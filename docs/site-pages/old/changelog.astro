@@ -1,0 +1,127 @@
+---
+import Base from '../layouts/Base.astro'
+import changelog from '../data/changelog.json'
+import { formatDate } from '../lib/site'
+
+const entries = changelog.entries
+---
+
+<Base title="Changelog" description="Every published Agent V release.">
+  <section class="vy-page-head">
+    <div class="vy-shell">
+      <p class="vy-eyebrow">Changelog</p>
+      <h1 class="vy-h1">Releases</h1>
+      <p class="vy-lede">
+        Releases are cut from git tags; the release notes are the record.
+        {' '}<a href={changelog.releasesUrl} class="vy-link" rel="noopener noreferrer">All releases on GitHub</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      {
+        entries.length === 0 ? (
+          <div class="vy-empty">
+            <h2 class="vy-h3">Nothing published yet</h2>
+            <p class="vy-prose-muted">The first release appears here once it is tagged and built.</p>
+          </div>
+        ) : (
+          <ol class="vy-rows vy-releases">
+            {entries.map((entry) => (
+              <li class="vy-release">
+                <div class="vy-release-meta">
+                  <h2 class="vy-release-tag vy-mono">{entry.tag}</h2>
+                  <p class="vy-release-date">{formatDate(entry.publishedAt)}</p>
+                  {entry.prerelease && <span class="vy-tag">pre-release</span>}
+                </div>
+
+                <div class="vy-item vy-panel-xl vy-release-card">
+                  <h3 class="vy-h3">{entry.name}</h3>
+                  {entry.body ? (
+                    <pre class="vy-codeblock vy-release-notes">{entry.body}</pre>
+                  ) : (
+                    <p>No release notes were written for this release.</p>
+                  )}
+                  <p class="vy-release-links">
+                    <a href={entry.htmlUrl} class="vy-link" rel="noopener noreferrer">
+                      Release on GitHub
+                    </a>
+                    <span class="vy-mono vy-release-assets">{entry.assetCount} files</span>
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )
+      }
+    </div>
+  </section>
+</Base>
+
+<style>
+  .vy-releases > .vy-release {
+    display: grid;
+    grid-template-columns: var(--vy-aside) minmax(0, 1fr);
+    gap: 1rem 3rem;
+    padding-block: 2rem;
+  }
+
+  .vy-release-card {
+    padding: 1.5rem;
+  }
+
+  .vy-release-card > :first-child {
+    margin-top: 0;
+  }
+
+  .vy-release-tag {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--vy-fg-strong);
+  }
+
+  .vy-release-date {
+    margin-top: 0.3rem;
+    font-size: 0.8125rem;
+    color: var(--vy-tertiary);
+  }
+
+  .vy-release-meta .vy-tag {
+    margin-top: 0.625rem;
+  }
+
+  .vy-release-notes {
+    margin-top: 0.875rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .vy-release-links {
+    margin-top: 1rem;
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    font-size: 0.875rem;
+  }
+
+  .vy-release-assets {
+    font-size: 0.8125rem;
+    color: var(--vy-tertiary);
+  }
+
+  @media (max-width: 900px) {
+    .vy-releases > .vy-release {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .vy-release-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 0.875rem;
+    }
+    .vy-release-date,
+    .vy-release-meta .vy-tag {
+      margin-top: 0;
+    }
+  }
+</style>

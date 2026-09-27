@@ -1,0 +1,277 @@
+---
+import Base from '../layouts/Base.astro'
+import Media from '../components/Media.astro'
+import DownloadButton from '../components/DownloadButton.astro'
+import ProviderList from '../components/ProviderList.astro'
+import IntegrationList from '../components/IntegrationList.astro'
+import { app, release, formatDate } from '../lib/site'
+import { HOME, HOME_JOBS, allLive, claims, jobPackages } from '../lib/showcase'
+import type { MEDIA } from '../lib/media'
+
+/**
+ * Home: what Agent V is, one real task on screen, the four ideas that make it
+ * different, and then the practical questions in the order people ask them.
+ * Which models? What can I hand it? Does anything go through you? Does it work
+ * with my tools? Every sentence comes from showcase.ts.
+ */
+
+const steps = claims(HOME.steps.claims)
+const rows = HOME.rows.filter((row) => allLive(row.from))
+const trust = claims(HOME.trust.claims)
+const named = HOME.integrations.named.map((id) => app.extensions.list.find((p) => p.id === id)?.name ?? id)
+const released = release.source === 'github' && release.version
+---
+
+<Base>
+  <section class="hero">
+    <div class="wrap">
+      <h1 class="display hero-title">
+        {HOME.hero.lines.map((line) => <span>{line}</span>)}
+      </h1>
+      <p class="lede hero-lede">{HOME.hero.lede}</p>
+      <div class="actions hero-actions">
+        <DownloadButton />
+        <a class="btn btn-secondary" href={app.repo.source} rel="noopener noreferrer">View on GitHub</a>
+      </div>
+      <p class="meta hero-meta">
+        {
+          released ? (
+            <>
+              Version <span class="mono">{release.version}</span>, released {formatDate(release.publishedAt)}.{' '}
+              <a href="/changelog" class="link">What’s new</a>
+            </>
+          ) : (
+            <>Free and open source.</>
+          )
+        }
+      </p>
+    </div>
+
+    <div class="wrap hero-media">
+      <Media id="hero" eager sizes="(min-width: 1224px) 1160px, 100vw" />
+    </div>
+  </section>
+
+  {
+    steps.length > 0 && (
+      <section class="band-tight" aria-labelledby="how">
+        <div class="wrap">
+          <h2 class="h2 steps-title" id="how">{HOME.steps.title}</h2>
+          <ol class="grid-4 ruled steps">
+            {steps.map((step, i) => (
+              <li class="item">
+                <span class="step-n mono">{String(i + 1).padStart(2, '0')}</span>
+                <h3 class="h3">{step.title}</h3>
+                <p>{step.body}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+    )
+  }
+
+  <div class="rows">
+    {
+      rows.map((row, i) => (
+        <section class:list={['row', i % 2 === 1 && 'row-flip']} id={row.id}>
+          <div class="wrap row-grid">
+            <div class="row-text">
+              <h2 class="h2">{row.title}</h2>
+              <p class="body">{row.body}</p>
+              <p class="detail">{row.detail}</p>
+            </div>
+            <div class="row-media">
+              <Media id={row.media as keyof typeof MEDIA} />
+            </div>
+          </div>
+        </section>
+      ))
+    }
+  </div>
+
+  {
+    allLive(HOME.models.from) && (
+      <section class="band rule" id="models">
+        <div class="wrap split">
+          <div class="stack">
+            <h2 class="h2">{HOME.models.title}</h2>
+            <p class="body">{HOME.models.body}</p>
+            <p class="detail">{HOME.models.detail}</p>
+          </div>
+          <ProviderList />
+        </div>
+      </section>
+    )
+  }
+
+  {
+    HOME_JOBS.length > 0 && (
+      <section class="band rule" id="jobs">
+        <div class="wrap">
+          <div class="section-head">
+            <h2 class="h2">{HOME.jobs.title}</h2>
+            <p class="body">{HOME.jobs.body}</p>
+          </div>
+          <ul class="grid-2 ruled">
+            {HOME_JOBS.map((job) => {
+              const { skills, uses } = jobPackages(job)
+              return (
+                <li class="item">
+                  <h3 class="h3">{job.title}</h3>
+                  <p>{job.summary}</p>
+                  <p class="meta job-meta">
+                    {skills.length > 0 && <span>Skills: {skills.join(', ')}</span>}
+                    {uses.length > 0 && <span>Works with {uses.join(', ')}</span>}
+                  </p>
+                </li>
+              )
+            })}
+          </ul>
+          <p class="section-more">
+            <a href="/features#jobs" class="more">More jobs on the features page</a>
+          </p>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    trust.length > 0 && (
+      <section class="band rule" id="privacy">
+        <div class="wrap">
+          <div class="section-head">
+            <h2 class="h2">{HOME.trust.title}</h2>
+          </div>
+          <ul class="grid-4 ruled">
+            {trust.map((fact) => (
+              <li class="item">
+                <h3 class="h3">{fact.title}</h3>
+                <p>{fact.body}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    )
+  }
+
+  <section class="band rule" id="integrations">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 class="h2">{HOME.integrations.title}</h2>
+        <p class="body">{HOME.integrations.body(named)}</p>
+        <p>
+          <a href="/extensions" class="more">See all {app.extensions.total} extensions</a>
+        </p>
+      </div>
+      <IntegrationList />
+    </div>
+  </section>
+
+  <section class="band rule cta">
+    <div class="wrap">
+      <h2 class="statement">{HOME.cta.title}</h2>
+      <p class="lede">{HOME.cta.body}</p>
+      <div class="actions">
+        <DownloadButton />
+        <a class="btn btn-secondary" href="/docs">Read the docs</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero {
+    padding-top: clamp(3.5rem, 9vw, 7.5rem);
+  }
+
+  /* One sentence per line on wide screens; on a phone they wrap freely. */
+  .hero-title span {
+    display: block;
+  }
+
+  .hero-lede {
+    margin-top: 1.5rem;
+    max-width: 38rem;
+  }
+
+  .hero-actions {
+    margin-top: 2.25rem;
+  }
+
+  .hero-meta {
+    margin-top: 1.25rem;
+  }
+
+  .hero-media {
+    margin-top: clamp(3rem, 6vw, 4.5rem);
+  }
+
+  .steps-title {
+    margin-bottom: 2.5rem;
+  }
+
+  .step-n {
+    font-size: 0.8125rem;
+    color: var(--text-3);
+  }
+
+  .rows {
+    padding-bottom: clamp(1.5rem, 3vw, 2.5rem);
+  }
+
+  .row {
+    padding-block: clamp(2.5rem, 5vw, 4rem);
+  }
+
+  .row-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: clamp(2.5rem, 6vw, 5.5rem);
+    align-items: center;
+  }
+
+  /* Media first on alternate rows, with the columns swapped so the media
+     keeps the wider track on both sides. */
+  .row-flip .row-grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  }
+
+  .row-flip .row-text {
+    order: 2;
+  }
+
+  .row-text {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .job-meta {
+    display: grid;
+    gap: 0.125rem;
+    margin-top: 0.25rem;
+  }
+
+  .section-more {
+    margin-top: 2.5rem;
+  }
+
+  .cta .lede {
+    margin-top: 1rem;
+  }
+
+  .cta .actions {
+    margin-top: 2rem;
+  }
+
+  @media (max-width: 899px) {
+    .row-grid,
+    .row-flip .row-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .row-flip .row-text {
+      order: 0;
+    }
+  }
+</style>
