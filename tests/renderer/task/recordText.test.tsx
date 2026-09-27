@@ -37,7 +37,8 @@ describe('MarkdownContent size and tone', () => {
 
   it('draws fenced code in the sunken well at a scale size', () => {
     const { container } = render(<MarkdownContent content={'```ts\nconst a = 1\n```'} />)
-    const shell = container.querySelector('.bg-sunken')
+    // The copy chip also takes the well's colour; the shell is the one that scrolls.
+    const shell = container.querySelector('.bg-sunken.overflow-x-auto')
     expect(shell).not.toBeNull()
     expect(shell!.classList.contains('text-xs')).toBe(true)
   })
