@@ -6,11 +6,23 @@ import { resolveInsideWorkspace } from '@main/workspace/safePath'
 import { assertInsideWorkspace } from '../../../shared/workspacePath'
 import { scrubPath } from '../../../shared/utils/scrub'
 import { abortError } from '../../../shared/errors'
-import { sanitizedTerminalEnv } from './terminal'
+import { killProcessTree, sanitizedTerminalEnv, TERMINAL_MAX_OUTPUT } from './terminal'
 
 const DIAG_TIMEOUT_MS = 120_000
 /** Per-stream capture cap (kept tail) so a chatty command cannot grow memory unboundedly. */
 export const MAX_STREAM_BYTES = 262_144
+
+/**
+ * Bound what reaches the model to the terminal/MCP cap. Capture keeps 256KB so
+ * the parsers see whole output; the tool result keeps the head (command,
+ * header, first diagnostics) and the tail (the runner's summary).
+ */
+export function capToolOutput(text: string, max = TERMINAL_MAX_OUTPUT): string {
+  if (text.length <= max) return text
+  const tail = Math.floor(max / 4)
+  const head = max - tail
+  return `${text.slice(0, head)}\n…[${text.length - max} chars truncated — narrow the command for the rest]…\n${text.slice(-tail)}`
+}
 
 export type DiagnosticsKind = 'typecheck' | 'lint'
 
@@ -190,11 +202,20 @@ export function runSafeCommand(
     let stdoutTrimmed = false
     let stderrTrimmed = false
     let killed = false
+    let settled = false
 
+    /**
+     * Kill the whole tree and answer now. `child.kill` ended only the direct
+     * child — on Windows the cmd.exe wrapping `pnpm.cmd` — so the runner kept
+     * going and, holding the inherited stdout, kept `close` from firing until
+     * it finished on its own.
+     */
     function kill(reason: 'aborted' | 'timeout'): void {
       if (killed) return
       killed = true
-      child.kill('SIGTERM')
+      if (child.pid) killProcessTree(child.pid, reason)
+      else child.kill('SIGTERM')
+      finish(null)
     }
 
     /** Keep only the last MAX_STREAM_BYTES per stream so a chatty command
@@ -241,23 +262,29 @@ export function runSafeCommand(
         ? setTimeout(() => kill('timeout'), options.timeoutMs)
         : null
 
-    child.on('error', (err) => {
-      if (timeout) clearTimeout(timeout)
-      options.signal?.removeEventListener('abort', onAbort)
-      reject(err)
-    })
-
-    child.on('close', (exitCode) => {
+    function finish(exitCode: number | null): void {
+      if (settled) return
+      settled = true
       if (timeout) clearTimeout(timeout)
       options.signal?.removeEventListener('abort', onAbort)
       const TRIM_MARK = '…[earlier output truncated — kept last 256KB]…'
       resolve({
         stdout: (stdoutTrimmed ? `${TRIM_MARK}\n` : '') + Buffer.concat(stdout).toString('utf8'),
         stderr: (stderrTrimmed ? `${TRIM_MARK}\n` : '') + Buffer.concat(stderr).toString('utf8'),
-        exitCode: exitCode ?? null,
+        exitCode,
         killed
       })
+    }
+
+    child.on('error', (err) => {
+      if (settled) return
+      settled = true
+      if (timeout) clearTimeout(timeout)
+      options.signal?.removeEventListener('abort', onAbort)
+      reject(err)
     })
+
+    child.on('close', (exitCode) => finish(exitCode ?? null))
   })
 }
 
@@ -279,7 +306,10 @@ export function resolveDiagnosticsCommand(
   const pm = preferPnpm(workspace) ? 'pnpm' : 'npm'
 
   if (kind === 'lint') {
-    if (scripts.lint) return `${pm} run lint --if-present`
+    // No `--if-present`: the script is known to exist here, and pnpm forwards
+    // arguments after the script name to the script, so `eslint . --if-present`
+    // exited 2 on the unknown option.
+    if (scripts.lint) return `${pm} run lint`
     // Prefer JSON: ESLint 10 removed the built-in `unix` formatter.
     return execPackageCommand(pm, 'eslint', '. --format json')
   }
@@ -412,7 +442,7 @@ export async function toolDiagnosticsAsync(
     if (signal.aborted) throw abortError()
 
     const combined = [stdout, stderr].filter(Boolean).join('\n').trim()
-    const output = combined || '(no output)'
+    const output = capToolOutput(combined || '(no output)')
     const parsed = parseDiagnosticLines(combined).map((d) => ({
       ...d,
       file: relativizeDiagnosticFile(workspace, d.file)
@@ -442,7 +472,7 @@ export async function toolDiagnosticsAsync(
             `${d.file}:${d.line}:${d.col}: ${d.severity ?? 'error'}: ${d.message}`
         )
       ]
-      return { ok: true, content: lines.join('\n') }
+      return { ok: true, content: capToolOutput(lines.join('\n')) }
     }
 
     if (killed) {

@@ -118,3 +118,19 @@ describe('wireToolCallArguments — observed payload shapes', () => {
     expect(toolCallArgumentsUnusable('read', 'not-json')).toBe(true)
   })
 })
+
+describe('truncated trailing numbers', () => {
+  it('never closes up a bare trailing number (a cut 120000 is not 12)', () => {
+    expect(wireToolCallArguments('run_terminal', '{"command":"npm test","timeoutMs":12')).toBe('{}')
+    expect(toolCallArgumentsUnusable('read', '{"path":"a.ts","limit":2')).toBe(true)
+  })
+
+  it('still closes a number a dropped `,` stub proved whole', () => {
+    expect(wireToolCallArguments('read', '{"path":"a.ts","limit":20,')).toBe(
+      '{"path":"a.ts","limit":20}'
+    )
+    expect(wireToolCallArguments('read', '{"path":"a.ts","limit":20, "offset":')).toBe(
+      '{"path":"a.ts","limit":20}'
+    )
+  })
+})

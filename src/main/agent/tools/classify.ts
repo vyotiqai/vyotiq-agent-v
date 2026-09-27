@@ -1,5 +1,10 @@
+import { mutationPathKey } from '@main/workspace/mutationQueue'
+import { BUILTIN_TOOL_NAMES } from '../schemas/tools'
 import { readPathArg } from './argAccess'
 import { lspActionFromArgs } from './lsp'
+
+/** Every builtin tool name, for lookups that must not touch disk. */
+export const BUILTIN_TOOL_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES)
 
 /** Workspace-local reads safe to run concurrently (no file mutation). */
 const PARALLEL_SAFE_BUILTIN = new Set([
@@ -114,9 +119,11 @@ export function stepToolBatchClass(
 }
 
 /**
- * Normalized relative path used to keep same-file mutations serial.
+ * Normalized relative path used to keep same-file mutations serial — the same
+ * key the workspace mutation lock uses (`mutationPathKey`).
  * Notebooks use `target_notebook`; others use `path` / `file` / `filepath` / `filename`.
- * Missing/empty path → undefined (caller must run that call as a singleton).
+ * Missing/empty or rooted path → undefined (caller must run that call as a
+ * singleton: an absolute spelling cannot be matched with a relative one here).
  */
 export function parallelMutationPathKey(
   args: Record<string, unknown>,
@@ -126,10 +133,7 @@ export function parallelMutationPathKey(
     name === 'edit_notebook' && typeof args.target_notebook === 'string'
       ? args.target_notebook
       : readPathArg(args)
-  if (!raw) return undefined
-  const normalized = raw.replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+$/, '').trim()
-  if (!normalized || normalized === '.') return undefined
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+  return raw ? mutationPathKey(raw) : undefined
 }
 
 export function parallelLimitForBatchClass(cls: StepToolBatchClass): number {

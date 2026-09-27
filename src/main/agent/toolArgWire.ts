@@ -95,7 +95,12 @@ export function wireToolCallArguments(name: string, raw: string): string {
         tool: name,
         droppedChars: text.length - trimmed.length
       })
-      return wireToolCallArguments(name, trimmed)
+      // Close it here: the dropped stub's `,` / `:` proved a trailing number
+      // whole, which a bare re-parse of the prefix can no longer see.
+      return wireToolCallArguments(
+        name,
+        closeUnterminatedJson(trimmed, { numberTerminated: true }) ?? trimmed
+      )
     }
     return '{}'
   }

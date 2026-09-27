@@ -4,12 +4,17 @@ import { join } from 'path'
 type ParsedPattern = {
   negated: boolean
   dirOnly: boolean
-  rootOnly: boolean
   regex: RegExp
   raw: string
 }
 
-function patternToRegex(pattern: string): RegExp {
+/**
+ * `anchored` patterns match from the start of the path relative to their
+ * `.gitignore`'s directory; the rest match at any depth. Git anchors a pattern
+ * with a leading or interior slash — `/lib` is only the top-level `lib`, and
+ * `docs/gen` only that path — where both used to match anywhere below.
+ */
+function patternToRegex(pattern: string, anchored: boolean): RegExp {
   let p = pattern.replace(/\\/g, '/')
   if (p.startsWith('/')) p = p.slice(1)
   const escaped = p
@@ -17,6 +22,7 @@ function patternToRegex(pattern: string): RegExp {
     .replace(/\*\*/g, '§§')
     .replace(/\*/g, '[^/]*')
     .replace(/§§/g, '.*')
+  if (anchored) return new RegExp(`^${escaped}(?:/|$)`)
   return new RegExp(`(?:^|/)${escaped}(?:/|$)|^${escaped}$`)
 }
 
@@ -36,13 +42,15 @@ function parseGitignoreLines(text: string): ParsedPattern[] {
     if (dirOnly) raw = raw.slice(0, -1)
     const rootOnly = raw.startsWith('/')
     if (rootOnly) raw = raw.slice(1)
+    // A leading `**/` already means "at any depth".
+    if (raw.startsWith('**/')) raw = raw.slice(3)
+    const anchored = rootOnly || raw.includes('/')
     try {
       out.push({
         raw,
         negated,
         dirOnly,
-        rootOnly,
-        regex: patternToRegex(raw)
+        regex: patternToRegex(raw, anchored)
       })
     } catch {
       // skip invalid patterns
@@ -65,23 +73,21 @@ function matchesPattern(norm: string, isDirectory: boolean, pat: ParsedPattern):
     if (!isDirectory) return false
     return norm === pat.raw || pat.regex.test(`${norm}/`)
   }
-  if (pat.rootOnly) {
-    return pat.regex.test(norm)
-  }
-  // Testing the basename too is redundant: the regex is anchored with
-  // `(?:^|/)`, so anything matching the trailing segment already matches
-  // the full path at the preceding slash.
+  // Testing the basename too is redundant: an unanchored regex starts with
+  // `(?:^|/)`, so anything matching the trailing segment already matches the
+  // full path at the preceding slash.
   return pat.regex.test(norm)
 }
 
-type RuleSet = { patterns: ParsedPattern[] }
+/** `base`: the `.gitignore`'s directory relative to the workspace root ('' = root). */
+type RuleSet = { base: string; patterns: ParsedPattern[] }
 
-function readRuleSet(dir: string): RuleSet | null {
+function readRuleSet(dir: string, base: string): RuleSet | null {
   const path = join(dir, '.gitignore')
   if (!existsSync(path)) return null
   try {
     const patterns = parseGitignoreLines(readFileSync(path, 'utf8'))
-    return patterns.length ? { patterns } : null
+    return patterns.length ? { base, patterns } : null
   } catch {
     return null
   }
@@ -129,7 +135,7 @@ export function gitignoreMatcherForDir(
   for (let i = 0; i <= parts.length; i++) {
     const dir =
       i === 0 ? workspaceRoot : join(workspaceRoot, ...parts.slice(0, i))
-    const rules = readRuleSet(dir)
+    const rules = readRuleSet(dir, parts.slice(0, i).join('/'))
     if (rules) ruleSets.push(rules)
   }
 
@@ -145,10 +151,12 @@ export function gitignoreMatcherForDir(
       // scanning newest-first and stopping at the first hit yields the same
       // verdict without evaluating every remaining pattern.
       for (let i = ruleSets.length - 1; i >= 0; i--) {
-        const { patterns } = ruleSets[i]!
+        const { base, patterns } = ruleSets[i]!
+        // Patterns are relative to their own .gitignore's directory.
+        const rel = base ? suffix.slice(base.length + 1) : suffix
         for (let k = patterns.length - 1; k >= 0; k--) {
           const pat = patterns[k]!
-          if (matchesPattern(suffix, isDirectory, pat)) return !pat.negated
+          if (matchesPattern(rel, isDirectory, pat)) return !pat.negated
         }
       }
       return false

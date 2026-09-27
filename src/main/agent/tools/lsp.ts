@@ -4,6 +4,7 @@ import { resolveInsideWorkspace, assertResolvedInsideWorkspace } from '../../wor
 import { atomicWriteFile } from '@main/storage/atomicWrite'
 import { withExclusiveWorkspaceMutation } from '@main/workspace/mutationQueue'
 import { assertWritablePath } from './writeGuard'
+import { existingFileMode } from './edit'
 import {
   workspaceLspRequest,
   workspaceLspStatus
@@ -184,15 +185,25 @@ export async function applyLspRenameEdits(
   const mutatedPaths: string[] = []
   await withExclusiveWorkspaceMutation(workspaceRoot, () => {
     for (const [path, pathEdits] of byPath) {
-      assertWritablePath(path)
-      const abs = resolveInsideWorkspace(workspaceRoot, path)
-      assertResolvedInsideWorkspace(workspaceRoot, dirname(abs))
-      if (!existsSync(abs)) {
-        throw new Error(`Rename target missing: ${path}`)
+      try {
+        assertWritablePath(path)
+        const abs = resolveInsideWorkspace(workspaceRoot, path)
+        assertResolvedInsideWorkspace(workspaceRoot, dirname(abs))
+        if (!existsSync(abs)) {
+          throw new Error(`Rename target missing: ${path}`)
+        }
+        const original = readFileSync(abs, 'utf8')
+        atomicWriteFile(abs, applyLspTextEdits(original, pathEdits), existingFileMode(abs))
+        mutatedPaths.push(path)
+      } catch (err) {
+        // Files are written one at a time; a failure partway must say which
+        // ones already changed, or the model reads the rename as not applied.
+        if (mutatedPaths.length === 0) throw err
+        const reason = err instanceof Error ? err.message : String(err)
+        throw new Error(
+          `${reason}. The rename was partially applied — already written: ${mutatedPaths.join(', ')}. Re-read those files before retrying.`
+        )
       }
-      const original = readFileSync(abs, 'utf8')
-      atomicWriteFile(abs, applyLspTextEdits(original, pathEdits))
-      mutatedPaths.push(path)
     }
   })
   return mutatedPaths

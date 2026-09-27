@@ -1,4 +1,6 @@
 import { getWriteCheckpoint, type InvokeWriteCheckpoint } from '../checkpoints'
+import { normalizeWorkspaceRelPath } from '../loopPolicy'
+import { resolveInsideWorkspace } from '../../workspace/safePath'
 
 /** Official @modelcontextprotocol/server-filesystem write-capable tools. */
 const FILESYSTEM_WRITE_TOOLS = new Set([
@@ -12,10 +14,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function normalizeWorkspaceRelPath(path: string): string {
-  return path.trim().replace(/\\/g, '/')
-}
-
 function isFilesystemMcpServer(serverId: string): boolean {
   return serverId === 'filesystem' || serverId === 'fs' || /filesystem/i.test(serverId)
 }
@@ -23,12 +21,15 @@ function isFilesystemMcpServer(serverId: string): boolean {
 /**
  * Snapshot known MCP filesystem write paths before invokeMcpTool.
  * Conservative: only bundled filesystem tool names + explicit path args.
+ * A filesystem server may be allowed directories outside the workspace; those
+ * paths have no workspace prior, so they are skipped (as terminalCheckpoint
+ * does) rather than thrown — the throw escaped the tool and failed the run.
  */
 export async function recordMcpFilesystemPriors(
   serverId: string,
   toolName: string,
   args: Record<string, unknown>,
-  context: { runDir?: string; skipWriteCheckpoint?: boolean }
+  context: { workspace: string; runDir?: string; skipWriteCheckpoint?: boolean }
 ): Promise<void> {
   if (context.skipWriteCheckpoint || !context.runDir) return
   if (!isFilesystemMcpServer(serverId) || !FILESYSTEM_WRITE_TOOLS.has(toolName)) return
@@ -36,11 +37,20 @@ export async function recordMcpFilesystemPriors(
   const cp = getWriteCheckpoint(context.runDir)
   if (!cp) return
 
+  const record = async (path: string, kind: 'write' | 'delete'): Promise<void> => {
+    try {
+      resolveInsideWorkspace(context.workspace, path)
+    } catch {
+      return
+    }
+    await cp.recordPrior(path, kind)
+  }
+
   if (toolName === 'move_file') {
     const source = asString(args.source)
     const destination = asString(args.destination)
-    if (source) await cp.recordPrior(source, 'delete')
-    if (destination) await cp.recordPrior(destination, 'write')
+    if (source) await record(source, 'delete')
+    if (destination) await record(destination, 'write')
     return
   }
 
@@ -48,7 +58,7 @@ export async function recordMcpFilesystemPriors(
 
   const path = asString(args.path)
   if (!path) return
-  await cp.recordPrior(path, 'write')
+  await record(path, 'write')
 }
 
 /**

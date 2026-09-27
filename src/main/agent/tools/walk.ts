@@ -1,10 +1,8 @@
 import { realpathSync, promises as fsp } from 'fs'
 import { basename, extname, join } from 'path'
 import { gitignoreMatcherForDir } from './gitignore'
-import {
-  canonicalizeWorkspacePath,
-  isWindowsStylePath
-} from '../../../shared/utils/workspacePath'
+import { canonicalizeWorkspacePath, isWindowsStylePath } from '../../../shared/utils/workspacePath'
+import { pathKey } from '../../workspace/safePath'
 
 /** Directories never worth walking, even when .gitignore does not mention them. */
 export const IGNORED_DIRS = new Set([
@@ -405,10 +403,6 @@ export function isIndexableSourcePath(rel: string, full?: string): boolean {
   return true
 }
 
-export function isDenseIndexPath(rel: string, full?: string): boolean {
-  return isIndexableSourcePath(rel, full)
-}
-
 /** Yield the event loop so long scans stay responsive to abort/cancel. */
 const YIELD_EVERY_DIRS = 64
 
@@ -445,10 +439,6 @@ export type WalkedFile = {
   full: string
   /** Workspace-relative path with forward slashes. */
   rel: string
-}
-
-function pathKey(path: string): string {
-  return isWindowsStylePath(path) ? path.toLowerCase() : path
 }
 
 /**

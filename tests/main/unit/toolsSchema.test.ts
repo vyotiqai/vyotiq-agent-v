@@ -564,6 +564,71 @@ describe('harness tool catalog', () => {
     expect(offsetZero.data.offset).toBeUndefined()
   })
 
+  // Models that fill every optional field send `offset: 0, limit: 0` as
+  // "unset" placeholders. `limit: 0` failed `.min(1)` before the line-range
+  // coercion ran, so the whole read failed (8 real calls) even though the
+  // line range alone was a valid request.
+  it('treats a non-positive limit as an unset placeholder', () => {
+    const withRange = validateToolArgs(
+      'read',
+      JSON.stringify({ path: 'a.ts', startLine: 130, endLine: 220, offset: 0, limit: 0 })
+    )
+    expect(withRange.ok).toBe(true)
+    if (!withRange.ok) return
+    expect(withRange.data).toEqual({ path: 'a.ts', startLine: 130, endLine: 220 })
+
+    const bare = validateToolArgs('read', JSON.stringify({ path: 'a.ts', offset: 0, limit: 0 }))
+    expect(bare.ok).toBe(true)
+    if (!bare.ok) return
+    expect(bare.data).toEqual({ path: 'a.ts' })
+
+    const byteWindow = validateToolArgs('read', JSON.stringify({ path: 'a.ts', offset: 40, limit: -1 }))
+    expect(byteWindow.ok).toBe(true)
+    if (!byteWindow.ok) return
+    expect(byteWindow.data).toEqual({ path: 'a.ts', offset: 40 })
+
+    // The wire schema still asks for a positive limit.
+    const read = AGENT_TOOLS.find((t) => t.name === 'read')!
+    const props = (read.parameters as { properties: Record<string, { minimum?: number }> }).properties
+    expect(props.limit?.minimum).toBe(1)
+  })
+
+  // A long evidence string used to fail the whole call (6 real calls), which
+  // dropped every verdict in it and cost the model a step to retry.
+  it('clips over-long done-when evidence instead of rejecting every verdict', () => {
+    const long = `vitest: ${'x'.repeat(900)}`
+    const out = validateToolArgs(
+      'check_done_when',
+      JSON.stringify({
+        checks: [
+          { id: 'c1', verdict: 'met', evidence: long },
+          { id: 'c2', verdict: 'not_met', evidence: 'short' }
+        ]
+      })
+    )
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    const checks = (out.data as { checks: Array<{ evidence: string }> }).checks
+    expect(checks[0]!.evidence.length).toBeLessThanOrEqual(600)
+    expect(checks[0]!.evidence.startsWith('vitest: xxx')).toBe(true)
+    expect(checks[0]!.evidence.endsWith('…')).toBe(true)
+    expect(checks[1]!.evidence).toBe('short')
+
+    // Empty evidence is still refused, and the wire schema still states the cap.
+    const blank = validateToolArgs(
+      'check_done_when',
+      JSON.stringify({ checks: [{ id: 'c1', verdict: 'met', evidence: '   ' }] })
+    )
+    expect(blank.ok).toBe(false)
+    const tool = AGENT_TOOLS.find((t) => t.name === 'check_done_when')!
+    const item = (
+      tool.parameters as {
+        properties: { checks: { items: { properties: { evidence: { maxLength?: number } } } } }
+      }
+    ).properties.checks.items.properties.evidence
+    expect(item.maxLength).toBe(600)
+  })
+
   it('swaps inverted startLine/endLine instead of failing', () => {
     const swapped = validateToolArgs(
       'read',

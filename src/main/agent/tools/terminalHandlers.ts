@@ -180,6 +180,7 @@ export const terminalHandlers = {
                 pattern,
                 blockUntilMs,
                 killOnTimeout: defaultWait,
+                runSignal: context.runSignal,
                 onOutput,
                 onStillRunning: registerExitFinalize
               })

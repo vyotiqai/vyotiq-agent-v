@@ -11,7 +11,28 @@ export type ModePolicyOptions = {
   autoModeSwitch?: boolean
   /** When true, omit root-only instance tools (depth-1 nesting). */
   inlineInstance?: boolean
+  /**
+   * A path_scope-shared inline instance (no worktree): omit the tools it is
+   * always denied because they escape the parent tree (see
+   * `assertInlineInstanceUnscopedToolAllowed`) — terminal, diagnostics,
+   * git_commit and MCP. Offered anyway, they cost 45 denied calls across real
+   * runs. The caller leaves out agent-built tools, which only it can tell apart.
+   */
+  sharedScope?: boolean
 }
+
+/**
+ * Built-ins a path_scope-shared inline instance is always denied, plus the
+ * ones that only lead to MCP tools it cannot call.
+ */
+const SHARED_SCOPE_DENIED_BUILTIN = new Set([
+  'terminal',
+  'diagnostics',
+  'git_commit',
+  'mcp_list_tools',
+  'request_mcp_tools',
+  'release_mcp_tools'
+])
 
 /**
  * Built-in tools allowed in Ask mode (read-only / parallel-safe).
@@ -178,6 +199,11 @@ export function filterToolDefsForMode<T extends { name: string }>(
         })
   if (opts?.inlineInstance) {
     filtered = filtered.filter((t) => !INLINE_OMIT_BUILTIN.has(t.name))
+  }
+  if (opts?.sharedScope) {
+    filtered = filtered.filter(
+      (t) => !SHARED_SCOPE_DENIED_BUILTIN.has(t.name) && !parseMcpToolName(t.name)
+    )
   }
   return filtered
 }

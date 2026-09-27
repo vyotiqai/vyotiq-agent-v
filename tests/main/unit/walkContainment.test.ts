@@ -8,7 +8,6 @@ import {
   collectWorkspaceFilesPage,
   IGNORED_DIRS,
   INDEX_SKIP_DIR_SEGMENTS,
-  isDenseIndexPath,
   isIndexableSourcePath,
   isIndexClutterFileName,
   isGrepOverlapRel,
@@ -189,7 +188,6 @@ describe('index clutter filters', () => {
 
   it('indexes production source only — not tests, docs, configs, scripts, or databases', () => {
     expect(isIndexableSourcePath('src/auth.ts')).toBe(true)
-    expect(isDenseIndexPath('src/auth.ts')).toBe(true)
     expect(isIndexableSourcePath('pkg/foo.go')).toBe(true)
     expect(isIndexableSourcePath('lib/auth.py')).toBe(true)
     expect(isIndexableSourcePath('svc/Contest.java')).toBe(true)

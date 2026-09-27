@@ -14,7 +14,8 @@ import { invokeMcpTool, parseMcpToolName, getMcpToolDefinition } from '../mcp'
 import { isMcpToolPermitted } from '../../../shared/utils/mcpToolPolicy'
 import { toolRead } from './read'
 import { toolEditAsync } from './edit'
-import { readPathArg, readEditBody, requirePathArg, readString, readTrimmed } from './argAccess'
+import { readPathArg, readEditBody, requirePathArg, readString } from './argAccess'
+import { throwIfAborted } from './walk'
 import { toolSearch } from './search'
 import { toolGlob } from './glob'
 import { toolGrep } from './grep'
@@ -27,7 +28,7 @@ import { notifySkillsChanged } from '../skills/notify'
 import { toolListDir } from './listDir'
 import { toolStrReplaceAsync } from './strReplace'
 import { executeCheckDoneWhen } from '../doneWhenChecks'
-import { toolDeleteAsync } from './deletePath'
+import { toolDeleteAsync, workspaceLinkPath } from './deletePath'
 import {
   assertInlineInstancePathScope,
   assertNotRetiredAgentDataPath,
@@ -71,7 +72,6 @@ import { instanceHandlers } from './instanceTools'
 import { handler as buildToolHandler } from './buildTool'
 import { resolveAgentToolsDir } from '../agentTools/paths'
 import { loadAgentToolsSnapshot } from '../agentTools/loader'
-import { BUILTIN_TOOL_NAMES as BUILTIN_TOOL_NAMES_FOR_SCAN } from '../schemas/tools'
 import { runAgentTool } from '../agentTools/runner'
 import type { AgentToolDef } from '../agentTools/types'
 import type { ToolApprovalGate } from '../toolApproval'
@@ -81,8 +81,9 @@ import {
   mcpNotInCatalogFailFastMessage,
   recordMcpNotInCatalogFailure
 } from '../loopPolicy'
-import { toolCallArgumentsUnusable, wireToolCallArguments } from '../toolArgWire'
-import { parseJsonish } from '../../../shared/utils/jsonish'
+import { toolCallArgumentsUnusable } from '../toolArgWire'
+import { parseToolCallArgs } from './callArgs'
+import { BUILTIN_TOOL_NAME_SET } from './classify'
 import {
   assertToolAllowedInMode,
   isRunContractPath,
@@ -220,11 +221,7 @@ export type ToolHandler = (
   context: ToolExecutionContext
 ) => Promise<ToolResult> | ToolResult
 
-export function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) {
-    throw new DOMException('Aborted', 'AbortError')
-  }
-}
+export { throwIfAborted }
 
 function logToolSuccess(name: string): void {
   logger.info('Tool succeeded', {
@@ -288,7 +285,6 @@ function toolFailureKind(err: unknown): string | undefined {
   if (/^Not a file/i.test(message)) return 'not_a_file'
   if (/Path is a directory/i.test(message)) return 'is_directory'
   if (/Binary file detected/i.test(message)) return 'binary'
-  if (/File too large/i.test(message)) return 'too_large'
   if (/Path escapes workspace/i.test(message)) return 'path_escape'
   // A read window aimed past EOF (read.ts throws `startLine|offset N is past the end of …`).
   if (/^(?:startLine|offset) \d+ is past the end of /.test(message)) return 'past_end'
@@ -365,6 +361,15 @@ export function invalidateAfterWorkspaceMutation(
     notifySkillsChanged(workspace)
   } else {
     invalidateSlashCommandsCache(workspace)
+  }
+}
+
+/** True when `path` names a symlink/junction; unresolvable paths are left to the tool's own error. */
+function isWorkspaceLink(workspace: string, path: string): boolean {
+  try {
+    return workspaceLinkPath(workspace, path) != null
+  } catch {
+    return false
   }
 }
 
@@ -477,7 +482,9 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     throwIfAborted(signal)
     const path = requirePathArg('delete', args)
     const recursive = args.recursive === true
-    if (!context.skipWriteCheckpoint) {
+    // A link delete leaves its target alone, so there is no prior to snapshot —
+    // recording one would log the target tree as deleted.
+    if (!context.skipWriteCheckpoint && !isWorkspaceLink(workspace, path)) {
       await getWriteCheckpoint(context.runDir)?.recordPrior(path, 'delete', {
         recursiveDir: recursive
       })
@@ -781,123 +788,6 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
 
 export { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from '../schemas/tools'
 
-function normalizeParsedToolArgs(
-  name: string,
-  parsed: Record<string, unknown>
-): Record<string, unknown> {
-  const normalized = { ...parsed }
-
-  if (
-    (name === 'read' ||
-      name === 'edit' ||
-      name === 'str_replace' ||
-      name === 'delete' ||
-      name === 'list_dir' ||
-      name === 'memory_read' ||
-      name === 'memory_write') &&
-    typeof normalized.path !== 'string'
-  ) {
-    const path = readPathArg(normalized)
-    if (path) normalized.path = path
-  }
-  if (name === 'list_dir' && typeof normalized.path !== 'string') {
-    const directory = readString(normalized, 'directory')
-    if (directory !== undefined) normalized.path = directory
-  }
-  if (name === 'grep' && typeof normalized.include !== 'string') {
-    // Models often pass `path` for a file/glob filter; map it to the real field.
-    const path = typeof normalized.path === 'string' ? normalized.path.trim() : ''
-    if (path) normalized.include = path
-  }
-  if (name === 'edit' && typeof normalized.contents !== 'string') {
-    const content = readString(normalized, 'content')
-    if (content !== undefined) normalized.contents = content
-  }
-  if (name === 'todo_write' && typeof normalized.todos === 'string') {
-    const parsedTodos = parseJsonish(normalized.todos)
-    if (Array.isArray(parsedTodos)) normalized.todos = parsedTodos
-  }
-  if (name === 'terminal') {
-    if (typeof normalized.command !== 'string') {
-      const command = readString(normalized, 'cmd')
-      if (command !== undefined) normalized.command = command
-    }
-    const command = typeof normalized.command === 'string' ? normalized.command : ''
-    if (command.trim()) {
-      delete normalized.session_id
-    }
-    if (typeof normalized.pattern === 'string' && normalized.pattern.trim() === '') {
-      delete normalized.pattern
-    }
-  }
-  if (typeof normalized.serverId !== 'string' && typeof normalized.server_id === 'string') {
-    normalized.serverId = normalized.server_id
-  }
-  if (name === 'spawn_agent_instance') {
-    // Two callers arrive without the full structured brief. Legacy alias calls
-    // (Task/subagent) carry only a free-form prompt; models that read `goal` as
-    // "the whole brief" send a rich goal and omit its siblings (run 874dad8f:
-    // 6/6 spawns rejected with `outcome: Required`, the model re-sending the
-    // identical payload because a bare Zod complaint names no remedy). Derive
-    // whatever is missing from the goal text so the brief still composes — the
-    // handler re-validates with its own actionable errors.
-    const goal =
-      readTrimmed(normalized, 'goal') ||
-      readTrimmed(normalized, 'prompt') ||
-      readTrimmed(normalized, 'description')
-    if (goal) {
-      normalized.goal = goal
-      if (!readTrimmed(normalized, 'outcome')) normalized.outcome = goal
-      if (!readTrimmed(normalized, 'done_when')) normalized.done_when = goal
-      if (
-        !Array.isArray(normalized.sub_tasks) ||
-        normalized.sub_tasks.filter((t) => typeof t === 'string' && t.trim()).length === 0
-      ) {
-        normalized.sub_tasks = [goal]
-      }
-    }
-  }
-  if (name === 'lsp') {
-    if (typeof normalized.action !== 'string') {
-      normalized.action = 'diagnostics'
-    }
-    if (typeof normalized.new_name !== 'string' && typeof normalized.newName === 'string') {
-      normalized.new_name = normalized.newName
-    }
-    const path = readPathArg(normalized)
-    if (path && typeof normalized.path !== 'string') normalized.path = path
-  }
-  if (name === 'edit_notebook' && typeof normalized.target_notebook !== 'string') {
-    const path = readPathArg(normalized)
-    if (path) normalized.target_notebook = path
-  }
-
-  return normalized
-}
-
-function parseToolArgs(name: string, argsJson: string | undefined): Record<string, unknown> {
-  const wired = wireToolCallArguments(name, argsJson ?? '')
-
-  try {
-    const parsed: unknown = JSON.parse(wired)
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return normalizeParsedToolArgs(name, parsed as Record<string, unknown>)
-    }
-  } catch {
-    // fall through
-  }
-  return {}
-}
-
-/**
- * One agent-built tool by name, or null.
- *
- * The snapshot is mtime-cached, so this is a cheap directory sweep rather than
- * a rescan, and a tool written earlier in this run is found on the next step
- * without a restart.
- */
-const BUILTIN_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES_FOR_SCAN)
-
 /**
  * One agent-built tool by name, or null.
  *
@@ -907,7 +797,7 @@ const BUILTIN_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES
  * found on the next step without a restart.
  */
 async function findAgentBuiltTool(name: string): Promise<AgentToolDef | null> {
-  if (BUILTIN_NAME_SET.has(name)) return null
+  if (BUILTIN_TOOL_NAME_SET.has(name)) return null
   if (name.startsWith('mcp__')) return null
   try {
     const defs = await loadAgentToolsSnapshot(await resolveAgentToolsDir())
@@ -946,7 +836,7 @@ export async function executeTool(
   // validateParsedToolArgs, which only knows builtin schemas.
   const agentBuilt = await findAgentBuiltTool(name)
   if (agentBuilt) {
-    const parsed = parseToolArgs(name, argsJson)
+    const parsed = parseToolCallArgs(name, argsJson)
     const modeGate = assertToolAllowedInMode(agentMode, name, parsed, {
       autoModeSwitch: context.autoModeSwitch,
       inlineInstance: context.inlineInstance === true
@@ -981,7 +871,7 @@ export async function executeTool(
 
   const mcp = parseMcpToolName(name)
   if (mcp) {
-    const parsed = parseToolArgs(name, argsJson)
+    const parsed = parseToolCallArgs(name, argsJson)
     const modeGate = assertToolAllowedInMode(agentMode, name, parsed, {
       autoModeSwitch: context.autoModeSwitch,
       inlineInstance: context.inlineInstance === true
@@ -1049,6 +939,7 @@ export async function executeTool(
     const stamp = Math.max(context.currentStep ?? 1, 1)
     context.mcpLastUsedByName?.set(name, stamp)
     await recordMcpFilesystemPriors(mcp.serverId, mcp.toolName, parsed, {
+      workspace,
       runDir: context.runDir,
       skipWriteCheckpoint: context.skipWriteCheckpoint
     })
@@ -1072,7 +963,7 @@ export async function executeTool(
     return mcpResult
   }
 
-  const args = parseToolArgs(name, argsJson)
+  const args = parseToolCallArgs(name, argsJson)
   const validation = toolCallArgumentsUnusable(name, argsJson)
     ? { ok: false as const, error: formatMalformedToolArgsError(name) }
     : validateParsedToolArgs(name, args)

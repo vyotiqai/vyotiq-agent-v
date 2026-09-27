@@ -1,4 +1,5 @@
 import {
+  capToolOutput,
   packageScripts,
   preferPnpm,
   parseSafeCommand,
@@ -113,8 +114,10 @@ export async function toolRunTestsAsync(
       timeoutMs: TEST_TIMEOUT_MS
     })
     if (signal.aborted) throw abortError()
-    const output = [stdout, stderr].filter(Boolean).join('\n').trim() || '(no output)'
-    const header = summaryHeader(output, exitCode)
+    const full = [stdout, stderr].filter(Boolean).join('\n').trim() || '(no output)'
+    // Summary from the whole capture; only the result itself is capped.
+    const header = summaryHeader(full, exitCode)
+    const output = capToolOutput(full)
     if (exitCode !== 0 && !killed) {
       return {
         ok: false,

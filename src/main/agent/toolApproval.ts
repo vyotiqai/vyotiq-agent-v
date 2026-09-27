@@ -17,8 +17,9 @@ import {
   terminalCommandOf
 } from '../../shared/utils/commandAllow'
 import { isMcpServerToolName } from '../../shared/mcpApps'
-import { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from './schemas/tools'
-import { isApprovalExemptTool } from './tools/classify'
+import { canonicalizeAgentToolName } from './schemas/tools'
+import { parseToolCallArgs } from './tools/callArgs'
+import { BUILTIN_TOOL_NAME_SET, isApprovalExemptTool } from './tools/classify'
 import { agentBuiltToolAllowKey } from './agentTools/loader'
 import { resolveAgentToolsDir } from './agentTools/paths'
 import { ASK_SAFE_BUILTIN } from './tools/modePolicy'
@@ -132,22 +133,12 @@ export function cancelPendingApprovals(runId: string, invokeId?: number): void {
  * runs for a name nothing else claims — which is exactly the agent-built case.
  */
 async function agentBuiltAllowKeyFor(name: string): Promise<string | undefined> {
-  if (BUILTIN_NAME_SET.has(name) || isMcpServerToolName(name)) return undefined
+  if (BUILTIN_TOOL_NAME_SET.has(name) || isMcpServerToolName(name)) return undefined
   try {
     return (await agentBuiltToolAllowKey(await resolveAgentToolsDir(), name)) ?? undefined
   } catch {
     // A tool we cannot identify is not one we can grant a standing allow to;
     // falling through leaves it gated under its bare name.
-    return undefined
-  }
-}
-
-function parseArgs(argsJson: string | undefined): Record<string, unknown> | undefined {
-  if (!argsJson) return undefined
-  try {
-    const parsed: unknown = JSON.parse(argsJson)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined
-  } catch {
     return undefined
   }
 }
@@ -168,17 +159,8 @@ export function isToolGated(
   const allowNames = allowKey ? [allowKey] : [canonical, name]
   if (allowNames.some((entry) => sessionAllowlist.has(entry))) return false
   if (allowNames.some((entry) => workspaceAllowlist.includes(entry))) return false
-  let args: Record<string, unknown> | undefined
-  if (argsJson) {
-    try {
-      const parsed: unknown = JSON.parse(argsJson)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        args = parsed as Record<string, unknown>
-      }
-    } catch {
-      args = undefined
-    }
-  }
+  // The arguments execution will run with, not the raw JSON (see parseToolCallArgs).
+  const args = parseToolCallArgs(canonical, argsJson)
   if (canonical === 'terminal') {
     const command = terminalCommandOf(args)
     // Polling a session reads the output of a command already let through; it starts nothing.
@@ -204,23 +186,10 @@ export function isToolGated(
 }
 
 /** High-risk tools that stay gated in autonomous mode unless workspace-allowlisted. */
-const BUILTIN_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES)
-
 export function isAutonomousHighRiskTool(name: string, argsJson?: string): boolean {
   const canonical = canonicalizeAgentToolName(name)
   if (canonical === 'lsp') {
-    let action: unknown
-    if (argsJson) {
-      try {
-        const parsed: unknown = JSON.parse(argsJson)
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          action = (parsed as Record<string, unknown>).action
-        }
-      } catch {
-        action = undefined
-      }
-    }
-    return action === 'rename'
+    return parseToolCallArgs(canonical, argsJson).action === 'rename'
   }
   return (
     canonical === 'delete' ||
@@ -243,7 +212,7 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
     // only place anyone reads the code before it exists.
     canonical === 'build_tool' ||
     canonical.startsWith('mcp__') ||
-    !(BUILTIN_TOOL_NAMES as readonly string[]).includes(canonical)
+    !BUILTIN_TOOL_NAME_SET.has(canonical)
   )
 }
 
@@ -398,7 +367,8 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
 
       // The terminal's "Always allow" is scoped to the command, computed here —
       // from the full arguments, not the card's truncated preview.
-      const terminalCommand = name === 'terminal' ? terminalCommandOf(parseArgs(call.arguments)) : null
+      const args = parseToolCallArgs(name, call.arguments)
+      const terminalCommand = name === 'terminal' ? terminalCommandOf(args) : null
       const alwaysAllowCommand = terminalCommand ? commandAllowPrefix(terminalCommand) : null
       const request: ToolApprovalRequest = {
         ...(name === 'terminal' ? { alwaysAllowCommand } : {}),
@@ -412,16 +382,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         argsPreview: scrubString(call.arguments.slice(0, 4000)),
         mutating: isNetworkBrowseTool(name)
           ? false
-          : !isApprovalExemptTool(name, (() => {
-              try {
-                const parsed: unknown = JSON.parse(call.arguments || '{}')
-                return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-                  ? (parsed as Record<string, unknown>)
-                  : undefined
-              } catch {
-                return undefined
-              }
-            })())
+          : !isApprovalExemptTool(name, args)
       }
 
       const decision = await ask(request).catch((err: unknown) => {

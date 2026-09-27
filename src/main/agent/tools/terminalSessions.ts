@@ -327,6 +327,11 @@ export type StartBackgroundTerminalOpts = {
    * agent waits for completion but never leaks a runaway process.
    */
   killOnTimeout?: boolean
+  /**
+   * Hard run-cancel signal. When set, only it kills the session; `signal`
+   * (which also carries the soft follow-up steer) just ends the wait.
+   */
+  runSignal?: AbortSignal
   onOutput?: (chunk: { text: string; stream: 'stdout' | 'stderr' }) => void
   /** Forwarded to the inner poll — fired when the process outlives the wait window. */
   onStillRunning?: (sessionId: string) => void
@@ -423,6 +428,10 @@ export async function startBackgroundTerminal(
   }
   sessions.set(id, session)
 
+  // Kill on the hard run cancel only. Listening on the tool signal also killed
+  // on a soft steer — even after this call had returned the session to the
+  // model as still running (a dev server died when the user queued a message).
+  const killSignal = opts.runSignal ?? opts.signal
   const onAbort = (): void => {
     if (session.running && child.pid) killProcessTree(child.pid, 'session-abort')
     session.running = false
@@ -431,8 +440,8 @@ export async function startBackgroundTerminal(
     notifySessionWaiters(session)
     void runExitFinalizers(id)
   }
-  if (opts.signal.aborted) onAbort()
-  else opts.signal.addEventListener('abort', onAbort, { once: true })
+  if (killSignal.aborted) onAbort()
+  else killSignal.addEventListener('abort', onAbort, { once: true })
 
   child.stdout?.on('data', (buf: Buffer) => {
     const text = decodeConsoleText(buf)
@@ -475,7 +484,7 @@ export async function startBackgroundTerminal(
     if (session.status === 'running' || session.status === 'pattern_matched') {
       session.status = matchesPattern(session) ? 'pattern_matched' : 'done'
     }
-    opts.signal.removeEventListener('abort', onAbort)
+    killSignal.removeEventListener('abort', onAbort)
     notifySessionWaiters(session)
     void runExitFinalizers(id)
   })
@@ -487,6 +496,7 @@ export async function startBackgroundTerminal(
     blockUntilMs: opts.blockUntilMs,
     pattern: opts.pattern,
     signal: opts.signal,
+    runSignal: opts.runSignal,
     killOnTimeout: opts.killOnTimeout,
     onStillRunning: opts.onStillRunning
   })
@@ -529,6 +539,7 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
   }
 
   const deadline = Date.now() + Math.max(0, opts.blockUntilMs)
+  let steered = false
   while (Date.now() < deadline) {
     if (opts.signal.aborted) {
       // Hard cancel kills the child so it cannot leak past the run; a soft
@@ -543,6 +554,8 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
         session.finishedAt ??= Date.now()
         session.status = 'aborted'
         notifySessionWaiters(session)
+      } else {
+        steered = true
       }
       break
     }
@@ -556,7 +569,8 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
   }
 
   if (session.running && opts.blockUntilMs > 0 && session.status === 'running') {
-    if (opts.killOnTimeout) {
+    // A soft steer ended the wait early; that is not the wait expiring.
+    if (opts.killOnTimeout && !steered) {
       // Foreground wait expired: hard-kill so the process cannot leak past the
       // run, and surface it as a failure the tool layer can flag.
       if (session.child.pid) killProcessTree(session.child.pid, 'poll-timeout-kill')

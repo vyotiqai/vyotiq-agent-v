@@ -183,8 +183,12 @@ export class InvokeWriteCheckpoint {
   private readonly runDir: string
   private readonly workspaceRoot: string
   private readonly files = new Map<string, CheckpointFileEntry>()
-  /** Rel-paths with an in-flight async snapshot so first-path-wins stays racy-safe. */
-  private readonly pendingRels = new Set<string>()
+  /**
+   * In-flight async snapshots by rel-path so first-path-wins stays racy-safe.
+   * A second caller awaits the first snapshot: returning at once let it write
+   * before the copy ran, and the "prior" captured its own edit (Undo kept it).
+   */
+  private readonly pendingRels = new Map<string, Promise<void>>()
   private finalized = false
 
   constructor(
@@ -237,15 +241,19 @@ export class InvokeWriteCheckpoint {
     // Recursive dir deletes are recorded as bare directory names (no extension).
     // Plausible-file checks reject those; still allow the checkpoint entry.
     if (!opts?.recursiveDir && !isPlausibleWorkspaceFilePath(rel)) return
-    if (this.files.has(rel) || this.pendingRels.has(rel)) return
-    this.pendingRels.add(rel)
+    if (this.files.has(rel)) return
+    const pending = this.pendingRels.get(rel)
+    if (pending) {
+      await pending
+      return
+    }
     const filesBefore = this.files.size
-    try {
-      await this.snapshotPrior(resolved, rel, kind, opts)
-    } finally {
+    const snapshot = this.snapshotPrior(resolved, rel, kind, opts).finally(() => {
       this.pendingRels.delete(rel)
       if (this.files.size > filesBefore) this.persistIncremental()
-    }
+    })
+    this.pendingRels.set(rel, snapshot.catch(() => undefined))
+    await snapshot
   }
 
   private async snapshotPrior(
@@ -364,7 +372,8 @@ export class InvokeWriteCheckpoint {
     if (!rel || rel.startsWith('..')) return
     if (!isPlausibleWorkspaceFilePath(rel)) return
     if (this.files.has(rel) || this.pendingRels.has(rel)) return
-    this.pendingRels.add(rel)
+    let release!: () => void
+    this.pendingRels.set(rel, new Promise<void>((resolve) => (release = resolve)))
     const filesBefore = this.files.size
     try {
       if (kind === 'created') {
@@ -400,6 +409,7 @@ export class InvokeWriteCheckpoint {
       })
     } finally {
       this.pendingRels.delete(rel)
+      release()
       if (this.files.size > filesBefore) this.persistIncremental()
     }
   }

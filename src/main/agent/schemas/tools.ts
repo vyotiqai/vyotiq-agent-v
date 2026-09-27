@@ -32,6 +32,20 @@ type ReadArgs = {
   limit?: number
 }
 
+/**
+ * Models that fill every optional field send `limit: 0` (sometimes `-1`) as an
+ * "unset" placeholder. Drop it before validation — `.min(1)` rejected the whole
+ * call, line range included, before `coerceReadWindow` could apply its rule
+ * that a line range wins. Runs as a preprocess so the wire schema is unchanged.
+ */
+function dropPlaceholderReadLimit(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+  const limit = (raw as { limit?: unknown }).limit
+  if (typeof limit !== 'number' || limit > 0) return raw
+  const { limit: _placeholder, ...rest } = raw as Record<string, unknown>
+  return rest
+}
+
 /** Line-range wins when both windows are present; offset 0 with no limit is a no-op. */
 function coerceReadWindow(args: ReadArgs): ReadArgs {
   const next = { ...args }
@@ -51,7 +65,7 @@ function coerceReadWindow(args: ReadArgs): ReadArgs {
   return next
 }
 
-const readArgs = z
+const readArgs = z.preprocess(dropPlaceholderReadLimit, z
   .object({
     path: z.string().trim().min(1).describe('Relative or absolute path inside the workspace'),
     startLine: z
@@ -79,7 +93,7 @@ const readArgs = z
       .describe('Max bytes from offset. Bytes, not lines. Omit when using startLine/endLine.')
       .optional()
   })
-  .transform(coerceReadWindow)
+  .transform(coerceReadWindow))
 
 const editArgs = z
   .object({
@@ -1012,18 +1026,37 @@ const updateGoalArgs = z.object({
     .describe('active resumes a paused goal; complete ends it. Never pause.')
 })
 
+const DONE_WHEN_EVIDENCE_MAX = 600
+
+/**
+ * Clip over-long evidence instead of rejecting it. A single long evidence
+ * string failed the whole call — every verdict in it was lost and the model
+ * paid a step to resend. Runs before validation, so the wire schema still
+ * states the cap and blank evidence is still refused.
+ */
+function clipDoneWhenEvidence(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw
+  const text = raw.trim()
+  return text.length > DONE_WHEN_EVIDENCE_MAX
+    ? `${text.slice(0, DONE_WHEN_EVIDENCE_MAX - 1).trimEnd()}…`
+    : text
+}
+
 const checkDoneWhenArgs = z.object({
   checks: z
     .array(
       z.object({
         id: z.string().trim().min(1).describe('e.g. c1'),
         verdict: z.enum(['met', 'not_met']).describe('met only if you saw it hold'),
-        evidence: z
-          .string()
-          .trim()
-          .min(1)
-          .max(600)
-          .describe('Command and result, file and line, or why not met')
+        evidence: z.preprocess(
+          clipDoneWhenEvidence,
+          z
+            .string()
+            .trim()
+            .min(1)
+            .max(DONE_WHEN_EVIDENCE_MAX)
+            .describe('Command and result, file and line, or why not met')
+        )
       })
     )
     .min(1)
@@ -1132,7 +1165,7 @@ export const TOOL_REGISTRY = {
   },
   check_done_when: {
     description:
-      "Mark this run's done-when checks (contract.md, ids c1…) met or not_met with evidence, before you finish. The user sees each verdict; not_met is an honest result.",
+      "Mark this run's done-when checks met or not_met with evidence, before you finish. Only when contract.md lists checks with ids (c1…); a run without them has nothing to mark. The user sees each verdict; not_met is an honest result.",
     schema: checkDoneWhenArgs
   },
   browser_search: {

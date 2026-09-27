@@ -57,6 +57,26 @@ describe('modePolicy', () => {
     )
   })
 
+  // A path_scope-shared instance (no worktree) is denied these at execution;
+  // offered anyway, they cost 45 denied calls across real runs.
+  it('shared-scope instances are not offered the tools they are always denied', () => {
+    const defs = [
+      { name: 'read' },
+      { name: 'edit' },
+      { name: 'terminal' },
+      { name: 'diagnostics' },
+      { name: 'git_commit' },
+      { name: 'git_status' },
+      { name: 'request_mcp_tools' },
+      { name: 'mcp_read_resource' },
+      { name: 'mcp__srv__tool' }
+    ]
+    const shared = filterToolDefsForMode('agent', defs, { inlineInstance: true, sharedScope: true })
+    expect(shared.map((d) => d.name)).toEqual(['read', 'edit', 'git_status', 'mcp_read_resource'])
+    // A worktree instance keeps them.
+    expect(filterToolDefsForMode('agent', defs, { inlineInstance: true })).toEqual(defs)
+  })
+
   it('root Agent mode delegates instance details to tool schemas', () => {
     const section = modeSectionMarkdown('agent')
     expect(section).toMatch(/Root-only agent-instance tools/)

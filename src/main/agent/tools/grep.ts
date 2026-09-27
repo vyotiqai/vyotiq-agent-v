@@ -21,6 +21,17 @@ import {
 export const GREP_SCAN_CAP = 20_000
 export const GREP_MAX_FILE_BYTES = 512 * 1024
 export const GREP_DEFAULT_MAX_RESULTS = 60
+/**
+ * Longest matched or context line printed whole. A hit inside a minified
+ * bundle is one line of up to 512KB; the match is findable from its head.
+ */
+export const GREP_MAX_LINE_CHARS = 2000
+
+/** Shared with `search` so both tools bound a hit line the same way. */
+export function capMatchLine(line: string): string {
+  if (line.length <= GREP_MAX_LINE_CHARS) return line
+  return `${line.slice(0, GREP_MAX_LINE_CHARS)}… [+${line.length - GREP_MAX_LINE_CHARS} chars]`
+}
 const YIELD_EVERY_FILES = 32
 
 export type GrepOptions = {
@@ -118,14 +129,14 @@ function grepFileText(
     state.matchCount++
 
     if (contextLines === 0) {
-      state.out.push(`${rel}:${n + 1}: ${lines[n]!.trim()}`)
+      state.out.push(`${rel}:${n + 1}: ${capMatchLine(lines[n]!.trim())}`)
       continue
     }
     const from = Math.max(0, n - contextLines)
     const to = Math.min(lines.length - 1, n + contextLines)
     state.out.push(`${rel}:${n + 1}`)
     for (let c = from; c <= to; c++) {
-      state.out.push(`${c === n ? '>' : ' '} ${c + 1}| ${lines[c]!}`)
+      state.out.push(`${c === n ? '>' : ' '} ${c + 1}| ${capMatchLine(lines[c]!)}`)
     }
     state.out.push('')
   }

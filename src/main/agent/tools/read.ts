@@ -12,6 +12,23 @@ const SUGGEST_CAP = 8
 const LINE_STREAM_CHUNK = 64 * 1024
 /** Default (no-window) read cap: larger files return a bounded line window. */
 export const READ_DEFAULT_MAX_LINES = 2000
+/**
+ * Longest line returned whole. Only pathological files (minified bundles, data
+ * dumps) come near it; one such line used to arrive as megabytes of context.
+ */
+export const READ_MAX_LINE_CHARS = 16 * 1024
+/**
+ * Most text one read returns — line windows and byte windows alike. Sized so
+ * any real file within READ_DEFAULT_MAX_LINES still reads whole (2000 lines x 512).
+ */
+export const READ_MAX_WINDOW_CHARS = 1024 * 1024
+/** Entries a directory read lists — same bound as `list_dir`. */
+export const LIST_DIR_CAP = 200
+
+function capLine(line: string): string {
+  if (line.length <= READ_MAX_LINE_CHARS) return line
+  return `${line.slice(0, READ_MAX_LINE_CHARS)}… [line truncated: ${line.length - READ_MAX_LINE_CHARS} more chars — read them with offset/limit]`
+}
 
 export type ReadOptions = {
   offset?: number
@@ -21,13 +38,15 @@ export type ReadOptions = {
 }
 
 async function listDirectoryEntries(resolved: string, relPath: string): Promise<string> {
-  const entries = (await fsp.readdir(resolved, { withFileTypes: true })).map(
-    (e) => `${e.isDirectory() ? '[dir]' : '[file]'} ${e.name}`
-  )
+  const all = await fsp.readdir(resolved, { withFileTypes: true })
+  const entries = all
+    .slice(0, LIST_DIR_CAP)
+    .map((e) => `${e.isDirectory() ? '[dir]' : '[file]'} ${e.name}`)
   return [
     `Path is a directory, not a file: ${relPath}`,
     'Contents:',
     ...entries,
+    all.length > entries.length ? `… ${all.length - entries.length} more entries` : '',
     'Use read on a file path, or list_dir / glob / search to explore further.'
   ]
     .filter(Boolean)
@@ -316,7 +335,8 @@ async function readByteRange(
     )
   }
   const remaining = Math.max(0, size - offset)
-  const want = limit === undefined ? remaining : Math.min(Math.max(0, limit), remaining)
+  const asked = limit === undefined ? remaining : Math.min(Math.max(0, limit), remaining)
+  const want = Math.min(asked, READ_MAX_WINDOW_CHARS)
   const buf = Buffer.alloc(want)
   const fh = await fsp.open(resolved, 'r')
   let read: number
@@ -333,7 +353,11 @@ async function readByteRange(
   }
   const header = `--- offset ${offset}${limit !== undefined ? `, limit ${limit}` : ''} of ${size} bytes ---\n`
   const body = utf16 ? decodeTextBuffer(slice, pathArg) : stripNuls(slice.toString('utf8'))
-  return header + body
+  const capped =
+    want < asked
+      ? `\n… read capped at ${READ_MAX_WINDOW_CHARS} bytes; pass offset ${offset + read} to continue.`
+      : ''
+  return header + body + capped
 }
 
 type LineEncoding = 'utf8' | 'utf16le' | 'utf16be'
@@ -400,7 +424,7 @@ async function streamLines(
   start: number,
   endLimit: number,
   maxCollected: number
-): Promise<{ collected: string[]; total: number; trailingNewline: boolean }> {
+): Promise<{ collected: string[]; total: number; trailingNewline: boolean; budgetHit: boolean }> {
   const fh = await fsp.open(resolved, 'r')
   try {
     const peek = Buffer.alloc(Math.min(4, size))
@@ -417,11 +441,21 @@ async function streamLines(
     let nulCount = 0
     let trailingNewline = false
     const collected: string[] = []
+    let collectedChars = 0
+    let budgetHit = false
     const pushLine = (line: string): void => {
       lineNo += 1
       total = lineNo
+      if (budgetHit) return
       if (lineNo >= start && lineNo <= endLimit && collected.length < maxCollected) {
-        collected.push(stripNuls(line))
+        const text = capLine(stripNuls(line))
+        // Always return at least one line, then stop at the window budget.
+        if (collected.length > 0 && collectedChars + text.length > READ_MAX_WINDOW_CHARS) {
+          budgetHit = true
+          return
+        }
+        collectedChars += text.length + 1
+        collected.push(text)
       }
     }
 
@@ -483,7 +517,7 @@ async function streamLines(
       if (start === 1 && endLimit >= 1 && maxCollected >= 1) collected.push('')
     }
 
-    return { collected, total, trailingNewline }
+    return { collected, total, trailingNewline, budgetHit }
   } finally {
     await fh.close()
   }
@@ -500,7 +534,7 @@ async function readDefaultWindow(
   size: number
 ): Promise<string> {
   const cap = READ_DEFAULT_MAX_LINES
-  const { collected, total, trailingNewline } = await streamLines(
+  const { collected, total, trailingNewline, budgetHit } = await streamLines(
     resolved,
     pathArg,
     size,
@@ -508,6 +542,13 @@ async function readDefaultWindow(
     Number.POSITIVE_INFINITY,
     cap
   )
+  if (budgetHit) {
+    return (
+      `--- lines 1-${collected.length} of ${total} ---\n` +
+      collected.join('\n') +
+      `\n… read truncated at ${READ_MAX_WINDOW_CHARS} chars; pass startLine/endLine to read further.`
+    )
+  }
   if (total <= cap) {
     // Byte-identical with a full read: no header, trailing newline preserved.
     return collected.join('\n') + (trailingNewline ? '\n' : '')
@@ -535,7 +576,7 @@ async function readLineRange(
   const start = Number.isFinite(endRaw) && endRaw < startRaw ? Math.max(1, endRaw) : startRaw
   const endLimit = Number.isFinite(endRaw) && endRaw < startRaw ? startRaw : endRaw
 
-  const { collected, total } = await streamLines(
+  const { collected, total, budgetHit } = await streamLines(
     resolved,
     pathArg,
     size,
@@ -554,6 +595,14 @@ async function readLineRange(
     )
   }
 
+  if (budgetHit) {
+    const last = start + collected.length - 1
+    return (
+      `--- lines ${start}-${last} of ${total} ---\n` +
+      collected.join('\n') +
+      `\n… read truncated at ${READ_MAX_WINDOW_CHARS} chars; pass startLine ${last + 1} to read further.`
+    )
+  }
   const actualEnd = Math.min(endLimit, total)
   return `--- lines ${start}-${actualEnd} of ${total} ---\n` + collected.join('\n')
 }

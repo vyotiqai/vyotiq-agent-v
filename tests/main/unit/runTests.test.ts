@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 vi.mock('@main/agent/tools/diagnostics', () => ({
+  // The output cap has its own coverage (runTestsOutputCap.test.ts).
+  capToolOutput: (text: string) => text,
   packageScripts: vi.fn(() => ({ test: 'vitest run' })),
   preferPnpm: () => true,
   parseSafeCommand: (cmd: string) => {

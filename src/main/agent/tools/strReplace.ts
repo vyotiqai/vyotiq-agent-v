@@ -5,6 +5,7 @@ import { atomicWriteFile } from '@main/storage/atomicWrite'
 import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
 import { assertWritablePath } from './writeGuard'
 import { memoryFileHint } from './read'
+import { dominantEol, existingFileMode, normalizeNewlines, splitBom } from './edit'
 
 /** Count non-overlapping occurrences of `needle` in `haystack`. */
 export function countOccurrences(haystack: string, needle: string): number {
@@ -20,8 +21,15 @@ export function countOccurrences(haystack: string, needle: string): number {
   return count
 }
 
-function normalizeNewlines(text: string): string {
-  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+/**
+ * Replace the first `needle` with `replacement` taken literally.
+ * `String.prototype.replace` with a string pattern still expands `$&`, `$'`,
+ * `` $` `` and `$$` in the replacement — `$$props` came back as `$props`.
+ */
+export function replaceFirstLiteral(haystack: string, needle: string, replacement: string): string {
+  const at = haystack.indexOf(needle)
+  if (at < 0) return haystack
+  return haystack.slice(0, at) + replacement + haystack.slice(at + needle.length)
 }
 
 function sharedPrefixLength(a: string, b: string): number {
@@ -89,8 +97,8 @@ export function toolStrReplace(
     )
   }
 
-  const original = readFileSync(resolved, 'utf8')
-  const useCrlf = original.includes('\r\n')
+  const { bom, body: original } = splitBom(readFileSync(resolved, 'utf8'))
+  const useCrlf = dominantEol(original) === '\r\n'
   const normalizedOriginal = normalizeNewlines(original)
   const normalizedOld = normalizeNewlines(oldString)
   const normalizedNew = normalizeNewlines(newString)
@@ -109,18 +117,18 @@ export function toolStrReplace(
 
   const nextNormalized = replaceAll
     ? normalizedOriginal.split(normalizedOld).join(normalizedNew)
-    : normalizedOriginal.replace(normalizedOld, normalizedNew)
+    : replaceFirstLiteral(normalizedOriginal, normalizedOld, normalizedNew)
 
   if (nextNormalized === normalizedOriginal) {
     throw new Error(`str_replace left ${path} unchanged`)
   }
 
-  const next = useCrlf ? nextNormalized.replace(/\n/g, '\r\n') : nextNormalized
+  const next = bom + (useCrlf ? nextNormalized.replace(/\n/g, '\r\n') : nextNormalized)
   assertWritablePath(path)
   assertResolvedInsideWorkspace(workspaceRoot, dirname(resolved))
   mkdirSync(dirname(resolved), { recursive: true })
   assertResolvedInsideWorkspace(workspaceRoot, resolved)
-  atomicWriteFile(resolved, next)
+  atomicWriteFile(resolved, next, existingFileMode(resolved))
   const label = replaceAll && matches > 1 ? `${matches} occurrences` : '1 occurrence'
   return `Replaced ${label} in ${path}`
 }
