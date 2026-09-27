@@ -212,13 +212,36 @@ describe('screen snip capture', () => {
     expect(result.frames).toHaveLength(1)
   })
 
+  // The failure wording depends on the host OS, so each case pins it.
+  async function onPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): Promise<T> {
+    const prev = process.platform
+    Object.defineProperty(process, 'platform', { value: platform })
+    try {
+      return await run()
+    } finally {
+      Object.defineProperty(process, 'platform', { value: prev })
+    }
+  }
+
   it('fails with the reason when the stream will not start, and still cleans up', async () => {
     fake.start = { error: 'NotReadableError: Could not start video source' }
-    await expect(snipScreen({ target: { kind: 'window', title: 'My Game' } })).rejects.toThrow(
-      /could not be captured/
+    await onPlatform('win32', () =>
+      expect(snipScreen({ target: { kind: 'window', title: 'My Game' } })).rejects.toThrow(
+        /could not be captured/
+      )
     )
     expect(fake.calls.at(-1)).toBe('stop')
     expect(fake.hidden).toBe(1)
+  })
+
+  it('points macOS at the Screen Recording permission when the stream is refused', async () => {
+    fake.start = { error: 'NotReadableError: Could not start video source' }
+    await onPlatform('darwin', () =>
+      expect(snipScreen({ target: { kind: 'window', title: 'My Game' } })).rejects.toThrow(
+        /Privacy & Security > Screen Recording/
+      )
+    )
+    expect(fake.calls.at(-1)).toBe('stop')
   })
 
   it('stops between frames when the run is cancelled', async () => {
