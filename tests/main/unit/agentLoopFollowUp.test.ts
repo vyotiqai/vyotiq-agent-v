@@ -89,6 +89,23 @@ vi.mock('@main/agent/tools', () => ({
   executeTool: vi.fn()
 }))
 
+const { deferredRewrites } = vi.hoisted(() => ({
+  /** When on, queued messages.jsonl rewrites wait here until a test runs them. */
+  deferredRewrites: { on: false, pending: [] as Array<() => void> }
+}))
+
+vi.mock('@main/agent/messageAppendQueue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/messageAppendQueue')>()
+  return {
+    ...actual,
+    enqueueMessageRewrite: (dir: string, rewrite: () => void) => {
+      if (!deferredRewrites.on) return actual.enqueueMessageRewrite(dir, rewrite)
+      deferredRewrites.pending.push(rewrite)
+      return Promise.resolve()
+    }
+  }
+})
+
 import { runAgent } from '@main/agent/loop'
 import {
   enqueueFollowUp,
@@ -111,6 +128,8 @@ describe('runAgent mid-run follow-ups', () => {
     mkdirSync(workspace, { recursive: true })
     resetActiveRunsForTests()
     streamChat.mockReset()
+    deferredRewrites.on = false
+    deferredRewrites.pending = []
   })
 
   afterEach(() => {
@@ -160,6 +179,46 @@ describe('runAgent mid-run follow-ups', () => {
 
     const messages = loadMessages(workspace, runId)
     expect(messages.some((m) => m.role === 'user' && m.content === 'change course')).toBe(true)
+  })
+
+  // A steer that lands just before `done` used to break on the done chunk
+  // itself: the finished turn was saved as interrupted and its usage was lost.
+  it('keeps a turn that finished as a steer arrived, with its usage', async () => {
+    const runId = 'follow-up-at-done'
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        yield { type: 'text', text: 'first answer' }
+        const queued = enqueueFollowUp(runId, { role: 'user', content: 'one more' })
+        if (queued.ok) promoteFollowUp(runId, queued.id)
+        yield { type: 'done', stopReason: 'stop', usage: { inputTokens: 100, outputTokens: 10 } }
+        return
+      }
+      yield { type: 'text', text: 'second answer' }
+      yield { type: 'done', stopReason: 'stop', usage: { inputTokens: 120, outputTokens: 12 } }
+    })
+
+    const events: Array<{ type: string; content?: string; reason?: string }> = []
+    for await (const ev of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'start' }],
+      workspacePath: workspace
+    })) {
+      events.push(ev)
+    }
+
+    expect(call).toBe(2)
+    expect(events.filter((e) => e.type === 'step_usage')).toHaveLength(2)
+    expect(events.some((e) => e.type === 'follow_up_applied')).toBe(true)
+    expect(events.some((e) => e.type === 'incomplete')).toBe(false)
+    const messages = loadMessages(workspace, runId)
+    expect(messages.map((m) => `${m.role}:${m.content}`)).toEqual([
+      'user:start',
+      'assistant:first answer',
+      'user:one more',
+      'assistant:second answer'
+    ])
   })
 
   it('soft-interrupts in-flight tools, applies follow-ups, then continues to done', async () => {
@@ -373,5 +432,44 @@ describe('runAgent mid-run follow-ups', () => {
       role: 'user',
       content: 'after crash'
     })
+  })
+
+  // The applied follow-up's disk rewrite waits behind queued appends. It wrote
+  // a queue snapshot taken before that wait, so a follow-up queued in the
+  // window was erased from followups.json.
+  it('keeps a follow-up queued while the applied one is being removed from disk', async () => {
+    const runId = 'follow-up-disk-window'
+    const runDir = resolveRunDir(workspace, runId)
+    deferredRewrites.on = true
+    let onDiskAfterRewrite: string[] = []
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        expect(enqueueFollowUp(runId, { role: 'user', content: 'first follow-up' }).ok).toBe(true)
+        syncFollowUpsToDisk(runDir, runId)
+      }
+      if (call === 2) {
+        // Inside the applied follow-up's turn: the user queues another (IPC
+        // writes the file at once), then the deferred rewrite lands.
+        expect(enqueueFollowUp(runId, { role: 'user', content: 'second follow-up' }).ok).toBe(true)
+        syncFollowUpsToDisk(runDir, runId)
+        for (const rewrite of deferredRewrites.pending.splice(0)) rewrite()
+        onDiskAfterRewrite = loadFollowUps(runDir).map((entry) => String(entry.message.content))
+      }
+      yield { type: 'text', text: `reply ${call}` }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+
+    for await (const _ of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'start' }],
+      workspacePath: workspace
+    })) {
+      // drain
+    }
+
+    expect(onDiskAfterRewrite).toEqual(['second follow-up'])
+    expect(call).toBe(3)
   })
 })

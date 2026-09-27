@@ -83,10 +83,18 @@ function shouldInvalidateList(patch: Partial<RunStatus>): boolean {
  */
 const abandonedDirs = new Set<string>()
 
-function mergePendingPatch(dir: string, patch: Partial<RunStatus>, invalidateList: boolean): void {
+/**
+ * Put a patch whose write failed back UNDER whatever was queued since.
+ *
+ * Merging it on top (as a new patch) let the older value win: a failed
+ * `{status:'running'}` flush re-merged over a newer `{status:'error'}`, so
+ * status.json ended "running" — and, no longer terminal, the patch also lost
+ * the unbounded terminal retry. A zombie run.
+ */
+function requeueFailedPatch(dir: string, failed: Partial<RunStatus>, invalidateList: boolean): void {
   if (abandonedDirs.has(dir)) return
   const entry = ensurePending(dir)
-  entry.patch = { ...entry.patch, ...patch }
+  entry.patch = { ...failed, ...entry.patch }
   if (invalidateList) entry.invalidateList = true
 }
 
@@ -145,7 +153,7 @@ async function flushDir(dir: string): Promise<void> {
       }
     } catch (err) {
       // Re-merge so a later flush can retry after disk/permission failures.
-      mergePendingPatch(dir, patch, invalidateList)
+      requeueFailedPatch(dir, patch, invalidateList)
       scheduleStatusRetry(dir)
       throw err
     }
@@ -320,7 +328,7 @@ export async function writeStatusImmediate(
   })
 
   entry.chain = writeOp.catch((err) => {
-    mergePendingPatch(dir, mergedPatch, invalidateList)
+    requeueFailedPatch(dir, mergedPatch, invalidateList)
     scheduleStatusRetry(dir)
     logger.warn('Failed immediate status write', {
       scope: 'state',

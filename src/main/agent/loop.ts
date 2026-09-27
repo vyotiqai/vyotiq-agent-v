@@ -44,6 +44,7 @@ import { findWorkspaceSettingsOverride, readWorkspacesState } from '@main/worksp
 import { preflightChatProviderAuth } from './providers/preflight'
 import {
   assembleContext,
+  buildMemorySection,
   buildSessionEnvSection,
   contentWindow,
   contextWindowFor,
@@ -120,12 +121,13 @@ import {
   takePendingMode
 } from './runRegistry'
 import { doneWhenNudgeText, readChecks } from './doneWhenChecks'
-import { saveFollowUps, syncFollowUpsToDisk } from './followUpStore'
+import { loadFollowUps, saveFollowUps, syncFollowUpsToDisk } from './followUpStore'
 import { clearLoopCheckpoint, loadLoopCheckpoint, saveLoopCheckpoint } from './loopCheckpoint'
 import { LOOP_CHECKPOINT_VERSION, type LoopCheckpoint } from '../../shared/ipc/schemas/agent'
 import {
   appendEvent,
   appendMessage,
+  appendMessages,
   ensureUserMessageAt,
   createRun,
   loadCompaction,
@@ -150,13 +152,15 @@ import {
   clearRunStorageLostHandler,
   flushStatusWrites,
   loadMessagesAsync,
+  loadMessagesStrictAsync,
+  recoverStreamSnapshotAssistant,
   patchLatestTodoWriteMessage,
   GOAL_SECTION_RE
 } from './state'
 import { enqueueMessageRewrite } from './messageAppendQueue'
 import { atomicWriteFile } from '../storage/atomicWrite'
 import { writeRunReceiptBestEffort } from './runReceipt'
-import { recordUsageDeltas } from './usageLedger'
+import { rebaseUsageLedger, recordUsageDeltas } from './usageLedger'
 import { writeTrajectoryArtifactsBestEffort } from './runTrajectory'
 import {
   emptyStepUsageTotals,
@@ -199,6 +203,7 @@ import { agentBuiltToolDefinitions } from './agentTools/loader'
 import {
   getMcpServerStatus,
   isGitMcpNotARepoError,
+  getMcpSessionGeneration,
   listMcpToolDefinitions,
   parseMcpToolName,
   setMcpStdioWorkspace,
@@ -358,23 +363,17 @@ function classifyIncompleteTurn(
   stopReason: StopReason | undefined,
   assistantText: string
 ): IncompleteReason | undefined {
-  const hasVisibleAnswer = Boolean(assistantText.trim())
-  if (stopReason === 'length') return 'truncated'
   if (stopReason === 'content_filter') return 'filtered'
-  // tool_calls with zero parsed tools usually means truncated/malformed deltas,
-  // not a genuinely empty model response.
-  if (stopReason === 'tool_calls') return 'truncated'
-  if (stopReason === 'error') {
-    // Only label as empty when no answer was produced; partial text is truncated.
-    if (!hasVisibleAnswer) return 'empty_response'
-    return 'truncated'
-  }
-  // Providers sometimes emit `unknown` for truncated/interrupted streams.
-  if (stopReason === 'unknown') {
-    if (!hasVisibleAnswer) return 'empty_response'
-    return 'truncated'
-  }
-  if (!hasVisibleAnswer) return 'empty_response'
+  // Nothing visible is an empty turn whatever the stop reason says. A
+  // reasoning-only reply cut off at `length`, or Gemini's
+  // MALFORMED_FUNCTION_CALL (normalized to `tool_calls` with nothing parsed),
+  // used to read as "truncated": an uncapped continue, every one at full
+  // effort, where an empty turn gets the capped retry with effort stepped down.
+  if (!assistantText.trim()) return 'empty_response'
+  // Partial text: `length`, `tool_calls` with zero parsed tools (truncated or
+  // malformed deltas), and `error` / `unknown` from interrupted streams.
+  if (stopReason === 'length' || stopReason === 'tool_calls') return 'truncated'
+  if (stopReason === 'error' || stopReason === 'unknown') return 'truncated'
   return undefined
 }
 
@@ -387,12 +386,15 @@ async function* yieldStreamRetryWait(
   signal: AbortSignal,
   runDir: string | undefined,
   errorCode: string,
-  failureMessage: string
+  failureMessage: string,
+  /** A local or custom provider endpoint: probe it, not the public internet. */
+  probeUrl: string | undefined
 ): AsyncGenerator<AgentEvent, void, unknown> {
   try {
     for await (const retryInMs of iterateNetworkWait({
       signal,
-      maxWaitMs: resolveOfflineWaitMs(getSettings())
+      maxWaitMs: resolveOfflineWaitMs(getSettings()),
+      probeUrl
     })) {
       const waitEv: AgentEvent = {
         type: 'network_wait',
@@ -526,9 +528,13 @@ function* applyDrainedFollowUps(
   // append: the entry is already removed from the registry, so a crash between
   // the disk-queue rewrite and the append-chain flush would otherwise lose the
   // acknowledged follow-up from BOTH stores.
-  const remaining = peekFollowUps(runId)
+  //
+  // Drop only the applied entry, from whatever the file holds when the
+  // rewrite runs. A queue snapshot taken here went stale in the append window
+  // (the IPC handlers write followups.json synchronously): a follow-up queued
+  // meanwhile was erased, and a deleted one came back on the next resume.
   void enqueueMessageRewrite(runDir, () => {
-    saveFollowUps(runDir, remaining)
+    saveFollowUps(runDir, loadFollowUps(runDir).filter((queued) => queued.id !== entry.id))
   })
   return true
 }
@@ -563,19 +569,31 @@ function seedPlanStubIfMissing(runDir: string): void {
  * tool call that made it. A fold misses the cache anyway, so catching up there
  * is free.
  */
-type PromptArtifacts = { foldKey: string; contract: string; plan: string }
+type PromptArtifacts = { foldKey: string; contract: string; plan: string; memory: string }
 
 /** Changes exactly when a compaction fold replaces the working history. */
 function compactionFoldKey(compaction: CompactionRecord | null): string {
   return compaction ? `${compaction.createdAt}#${compaction.foldedMessages ?? 0}` : ''
 }
 
+/**
+ * Workspace memory (state.md + index.md) is frozen the same way: it renders in
+ * the stable zone, and every `memory_write` — this run's, or a child instance's,
+ * which writes to the same session workspace — otherwise rewrote the prefix
+ * mid-invoke (measured: 173k / 65k / 66k uncached after memory writes). The
+ * write itself stays visible through its tool call.
+ */
 async function readPromptArtifacts(
   runDir: string,
-  compaction: CompactionRecord | null
+  compaction: CompactionRecord | null,
+  memoryWorkspace: string | null
 ): Promise<PromptArtifacts> {
-  const [contract, plan] = await Promise.all([readContractAsync(runDir), readPlanAsync(runDir)])
-  return { foldKey: compactionFoldKey(compaction), contract, plan }
+  const [contract, plan, memory] = await Promise.all([
+    readContractAsync(runDir),
+    readPlanAsync(runDir),
+    buildMemorySection(memoryWorkspace)
+  ])
+  return { foldKey: compactionFoldKey(compaction), contract, plan, memory }
 }
 
 /** Assemble fields for the frozen artifacts; see readPlanAsync for the verbatim rule. */
@@ -583,11 +601,13 @@ function promptArtifactFields(artifacts: PromptArtifacts): {
   contract: string
   plan: string | undefined
   planVerbatim: boolean
+  memorySection: string
 } {
   return {
     contract: artifacts.contract,
     plan: artifacts.plan || undefined,
-    planVerbatim: Boolean(artifacts.plan)
+    planVerbatim: Boolean(artifacts.plan),
+    memorySection: artifacts.memory
   }
 }
 
@@ -648,49 +668,19 @@ function* dropPendingFollowUps(
 }
 
 /**
- * Surface the first mid-run messages.jsonl append failure as a run error event.
+ * Surface the first mid-run append failure of one run log as a run error event.
  * @returns true when a failure was emitted (caller should stop the run).
  */
-function* emitMessageAppendFailureNotice(
+function* emitAppendFailureNotice(
   runId: string,
   runDir: string,
-  invokeId: number
+  invokeId: number,
+  takeFailure: (runDir: string) => unknown,
+  what: string
 ): Generator<AgentEvent, boolean> {
-  const err = takeMessageAppendFailureNotice(runDir)
+  const err = takeFailure(runDir)
   if (!err) return false
-  const message = `Failed to persist a chat message: ${formatError(err)}`
-  logger.error(message, {
-    scope: 'agent',
-    code: 'PERSIST',
-    correlationId: runId,
-    err
-  })
-  const ev: AgentEvent = {
-    type: 'error',
-    runId,
-    invokeId,
-    message,
-    code: 'PERSIST',
-    errorId: randomUUID()
-  }
-  appendEvent(runDir, ev)
-  yield ev
-  yield* dropPendingFollowUps(runId, runDir, 'PERSIST')
-  return true
-}
-
-/**
- * Surface the first mid-run events.jsonl append failure as a run error event.
- * @returns true when a failure was emitted (caller should stop the run).
- */
-function* emitEventAppendFailureNotice(
-  runId: string,
-  runDir: string,
-  invokeId: number
-): Generator<AgentEvent, boolean> {
-  const err = takeEventAppendFailureNotice(runDir)
-  if (!err) return false
-  const message = `Failed to persist a run event: ${formatError(err)}`
+  const message = `Failed to persist ${what}: ${formatError(err)}`
   logger.error(message, {
     scope: 'agent',
     code: 'PERSIST',
@@ -725,13 +715,6 @@ function* emitTerminalRunError(opts: {
   code?: string
   emitErrorEvent?: boolean
   dropFollowUpsReason?: string
-  /**
-   * Keep the queued follow-ups for the next continue instead of orphan-dropping
-   * them in the run finally. Used by stops whose own message invites a
-   * "continue" (runaway-step ceiling, budget exhaustion) — the user's queued
-   * tasks must survive to be applied by that continue.
-   */
-  preserveFollowUps?: boolean
   /** When true, skip flushWriteCheckpoint (caller already flushed). */
   skipCheckpoint?: boolean
   /** Mark the run resumable so a later resume restores the loop checkpoint. */
@@ -748,8 +731,6 @@ function* emitTerminalRunError(opts: {
     : null
   if (opts.dropFollowUpsReason) {
     yield* dropPendingFollowUps(runId, runDir, opts.dropFollowUpsReason)
-  } else if (opts.preserveFollowUps) {
-    yield* dropPendingFollowUps(runId, runDir, 'run_ended', { preserveOnDisk: true })
   }
   if (errorEvent) {
     yield errorEvent
@@ -908,58 +889,6 @@ function logReasoningQuarantine(runId: string, step: number): void {
   })
 }
 
-/**
- * Rebuild an in-flight assistant answer from the last durable stream_snapshot
- * after a hard kill. During a healthy stream the assistant message reaches
- * messages.jsonl only at step end, so a power loss / SIGKILL mid-stream leaves
- * the answer the user watched only in events.jsonl snapshots. Appends the
- * snapshot text as an assistant message when:
- *  - the snapshot is the last one and no terminal status event follows it
- *    (orderly interrupt/error paths always append status after flushing), and
- *  - the transcript does not already contain that text (the step's own persist
- *    may have landed before the crash; snapshots repeat the full buffer).
- */
-async function reconstructStreamSnapshotAssistant(
-  runDir: string,
-  runId: string,
-  messages: ChatMessage[]
-): Promise<void> {
-  if (messages.length === 0) return
-  const events = await loadEventsAsync(runDir, runId, { limit: 400 })
-  let snapshot: string | null = null
-  let terminalAfterSnapshot = false
-  for (const row of events) {
-    const ev = row.event as { type?: unknown; text?: unknown; status?: unknown } | null
-    if (!ev || typeof ev !== 'object') continue
-    if (ev.type === 'stream_snapshot' && typeof ev.text === 'string' && ev.text.trim()) {
-      snapshot = ev.text
-      terminalAfterSnapshot = false
-      continue
-    }
-    if (
-      snapshot &&
-      ev.type === 'status' &&
-      (ev.status === 'done' || ev.status === 'cancelled' || ev.status === 'error')
-    ) {
-      terminalAfterSnapshot = true
-    }
-  }
-  if (!snapshot || terminalAfterSnapshot) return
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]
-    if (message.role !== 'assistant') continue
-    const content = message.content
-    if (typeof content === 'string' && (content === snapshot || content.includes(snapshot))) {
-      return
-    }
-    break
-  }
-  const recovered: ChatMessage = { role: 'assistant', content: snapshot }
-  messages.push(recovered)
-  appendMessage(runDir, recovered)
-  appendEvent(runDir, { type: 'assistant_message', runId, content: snapshot })
-}
-
 export type ProviderModelPair = { provider: ProviderId; model: string }
 
 /**
@@ -1083,7 +1012,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       await flushStatusWrites(runDir)
     } catch (err) {
       // Do not clear pending append notices here — step-boundary
-      // emitEventAppendFailureNotice still needs to surface them. Log so interim
+      // stopIfPersistFailed still needs to surface them. Log so interim
       // receipt flushes are not silent.
       logger.warn('Interim step artifact flush failed', {
         scope: 'agent',
@@ -1095,8 +1024,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   }
   const persistInterimReceipt = async (force = false): Promise<void> => {
     if (!runDir || !isCurrentInvoke(runId, invokeId)) return
-    await flushStepArtifacts()
+    // Check first: flushing before it forced a status.json write and an
+    // events flush on every step, defeating the status queue's coalescing.
     if (!force && step - lastReceiptPersistedStep < RECEIPT_PERSIST_EVERY_STEPS) return
+    await flushStepArtifacts()
     // Interim receipts use the in-memory working set + a bounded event tail to
     // avoid re-parsing the full messages.jsonl every few steps. Final receipt in
     // `finally` still loads durable disk state.
@@ -1130,9 +1061,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     // so an active goal can resume after restart.
     updateStatus(runDir, patch)
   }
-  const flushWriteCheckpoint = function* (opts?: {
-    reopen?: boolean
-  }): Generator<AgentEvent, void, unknown> {
+  const flushWriteCheckpoint = function* (): Generator<AgentEvent, void, unknown> {
     if (!runDir || checkpointFlushed) return
     checkpointFlushed = true
     const meta = finalizeWriteCheckpoint(runDir)
@@ -1146,10 +1075,43 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       appendEvent(runDir, ev)
       yield ev
     }
-    if (opts?.reopen) {
-      checkpointFlushed = false
-      beginWriteCheckpoint(runDir, toolWorkspace, lastUserMessageIndex(messages))
+  }
+  /**
+   * Drain both append queues, and when either recorded a failure, surface it
+   * and close the run. @returns true when the run was stopped (caller returns).
+   */
+  const stopIfPersistFailed = async function* (
+    dir: string,
+    context = ''
+  ): AsyncGenerator<AgentEvent, boolean, unknown> {
+    try {
+      await flushMessageAppends(dir)
+    } catch {
+      // Failure is recorded; the notice below surfaces it.
     }
+    try {
+      await flushEventAppends(dir)
+    } catch {
+      // Failure is recorded; the notice below surfaces it.
+    }
+    for (const [takeFailure, what] of [
+      [takeMessageAppendFailureNotice, 'a chat message'],
+      [takeEventAppendFailureNotice, 'a run event']
+    ] as const) {
+      if (yield* emitAppendFailureNotice(runId, dir, invokeId, takeFailure, what)) {
+        yield* emitTerminalRunError({
+          runId,
+          invokeId,
+          runDir: dir,
+          message: `Failed to persist ${what}${context}`,
+          emitErrorEvent: false,
+          flushWriteCheckpoint,
+          writeStatus
+        })
+        return true
+      }
+    }
+    return false
   }
   try {
     const lastUser = [...(input.messages ?? input.newMessages ?? [])]
@@ -1183,23 +1145,32 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       initialStep = persisted?.step ?? 0
       // Prefer chatStart mode when the UI sent one; otherwise restore last run mode.
       agentMode = input.mode ?? persisted?.mode ?? 'agent'
-      const diskMessages = await loadMessagesAsync(workspace, runId)
+      // Strict: this read is written straight back below, so a failed or
+      // partial read must stop the invoke rather than replace the transcript.
+      let diskMessages: ChatMessage[]
+      try {
+        diskMessages = await loadMessagesStrictAsync(workspace, runId)
+      } catch (err) {
+        throw new Error(
+          `Could not read this chat's saved transcript, so it was left unchanged: ${formatError(err)}`
+        )
+      }
       // Always merge from durable disk history on resume so a stale client
       // payload cannot silently rewrite messages.jsonl.
-      if (input.newMessages?.length) {
-        const toAppend = dedupeNewMessagesAgainstDisk(
-          diskMessages,
-          input.newMessages,
-          input.persistedMessageCount
-        ).map((m) => ensureUserMessageAt(m))
-        messages = [...diskMessages, ...toAppend]
-      } else {
-        messages = diskMessages.map((m) => ({ ...m }))
-      }
+      const toAppend = input.newMessages?.length
+        ? dedupeNewMessagesAgainstDisk(
+            diskMessages,
+            input.newMessages,
+            input.persistedMessageCount
+          ).map((m) => ensureUserMessageAt(m))
+        : []
       // A hard kill mid-stream leaves the in-flight answer only as
       // stream_snapshot events; rebuild it so the transcript the user resumes
-      // shows the answer they watched stream.
-      await reconstructStreamSnapshotAssistant(runDir, runId, messages)
+      // shows the answer they watched stream. Into the disk history, before
+      // this turn's messages: after them it sat below the new user turn, and
+      // the request ended on an assistant message, which acts as a prefill.
+      await recoverStreamSnapshotAssistant(runDir, runId, diskMessages)
+      messages = [...diskMessages.map((m) => ({ ...m })), ...toAppend]
       await syncMessagesAsync(runDir, messages)
       // Seed cumulative billed totals. Prefer the durable loopCheckpoint
       // usageTotals: events.jsonl archives rotate (oldest deleted), so
@@ -1239,9 +1210,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {})
         })
       }
-      for (const m of messages) appendMessage(runDir, m)
+      appendMessages(runDir, messages)
       await flushMessageAppends(runDir)
     }
+    // The seeded totals can be lower than the ledger has recorded (a rewind,
+    // a rotated-out events archive); diff this invoke's spend from them.
+    rebaseUsageLedger(runDir, costTotals)
 
     const persistedForTools = loadStatus(runDir)
     // Storage-loss tripwire: if the run dir vanishes mid-run (external cleanup
@@ -1260,6 +1234,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
     const isInlineInstance = persistedForTools?.inlineInstance === true
     runIsInlineInstance = isInlineInstance
+    /** Shares the parent's tree under path_scope: see ModePolicyOptions.sharedScope. */
+    const isSharedScopeInstance =
+      isInlineInstance &&
+      Boolean(persistedForTools?.pathScope?.length) &&
+      !persistedForTools?.worktreePath
     if (isInlineInstance && persistedForTools?.worktreePath) {
       const wt = persistedForTools.worktreePath
       if (!isSafeInstanceWorktreePath(workspace, wt) || !existsSync(wt)) {
@@ -1484,57 +1463,37 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         estimatedCost: costTotals.estimatedCost,
         stepsWithEstimate: costTotals.stepsWithEstimate,
         generationMs: costTotals.generationMs,
-        lastStepInputTokens: costTotals.inputTokens
+        lastStepInputTokens: costTotals.inputTokens,
+        ...(providerInputTokens != null ? { lastStepPromptTokens: providerInputTokens } : {})
       }
     }
     /**
-     * Merge cumulative usage into loopCheckpoint.json. events.jsonl archives
-     * rotate (oldest deleted, MAX_EVENT_ARCHIVES=5), so re-summing step_usage
-     * rows on resume silently loses billed tokens once history rotates — the
-     * durable checkpoint is the only monotonic source. Cheap (single atomic
-     * JSON write) and called once per agent step.
+     * Write loopCheckpoint.json: the step, loop counters and cumulative usage.
+     * events.jsonl archives rotate (oldest deleted, MAX_EVENT_ARCHIVES=5), so
+     * re-summing step_usage rows on resume silently loses billed tokens once
+     * history rotates — this is the only monotonic source. Called after each
+     * billed step and again at step end; a write that would repeat the last
+     * one is skipped (the pair of sync atomic writes measured ~5.6ms a step).
      */
-    const persistUsageTotalsCheckpoint = (): void => {
-      if (!runDir || !isCurrentInvoke(runId, invokeId)) return
-      const usageTotals = persistUsageTotalsCheckpointPayload()
-      if (!usageTotals) return
-      try {
-        saveLoopCheckpoint(runDir, {
-          version: LOOP_CHECKPOINT_VERSION,
-          step,
-          invokeId,
-          updatedAt: new Date().toISOString(),
-          overflowRetryUsed,
-          goalNoToolFinishes,
-          usageTotals
-        })
-      } catch (err) {
-        // Checkpoint write is best-effort; the run must not fail on it.
-        logger.warn('Usage totals checkpoint persist failed', {
-          scope: 'agent',
-          code: 'PERSIST',
-          correlationId: runId,
-          err
-        })
-      }
-    }
+    let lastCheckpointKey = ''
     const persistLoopCheckpoint = (): void => {
       if (!runDir || !isCurrentInvoke(runId, invokeId)) return
+      const usageTotals = persistUsageTotalsCheckpointPayload()
+      const body = {
+        version: LOOP_CHECKPOINT_VERSION,
+        step,
+        invokeId,
+        overflowRetryUsed,
+        goalNoToolFinishes,
+        ...(usageTotals ? { usageTotals } : {})
+      }
+      const key = JSON.stringify(body)
+      if (key === lastCheckpointKey) return
       try {
-        saveLoopCheckpoint(runDir, {
-          version: LOOP_CHECKPOINT_VERSION,
-          step,
-          invokeId,
-          updatedAt: new Date().toISOString(),
-          overflowRetryUsed,
-          goalNoToolFinishes,
-          // Carry the durable usage totals so this write never erases them.
-          ...(() => {
-            const usageTotals = persistUsageTotalsCheckpointPayload()
-            return usageTotals ? { usageTotals } : {}
-          })()
-        })
+        saveLoopCheckpoint(runDir, { ...body, updatedAt: new Date().toISOString() })
+        lastCheckpointKey = key
       } catch (err) {
+        // Checkpoint write is best-effort; the run must not fail on it.
         logger.warn('Loop checkpoint persist failed', {
           scope: 'agent',
           code: 'PERSIST',
@@ -1714,10 +1673,20 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         )
       if (!configUnchanged || needsFailureRetry) {
         if (needsFailureRetry) mcpFailureRetried = true
-        await syncMcpServers(
+        const sync = syncMcpServers(
           sessionServers,
           needsFailureRetry ? { forceRetryFailures: true } : undefined
         )
+        if (configUnchanged) {
+          // Retry-only: reconnect in the background instead of holding the
+          // step for it. The session generation in catalogFp brings the
+          // server's tools in on the first step after it lands.
+          void sync.catch((err) =>
+            logger.warn('MCP failure retry failed', { scope: 'mcp', correlationId: runId, err })
+          )
+        } else {
+          await sync
+        }
       }
       const runMcpServers = resolveEffectiveMcpServers(marketplaceOverrides)
       runEnabledMcpIds = new Set(
@@ -1742,7 +1711,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
        * goes on the wire.
        */
       const mcpCandidates = (): ToolDefinition[] =>
-        listMcpToolDefinitions().filter((t) => {
+        // Scoped like invoke: the sessions a call from this workspace resolves.
+        listMcpToolDefinitions(toolWorkspace).filter((t) => {
           const parsed = parseMcpToolName(t.name)
           if (parsed == null || !runEnabledMcpIds.has(parsed.serverId)) return false
           const policy = mcpToolPolicies.get(parsed.serverId)
@@ -1777,7 +1747,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       ]
         .sort()
         .join(',')}::${[...runPinnedMcpToolNames].sort().join(',')}`
-      const catalogFp = `${refreshFp}::${agentMode}::${settings.autoModeSwitch ? 1 : 0}::${modelInfo.supportsTools === false ? 0 : 1}::ci${liveCodeIndexEnabled ? 1 : 0}::${admissionFp}`
+      const catalogFp = `${refreshFp}::${agentMode}::${settings.autoModeSwitch ? 1 : 0}::${modelInfo.supportsTools === false ? 0 : 1}::ci${liveCodeIndexEnabled ? 1 : 0}::${admissionFp}::gen${getMcpSessionGeneration()}`
       if (configUnchanged && catalogFp === lastMcpCatalogFp && lastMcpCatalogFp !== '') {
         // Servers/mode/switch availability/tools support unchanged — reuse prior defs.
         return
@@ -1799,7 +1769,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // Tools this user's own runs wrote (build_tool). Never deferred: the set
       // is small, and a tool written this step has to be callable on the next
       // one for build_tool to be worth having.
-      const agentBuiltDefs = await agentBuiltToolDefinitions()
+      const agentBuiltDefs = isSharedScopeInstance ? [] : await agentBuiltToolDefinitions()
       const fullToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpCandidateDefs]
       const wireToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpSelection.active]
       const allToolDefs =
@@ -1810,7 +1780,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 wireToolDefs,
                 {
                 autoModeSwitch: settings.autoModeSwitch,
-                inlineInstance: isInlineInstance
+                inlineInstance: isInlineInstance,
+                sharedScope: isSharedScopeInstance
               }),
               liveCodeIndexEnabled
             )
@@ -1830,7 +1801,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // Ask and Plan cannot call MCP at all (isMcpAllowedInMode), so naming a
       // load path there would be a dead instruction.
       mcpServersSection =
-        modelInfo.supportsTools !== false && agentMode === 'agent'
+        modelInfo.supportsTools !== false && agentMode === 'agent' && !isSharedScopeInstance
           ? buildMcpServersSection({
               candidates: mcpCandidateDefs,
               loadedServerIds: mcpSelection.loadedServerIds,
@@ -1879,8 +1850,19 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     // provider-reported input tokens), so a resumed run keeps deciding on the
     // provider figure instead of falling back to the replay-inflated estimate
     // before the first usage report arrives.
-    let providerInputTokens: number | null =
-      costTotals.inputTokens > 0 ? costTotals.inputTokens : null
+    //
+    // The restored figure must be the whole prompt, as the live path records it
+    // (`promptTokensFromUsage` below). `lastStepInputTokens` is the raw slice: on
+    // Anthropic, a cache-warm step reports a handful of tokens there, which read
+    // as "far under the threshold" and skipped the first resumed step's fold.
+    // Checkpoints written before `lastStepPromptTokens` fall back to the raw slice
+    // except on Anthropic, the one provider whose raw slice excludes cache.
+    let providerInputTokens: number | null = (() => {
+      const restored = resumedLoopCheckpoint?.usageTotals?.lastStepPromptTokens
+      if (restored != null && restored > 0) return restored
+      if (providerId === 'anthropic') return null
+      return costTotals.inputTokens > 0 ? costTotals.inputTokens : null
+    })()
     let lastCompactVerifyFailed = false
     const knownPaths = seedKnownPathsFromMessages(messages)
     const mutationPaths = seedMutationPathsFromMessages(messages)
@@ -1892,13 +1874,22 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     const recentReadPaths = new Map<string, number>()
     /** Shallow-published-plan nudges this invoke (cap 2). */
     let planQualityNudges = 0
+    /**
+     * plan.md as this invoke found it. Only a plan published or revised during
+     * the invoke is judged: one judged on an earlier invoke and left as it was
+     * re-fired both nudges on every follow-up — two extra model calls per
+     * ordinary turn, the cost that got the missing-plan nudge removed.
+     */
+    const planAtInvokeStart = await readPlanRawAsync(runDir)
     /** Reminders to mark unmarked done-when checks before finishing (cap 1). */
     let doneWhenNudges = 0
     /**
      * Consecutive empty-response retries. The retry re-sends a byte-identical
      * request, so a deterministic empty turn would loop at full generation cost
      * forever (34 empty_response events measured across 467 steps, observed
-     * back-to-back). Reset on any non-empty turn.
+     * back-to-back). Reset on any non-empty turn, and when a queued follow-up
+     * starts a new user turn: left at the cap, it sent the follow-up at the
+     * stepped-down effort and gave its first empty reply no retry.
      */
     let consecutiveEmptyResponses = 0
     /**
@@ -1909,6 +1900,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     let mechanicalStepStreak = 0
     /** Frozen for the invoke; re-read after a fold (see PromptArtifacts). */
     let promptArtifacts: PromptArtifacts | null = null
+    /** Worktree children read memory from the session (parent) workspace, as assemble does. */
+    const promptMemoryWorkspace: string | null =
+      isInlineInstance && toolWorkspace !== workspace ? workspace : toolWorkspace
     const costWarnOnce = new Set<string>()
     /** Rolling cache-hit samples from large steps (low_cache_hit_rate). */
     const recentLargeCacheHits: number[] = []
@@ -1932,7 +1926,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       if (!(await waitForHeapPressureRelief(controller.signal))) break
       if (controller.signal.aborted) break
       // Inject promoted follow-ups (Send now) before the next model call.
-      yield* applyDrainedFollowUps(runId, runDir, messages)
+      if (yield* applyDrainedFollowUps(runId, runDir, messages)) consecutiveEmptyResponses = 0
       const modeBeforeBoundary = agentMode
       agentMode = yield* applyPendingModeChange(
         runId,
@@ -1954,40 +1948,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         settings.autoModeSwitch = liveAutoModeSwitch
         lastMcpCatalogFp = ''
       }
-      try {
-        await flushMessageAppends(runDir)
-      } catch {
-        // Failure is recorded for emitMessageAppendFailureNotice below.
-      }
-      try {
-        await flushEventAppends(runDir)
-      } catch {
-        // Failure is recorded for emitEventAppendFailureNotice below.
-      }
-      if (yield* emitMessageAppendFailureNotice(runId, runDir, invokeId)) {
-        yield* emitTerminalRunError({
-          runId,
-          invokeId,
-          runDir,
-          message: 'Failed to persist a chat message',
-          emitErrorEvent: false,
-          flushWriteCheckpoint,
-          writeStatus
-        })
-        return
-      }
-      if (yield* emitEventAppendFailureNotice(runId, runDir, invokeId)) {
-        yield* emitTerminalRunError({
-          runId,
-          invokeId,
-          runDir,
-          message: 'Failed to persist a run event',
-          emitErrorEvent: false,
-          flushWriteCheckpoint,
-          writeStatus
-        })
-        return
-      }
+      if (yield* stopIfPersistFailed(runDir)) return
       step++
       const stepSoftAbort = new AbortController()
       setStreamInterrupt(runId, stepSoftAbort)
@@ -1998,16 +1959,26 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         const skillStub = stubPastSkillInvocationsInMessages(messages)
         if (skillStub.stubbedCount > 0) {
           messages = skillStub.messages
-          const diskMessages = await loadMessagesAsync(workspace, runId)
-          const fullStub = stubPastSkillInvocationsInMessages(diskMessages)
-          if (fullStub.stubbedCount > 0) {
+          // The durable stub is an optimization; a transcript that cannot be
+          // read whole is left as it is rather than rewritten from a partial.
+          const diskMessages = await loadMessagesStrictAsync(workspace, runId).catch((err) => {
+            logger.warn('Skill stub not persisted; transcript read failed', {
+              scope: 'agent',
+              code: 'PERSIST',
+              correlationId: runId,
+              err
+            })
+            return null
+          })
+          const fullStub = diskMessages ? stubPastSkillInvocationsInMessages(diskMessages) : null
+          if (fullStub && fullStub.stubbedCount > 0) {
             await syncMessagesAsync(runDir, fullStub.messages)
           }
           logger.info('Stubbed past skill invocation bodies in durable history', {
             scope: 'agent',
             code: 'TOKEN_COST',
             runId,
-            stubbedCount: fullStub.stubbedCount || skillStub.stubbedCount
+            stubbedCount: fullStub?.stubbedCount || skillStub.stubbedCount
           })
         }
       }
@@ -2081,7 +2052,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const artifacts: PromptArtifacts =
         promptArtifacts?.foldKey === compactionFoldKey(compaction)
           ? promptArtifacts
-          : await readPromptArtifacts(runDir, compaction)
+          : await readPromptArtifacts(runDir, compaction, promptMemoryWorkspace)
       promptArtifacts = artifacts
       const assembleLoopHint = combineLoopHints(
         mcpNotInCatalogFailFastHint(),
@@ -2157,6 +2128,31 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       )
       const needsAutoCompact =
         assembled.overflow || (proactiveDecision.trigger && !proactiveSuppressed)
+
+      /**
+       * Re-assemble after a fold. The "still large" notice is decided on this
+       * assembly's own whole-prompt estimate — the compaction record's figure is
+       * history-only and, for providers that strip reasoning replay, inflated
+       * severalfold, so the notice fired after folds that had cleared the
+       * threshold. Only when the result is still over does it assemble again,
+       * with the notice (both assemblies share the cached stable zone and counts).
+       */
+      const assembleAfterFold = async (
+        artifacts: PromptArtifacts,
+        foldHint: string | undefined
+      ): Promise<Awaited<ReturnType<typeof assembleContext>>> => {
+        const request = {
+          ...assembleBase,
+          ...promptArtifactFields(artifacts),
+          messages,
+          priorCompaction: compaction
+        }
+        const hints = [mcpNotInCatalogFailFastHint(), outsidePathHint, foldHint] as const
+        const first = await assembleContext({ ...request, loopHint: combineLoopHints(...hints) })
+        const stillLarge = loopHintWhenContextStillLarge(first.estimatedTokens, proactiveThreshold)
+        if (!stillLarge) return first
+        return assembleContext({ ...request, loopHint: combineLoopHints(...hints, stillLarge) })
+      }
 
       const reloadCompactionWatermark = (): void => {
         if (!runDir) return
@@ -2269,22 +2265,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           // The fold replaced the working history, so this request misses the
           // cache whatever it carries. That makes it the free point for the
           // prompt to catch up with contract/plan writes.
-          promptArtifacts = await readPromptArtifacts(runDir, compaction)
+          promptArtifacts = await readPromptArtifacts(runDir, compaction, promptMemoryWorkspace)
           lastCompactVerifyFailed = false
-          const postCompactEstimate = autoOutcome.result.estimatedTokens
-          postCompactEstimateFloor = postCompactEstimate ?? null
-          assembled = await assembleContext({
-            ...assembleBase,
-            ...promptArtifactFields(promptArtifacts),
-            messages,
-            priorCompaction: compaction,
-            loopHint: combineLoopHints(
-              mcpNotInCatalogFailFastHint(),
-              outsidePathHint,
-              postFoldHint,
-              loopHintWhenContextStillLarge(postCompactEstimate ?? 0, proactiveThreshold)
-            )
-          })
+          assembled = await assembleAfterFold(promptArtifacts, postFoldHint)
           lastUsage = { inputTokens: assembled.estimatedTokens }
           // RC2: the compaction record's remainingEstimate (compactRun.ts) still
           // counts reasoning replay for providers that strip it, inflating the
@@ -2368,23 +2351,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               return
             }
             reloadCompactionWatermark()
-            promptArtifacts = await readPromptArtifacts(runDir, compaction)
+            promptArtifacts = await readPromptArtifacts(runDir, compaction, promptMemoryWorkspace)
             lastCompactVerifyFailed = false
-            const retryPostCompactEstimate = retryOutcome.result.estimatedTokens
-            postCompactEstimateFloor = retryPostCompactEstimate ?? null
-            assembled = await assembleContext({
-              ...assembleBase,
-              ...promptArtifactFields(promptArtifacts),
-              messages,
-              priorCompaction: compaction,
-              loopHint: combineLoopHints(
-                mcpNotInCatalogFailFastHint(),
-                outsidePathHint,
-                retryFoldHint,
-                loopHintWhenContextStillLarge(retryPostCompactEstimate ?? 0, proactiveThreshold)
-              )
-            })
+            assembled = await assembleAfterFold(promptArtifacts, retryFoldHint)
             lastUsage = { inputTokens: assembled.estimatedTokens }
+            // RC2, as after the proactive fold above: the record's estimate is
+            // inflated for providers that strip reasoning replay.
+            postCompactEstimateFloor = assembled.estimatedTokens
           }
         }
         if (assembled.overflow) {
@@ -2531,7 +2504,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             streamSignalFor(runId, controller.signal),
             streamRunDir,
             lastStreamFailureCode || 'PROVIDER_STREAM',
-            lastStreamFailureMessage
+            lastStreamFailureMessage,
+            baseUrl
           )
         },
         onRetriableFailure: (err, attempt) => {
@@ -2579,7 +2553,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         })) {
           if (controller.signal.aborted) break
           // Soft-steer: break so we can flush partial output and inject follow-ups.
-          if (hasReadyFollowUps(runId) || stepSoftAbort.signal.aborted) {
+          // Never on or after `done`: that turn is complete, and breaking here
+          // lost its usage and saved it as interrupted.
+          if (
+            !streamGotDone &&
+            chunk.type !== 'done' &&
+            (hasReadyFollowUps(runId) || stepSoftAbort.signal.aborted)
+          ) {
             streamSteered = true
             break
           }
@@ -2775,7 +2755,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                   stepPartial.stepsWithCacheReport = 1
                 }
                 costTotals = mergeStepUsageTotals(costTotals, stepPartial)
-                persistUsageTotalsCheckpoint()
+                persistLoopCheckpoint()
                 // Per-day usage ledger — deltas since the last record, attributed
                 // to today. Best-effort; never breaks the run loop. The raw
                 // context window feeds the per-day context-pressure signal.
@@ -2824,12 +2804,15 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               }
               appendEvent(runDir, usageEv)
               yield usageEv
+              // Share and size of the whole prompt. Anthropic's inputTokens is the
+              // uncached slice alone: the rate saturated at 1 and a large,
+              // cache-missing step read as small, so neither warning fired.
               const hitRate = stepCacheHitRate(
-                chunk.usage.inputTokens,
+                promptTokens,
                 chunk.usage.cachedInputTokens,
                 cacheFieldsPresent
               )
-              const inputTok = chunk.usage.inputTokens ?? 0
+              const inputTok = promptTokens
               if (hitRate != null && inputTok >= LARGE_STEP_INPUT_THRESHOLD) {
                 pushRecentLargeCacheHit(recentLargeCacheHits, hitRate)
               }
@@ -2858,7 +2841,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 compactionCountThisRun
               })
               for (const warn of evaluateTokenCostWarnings({
-                estimatedTokens: chunk.usage.inputTokens ?? assembled.estimatedTokens,
+                estimatedTokens: promptTokens || assembled.estimatedTokens,
                 compactionTrigger,
                 contentWindow: effectiveContentWindow,
                 compactedThisRun: compactionCountThisRun > 0,
@@ -2931,7 +2914,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               chunk.errorCode === 'PROVIDER_HTTP'
                 ? providerHttpErrorCode(chunk.httpStatus)
                 : chunk.errorCode === 'PROVIDER_NETWORK' ||
-                    chunk.errorCode === 'PROVIDER_TIMEOUT'
+                    chunk.errorCode === 'PROVIDER_TIMEOUT' ||
+                    chunk.errorCode === 'PROVIDER_REQUEST'
                   ? chunk.errorCode
                   : 'PROVIDER_STREAM'
             lastStreamFailureHttpStatus = chunk.httpStatus
@@ -3247,7 +3231,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           step,
           'interrupted'
         )
-        yield* applyDrainedFollowUps(runId, runDir, messages)
+        if (yield* applyDrainedFollowUps(runId, runDir, messages)) consecutiveEmptyResponses = 0
         continue
       }
 
@@ -3384,16 +3368,31 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           // erasure into durable history — 507 of 523 tool results on disk for
           // run 356eefd5 read `[cleared]`, so even a resume could not recover
           // what the agent had already read. Disk holds the full bodies.
-          const diskMessages = await loadMessagesAsync(workspace, runId)
-          const diskLast = diskMessages[diskMessages.length - 1]
-          if (
-            diskLast?.role === 'assistant' &&
-            !contentToText(diskLast.content).trim() &&
-            !diskLast.toolCalls?.length
-          ) {
-            diskMessages.pop()
+          //
+          // Strict read: `loadMessagesAsync` answers a failed read with `[]`,
+          // and syncing that erased messages.jsonl and its archives. When the
+          // read fails, the blank row stays on disk — harmless, and a failed
+          // append is still reported at the next step boundary.
+          const diskMessages = await loadMessagesStrictAsync(workspace, runId).catch((err) => {
+            logger.warn('Empty turn not removed from disk; transcript read failed', {
+              scope: 'agent',
+              code: 'PERSIST',
+              correlationId: runId,
+              err
+            })
+            return null
+          })
+          if (diskMessages) {
+            const diskLast = diskMessages[diskMessages.length - 1]
+            if (
+              diskLast?.role === 'assistant' &&
+              !contentToText(diskLast.content).trim() &&
+              !diskLast.toolCalls?.length
+            ) {
+              diskMessages.pop()
+              await syncMessagesAsync(runDir, diskMessages)
+            }
           }
-          await syncMessagesAsync(runDir, diskMessages)
           continue
         }
 
@@ -3409,9 +3408,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // is the half that judges a plan the run chose to publish.
         // Asking for a plan at all stays with the mode section and
         // `create_plan`'s own advisory quality feedback.
-        if (!isInlineInstance && agentMode === 'agent' && planQualityNudges < 2) {
+        if (!incomplete && !isInlineInstance && agentMode === 'agent' && planQualityNudges < 2) {
           const planRaw = await readPlanRawAsync(runDir)
-          const quality = isPlanDraftReady(planRaw) ? scorePlanQuality(planRaw) : null
+          const quality =
+            planRaw !== planAtInvokeStart && isPlanDraftReady(planRaw) ? scorePlanQuality(planRaw) : null
           if (quality && quality.issues.length > 0) {
             planQualityNudges += 1
             const nudge: ChatMessage = {
@@ -3448,7 +3448,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
 
         // Queued follow-ups at turn end auto-apply and continue the run.
         if (hasPendingFollowUps(runId)) {
-          yield* applyDrainedFollowUps(runId, runDir, messages, 'next')
+          if (yield* applyDrainedFollowUps(runId, runDir, messages, 'next')) consecutiveEmptyResponses = 0
           continue
         }
 
@@ -3503,6 +3503,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         if (closeTurn === 'has_followups') {
           const applied = yield* applyDrainedFollowUps(runId, runDir, messages, 'next')
           if (applied) {
+            consecutiveEmptyResponses = 0
             checkpointFlushed = false
             // Anchor AFTER draining so the checkpoint covers the follow-up turn's
             // own prompt (rewind/edit of that prompt must restore its writes).
@@ -3659,36 +3660,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
       messages.push(assistantWithTools)
       appendMessage(runDir, assistantWithTools)
-      await flushMessageAppends(runDir)
-      if (yield* emitMessageAppendFailureNotice(runId, runDir, invokeId)) {
-        yield* emitTerminalRunError({
-          runId,
-          invokeId,
-          runDir,
-          message: 'Failed to persist assistant message before tool execution',
-          emitErrorEvent: false,
-          flushWriteCheckpoint,
-          writeStatus
-        })
-        return
-      }
-      try {
-        await flushEventAppends(runDir)
-      } catch {
-        // Failure is recorded for emitEventAppendFailureNotice below.
-      }
-      if (yield* emitEventAppendFailureNotice(runId, runDir, invokeId)) {
-        yield* emitTerminalRunError({
-          runId,
-          invokeId,
-          runDir,
-          message: 'Failed to persist run event before tool execution',
-          emitErrorEvent: false,
-          flushWriteCheckpoint,
-          writeStatus
-        })
-        return
-      }
+      // Tools must not run for a tool call that never reached disk.
+      if (yield* stopIfPersistFailed(runDir, ' before tool execution')) return
       if (thinkingText && !thinkingDoneEmitted) {
         thinkingDoneEmitted = true
         const thinkingDoneEv: AgentEvent = {
@@ -3846,40 +3819,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       try {
         toolOutcome = await settledWork
       } catch (err) {
-        try {
-          await flushMessageAppends(runDir)
-        } catch {
-          // Failure is recorded for emitMessageAppendFailureNotice below.
-        }
-        try {
-          await flushEventAppends(runDir)
-        } catch {
-          // Failure is recorded for emitEventAppendFailureNotice below.
-        }
-        if (yield* emitMessageAppendFailureNotice(runId, runDir, invokeId)) {
-          yield* emitTerminalRunError({
-            runId,
-            invokeId,
-            runDir,
-            message: 'Failed to persist a chat message',
-            emitErrorEvent: false,
-            flushWriteCheckpoint,
-            writeStatus
-          })
-          return
-        }
-        if (yield* emitEventAppendFailureNotice(runId, runDir, invokeId)) {
-          yield* emitTerminalRunError({
-            runId,
-            invokeId,
-            runDir,
-            message: 'Failed to persist a run event',
-            emitErrorEvent: false,
-            flushWriteCheckpoint,
-            writeStatus
-          })
-          return
-        }
+        if (yield* stopIfPersistFailed(runDir)) return
         throw err
       }
       // Reconcile against the authoritative mutation signal — catches terminal
@@ -3915,41 +3855,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         !controller.signal.aborted &&
         (toolsSteered || hasReadyFollowUps(runId))
       ) {
-        yield* applyDrainedFollowUps(runId, runDir, messages)
-        try {
-          await flushMessageAppends(runDir)
-        } catch {
-          // Failure is recorded for emitMessageAppendFailureNotice below.
-        }
-        try {
-          await flushEventAppends(runDir)
-        } catch {
-          // Failure is recorded for emitEventAppendFailureNotice below.
-        }
-        if (yield* emitMessageAppendFailureNotice(runId, runDir, invokeId)) {
-          yield* emitTerminalRunError({
-            runId,
-            invokeId,
-            runDir,
-            message: 'Failed to persist a chat message',
-            emitErrorEvent: false,
-            flushWriteCheckpoint,
-            writeStatus
-          })
-          return
-        }
-        if (yield* emitEventAppendFailureNotice(runId, runDir, invokeId)) {
-          yield* emitTerminalRunError({
-            runId,
-            invokeId,
-            runDir,
-            message: 'Failed to persist a run event',
-            emitErrorEvent: false,
-            flushWriteCheckpoint,
-            writeStatus
-          })
-          return
-        }
+        if (yield* applyDrainedFollowUps(runId, runDir, messages)) consecutiveEmptyResponses = 0
+        if (yield* stopIfPersistFailed(runDir)) return
         continue
       }
 

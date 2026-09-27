@@ -13,7 +13,7 @@ import {
 import {
   loadCompaction,
   loadEventsAsync,
-  loadMessagesAsync,
+  loadMessagesStrictAsync,
   saveCompaction,
   syncEventsAsync,
   syncMessagesAsync,
@@ -269,7 +269,7 @@ export async function planRewindToUserMessage(input: {
   userMessageIndex: number
   targetUserAt?: string
 }): Promise<RewindWritesPlan> {
-  const messages = await loadMessagesAsync(input.workspacePath, input.runId)
+  const messages = await loadMessagesStrictAsync(input.workspacePath, input.runId)
   const userMessageIndex = resolveUserMessageIndex(messages, input.userMessageIndex, input.targetUserAt)
   if (userMessageIndex < 0) {
     throw new Error(rewindAnchorMissingMessage(input.targetUserAt != null))
@@ -311,7 +311,7 @@ export async function prepareRewindAndReplaceUserMessage(input: {
   // against the rewound transcript.
   clearFollowUpsOnDisk(runDir)
 
-  const diskMessages = await loadMessagesAsync(workspacePath, runId)
+  const diskMessages = await loadMessagesStrictAsync(workspacePath, runId)
   const editMessageIndex = resolveUserMessageIndex(diskMessages, input.editMessageIndex, input.targetUserAt)
   if (editMessageIndex < 0) {
     throw new Error(rewindAnchorMissingMessage(input.targetUserAt != null))
@@ -439,7 +439,7 @@ export async function prepareRewindToUserMessage(input: {
   // Same disk clear as the edit-and-resend rewind — see the comment there.
   clearFollowUpsOnDisk(runDir)
 
-  const diskMessages = await loadMessagesAsync(workspacePath, runId)
+  const diskMessages = await loadMessagesStrictAsync(workspacePath, runId)
   const userMessageIndex = resolveUserMessageIndex(diskMessages, input.userMessageIndex, input.targetUserAt)
   if (userMessageIndex < 0 || userMessageIndex >= diskMessages.length) {
     throw new Error('userMessageIndex out of range')

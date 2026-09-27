@@ -20,10 +20,28 @@ vi.mock('@main/app/window', () => ({
   getMainWindow: () => null
 }))
 
+const { activeOnReload } = vi.hoisted(() => ({
+  /** Whether the run held its slot each time a rewind step re-read the transcript. */
+  activeOnReload: [] as boolean[]
+}))
+
+vi.mock('@main/agent/state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/state')>()
+  const { isActive } = await import('@main/agent/runRegistry')
+  return {
+    ...actual,
+    loadMessagesAsync: (workspacePath: string, id: string) => {
+      activeOnReload.push(isActive(id))
+      return actual.loadMessagesAsync(workspacePath, id)
+    }
+  }
+})
+
 import { beginWriteCheckpoint, finalizeWriteCheckpoint, resetWriteCheckpointsForTests } from '@main/agent/checkpoints'
 import { prepareRewindToUserMessage, prepareRewindAndReplaceUserMessage } from '@main/agent/rewindRun'
 import { discardRewindRedo, redoRewind, rewindRedoStatus } from '@main/agent/rewindRedo'
 import { createRun, loadMessages, syncMessagesAsync } from '@main/agent/state'
+import { isActive } from '@main/agent/runRegistry'
 
 let workspace: string
 let runId: string
@@ -64,6 +82,19 @@ afterEach(() => {
 })
 
 describe('redo a rewind', () => {
+  // A loop tick or goal relaunch that registered mid-redo wrote into the run
+  // files being replaced. The redo holds the run slot until it is done.
+  it('holds the run slot while it puts the record back', async () => {
+    await taskWithSecondRun()
+    await prepareRewindToUserMessage({ workspacePath: workspace, runId, userMessageIndex: 2 })
+    activeOnReload.length = 0
+
+    await redoRewind(workspace, runId)
+
+    expect(activeOnReload.at(-1)).toBe(true)
+    expect(isActive(runId)).toBe(false)
+  })
+
   it('brings back the rewound runs and the files as the task left them', async () => {
     await taskWithSecondRun()
     expect(await rewindRedoStatus(workspace, runId)).toEqual({ available: false, reason: 'none' })

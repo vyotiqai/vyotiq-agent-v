@@ -388,6 +388,38 @@ describe('listRuns / interruptOrphanRuns', () => {
     expect(events.some((row) => row.event.type === 'tool_result')).toBe(true)
   })
 
+  // Some hosts send the same id (`call_0`) every turn. Matched across the
+  // whole transcript, the earlier turn's result hid the crash-orphaned call.
+  it('stubs an unfinished call whose id an earlier turn already answered', async () => {
+    const runId = 'orphan-reused-id'
+    const dir = resolveRunDir(workspace, runId)
+    writeStatus(dir, {
+      status: 'running',
+      step: 3,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      goal: 'left mid-tool',
+      workspacePath: workspace
+    })
+    syncMessages(dir, [
+      { role: 'user', content: 'audit' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_0', name: 'read', arguments: '{"path":"a.ts"}' }] },
+      { role: 'tool', toolCallId: 'call_0', toolName: 'read', content: 'a body', ok: true },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_0', name: 'read', arguments: '{"path":"b.ts"}' }] }
+    ])
+
+    await interruptOrphanRuns([workspace])
+
+    const messages = loadMessages(workspace, runId)
+    expect(messages).toHaveLength(5)
+    expect(messages[4]).toEqual({
+      role: 'tool',
+      toolCallId: 'call_0',
+      toolName: 'read',
+      content: TOOL_STUB_RESTART_INTERRUPTED,
+      ok: false
+    })
+  })
+
   it('cancels in-progress todo tasks on interrupt', async () => {
     const runId = 'orphan-todo'
     const dir = resolveRunDir(workspace, runId)

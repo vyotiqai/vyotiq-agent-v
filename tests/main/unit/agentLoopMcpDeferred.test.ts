@@ -136,6 +136,7 @@ vi.mock('@main/agent/tools', () => ({
 
 import { runAgent } from '@main/agent/loop'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
+import { formatMcpToolInvocation } from '@shared/slashCommands'
 
 function mcpNames(names: string[]): string[] {
   return names.filter((n) => n.startsWith('mcp__'))
@@ -259,7 +260,8 @@ describe('runAgent MCP tool loading', () => {
     await drain(
       'mcp-deferred-seed',
       workspace,
-      'Use the MCP tool `search` from server `notion`. (mcp__notion__search)'
+      // Exactly what the composer's /mcp picker sends (slashCommands/mcp.ts).
+      formatMcpToolInvocation('notion', 'search', 'Search the workspace', 'find the roadmap')
     )
 
     expect(mcpNames(toolCatalogs[0] ?? [])).toEqual(['mcp__notion__search'])

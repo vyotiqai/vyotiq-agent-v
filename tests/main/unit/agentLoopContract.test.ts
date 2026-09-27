@@ -6,6 +6,7 @@ import type { StreamChunk } from '@main/agent/providers/types'
 import type { AgentEvent } from '@shared/ipc'
 import { resolveRunDir } from '@main/storage/paths'
 import { saveCompaction } from '@main/agent/state'
+import { memoryRoot } from '@main/agent/context/memory'
 
 const userData = join(tmpdir(), `vyotiq-contract-${process.pid}-${Date.now()}`)
 
@@ -103,6 +104,7 @@ type AssembleInput = {
   contract?: string
   plan?: string
   planVerbatim?: boolean
+  memorySection?: string
 }
 
 // Complete enough that the loop's shallow-plan nudge stays quiet and each
@@ -260,6 +262,38 @@ describe('runAgent run artifacts in the cached prompt prefix', () => {
     expect(contractOnDisk).toContain('updated contract')
   })
 
+  // Memory renders in the stable zone too: a mid-invoke memory_write re-sent
+  // the whole history uncached (~300k tokens across real runs).
+  it('holds workspace memory for the rest of the invoke, then picks it up on the next', async () => {
+    const runId = 'memory-frozen'
+    const statePath = join(memoryRoot(workspace), 'state.md')
+    mkdirSync(memoryRoot(workspace), { recursive: true })
+    writeFileSync(statePath, 'first memory\n', 'utf8')
+    streamChat.mockImplementation(toolThenAnswer())
+    executeTool.mockImplementation(async () => {
+      writeFileSync(statePath, 'written mid-invoke\n', 'utf8')
+      return { ok: true, summary: 'memory', content: 'saved' }
+    })
+
+    await drain(
+      runAgent({ runId, messages: [{ role: 'user', content: 'work' }], workspacePath: workspace })
+    )
+    const memories = () =>
+      assembleContext.mock.calls.map((call) => (call[0] as AssembleInput).memorySection ?? '')
+    const [step1, step2] = memories()
+    expect(step1).toContain('first memory')
+    expect(step2).toBe(step1)
+
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'ok' }
+      yield { type: 'done', usage: { inputTokens: 100, outputTokens: 5, cachedInputTokens: 0 } }
+    })
+    await drain(
+      runAgent({ runId, newMessages: [{ role: 'user', content: 'next' }], workspacePath: workspace })
+    )
+    expect(memories().at(-1)).toContain('written mid-invoke')
+  })
+
   it('re-reads them when a compaction fold rewrites the history mid-invoke', async () => {
     const runId = 'contract-fold'
     streamChat.mockImplementation(toolThenAnswer())
@@ -334,5 +368,57 @@ describe('runAgent run artifacts in the cached prompt prefix', () => {
     // The retry re-assemble must not fall back to what the invoke started with.
     expect(seen[3]!.contract).toContain('updated contract')
     expect(seen[3]!.plan).toBe(PLAN)
+  })
+
+  // The re-compaction throttle is anchored on the re-assembled estimate after
+  // a fold (RC2). The overflow-retry fold kept the compaction record's figure,
+  // which is inflated for providers that strip reasoning replay, so a context
+  // that really had regrown past the threshold was never folded again.
+  it('anchors the re-compaction floor on the re-assembled context after the overflow retry fold', async () => {
+    const runId = 'retry-fold-floor'
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      // No usage reports: the proactive decision reads the assembled estimate.
+      if (call < 3) {
+        yield { type: 'tool_call', toolCall: { id: `c${call}`, name: 'read', arguments: '{"path":"a.ts"}' } }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      yield { type: 'text', text: 'done' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'file', content: 'body' })
+    let folds = 0
+    autoCompactLlmEvents.mockImplementation(async function* (input: FoldInput) {
+      yield foldStarted(input)
+      folds += 1
+      saveCompaction(input.runDir, {
+        summary: `Earlier turns, fold ${folds}.`,
+        createdAt: new Date(Date.UTC(2026, 8, 23, 12, folds)).toISOString(),
+        tokenEstimate: 10,
+        foldedMessages: 0
+      })
+      // The record's own estimate, inflated far past the real post-fold context.
+      return { ok: true, result: { estimatedTokens: 50_000_000 } }
+    })
+    // Step 2 overflows and so does its first re-assemble (the overflow retry
+    // fold). Step 3's context has regrown well past any proactive threshold.
+    let assembles = 0
+    const base = assembleContext.getMockImplementation()!
+    assembleContext.mockImplementation(async (input: AssembleInput) => {
+      assembles += 1
+      const result = await base(input)
+      if (assembles === 2 || assembles === 3) return { ...result, overflow: true }
+      if (assembles === 5) return { ...result, estimatedTokens: 5_000_000 }
+      return result
+    })
+
+    await drain(
+      runAgent({ runId, messages: [{ role: 'user', content: 'work' }], workspacePath: workspace })
+    )
+
+    // Two folds for the overflow, and a third, proactive one on step 3.
+    expect(autoCompactLlmEvents).toHaveBeenCalledTimes(3)
   })
 })

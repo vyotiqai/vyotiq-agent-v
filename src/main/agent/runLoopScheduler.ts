@@ -5,7 +5,9 @@ import { RunLoopSchema, type RunLoop } from '../../shared/ipc'
 import { atomicWriteJson } from '@main/storage/atomicWrite'
 import { invalidateListRunsCache } from './runListCache'
 import { appendEvent, loadStatus } from './state'
-import { getRunInvokeId } from './runRegistry'
+import { getRunInvokeId, peekFollowUps } from './runRegistry'
+import { getWorkspaces } from '../workspace/workspaces'
+import { workspacePathsEqual } from '../../shared/workspacePath'
 import { sendChatEventToRenderer } from './startAgentRun'
 import { launchRunFollowUpOrStart, resolveRunWebContents } from './launchRunInvoke'
 import { readGoal, registerGoalLoopDisarm } from './runGoal'
@@ -118,6 +120,14 @@ async function onTick(runId: string): Promise<void> {
     tickRetries.delete(runId)
     return
   }
+  // A closed workspace holds its loop, as a paused goal does: ticks kept
+  // starting runs, unseen, in a workspace the user had closed. Reopening it
+  // resumes the loop on the next interval.
+  if (!getWorkspaces().openPaths.some((p) => workspacePathsEqual(p, info.workspacePath))) {
+    const timer = setTimeout(() => void onTick(runId), loop.intervalMs)
+    timers.set(runId, timer)
+    return
+  }
   const goal = readGoal(info.runDir)
   // A completed goal terminates the loop; a paused goal holds without launching.
   if (goal && goal.status === 'complete') {
@@ -143,11 +153,18 @@ async function onTick(runId: string): Promise<void> {
     timers.set(runId, timer)
     return
   }
-  const launched = launchRunFollowUpOrStart({
-    workspacePath: info.workspacePath,
-    runId,
-    message: { role: 'user', content: loop.prompt }
-  })
+  // The last tick's prompt still waiting in the busy run's queue already
+  // delivers this one. Queuing another per interval piled up identical
+  // follow-ups, and once turns outlast the interval the queue never drains
+  // and the invoke never ends.
+  const alreadyQueued = peekFollowUps(runId).some((f) => f.message.content === loop.prompt)
+  const launched = alreadyQueued
+    ? ({ ok: true } as const)
+    : launchRunFollowUpOrStart({
+        workspacePath: info.workspacePath,
+        runId,
+        message: { role: 'user', content: loop.prompt }
+      })
   if (!launched.ok) {
     // No retry ceiling (cap removed, user decision): tick delivery retries
     // indefinitely every LOOP_TICK_RETRY_MS until the run accepts the prompt.

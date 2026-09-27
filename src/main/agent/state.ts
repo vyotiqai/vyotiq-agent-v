@@ -9,7 +9,14 @@ import {
   normalizeCheckText,
   type DoneWhenCheck
 } from '../../shared/doneWhenChecks'
-import { enqueueEventAppend, flushEventAppends, listEventArchives, listEventArchivesSync, removeEventArchives } from './eventAppendQueue'
+import {
+  clearRunStorageLost,
+  enqueueEventAppend,
+  flushEventAppends,
+  listEventArchives,
+  listEventArchivesSync,
+  removeEventArchives
+} from './eventAppendQueue'
 import {
   enqueueMessageAppend,
   enqueueMessageRewrite,
@@ -20,7 +27,13 @@ import {
   removeMessageArchivesSync,
   takeMessageAppendFailureNotice
 } from './messageAppendQueue'
-import { enqueueStatusPatch, flushStatusWrites, writeStatusImmediate, clearStatusWritesForDir } from './statusWriteQueue'
+import {
+  allowStatusWritesForDir,
+  clearStatusWritesForDir,
+  enqueueStatusPatch,
+  flushStatusWrites,
+  writeStatusImmediate
+} from './statusWriteQueue'
 import { getCachedListRuns, invalidateListRunsCache } from './runListCache'
 import {
   ChatMessageSchema,
@@ -193,6 +206,7 @@ export async function resumeRun(workspacePath: string, runId: string): Promise<s
   if (!existsSync(dir)) {
     throw new Error('Run not found')
   }
+  clearRunStorageLost(dir)
   // chatStart may already have queued the follow-up user turn.
   await flushMessageAppends(dir)
   // Close any unfinished tool pairing from a previous crash before continuing.
@@ -263,8 +277,18 @@ export async function syncMessagesAsync(dir: string, messages: ChatMessage[]): P
 }
 
 export function appendMessage(dir: string, message: ChatMessage): Promise<void> {
-  const line = `${JSON.stringify(ensureUserMessageAt(message))}\n`
-  return enqueueMessageAppend(dir, line)
+  return appendMessages(dir, [message])
+}
+
+/**
+ * Append several messages as one write. A fresh invoke that carries history
+ * appended it a line at a time — a rotation check and an appendFile each,
+ * 458ms for 400 messages.
+ */
+export function appendMessages(dir: string, messages: readonly ChatMessage[]): Promise<void> {
+  if (messages.length === 0) return Promise.resolve()
+  const lines = messages.map((message) => `${JSON.stringify(ensureUserMessageAt(message))}\n`)
+  return enqueueMessageAppend(dir, lines.join(''))
 }
 
 /** The brief's checks, numbered c1… in the order typed; a repeat is one check. */
@@ -304,6 +328,7 @@ export function createRun(
   const dir = resolveRunDir(workspacePath, runId)
   ensureWorkspaceStorage(workspacePath)
   mkdirSync(dir, { recursive: true })
+  clearRunStorageLost(dir)
   const goalText = goal.trim() || 'chat'
   const briefChecks = briefDoneWhenChecks(options.doneWhen ?? [], new Date().toISOString())
   if (briefChecks.length > 0) atomicWriteJson(join(dir, DONE_WHEN_CHECKS_FILE), { checks: briefChecks })
@@ -468,12 +493,19 @@ export function invalidateMessagesCache(dir?: string): void {
   else stitchCache.clear()
 }
 
-async function stitchedMessagesContentAsync(dir: string): Promise<string | null> {
+/**
+ * `strict` refuses to return a partial transcript: an unreadable archive
+ * throws instead of being skipped. Callers that REWRITE messages.jsonl from
+ * what they read need that — `syncMessagesAsync` deletes the archives, so a
+ * skipped archive would be deleted with its history never written back.
+ */
+async function stitchedMessagesContentAsync(dir: string, strict = false): Promise<string | null> {
   const parts: string[] = []
-  for (const name of await listMessageArchives(dir)) {
+  for (const name of await listMessageArchives(dir, strict)) {
     try {
       parts.push(await readFile(join(dir, name), 'utf8'))
-    } catch {
+    } catch (err) {
+      if (strict) throw err
       // skip unreadable archive — the live file still carries the recent tail
     }
   }
@@ -547,6 +579,28 @@ export async function loadMessagesAsync(
     logger.warn('Failed to read messages.jsonl', { scope: 'state', runId, err })
     return []
   }
+}
+
+/**
+ * The whole transcript, or a throw — never `[]` or a partial read standing in
+ * for it.
+ *
+ * For every caller that writes back what it read (resume, the empty-response
+ * retry, skill stubbing, rewind, fork). `loadMessagesAsync` answers a failed
+ * read with `[]` so receipts and exports degrade gracefully, and fed into a
+ * rewrite that `[]` erased messages.jsonl and its archives: one failed append
+ * followed by an empty model turn, or one EMFILE while resuming, deleted the
+ * conversation.
+ */
+export async function loadMessagesStrictAsync(
+  workspacePath: string,
+  runId: string
+): Promise<ChatMessage[]> {
+  const dir = resolveRunDir(workspacePath, runId)
+  await flushMessageAppends(dir)
+  const content = await stitchedMessagesContentAsync(dir, true)
+  if (content == null) return []
+  return parseMessagesJsonl(content)
 }
 
 const MESSAGES_WINDOW_BYTE_BUDGET = 4 * 1024 * 1024
@@ -774,7 +828,9 @@ function parseToolLine(line: string, toolCallId: string): string | null {
 /**
  * Read full persisted tool output for lazy UI expansion (IPC ships a preview only).
  * Scans newest-first through growing byte-tail windows so typical expansions read
- * ~256 KB instead of re-loading the entire multi-MB transcript.
+ * ~256 KB instead of re-loading the entire multi-MB transcript. A result older
+ * than the live file is in a rotated archive; those are scanned newest-first
+ * after it, or an expansion of an early tool call found nothing.
  */
 export async function loadToolResultContent(
   workspacePath: string,
@@ -795,7 +851,20 @@ export async function loadToolResultContent(
       err
     })
   }
-  const p = join(dir, 'messages.jsonl')
+  const archives = await listMessageArchives(dir)
+  for (const name of ['messages.jsonl', ...archives.reverse()]) {
+    const hit = await scanFileForToolResult(join(dir, name), runId, toolCallId)
+    if (hit !== null) return hit
+  }
+  return null
+}
+
+/** Newest-first scan of one transcript file for a tool result's full content. */
+async function scanFileForToolResult(
+  p: string,
+  runId: string,
+  toolCallId: string
+): Promise<string | null> {
   if (!existsSync(p)) return null
   let fh: Awaited<ReturnType<typeof open>>
   try {
@@ -1330,21 +1399,27 @@ function appendOrphanToolStubs(dir: string, runId: string): void {
   const content = stitchedMessagesContentSync(dir)
   if (content == null) return
   const messages = parseMessagesJsonl(content)
-  const completedIds = new Set<string>()
-  for (const message of messages) {
-    if (message.role === 'tool' && message.toolCallId) completedIds.add(message.toolCallId)
-  }
   // A crash between dispatch and result cannot honestly claim the tool did not
   // run — see TOOL_STUB_RESTART_INTERRUPTED. The resumed turn reads this.
   const stub = TOOL_STUB_RESTART_INTERRUPTED
   const repaired: ChatMessage[] = []
   let changed = false
-  for (const message of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!
     repaired.push(message)
     if (message.role !== 'assistant' || !message.toolCalls?.length) continue
+    // A call is answered by the results after its own turn, up to the next
+    // assistant message. Matched transcript-wide, a host that reuses ids each
+    // turn (`call_0`) had a crash-orphaned call read as answered by an earlier
+    // turn's result, and the resume request failed on an unpaired tool call.
+    const answered = new Set<string>()
+    for (let j = i + 1; j < messages.length && messages[j]!.role !== 'assistant'; j++) {
+      const later = messages[j]!
+      if (later.role === 'tool' && later.toolCallId) answered.add(later.toolCallId)
+    }
     for (const call of message.toolCalls) {
-      if (completedIds.has(call.id)) continue
-      completedIds.add(call.id)
+      if (answered.has(call.id)) continue
+      answered.add(call.id)
       changed = true
       repaired.push({
         role: 'tool',
@@ -1567,6 +1642,61 @@ function describeInstanceResumability(
   return { resumable: true }
 }
 
+/**
+ * Rebuild an in-flight assistant answer from the last durable stream_snapshot
+ * after a hard kill. During a healthy stream the assistant message reaches
+ * messages.jsonl only at step end, so a power loss / SIGKILL mid-stream leaves
+ * the answer the user watched only in events.jsonl snapshots. Appends the
+ * snapshot text to `messages` and to disk as an assistant message when:
+ *  - the snapshot is the last one and no terminal status event follows it
+ *    (orderly interrupt/error paths always append status after flushing), and
+ *  - the transcript does not already contain that text (the step's own persist
+ *    may have landed before the crash; snapshots repeat the full buffer).
+ *
+ * The startup sweep calls it before writing its own terminal status, which
+ * would otherwise mark every swept snapshot as already handled.
+ */
+export async function recoverStreamSnapshotAssistant(
+  runDir: string,
+  runId: string,
+  messages: ChatMessage[]
+): Promise<void> {
+  if (messages.length === 0) return
+  const events = await loadEventsAsync(runDir, runId, { limit: 400 })
+  let snapshot: string | null = null
+  let terminalAfterSnapshot = false
+  for (const row of events) {
+    const ev = row.event as { type?: unknown; text?: unknown; status?: unknown } | null
+    if (!ev || typeof ev !== 'object') continue
+    if (ev.type === 'stream_snapshot' && typeof ev.text === 'string' && ev.text.trim()) {
+      snapshot = ev.text
+      terminalAfterSnapshot = false
+      continue
+    }
+    if (
+      snapshot &&
+      ev.type === 'status' &&
+      (ev.status === 'done' || ev.status === 'cancelled' || ev.status === 'error')
+    ) {
+      terminalAfterSnapshot = true
+    }
+  }
+  if (!snapshot || terminalAfterSnapshot) return
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role !== 'assistant') continue
+    const content = message.content
+    if (typeof content === 'string' && (content === snapshot || content.includes(snapshot))) {
+      return
+    }
+    break
+  }
+  const recovered: ChatMessage = { role: 'assistant', content: snapshot }
+  messages.push(recovered)
+  appendMessage(runDir, recovered)
+  appendEvent(runDir, { type: 'assistant_message', runId, content: snapshot })
+}
+
 async function interruptRunningRunOnDisk(
   workspacePath: string,
   runId: string,
@@ -1577,6 +1707,8 @@ async function interruptRunningRunOnDisk(
   // and rewrites the complete transcript rather than racing the append chain.
   await flushMessageAppends(dir)
   appendOrphanToolStubs(dir, runId)
+  // Append-only, so a failed read (no messages) just skips the recovery.
+  await recoverStreamSnapshotAssistant(dir, runId, await loadMessagesAsync(workspacePath, runId))
   finalizeInterruptedTodos(dir)
   await patchLatestTodoWriteMessage(dir, 'cancelled')
   // Keep the branch. finalizeInstanceWorktree commits the instance's dirty
@@ -1721,7 +1853,9 @@ export async function deleteRun(
   await drainRunWritersBeforeDelete(dir)
   // M2: a chatStart can register this runId (tryRegisterRunAbort) during the
   // awaits above — re-check so the directory is never deleted under a live run.
+  // The drain marked the dir abandoned; that live run must keep its status writes.
   if (isActive(runId)) {
+    allowStatusWritesForDir(dir)
     return { ok: false, error: 'Cancel run first' }
   }
   rmSync(dir, { recursive: true, force: true })

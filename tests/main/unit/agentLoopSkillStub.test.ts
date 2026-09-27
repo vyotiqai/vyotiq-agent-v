@@ -99,12 +99,13 @@ vi.mock('@main/agent/state', async (importOriginal) => {
   return {
     ...actual,
     loadMessagesAsync: vi.fn(actual.loadMessagesAsync),
+    loadMessagesStrictAsync: vi.fn(actual.loadMessagesStrictAsync),
     syncMessagesAsync: vi.fn(actual.syncMessagesAsync)
   }
 })
 
 import { runAgent } from '@main/agent/loop'
-import { loadMessagesAsync, syncMessagesAsync } from '@main/agent/state'
+import { loadMessagesAsync, loadMessagesStrictAsync, syncMessagesAsync } from '@main/agent/state'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
 import { formatSkillInvocation, SKILL_BODY_STUB } from '@shared/slashCommands'
 
@@ -118,6 +119,7 @@ describe('runAgent skill-body stub rewrite gate', () => {
     streamChat.mockReset()
     executeTool.mockReset()
     vi.mocked(loadMessagesAsync).mockClear()
+    vi.mocked(loadMessagesStrictAsync).mockClear()
     vi.mocked(syncMessagesAsync).mockClear()
   })
 
@@ -161,12 +163,13 @@ describe('runAgent skill-body stub rewrite gate', () => {
     }
 
     // Step 1: skill turn is still the open (last) message — no stub, no stub-gate
-    // disk read. Step 2: follow-up exists — the gate reads and rewrites exactly
-    // once. Step 3: already stubbed — the idempotent pass reports 0 and the disk
-    // is untouched. Beyond the gate, run receipts are best-effort and read the
-    // durable transcript twice (interim receipt at run start, final receipt at
-    // run end) — hence 3 total reads while the rewrite itself stays write-once.
-    expect(vi.mocked(loadMessagesAsync)).toHaveBeenCalledTimes(3)
+    // disk read. Step 2: follow-up exists — the gate reads (strictly: its read
+    // feeds a rewrite) and rewrites exactly once. Step 3: already stubbed — the
+    // idempotent pass reports 0 and the disk is untouched. Beyond the gate, run
+    // receipts are best-effort and read the durable transcript twice (interim
+    // receipt at run start, final receipt at run end).
+    expect(vi.mocked(loadMessagesStrictAsync)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(loadMessagesAsync)).toHaveBeenCalledTimes(2)
     expect(vi.mocked(syncMessagesAsync)).toHaveBeenCalledTimes(1)
 
     const transcript = readFileSync(
