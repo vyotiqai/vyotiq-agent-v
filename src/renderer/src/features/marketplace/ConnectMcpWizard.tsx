@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { GithubAuthStatus, McpInput, McpServerStatus, Settings } from '@shared/ipc'
 import {
   GOOGLE_ACCESS_READ,
@@ -14,8 +14,7 @@ import {
   type McpAuthScope
 } from '@shared/mcpApps'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Icon } from '@renderer/lib/icons'
-import { Button, IconButton, Input, cn } from '@renderer/lib/ui'
+import { Button, Input, RadioList, cn } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 
@@ -435,7 +434,6 @@ export function ConnectMcpWizard({
     return tokenAuth || usingPat ? 'Connect' : 'Sign in'
   }
 
-  const titleId = useId()
   const descId = useId()
   const methodLabelId = useId()
   const scopeLabelId = useId()
@@ -464,7 +462,8 @@ export function ConnectMcpWizard({
     <Dialog
       open
       onClose={onClose}
-      labelledBy={titleId}
+      title={title}
+      icon="mcp"
       describedBy={descId}
       useNativeDialog={false}
       padded={false}
@@ -492,15 +491,6 @@ export function ConnectMcpWizard({
         </>
       }
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Icon name="mcp" size={16} className="text-muted" />
-        <h2 id={titleId} className="min-w-0 truncate text-heading font-semibold text-fg-strong">
-          {title}
-        </h2>
-        <span className="flex-1" />
-        <IconButton icon="close" label="Close" size="sm" tone="muted" onClick={onClose} />
-      </div>
-
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <p id={descId} className="m-0 text-xs text-muted">
           Installed packages stay disconnected until you sign in. Agent V will not see these tools until
@@ -719,7 +709,8 @@ export function ConnectMcpWizard({
                     <div id={methodLabelId} className={SECTION_LABEL}>
                       Sign-in method
                     </div>
-                    <ChoiceRows
+                    <RadioList
+                      className="mt-1.5"
                       labelledBy={methodLabelId}
                       value={githubMethod}
                       onChange={setGithubMethod}
@@ -749,7 +740,8 @@ export function ConnectMcpWizard({
                   <div id={scopeLabelId} className={SECTION_LABEL}>
                     Where can Agent V use this?
                   </div>
-                  <ChoiceRows
+                  <RadioList
+                      className="mt-1.5"
                     labelledBy={scopeLabelId}
                     value={authScope}
                     onChange={setAuthScope}
@@ -772,7 +764,8 @@ export function ConnectMcpWizard({
                     <div id={accessLabelId} className={SECTION_LABEL}>
                       Access
                     </div>
-                    <ChoiceRows
+                    <RadioList
+                      className="mt-1.5"
                       labelledBy={accessLabelId}
                       value={googleAccess}
                       onChange={setGoogleAccess}
@@ -798,84 +791,5 @@ export function ConnectMcpWizard({
         ) : null}
       </div>
     </Dialog>
-  )
-}
-
-type Choice<T extends string> = {
-  value: T
-  label: string
-  description?: string
-  disabled?: boolean
-}
-
-/**
- * One radio per row, the chosen row filled — the Set up page's approval
- * choice, so every "pick one of these" in the app reads the same way. Arrow
- * keys move the choice, skipping rows that are unavailable.
- */
-function ChoiceRows<T extends string>({
-  labelledBy,
-  value,
-  choices,
-  onChange
-}: {
-  labelledBy: string
-  value: T
-  choices: ReadonlyArray<Choice<T>>
-  onChange: (value: T) => void
-}) {
-  const enabled = choices.filter((c) => !c.disabled).map((c) => c.value)
-  const move = (e: KeyboardEvent<HTMLButtonElement>): void => {
-    const i = enabled.indexOf(value)
-    let next = -1
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (i + 1) % enabled.length
-    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (i - 1 + enabled.length) % enabled.length
-    else if (e.key === 'Home') next = 0
-    else if (e.key === 'End') next = enabled.length - 1
-    if (next < 0 || enabled.length === 0) return
-    e.preventDefault()
-    const to = enabled[next]!
-    onChange(to)
-    e.currentTarget.parentElement
-      ?.querySelector<HTMLButtonElement>(`[role="radio"][data-value="${to}"]`)
-      ?.focus()
-  }
-  return (
-    <div role="radiogroup" aria-labelledby={labelledBy} className="-mx-2 mt-1.5 space-y-px">
-      {choices.map((c) => {
-        const on = c.value === value
-        return (
-          <button
-            key={c.value}
-            type="button"
-            role="radio"
-            data-value={c.value}
-            aria-checked={on}
-            tabIndex={on ? 0 : -1}
-            disabled={c.disabled}
-            onClick={() => onChange(c.value)}
-            onKeyDown={move}
-            className={cn(
-              'flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left vy-transition focus-visible:vy-focus-ring disabled:vy-disabled-state',
-              on ? 'bg-surface' : c.disabled ? '' : 'hover:bg-surface'
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn(
-                'mt-[3px] inline-grid size-3.5 shrink-0 place-items-center rounded-full border',
-                on ? 'border-accent' : 'border-border-strong'
-              )}
-            >
-              {on ? <span className="size-1.5 rounded-full bg-accent" /> : null}
-            </span>
-            <span className="min-w-0">
-              <span className="block text-sm text-fg">{c.label}</span>
-              {c.description ? <span className="block text-xs text-muted">{c.description}</span> : null}
-            </span>
-          </button>
-        )
-      })}
-    </div>
   )
 }

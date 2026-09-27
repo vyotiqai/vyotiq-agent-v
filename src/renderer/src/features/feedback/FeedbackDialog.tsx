@@ -1,9 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { FEEDBACK_MESSAGE_MAX, FEEDBACK_TITLE_MAX } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Icon } from '@renderer/lib/icons'
 import { copyText } from '@renderer/lib/markdown/copyText'
-import { Button, Checkbox, IconButton, Input, Segmented, Textarea } from '@renderer/lib/ui'
+import { Button, Checkbox, Input, Segmented, Textarea } from '@renderer/lib/ui'
 
 export type FeedbackType = 'bug' | 'feature' | 'praise' | 'other'
 
@@ -113,7 +112,6 @@ export function FeedbackDialog({
   const [copied, setCopied] = useState(false)
   const copiedTimerRef = useRef<number | null>(null)
 
-  const headerId = useId()
   const formId = useId()
   const titleFieldId = useId()
   const messageFieldId = useId()
@@ -239,22 +237,14 @@ export function FeedbackDialog({
     <Dialog
       open={open}
       onClose={close}
-      labelledBy={headerId}
+      title="Send feedback"
+      icon="note"
       useNativeDialog={false}
       padded={false}
       initialFocusRef={titleInputRef}
       className="vy-menu flex w-[480px] flex-col overflow-hidden"
       footer={footer}
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Icon name="note" size={16} className="text-muted" />
-        <h2 id={headerId} className="text-heading font-semibold text-fg-strong">
-          Send feedback
-        </h2>
-        <span className="flex-1" />
-        <IconButton icon="close" label="Close" size="sm" tone="muted" onClick={close} />
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {phase === 'success' ? (
           <div className="space-y-3" role="status">

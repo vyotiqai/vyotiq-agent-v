@@ -1,6 +1,5 @@
 import { useRef, type JSX, type KeyboardEvent } from 'react'
-import { Icon } from '@renderer/lib/icons'
-import { Input, Textarea, cn } from '@renderer/lib/ui'
+import { CheckMark, Input, RadioMark, Textarea, cn } from '@renderer/lib/ui'
 import { CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type { UiAgentQuestionItem } from '@shared/transcript'
 
@@ -39,31 +38,8 @@ function OptionMark({
   kind: 'radio' | 'check'
   active: boolean
 }): JSX.Element {
-  if (kind === 'check') {
-    // Checkbox's box, drawn inside the option row that is already the checkbox.
-    return (
-      <span
-        aria-hidden
-        className={cn(
-          'inline-grid size-3.5 shrink-0 place-items-center rounded-[3px] border vy-transition',
-          active ? 'border-accent bg-accent text-accent-fg' : 'border-border-strong bg-bg'
-        )}
-      >
-        {active ? <Icon name="check" size={10} weight="bold" /> : null}
-      </span>
-    )
-  }
-  return (
-    <span
-      className={cn(
-        'flex size-3.5 shrink-0 items-center justify-center rounded-full border',
-        active ? 'border-fg bg-fg' : 'border-border-strong'
-      )}
-      aria-hidden
-    >
-      {active ? <span className="size-1.5 rounded-full bg-bg" /> : null}
-    </span>
-  )
+  // The option row is already the radio or checkbox, so it draws only the mark.
+  return kind === 'check' ? <CheckMark on={active} /> : <RadioMark on={active} />
 }
 
 function CustomOther({

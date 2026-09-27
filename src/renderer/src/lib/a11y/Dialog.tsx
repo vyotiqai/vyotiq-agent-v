@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, type JSX, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
-import { cn } from '@renderer/lib/ui'
+import { Icon, type IconName } from '@renderer/lib/icons'
+import { IconButton, cn } from '@renderer/lib/ui'
 import { useFocusTrap } from './useFocusTrap'
 
 export type DialogSize = 'sm' | 'md' | 'lg'
@@ -22,13 +23,18 @@ const SIZE_WIDTH: Record<DialogSize, string> = {
   lg: 'w-[min(36rem,calc(100vw_-_2rem))]'
 }
 
-/** Inset shared by the header, the body and the footer so they line up on both edges. */
+/**
+ * Inset shared by the header, the body and the footer so they line up on both
+ * edges: `px-5` under a plain title, `px-4` under the 48px bar.
+ */
 const PAD_X = 'px-5'
+const BAR_PAD_X = 'px-4'
 
 export function Dialog({
   open,
   onClose,
   title,
+  icon,
   description,
   label,
   labelledBy,
@@ -47,6 +53,13 @@ export function Dialog({
   onClose: () => void
   /** Visible heading, and the accessible name unless `labelledBy` is given. */
   title?: string
+  /**
+   * With a {@link title}, draws the heading as the 48px bar a working dialog
+   * (a form, a wizard) starts with: this icon, the title, and a close button
+   * on a hairline. Without one the title is the plain heading a short
+   * decision (confirm, rename) uses.
+   */
+  icon?: IconName
   /** Visible sub-heading under {@link title}, and the accessible description. */
   description?: string
   /** Accessible name for a dialog that shows no heading of its own. */
@@ -57,8 +70,8 @@ export function Dialog({
   /**
    * The action row: a hairline over the buttons, which sit on the right edge.
    * Put a note first and a `flex-1` spacer after it if the row needs one. Its
-   * inset follows the body — {@link PAD_X} when padded, and the `px-4` of the
-   * `h-12` header family when the content draws its own.
+   * inset follows the body: {@link PAD_X} under a plain title, and
+   * {@link BAR_PAD_X} under the bar or when the content draws its own.
    */
   footer?: ReactNode
   className?: string
@@ -120,8 +133,17 @@ export function Dialog({
   // A dialog that names itself draws that name. This used to be `sr-only`,
   // which left every caller a choice between an unlabelled panel and hand
   // rolling a header — so most of them shipped the unlabelled panel.
-  const header =
-    title || description ? (
+  const bar = Boolean(icon && title)
+  const header = bar ? (
+    <div className={cn('flex h-12 shrink-0 items-center gap-2 border-b border-border', BAR_PAD_X)}>
+      <Icon name={icon!} size={16} className="shrink-0 text-muted" />
+      <h2 id={autoTitleId} className="m-0 min-w-0 truncate text-heading font-semibold text-fg-strong">
+        {title}
+      </h2>
+      <span className="flex-1" />
+      <IconButton icon="close" label="Close" size="sm" tone="muted" onClick={onClose} />
+    </div>
+  ) : title || description ? (
       <div className={cn('flex shrink-0 flex-col gap-1', padded && `${PAD_X} pt-5 pb-3`)}>
         {title ? (
           <h2
@@ -148,7 +170,7 @@ export function Dialog({
         <div
           className={cn(
             'min-h-0 flex-1 overflow-y-auto overscroll-contain',
-            header ? `${PAD_X} pb-5` : 'p-5'
+            bar ? `${BAR_PAD_X} py-4` : header ? `${PAD_X} pb-5` : 'p-5'
           )}
         >
           {children}
@@ -160,7 +182,7 @@ export function Dialog({
         <div
           className={cn(
             'flex shrink-0 items-center justify-end gap-2 border-t border-border py-3',
-            padded ? PAD_X : 'px-4'
+            padded && !bar ? PAD_X : BAR_PAD_X
           )}
         >
           {footer}

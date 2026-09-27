@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { Icon } from '@renderer/lib/icons'
 import { cn } from './cn'
+import { CheckMark } from './RadioList'
 
 /**
  * A 14px box that ticks. The label, when given, sits beside it inside the same
@@ -40,15 +40,7 @@ export function Checkbox({
         onCheckedChange(!checked)
       }}
     >
-      <span
-        aria-hidden
-        className={cn(
-          'inline-grid size-3.5 shrink-0 place-items-center rounded-[3px] border vy-transition',
-          checked ? 'border-accent bg-accent text-accent-fg' : 'border-border-strong bg-bg'
-        )}
-      >
-        {checked ? <Icon name="check" size={10} weight="bold" /> : null}
-      </span>
+      <CheckMark on={checked} />
       {label ? <span className="text-xs text-muted">{label}</span> : null}
     </button>
   )

@@ -98,7 +98,12 @@ in every skin: `vy-panel` is the pane background plus one hairline on its left,
 with no gap, radius or shadow. Menus and popovers use `vy-menu`
 (`MENU_SURFACE`); rows inside them use `MENU_ROW` and its one-of text and fill
 classes. Every pane starts with a 40px row (`h-10 border-b`): text-first rows pad
-`pl-4 pr-2`, control-first rows `px-2`, and buttons in it are `size="xs"`.
+`pl-4 pr-2`, control-first rows `px-2`, and buttons in it are `size="xs"`. A
+popover anchored to a control starts with the same 40px row (`pl-3 pr-2`). A
+modal is one step up: a working dialog passes `icon` to `Dialog` for its 48px
+bar, the command palette's search row is 48px too, and a short decision
+(confirm, rename) keeps `Dialog`'s plain title. Radios and checkboxes use
+`RadioList`/`RadioMark`/`CheckMark`/`Checkbox`, never a hand-drawn mark.
 
 ### Never
 

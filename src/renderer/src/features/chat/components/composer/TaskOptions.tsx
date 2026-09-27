@@ -378,7 +378,7 @@ export function TaskOptions(props: TaskOptionsProps) {
           </>
         ) : (
           <>
-            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2">
               <Icon name="search" size={15} className="shrink-0 text-muted" />
               <input
                 role="combobox"

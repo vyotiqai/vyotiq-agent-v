@@ -480,7 +480,7 @@
   Seven sizes. The old scale had nine (9–17px) a pixel apart, which is the same
   as having none: nobody can tell 15 from 16 on sight.
     caption 11 · xs 12 · sm 13 (body) · md 14 · heading 15 · title 18 · display 24
-  `2xs` (10) is for keycaps and dense meta only.
+  `2xs` (10) is for keycaps only.
 
   `inline` matters: the sizes read --vy-font-scale, which lives on the element
   carrying data-skin. A non-inline theme var resolves at :root, where a nested
