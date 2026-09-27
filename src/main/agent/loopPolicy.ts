@@ -4,6 +4,7 @@ import { codebaseSearchHitPathsFromResult } from './codeindex/query'
 import { readPathArg } from './tools/argAccess'
 import { searchHitPathsFromResult } from './tools/search'
 import { loopHintForRetainedDecisions } from './context/retainedDecisions'
+import { isConcreteWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 
 /**
  * After this many not-in-catalog failures for the *same* MCP tool name in a run,
@@ -221,10 +222,6 @@ export function runNoticeForContextAboveSoftTrigger(): string {
   return 'Context is still large after compaction. Continue; auto-compact will fold again at the next threshold. Move durable facts into memory with memory_write.'
 }
 
-export function normalizeWorkspaceRelPath(path: string): string {
-  return path.trim().replace(/\\/g, '/')
-}
-
 function parseToolArgs(argumentsJson: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(argumentsJson)
@@ -286,31 +283,6 @@ export function readPathFromToolCall(
   const raw = readPathArg(args)
   const path = raw ? normalizeWorkspaceRelPath(raw) : ''
   return path || null
-}
-
-/** True when a path/glob string names a single concrete file (no wildcards). */
-export function isConcreteWorkspacePath(value: string): boolean {
-  const path = normalizeWorkspaceRelPath(value)
-  if (!path || path === '.' || path === '..') return false
-  if (/[*?[{]/.test(path)) return false
-  return true
-}
-
-/**
- * Receipt/checkpoint paths must look like real workspace files — not comma-glued
- * command args, bare punctuation, or assertion fragments from terminal output.
- */
-export function isPlausibleWorkspaceFilePath(value: string): boolean {
-  const path = normalizeWorkspaceRelPath(value)
-  if (!isConcreteWorkspacePath(path)) return false
-  if (path.includes(',')) return false
-  if (/[;|&<>]/.test(path)) return false
-  // PowerShell env paths (`$env:TEMP/…`) are not workspace files.
-  if (path.startsWith('$')) return false
-  if (/^[=+-]+$/.test(path)) return false
-  if (path.includes(')') && !path.includes('(')) return false
-  if (!path.includes('/') && !/\.[a-zA-Z0-9][\w.-]*$/.test(path)) return false
-  return true
 }
 
 /**

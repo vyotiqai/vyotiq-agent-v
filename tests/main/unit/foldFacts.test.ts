@@ -5,9 +5,9 @@ import {
   parseContractGoal,
   parseContractDoneWhen,
   extractUserConstraints,
-  collectPathsFromText,
-  isPlausibleWorkspaceFilePath
+  collectPathsFromText
 } from '@main/agent/context/foldFacts'
+import { isStrictWorkspaceFilePath } from '@main/agent/pathPlausibility'
 import type { TodoItem } from '@main/agent/tools/todo'
 
 function user(text: string): ChatMessage {
@@ -53,6 +53,20 @@ describe('extractFoldFacts', () => {
     ]
     const facts = extractFoldFacts(msgs)
     expect(facts.wroteFiles).not.toContain('src/app.ts')
+  })
+
+  it('does not treat a PowerShell env path as a written workspace file', () => {
+    const msgs: ChatMessage[] = [
+      toolCall('c1', 'edit', { path: '$env:TEMP/ext.ps1', contents: 'x' }),
+      toolResult('c1', 'edit', 'Created $env:TEMP/ext.ps1', true),
+      toolCall('c2', 'edit', { path: 'src/app.ts', contents: 'x' }),
+      toolResult('c2', 'edit', 'Created src/app.ts', true)
+    ]
+    const facts = extractFoldFacts(msgs)
+    // A temp path outside the workspace must not become a fact the summarizer
+    // is then required to cite, or every fold fails with missing_wrote_file.
+    expect(facts.wroteFiles).toEqual(['src/app.ts'])
+    expect(facts.files).not.toContain('$env:TEMP/ext.ps1')
   })
 
   it('collects inspected files from read/grep tool calls', () => {
@@ -135,10 +149,10 @@ describe('foldFacts helpers', () => {
     expect(out.filter((p) => p === 'src/A.ts')).toHaveLength(1)
   })
 
-  it('isPlausibleWorkspaceFilePath rejects junk', () => {
-    expect(isPlausibleWorkspaceFilePath('src/a.ts')).toBe(true)
-    expect(isPlausibleWorkspaceFilePath('*.ts')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('https://x.com')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('process.env')).toBe(false)
+  it('isStrictWorkspaceFilePath rejects junk', () => {
+    expect(isStrictWorkspaceFilePath('src/a.ts')).toBe(true)
+    expect(isStrictWorkspaceFilePath('*.ts')).toBe(false)
+    expect(isStrictWorkspaceFilePath('https://x.com')).toBe(false)
+    expect(isStrictWorkspaceFilePath('process.env')).toBe(false)
   })
 })

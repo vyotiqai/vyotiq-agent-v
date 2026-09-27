@@ -14,17 +14,16 @@ import {
   loopHintForCompactionFailure,
   loopHintForCompactionVerifyFailed,
   runNoticeForContextAboveSoftTrigger,
-  isPlausibleWorkspaceFilePath,
   isBuildOutputRelPath,
   isAbortStubToolResult,
   isGateRefusalToolResult,
   isNonMutatingWriteFailure,
-  normalizeWorkspaceRelPath,
   readPathFromToolCall,
   seedKnownPathsFromMessages,
   toolArgsFromCall,
   unreadExistingEditPaths
 } from '@main/agent/loopPolicy'
+import { looksLikeWorkspacePath, normalizeWorkspaceRelPath } from '@main/agent/pathPlausibility'
 import { assertToolAllowedInMode, type ModePolicyOptions } from '@main/agent/tools/modePolicy'
 
 describe('loopPolicy', () => {
@@ -33,10 +32,10 @@ describe('loopPolicy', () => {
   })
 
   it('rejects shell-operator junk in receipt paths', () => {
-    expect(isPlausibleWorkspaceFilePath('src/stores')).toBe(true)
-    expect(isPlausibleWorkspaceFilePath('src/stores;')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('src/a.ts')).toBe(true)
-    expect(isPlausibleWorkspaceFilePath('$env:TEMP/ext.ps1')).toBe(false)
+    expect(looksLikeWorkspacePath('src/stores')).toBe(true)
+    expect(looksLikeWorkspacePath('src/stores;')).toBe(false)
+    expect(looksLikeWorkspacePath('src/a.ts')).toBe(true)
+    expect(looksLikeWorkspacePath('$env:TEMP/ext.ps1')).toBe(false)
   })
 
   it('classifies .NET bin/Debug output and abort/mode write failures', () => {
