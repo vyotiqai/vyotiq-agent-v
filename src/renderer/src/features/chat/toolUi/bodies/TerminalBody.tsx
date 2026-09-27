@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, type ReactElement, type UIEvent } from 'react'
 import { cn } from '@renderer/lib/ui'
 import { TOOL_TERMINAL_VIEWPORT } from '@renderer/lib/utils/layout'
-import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import { sanitizeTerminalDisplayText } from '@shared/utils/terminalFormat'
 import type { ToolBodyProps } from '../types'
 import { parseTerminalCardData } from '../parsers/terminal'
@@ -15,17 +14,7 @@ function TerminalDivider(): ReactElement {
   </span>
 }
 
-function resolveStartedAt(timing: ToolBodyProps['timing']): number | undefined {
-  const started = timing?.startedAt
-  return started != null && Number.isFinite(started) ? started : undefined
-}
-
-function resolveEndedAt(timing: ToolBodyProps['timing']): number | undefined {
-  const ended = timing?.endedAt
-  return ended != null && Number.isFinite(ended) ? ended : undefined
-}
-
-export function TerminalBody({ tool, loading, loadFailed, timing, inGroup }: ToolBodyProps) {
+export function TerminalBody({ tool, loading, loadFailed, inGroup }: ToolBodyProps) {
   const data = useMemo(() => {
     const parsed = parseTerminalCardData(tool)
     return {
@@ -39,12 +28,6 @@ export function TerminalBody({ tool, loading, loadFailed, timing, inGroup }: Too
   const viewportRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
   const streamKey = `${data.output.length}:${data.stderr.length}:${data.cwd}:${data.shell}`
-  const startedAt = resolveStartedAt(timing)
-  const endedAt = resolveEndedAt(timing)
-
-  // Reuse the single shared 1 Hz clock instead of a per-card setInterval — many
-  // mounted terminal cards previously each fired their own timer + re-render/sec.
-  const nowMs = useSharedNow(running && startedAt != null)
 
   useEffect(() => {
     if (running) pinnedRef.current = true
@@ -63,17 +46,8 @@ export function TerminalBody({ tool, loading, loadFailed, timing, inGroup }: Too
       el.scrollHeight - el.scrollTop - el.clientHeight <= VIEWPORT_PIN_PX
   }
 
+  // The card header carries the duration; the body names where it ran.
   const metaLines: string[] = []
-  if (startedAt != null) {
-    // Prefer real wall-clock meta when present (matches reference keys).
-    metaLines.push(`started_at: ${new Date(startedAt).toISOString()}`)
-    const endMs = running ? nowMs : (endedAt ?? undefined)
-    if (endMs != null && endMs >= startedAt) {
-      // Live clock while the command runs; fixed duration once it settles.
-      metaLines.push(`${running ? 'running' : 'ran'}_for_ms: ${Math.max(0, endMs - startedAt)}`)
-    }
-  }
-  // Always surface cwd/shell when known — timing must not hide workspace context.
   if (data.cwd) metaLines.push(`cwd: ${data.cwd}`)
   if (data.shell) metaLines.push(`shell: ${data.shell}`)
   if (data.sessionStatus) metaLines.push(`status: ${data.sessionStatus}`)

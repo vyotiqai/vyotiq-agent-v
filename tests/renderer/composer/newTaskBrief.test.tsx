@@ -96,7 +96,6 @@ function renderBrief(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
     onChatSettingsChange: vi.fn(),
     onProviderModel: vi.fn(),
     onSend: vi.fn(async () => true),
-    onStop: vi.fn(),
     variant: 'brief' as const,
     ...overrides
   }

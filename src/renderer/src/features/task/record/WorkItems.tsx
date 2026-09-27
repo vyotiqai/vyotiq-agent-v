@@ -252,10 +252,7 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
   const [open, setOpen] = useState(false)
   const { onOpenWorkspaceFile } = useRunSession()
   const { onLoadToolContent, mcpServerNames } = useContext(RecordActionsContext)
-  const group = mapToolGroupProps(
-    tools.map((t) => t.tool),
-    {}
-  )
+  const group = mapToolGroupProps(tools.map((t) => t.tool))
   const running = group.state === 'pending'
   const failed = tools.filter((t) => t.tool.status === 'fail').length
   return (

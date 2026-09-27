@@ -141,7 +141,7 @@ describe('generateCommitMessage', () => {
     await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
       message: null,
       source: 'fallback',
-      reason: 'Could not read chat settings'
+      reason: 'Could not read agent settings'
     })
   })
 
@@ -205,7 +205,7 @@ describe('generateCommitMessage', () => {
     await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
       message: null,
       source: 'fallback',
-      reason: 'The model reply was not a usable commit message'
+      reason: 'The model did not return a usable commit message'
     })
   })
 

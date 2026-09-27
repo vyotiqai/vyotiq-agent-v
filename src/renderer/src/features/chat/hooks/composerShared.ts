@@ -27,45 +27,33 @@ import type { SlashClientHandlers } from '../components/composer/slashCommandExe
 import { useTranscriptShowsError } from '../components/ChatStreamLeaves'
 import type { ChatItemsStore } from '../chatStores'
 import { isRetryableTurnFailure } from '@shared/errors'
-import type { TurnOutcome } from '@shared/transcript'
 
 export type ChatErrorSurfaces = {
-  hasTranscriptRunError: boolean
   chatBannerError: string | null
   turnFailed: boolean
-  turnFailureLabel: string | null
 }
 
 export type ChatErrorSurfacesArgs = {
   error: string | null
   errorCode?: string | null
   incomplete?: IncompleteTurnState | null
-  turnStatus?: TurnOutcome | null
 }
 
 /**
- * Single derivation of the banner / turn-failure presentation shared by
- * ChatView and SessionChatColumn — the suppression rule (composer banner off
- * when the latest turn already shows the same error as a run_error row) and the
- * failure-label vocabulary live here so the surfaces cannot drift.
+ * Single derivation of SessionChatColumn's banner / turn-failure presentation —
+ * the suppression rule (composer banner off when the latest turn already shows
+ * the same error as a run_error row) and the retryable-failure test.
  */
 export function deriveChatErrorSurfaces(
   hasTranscriptRunError: boolean,
   args: ChatErrorSurfacesArgs
 ): ChatErrorSurfaces {
-  const turnFailed = isRetryableTurnFailure({
-    errorCode: args.errorCode,
-    incompleteReason: args.incomplete?.reason
-  })
   return {
-    hasTranscriptRunError,
     chatBannerError: hasTranscriptRunError ? null : args.error,
-    turnFailed,
-    turnFailureLabel: turnFailed
-      ? args.incomplete?.message ?? (args.error ?? 'Failed')
-      : args.turnStatus === 'error'
-        ? 'Failed'
-        : null
+    turnFailed: isRetryableTurnFailure({
+      errorCode: args.errorCode,
+      incompleteReason: args.incomplete?.reason
+    })
   }
 }
 
@@ -91,7 +79,7 @@ type SendFn = (
   extras?: ComposerSendExtras
 ) => boolean | void | Promise<boolean | void>
 
-/** Shared prompt-edit draft state for ChatView and SessionChatColumn. */
+/** SessionChatColumn's prompt-edit draft state. */
 export function useComposerEditState(args: {
   surfaceKey: string
   messages: ChatMessage[]
@@ -104,16 +92,8 @@ export function useComposerEditState(args: {
     extras?: ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
   onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
-  onAfterRevert?: () => void
 }) {
-  const {
-    surfaceKey,
-    messages,
-    onSend,
-    onEditAndResend,
-    onRevertToUserMessage,
-    onAfterRevert
-  } = args
+  const { surfaceKey, messages, onSend, onEditAndResend, onRevertToUserMessage } = args
   const [editingUserMessageIndex, setEditingUserMessageIndex] = useState<number | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [editSeeds, setEditSeeds] = useState<ComposerEditSeeds>({})
@@ -172,10 +152,9 @@ export function useComposerEditState(args: {
       if (!onRevertToUserMessage) return
       // Confirmation (with the affected-file list) is owned by the handler —
       // do not add a second native confirm here.
-      const ok = await onRevertToUserMessage(messageIndex, runN)
-      if (ok !== false) onAfterRevert?.()
+      await onRevertToUserMessage(messageIndex, runN)
     },
-    [onRevertToUserMessage, onAfterRevert]
+    [onRevertToUserMessage]
   )
 
   const sendFromDock = useCallback(
@@ -220,7 +199,6 @@ export type BuildComposerSendPropsInput = {
   model: string
   running: boolean
   hasWorkspace: boolean
-  hasTranscript: boolean
   workspacePath: string | null
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
@@ -244,7 +222,6 @@ export type BuildComposerSendPropsInput = {
     files?: AttachedFile[],
     extras?: ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onStop: () => void
   pendingFollowUps?: PendingFollowUpState[]
   onRemoveFollowUp?: (id: string) => void
   onEditFollowUp?: (id: string, text: string) => boolean | Promise<boolean>
@@ -266,14 +243,13 @@ export type BuildComposerSendPropsInput = {
   onEditLastUserMessage?: () => boolean
 }
 
-/** Shared dock/hero composer prop bag for ChatView and SessionChatColumn. */
+/** SessionChatColumn's dock composer prop bag. */
 export function buildComposerSendProps(input: BuildComposerSendPropsInput) {
   return {
     provider: input.provider,
     model: input.model,
     running: input.running,
     disabled: !input.hasWorkspace,
-    hasTranscript: input.hasTranscript,
     hasWorkspace: input.hasWorkspace,
     ollamaBaseUrl: input.ollamaBaseUrl,
     customOpenAiBaseUrl: input.customOpenAiBaseUrl,
@@ -293,7 +269,6 @@ export function buildComposerSendProps(input: BuildComposerSendPropsInput) {
     agentMode: input.agentMode,
     onAgentModeChange: input.onAgentModeChange,
     onSend: input.onSend,
-    onStop: input.onStop,
     pendingFollowUps: input.pendingFollowUps,
     onRemoveFollowUp: input.onRemoveFollowUp,
     onEditFollowUp: input.onEditFollowUp,

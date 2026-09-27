@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { McpServer, McpServerStatus, McpTransport } from '@shared/ipc'
-import { Button, Input, Segmented, Switch } from '@renderer/lib/ui'
+import { Button, Input, Segmented, Switch, Textarea } from '@renderer/lib/ui'
 import { hasNonBearerAuthorization, headersWithoutAuthorization } from '@shared/utils/mcpAuth'
 import { formatMcpToolNameList, parseMcpToolNameList } from '@shared/utils/mcpToolPolicy'
 import { isGoogleMcpId, mcpOAuthFixedRedirectUrl } from '@shared/mcpApps'
@@ -8,9 +8,6 @@ import { copyText } from '@renderer/lib/markdown/copyText'
 import { mcpArgsToText, mcpEnvToText, mcpTextToArgs, mcpTextToEnv } from './mcpText'
 
 /** A bordered multi-line field, the textarea twin of `Input size="sm"`. */
-export const FIELD_TEXTAREA =
-  'block w-full resize-none rounded-md border border-border bg-bg px-2.5 py-1.5 font-mono text-xs text-fg placeholder:text-tertiary vy-transition hover:border-border-strong focus-visible:border-border-strong focus-visible:vy-focus-ring disabled:vy-disabled-state'
-
 /** Label column + field column, shared with the Add dialog. */
 export const FIELD_GRID = 'grid grid-cols-[88px_1fr] items-center gap-x-3 gap-y-2 text-xs'
 
@@ -308,8 +305,9 @@ export function McpServerConfig({
               onKeyDown={blurOnEnter}
             />
             <FieldLabel top>Arguments</FieldLabel>
-            <textarea
-              className={FIELD_TEXTAREA}
+            <Textarea
+              size="sm"
+              mono
               aria-label={`MCP arguments for ${server.id}`}
               placeholder="One per line"
               disabled={disabled}
@@ -319,8 +317,9 @@ export function McpServerConfig({
               onBlur={commitArgs}
             />
             <FieldLabel top>Env</FieldLabel>
-            <textarea
-              className={FIELD_TEXTAREA}
+            <Textarea
+              size="sm"
+              mono
               aria-label={`MCP environment for ${server.id}`}
               placeholder="KEY=value, one per line"
               disabled={disabled}
@@ -422,8 +421,9 @@ export function McpServerConfig({
               </>
             ) : null}
             <FieldLabel top>Headers</FieldLabel>
-            <textarea
-              className={FIELD_TEXTAREA}
+            <Textarea
+              size="sm"
+              mono
               aria-label={`MCP extra headers for ${server.id}`}
               placeholder={nonBearerAuth ? 'Authorization=… and others' : 'KEY=value, one per line'}
               disabled={disabled}
@@ -435,8 +435,9 @@ export function McpServerConfig({
           </>
         )}
         <FieldLabel top>Allow only</FieldLabel>
-        <textarea
-          className={FIELD_TEXTAREA}
+        <Textarea
+          size="sm"
+          mono
           aria-label={`Allowed MCP tools for ${server.id}`}
           placeholder="Tool names, one per line. Empty allows all."
           disabled={disabled}
@@ -446,8 +447,9 @@ export function McpServerConfig({
           onBlur={commitAllowed}
         />
         <FieldLabel top>Never allow</FieldLabel>
-        <textarea
-          className={FIELD_TEXTAREA}
+        <Textarea
+          size="sm"
+          mono
           aria-label={`Denied MCP tools for ${server.id}`}
           placeholder="Tool names, one per line"
           disabled={disabled}

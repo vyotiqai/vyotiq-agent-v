@@ -360,7 +360,7 @@ export function TaskOptions(props: TaskOptionsProps) {
       >
         {view === 'context' && aligned ? (
           <>
-            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-2">
+            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
               <IconButton icon="arrowLeft" label="Back to models" size="sm" tone="muted" onClick={() => setView('models')} />
               <span className="text-sm font-medium text-fg-strong">Context</span>
             </div>
@@ -378,7 +378,7 @@ export function TaskOptions(props: TaskOptionsProps) {
           </>
         ) : (
           <>
-            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
               <Icon name="search" size={15} className="shrink-0 text-muted" />
               <input
                 role="combobox"
@@ -420,7 +420,7 @@ export function TaskOptions(props: TaskOptionsProps) {
                       aria-pressed={on}
                       onClick={() => browse(p)}
                       className={cn(
-                        'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm vy-transition focus-visible:vy-focus-ring',
+                        'flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-sm vy-transition focus-visible:vy-focus-ring',
                         on ? SELECTED : cn('text-secondary', ROW_HOVER)
                       )}
                     >
@@ -437,7 +437,7 @@ export function TaskOptions(props: TaskOptionsProps) {
                       close(false)
                       props.onAddProvider?.()
                     }}
-                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
+                    className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
                   >
                     <Icon name="plus" size={13} />
                     Add a provider
@@ -705,7 +705,7 @@ function ModelRow({
             onToggleFavorite()
           }}
           className={cn(
-            'inline-grid size-5 shrink-0 place-items-center rounded text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring',
+            'inline-grid size-5 shrink-0 place-items-center rounded-sm text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring',
             favorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
           )}
         >

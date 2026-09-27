@@ -23,13 +23,13 @@ const sizes = {
  */
 export const Textarea = forwardRef<
   HTMLTextAreaElement,
-  TextareaHTMLAttributes<HTMLTextAreaElement> & { size?: keyof typeof sizes }
->(function Textarea({ className = '', size = 'md', rows = 3, ...props }, ref) {
+  TextareaHTMLAttributes<HTMLTextAreaElement> & { size?: keyof typeof sizes; mono?: boolean }
+>(function Textarea({ className = '', size = 'md', mono = false, rows = 3, ...props }, ref) {
   return (
     <textarea
       ref={ref}
       data-vy-text-entry
-      className={cn(fieldChrome, sizes[size], className)}
+      className={cn(fieldChrome, sizes[size], mono && 'font-mono', className)}
       rows={rows}
       {...props}
     />

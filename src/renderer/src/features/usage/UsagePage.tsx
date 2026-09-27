@@ -7,7 +7,7 @@ import { Button, Menu, ProgressBar, Segmented, cn, type MenuOption } from '@rend
 import { buildLineSegments } from '@renderer/lib/ui/lineChart'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
-import { stripGoalMarkdown } from '@renderer/app/navigator/runTitle'
+import { UNTITLED_TASK, taskTitleFromGoal } from '@shared/utils/taskTitle'
 import { ProviderLogo } from '@renderer/features/chat/components/composer/ProviderLogo'
 import { openRouterSubProvider } from '@renderer/features/chat/components/composer/composerModelUtils'
 import {
@@ -338,7 +338,7 @@ function ToolFailuresChart({ data, span }: { data: HomeActivityResult; span: num
         <p className="text-xs text-tertiary">No tool failed in these {span} days.</p>
       ) : (
         failing.map((tool) => (
-          <div key={tool.name} className="flex items-baseline gap-2 border-b border-border py-2 text-xs">
+          <div key={tool.name} className="flex items-baseline gap-2 border-b border-border/60 py-2 text-xs">
             <span className="font-mono text-caption text-fg">{tool.name}</span>
             <span className="min-w-0 flex-1 truncate text-tertiary" title={tool.reason}>
               {tool.reason ?? ''}
@@ -370,13 +370,13 @@ function UncheckedChart({
       ) : (
         <>
           {runs.map((run) => {
-            const title = (run.goal && stripGoalMarkdown(run.goal)) || 'Untitled task'
+            const title = (run.goal && taskTitleFromGoal(run.goal)) || UNTITLED_TASK
             return (
               <button
                 key={run.runId}
                 type="button"
                 title={`Open ${title}`}
-                className="flex w-full items-center gap-2 border-b border-border py-2 text-left text-xs vy-transition hover:bg-surface focus-visible:vy-focus-ring"
+                className="flex w-full items-center gap-2 border-b border-border/60 py-2 text-left text-xs vy-transition hover:bg-surface focus-visible:vy-focus-ring"
                 onClick={() => onOpenTask(run.workspacePath, run.runId)}
               >
                 <Icon name="warningCircle" size={13} className="shrink-0 text-warning" />

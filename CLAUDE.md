@@ -39,9 +39,9 @@ are mapped to Tailwind names in the `@theme` block, so `bg-surface`, `text-muted
 
 2. **Never hardcode a color.** Every surface renders under five skins
    (`default`, `proof`, `bench`, `native`, `gild`) × light/dark. A literal hex
-   is wrong in at least nine of those ten combinations. Use the semantic token,
-   not a `--vy-gray-*` ramp — those are legacy. Two real exceptions exist and
-   are the only shapes that justify a literal: a fallback when reading a CSS var
+   is wrong in at least nine of those ten combinations. Use the semantic token.
+   Two real exceptions exist and are the only shapes that justify a literal:
+   a fallback when reading a CSS var
    into a JS theme object that can't take `var()`
    (`features/chat/components/TerminalPanel.tsx`), and a third-party brand color
    checked for contrast against the skin
@@ -113,7 +113,7 @@ classes. Every pane starts with a 40px row (`h-10 border-b`): text-first rows pa
   layout" does not apply to those.
 - Use a type size off the scale: `2xs` 10 (keycaps only), `caption` 11, `xs`
   12, `sm` 13 (body), `md` 14, `heading` 15, `title` 18, `display` 24.
-  `3xs` and `lg` are legacy aliases until their last caller is ported.
+  Tailwind's own `text-base`/`text-lg`/`text-xl` still resolve, off the scale.
 - Style the top 36px band casually. Title-bar z-order, the drag region, and the
   caption strip have collided three times; verify changes there with the
   Electron e2e, not by reading classes.

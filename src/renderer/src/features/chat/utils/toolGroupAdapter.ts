@@ -1,5 +1,4 @@
-import type { ChatRightPanelId } from '@renderer/lib/utils/layout'
-import type { UiGroupTiming, UiToolRow } from '@shared/transcript'
+import type { UiToolRow } from '@shared/transcript'
 import { mcpDoneLabel, mcpRunningLabel } from '@shared/utils/mcpToolMeta'
 import {
   inferFileWriteAction,
@@ -9,7 +8,6 @@ import {
   parseMcpToolDisplay,
   summarizeToolArgs
 } from '@shared/toolSummary'
-import { formatElapsed } from '@shared/utils/timeFormat'
 import {
   formatAgentInstanceShortId,
   parseAgentInstanceRunId,
@@ -40,8 +38,6 @@ export type ToolGroupNestedTool = {
   filePath?: string
   /** 1-based line the badge opens at, when the tool reported one. */
   fileLine?: number
-  /** Dock panel the leading icon reveals, when the result lives in one. */
-  opensPanel?: ChatRightPanelId
 }
 
 export type ToolGroupState = 'pending' | 'completed' | 'interrupted'
@@ -52,9 +48,6 @@ export type ToolGroupProps = {
   summary: string
   runningLabel: string
   doneLabel: string
-  elapsedMs: number | null
-  elapsedDisplay: string
-  singleTool: boolean
 }
 
 const CATEGORY_COUNT_LABELS: Record<ToolGroupCategory, [singular: string, plural: string]> = {
@@ -311,19 +304,13 @@ function isInterrupted(tools: UiToolRow[]): boolean {
 }
 
 function deriveState(tools: UiToolRow[]): ToolGroupState {
-  // A closed groupTiming only proves the first tool finished — a sibling can
-  // still be running, and the group must read as live until every tool settles.
+  // The group reads as live until every tool settles.
   if (tools.some((tool) => tool.status === 'running')) return 'pending'
   if (isInterrupted(tools)) return 'interrupted'
   return 'completed'
 }
 
-export function mapToolGroupProps(
-  tools: UiToolRow[],
-  options: {
-    groupTiming?: UiGroupTiming
-  }
-): ToolGroupProps {
+export function mapToolGroupProps(tools: UiToolRow[]): ToolGroupProps {
   const inGroup = tools.length > 1
   const nestedTools: ToolGroupNestedTool[] = tools.map((tool) => {
     const subtitle = toolSubtitle(tool)
@@ -336,19 +323,11 @@ export function mapToolGroupProps(
       subtitle: inGroup && tool.name !== 'list_dir' ? '' : subtitle,
       status: tool.status,
       ...(meta.filePath ? { filePath: meta.filePath } : {}),
-      ...(meta.fileLine != null ? { fileLine: meta.fileLine } : {}),
-      ...(meta.opensPanel ? { opensPanel: meta.opensPanel } : {})
+      ...(meta.fileLine != null ? { fileLine: meta.fileLine } : {})
     }
   })
 
   const state = deriveState(tools)
-  const { groupTiming } = options
-
-  let elapsedMs: number | null = null
-  if (groupTiming?.startedAt != null) {
-    if (groupTiming.endedAt != null) elapsedMs = groupTiming.endedAt - groupTiming.startedAt
-    else if (state === 'pending') elapsedMs = Date.now() - groupTiming.startedAt
-  }
 
   const labels = groupLabels(nestedTools, tools)
   // Interrupted groups never completed — header uses the in-progress verb.
@@ -359,9 +338,6 @@ export function mapToolGroupProps(
     nestedTools,
     summary: summarizeCounts(nestedTools),
     runningLabel: labels.running,
-    doneLabel: settledLabel,
-    elapsedMs,
-    elapsedDisplay: elapsedMs != null && elapsedMs >= 1000 ? formatElapsed(elapsedMs) : '',
-    singleTool: tools.length === 1
+    doneLabel: settledLabel
   }
 }

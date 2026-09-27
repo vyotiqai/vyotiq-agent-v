@@ -21,7 +21,7 @@ import { modelSelectionKey } from '@shared/domain/modelSelection'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
 import { isRetryableTurnFailure } from '@shared/errors'
-import { Alert, Button, IconButton, cn, pushToast } from '@renderer/lib/ui'
+import { Alert, Button, IconButton, Textarea, cn, pushToast } from '@renderer/lib/ui'
 import {
   draftTitle,
   saveTaskDraftFor,
@@ -181,7 +181,6 @@ export function Composer({
   onAgentModeChange = () => {},
 
   onSend,
-  onStop,
   pendingFollowUps = [],
   onRemoveFollowUp,
   onEditFollowUp,
@@ -217,8 +216,6 @@ export function Composer({
   running: boolean
   disabled?: boolean
   hasWorkspace?: boolean
-  /** No longer read — every placeholder here is set by its variant. Callers still pass it. */
-  hasTranscript?: boolean
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
   modelsRefreshKey?: string | number
@@ -244,7 +241,6 @@ export function Composer({
     files?: AttachedFile[],
     extras?: import('@shared/ipc').ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onStop: () => void
   pendingFollowUps?: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[]
   onRemoveFollowUp?: (id: string) => void
   onEditFollowUp?: (id: string, text: string) => boolean | Promise<boolean>
@@ -1341,10 +1337,10 @@ export function Composer({
           <ul className="m-0 list-none p-0" data-follow-up-queue aria-label="Queued instructions">
             {pendingFollowUps.map((entry) =>
               editingFollowUpId === entry.id ? (
-                <li key={entry.id} className="flex items-start gap-2 border-b border-border px-4 py-2">
-                  <textarea
+                <li key={entry.id} className="flex items-start gap-2 border-b border-border/60 px-4 py-2">
+                  <Textarea
                     ref={followUpEditRef}
-                    className="min-h-14 min-w-0 flex-1 resize-y rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg-strong outline-none focus-visible:vy-focus-ring"
+                    className="min-w-0 flex-1"
                     value={editingFollowUpText}
                     onChange={(e) => setEditingFollowUpText(e.target.value)}
                     onKeyDown={(e) => {
@@ -1377,7 +1373,7 @@ export function Composer({
               ) : (
                 <li
                   key={entry.id}
-                  className="flex h-8 items-center gap-2.5 border-b border-border px-4 text-xs"
+                  className="flex h-8 items-center gap-2.5 border-b border-border/60 px-4 text-xs"
                   data-follow-up-offline={entry.offline ? '' : undefined}
                 >
                   {/* Offline: kept here, starts when the connection is back — the icon and the word both say so. */}

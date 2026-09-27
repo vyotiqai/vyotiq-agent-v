@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 
 /**
- * Narrow external store for keystroke-hot workspace UI (composer draft + session search).
+ * Narrow external store for keystroke-hot workspace UI (the composer draft).
  * Keeps App/`setContexts` off the typing path while persistence still reads `contextsRef`.
  *
  * Composer drafts are keyed per run (`__draft__` when `runId` is null) so multi-pane
@@ -19,13 +19,11 @@ export type WorkspaceHotUi = {
   /** Legacy null-run draft; kept in sync with `composerDraftByRunId[HOT_COMPOSER_DRAFT_KEY]`. */
   composerDraft: string
   composerDraftByRunId: Record<string, string>
-  sessionQuery: string
 }
 
 const EMPTY_HOT_UI: WorkspaceHotUi = Object.freeze({
   composerDraft: '',
-  composerDraftByRunId: Object.freeze({}) as Record<string, string>,
-  sessionQuery: ''
+  composerDraftByRunId: Object.freeze({}) as Record<string, string>
 })
 
 const byPath = new Map<string, WorkspaceHotUi>()
@@ -43,8 +41,7 @@ function notify(path: string): void {
 function cloneHot(prev: WorkspaceHotUi | undefined): WorkspaceHotUi {
   return {
     composerDraft: prev?.composerDraft ?? '',
-    composerDraftByRunId: { ...(prev?.composerDraftByRunId ?? {}) },
-    sessionQuery: prev?.sessionQuery ?? ''
+    composerDraftByRunId: { ...(prev?.composerDraftByRunId ?? {}) }
   }
 }
 
@@ -95,7 +92,7 @@ export function subscribeWorkspaceHotUi(
 
 export function setWorkspaceHotUi(
   path: string,
-  patch: Partial<Pick<WorkspaceHotUi, 'composerDraft' | 'sessionQuery'>> & {
+  patch: Partial<Pick<WorkspaceHotUi, 'composerDraft'>> & {
     composerDraftByRunId?: Record<string, string>
   }
 ): WorkspaceHotUi {
@@ -120,9 +117,7 @@ export function setWorkspaceHotUi(
 
   const next: WorkspaceHotUi = {
     composerDraft,
-    composerDraftByRunId,
-    sessionQuery:
-      patch.sessionQuery !== undefined ? patch.sessionQuery : prev.sessionQuery
+    composerDraftByRunId
   }
 
   const sameDraftMap =
@@ -134,7 +129,6 @@ export function setWorkspaceHotUi(
 
   if (
     next.composerDraft === prev.composerDraft &&
-    next.sessionQuery === prev.sessionQuery &&
     sameDraftMap &&
     byPath.has(path)
   ) {
@@ -160,8 +154,7 @@ export function setWorkspaceHotComposerDraft(
   const composerDraftByRunId = { ...prev.composerDraftByRunId, [key]: draft }
   const next: WorkspaceHotUi = {
     composerDraft: runId ? prev.composerDraft : draft,
-    composerDraftByRunId,
-    sessionQuery: prev.sessionQuery
+    composerDraftByRunId
   }
   if (!runId) {
     next.composerDraft = draft
@@ -171,7 +164,7 @@ export function setWorkspaceHotComposerDraft(
   return next
 }
 
-/** Remove one run's hot draft key (does not touch sibling runs or sessionQuery). */
+/** Remove one run's hot draft key (does not touch sibling runs). */
 export function clearWorkspaceHotComposerDraft(
   path: string,
   runId: string | null
@@ -183,8 +176,7 @@ export function clearWorkspaceHotComposerDraft(
   const { [key]: _removed, ...composerDraftByRunId } = prev.composerDraftByRunId
   const next: WorkspaceHotUi = {
     composerDraft: key === HOT_COMPOSER_DRAFT_KEY ? '' : prev.composerDraft,
-    composerDraftByRunId,
-    sessionQuery: prev.sessionQuery
+    composerDraftByRunId
   }
   byPath.set(path, next)
   notify(path)
@@ -195,7 +187,6 @@ export function seedWorkspaceHotUi(
   values: {
     composerDraft?: string
     composerDraftByRunId?: Record<string, string>
-    sessionQuery?: string
   }
 ): void {
   const prev = byPath.get(path)
@@ -212,15 +203,10 @@ export function seedWorkspaceHotUi(
   } else if (values.composerDraft !== undefined) {
     composerDraftByRunId[HOT_COMPOSER_DRAFT_KEY] = values.composerDraft
   }
-  const sessionQuery =
-    values.sessionQuery !== undefined
-      ? values.sessionQuery
-      : (prev?.sessionQuery ?? '')
 
   if (
     prev &&
     prev.composerDraft === composerDraft &&
-    prev.sessionQuery === sessionQuery &&
     Object.keys(composerDraftByRunId).length ===
       Object.keys(prev.composerDraftByRunId).length &&
     Object.entries(composerDraftByRunId).every(
@@ -231,8 +217,7 @@ export function seedWorkspaceHotUi(
   }
   byPath.set(path, {
     composerDraft,
-    composerDraftByRunId,
-    sessionQuery
+    composerDraftByRunId
   })
   notify(path)
 }

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import {
   ContextMeter,
+  ContextMeterPanel,
   cacheHitPct
 } from '@renderer/features/chat/components/composer/ContextMeter'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
@@ -181,18 +182,36 @@ describe('ContextMeter', () => {
     expect(screen.queryByText(/990k headroom/i)).toBeNull()
   })
 
+  it('has no compact action — the instance meter is read-only', () => {
+    render(<ContextMeter usage={baseUsage} />)
+    fireEvent.click(screen.getByRole('button', { name: /context/i }))
+    expect(screen.queryByRole('button', { name: /compact history/i })).toBeNull()
+  })
+})
+
+describe('ContextMeterPanel', () => {
   it('renders compact action when handler is provided', () => {
+    const calls: number[] = []
     render(
-      <ContextMeter
+      <ContextMeterPanel
         usage={baseUsage}
-        onCompact={async () => ({ ok: true, message: 'Done' })}
+        onCompact={() => calls.push(1)}
+        compactMessage="Done"
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /context/i }))
     const compact = screen.getByRole('button', { name: /compact history/i })
     // The Button primitive: its focus ring and outlined geometry.
     expect(compact.className).toContain('focus-visible:vy-focus-ring')
     expect(compact.className).toContain('border-border')
+    fireEvent.click(compact)
+    expect(calls).toEqual([1])
+    expect(screen.getByRole('status').textContent).toBe('Done')
+  })
+
+  it('disables compact while the agent is running', () => {
+    render(<ContextMeterPanel usage={baseUsage} onCompact={() => {}} compactDisabled />)
+    const compact = screen.getByRole('button', { name: /compact history/i }) as HTMLButtonElement
+    expect(compact.disabled).toBe(true)
   })
 })
 
@@ -230,7 +249,7 @@ describe('ContextMeter breakdown', () => {
   it('renders every breakdown row with tokens and window shares', () => {
     render(<ContextMeter usage={detailUsage} />)
     fireEvent.click(screen.getByRole('button', { name: /context window/i }))
-    expect(screen.getByText(/^Messages$/)).toBeTruthy()
+    expect(screen.getByText(/^Record$/)).toBeTruthy()
     expect(screen.getByText(/^System tools$/)).toBeTruthy()
     expect(screen.getByText(/^MCP tools$/)).toBeTruthy()
     expect(screen.getByText(/^System prompt$/)).toBeTruthy()
@@ -272,7 +291,7 @@ describe('ContextMeter breakdown', () => {
     expect(screen.getByText(/^System$/)).toBeTruthy()
     expect(screen.getByText(/^History$/)).toBeTruthy()
     expect(screen.getByText(/^Tools$/)).toBeTruthy()
-    expect(screen.queryByText(/^Messages$/)).toBeNull()
+    expect(screen.queryByText(/^Record$/)).toBeNull()
     expect(screen.queryByText(/^Skills$/)).toBeNull()
   })
 })

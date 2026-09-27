@@ -82,7 +82,7 @@ export function proposeGoal(runDir: string, objective: string): RunGoal {
   const current = readGoal(runDir)
   if (current && current.status !== 'complete' && goalOrigin(current) === 'user') {
     throw new Error(
-      `This chat already has a user-set goal: "${current.objective}". Ask the user to change it instead of replacing it.`
+      `This task already has a user-set goal: "${current.objective}". Ask the user to change it instead of replacing it.`
     )
   }
   const at = nowIso()

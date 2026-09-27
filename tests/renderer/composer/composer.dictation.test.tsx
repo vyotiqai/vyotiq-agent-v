@@ -98,7 +98,6 @@ function renderComposer(
       onChatSettingsChange={vi.fn()}
       onProviderModel={vi.fn()}
       onSend={vi.fn()}
-      onStop={vi.fn()}
       slashHandlers={overrides?.slashHandlers}
     />
   )
@@ -387,7 +386,6 @@ describe('Composer dictation', () => {
           onChatSettingsChange={vi.fn()}
           onProviderModel={vi.fn()}
           onSend={vi.fn()}
-          onStop={vi.fn()}
         />
       )
     }
@@ -626,7 +624,6 @@ describe('New task brief dictation', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
   }

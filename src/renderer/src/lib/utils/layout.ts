@@ -125,9 +125,6 @@ export const HOVER_ON_SURFACE = 'hover:bg-surface-2'
 export const BORDER_DIVIDER = 'border-border/60'
 export const DIVIDER_FILL = 'bg-border'
 
-/** Outlines a thing: panel, input, card, menu. Named so the pair reads as a pair. */
-export const BORDER = 'border-border'
-
 /** The one fill for "this is the one you're on": a selected row, tab or place. */
 export const SELECTED = 'bg-surface-2 text-fg-strong'
 

@@ -4,8 +4,8 @@ import type { MarketplaceOverrideKind } from '@shared/domain/marketplaceEnableme
 import { classifyMcpInput, tokenizeCommand } from '@shared/utils/mcpClassify'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Checkbox, IconButton, Input, Segmented, StatusGlyph, type TaskState } from '@renderer/lib/ui'
-import { FIELD_GRID, FIELD_TEXTAREA } from './McpServerConfig'
+import { Button, Checkbox, IconButton, Input, Segmented, StatusGlyph, Textarea, type TaskState } from '@renderer/lib/ui'
+import { FIELD_GRID } from './McpServerConfig'
 import { mcpLaunchLine } from './extensionItems'
 import type { MarketplaceController } from './useMarketplaceController'
 
@@ -325,9 +325,11 @@ export function AddMcpDialog({
             <label className="text-xs font-medium text-fg" htmlFor="mcp-src">
               Paste a URL, npm package, npx command or JSON
             </label>
-            <textarea
+            <Textarea
               ref={inputRef}
               id="mcp-src"
+              size="sm"
+              mono
               rows={2}
               value={input}
               // Only this dialog's own submit locks what you type. The JSON
@@ -335,7 +337,7 @@ export function AddMcpDialog({
               // the field mid-typing and dropped its focus.
               disabled={submitting}
               placeholder="npx -y @modelcontextprotocol/server-memory"
-              className={`mt-1.5 ${FIELD_TEXTAREA}`}
+              className="mt-1.5"
               onChange={(e) => setInput(e.target.value)}
             />
           </div>

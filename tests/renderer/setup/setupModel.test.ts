@@ -78,7 +78,7 @@ describe('providerCheckFrom', () => {
 
   it('a reachable host without a model list is an answer too', () => {
     const warning =
-      'Ollama does not serve a model list (HTTP 405); the host is reachable and chat can still connect. Showing illustrative placeholder model IDs (not live models).'
+      'Ollama does not serve a model list (HTTP 405); the host is reachable and tasks can still run. Showing illustrative placeholder model IDs (not live models).'
     expect(providerCheckFrom({ ok: true, data: { models: [], warning } })).toEqual({ state: 'ok' })
   })
 

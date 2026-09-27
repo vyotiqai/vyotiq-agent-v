@@ -1288,7 +1288,7 @@ export async function buildRunMarkdownExport(
     if (!text && message.role !== 'assistant') continue
     lines.push('')
     if (message.role === 'user') {
-      lines.push('## User', '', text || '_(empty)_')
+      lines.push('## Instruction', '', text || '_(empty)_')
     } else if (message.role === 'assistant') {
       lines.push('## Agent', '', text || '_(no text — tool calls only)_')
       // New rows carry reasoning only in reasoningState; derive the view.

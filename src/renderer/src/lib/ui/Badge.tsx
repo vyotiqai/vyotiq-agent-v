@@ -4,29 +4,22 @@ import { cn } from './cn'
 /**
  * Small status or count tag.
  *
- * Tones are semantic, not decorative. The redesign uses three — `outline` (a
- * quiet tag), `accent` (asks for you) and `success` (passed). `neutral`,
- * `danger` and `warning` stay for surfaces not yet ported. Tints come from the
- * named `-soft` tokens, never an invented opacity.
+ * Tones are semantic, not decorative: `outline` (a quiet tag), `accent` (asks
+ * for you) and `success` (passed). Tints come from the named `-soft` tokens,
+ * never an invented opacity.
  */
 const badgeTones = {
   outline: 'border border-border text-muted',
-  neutral: 'bg-surface-2 text-muted',
   accent: 'bg-accent-soft text-accent',
-  success: 'bg-success-soft text-success',
-  danger: 'bg-danger-soft text-danger',
-  warning: 'bg-warning-soft text-warning'
+  success: 'bg-success-soft text-success'
 } as const
 
 export type BadgeTone = keyof typeof badgeTones
 
 const badgeDotTones: Record<BadgeTone, string> = {
   outline: 'bg-muted',
-  neutral: 'bg-muted',
   accent: 'bg-accent',
-  success: 'bg-success',
-  danger: 'bg-danger',
-  warning: 'bg-warning'
+  success: 'bg-success'
 }
 
 const badgeSizes = {
@@ -36,7 +29,7 @@ const badgeSizes = {
 
 export function Badge({
   children,
-  tone = 'neutral',
+  tone = 'outline',
   size = 'sm',
   dot = false,
   mono = false,

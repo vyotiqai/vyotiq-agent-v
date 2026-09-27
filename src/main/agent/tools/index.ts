@@ -506,7 +506,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
   create_goal: (_workspace, args, signal, context) => {
     throwIfAborted(signal)
     if (context.inlineInstance) {
-      return toolFail('create_goal', 'Root chat only', 'create_goal is only available on the root chat.')
+      return toolFail('create_goal', 'Main task only', 'create_goal is only available on the main task.')
     }
     const objective = typeof args.objective === 'string' ? args.objective : ''
     // Agent-created goals are proposals: inert until the user starts one from
@@ -545,7 +545,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
   update_goal: (_workspace, args, signal, context) => {
     throwIfAborted(signal)
     if (context.inlineInstance) {
-      return toolFail('update_goal', 'Root chat only', 'update_goal is only available on the root chat.')
+      return toolFail('update_goal', 'Main task only', 'update_goal is only available on the main task.')
     }
     const statusArg = args.status
     if (statusArg !== 'complete' && statusArg !== 'active') {
@@ -644,7 +644,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       return toolFail(
         'switch_mode',
         'mode',
-        'Automatic mode switching is off. Only the user can change Ask / Agent (composer or slash).'
+        'Automatic mode switching is off. Only the user can change Ask / Agent (instruction line or slash command).'
       )
     }
     // `'plan'` is accepted and folded to `'agent'`: a model that learned the

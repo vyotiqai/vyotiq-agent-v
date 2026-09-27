@@ -22,7 +22,7 @@ export function formatGoalInvocation(objective: string): string {
     // The goal is already seeded active on this path (loop.ts reads this
     // header), so asking for `create_goal` here would only collide with it:
     // that tool proposes, and a live user-set goal refuses to be replaced.
-    'This goal is now active on this chat. Work until `update_goal` with status "complete", or the user pauses. Never pause yourself. Do not stop while required work remains.'
+    'This goal is now active on this task. Work until `update_goal` with status "complete", or the user pauses. Never pause yourself. Do not stop while required work remains.'
   ].join('\n')
 }
 

@@ -313,11 +313,11 @@ export function VoiceSection({
         })}
       </SettingsGroup>
 
-      <SettingsGroup title="Composer">
+      <SettingsGroup title="Instruction line">
         <SelectField
           id="dictation-waveform"
           title="Waveform"
-          hint="The listening visualiser in the composer."
+          hint="The listening visualiser in the instruction line."
           value={dictation.waveformStyle ?? 'bars'}
           options={DICTATION_WAVEFORM_STYLE_OPTIONS}
           width={140}

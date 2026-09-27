@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { DiffStat, IconButton, cn } from '@renderer/lib/ui'
+import { ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import { FileBadge } from '@renderer/features/chat/components/FileBadge'
 import { DiffPreview, type DiffLayout } from '@renderer/features/chat/components/DiffPreview'
 import { basename, type DiffLine } from '@renderer/features/chat/toolUi'
@@ -93,7 +94,7 @@ export function ChangesList({
         return (
           <li
             key={file.path}
-            className={cn('group flex h-7 min-w-0 items-center vy-transition', on ? 'bg-surface-2' : 'hover:bg-surface')}
+            className={cn('group flex h-7 min-w-0 items-center vy-transition', on ? SELECTED : ROW_HOVER)}
             data-change-row={file.path}
           >
             <button

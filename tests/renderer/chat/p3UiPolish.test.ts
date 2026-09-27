@@ -8,7 +8,6 @@ import {
   buildComposerSendProps,
   deriveChatErrorSurfaces
 } from '@renderer/features/chat/hooks/composerShared'
-import type { UiItem } from '@shared/transcript'
 import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
 import { resolveEffectiveSettings } from '@shared/effectiveSettings'
 
@@ -25,16 +24,12 @@ describe('P3 surfaceKey + composer shared hooks', () => {
   })
 
   it('deriveChatErrorSurfaces clears banner when transcript has run_error', () => {
-    const withRunError: UiItem[] = [
-      { kind: 'run_error', id: 'e1', message: 'boom' }
-    ]
     const surfaces = deriveChatErrorSurfaces(true, {
       error: 'composer boom',
       errorCode: 'PROVIDER_NETWORK'
     })
     expect(surfaces.chatBannerError).toBeNull()
     expect(surfaces.turnFailed).toBe(true)
-    expect(surfaces.turnFailureLabel).toBe('composer boom')
 
     const clean = deriveChatErrorSurfaces(false, {
       error: 'composer boom',
@@ -51,13 +46,6 @@ describe('P3 surfaceKey + composer shared hooks', () => {
       deriveChatErrorSurfaces(false, { error: 'no credits', errorCode: 'PROVIDER_BILLING' })
         .turnFailed
     ).toBe(false)
-    // Permanent + terminal: the summary shows the short generic label, no Retry.
-    const permanent = deriveChatErrorSurfaces(false, {
-      error: 'plan required',
-      errorCode: 'PROVIDER_AUTH',
-      turnStatus: 'error'
-    })
-    expect(permanent.turnFailureLabel).toBe('Failed')
   })
 
   it('buildComposerSendProps mirrors shared dock fields', () => {
@@ -67,20 +55,17 @@ describe('P3 surfaceKey + composer shared hooks', () => {
       model: 'gpt-4.1',
       running: false,
       hasWorkspace: true,
-      hasTranscript: true,
       workspacePath: '/ws',
       onProviderModel: () => undefined,
       chatSettings,
       onChatSettingsChange: () => undefined,
       onSend: () => true,
-      onStop: () => undefined,
       secrets: emptySecretStatus(),
       bannerError: null,
       secondaryBannerError: null,
       activeRunId: 'run-1'
     })
     expect(props.disabled).toBe(false)
-    expect(props.hasTranscript).toBe(true)
     expect(props.onRetryNetwork).toBeUndefined()
     expect(props.bannerError).toBeNull()
     expect(props.activeRunId).toBe('run-1')

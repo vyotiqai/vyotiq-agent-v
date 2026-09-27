@@ -1,8 +1,8 @@
 import { Icon } from '@renderer/lib/icons'
-import { cn } from '@renderer/lib/ui'
+import { Button, IconButton, cn } from '@renderer/lib/ui'
 import type { DictationWaveformStyle } from '@shared/ipc'
 import type { DictationPhase } from './useComposerDictation'
-import { chromeIconButton, chromeLabelText, chromePillButton, chromeRow } from './composerChrome'
+import { chromeLabelText, chromeRow } from './composerChrome'
 
 export type DictationSettingsSection = 'voice' | 'providers'
 
@@ -27,7 +27,6 @@ function settingsActionLabel(section: DictationSettingsSection): string {
   }
 }
 
-const iconBtn = chromeIconButton
 
 const waveTrack = 'h-8 min-w-0 flex-1 overflow-hidden'
 
@@ -276,24 +275,23 @@ export function DictationErrorBanner({
       </span>
       <span className={cn(chromeLabelText, 'min-w-0 flex-1 truncate text-danger')}>{message}</span>
       {settingsSection && onOpenSettings ? (
-        <button
-          type="button"
-          className={cn(chromePillButton, 'shrink-0 text-fg')}
+        <Button
+          size="xs"
+          variant="ghost"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onOpenSettings(settingsSection)}
         >
           {settingsActionLabel(settingsSection)}
-        </button>
+        </Button>
       ) : null}
-      <button
-        type="button"
-        className={iconBtn}
-        aria-label="Dismiss dictation error"
+      <IconButton
+        icon="close"
+        label="Dismiss dictation error"
+        size="sm"
+        tone="muted"
         onMouseDown={(e) => e.preventDefault()}
         onClick={onDismiss}
-      >
-        <Icon name="close" size={14} />
-      </button>
+      />
     </div>
   )
 }

@@ -17,7 +17,7 @@ import {
 import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
 import { Icon } from '@renderer/lib/icons'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
-import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
+import { CHAT_RIGHT_PANEL_BODY, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type { GitBranchEntry, GitChangedFile, GitLogEntry, GitStatus, TaskFileStat } from '@shared/ipc'
 import { namedGitBranch } from '@shared/utils/gitBranch'
 import type { UiItem } from '@shared/transcript'
@@ -1449,7 +1449,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             />
             {generationNotice ? (
               <span className="max-w-[40%] truncate text-caption text-muted" title={generationNotice} aria-live="polite">
-                No agent message: {generationNotice}
+                No drafted message: {generationNotice}
               </span>
             ) : draftMayBeStale ? (
               <span className="max-w-[40%] truncate text-caption text-muted" title={STALE_DRAFT_NOTE} aria-live="polite">
@@ -1586,7 +1586,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                     return (
                       <li
                         key={file.path}
-                        className={cn('flex h-8 items-center gap-2 px-3', on ? 'bg-surface-2' : 'hover:bg-surface')}
+                        className={cn('flex h-8 items-center gap-2 px-3', on ? SELECTED : ROW_HOVER)}
                         title={file.path}
                         data-review-row={file.path}
                       >
@@ -1629,7 +1629,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           <div className="flex min-w-0 flex-1 flex-col">
             {selected ? (
               <>
-                <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4 text-xs" data-review-file>
+                <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs" data-review-file>
                   <FileBadge path={selected.path} size={14} />
                   <span className="min-w-0 flex-1 truncate font-mono text-caption text-muted" title={selected.path}>
                     {dir}
@@ -1947,7 +1947,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               />
               {generationNotice ? (
                 <p className="m-0 truncate text-caption text-muted" title={generationNotice} aria-live="polite">
-                  No agent message: {generationNotice} — a plain one is in its place
+                  No drafted message: {generationNotice} — a plain one is in its place
                 </p>
               ) : draftMayBeStale ? (
                 <p className="m-0 truncate text-caption text-muted" title={STALE_DRAFT_NOTE} aria-live="polite">

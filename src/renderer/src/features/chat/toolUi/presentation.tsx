@@ -16,8 +16,7 @@ export function ToolBodyView({
     onLoadFullContent,
     toolProgress,
     mcpServerNames,
-    inGroup,
-    timing
+    inGroup
   } = context
   // Full content loads only while the body is visible (ExpandPanel open or card expanded).
   // File reads never pull the full model payload into the transcript — preview is clamped.
@@ -32,8 +31,7 @@ export function ToolBodyView({
     loading,
     loadFailed: failed,
     mcpServerNames,
-    inGroup,
-    timing
+    inGroup
   })
   // Bordered ToolCard already provides chrome for prominent tools.
   if (isProminentPresentation(tool)) return body

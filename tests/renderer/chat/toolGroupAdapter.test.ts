@@ -28,13 +28,11 @@ function tool(
 
 describe('mapToolGroupProps', () => {
 
-  it('maps pending state when group is open and tools are running', () => {
+  it('maps pending state while tools are running', () => {
 
     const result = mapToolGroupProps(
 
-      [tool('t1', 'read', 'src/a.ts', 'running'), tool('t2', 'search', 'query', 'running')],
-
-      { groupTiming: { startedAt: 1_000 } }
+      [tool('t1', 'read', 'src/a.ts', 'running'), tool('t2', 'search', 'query', 'running')]
 
     )
 
@@ -52,7 +50,7 @@ describe('mapToolGroupProps', () => {
 
 
 
-  it('maps completed state when group timing is closed', () => {
+  it('maps completed state once every tool has settled', () => {
 
     const result = mapToolGroupProps(
 
@@ -64,9 +62,7 @@ describe('mapToolGroupProps', () => {
 
         tool('t3', 'search', 'foo')
 
-      ],
-
-      { groupTiming: { startedAt: 1_000, endedAt: 7_000 } }
+      ]
 
     )
 
@@ -74,21 +70,6 @@ describe('mapToolGroupProps', () => {
 
     expect(result.summary).toBe('1 file, 1 lookup, and 1 command')
 
-    expect(result.elapsedDisplay).toBe('6s')
-
-  })
-
-
-
-  it('completes a finished group whose timing is still open', () => {
-
-    const result = mapToolGroupProps([tool('t1', 'read', 'src/a.ts'), tool('t2', 'search', 'q')], {
-
-      groupTiming: { startedAt: 1_000 }
-
-    })
-
-    expect(result.state).toBe('completed')
 
   })
 
@@ -96,8 +77,7 @@ describe('mapToolGroupProps', () => {
 
   it('maps interrupted state from cancelled tool content', () => {
     const result = mapToolGroupProps(
-      [tool('t1', 'read', 'src/a.ts', 'fail', 'Cancelled')],
-      { groupTiming: { startedAt: 1_000, endedAt: 2_000 } }
+      [tool('t1', 'read', 'src/a.ts', 'fail', 'Cancelled')]
     )
     expect(result.state).toBe('interrupted')
     expect(result.doneLabel).toBe('Reading')
@@ -107,8 +87,7 @@ describe('mapToolGroupProps', () => {
 
   it('uses Asking not Asked for interrupted ask_question', () => {
     const result = mapToolGroupProps(
-      [tool('t1', 'ask_question', 'Should I continue?', 'fail', 'Cancelled')],
-      { groupTiming: { startedAt: 1_000, endedAt: 2_000 } }
+      [tool('t1', 'ask_question', 'Should I continue?', 'fail', 'Cancelled')]
     )
     expect(result.state).toBe('interrupted')
     expect(result.doneLabel).toBe('Asking')
@@ -125,9 +104,7 @@ describe('mapToolGroupProps', () => {
 
         tool('t2', 'mcp__github__list_labels', 'repo', 'done')
 
-      ],
-
-      { groupTiming: { startedAt: 1_000, endedAt: 2_000 } }
+      ]
 
     )
 
@@ -143,11 +120,7 @@ describe('mapToolGroupProps', () => {
 
   it('uses basename for file tool subtitles', () => {
 
-    const result = mapToolGroupProps([tool('t1', 'read', 'src/components/Chat.tsx')], {
-
-      groupTiming: { startedAt: 1_000, endedAt: 2_000 }
-
-    })
+    const result = mapToolGroupProps([tool('t1', 'read', 'src/components/Chat.tsx')])
 
     expect(result.nestedTools[0]?.subtitle).toBe('Chat.tsx')
 
@@ -161,7 +134,7 @@ describe('mapToolGroupProps', () => {
 
     row.argsPreview = JSON.stringify({ path: 'src/app.css', startLine: 12, endLine: 48 })
 
-    const result = mapToolGroupProps([row], { groupTiming: { startedAt: 1 } })
+    const result = mapToolGroupProps([row])
 
     expect(result.nestedTools[0]?.subtitle).toBe('app.css L12-48')
 
@@ -175,7 +148,7 @@ describe('mapToolGroupProps', () => {
 
     row.argsPreview = JSON.stringify({ startLine: 12 })
 
-    const result = mapToolGroupProps([row], { groupTiming: { startedAt: 1 } })
+    const result = mapToolGroupProps([row])
 
     expect(result.nestedTools[0]?.subtitle).toBe('app.css L12+')
 
@@ -187,7 +160,7 @@ describe('mapToolGroupProps', () => {
 
     const row = tool('t1', 'read', 'a.css', 'done', 'one\ntwo\nthree\n')
 
-    const result = mapToolGroupProps([row], { groupTiming: { startedAt: 1 } })
+    const result = mapToolGroupProps([row])
 
     expect(result.nestedTools[0]?.subtitle).toBe('a.css L1-3')
 
@@ -201,7 +174,7 @@ describe('mapToolGroupProps', () => {
 
     row.contentTruncated = true
 
-    const result = mapToolGroupProps([row], { groupTiming: { startedAt: 1 } })
+    const result = mapToolGroupProps([row])
 
     expect(result.nestedTools[0]?.subtitle).toBe('a.css')
 
@@ -220,11 +193,11 @@ describe('mapToolGroupProps', () => {
       run_id: '7f2e9b1a-1111-2222-3333-444455556666'
     })
 
-    expect(mapToolGroupProps([spawn], { groupTiming: { startedAt: 1 } }).nestedTools[0]?.subtitle).toBe(
+    expect(mapToolGroupProps([spawn]).nestedTools[0]?.subtitle).toBe(
       '584c0a1c'
     )
     expect(
-      mapToolGroupProps([awaitTool], { groupTiming: { startedAt: 1 } }).nestedTools[0]?.subtitle
+      mapToolGroupProps([awaitTool]).nestedTools[0]?.subtitle
     ).toBe('7f2e9b1a')
   })
 
@@ -234,8 +207,7 @@ describe('mapToolGroupProps', () => {
         tool('t1', 'read', 'src/a.ts'),
         tool('t2', 'list_dir', '.'),
         tool('t3', 'list_dir', 'src')
-      ],
-      { groupTiming: { startedAt: 1_000, endedAt: 2_000 } }
+      ]
     )
 
     expect(result.doneLabel).toBe('Read and listed')
@@ -244,8 +216,7 @@ describe('mapToolGroupProps', () => {
 
   it('keeps a directory listing action distinct from a later file read', () => {
     const result = mapToolGroupProps(
-      [tool('t1', 'list_dir', 'src'), tool('t2', 'read', 'src/package.json')],
-      { groupTiming: { startedAt: 1_000, endedAt: 2_000 } }
+      [tool('t1', 'list_dir', 'src'), tool('t2', 'read', 'src/package.json')]
     )
 
     expect(result.nestedTools[0]?.title).toBe('Listed')
@@ -255,8 +226,7 @@ describe('mapToolGroupProps', () => {
 
   it('collapses duplicate listing verbs for directory and memory listings', () => {
     const result = mapToolGroupProps(
-      [tool('t1', 'list_dir', '.'), tool('t2', 'memory_list', '.vyotiq/memory')],
-      { groupTiming: { startedAt: 1_000, endedAt: 2_000 } }
+      [tool('t1', 'list_dir', '.'), tool('t2', 'memory_list', '.vyotiq/memory')]
     )
 
     expect(result.doneLabel).toBe('Listed')
@@ -271,8 +241,7 @@ describe('mapToolGroupProps', () => {
         tool('t1', 'list_dir', '.'),
         tool('t2', 'terminal', 'pnpm test'),
         tool('t3', 'edit', 'src/a.ts')
-      ],
-      { groupTiming: { startedAt: 1_000 } }
+      ]
     )
 
     expect(result.runningLabel).toBe('Exploring')
@@ -282,8 +251,7 @@ describe('mapToolGroupProps', () => {
 
   it('shows a preparing label for unresolved streaming tool rows in a group', () => {
     const result = mapToolGroupProps(
-      [tool('t1', 'tool', '', 'running')],
-      { groupTiming: { startedAt: 1_000 } }
+      [tool('t1', 'tool', '', 'running')]
     )
 
     expect(result.nestedTools[0]?.title).toBe('Preparing…')
@@ -294,7 +262,7 @@ describe('mapToolGroupProps', () => {
     row.argsPreview = JSON.stringify({
       todos: [{ id: 'audit-1', content: 'Audit Auth', status: 'in_progress' }]
     })
-    const result = mapToolGroupProps([row], { groupTiming: { startedAt: 1_000 } })
+    const result = mapToolGroupProps([row])
 
     expect(result.nestedTools[0]?.title).toBe('Preparing…')
     expect(result.nestedTools[0]?.subtitle).toBe('')
@@ -302,8 +270,7 @@ describe('mapToolGroupProps', () => {
 
   it('does not count unresolved tools as files under Preparing', () => {
     const result = mapToolGroupProps(
-      [tool('t1', 'tool', '', 'running'), tool('t2', 'tool', '', 'running')],
-      { groupTiming: { startedAt: 1_000 } }
+      [tool('t1', 'tool', '', 'running'), tool('t2', 'tool', '', 'running')]
     )
 
     expect(result.runningLabel).toBe('Preparing…')
@@ -322,8 +289,7 @@ describe('mapToolGroupProps', () => {
           'fail',
           'Unknown tool "write_file_check". Use edit or str_replace to change files.'
         )
-      ],
-      { groupTiming: { startedAt: 1_000 } }
+      ]
     )
     const unknown = result.nestedTools.find((row) => row.name === 'write_file_check')
     expect(unknown?.title).not.toBe('placeholder')
@@ -341,8 +307,7 @@ describe('mapToolGroupProps', () => {
           'fail',
           'questions: Expected array, received string'
         )
-      ],
-      { groupTiming: { startedAt: 1_000 } }
+      ]
     )
     expect(result.nestedTools[0]?.subtitle).toBe('')
     expect(result.nestedTools[0]?.title).not.toContain('…')
@@ -359,8 +324,7 @@ describe('mapToolGroupProps', () => {
           'fail',
           'ask_question.questions must be a JSON array of question objects.'
         )
-      ],
-      { groupTiming: { startedAt: 1_000 } }
+      ]
     )
     const ask = result.nestedTools.find((row) => row.name === 'ask_question')
     expect(ask?.title).toBe('Failed')
@@ -371,8 +335,7 @@ describe('mapToolGroupProps', () => {
       [
         tool('t1', 'edit', 'a.ts', 'done', 'Created a.ts (3 chars)'),
         tool('t2', 'edit', 'b.ts', 'done', 'Created b.ts (3 chars)')
-      ],
-      { groupTiming: { startedAt: 1_000 } }
+      ]
     )
     expect(result.doneLabel).toBe('Created')
   })
@@ -382,8 +345,7 @@ describe('mapToolGroupProps', () => {
       [
         tool('t1', 'edit', 'a.ts', 'done', 'Created a.ts (3 chars)'),
         tool('t2', 'edit', 'b.ts', 'done', 'Wrote b.ts (3 chars)')
-      ],
-      { groupTiming: { startedAt: 1_000 } }
+      ]
     )
     expect(result.doneLabel).toBe('Edited')
   })

@@ -1,6 +1,6 @@
 import { useRef, type JSX, type KeyboardEvent } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { Input, cn } from '@renderer/lib/ui'
+import { Input, Textarea, cn } from '@renderer/lib/ui'
 import { CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type { UiAgentQuestionItem } from '@shared/transcript'
 
@@ -19,15 +19,6 @@ const OPTION_BASE = cn(
 /** Hover stays lighter than the selected fill so hover never reads as answered. */
 const OPTION_IDLE = cn('text-secondary hover:text-fg', CONTROL_HOVER)
 const OPTION_ACTIVE = SELECTED
-
-/** Input's field chrome, for the one multi-line field (no Textarea primitive yet). */
-const TEXTAREA_CHROME = cn(
-  'rounded-md border border-border bg-bg text-fg placeholder:text-tertiary',
-  'hover:border-border-strong',
-  'focus-visible:border-border-strong focus-visible:vy-focus-ring',
-  'disabled:vy-disabled-state disabled:hover:border-border',
-  'vy-transition'
-)
 
 export type QuestionFieldProps = {
   item: UiAgentQuestionItem
@@ -328,9 +319,8 @@ export function TextField({
   onChange
 }: QuestionFieldProps): JSX.Element {
   return (
-    <textarea
+    <Textarea
       id={`${promptId}-input`}
-      className={cn(TEXTAREA_CHROME, 'min-h-[64px] w-full resize-y px-3 py-1.5 text-sm')}
       placeholder="Your answer…"
       aria-labelledby={promptId}
       disabled={disabled}

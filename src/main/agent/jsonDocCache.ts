@@ -1,9 +1,9 @@
 import { readFile, stat } from 'fs/promises'
 
 /**
- * Mtime-keyed raw-JSON parse cache shared by the Home aggregation paths
- * (`runStats`, `homeActivity`, `listRuns`). The same `receipt.json` /
- * `status.json` / `usage.json` was being fully read + parsed by up to three
+ * Mtime-keyed raw-JSON parse cache shared by the Home aggregation and run-list
+ * paths (`homeActivity`, `listRuns`). The same `receipt.json` /
+ * `status.json` / `usage.json` was being fully read + parsed by several
  * pipelines per Home refresh cycle; unchanged files — the overwhelming
  * majority — are now read and parsed exactly once per write.
  *

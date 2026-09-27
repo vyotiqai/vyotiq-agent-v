@@ -14,8 +14,7 @@ export function TaskHeader({
   title,
   editor,
   facts,
-  actions,
-  headingRef
+  actions
 }: {
   /** None for a task that has not started. */
   state?: TaskState | null
@@ -25,7 +24,6 @@ export function TaskHeader({
   editor?: ReactNode
   facts?: Array<{ text: ReactNode; mono?: boolean; title?: string }>
   actions?: ReactNode
-  headingRef?: Ref<HTMLHeadingElement>
 }) {
   return (
     <header
@@ -39,7 +37,6 @@ export function TaskHeader({
       ) : null}
       {editor ?? (
         <h1
-          ref={headingRef}
           tabIndex={-1}
           title={title}
           className="min-w-0 truncate text-sm font-semibold text-fg-strong outline-none"

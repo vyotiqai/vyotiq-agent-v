@@ -58,6 +58,10 @@ describe('noticeTaskTitle', () => {
     expect(noticeTaskTitle({ goal: '   ' }, 'abcdef1234567')).toBe('abcdef12')
     expect(noticeTaskTitle(null, 'abcdef1234567')).toBe('abcdef12')
   })
+
+  it('calls a task started without words "Untitled task", never by its stored placeholder', () => {
+    expect(noticeTaskTitle({ goal: 'chat' }, 'abcdef1234567')).toBe('Untitled task')
+  })
 })
 
 describe('needs-you notices', () => {

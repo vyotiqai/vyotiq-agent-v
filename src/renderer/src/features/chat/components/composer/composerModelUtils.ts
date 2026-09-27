@@ -1,6 +1,6 @@
-import { PROVIDER_DEFAULTS, seedModelsFor, providerLabel } from '@shared/providers'
+import { PROVIDER_DEFAULTS, seedModelsFor } from '@shared/providers'
 import type { ModelInfo, ProviderId } from '@shared/ipc'
-import { modelSelectionKey, parseModelSelectionKey } from '@shared/domain/modelSelection'
+import { modelSelectionKey } from '@shared/domain/modelSelection'
 import { inferSupportedServiceTiers } from '@shared/domain/serviceTier'
 
 export type ModelFilterOpts = { hasWorkspace: boolean; hasImages: boolean; hasAudio?: boolean }
@@ -154,35 +154,6 @@ export function buildModelMetaMap(
     }
   }
   return map
-}
-
-/** Resolve a stored model key to a picker row, including cross-provider favorites/recent. */
-export function resolvePickerOption(
-  key: string,
-  optionsByProvider: Record<ProviderId, ModelPickerOption[]>,
-  modelMetaByValue: Record<string, ModelInfo>
-): ModelPickerOption | undefined {
-  const parsed = parseModelSelectionKey(key)
-  if (!parsed) return undefined
-  const found = optionsByProvider[parsed.provider]?.find((o) => o.value === key)
-  if (found) return found
-  const meta = modelMetaByValue[key]
-  const group =
-    parsed.provider === 'openrouter' && parsed.model.includes('/')
-      ? openRouterGroup(parsed.model)
-      : providerLabel(parsed.provider)
-  const label = compactModelLabel(
-    formatModelDisplayName(parsed.model, meta?.displayName),
-    providerLabel(parsed.provider),
-    group
-  )
-  return {
-    value: key,
-    label,
-    group,
-    subProvider: openRouterSubProvider(parsed.model),
-    meta
-  }
 }
 
 export function supportedTiersForModel(

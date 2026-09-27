@@ -31,8 +31,7 @@ import {
   hasWorkspaceHotUi,
   resolveHotComposerDraft,
   seedWorkspaceHotUi,
-  setWorkspaceHotComposerDraft,
-  setWorkspaceHotUi
+  setWorkspaceHotComposerDraft
 } from './workspaceHotUiStore'
 import {
   clearComposerAttachments,
@@ -333,8 +332,6 @@ export type WorkspaceUiSlice = {
   composerDraft: string
   composerDraftByRunId: Record<string, string>
   agentMode: AgentInteractionMode
-  /** Whether this workspace's group is expanded in the sidebar (undefined = default). */
-  expanded?: boolean
   /** Persisted per-run card expansion state (tool/group/thinking, collapsed turns). */
   expansionsByRunId: Record<string, RunExpansions>
 }
@@ -463,7 +460,6 @@ export type WorkspaceContext = {
   activeRunId: string | null
   openRunIds: string[]
   backgroundRunIds: Set<string>
-  sessionQuery: string
   ui: WorkspaceUiSlice
   settingsOverride: WorkspaceSettingsOverride | null
 }
@@ -499,7 +495,6 @@ function uiStateFromContext(ctx: WorkspaceContext): WorkspaceUiState {
     composerDraft: ctx.ui.composerDraft,
     composerDraftByRunId: { ...ctx.ui.composerDraftByRunId },
     agentMode: ctx.ui.agentMode,
-    expanded: ctx.ui.expanded,
     expansionsByRunId: pruneExpansionsByRunId(ctx.ui.expansionsByRunId, {
       openRunIds: ctx.openRunIds,
       activeRunId: ctx.activeRunId
@@ -557,14 +552,12 @@ function contextFromRegistry(path: string, registry: WorkspacesState): Workspace
     activeRunId: ui.activeRunId,
     openRunIds: [...ui.openRunIds],
     backgroundRunIds: new Set(),
-    sessionQuery: '',
     ui: {
       scrollTop: ui.scrollTop,
       scrollTopByRunId,
       composerDraft: ui.composerDraft,
       composerDraftByRunId: { ...(ui.composerDraftByRunId ?? {}) },
       agentMode: ui.agentMode ?? 'agent',
-      expanded: ui.expanded,
       expansionsByRunId: { ...(ui.expansionsByRunId ?? {}) }
     },
     settingsOverride:
@@ -792,11 +785,10 @@ export function useWorkspaceManager(options?: {
       const scrollChanged =
         refCtx.ui.scrollTop !== stateCtx.ui.scrollTop ||
         Object.keys(refScroll).some((key) => refScroll[key] !== stateScroll[key])
-      // Prefer ref for keystroke-hot fields so draft/query isolation is not wiped
+      // Prefer ref for keystroke-hot fields so draft isolation is not wiped
       // when React state lags behind contextsRef.
       merged[path] = {
         ...stateCtx,
-        sessionQuery: refCtx.sessionQuery,
         ui: {
           ...stateCtx.ui,
           composerDraft: refCtx.ui.composerDraft,
@@ -1556,7 +1548,6 @@ export function useWorkspaceManager(options?: {
             composerDraft,
             composerDraftByRunId,
             agentMode: existing.ui.agentMode ?? refUi?.agentMode ?? ui.agentMode ?? 'agent',
-            expanded: existing.ui.expanded ?? refUi?.expanded ?? ui.expanded,
             expansionsByRunId: {
               ...(ui.expansionsByRunId ?? {}),
               ...(refUi?.expansionsByRunId ?? {}),
@@ -1589,8 +1580,7 @@ export function useWorkspaceManager(options?: {
         const migrated = migrateLegacyComposerDraftMap(ctx.ui, ctx.activeRunId)
         seedWorkspaceHotUi(path, {
           composerDraft: ctx.ui.composerDraft,
-          composerDraftByRunId: migrated,
-          sessionQuery: ctx.sessionQuery
+          composerDraftByRunId: migrated
         })
       } else {
         // Keep store draft in sync when registry restores a non-empty draft onto an empty store path.
@@ -1609,8 +1599,7 @@ export function useWorkspaceManager(options?: {
             composerDraftByRunId: {
               ...migrated,
               ...hot.composerDraftByRunId
-            },
-            sessionQuery: hot.sessionQuery || ctx.sessionQuery
+            }
           })
         }
       }
@@ -1771,32 +1760,6 @@ export function useWorkspaceManager(options?: {
   const activeContext = activeWorkspace
     ? findByWorkspacePath(contexts, activeWorkspace)
     : null
-
-  /** Persisted sidebar expand/collapse per workspace (defaults to active expanded). */
-  const workspaceExpandedByPath = useMemo(() => {
-    const map: Record<string, boolean> = {}
-    for (const [path, ctx] of Object.entries(contexts)) {
-      map[path] =
-        ctx.ui.expanded ??
-        (activeWorkspace != null && workspacePathsEqual(path, activeWorkspace))
-    }
-    return map
-  }, [contexts, activeWorkspace])
-
-  const setWorkspaceExpanded = useCallback(
-    (path: string, expanded: boolean): void => {
-      const ctx = contextsRef.current[path]
-      if (!ctx || ctx.ui.expanded === expanded) return
-      const nextCtx: WorkspaceContext = {
-        ...ctx,
-        ui: { ...ctx.ui, expanded }
-      }
-      contextsRef.current = { ...contextsRef.current, [path]: nextCtx }
-      setContexts((prev) => ({ ...prev, [path]: nextCtx }))
-      schedulePersistUiState(path, nextCtx)
-    },
-    [schedulePersistUiState]
-  )
 
   const getReservedPx = useCallback((): number => {
     const ctx = paneCapacityContextRef.current
@@ -1965,19 +1928,6 @@ export function useWorkspaceManager(options?: {
     },
     [paneLayout]
   )
-
-  const isSessionFocusedInPane = useCallback(
-    (workspacePath: string, runId: string): boolean => {
-      const focused = getFocusedPane()
-      if (!focused) return false
-      return (
-        workspacePathsEqual(focused.workspacePath, workspacePath) && focused.runId === runId
-      )
-    },
-    [getFocusedPane, paneLayout]
-  )
-
-  const isMultiPane = (paneLayout?.panes.length ?? 0) > 1
 
   const switchWorkspace = useCallback(
     async (path: string): Promise<void> => {
@@ -2308,17 +2258,6 @@ export function useWorkspaceManager(options?: {
     [openRunTabInWorkspace, switchWorkspace]
   )
 
-  const openSessionInFocusedPane = useCallback(
-    (workspacePath: string, runId: string): void => {
-      openRunTabInWorkspace(workspacePath, runId, { syncLayout: false })
-      const layout =
-        paneLayoutRef.current ??
-        singlePaneLayout(workspacePath, runId, createPaneId())
-      commitPaneLayout(openRunInFocusedPane(layout, { workspacePath, runId }))
-    },
-    [commitPaneLayout, openRunTabInWorkspace]
-  )
-
   /**
    * True when runId is an inline agent instance: listed under the workspace,
    * or live in any parent controller's agentInstances snapshot.
@@ -2606,22 +2545,6 @@ export function useWorkspaceManager(options?: {
     [schedulePersistUiState]
   )
 
-  const setSessionQuery = useCallback(
-    (query: string): void => {
-      if (!activeWorkspace) return
-      const ctx = contextsRef.current[activeWorkspace]
-      if (!ctx) return
-      if (ctx.sessionQuery === query) return
-      const nextCtx: WorkspaceContext = { ...ctx, sessionQuery: query }
-      contextsRef.current = {
-        ...contextsRef.current,
-        [activeWorkspace]: nextCtx
-      }
-      setWorkspaceHotUi(activeWorkspace, { sessionQuery: query })
-    },
-    [activeWorkspace]
-  )
-
   const setSettingsOverride = useCallback(
     async (
       path: string,
@@ -2800,23 +2723,6 @@ export function useWorkspaceManager(options?: {
     return () => window.clearTimeout(timer)
   }, [activeWorkspace, chatSnapshot.runTerminalTick, refreshRuns])
 
-  const isRunActiveInBackground = useCallback(
-    (runId: string): boolean => backgroundRunIdsRef.current.has(runId),
-    []
-  )
-
-  const workspaceHasBackgroundRun = useCallback(
-    (workspacePath: string): boolean => {
-      return activeRuns.some(
-        (r) =>
-          workspacePathsEqual(r.workspacePath, workspacePath) &&
-          (backgroundRunIdsRef.current.has(r.runId) ||
-            !contexts[workspacePath]?.openRunIds.includes(r.runId))
-      )
-    },
-    [activeRuns, contexts]
-  )
-
   const clearRunsError = useCallback((workspacePath?: string) => {
     const path = workspacePath ?? activeWorkspace
     if (!path) return
@@ -2917,20 +2823,15 @@ export function useWorkspaceManager(options?: {
     switchWorkspace,
     addWorkspace,
     removeWorkspace,
-    workspaceExpandedByPath,
-    setWorkspaceExpanded,
     getRunController,
     loadRunIntoTab,
     openRunTab,
     openRunInWorkspace,
     newChatInWorkspace,
     closeRunTab,
-    setSessionQuery,
     refreshActiveRuns,
     refreshWorkspaceRuns,
     loadOlderRuns,
-    isRunActiveInBackground,
-    workspaceHasBackgroundRun,
     scrollRestoreToken,
     chatSurfaceEpoch,
     workspaceError,
@@ -2943,7 +2844,6 @@ export function useWorkspaceManager(options?: {
     chatActions,
     purgeDeletedRunUi,
     paneLayout,
-    isMultiPane,
     focusPaneById,
     closePaneById,
     setPaneSizesByIndex,
@@ -2951,9 +2851,7 @@ export function useWorkspaceManager(options?: {
     splitFocusedPane,
     isInstanceRun,
     getInstanceParentRunId,
-    openSessionInFocusedPane,
     isSessionOpenInPane,
-    isSessionFocusedInPane,
     getFocusedPane,
     getPaneById,
     openNewChatInPane,

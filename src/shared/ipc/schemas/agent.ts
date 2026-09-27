@@ -1184,59 +1184,6 @@ export const RunTokenUsageSchema = z.object({
 })
 export type RunTokenUsage = z.infer<typeof RunTokenUsageSchema>
 
-/** Per-run usage stat for aggregate surfaces (Home usage strip). */
-export const RunStatSchema = z.object({
-  runId: z.string(),
-  /** Transcript rows stitched across rotated archive heads + the live file. */
-  messages: z.number().int().min(0),
-  tokenUsage: RunTokenUsageSchema.optional(),
-  // — Session detail from receipt.json (absent while a run has no receipt). —
-  model: z.string().min(1).optional(),
-  provider: z.string().min(1).optional(),
-  billedCost: z.number().finite().optional(),
-  /** Estimated cost (tokens × published prices) for runs without a provider-reported bill. */
-  estimatedCost: z.number().finite().optional(),
-  /** Final agent step count (receipt.step). */
-  steps: z.number().int().min(0).optional(),
-  compactionCount: z.number().int().min(0).optional(),
-  toolStats: z
-    .object({
-      totalCalls: z.number().int().min(0),
-      ok: z.number().int().min(0),
-      failed: z.number().int().min(0),
-      byName: z.record(z.string(), RunReceiptToolStatSchema)
-    })
-    .optional(),
-  failureClusters: z
-    .array(z.object({ key: z.string(), count: z.number().int().min(1) }))
-    .optional(),
-  maxConsecutiveToolFailures: z.number().int().min(0).optional(),
-  verification: z
-    .object({
-      lastMutationAt: z.string().optional(),
-      lastCheckAt: z.string().optional(),
-      verifiedAfterLastMutation: z.boolean()
-    })
-    .optional(),
-  /** Raw model context window in effect at the final step (context pressure). */
-  contextWindow: z.number().int().min(0).optional(),
-  /** First persisted event timestamp — run start (duration = writtenAt − this). */
-  startedAt: z.string().optional(),
-  writtenAt: z.string().optional()
-})
-export type RunStat = z.infer<typeof RunStatSchema>
-
-export const RunStatsRequestSchema = z.object({
-  workspacePath: z.string().min(1),
-  runIds: z.array(z.string().min(1)).min(1).max(100)
-})
-export type RunStatsRequest = z.infer<typeof RunStatsRequestSchema>
-
-export const RunStatsResultSchema = z.object({
-  stats: z.array(RunStatSchema)
-})
-export type RunStatsResult = z.infer<typeof RunStatsResultSchema>
-
 /** Home Activity request: aggregate over the open workspaces' receipts. */
 export const HomeActivityRequestSchema = z.object({
   workspacePaths: z.array(z.string().min(1)).min(1).max(12),
@@ -1479,12 +1426,6 @@ export const RunReceiptSchema = z.object({
   contractExcerpt: z.string()
 })
 export type RunReceipt = z.infer<typeof RunReceiptSchema>
-
-export const HarnessReviewRequestSchema = z.object({
-  workspacePath: z.string().min(1),
-  limit: z.number().int().min(1).max(100).optional()
-})
-export type HarnessReviewRequest = z.infer<typeof HarnessReviewRequestSchema>
 
 export const HarnessReviewResultSchema = z.object({
   proposalPath: z.string().min(1),

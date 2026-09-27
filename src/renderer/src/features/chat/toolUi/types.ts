@@ -1,12 +1,10 @@
 import type { IconName } from '@renderer/lib/icons'
 import type { ChatRightPanelId } from '@renderer/lib/utils/layout'
-import type { UiGroupTiming, UiToolProgressEntry, UiToolRow } from '@shared/transcript'
+import type { UiToolProgressEntry, UiToolRow } from '@shared/transcript'
 
 export type ToolPresentation = 'prominent' | 'compact'
 
 export type ToolCategory = 'file' | 'edit' | 'search' | 'command' | 'browse' | 'browser'
-
-export type ToolBodyTiming = UiGroupTiming
 
 export type ToolHeaderMeta = {
   verb: string
@@ -44,7 +42,6 @@ export type ToolBodyProps = {
   mcpServerNames?: ReadonlyMap<string, string>
   /** Suppress redundant path chrome already shown in the compact row. */
   inGroup?: boolean
-  timing?: ToolBodyTiming
 }
 
 export type ToolBodyContext = {
@@ -58,5 +55,4 @@ export type ToolBodyContext = {
   onCollapse?: () => void
   mcpServerNames?: ReadonlyMap<string, string>
   inGroup?: boolean
-  timing?: ToolBodyTiming
 }

@@ -1,17 +1,13 @@
 import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Icon } from '@renderer/lib/icons'
+import { Alert } from '@renderer/lib/ui/Alert'
 import { Button } from '@renderer/lib/ui/Button'
 import { cn } from '@renderer/lib/ui/cn'
 import { MENU_SURFACE } from '@renderer/lib/ui/menuStyles'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import { BORDER_DIVIDER, DIVIDER_FILL, NUM, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
-import {
-  alignContextUsageToModelWindow,
-  type ContextToolGroupDetail,
-  type ContextUsageState
-} from '@shared/utils/contextUsage'
+import type { ContextToolGroupDetail, ContextUsageState } from '@shared/utils/contextUsage'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import {
   LONG_RUN_BILLED_INPUT_HINT_THRESHOLD,
@@ -196,7 +192,8 @@ function BreakdownRow({
       )}
       <span
         className={cn(
-          'w-10 shrink-0 text-right text-caption tnum',
+          'w-10 shrink-0 text-right',
+          NUM,
           muted ? 'text-tertiary' : 'text-fg'
         )}
       >
@@ -204,7 +201,8 @@ function BreakdownRow({
       </span>
       <span
         className={cn(
-          'w-9 shrink-0 text-right text-caption tnum',
+          'w-9 shrink-0 text-right',
+          NUM,
           muted ? 'text-tertiary' : 'text-secondary'
         )}
       >
@@ -237,10 +235,10 @@ function McpServerRows({ groups }: { groups: ContextToolGroupDetail[] }) {
           <span className="min-w-0 flex-1 truncate text-caption text-tertiary" title={group.serverId}>
             {group.serverId}
           </span>
-          <span className="shrink-0 text-caption tnum text-tertiary">
+          <span className={cn('shrink-0 text-tertiary', NUM)}>
             {group.toolCount} {group.toolCount === 1 ? 'tool' : 'tools'}
           </span>
-          <span className="w-10 shrink-0 text-right text-caption tnum text-secondary">
+          <span className={cn('w-10 shrink-0 text-right text-secondary', NUM)}>
             {formatTokens(group.tokens)}
           </span>
           <span className="w-9 shrink-0" aria-hidden />
@@ -290,7 +288,7 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   return (
     <>
       <BreakdownRow
-        label="Messages"
+        label="Record"
         tokens={usage.layers.history}
         total={base}
         color="bg-accent"
@@ -351,7 +349,6 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   )
 }
 
-/** Latest-step cache hit share of provider input, or null when unknown. */
 /**
  * The meter's words: how full the context is, of what, how much was cached,
  * and whether a long-run tip waits inside. Shared by every place the meter
@@ -373,6 +370,7 @@ export function contextMeterLabels(
   }
 }
 
+/** Latest-step cache hit share of provider input, or null when unknown. */
 export function cacheHitPct(totals: StepUsageTotals): number | null {
   if (totals.cachedInputTokens <= 0 || totals.inputTokens <= 0) return null
   return Math.round((totals.cachedInputTokens / totals.inputTokens) * 100)
@@ -441,14 +439,14 @@ export function ContextMeterPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="shrink-0 px-3.5 pt-3.5 pb-3">
+      <header className="shrink-0 p-3">
         <div className="flex items-start gap-3">
           <UsageRing ratio={ratio} size={56} level={level}>
             <span className={levelRing[level]}>{displayPct}%</span>
           </UsageRing>
           <div className="min-w-0 flex-1 pt-0.5">
             <p className="m-0 text-sm font-medium text-fg">Context</p>
-            <p className="m-0 mt-0.5 text-caption leading-snug text-secondary">
+            <p className="m-0 mt-0.5 text-caption text-secondary">
               Current step {usage.step}
               <span className="text-tertiary"> · </span>
               {formatTokens(usage.window)} model
@@ -456,10 +454,10 @@ export function ContextMeterPanel({
                 <span className="text-tertiary"> · estimated</span>
               ) : null}
             </p>
-            <p className="m-0 mt-1.5 text-xs tnum text-fg">
-              <span className="font-semibold">{formatTokens(usage.used)}</span>
+            <p className="m-0 mt-1.5 text-caption text-fg">
+              <span className={NUM}>{formatTokens(usage.used)}</span>
               <span className="text-secondary"> used of </span>
-              <span className="font-medium">{formatTokens(budget)}</span>
+              <span className={NUM}>{formatTokens(budget)}</span>
             </p>
           </div>
         </div>
@@ -488,25 +486,19 @@ export function ContextMeterPanel({
         </div>
       </header>
 
-      <div className={cn('sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t px-3.5 py-3', BORDER_DIVIDER)}>
+      <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain border-t p-3 scroll-thin', BORDER_DIVIDER)}>
         {overBudget ? (
-          <p
-            className="m-0 mb-3 flex items-start gap-1.5 rounded-md bg-danger-soft px-2.5 py-2 text-caption leading-snug text-danger"
-            role="alert"
-          >
-            <Icon name="warning" size={13} className="mt-px shrink-0" />
-            <span className="min-w-0">
-              {usage.overflow
-                ? 'Context still exceeds the model window after compaction. Start a new task if the agent cannot fold further.'
-                : `${formatTokens(overage)} over budget — auto-compact will fold at the threshold, or use Compact when the run is stopped.`}
-            </span>
-          </p>
+          <Alert className="mb-3">
+            {usage.overflow
+              ? 'Context still exceeds the model window after compaction. Start a new task if the agent cannot fold further.'
+              : `${formatTokens(overage)} over budget — auto-compact will fold at the threshold, or use Compact when the run is stopped.`}
+          </Alert>
         ) : null}
 
         {effectiveAdvisoryHint ? (
-          <p className="m-0 mb-3 rounded-md bg-warning-soft px-2.5 py-2 text-caption leading-snug text-warning" role="status">
+          <Alert variant="info" className="mb-3">
             {effectiveAdvisoryHint}
-          </p>
+          </Alert>
         ) : null}
 
         {contentTotal > 0 ? (
@@ -588,7 +580,7 @@ export function ContextMeterPanel({
               ) : null}
             </dl>
             {reasoningPct != null && reasoningPct >= 40 ? (
-              <p className="m-0 text-caption leading-snug text-secondary">
+              <p className="m-0 text-caption text-secondary">
                 Reasoning is a large share of output — lower Think effort for simpler work.
               </p>
             ) : null}
@@ -619,7 +611,7 @@ export function ContextMeterPanel({
           {compactMessage ? (
             <p
               className={cn(
-                'm-0 mt-2 text-center text-caption leading-snug',
+                'm-0 mt-2 text-center text-caption',
                 compactFailed ? 'text-danger' : 'text-secondary'
               )}
               role={compactFailed ? 'alert' : 'status'}
@@ -633,34 +625,15 @@ export function ContextMeterPanel({
   )
 }
 
-export function ContextMeter({
-  usage,
-  modelWindow,
-  onCompact,
-  compactDisabled = false,
-  advisoryHint = null,
-  className
-}: {
-  usage: ContextUsageState | null
-  modelWindow?: number | null
-  onCompact?: (
-    focus?: string
-  ) => Promise<{ ok: true; message: string } | { ok: false; message: string }>
-  compactDisabled?: boolean
-  advisoryHint?: string | null
-  className?: string
-}) {
+/**
+ * A ring that opens the read-only context panel — the agent instance pane's
+ * header meter. The task pane's meter, with Compact, lives in TaskOptions.
+ */
+export function ContextMeter({ usage }: { usage: ContextUsageState | null }) {
   const [open, setOpen] = useState(false)
-  const [compacting, setCompacting] = useState(false)
-  const [compactMessage, setCompactMessage] = useState<string | null>(null)
-  const [compactFailed, setCompactFailed] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const panelId = useId()
-  const alignedUsage =
-    usage && modelWindow && modelWindow > 0
-      ? alignContextUsageToModelWindow(usage, modelWindow)
-      : usage
   const { position } = useDropdownMenu({
     open,
     onOpenChange: setOpen,
@@ -668,32 +641,18 @@ export function ContextMeter({
     panelRef,
     placement: 'up',
     align: 'end',
-    disabled: !alignedUsage,
+    disabled: !usage,
     trapFocus: true
   })
 
-  const runCompaction = async (): Promise<void> => {
-    if (!onCompact || compacting || compactDisabled) return
-    setCompacting(true)
-    setCompactMessage(null)
-    setCompactFailed(false)
-    try {
-      const result = await onCompact()
-      setCompactMessage(result.message)
-      setCompactFailed(!result.ok)
-    } finally {
-      setCompacting(false)
-    }
-  }
-
   // Silent before the first usage report: an em-dash placeholder spends
-  // permanent toolbar width on information that does not exist yet.
-  if (!alignedUsage || alignedUsage.window <= 0) {
+  // permanent header width on information that does not exist yet.
+  if (!usage || usage.window <= 0) {
     return null
   }
 
-  const { overBudget, ratio, level } = usageMetrics(alignedUsage)
-  const labels = contextMeterLabels(alignedUsage, advisoryHint)
+  const { overBudget, ratio, level } = usageMetrics(usage)
+  const labels = contextMeterLabels(usage, null)
 
   const panelLayout =
     open && position
@@ -715,7 +674,7 @@ export function ContextMeter({
       : null
 
   return (
-    <div className={cn('relative flex h-7 shrink-0 items-center', className)}>
+    <div className="relative flex h-7 shrink-0 items-center">
       <button
         ref={triggerRef}
         type="button"
@@ -759,15 +718,7 @@ export function ContextMeter({
                 maxHeight: panelLayout.maxHeight
               }}
             >
-              <ContextMeterPanel
-                usage={alignedUsage}
-                onCompact={onCompact ? () => void runCompaction() : undefined}
-                compacting={compacting}
-                compactDisabled={compactDisabled}
-                compactMessage={compactMessage}
-                compactFailed={compactFailed}
-                advisoryHint={advisoryHint}
-              />
+              <ContextMeterPanel usage={usage} />
             </div>,
             document.body
           )

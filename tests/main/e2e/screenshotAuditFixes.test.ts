@@ -130,7 +130,7 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     expect(status.chip).toBe('Invalid arguments')
     expect(status.message).not.toMatch(/Expected array, received string/)
 
-    const group = mapToolGroupProps(tools, { groupTiming: { startedAt: 1_000 } })
+    const group = mapToolGroupProps(tools)
     const nested = group.nestedTools.find((r) => r.name === 'ask_question')
     // Args do not yield a recoverable title; executeTool summary "Invalid arguments" is live-path only.
     expect(nested?.subtitle).toBe('')
@@ -239,7 +239,7 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     msgs = appendToolResult(msgs, 'w1', 'write_file_check', result.content, false)
 
     const tools = toolRowsFromMessages(msgs)
-    const group = mapToolGroupProps(tools, { groupTiming: { startedAt: 1_000 } })
+    const group = mapToolGroupProps(tools)
     const unknown = group.nestedTools.find((r) => r.name === 'write_file_check')
     expect(unknown?.title.toLowerCase()).not.toBe('placeholder')
     expect(unknown?.title.toLowerCase()).toMatch(/write/)
@@ -316,7 +316,7 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     // EditBody shows tool.content error when status=fail (assert content preserved).
     expect(edit!.content).toBe(failContent)
 
-    const group = mapToolGroupProps(tools, { groupTiming: { startedAt: 1_000 } })
+    const group = mapToolGroupProps(tools)
     const nested = group.nestedTools.find((r) => r.name === 'edit')
     expect(nested?.subtitle?.toLowerCase()).not.toBe('rejected')
     expect(nested?.subtitle).toMatch(/index\.html/i)

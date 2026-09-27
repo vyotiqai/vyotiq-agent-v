@@ -211,7 +211,7 @@ export function buildHelpMessage(commands: SlashCommandDescriptor[]): string {
       .slice(0, 40)
       .map((c) => `- \`/${c.trigger}\` — ${c.description || c.label}`),
     '',
-    'Type `/` in the composer to search all commands.'
+    'Type `/` in the instruction line to search all commands.'
   ]
   return lines.join('\n')
 }

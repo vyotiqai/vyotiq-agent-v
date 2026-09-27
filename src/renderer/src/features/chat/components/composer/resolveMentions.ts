@@ -109,7 +109,7 @@ async function resolveChatBlock(
   workspacePath: string,
   mention: Extract<ComposerMention, { kind: 'chat' }>
 ): Promise<string> {
-  const header = `## Referenced past chat\nTitle: ${mention.title}\nRun id: ${mention.runId}`
+  const header = `## Referenced past task\nTitle: ${mention.title}\nRun id: ${mention.runId}`
   try {
     const res = await window.vyotiq.loadRun(workspacePath, mention.runId)
     if (!res.ok) return header

@@ -27,9 +27,7 @@ import type {
   TaskFileStatsResult,
   TaskFileDiffResult,
   RunArtifactName,
-  RunStatsResult,
   HomeActivityResult,
-  HarnessReviewResult,
   RunFeedbackGetResult,
   RunFeedbackSetResult,
   RunFeedbackRating,
@@ -84,8 +82,6 @@ import type {
   GithubIssueCreateResult,
   CrashDiagnosticsSnapshot,
   CrashRecoveryPending,
-  TraceStartResult,
-  TraceStatusResult,
   TraceStopResult,
   ToolApprovalDecision,
   ToolApprovalRequest,
@@ -317,18 +313,10 @@ export interface VyotiqApi {
     runId: string
     path: string
   }) => Promise<IpcResult<TaskFileDiffResult>>
-  runStats: (payload: {
-    workspacePath: string
-    runIds: string[]
-  }) => Promise<IpcResult<RunStatsResult>>
   homeActivity: (payload: {
     workspacePaths: string[]
     windowDays?: number
   }) => Promise<IpcResult<HomeActivityResult>>
-  harnessReview: (payload: {
-    workspacePath: string
-    limit?: number
-  }) => Promise<IpcResult<HarnessReviewResult>>
   runFeedbackGet: (payload: {
     workspacePath: string
     runId: string
@@ -577,8 +565,6 @@ export interface VyotiqApi {
   getCrashDiagnostics: () => Promise<IpcResult<CrashDiagnosticsSnapshot>>
   consumeCrashRecovery: () => Promise<IpcResult<CrashRecoveryPending | null>>
   telemetryStatus: () => Promise<IpcResult<TelemetryStatus>>
-  startTrace: () => Promise<IpcResult<TraceStartResult>>
-  getTraceStatus: () => Promise<IpcResult<TraceStatusResult>>
   stopTrace: () => Promise<IpcResult<TraceStopResult>>
   getAppInfo: () => Promise<IpcResult<AppInfo>>
   updater: VyotiqUpdaterApi

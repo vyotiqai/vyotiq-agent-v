@@ -147,7 +147,7 @@ describe('resolveComposerMentions', () => {
       draft,
       existingFiles: []
     })
-    expect(result.text).toContain('Referenced past chat')
+    expect(result.text).toContain('Referenced past task')
     expect(result.text).toContain('earlier goal')
   })
 

@@ -49,7 +49,6 @@ function renderLine(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
     onChatSettingsChange: vi.fn(),
     onProviderModel: vi.fn(),
     onSend: vi.fn(),
-    onStop: vi.fn(),
     variant: 'line' as const,
     ...overrides
   }

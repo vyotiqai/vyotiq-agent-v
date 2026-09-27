@@ -128,7 +128,7 @@ export function Segmented<T extends string>({
       role="radiogroup"
       aria-label={label}
       aria-disabled={disabled || undefined}
-      className={cn('inline-flex h-7 items-center rounded-md bg-surface p-0.5', disabled && 'opacity-45', className)}
+      className={cn('inline-flex h-7 items-center rounded-md bg-surface p-0.5', disabled && 'vy-disabled-state', className)}
     >
       {items.map((it) => {
         const on = it.id === value

@@ -287,7 +287,7 @@ async function listProviderModelsUncached(
           { ...input, signal: timeout },
           enrichCatalogModels(input.provider, seeds)
         ),
-        warning: `${label} does not serve a model list (HTTP ${err.status}); the host is reachable and chat can still connect.${hint} Showing illustrative placeholder model IDs (not live models).`
+        warning: `${label} does not serve a model list (HTTP ${err.status}); the host is reachable and tasks can still run.${hint} Showing illustrative placeholder model IDs (not live models).`
       }
     }
     const raw = formatError(err)

@@ -227,7 +227,7 @@ export function AgentSection({
         <SwitchField
           id="auto-mode-switch"
           title="Switch between Ask and Agent on its own"
-          help="Takes effect from the next step of a live run. When off, only you change the mode — from the composer or a slash command."
+          help="Takes effect from the next step of a live run. When off, only you change the mode — from the instruction line or a slash command."
           checked={form.settings.autoModeSwitch}
           disabled={form.formLocked}
           onChange={(autoModeSwitch) => {
@@ -319,7 +319,7 @@ export function AgentSection({
         <SegmentedField
           id="response-verbosity"
           title="Answer length"
-          help="Default length of conversational replies. Code and task output are unaffected."
+          help="Default length of the agent's notes and summaries. Code and file output are unaffected."
           badge={scoped}
           value={verbosity}
           options={RESPONSE_VERBOSITY_OPTIONS}
@@ -332,7 +332,7 @@ export function AgentSection({
         <SettingsField
           id="response-language"
           title="Response language"
-          help="Leave blank to reply in the language you write in."
+          help="Leave blank to use the language of your instructions."
           badge={scoped}
           {...form.agentDefaultMark('responseLanguage')}
         >
@@ -363,7 +363,7 @@ export function AgentSection({
         <SettingsField
           id="agent-tone"
           title="Tone"
-          hint="How replies sound."
+          hint="How the agent's notes sound."
           help="Friendly, blunt, playful, formal. Leave blank for no tone directive."
           badge={scoped}
           wide

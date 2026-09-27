@@ -119,12 +119,12 @@ function PaneSkeleton({ label }: { label?: string }) {
     >
       {label ? <span className="sr-only">{label}</span> : null}
       <div className="flex h-10 shrink-0 items-center border-b border-border pl-4 pr-2">
-        <div className="h-3 w-32 animate-pulse rounded bg-surface" />
+        <div className="h-3 w-32 animate-pulse rounded-sm bg-surface" />
       </div>
       <div className="flex flex-col gap-3 px-4 py-4">
-        <div className="h-4 w-2/5 animate-pulse rounded bg-surface" />
-        <div className="h-4 w-3/5 animate-pulse rounded bg-surface" />
-        <div className="h-4 w-1/3 animate-pulse rounded bg-surface" />
+        <div className="h-4 w-2/5 animate-pulse rounded-sm bg-surface" />
+        <div className="h-4 w-3/5 animate-pulse rounded-sm bg-surface" />
+        <div className="h-4 w-1/3 animate-pulse rounded-sm bg-surface" />
       </div>
     </div>
   )
@@ -1854,7 +1854,7 @@ function App() {
                 paneCtrl?.applyManualCompaction?.(res.data)
                 return {
                   ok: true as const,
-                  message: `Summarised ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
+                  message: `Summarised ${res.data.messagesBefore - res.data.keptMessages} earlier record entries; ${res.data.keptMessages} kept verbatim.`
                 }
               } finally {
                 paneCtrl?.setCompacting?.(false)
@@ -1915,7 +1915,6 @@ function App() {
           itemsStore={snap.itemsStore}
           metaStore={snap.metaStore}
           running={snap.running}
-          invokeId={snap.invokeId}
           pendingRun={snap.pendingRun}
           error={snap.error}
           errorCode={snap.errorCode}
@@ -1945,7 +1944,6 @@ function App() {
           onLoadEarlierMessages={() => {
             void paneCtrl?.loadEarlierMessages()
           }}
-          showPageHeading={false}
           onActivate={() => focusPaneById(pane.paneId)}
           onProviderModel={(provider, model) => {
             paneCtrl?.setProviderModel(provider, model)
