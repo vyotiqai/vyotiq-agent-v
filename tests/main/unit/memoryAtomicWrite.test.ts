@@ -11,7 +11,7 @@
  * (`renameSync`), with `process.platform` pinned to `win32` so the retry
  * ladder runs on any host.
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'fs'
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -72,7 +72,10 @@ beforeEach(() => {
   fsState.writes = []
   fsState.renameAttempts = []
   fsState.transientLockTargets = new Map()
-  dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-atomic-'))
+  // Real path: macOS's tmpdir is /var/folders, a symlink to /private/var, and
+  // the writer resolves the memory root before writing, so paths compared
+  // against memoryRoot(dir) would otherwise never match there.
+  dir = realpathSync(mkdtempSync(join(tmpdir(), 'vyotiq-mem-atomic-')))
 })
 
 afterEach(() => {

@@ -111,9 +111,18 @@ function writeNote(name: string): void {
   writeFileSync(join(workspace, '.vyotiq', 'memory', 'notes', `${name}.md`), `- ${name}\n`, 'utf8')
 }
 
+/**
+ * macOS starts its FSEvents stream asynchronously, so a write in the first
+ * moments after fs.watch returns can go unreported. The watcher arms long
+ * before anything writes in the app; the tests write at once, so they wait
+ * for the stream to start first.
+ */
+const WATCH_SETTLE_MS = 300
+
 async function arm(): Promise<void> {
   const initial = await buildWorkspaceAgentContext(workspace, { enabled: false, phase: 'idle' })
   armAgentContextWatch(workspace, initial)
+  await sleep(WATCH_SETTLE_MS)
 }
 
 beforeEach(() => {
