@@ -93,7 +93,7 @@ import { readWorkspacesState } from '../../workspace/workspaces'
 import { workspacePathsEqual } from '../../../shared/workspacePath'
 import { workspaceIdFromPath } from '../../../shared/workspaceId'
 import { listActiveRuns } from '../runRegistry'
-import { AppError, formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
+import { formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
 import { assertPublicUrl } from '@main/net/webFetch'
 import { recordEgress } from '@main/net/egress'
 import {
@@ -1120,6 +1120,19 @@ async function createTransport(
   return new SSEClientTransport(url, { requestInit, fetch: fetchImpl })
 }
 
+/** OAuth browser flow may take minutes; non-OAuth still fails fast via server errors. */
+const MCP_CONNECT_TIMEOUT_MS = 120_000
+
+/**
+ * The `initialize` handshake answers to the connect deadline above, not the
+ * SDK's 60s request default. A stdio server launched as `npx -y pkg@latest`
+ * checks the registry and, run from a pnpm checkout, walks that project's
+ * whole node_modules before the package even starts: 17s idle in this repo,
+ * well past 60s on a busy launch. The SDK's timeout fired first, so the
+ * 120s budget never applied and the server showed "did not respond in time".
+ */
+const MCP_INITIALIZE_OPTIONS = { timeout: MCP_CONNECT_TIMEOUT_MS }
+
 type PendingMcpConnection = { client: Client; transport: Transport }
 
 /** The server said no to the credential we sent, as opposed to failing to answer. */
@@ -1159,7 +1172,7 @@ async function connectWithOptionalOAuth(
     const transport = await createTransport(server, { workspacePath })
     const client = createMcpClient(workspacePath)
     track({ client, transport })
-    await client.connect(transport)
+    await client.connect(transport, MCP_INITIALIZE_OPTIONS)
     return { client, transport }
   }
 
@@ -1173,7 +1186,7 @@ async function connectWithOptionalOAuth(
     const connection = { client, transport }
     track(connection)
     try {
-      await client.connect(transport)
+      await client.connect(transport, MCP_INITIALIZE_OPTIONS)
       return connection
     } catch (err) {
       if (!isMcpAuthRejection(err)) throw err
@@ -1218,7 +1231,7 @@ async function connectWithOptionalOAuth(
   const connection = { client, transport }
   track(connection)
   try {
-    await client.connect(transport)
+    await client.connect(transport, MCP_INITIALIZE_OPTIONS)
     return connection
   } catch (err) {
     if (!(err instanceof UnauthorizedError)) throw err
@@ -1285,7 +1298,7 @@ async function connectRemoteWithOAuth(
   track({ client, transport })
 
   try {
-    await client.connect(transport)
+    await client.connect(transport, MCP_INITIALIZE_OPTIONS)
     cancelMcpOAuthCallback(server.id)
     return { client, transport }
   } catch (err) {
@@ -1331,7 +1344,7 @@ async function connectRemoteWithOAuth(
       const transport2 = await createTransport(server, { authProvider, workspacePath })
       const client2 = createMcpClient(workspacePath)
       track({ client: client2, transport: transport2 })
-      await client2.connect(transport2)
+      await client2.connect(transport2, MCP_INITIALIZE_OPTIONS)
       await maybeLinkNativeGithubAfterMcpAuth(server.id)
       return { client: client2, transport: transport2 }
     } catch (oauthErr) {
@@ -1345,9 +1358,6 @@ async function connectRemoteWithOAuth(
     }
   }
 }
-
-/** OAuth browser flow may take minutes; non-OAuth still fails fast via server errors. */
-const MCP_CONNECT_TIMEOUT_MS = 120_000
 
 /**
  * Attempts allowed when the failure says the request never reached the server.
@@ -1834,30 +1844,27 @@ async function syncMcpServersUnlocked(
       await connectMcpServer(server, workspacePath)
       recordCircuitSuccess(circuitKeyMcpConnect(key))
     } catch (err) {
-      // What the card will show. The raw text still reaches the log below, so
-      // the six IP addresses undici prints stay available for diagnosis
-      // without being the thing the user is asked to read.
+      // What the card will show. The thrown error itself goes to the log as
+      // `err`, so the six IP addresses undici prints (or the SDK's own
+      // "Request timed out") stay available for diagnosis without being the
+      // thing the user is asked to read. Log fields pass an allowlist:
+      // anything not on it, such as a workspace path, is dropped silently.
       const message = describeMcpConnectError(err, server)
-      const raw = formatError(err)
       const code = mcpConnectErrorCode(err)
       connectErrors.set(key, message)
       recordCircuitFailure(circuitKeyMcpConnect(key), MCP_CONNECT_CIRCUIT_POLICY)
       if (quietMcpConnectSkip(message)) return
-      const logged = new AppError(message, {
-        code,
-        severity: 'warn',
-        retriable: !isGitMcpNotARepoError(message),
-        cause: err instanceof Error ? err : undefined
-      })
+      const stdioWorkspace = isStdioTransport(server.transport)
+        ? resolveStdioWorkspacePath(workspacePath)
+        : null
       logger.warn('MCP connect failed', {
         scope: 'mcp',
         serverId: server.id,
-        workspacePath: workspacePath ?? undefined,
+        ...(stdioWorkspace ? { workspaceId: workspaceIdFromPath(stdioWorkspace) } : {}),
         code,
         kind: classifyMcpConnectError(err),
         reason: message,
-        ...(raw === message ? {} : { raw }),
-        err: logged
+        err
       })
     }
   }

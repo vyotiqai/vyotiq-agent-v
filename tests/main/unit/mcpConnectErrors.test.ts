@@ -156,6 +156,9 @@ describe('classifyMcpConnectError', () => {
       [fetchFailed('read ECONNRESET', 'ECONNRESET'), 'network'],
       [fetchFailed('unable to verify the first certificate'), 'network'],
       [new Error('fetch failed'), 'network'],
+      // The SDK's own request timeout (McpError -32001) on `initialize`.
+      [new Error('MCP error -32001: Request timed out'), 'network'],
+      [new Error('MCP connect timed out after 120s (playwright)'), 'network'],
       [new Error('Sign in required'), 'sign-in'],
       [new Error('uvx was not found on PATH'), 'binary']
     ]
