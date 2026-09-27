@@ -219,11 +219,7 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
     case 'plan':
       return <PlanItem title={item.title} running={item.tool.tool.status === 'running'} />
     case 'note':
-      return (
-        <div className="text-sm leading-[21px] text-secondary">
-          <MarkdownContent content={item.text} streaming={Boolean(item.item.streaming)} />
-        </div>
-      )
+      return <MarkdownContent content={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
     case 'thought':
       return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought text={item.text} />
     case 'error':
@@ -241,6 +237,16 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
       )
   }
 }
+
+/** Lookups whose failure is said by the error's first line, not by their body. */
+const ERROR_LINE_LOOKUPS: ReadonlySet<string> = new Set([
+  'search',
+  'glob',
+  'grep',
+  'codebase_search',
+  'concept_search',
+  'web_search'
+])
 
 function ExploreItem({ tools }: { tools: ToolItem[] }) {
   const [open, setOpen] = useState(false)
@@ -303,14 +309,22 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
                   <Duration ms={toolDurationMs(t)} />
                 </div>
                 {fail && t.tool.content ? (
-                  <ToolRowOutput
-                    tool={t.tool}
-                    toolProgress={t.toolProgress}
-                    onLoadFullContent={onLoadToolContent}
-                    mcpServerNames={mcpServerNames}
-                    inGroup
-                    indent={false}
-                  />
+                  ERROR_LINE_LOOKUPS.has(t.tool.name) ? (
+                    // These bodies have no error branch: they would read "No
+                    // matches" and hide why the call failed.
+                    <p className="m-0 line-clamp-2 pl-[21px] text-caption text-danger [overflow-wrap:anywhere]">
+                      {t.tool.content.trim().split('\n').find((l) => l.trim()) ?? ''}
+                    </p>
+                  ) : (
+                    <ToolRowOutput
+                      tool={t.tool}
+                      toolProgress={t.toolProgress}
+                      onLoadFullContent={onLoadToolContent}
+                      mcpServerNames={mcpServerNames}
+                      inGroup
+                      indent={false}
+                    />
+                  )
                 ) : null}
               </li>
             )
@@ -350,7 +364,10 @@ function TerminalCard({ item }: { item: ToolItem }) {
             running
           </span>
         ) : failed ? (
-          <span className="shrink-0 font-mono text-caption text-danger">✕ exit {exit ?? '?'}</span>
+          <span className="inline-flex shrink-0 items-center gap-1 font-mono text-caption text-danger">
+            <Icon name="xCircle" size={11} />
+            exit {exit ?? '?'}
+          </span>
         ) : exit != null ? (
           <span className="inline-flex shrink-0 items-center gap-1 font-mono text-caption text-tertiary">
             <Icon name="check" size={11} className="text-success" />

@@ -1,6 +1,6 @@
 import type { ReactNode, Ref } from 'react'
 import { STATE_LABEL, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
-import { RECORD_MAX, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { DIVIDER_FILL, RECORD_MAX, SECTION_LABEL } from '@renderer/lib/utils/layout'
 
 /**
  * The task header is one 40px row — the height of the inspector's tab strip,
@@ -132,7 +132,7 @@ export function RunDivider({ n, at }: { n: number; at?: string }) {
         Run {n}
         {at ? <span className="ml-2 font-mono font-normal normal-case tracking-normal tnum">{at}</span> : null}
       </span>
-      <span className="h-px flex-1 bg-border" />
+      <span className={cn('h-px flex-1', DIVIDER_FILL)} />
     </div>
   )
 }

@@ -14,9 +14,14 @@ export function DeleteBody({ tool }: ToolBodyProps) {
 
   return (
     <div className={cn(TOOL_BODY_PAD, 'flex items-start gap-2 text-caption')}>
-      <Icon name="trash" size={16} className="mt-0.5 shrink-0 text-danger" />
+      {/* A delete that worked is not an alarm; the row's verb turns danger on failure. */}
+      <Icon
+        name="trash"
+        size={14}
+        className={cn('mt-px shrink-0', tool.status === 'fail' ? 'text-danger' : 'text-muted')}
+      />
       <div className="min-w-0">
-        {hasAdditionalMessage ? <p className="m-0 text-fg/80">{data.message}</p> : null}
+        {hasAdditionalMessage ? <p className="m-0 text-secondary">{data.message}</p> : null}
         {data.recursive ? (
           <p className="m-0 mt-1 text-tertiary">Recursive delete</p>
         ) : null}

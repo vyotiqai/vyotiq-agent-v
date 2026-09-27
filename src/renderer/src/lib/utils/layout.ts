@@ -78,17 +78,6 @@ export const COMPOSER_TEXTAREA_MAX_PX = 280
 /** Tailwind max-height matching `COMPOSER_TEXTAREA_MAX_PX`. */
 export const COMPOSER_TEXTAREA_MAX_CLASS = 'max-h-[280px]'
 
-/** One line of a disclosure list: label, detail, trailing meta. */
-export const DISCLOSURE_ROW =
-  'flex min-w-0 items-center gap-1.5 rounded-sm py-1.5 text-xs vy-transition hover:opacity-80'
-
-/**
- * Disclosure chevron — hidden until the row is hovered or focused.
- * Pair with `group` on the disclosure control; add rotate when expanded.
- */
-export const DISCLOSURE_CHEVRON =
-  'shrink-0 text-tertiary opacity-0 vy-transition group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
-
 /** Ask-question gate — quiet panel, not bordered tool-card chrome. */
 /**
  * The needs-you frame: the one accent block in a record. An accent outline,
@@ -125,10 +114,8 @@ export const TOOL_BODY_FLOW = 'overflow-visible pr-5'
 export const TOOL_SNAPSHOT_SCROLL =
   'max-h-[min(12rem,28vh)] overflow-y-auto overscroll-contain'
 
-/** Family shells — compact todo / delete / read-only terminal (not bordered cards). */
+/** Family shell for terminal output inside the record (not a bordered card of its own). */
 export const TOOL_FAMILY_TERMINAL = 'overflow-hidden'
-export const TOOL_FAMILY_TODO = 'rounded-md'
-export const TOOL_FAMILY_DELETE = 'border-l-2 border-danger/50 pl-2'
 
 /** Subtle surface shared by the in-flow docked composer. */
 export const FLOATING_CHROME = 'vy-chrome bg-[var(--vy-chrome-surface)] motion-reduce:animate-none'

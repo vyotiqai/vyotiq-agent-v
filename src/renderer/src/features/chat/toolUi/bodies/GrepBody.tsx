@@ -11,7 +11,7 @@ export function GrepBody({ tool, loading, loadFailed, inGroup }: ToolBodyProps) 
     <div>
       <div className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 pb-1`}>
         {!inGroup ? <Chip>/{data.pattern}/</Chip> : null}
-        <span className="text-2xs tabular-nums text-tertiary">
+        <span className="text-caption tnum text-tertiary">
           {data.matchCount} {data.matchCount === 1 ? 'match' : 'matches'}
           {data.truncated ? ' (truncated)' : ''}
         </span>

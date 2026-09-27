@@ -3,7 +3,8 @@ import type { ToolApprovalDecision } from '@shared/ipc'
 import type { UiToolApproval } from '@shared/transcript'
 import { TERMINAL_DEFAULT_TIMEOUT_MS, TOOL_APPROVAL_TIMEOUT_MS } from '@shared/agentTimeouts'
 import { parseArgsRecord, parseMcpToolDisplay } from '@shared/toolSummary'
-import { Button, StatusGlyph } from '@renderer/lib/ui'
+import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
+import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import { altChordLabel } from '@renderer/lib/shortcuts/labels'
 import { toolLabel } from '@renderer/features/chat/toolUi'
@@ -136,9 +137,9 @@ export const ApprovalCard = memo(function ApprovalCard({
       data-needs-you
       data-tool-approval=""
       aria-busy={phase === 'pending' || undefined}
-      className="@container scroll-mt-4 overflow-hidden rounded-lg border border-accent bg-bg"
+      className={cn(QUESTION_GATE_SURFACE, '@container scroll-mt-4')}
     >
-      <div className="flex h-8 items-center gap-2 bg-accent-soft px-3 text-xs">
+      <div className={QUESTION_GATE_HEADER}>
         <StatusGlyph state="needs" size={12} />
         <span className="font-semibold text-accent">Needs you — {approvalTitle(approval, mcpServerNames)}</span>
         <span className="flex-1" />
@@ -166,7 +167,7 @@ export const ApprovalCard = memo(function ApprovalCard({
               type="button"
               onClick={() => setShowArgs((v) => !v)}
               aria-expanded={showArgs}
-              className="text-caption text-tertiary hover:text-fg focus-visible:vy-focus-ring"
+              className="rounded-sm text-caption text-tertiary hover:text-fg focus-visible:vy-focus-ring"
             >
               {showArgs ? 'Hide the full request' : 'Show the full request'}
             </button>

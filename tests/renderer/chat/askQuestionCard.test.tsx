@@ -384,7 +384,7 @@ describe('AskQuestionPanel', () => {
     expect(screen.queryByRole('button', { name: 'Skip — let the agent choose' })).toBeNull()
   })
 
-  it('dims unanswered prompts and shows labeled settled summary for multi-question forms', async () => {
+  it('marks unanswered prompts with a word, not an opacity, and shows labeled settled summary', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(
       <AskQuestionPanel
@@ -402,8 +402,11 @@ describe('AskQuestionPanel', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Ask' }))
     const modePrompt = document.getElementById('ask-q-prompt-q1-a')
     const notesPrompt = document.getElementById('ask-q-prompt-q1-b')
-    expect(modePrompt?.className).not.toMatch(/opacity-90/)
-    expect(notesPrompt?.className).toMatch(/opacity-90/)
+    // Emphasis comes from the neighbours: no invented opacity on the prompt.
+    expect(modePrompt?.className).not.toMatch(/opacity/)
+    expect(notesPrompt?.className).not.toMatch(/opacity/)
+    expect(notesPrompt?.parentElement?.textContent).toContain('Unanswered')
+    expect(modePrompt?.parentElement?.textContent).not.toContain('Unanswered')
 
     fireEvent.change(screen.getByPlaceholderText('Your answer…'), {
       target: { value: 'ship it' }

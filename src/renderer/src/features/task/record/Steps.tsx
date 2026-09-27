@@ -3,6 +3,7 @@ import { parseAgentInstanceRunId, parseAgentInstanceRunIdFromArgs, formatAgentIn
 import { formatElapsed } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
 import { StepMarker, cn } from '@renderer/lib/ui'
+import { NUM, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import type { RecordStep } from '../recordModel'
 import { RecordOpenContext, stepOpenKey } from '../recordFind'
@@ -81,7 +82,7 @@ function StepRow({ step, runN, activity }: { step: RecordStep; runN: number; act
       <div
         className={cn(
           'group relative flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1.5 vy-transition',
-          !live && canOpen && 'hover:bg-surface'
+          !live && canOpen && ROW_HOVER
         )}
       >
         <StepMarker state={step.state} n={step.n} />
@@ -100,7 +101,7 @@ function StepRow({ step, runN, activity }: { step: RecordStep; runN: number; act
         {instances.map((k) => (
           <span
             key={k}
-            className="inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 font-mono text-2xs text-muted"
+            className={cn('inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted', NUM)}
             title={`Instance ${k}`}
           >
             {k}
