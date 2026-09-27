@@ -149,6 +149,32 @@ export default [
     }
   },
   {
+    // The primitives in lib/ sit under the `lib/ui` barrel, so one of them
+    // importing the barrel closes a module cycle. Rollup then splits the two
+    // into separate chunks and warns about execution order on every build
+    // (a11y/Dialog -> lib/ui -> Menu -> useDropdownMenu -> a11y did exactly
+    // that). Import the leaf module instead. This block replaces the one above
+    // for these files, so it repeats the @main restriction.
+    files: ['src/renderer/src/lib/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@main', '@main/*'],
+              message: 'Renderer must not import main-process code (@main/*).'
+            },
+            {
+              regex: '^(@renderer/lib/ui|(\\.\\./)+(lib/)?ui|\\.)(/index)?$',
+              message: 'Inside lib/, import the leaf module (e.g. @renderer/lib/ui/cn), not the lib/ui barrel.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     files: ['src/main/**/*.{ts,tsx}', 'src/preload/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type JSX, type ReactNode } from 'react'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Button } from '@renderer/lib/ui'
+import { Button } from '@renderer/lib/ui/Button'
 
 type ConfirmState = {
   message: string

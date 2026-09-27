@@ -20,6 +20,7 @@ import { formatProviderHttpError, scrubProviderErrorText } from './httpErrors'
 import { streamGeminiInteractions } from './geminiInteractions'
 import { resolveSystemZones, volatileSessionMessage } from './systemZones'
 import { wireToolCallArguments } from '../toolArgWire'
+import { liftToolImagesToUserTurn } from './toolImages'
 
 /** Exported for tests — parse Gemini usage metadata including implicit cache hits. */
 export function parseGeminiUsage(usageMetadata: Record<string, unknown>): TokenUsage {
@@ -105,7 +106,8 @@ function toGeminiParts(content: MessageContent): Array<Record<string, unknown>> 
 function toGeminiContents(messages: ChatMessage[]): Array<Record<string, unknown>> {
   const contents: Array<Record<string, unknown>> = []
 
-  for (const m of messages) {
+  // functionResponse carries text; screenshots join the same user turn as inlineData.
+  for (const m of liftToolImagesToUserTurn(messages)) {
     if (m.role === 'system') continue
     if (m.role === 'tool') {
       contents.push({

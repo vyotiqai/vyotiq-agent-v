@@ -557,7 +557,7 @@ export interface VyotiqApi {
   browserBack: (workspacePath?: string) => Promise<IpcResult<boolean>>
   browserForward: (workspacePath?: string) => Promise<IpcResult<boolean>>
   browserSetBounds: (
-    bounds: { x: number; y: number; width: number; height: number } | null
+    bounds: { x: number; y: number; width: number; height: number; occluded?: boolean } | null
   ) => Promise<IpcResult<true>>
   browserNavigate: (url: string, workspacePath?: string) => Promise<IpcResult<boolean>>
   browserReload: (workspacePath?: string) => Promise<IpcResult<boolean>>

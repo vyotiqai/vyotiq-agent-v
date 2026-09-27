@@ -27,6 +27,12 @@ describe('isToolGated', () => {
     expect(isToolGated('read', 'mutating', none, [])).toBe(false)
   })
 
+  it('asks before a screen snip, even under autonomy', () => {
+    expect(isToolGated('screen_snip', 'mutating', none, [])).toBe(true)
+    expect(isAutonomousHighRiskTool('screen_snip')).toBe(true)
+    expect(isToolGated('screen_snip', 'mutating', none, ['screen_snip'])).toBe(false)
+  })
+
   it('gates reads too in all mode', () => {
     expect(isToolGated('read', 'all', none, [])).toBe(true)
   })

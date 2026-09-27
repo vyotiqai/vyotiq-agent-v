@@ -2608,7 +2608,8 @@ export function createChatStreamController(
                 summary: event.summary,
                 status: event.ok ? 'done' : 'fail',
                 content: event.content ?? existing.tool.content,
-                contentTruncated: event.contentTruncated ?? existing.tool.contentTruncated
+                contentTruncated: event.contentTruncated ?? existing.tool.contentTruncated,
+                images: event.images ?? existing.tool.images
               }
             },
             event.toolCallId
@@ -2644,7 +2645,8 @@ export function createChatStreamController(
                     summary: event.summary,
                     status: event.ok ? 'done' : 'fail',
                     content: event.content ?? row.tool.content,
-                    contentTruncated: event.contentTruncated ?? row.tool.contentTruncated
+                    contentTruncated: event.contentTruncated ?? row.tool.contentTruncated,
+                    images: event.images ?? row.tool.images
                   }
                 },
                 event.toolCallId
@@ -2664,7 +2666,8 @@ export function createChatStreamController(
                 summary: event.summary,
                 status: event.ok ? 'done' : 'fail',
                 content: event.content,
-                contentTruncated: event.contentTruncated
+                contentTruncated: event.contentTruncated,
+                ...(event.images ? { images: event.images } : {})
               }
             },
             state.runStartedAt

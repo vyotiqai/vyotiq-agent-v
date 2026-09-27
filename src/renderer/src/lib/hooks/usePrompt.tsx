@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Button, Input } from '@renderer/lib/ui'
+import { Button } from '@renderer/lib/ui/Button'
+import { Input } from '@renderer/lib/ui/Input'
 
 type PromptOptions = {
   /** The verb on the submit button, when "OK" says less than it could ("Create", "Rename"). */

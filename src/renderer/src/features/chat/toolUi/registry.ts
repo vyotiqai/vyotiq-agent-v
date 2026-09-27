@@ -20,6 +20,7 @@ import { McpIntrospectBody } from './bodies/McpIntrospectBody'
 import { McpPinBody } from './bodies/McpPinBody'
 import { MemoryListBody, MemoryReadBody, MemoryWriteBody } from './bodies/MemoryBodies'
 import { ReadBody } from './bodies/ReadBody'
+import { ScreenSnipBody, screenSnipHasBody } from './bodies/ScreenSnipBody'
 import { SearchBody } from './bodies/SearchBody'
 import { CodebaseSearchBody } from './bodies/CodebaseSearchBody'
 import { SkillBody } from './bodies/SkillBody'
@@ -522,6 +523,15 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
         icon: 'globe'
       }
     }
+  },
+  screen_snip: {
+    Body: ScreenSnipBody,
+    hasBody: screenSnipHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'monitor'
+    })
   },
   browser_tabs: {
     Body: BrowserTabsBody,

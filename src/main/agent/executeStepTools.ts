@@ -1,5 +1,6 @@
 import { existsSync } from 'fs'
 import type { AgentEvent, AgentInteractionMode, ChatMessage, Settings } from '../../shared/ipc'
+import { toolContentWithImages } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
 import { composeAbortSignal } from '../../shared/utils/errors'
 import { logger } from '../../shared/logger'
@@ -466,11 +467,13 @@ async function runSingleTool(
       ctx.verification.noteToolResult(call.name, content, result.ok)
     }
     const resultSummary = result.summary || summary
+    const images = result.images?.length ? result.images : undefined
     const toolMsg: ChatMessage = {
       role: 'tool',
       toolCallId: call.id,
       toolName: call.name,
-      content,
+      // Images ride as run-dir references; main hydrates them just before send.
+      content: toolContentWithImages(content, images),
       ok: result.ok
     }
     events.push({
@@ -480,7 +483,8 @@ async function runSingleTool(
       name: call.name,
       summary: resultSummary,
       ok: result.ok,
-      content
+      content,
+      ...(images ? { images } : {})
     })
     if (!result.ok && !result.failureLogged) {
       // The args summary (e.g. "2 tasks") is not a failure reason. The real

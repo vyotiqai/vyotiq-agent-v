@@ -67,6 +67,7 @@ import {
   stripRejectedBodyField
 } from './httpErrors'
 import { sanitizeToolParameters } from './toolSchemaSanitize'
+import { liftToolImagesToUserTurn } from './toolImages'
 import {
   resolveSystemZones,
   volatileSessionMessage,
@@ -660,7 +661,8 @@ export function toOpenAiMessages(
       out.push({ role: 'system', content: zones.stable })
     }
   }
-  for (const m of messages) {
+  // A `tool` message cannot hold images here; screenshots follow as a user turn.
+  for (const m of liftToolImagesToUserTurn(messages)) {
     if (m.role === 'tool') {
       if (!m.toolCallId) continue
       out.push({

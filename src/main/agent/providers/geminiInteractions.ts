@@ -22,6 +22,7 @@ import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
 import { formatProviderHttpError } from './httpErrors'
 import { parseDataUrl } from './normalize'
 import { resolveSystemZones, volatileSessionMessage } from './systemZones'
+import { liftToolImagesToUserTurn } from './toolImages'
 
 export function serializeToolArgs(value: unknown): string {
   if (value == null) return ''
@@ -68,7 +69,10 @@ export function toInteractionsInput(
   continuing: boolean,
   opts?: { systemStable?: string; systemVolatile?: string }
 ): string | Array<Record<string, unknown>> {
-  const source = continuing ? statefulContinuationMessages(messages) : messages
+  // function_response carries text; screenshots follow as user image content.
+  const source = liftToolImagesToUserTurn(
+    continuing ? statefulContinuationMessages(messages) : messages
+  )
   const zones = resolveSystemZones({
     system,
     systemStable: opts?.systemStable,

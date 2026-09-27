@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
   TOOL_BODY_FLOW,
   TOOL_BODY_INNER,
@@ -6,79 +6,25 @@ import {
   TOOL_SNAPSHOT_SCROLL
 } from '@renderer/lib/utils/layout'
 import { parseArgsRecord } from '@shared/toolSummary'
-import { useRunSession } from '../../RunSessionContext'
 import type { ToolBodyProps } from '../types'
 import {
   parseBrowserActionData,
   parseBrowserSnapshotData,
-  parseBrowserTabsData
+  parseBrowserTabsData,
+  splitActionSnapshot
 } from '../parsers/browser'
 import { Chip, TruncatedBanner } from '../primitives'
 
-export function BrowserSnapshotBody({ tool, loading, loadFailed }: ToolBodyProps) {
-  const data = useMemo(() => parseBrowserSnapshotData(tool), [tool])
-  const visibleMessage =
-    data.message && data.url && /^Navigated to\s+\S+$/i.test(data.message)
-      ? ''
-      : data.message
-  const searchQuery = useMemo(() => {
-    if (tool.name !== 'browser_search') return ''
-    const args = parseArgsRecord(tool.argsPreview)
-    return typeof args?.query === 'string' ? args.query.trim() : ''
-  }, [tool.name, tool.argsPreview])
-  const { workspacePath, runId } = useRunSession()
-  const [screenshotSrc, setScreenshotSrc] = useState<string | null>(null)
-  const [screenshotFailed, setScreenshotFailed] = useState(false)
+type SnapshotData = ReturnType<typeof parseBrowserSnapshotData>
 
-  useEffect(() => {
-    setScreenshotFailed(false)
-    if (
-      !data.screenshotNote ||
-      /capture failed/i.test(data.screenshotNote) ||
-      !workspacePath ||
-      !runId
-    ) {
-      setScreenshotSrc(null)
-      return
-    }
-    if (!data.screenshotPath) {
-      setScreenshotSrc(null)
-      return
-    }
-    const artifactName = data.screenshotPath
-    let cancelled = false
-    void window.vyotiq
-      .readRunArtifact({ workspacePath, runId, name: artifactName })
-      .then((res) => {
-        if (cancelled) return
-        if (!res.ok || !res.data.exists || !res.data.content) {
-          if (artifactName !== 'browser/snapshot.jpg') {
-            return window.vyotiq
-              .readRunArtifact({ workspacePath, runId, name: 'browser/snapshot.jpg' })
-              .then((fallback) => {
-                if (cancelled) return
-                if (fallback.ok && fallback.data.exists && fallback.data.content) {
-                  setScreenshotSrc(fallback.data.content)
-                } else {
-                  setScreenshotSrc(null)
-                }
-              })
-          }
-          setScreenshotSrc(null)
-          return
-        }
-        setScreenshotSrc(res.data.content)
-      })
-      .catch(() => {
-        if (!cancelled) setScreenshotSrc(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [data.screenshotNote, data.screenshotPath, workspacePath, runId, tool.id])
-
+/**
+ * Page facts, refs and text of one snapshot. The screenshot itself is not
+ * drawn here: the record shows a tool's images under its line, visible
+ * without opening the row (see ToolImageStrip).
+ */
+function SnapshotDetails({ data, searchQuery }: { data: SnapshotData; searchQuery?: string }) {
   return (
-    <div>
+    <>
       <div className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 pb-1`}>
         {searchQuery ? <Chip>{searchQuery}</Chip> : null}
         {data.url ? <Chip>{data.url}</Chip> : null}
@@ -99,10 +45,6 @@ export function BrowserSnapshotBody({ tool, loading, loadFailed }: ToolBodyProps
           </span>
         ) : null}
       </div>
-      {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}
-      {visibleMessage ? (
-        <p className={`${TOOL_BODY_PAD} m-0 text-caption text-tertiary`}>{visibleMessage}</p>
-      ) : null}
       {data.refs.length > 0 || data.body ? (
         <div
           className={`${TOOL_BODY_INNER} ${TOOL_SNAPSHOT_SCROLL} flex flex-col gap-2 pr-5`}
@@ -131,23 +73,34 @@ export function BrowserSnapshotBody({ tool, loading, loadFailed }: ToolBodyProps
           ) : null}
         </div>
       ) : null}
-      {screenshotSrc ? (
-        <div className={`${TOOL_BODY_PAD} pt-1`}>
-          <img
-            src={screenshotSrc}
-            alt="Browser snapshot"
-            className="max-h-48 w-full rounded-md border border-border object-contain object-top"
-            onError={() => {
-              setScreenshotFailed(true)
-              setScreenshotSrc(null)
-            }}
-          />
-        </div>
-      ) : data.screenshotNote || screenshotFailed ? (
-        <p className={`${TOOL_BODY_PAD} m-0 pt-1 text-caption text-tertiary`} role={screenshotFailed ? 'status' : undefined}>
-          {screenshotFailed ? 'Screenshot preview unavailable.' : data.screenshotNote}
+      {data.screenshotFailed ? (
+        <p className={`${TOOL_BODY_PAD} m-0 pt-1 text-caption text-tertiary`} role="status">
+          {data.screenshotNote.replace(/^\[|\]$/g, '')}
         </p>
       ) : null}
+    </>
+  )
+}
+
+export function BrowserSnapshotBody({ tool, loading, loadFailed }: ToolBodyProps) {
+  const data = useMemo(() => parseBrowserSnapshotData(tool), [tool])
+  const visibleMessage =
+    data.message && data.url && /^Navigated to\s+\S+$/i.test(data.message)
+      ? ''
+      : data.message
+  const searchQuery = useMemo(() => {
+    if (tool.name !== 'browser_search') return ''
+    const args = parseArgsRecord(tool.argsPreview)
+    return typeof args?.query === 'string' ? args.query.trim() : ''
+  }, [tool.name, tool.argsPreview])
+
+  return (
+    <div>
+      {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}
+      {visibleMessage ? (
+        <p className={`${TOOL_BODY_PAD} m-0 text-caption text-tertiary`}>{visibleMessage}</p>
+      ) : null}
+      <SnapshotDetails data={data} searchQuery={searchQuery} />
     </div>
   )
 }
@@ -191,6 +144,12 @@ export function BrowserTabsBody({ tool, loading, loadFailed }: ToolBodyProps) {
 
 export function BrowserActionBody({ tool, loading, loadFailed }: ToolBodyProps) {
   const data = useMemo(() => parseBrowserActionData(tool), [tool])
+  // includeSnapshot appends a whole page snapshot; show it as one, not as a
+  // paragraph of raw page text under the action.
+  const snapshot = useMemo(() => {
+    const split = splitActionSnapshot(tool.content ?? '')
+    return split.snapshot ? parseBrowserSnapshotData({ ...tool, content: split.snapshot }) : null
+  }, [tool])
 
   return (
     <div>
@@ -212,6 +171,7 @@ export function BrowserActionBody({ tool, loading, loadFailed }: ToolBodyProps) 
       >
         {data.message || (loading || tool.status === 'running' ? 'Working…' : '')}
       </p>
+      {snapshot ? <SnapshotDetails data={snapshot} /> : null}
     </div>
   )
 }

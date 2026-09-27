@@ -30,9 +30,42 @@ export const RunIdSchema = z
   .regex(/^[A-Za-z0-9._-]+$/, 'Invalid run id')
   .refine((value) => value !== '.' && value !== '..', 'Invalid run id')
 
+/**
+ * Run-dir paths a tool may store an image under: browser captures, and images
+ * a tool returned (MCP image blocks, `read` of an image file).
+ */
+export const TOOL_IMAGE_ARTIFACT_RE =
+  /^(?:browser\/snapshot(?:-[\w.-]+)?\.jpg|images\/[\w-][\w.-]*\.(?:png|jpe?g|webp|gif))$/
+
+/**
+ * URL a tool image part carries on disk and in memory. It is not a fetchable
+ * URL: main swaps it for a data URL just before the request is sent, so
+ * messages.jsonl keeps a path instead of ~100 KB of base64 per screenshot.
+ */
+export const ARTIFACT_IMAGE_URL_PREFIX = 'vyotiq-artifact:'
+
+export function artifactImageUrl(artifact: string): string {
+  return `${ARTIFACT_IMAGE_URL_PREFIX}${artifact}`
+}
+
+/** An image a tool produced, stored in its run directory. */
+export const ToolImageRefSchema = z.object({
+  artifact: z.string().regex(TOOL_IMAGE_ARTIFACT_RE),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  /** What the image shows, e.g. "viewport" or "element #login". */
+  label: z.string().max(200).optional()
+})
+export type ToolImageRef = z.infer<typeof ToolImageRefSchema>
+
 const AttachmentImagePartSchema = z.object({
   type: z.literal('image_url'),
-  url: z.string().min(1).max(MAX_IMAGE_DATA_URL_CHARS)
+  url: z.string().min(1).max(MAX_IMAGE_DATA_URL_CHARS),
+  /** Set on tool images: the run-dir file behind `url`. */
+  artifact: z.string().regex(TOOL_IMAGE_ARTIFACT_RE).optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  label: z.string().max(200).optional()
 })
 
 /** A document the user attached, already reduced to text in the main process. */
@@ -293,7 +326,9 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     ok: z.boolean(),
     content: z.string().optional(),
     /** IPC preview was capped; full output is on disk until lazy-loaded. */
-    contentTruncated: z.boolean().optional()
+    contentTruncated: z.boolean().optional(),
+    /** Images the tool returned (screenshots), read via `runs:readArtifact`. */
+    images: z.array(ToolImageRefSchema).max(16).optional()
   }),
   z.object({
     /** Live progress from a long-running tool, shown under the tool row. */
@@ -1056,11 +1091,30 @@ export const RunArtifactBrowserSnapshotSchema = z
   .string()
   .regex(/^browser\/snapshot(?:-[\w.-]+)?\.jpg$/)
 
+/** Any image a tool stored in the run dir (browser captures included). */
+export const RunArtifactImageSchema = z.string().regex(TOOL_IMAGE_ARTIFACT_RE)
+
 /** Run-dir artifacts readable via `runs:readArtifact`. */
 export const RunArtifactNameSchema = z.union([
   RunArtifactFixedNameSchema,
-  RunArtifactBrowserSnapshotSchema
+  RunArtifactBrowserSnapshotSchema,
+  RunArtifactImageSchema
 ])
+
+const ARTIFACT_IMAGE_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif'
+}
+
+/** Mime of an image artifact name, or null when the name is not an image artifact. */
+export function runArtifactImageMime(name: string): string | null {
+  if (!TOOL_IMAGE_ARTIFACT_RE.test(name)) return null
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  return ARTIFACT_IMAGE_MIME[ext] ?? null
+}
 export type RunArtifactName = z.infer<typeof RunArtifactNameSchema>
 
 export const TRAJECTORY_FILENAME = 'trajectory.jsonl' as const
@@ -1899,9 +1953,47 @@ export function contentDisplayText(content: MessageContent): string {
     .trim()
 }
 
+/** Displayable image URLs. Tool images are excluded: their `url` is a run-dir reference. */
 export function contentImages(content: MessageContent): string[] {
   if (typeof content === 'string') return []
-  return content.filter((p) => p.type === 'image_url').map((p) => p.url)
+  const urls: string[] = []
+  for (const p of content) {
+    if (p.type === 'image_url' && !p.artifact) urls.push(p.url)
+  }
+  return urls
+}
+
+/** Images a tool message carries, as run-dir references. */
+export function contentImageArtifacts(content: MessageContent): ToolImageRef[] {
+  if (typeof content === 'string') return []
+  const out: ToolImageRef[] = []
+  for (const p of content) {
+    if (p.type !== 'image_url' || !p.artifact) continue
+    out.push({
+      artifact: p.artifact,
+      ...(p.width ? { width: p.width } : {}),
+      ...(p.height ? { height: p.height } : {}),
+      ...(p.label ? { label: p.label } : {})
+    })
+  }
+  return out
+}
+
+/** Tool message content: the text result followed by its images as run-dir references. */
+export function toolContentWithImages(text: string, images: ToolImageRef[] | undefined): MessageContent {
+  if (!images?.length) return text
+  const parts: ContentPart[] = [{ type: 'text', text }]
+  for (const image of images) {
+    parts.push({
+      type: 'image_url',
+      url: artifactImageUrl(image.artifact),
+      artifact: image.artifact,
+      ...(image.width ? { width: image.width } : {}),
+      ...(image.height ? { height: image.height } : {}),
+      ...(image.label ? { label: image.label } : {})
+    })
+  }
+  return parts
 }
 
 export type AttachedFile = Extract<ContentPart, { type: 'file' }>
@@ -2161,8 +2253,12 @@ export function providerContentParts(
       continue
     }
     if (part.type === 'image_url') {
-      if (caps.image !== false) out.push(part)
-      else out.push({ type: 'text', text: '[image omitted: model does not support vision]' })
+      // A run-dir reference main did not hydrate is not a URL any provider can fetch.
+      if (part.url.startsWith(ARTIFACT_IMAGE_URL_PREFIX)) {
+        out.push({ type: 'text', text: '[screenshot not attached]' })
+      } else if (caps.image !== false) {
+        out.push(part.artifact ? { type: 'image_url', url: part.url } : part)
+      } else out.push({ type: 'text', text: '[image omitted: model does not support vision]' })
       continue
     }
     if (part.type === 'audio') {

@@ -6,13 +6,65 @@ import { join } from 'path'
 const sessionOn = vi.hoisted(() => vi.fn())
 const browserViews = vi.hoisted(() => ({
   instances: [] as Array<{
-    webContents: { setBackgroundThrottling: ReturnType<typeof vi.fn> }
+    webContents: {
+      setBackgroundThrottling: ReturnType<typeof vi.fn>
+      capturePage: ReturnType<typeof vi.fn>
+      debugger: { sendCommand: ReturnType<typeof vi.fn> }
+    }
     setBounds: ReturnType<typeof vi.fn>
     setVisible: ReturnType<typeof vi.fn>
   }>
 }))
 
+/** A window's view list, enough for attach/detach bookkeeping. */
+const hosts = vi.hoisted(() => {
+  const contentView = () => {
+    const children: unknown[] = []
+    return {
+      children,
+      addChildView: (v: unknown) => children.push(v),
+      removeChildView: (v: unknown) => {
+        const i = children.indexOf(v)
+        if (i >= 0) children.splice(i, 1)
+      }
+    }
+  }
+  return {
+    contentView,
+    main: {
+      isDestroyed: () => false,
+      once: () => undefined,
+      webContents: { send: () => undefined },
+      contentView: contentView()
+    },
+    offstage: [] as Array<{ contentView: { children: unknown[] }; setContentSize: (w: number, h: number) => void }>
+  }
+})
+
 vi.mock('electron', () => ({
+  nativeImage: {
+    createFromBuffer: () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 1280, height: 800 }),
+      toJPEG: () => Buffer.from([0xff, 0xd8])
+    })
+  },
+  BaseWindow: class {
+    contentView = hosts.contentView()
+    size: [number, number] = [0, 0]
+    setIgnoreMouseEvents = vi.fn()
+    setPosition = vi.fn()
+    showInactive = vi.fn()
+    isDestroyed = () => false
+    destroy = vi.fn()
+    getContentSize = () => this.size
+    setContentSize = (w: number, h: number) => {
+      this.size = [w, h]
+    }
+    constructor() {
+      hosts.offstage.push(this)
+    }
+  },
   session: {
     fromPartition: () => ({
       setPermissionRequestHandler: vi.fn(),
@@ -41,9 +93,20 @@ vi.mock('electron', () => ({
         webRequest: { onHeadersReceived: ReturnType<typeof vi.fn> }
       }
       capturePage: ReturnType<typeof vi.fn>
+      debugger: {
+        isAttached: () => boolean
+        attach: ReturnType<typeof vi.fn>
+        detach: ReturnType<typeof vi.fn>
+        sendCommand: ReturnType<typeof vi.fn>
+      }
+      getZoomFactor: () => number
     }
+    visible = false
     setBounds = vi.fn()
-    setVisible = vi.fn()
+    setVisible = vi.fn((v: boolean) => {
+      this.visible = v
+    })
+    getVisible = () => this.visible
     constructor() {
       this.webContents = {
         on: vi.fn(),
@@ -64,9 +127,22 @@ vi.mock('electron', () => ({
           webRequest: { onHeadersReceived: vi.fn() }
         },
         capturePage: vi.fn().mockResolvedValue({
+          isEmpty: () => false,
           getSize: () => ({ width: 10, height: 10 }),
           toJPEG: () => Buffer.from([0xff, 0xd8])
-        })
+        }),
+        debugger: {
+          isAttached: () => false,
+          attach: vi.fn(),
+          detach: vi.fn(),
+          sendCommand: vi.fn(async (method: string) =>
+            method === 'Page.getLayoutMetrics'
+              ? { cssVisualViewport: { pageX: 0, pageY: 40, clientWidth: 1280, clientHeight: 800 } }
+              : { data: Buffer.from([0x89, 0x50]).toString('base64') }
+          )
+        },
+        getZoomFactor: () => 1,
+        executeJavaScript: vi.fn(async () => ({ text: 'page', viewport: { w: 1280, h: 800 }, items: [] }))
       }
       browserViews.instances.push(this)
     }
@@ -74,7 +150,7 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('@main/app/window', () => ({
-  getMainWindow: () => null
+  getMainWindow: () => hosts.main
 }))
 
 vi.mock('@main/settings/settings', () => ({
@@ -87,8 +163,11 @@ import {
   resetAgentBrowserForTests,
   selectBrowserTab,
   setAgentBrowserBounds,
-  takeBrowserScreenshot
+  snapshotPage,
+  takeBrowserScreenshot,
+  HEADLESS_VIEWPORT
 } from '@main/app/agentBrowser'
+import type { ToolImageRef } from '@shared/ipc'
 
 const WS_A = '/ws-a'
 const WS_B = '/ws-b'
@@ -105,6 +184,8 @@ describe('browser tab workspace ownership', () => {
   beforeEach(() => {
     sessionOn.mockClear()
     browserViews.instances.length = 0
+    hosts.offstage.length = 0
+    hosts.main.contentView.children.length = 0
     runDir = mkdtempSync(join(tmpdir(), 'vyotiq-browser-ss-'))
   })
 
@@ -165,6 +246,83 @@ describe('browser tab workspace ownership', () => {
       workspacePath: WS_A
     })
     expect(result.path).toContain(join('browser', 'snapshot-'))
+    expect(result.artifact).toMatch(/^browser\/snapshot-\d+-\d+\.jpg$/)
+  })
+
+  it('hosts the active tab offstage at a real size while no panel shows it', async () => {
+    const { tabA } = await openOwnedTabs()
+    expect(selectBrowserTab(tabA, WS_A)).toBe(true)
+    const view = browserViews.instances[0]!
+    const offstage = hosts.offstage.at(-1)!
+    // It used to sit in the main window at 0x0: no viewport, no frame, no clicks.
+    expect(offstage.contentView.children).toContain(view)
+    expect(hosts.main.contentView.children).not.toContain(view)
+    expect(view.setBounds).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 0,
+      width: HEADLESS_VIEWPORT.width,
+      height: HEADLESS_VIEWPORT.height
+    })
+    // Idle: laid out but unpainted.
+    expect(view.setVisible).toHaveBeenLastCalledWith(false)
+
+    await takeBrowserScreenshot({ runDir, tabId: tabA, workspacePath: WS_A })
+    // Painted for the capture, read through DevTools, then back to idle.
+    expect(view.setVisible).toHaveBeenCalledWith(true)
+    expect(view.webContents.debugger.sendCommand).toHaveBeenCalledWith('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 40, width: 1280, height: 800, scale: 1 }
+    })
+    expect(view.webContents.capturePage).not.toHaveBeenCalled()
+    expect(view.setVisible).toHaveBeenLastCalledWith(false)
+  })
+
+  it('records a burst: every frame kept, painted throughout, idle after', async () => {
+    const { tabA } = await openOwnedTabs()
+    expect(selectBrowserTab(tabA, WS_A)).toBe(true)
+    const view = browserViews.instances[0]!
+    const captures: ToolImageRef[] = []
+    const text = await snapshotPage({
+      runDir,
+      tabId: tabA,
+      workspacePath: WS_A,
+      frames: 3,
+      intervalMs: 50,
+      captures
+    })
+    const shots = view.webContents.debugger.sendCommand.mock.calls.filter(
+      ([method]) => method === 'Page.captureScreenshot'
+    )
+    expect(shots).toHaveLength(3)
+    expect(captures).toHaveLength(3)
+    expect(new Set(captures.map((c) => c.artifact)).size).toBe(3)
+    expect(captures[0]!.label).toBe('viewport · frame 1/3 +0ms')
+    expect(captures[2]!.label).toMatch(/^viewport · frame 3\/3 \+\d+ms$/)
+    expect(text.match(/\[Screenshot saved under run browser\/snapshot-/g)).toHaveLength(3)
+    // Painted for the whole burst: nothing hid the page between its frames.
+    const { invocationCallOrder: shotOrder, calls: sent } = view.webContents.debugger.sendCommand.mock
+    const shotAt = shotOrder.filter((_, i) => sent[i]![0] === 'Page.captureScreenshot')
+    const { invocationCallOrder: paintOrder, calls: paints } = view.setVisible.mock
+    const hiddenAt = paintOrder.filter((_, i) => paints[i]![0] === false)
+    expect(hiddenAt.some((at) => at > shotAt[0]! && at < shotAt.at(-1)!)).toBe(false)
+    expect(view.setVisible).toHaveBeenLastCalledWith(false)
+  })
+
+  it('moves the tab to the dock panel when it opens, and offstage at its size under a modal', async () => {
+    const { tabA } = await openOwnedTabs()
+    expect(selectBrowserTab(tabA, WS_A)).toBe(true)
+    const view = browserViews.instances[0]!
+    setAgentBrowserBounds({ x: 10, y: 20, width: 600, height: 400 })
+    expect(hosts.main.contentView.children).toContain(view)
+    expect(view.setVisible).toHaveBeenLastCalledWith(true)
+
+    // A dialog covers the panel: the native view would paint over it.
+    setAgentBrowserBounds({ x: 10, y: 20, width: 600, height: 400, occluded: true })
+    expect(hosts.main.contentView.children).not.toContain(view)
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 600, height: 400 })
+    setAgentBrowserBounds(null)
   })
 
   it('enumerates live workspace-visible tab ids in the unknown-tab error', async () => {
