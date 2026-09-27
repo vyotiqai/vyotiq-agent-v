@@ -1,9 +1,8 @@
+import { pathCandidatesIn, type FoldFacts } from './foldFacts'
 import {
-  isPlausibleWorkspaceFilePath,
-  normalizeWorkspaceRelPath,
-  pathCandidatesIn,
-  type FoldFacts
-} from './foldFacts'
+  isStrictWorkspaceFilePath,
+  normalizeWorkspaceFileRelPath
+} from '../pathPlausibility'
 
 export type CompactionVerifyFailureKind =
   | 'invented_path'
@@ -82,11 +81,11 @@ export function clipVerifyFailures(lines: readonly string[]): string[] {
 const BRACE_PATH_RE = /(?:[\w.-]+\/)*[\w.-]*\{[^{}]+\}[\w./\\-]*\.[A-Za-z][\w.-]*/g
 
 function normalizePath(value: string): string {
-  return normalizeWorkspaceRelPath(value).replace(/^\.\//, '').toLowerCase()
+  return normalizeWorkspaceFileRelPath(value).replace(/^\.\//, '').toLowerCase()
 }
 
 function basename(path: string): string {
-  const norm = normalizeWorkspaceRelPath(path)
+  const norm = normalizeWorkspaceFileRelPath(path)
   const slash = Math.max(norm.lastIndexOf('/'), norm.lastIndexOf('\\'))
   return slash >= 0 ? norm.slice(slash + 1) : norm
 }
@@ -164,8 +163,8 @@ function collectSectionBullets(markdown: string, heading: string): string[] {
 function pushUniquePath(into: string[], raw: string): void {
   const cleaned = raw.replace(/^[*_`]+|[*_`]+$/g, '').trim()
   for (const piece of expandBraceGlobs(cleaned)) {
-    const path = normalizeWorkspaceRelPath(piece)
-    if (!isPlausibleWorkspaceFilePath(path)) continue
+    const path = normalizeWorkspaceFileRelPath(piece)
+    if (!isStrictWorkspaceFilePath(path)) continue
     const key = normalizePath(path)
     if (into.some((existing) => normalizePath(existing) === key)) continue
     into.push(path)

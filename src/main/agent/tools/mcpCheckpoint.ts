@@ -1,4 +1,5 @@
 import { getWriteCheckpoint, type InvokeWriteCheckpoint } from '../checkpoints'
+import { normalizeWorkspaceRelPath } from '../pathPlausibility'
 
 /** Official @modelcontextprotocol/server-filesystem write-capable tools. */
 const FILESYSTEM_WRITE_TOOLS = new Set([
@@ -10,10 +11,6 @@ const FILESYSTEM_WRITE_TOOLS = new Set([
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
-
-function normalizeWorkspaceRelPath(path: string): string {
-  return path.trim().replace(/\\/g, '/')
 }
 
 function isFilesystemMcpServer(serverId: string): boolean {
