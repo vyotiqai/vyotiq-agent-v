@@ -70,14 +70,91 @@ describe('resolveLinePlaceholder', () => {
 })
 
 describe('instruction line', () => {
-  it('is one row with no Send or Stop button — Enter sends, Esc stops', () => {
-    renderLine({ running: true })
-    expect(screen.getByRole('combobox', { name: 'Instruction' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Send$/ })).toBeNull()
+  it('is the field over one control row: mode, model, attach, mic, Send — no Stop', () => {
+    renderLine()
+    const shell = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-shell]')!
+    expect(shell).toBeTruthy()
+    const field = within(shell).getByRole('combobox', { name: 'Instruction' })
+    const row = shell.querySelector<HTMLElement>('[data-composer-controls]')!
+    // The field comes first; the controls sit under it, never beside it.
+    expect(field.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const controls = within(row)
+    expect(controls.getByRole('radiogroup', { name: 'Mode' })).toBeTruthy()
+    expect(row.querySelector('[data-model-picker]')?.textContent).toContain('qwen2.5')
+    expect(controls.getByRole('button', { name: 'Attach files — or type @ for context' })).toBeTruthy()
+    // No key for any engine: the mic says it needs setting up, in its label.
+    expect(controls.getByRole('button', { name: 'Set up dictation' })).toBeTruthy()
+    // Nothing to send yet: Send is there, and says so by being off.
+    expect(controls.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true)
+    // Stop lives in the task header, not here.
     expect(screen.queryByRole('button', { name: /^Stop$/ })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Attach files — or type @ for context' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
-    expect(document.querySelector('[data-composer-line] [data-composer-shell]')).toBeTruthy()
+    // The decorative prompt glyph is gone.
+    expect(shell.textContent).not.toContain('›')
+  })
+
+  it('sends from the Send button, as Enter does', async () => {
+    const { props } = renderLine({ onSend: vi.fn(async () => true) })
+    const line = screen.getByRole('combobox', { name: 'Instruction' })
+    line.textContent = 'Add a regression test'
+    fireEvent.input(line)
+    const send = screen.getByRole('button', { name: 'Send' })
+    await waitFor(() => expect(send).toHaveProperty('disabled', false))
+    fireEvent.click(send)
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![0]).toBe('Add a regression test')
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toBeUndefined()
+  })
+
+  it('reads Queue while a run is live, with Send now beside it once there is text', async () => {
+    const { props } = renderLine({ running: true, onSend: vi.fn(async () => true) })
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Queue' })).toHaveProperty('disabled', true)
+    // Send now only once there is something to send.
+    expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull()
+    const line = screen.getByRole('combobox', { name: 'Instruction' })
+    line.textContent = 'Use the other API'
+    fireEvent.input(line)
+    fireEvent.click(await screen.findByRole('button', { name: 'Send now' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ steer: true })
+  })
+
+  it('shows the context used beside the controls once there is a reading', () => {
+    renderLine({
+      contextUsage: {
+        step: 3,
+        used: 4000,
+        estimatedTokens: 4000,
+        inputTokens: 4000,
+        window: 32768,
+        contentWindow: 27852,
+        compactionTrigger: 27852,
+        source: 'provider',
+        layers: { system: 1000, history: 3000, tools: 0, buffer: 0 },
+        stepUsage: {
+          inputTokens: 4000,
+          billedInputTokens: 9000,
+          peakInputTokens: 4000,
+          outputTokens: 120,
+          cachedInputTokens: 0,
+          billedCachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          reasoningTokens: 0,
+          steps: 3,
+          stepsWithCacheReport: 0,
+          billedCost: 0,
+          billedCostSaved: 0,
+          stepsWithCostReport: 0,
+          estimatedCost: 0,
+          stepsWithEstimate: 0,
+          generationMs: 0
+        },
+        updatedAt: '2026-01-01T12:00:00.000Z'
+      }
+    })
+    const meter = document.querySelector<HTMLButtonElement>('[data-composer-controls] [data-context-meter]')!
+    expect(meter).toBeTruthy()
+    expect(meter.textContent).toMatch(/\d+%/)
   })
 
   it('steers with Shift+Enter while a run is live, and only then; Enter still queues', async () => {
@@ -148,16 +225,26 @@ describe('instruction line', () => {
     expect(onRemoveFollowUp).toHaveBeenCalledWith('o1')
   })
 
-  it('sets mode, model and effort from one token', async () => {
-    const onProviderModel = vi.fn()
+  it('switches mode in one press, Agent first', () => {
     const onAgentModeChange = vi.fn()
-    renderLine({ onProviderModel, onAgentModeChange })
-    const token = document.querySelector<HTMLButtonElement>('[data-task-options]')!
-    expect(token.textContent).toContain('Agent · qwen2.5')
-    fireEvent.click(token)
-    const dialog = await screen.findByRole('dialog', { name: 'Mode, model and effort' })
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Ask' }))
+    renderLine({ onAgentModeChange })
+    const modes = screen.getByRole('radiogroup', { name: 'Mode' })
+    const radios = within(modes).getAllByRole('radio')
+    expect(radios.map((r) => r.textContent)).toEqual(['Agent', 'Ask'])
+    expect(radios[0]!.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(within(modes).getByRole('radio', { name: 'Ask' }))
     expect(onAgentModeChange).toHaveBeenCalledWith('ask')
+  })
+
+  it('picks the model from its own popover', async () => {
+    const onProviderModel = vi.fn()
+    renderLine({ onProviderModel })
+    const picker = document.querySelector<HTMLButtonElement>('[data-model-picker]')!
+    expect(picker.textContent).toContain('qwen2.5')
+    fireEvent.click(picker)
+    const dialog = await screen.findByRole('dialog', { name: 'Model and effort' })
+    // Mode is not in here any more — it has its own switch.
+    expect(within(dialog).queryByRole('radiogroup', { name: 'Mode' })).toBeNull()
     await waitFor(() => expect(within(dialog).getByText('llama3.2')).toBeTruthy())
     // The model in use reads as selected by weight and a check — no accent tint,
     // which is reserved for Needs you.
@@ -167,13 +254,13 @@ describe('instruction line', () => {
     expect(current.querySelector('svg')).toBeTruthy()
     fireEvent.click(within(dialog).getByText('llama3.2'))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Mode, model and effort' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Model and effort' })).toBeNull())
   })
 
   it('searches every provider from the popover', async () => {
     renderLine()
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-task-options]')!)
-    const dialog = await screen.findByRole('dialog', { name: 'Mode, model and effort' })
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-model-picker]')!)
+    const dialog = await screen.findByRole('dialog', { name: 'Model and effort' })
     await waitFor(() => expect(within(dialog).getByText('llama3.2')).toBeTruthy())
     fireEvent.change(within(dialog).getByRole('combobox', { name: 'Search models' }), { target: { value: 'llama' } })
     const list = within(dialog).getByRole('listbox', { name: 'Models' })

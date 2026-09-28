@@ -1,6 +1,6 @@
 /**
  * The effort ladder the task options offer: which models show it and which
- * steps it has. TaskOptions and the New task brief render these helpers.
+ * steps it has. The composer's model picker renders these helpers.
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import {

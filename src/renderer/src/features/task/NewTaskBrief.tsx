@@ -1,22 +1,11 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import type { AgentInteractionMode, McpServerStatus, ToolApprovalMode, ToolCatalogResult } from '@shared/ipc'
-import { providerLabel } from '@shared/domain/providers'
-import { modelSelectionKey } from '@shared/domain/modelSelection'
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
+import type { McpServerStatus, ToolApprovalMode, ToolApprovalSettings, ToolCatalogResult } from '@shared/ipc'
 import { relativeTimeAgo } from '@shared/utils/timeFormat'
-import { Button, IconButton, Menu, Segmented, StatusGlyph, cn, type MenuOption } from '@renderer/lib/ui'
+import { Button, IconButton, Menu, StatusGlyph, cn, type MenuOption } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
-import { useCustomProviders } from '@renderer/lib/hooks/customProvidersStore'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
-import { MODES } from '@renderer/features/chat/components/composer/ModePicker'
-import { TaskOptions, capabilities, type TaskOptionsProps } from '@renderer/features/chat/components/composer/TaskOptions'
-import {
-  buildModes,
-  modeIndex,
-  modelShowsThinkingControls,
-  resolveThinkingUiMeta
-} from '@renderer/features/chat/components/composer/ThinkingControls'
 import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
 import { useGitInit } from '@renderer/features/chat/components/useGitInit'
 import { useGitStatus } from '@renderer/features/chat/components/useGitStatus'
@@ -32,13 +21,6 @@ export type NewTaskTargets = {
 const MAX_CHECKS = 20
 const CHECK_MAX_CHARS = 500
 
-const MODE_NOTE: Record<AgentInteractionMode, string> = {
-  agent: 'Plans, edits files and runs commands in the workspace',
-  ask: 'Reads and answers — changes nothing'
-}
-
-const MODE_NOTE_WORKTREE = 'Plans, edits files and runs commands in the new worktree'
-
 const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
   off: 'Runs its tools without asking',
   mutating: 'Asks before edits and commands',
@@ -52,10 +34,11 @@ function startChord(): string {
 }
 
 /**
- * Starting a task is filling in a brief, not opening a chat: what to do, the
- * checks the run is judged against, how it runs, and — beside it — what the
- * agent will see. The brief itself is the composer's input, so @ context,
- * attachments and / skills work here as they do on the instruction line.
+ * Starting a task is filling in a brief, not opening a chat: what to do and
+ * how it runs (the composer's own control row, in the brief's box), the
+ * checks the run is judged against, and — beside it — what the agent will
+ * see. The brief itself is the composer's input, so @ context, attachments
+ * and / skills work here as they do on the instruction line.
  */
 export function NewTaskBrief({
   workspacePath,
@@ -63,21 +46,19 @@ export function NewTaskBrief({
   brief,
   input,
   attachments,
+  controls,
   banners,
   fileInput,
   menus,
-  attachLabel,
-  attachDisabled,
-  onAttach,
-  onMention,
-  options,
+  onDragOver,
+  onDrop,
+  approval,
   canStart,
   startBlockedReason,
   onChecksChange,
   onStart,
   onOpenSettings,
   headerActions,
-  mic,
   checks,
   onChecksEdit,
   clearToken,
@@ -91,14 +72,19 @@ export function NewTaskBrief({
   brief: string
   input: ReactNode
   attachments: ReactNode
+  /**
+   * Mode, model · effort, attach and mic — the row every composer ends with.
+   * A dictation take's strip stands in for it while there is one.
+   */
+  controls: ReactNode
   banners: ReactNode
   fileInput: ReactNode
   menus: ReactNode
-  attachLabel: string
-  attachDisabled: boolean
-  onAttach: () => void
-  onMention: () => void
-  options: TaskOptionsProps
+  /** Files dropped anywhere on the box attach. */
+  onDragOver?: (event: DragEvent<HTMLElement>) => void
+  onDrop?: (event: DragEvent<HTMLElement>) => void
+  /** How tools ask before they run — said once, beside Start task. */
+  approval?: ToolApprovalSettings | null
   canStart: boolean
   startBlockedReason: string | null
   /** The checks as they stand, a half-typed one included — whatever starts the task sends them. */
@@ -107,8 +93,6 @@ export function NewTaskBrief({
   onOpenSettings?: (section: 'agent') => void
   /** The pane's own controls: show the inspector, close a split pane. */
   headerActions?: ReactNode
-  /** Dictation, as on the instruction line. */
-  mic?: ReactNode
   /** The checks added so far — kept per workspace, so leaving New task keeps them. */
   checks: string[]
   onChecksEdit: (next: string[]) => void
@@ -229,31 +213,15 @@ export function NewTaskBrief({
             <div
               className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
               data-brief
+              // The composer's shell: Ctrl+. typed in the brief switches this box's mode.
+              data-composer-shell
+              onDragOver={onDragOver}
+              onDrop={onDrop}
             >
               {fileInput}
-              <div className="px-4 pt-3">{input}</div>
-              <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1">
-                <div className="min-w-0 flex-1">{attachments}</div>
-                <IconButton
-                  icon="at"
-                  label="Add context (@)"
-                  size="md"
-                  tone="muted"
-                  disabled={attachDisabled}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={onMention}
-                />
-                <IconButton
-                  icon="paperclip"
-                  label={attachLabel}
-                  size="md"
-                  tone="muted"
-                  disabled={attachDisabled}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={onAttach}
-                />
-                {mic}
-              </div>
+              <div className="px-4 pt-3.5">{input}</div>
+              {attachments ? <div className="px-4 pt-2">{attachments}</div> : null}
+              <div className="pb-1 pl-4 pr-3 @container">{controls}</div>
             </div>
             {menus}
 
@@ -308,15 +276,10 @@ export function NewTaskBrief({
               ) : null}
             </Block>
 
-            <Block label="How it runs">
-              <HowItRuns options={options} onOpenSettings={onOpenSettings} worktree={worktree} />
-            </Block>
-
-            <div className="mt-8 flex items-center gap-2">
+            <div className="mt-8 flex flex-wrap items-center gap-2">
               <Button
                 variant="primary"
                 size="md"
-                icon="play"
                 title={startBlockedReason ?? `Start task (${startChord()})`}
                 disabled={!canStart}
                 onClick={onStart}
@@ -335,6 +298,7 @@ export function NewTaskBrief({
                   {draft.continuing ? 'Update draft' : 'Save as draft'}
                 </Button>
               ) : null}
+              {approval ? <ApprovalNote approval={approval} onOpenSettings={onOpenSettings} /> : null}
             </div>
           </div>
 
@@ -488,94 +452,36 @@ function BranchSelect({
   )
 }
 
-function HowItRuns({
-  options,
-  onOpenSettings,
-  worktree
+/**
+ * How tools ask before they run: the one run setting the control row does
+ * not carry, set in Settings → Agent. Quiet — it is usually the default.
+ */
+function ApprovalNote({
+  approval,
+  onOpenSettings
 }: {
-  options: TaskOptionsProps
+  approval: ToolApprovalSettings
   onOpenSettings?: (section: 'agent') => void
-  worktree: boolean
 }) {
-  const { provider, model, modelMetaByValue, agentMode, onAgentModeChange, chatSettings, onChatSettingsChange } = options
-  const locked = Boolean(options.disabled)
-  const customProviders = useCustomProviders()
-  const meta = modelMetaByValue[modelSelectionKey(provider, model)] ?? modelMetaByValue[model]
-  const thinkingUi = resolveThinkingUiMeta(provider, model, meta)
-  const effortModes = buildModes(
-    thinkingUi.supportedThinkingEfforts,
-    thinkingUi.thinkingCanDisable,
-    thinkingUi.thinkingMode,
-    thinkingUi.thinkingDefaultEffort
-  )
-  const showsEffort = modelShowsThinkingControls(provider, model, meta)
-  const effortAt = modeIndex(effortModes, chatSettings.thinkingEnabled, chatSettings.thinkingEffort)
-  const can = capabilities(meta).map((c) => c.label.toLowerCase())
-  const approval = chatSettings.toolApproval
-  const approvalNote = [
+  const note = [
     APPROVAL_NOTE[approval.mode],
     approval.mode !== 'all' && approval.mcpProtection !== false ? 'MCP tools ask first' : null
   ]
     .filter(Boolean)
     .join(' · ')
-
   return (
-    <dl className="m-0 grid grid-cols-[88px_1fr] items-center gap-y-2.5 text-sm">
-      <dt className="text-muted">Mode</dt>
-      <dd className="m-0 flex min-w-0 items-center gap-3">
-        <Segmented
-          label="Mode"
-          value={agentMode}
-          // Agent first: it is what a task usually is.
-          items={[...MODES].sort((a, b) => Number(b.value === 'agent') - Number(a.value === 'agent')).map((m) => ({ id: m.value, label: m.label }))}
-          onChange={onAgentModeChange}
-          disabled={locked}
-        />
-        <span className="min-w-0 truncate text-xs text-tertiary">
-          {worktree && agentMode === 'agent' ? MODE_NOTE_WORKTREE : MODE_NOTE[agentMode]}
-        </span>
-      </dd>
-      <dt className="text-muted">Model</dt>
-      <dd className="m-0 flex min-w-0 items-center gap-3">
-        <TaskOptions {...options} trigger="model" />
-        <span className="min-w-0 truncate text-xs text-tertiary">
-          {[providerLabel(provider, customProviders), ...can].join(' · ')}
-        </span>
-      </dd>
-      {showsEffort ? (
-        <>
-          <dt className="text-muted">Effort</dt>
-          <dd className="m-0">
-            <Segmented
-              label="Effort"
-              value={String(effortAt)}
-              items={effortModes.map((m, i) => ({ id: String(i), label: m.short, title: m.label }))}
-              onChange={(id) => {
-                const next = effortModes[Number(id)]
-                if (!next) return
-                onChatSettingsChange(
-                  next.enabled ? { thinkingEnabled: true, thinkingEffort: next.effort } : { thinkingEnabled: false }
-                )
-              }}
-              disabled={locked}
-            />
-          </dd>
-        </>
+    <p className="m-0 ml-auto flex min-w-0 items-center gap-2 text-xs text-muted" data-approval-note>
+      <span className="min-w-0 truncate">{note}</span>
+      {onOpenSettings ? (
+        <button
+          type="button"
+          className="shrink-0 rounded-sm font-medium text-secondary underline-offset-2 vy-transition hover:text-fg hover:underline focus-visible:vy-focus-ring"
+          onClick={() => onOpenSettings('agent')}
+        >
+          Change
+        </button>
       ) : null}
-      <dt className="text-muted">Approvals</dt>
-      <dd className="m-0 flex min-w-0 items-center gap-2 text-xs text-secondary">
-        <span className="min-w-0 truncate">{approvalNote}</span>
-        {onOpenSettings ? (
-          <button
-            type="button"
-            className="shrink-0 rounded-sm font-medium text-muted underline-offset-2 vy-transition hover:text-fg hover:underline focus-visible:vy-focus-ring"
-            onClick={() => onOpenSettings('agent')}
-          >
-            Change
-          </button>
-        ) : null}
-      </dd>
-    </dl>
+    </p>
   )
 }
 

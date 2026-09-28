@@ -18,15 +18,22 @@ import { parseSlashSubmit } from '@shared/slashCommands'
 import { findSlashChipSubmit, hasComposerContent } from './mentionModel'
 import type { MentionMenuItem } from './mentionModel'
 
-/** Build the native-file / audio extras payload from a cleared draft, if any. */
+/**
+ * The extras payload from a cleared draft, if any: native files, audio, and
+ * whether this send steers the live run. Steer rides here, not in a flag the
+ * caller sets beside the call, so it survives the await a slash command's
+ * lookup puts between the key press and the send.
+ */
 function buildExtras(
   nativeFiles: AttachedNativeFile[],
-  audio: AttachedAudio[]
+  audio: AttachedAudio[],
+  steer = false
 ): ComposerSendExtras | undefined {
-  return nativeFiles.length || audio.length
+  return nativeFiles.length || audio.length || steer
     ? {
         ...(nativeFiles.length ? { nativeFiles: nativeFiles } : {}),
-        ...(audio.length ? { audio: audio } : {})
+        ...(audio.length ? { audio: audio } : {}),
+        ...(steer ? { steer: true } : {})
       }
     : undefined
 }
@@ -202,8 +209,10 @@ export function useComposerDraft({
     setFileError
   ])
 
-  const submit = (e?: FormEvent): void => {
+  /** `steer`: send into the live run now (Shift+Enter, Send now), not at the turn's end. */
+  const submit = (e?: FormEvent, opts?: { steer?: boolean }): void => {
     e?.preventDefault()
+    const steer = Boolean(opts?.steer)
     if (
       (!hasComposerContent(text) && !hasAttachments) ||
       disabled ||
@@ -235,7 +244,7 @@ export function useComposerDraft({
             return false
           }
           const { draftImages, draftFiles, draftNative, draftAudio, restore } = clearDraft(submissionId)
-          const extras = buildExtras(draftNative, draftAudio)
+          const extras = buildExtras(draftNative, draftAudio, steer)
           try {
             const ok = await onSlashSubmit(
               cmd,
@@ -266,7 +275,7 @@ export function useComposerDraft({
             // Unknown slash → fall through as normal chat message
             const { draftText, draftImages, draftFiles, draftNative, draftAudio, restore } =
               clearDraft(submissionId)
-            const extras = buildExtras(draftNative, draftAudio)
+            const extras = buildExtras(draftNative, draftAudio, steer)
             try {
               const ok = await onSend(
                 draftText,
@@ -281,7 +290,7 @@ export function useComposerDraft({
             return
           }
           const { draftImages, draftFiles, draftNative, draftAudio, restore } = clearDraft(submissionId)
-          const extras = buildExtras(draftNative, draftAudio)
+          const extras = buildExtras(draftNative, draftAudio, steer)
           try {
             const ok = await onSlashSubmit(
               cmd,
@@ -302,7 +311,7 @@ export function useComposerDraft({
     }
 
     const { draftText, draftImages, draftFiles, draftNative, draftAudio, restore } = clearDraft(submissionId)
-    const extras = buildExtras(draftNative, draftAudio)
+    const extras = buildExtras(draftNative, draftAudio, steer)
     void Promise.resolve()
       .then(() =>
         onSend(

@@ -7,6 +7,7 @@ import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
 import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import { altChordLabel } from '@renderer/lib/shortcuts/labels'
+import { typingElsewhere } from '@renderer/lib/a11y'
 import { toolLabel } from '@renderer/features/chat/toolUi'
 import { RecordActionsContext } from './WorkItems'
 
@@ -89,9 +90,15 @@ export const ApprovalCard = memo(function ApprovalCard({
 
   const canDecide = Boolean(onDecide) && phase === 'idle'
 
+  // Focus Allow once per request — never again because a parent re-rendered
+  // (a new `onDecide` each keystroke), and never out from under text being
+  // typed elsewhere: the next space would press Allow for the typist.
+  const canFocus = Boolean(onDecide) && captureFocus
   useEffect(() => {
-    if (onDecide && captureFocus) allowRef.current?.focus({ preventScroll: true })
-  }, [approval.requestId, onDecide, captureFocus])
+    const allow = allowRef.current
+    if (!canFocus || !allow || typingElsewhere(allow.closest('[data-tool-approval]') ?? allow)) return
+    allow.focus({ preventScroll: true })
+  }, [approval.requestId, canFocus])
 
   // Alt A allows once, Alt D denies — Esc is left to stop the run.
   useEffect(() => {

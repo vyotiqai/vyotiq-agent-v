@@ -4,6 +4,7 @@ import { Icon } from '@renderer/lib/icons'
 import { Button } from '@renderer/lib/ui/Button'
 import { cn } from '@renderer/lib/ui/cn'
 import { MENU_SURFACE } from '@renderer/lib/ui/menuStyles'
+import { Pie } from '@renderer/lib/ui/Progress'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import { BORDER_DIVIDER, DIVIDER_FILL, NUM, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
@@ -69,7 +70,7 @@ function formatPct(n: number, total: number): string {
 }
 
 /** Ratio, percent and level for a usage snapshot — one source for every ring. */
-export function usageMetrics(usage: ContextUsageState) {
+function usageMetrics(usage: ContextUsageState) {
   const budget = Math.max(1, usage.contentWindow > 0 ? usage.contentWindow : usage.window)
   const overBudget = usage.used > budget || usage.overflow === true
   const ratio = Math.min(1, usage.used / budget)
@@ -357,7 +358,7 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
  * and whether a long-run tip waits inside. Shared by every place the meter
  * opens from, so screen readers hear the same reading wherever it is.
  */
-export function contextMeterLabels(
+function contextMeterLabels(
   usage: ContextUsageState,
   advisoryHint: string | null
 ): { aria: string; title: string } {
@@ -403,7 +404,7 @@ function RunStat({
   )
 }
 
-export function ContextMeterPanel({
+function ContextMeterPanel({
   usage,
   onCompact,
   compacting,
@@ -639,6 +640,7 @@ export function ContextMeter({
   onCompact,
   compactDisabled = false,
   advisoryHint = null,
+  showPercent = false,
   className
 }: {
   usage: ContextUsageState | null
@@ -648,6 +650,8 @@ export function ContextMeter({
   ) => Promise<{ ok: true; message: string } | { ok: false; message: string }>
   compactDisabled?: boolean
   advisoryHint?: string | null
+  /** The share beside the pie — the composer's control row, where there is room to read it. */
+  showPercent?: boolean
   className?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -692,7 +696,7 @@ export function ContextMeter({
     return null
   }
 
-  const { overBudget, ratio, level } = usageMetrics(alignedUsage)
+  const { overBudget, ratio, displayPct } = usageMetrics(alignedUsage)
   const labels = contextMeterLabels(alignedUsage, advisoryHint)
 
   const panelLayout =
@@ -719,8 +723,12 @@ export function ContextMeter({
       <button
         ref={triggerRef}
         type="button"
+        data-context-meter
         className={cn(
-          'inline-grid size-7 shrink-0 place-items-center rounded-md vy-transition focus-visible:vy-focus-ring',
+          showPercent
+            ? 'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs'
+            : 'inline-grid size-7 shrink-0 place-items-center rounded-md',
+          'vy-transition focus-visible:vy-focus-ring',
           // One state's classes at a time: appended, the open state's text-fg lost to text-muted.
           overBudget
             ? cn('bg-danger-soft', levelRing.danger)
@@ -736,7 +744,14 @@ export function ContextMeter({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}
       >
-        <UsageRing ratio={ratio} size={16} level={level} />
+        {/* A pie, not a ring: a small ring read as a loading spinner. */}
+        <Pie value={ratio} size={showPercent ? 12 : 16} />
+        {showPercent ? (
+          // A split pane keeps the pie and drops the number (the label still reads it).
+          <span aria-hidden="true" className="font-mono tnum @max-[400px]:hidden">
+            {displayPct}%
+          </span>
+        ) : null}
       </button>
 
       {open && position && panelLayout

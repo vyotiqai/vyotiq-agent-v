@@ -1,10 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
-  type DragEvent
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode
 } from 'react'
 import type {
   AgentInteractionMode,
@@ -12,12 +15,14 @@ import type {
   AttachedFile,
   AttachedNativeFile,
   ComposerSendExtras,
+  ModelInfo,
   ProviderIdAny,
   SecretProvider,
   ServiceTier,
   SlashCommandDescriptor
 } from '@shared/ipc'
 import { modelSelectionKey } from '@shared/domain/modelSelection'
+import { resolveModelContextWindow } from '@shared/domain/modelContextWindows'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
 import { isRetryableTurnFailure } from '@shared/errors'
@@ -30,22 +35,21 @@ import {
   setBriefWorktree,
   useBriefState
 } from '@renderer/lib/drafts/taskDraftStore'
-import { Icon } from '@renderer/lib/icons'
 import { isSessionDragEvent } from '@renderer/lib/chat/chatPaneLayout'
 import { ComposerMentionInput, type ComposerMentionInputHandle } from './ComposerMentionInput'
 import { ComposerAttachments } from './ComposerAttachments'
-import {
-  DictationErrorBanner,
-  DictationSession,
-  type DictationSettingsSection,
-  type DictationStripState
-} from './DictationSessionStrip'
-import { TaskOptions } from './TaskOptions'
+import { ModelPicker } from './ModelPicker'
+import { ModeSwitch } from './ModePicker'
+import { ContextMeter, type ContextUsageState } from './ContextMeter'
+import { useResolvedContextUsage, useResolvedCostHint } from './useContextUsage'
+import type { ChatMetaStore } from '../../chatStores'
 import { useComposerDraft } from './useComposerDraft'
 import { useComposerImages, MAX_IMAGES } from './useComposerImages'
 import { useComposerFiles, ATTACHMENT_ACCEPT, MAX_FILES, isImageFile } from './useComposerFiles'
 import { useComposerAudio, isAudioFile, MAX_AUDIO_FILES } from './useComposerAudio'
-import { useComposerDictation, type DictationPhase } from './useComposerDictation'
+import { useTake } from './take/useTake'
+import { TakeStrip } from './take/TakeStrip'
+import { MicControl } from './take/MicControl'
 import { useComposerModels } from './useComposerModels'
 import { deriveModelReadiness, modelReadinessBlocksSend, modelReadinessSendReason } from './modelReadiness'
 import { ModelReadinessBanner } from './ModelReadinessBanner'
@@ -70,78 +74,20 @@ import {
 } from './slashCommandExecute'
 import { resolveLinePlaceholder } from './composerPlaceholder'
 import { filesFromDataTransfer } from './dataTransferFiles'
-import { focusComposerMessage, isMainComposerTarget, shortcutLabel } from '@renderer/lib/shortcuts'
+import { focusComposerMessage, isMainComposerTarget } from '@renderer/lib/shortcuts'
 
 /**
- * `line` is the task's instruction line: one row flush with the pane's bottom
- * edge — no Send or Stop button (Enter sends, Esc stops), options in one token.
- * `brief` is the New task page. `inline` is Edit and rerun: the line's
- * controls in the brief's box, in place of the instruction it edits.
+ * Three surfaces, one anatomy: the field, what is attached to it, then one
+ * control row — mode, model · effort, context, attach, mic, the action.
+ * `line` is the task's instruction line, flush with the pane's bottom edge
+ * (Send, or Queue while a run is live; Stop stays in the task header).
+ * `brief` is the New task page, the same field and row in its box.
+ * `inline` is Edit and rerun, in a box where the instruction was.
  */
 export type ComposerVariant = 'inline' | 'line' | 'brief'
 
 /** The inline editor's placeholder when the caller names none. */
 const INLINE_PLACEHOLDER = 'Edit the instruction…'
-
-function resolveDictationStripState(d: {
-  phase: DictationPhase
-  error: string | null
-  errorAction: DictationSettingsSection | null
-  elapsedMs: number
-  waveform: readonly number[]
-}): DictationStripState | null {
-  switch (d.phase) {
-    case 'checking':
-      return { kind: 'checking', elapsedMs: d.elapsedMs, waveform: d.waveform }
-    case 'recording':
-      return { kind: 'listening', elapsedMs: d.elapsedMs, waveform: d.waveform }
-    case 'transcribing':
-      return { kind: 'transcribing', elapsedMs: d.elapsedMs, waveform: d.waveform }
-    case 'idle':
-      return d.error
-        ? { kind: 'error', message: d.error, settingsSection: d.errorAction }
-        : null
-    default: {
-      const _exhaustive: never = d.phase
-      return _exhaustive
-    }
-  }
-}
-
-/**
- * The instruction line's mic: its name says what pressing it does in each
- * dictation phase; the tooltip adds the chord and the engine.
- */
-function lineMic(phase: DictationPhase, engineHint: string | null): { label: string; tip: string } {
-  switch (phase) {
-    case 'idle': {
-      const chord = `Dictate (${shortcutLabel('dictation')})`
-      return { label: 'Dictate', tip: engineHint ? `${chord} · ${engineHint}` : chord }
-    }
-    case 'checking':
-      return { label: 'Starting dictation', tip: 'Starting dictation…' }
-    case 'recording':
-      return { label: 'Stop dictation', tip: 'Stop dictation and transcribe' }
-    case 'transcribing':
-      return { label: 'Transcribing', tip: 'Transcribing…' }
-    default: {
-      const _exhaustive: never = phase
-      return _exhaustive
-    }
-  }
-}
-
-/** Narrow DictationPhase to the live session phases; null while idle. */
-function liveDictationPhase(phase: DictationPhase): 'checking' | 'recording' | 'transcribing' | null {
-  switch (phase) {
-    case 'checking':
-    case 'recording':
-    case 'transcribing':
-      return phase
-    default:
-      return null
-  }
-}
 
 function notifyMcpUnavailable(
   command: SlashCommandDescriptor,
@@ -286,6 +232,8 @@ export function Composer({
   taskFiles?: readonly string[]
 }) {
   const taRef = useRef<ComposerMentionInputHandle>(null)
+  // useId's colons would need escaping in a selector; the menus look ids up by getElementById.
+  const listIdBase = useId().replace(/:/g, '')
   const focusInput = useCallback(() => taRef.current?.focus(), [])
   /** The New task brief's done-when checks, kept current while the brief is up. */
   const briefChecksRef = useRef<string[]>([])
@@ -385,8 +333,6 @@ export function Composer({
   const briefState = useBriefState(briefWorkspace)
   const briefDraftIdRef = useRef(briefState.draftId)
   briefDraftIdRef.current = briefState.draftId
-  /** Set by Shift+Enter just before submit: this send steers the live run. */
-  const steerNextRef = useRef(false)
   const briefWorktreeRef = useRef(Boolean(briefState.worktree))
   briefWorktreeRef.current = Boolean(briefState.worktree)
   const [savingDraft, setSavingDraft] = useState(false)
@@ -461,11 +407,6 @@ export function Composer({
         // New worktree: App makes it and starts the task there.
         if (variant === 'brief' && briefWorktreeRef.current) {
           extras = { ...(extras ?? {}), worktree: true }
-        }
-        // Shift+Enter on the instruction line while a run is live.
-        if (steerNextRef.current) {
-          steerNextRef.current = false
-          extras = { ...(extras ?? {}), steer: true }
         }
         const boundWorkspace = workspacePath
         const resolved = await resolveComposerMentions({
@@ -835,32 +776,54 @@ export function Composer({
 
   const setDictationCaret = useCallback((offset: number): void => {
     setCursor(offset)
-    // Listening unmounts the editor; wait until it remounts after transcribe.
+    // The field is read-only while a take writes into it; place the caret
+    // once it is editable again.
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        taRef.current?.setSelectionStart(offset)
-        taRef.current?.focus()
-      })
+      taRef.current?.focus()
+      taRef.current?.setSelectionStart(offset)
     })
   }, [])
 
-  const dictation = useComposerDictation({
+  const isDictationTarget = useCallback((): boolean => {
+    const el = taRef.current?.el ?? null
+    if (!el) return false
+    const active = document.activeElement
+    return active === el || el.contains(active)
+  }, [])
+
+  const focusForDictation = useCallback(() => taRef.current?.focus(), [])
+
+  // "Send" from a take: the words land in the draft first, then the draft
+  // submits on the render that has them — `submit` reads the draft it was
+  // rendered with.
+  const sendAfterTakeRef = useRef(false)
+  const submitRef = useRef(submit)
+  submitRef.current = submit
+  const requestSendAfterTake = useCallback(() => {
+    sendAfterTakeRef.current = true
+  }, [])
+  useEffect(() => {
+    if (!sendAfterTakeRef.current) return
+    sendAfterTakeRef.current = false
+    submitRef.current()
+  }, [text])
+
+  const take = useTake({
+    surface: variant,
+    workspacePath,
     text,
     setText,
     secrets,
     disabled: Boolean(disabled),
-    shortcutActive: true,
-    isShortcutTarget: () => {
-      const el = taRef.current?.el ?? null
-      if (!el) return false
-      const active = document.activeElement
-      return active === el || el.contains(active)
-    },
-    focusComposer: () => taRef.current?.focus(),
     getCaret: getDictationCaret,
-    setCaret: setDictationCaret
+    setCaret: setDictationCaret,
+    isShortcutTarget: isDictationTarget,
+    focusComposer: focusForDictation,
+    requestSend: variant === 'brief' ? null : requestSendAfterTake,
+    openSettings: slashHandlers?.onOpenSettings
   })
-
+  /** A take is writing into the field: typing, attaching and menus wait. */
+  const takeOpen = take.field.locked
 
   preferNativePdfRef.current = Boolean(
     (
@@ -960,7 +923,7 @@ export function Composer({
   const audioFull = audio.length >= MAX_AUDIO_FILES
   const fileRoom = MAX_FILES - files.length - nativeFiles.length
   const audioRoom = MAX_AUDIO_FILES - audio.length
-  // Per-bucket capacity on the plus button: full buckets state "full", open
+  // Per-bucket capacity on the paperclip: full buckets state "full", open
   // buckets state remaining slots — a click never dead-ends silently. Shown
   // only once at least one bucket is full; the resting label stays untouched.
   const attachHint =
@@ -975,6 +938,12 @@ export function Composer({
           .filter(Boolean)
           .join(' · ')
       : null
+  const attachFullAll = imagesFull && filesFull && audioFull
+  const attachLabel = attachFullAll
+    ? 'Attachment limits reached'
+    : attachHint
+      ? `Attach files — ${attachHint}`
+      : 'Attach files — or type @ for context'
 
   const sendDisabledReason = !canSend
     ? disabled
@@ -989,46 +958,303 @@ export function Composer({
             ? 'Resolve the attachment issue before starting.'
             : isInline
               ? 'Edit the instruction to rerun it'
-              : 'Write a brief or attach a file to start.'
+              : isBrief
+                ? 'Write a brief or attach a file to start.'
+                : 'Write an instruction or attach a file first.'
     : null
 
-  const slashListId = `slash-command-menu-${variant}`
-  const mentionListId = `composer-mention-menu-${variant}`
-
-  const dictationStripState = resolveDictationStripState({
-    phase: dictation.phase,
-    error: dictation.error,
-    errorAction: dictation.errorAction,
-    elapsedMs: dictation.elapsedMs,
-    waveform: dictation.waveform
-  })
-
-  const dictationActive =
-    dictationStripState?.kind === 'checking' ||
-    dictationStripState?.kind === 'listening' ||
-    dictationStripState?.kind === 'transcribing'
+  const slashListId = `slash-command-menu-${variant}-${listIdBase}`
+  const mentionListId = `composer-mention-menu-${variant}-${listIdBase}`
 
   const showRetry =
     Boolean(onRetryNetwork) &&
     isRetryableTurnFailure({ errorCode, incompleteReason: incomplete?.reason })
 
+  const hasAttachmentRow =
+    images.length > 0 ||
+    files.length > 0 ||
+    nativeFiles.length > 0 ||
+    audio.length > 0 ||
+    Boolean(imageError || fileError || audioError) ||
+    extracting
+  const showReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
+
+  /** Shift+Enter on the line while a run is live: this one goes in now, not at the turn's end. */
+  const steer = (): void => submit(undefined, { steer: true })
+
+  const placeholder =
+    composerPlaceholder?.trim() ||
+    (isBrief
+      ? !hasWorkspace
+        ? 'Open a workspace to start a task'
+        : agentMode === 'ask'
+          ? 'Ask about this workspace — the agent reads and answers, and changes nothing'
+          : 'Describe the task — the agent plans it, does it, and shows you the result'
+      : isInline
+        ? INLINE_PLACEHOLDER
+        : resolveLinePlaceholder({ hasWorkspace: Boolean(hasWorkspace), running, agentMode, runCount }))
+
+  // ── The pieces every variant is built from ────────────────────────────
+
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept={ATTACHMENT_ACCEPT}
+      multiple
+      className="hidden"
+      aria-hidden
+      tabIndex={-1}
+      onChange={(e) => {
+        void onPickAttachments(e.target.files)
+        e.target.value = ''
+      }}
+    />
+  )
+
+  const field = (
+    <div ref={mentionAnchorRef} className="min-w-0" data-composer-input-wrap>
+      <ComposerMentionInput
+        ref={taRef}
+        size={isBrief ? 'brief' : 'sm'}
+        newlineOnEnter={isBrief}
+        ariaLabel={isBrief ? 'Brief' : 'Instruction'}
+        value={take.field.value ?? text}
+        readOnly={takeOpen}
+        highlights={take.field.highlights}
+        onChange={(next) => {
+          if (takeOpen) return
+          setText(next)
+          requestAnimationFrame(syncCursor)
+        }}
+        onKeyDown={(e) => {
+          if (
+            isLine &&
+            running &&
+            e.key === 'Enter' &&
+            e.shiftKey &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !e.altKey &&
+            !e.nativeEvent.isComposing &&
+            !slash.open &&
+            !mentions.open
+          ) {
+            e.preventDefault()
+            steer()
+            return
+          }
+          onKeyDown(e)
+          requestAnimationFrame(syncCursor)
+        }}
+        onCaretChange={(offset) => setCursor(offset)}
+        onPasteFiles={(pasted) => {
+          void onPickAttachments(pasted)
+        }}
+        placeholder={placeholder}
+        disabled={inputLocked}
+        onFocus={onFocus}
+        aria-expanded={slash.open || mentions.open}
+        aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
+        aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
+        aria-activedescendant={
+          slash.open && slash.activeCommand
+            ? `${slashListId}-opt-${slash.activeCommand.id}`
+            : mentions.open && mentions.activeItem
+              ? `${mentionListId}-opt-${mentions.activeItem.id}`
+              : undefined
+        }
+      />
+    </div>
+  )
+
+  const attachments = hasAttachmentRow ? (
+    <ComposerAttachments
+      images={images}
+      imageError={imageError}
+      files={files}
+      nativeFiles={nativeFiles}
+      audio={audio}
+      fileError={fileError}
+      audioError={audioError}
+      extracting={extracting}
+      attachLocked={inputLocked}
+      onRemove={removeImage}
+      onRemoveFile={removeFile}
+      onRemoveNativeFile={removeNativeFile}
+      onRemoveAudio={removeAudio}
+    />
+  ) : null
+
+  const readiness =
+    showReadiness && readinessIssue ? (
+      <ModelReadinessBanner
+        issue={readinessIssue}
+        busy={catalogLoading}
+        // On the brief, Start task is the page's one primary.
+        primary={!isBrief}
+        onRecheck={() => {
+          void refreshCatalog({ forceRefresh: true, provider })
+        }}
+        onAddKey={() => {
+          slashHandlers?.onOpenSettings?.('providers')
+        }}
+      />
+    ) : null
+
+  const errorAlerts =
+    bannerError || secondaryBannerError ? (
+      <>
+        {secondaryBannerError ? <Alert>{secondaryBannerError}</Alert> : null}
+        {bannerError ? (
+          <Alert onDismiss={onDismissError}>
+            <div className="flex items-start justify-between gap-2">
+              <span className="min-w-0 [overflow-wrap:anywhere]">{bannerError}</span>
+              {showRetry ? (
+                <Button size="xs" onClick={onRetryNetwork}>
+                  Retry
+                </Button>
+              ) : null}
+            </div>
+          </Alert>
+        ) : null}
+      </>
+    ) : null
+
+  const menus = takeOpen ? null : (
+    <>
+      <SlashCommandMenu
+        open={slash.open}
+        commands={slash.filtered}
+        mcpServers={slash.mcpServers}
+        activeIndex={slash.activeIndex}
+        onActiveIndexChange={slash.setActiveIndex}
+        onPick={onSlashAccept}
+        onDismiss={slash.dismiss}
+        anchorRef={mentionAnchorRef}
+        listId={slashListId}
+        loading={slash.loading}
+        listError={slash.listError}
+      />
+      <MentionMenu
+        open={mentions.open}
+        view={mentions.view}
+        items={mentions.items}
+        query={mentions.token?.query ?? ''}
+        activeIndex={mentions.activeIndex}
+        onActiveIndexChange={mentions.setActiveIndex}
+        onPick={onMentionAccept}
+        onDismiss={mentions.dismiss}
+        onBack={mentions.goBack}
+        anchorRef={mentionAnchorRef}
+        listId={mentionListId}
+        loading={mentions.loading}
+      />
+    </>
+  )
+
+  /**
+   * The control row, the same on every surface: how the task runs on the
+   * left (mode, then model · effort), what goes with it on the right
+   * (context used, attach, mic), then this surface's action. While a take is
+   * open it owns the field, and its strip stands in for the row, with the mic
+   * kept at the end. What a take leaves behind — words inserted (Undo), a
+   * discarded take (Restore), a mic error — is a slim row above the
+   * controls, which stay: the next thing is usually Send.
+   *
+   * Its wrapper is the size container, so a split pane (280px at the least)
+   * sheds in steps rather than spilling: keycaps under 480px, the context
+   * share and Send now under 400px, the effort under 320px — and below that
+   * the right group wraps under the left.
+   */
+  const controls = (action: ReactNode, opts: { context: boolean; takeSendLabel: string | null }): ReactNode =>
+    takeOpen ? (
+      <div className="flex h-10 min-w-0 items-center gap-1 @max-[480px]:[&_span:has(>kbd)]:hidden" data-composer-controls>
+        <TakeStrip take={take} sendLabel={opts.takeSendLabel} className="min-w-0 flex-1" />
+        <MicControl take={take} />
+      </div>
+    ) : (
+      <>
+        {take.view ? (
+          <TakeStrip take={take} sendLabel={opts.takeSendLabel} className="min-w-0 @max-[480px]:[&_span:has(>kbd)]:hidden" />
+        ) : null}
+        <div
+          className="flex min-h-10 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1.5 @max-[480px]:[&_span:has(>kbd)]:hidden"
+          data-composer-controls
+        >
+          <div className="flex min-w-0 flex-[1_1_140px] items-center gap-1">
+            <ModeSwitch mode={agentMode} onChange={onAgentModeChange} disabled={settingsLocked} />
+            <ModelPicker
+              provider={provider}
+              model={model}
+              providers={providers}
+              optionsByProvider={optionsByProvider}
+              seedsByProvider={seedsByProvider}
+              modelMetaByValue={modelMetaByValue}
+              warningsByProvider={warningsByProvider}
+              favoriteModels={favoriteModels}
+              recentModels={recentModels}
+              serviceTier={serviceTier}
+              secrets={secrets}
+              ollamaBaseUrl={ollamaBaseUrl}
+              customOpenAiBaseUrl={customOpenAiBaseUrl}
+              onModelChange={onProviderModel}
+              onToggleFavorite={onToggleFavorite}
+              onServiceTierChange={onServiceTierChange}
+              onRefreshCatalog={() => {
+                setRefreshingCatalog(true)
+                void refreshCatalog({ forceRefresh: true, provider: browsedProvider }).finally(() =>
+                  setRefreshingCatalog(false)
+                )
+              }}
+              onBrowseProvider={setBrowsedProvider}
+              catalogLoading={catalogLoading}
+              chatSettings={chatSettings}
+              onChatSettingsChange={onChatSettingsChange}
+              contextUsage={contextUsage}
+              metaStore={metaStore}
+              onAddProvider={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('providers') : undefined}
+              running={running}
+              disabled={settingsLocked}
+              focusInput={focusInput}
+              placement={isBrief ? 'down' : 'up'}
+            />
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {opts.context ? (
+              <ComposerContextMeter
+                provider={provider}
+                model={model}
+                modelMetaByValue={modelMetaByValue}
+                contextUsage={contextUsage}
+                metaStore={metaStore}
+                onCompactContext={onCompactContext}
+                running={running}
+              />
+            ) : null}
+            <IconButton
+              icon="paperclip"
+              label={attachLabel}
+              size="md"
+              tone="muted"
+              disabled={inputLocked || attachFullAll}
+              data-composer-attach
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => fileRef.current?.click()}
+            />
+            <MicControl take={take} />
+            {action}
+          </div>
+        </div>
+      </>
+    )
+
+  // Buttons never take focus from the field on press: the field is where the
+  // next instruction is typed, and the keys do the same thing.
+  const keepFocus = (e: ReactMouseEvent): void => e.preventDefault()
+  const sendReady = canSend && !takeOpen
+
   if (isBrief) {
-    const attachFullAll = imagesFull && filesFull && audioFull
-    const attachLabel = attachFullAll
-      ? 'Attachment limits reached'
-      : attachHint
-        ? `Attach files — ${attachHint}`
-        : 'Attach files'
-    const showReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
-    const dictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
-    const briefLivePhase = liveDictationPhase(dictation.phase)
-    const hasAttachmentRow =
-      images.length > 0 ||
-      files.length > 0 ||
-      nativeFiles.length > 0 ||
-      audio.length > 0 ||
-      Boolean(imageError || fileError || audioError) ||
-      extracting
     return (
       <NewTaskBrief
         workspacePath={workspacePath ?? null}
@@ -1046,230 +1272,23 @@ export function Composer({
         }
         brief={text}
         banners={
-          bannerError || secondaryBannerError || showReadiness || dictationStripState?.kind === 'error' ? (
+          errorAlerts || readiness ? (
             <div className="mb-4 flex flex-col gap-2">
-              {secondaryBannerError ? <Alert>{secondaryBannerError}</Alert> : null}
-              {bannerError ? <Alert onDismiss={onDismissError}>{bannerError}</Alert> : null}
-              {dictationStripState?.kind === 'error' ? (
-                <DictationErrorBanner
-                  message={dictationStripState.message}
-                  settingsSection={dictationStripState.settingsSection}
-                  onDismiss={() => dictation.setError(null)}
-                  onOpenSettings={slashHandlers?.onOpenSettings}
-                />
-              ) : null}
-              {showReadiness && readinessIssue ? (
-                <ModelReadinessBanner
-                  issue={readinessIssue}
-                  busy={catalogLoading}
-                  // Start task is the brief's one primary.
-                  primary={false}
-                  onRecheck={() => {
-                    void refreshCatalog({ forceRefresh: true, provider })
-                  }}
-                  onAddKey={() => {
-                    slashHandlers?.onOpenSettings?.('providers')
-                  }}
-                />
-              ) : null}
+              {errorAlerts}
+              {readiness}
             </div>
           ) : null
         }
-        fileInput={
-          <input
-            ref={fileRef}
-            type="file"
-            accept={ATTACHMENT_ACCEPT}
-            multiple
-            className="hidden"
-            aria-hidden
-            tabIndex={-1}
-            onChange={(e) => {
-              void onPickAttachments(e.target.files)
-              e.target.value = ''
-            }}
-          />
-        }
-        input={
-          <>
-            {dictationActive && briefLivePhase ? (
-              <div className="mb-2">
-                <DictationSession
-                  phase={briefLivePhase}
-                  elapsedMs={dictation.elapsedMs}
-                  waveform={dictation.waveform}
-                  style={dictation.waveformStyle}
-                  engineHint={dictation.engineHint}
-                  className="min-w-0 flex-1"
-                />
-              </div>
-            ) : null}
-            <div
-              ref={mentionAnchorRef}
-              data-composer-input-wrap
-              onDragOver={onAttachmentDragOver}
-              onDrop={onAttachmentDrop}
-            >
-              <ComposerMentionInput
-                ref={taRef}
-                size="brief"
-                newlineOnEnter
-                ariaLabel="Brief"
-                value={text}
-                onChange={(next) => {
-                  setText(next)
-                  requestAnimationFrame(syncCursor)
-                }}
-                onKeyDown={(e) => {
-                  onKeyDown(e)
-                  requestAnimationFrame(syncCursor)
-                }}
-                onCaretChange={(offset) => setCursor(offset)}
-                onPasteFiles={(pasted) => {
-                  void onPickAttachments(pasted)
-                }}
-                placeholder={
-                  composerPlaceholder?.trim() ||
-                  (hasWorkspace
-                    ? 'Describe the task — the agent plans it, does it, and shows you the result'
-                    : 'Open a workspace to start a task')
-                }
-                disabled={inputLocked}
-                onFocus={onFocus}
-                aria-expanded={slash.open || mentions.open}
-                aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
-                aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
-                aria-activedescendant={
-                  slash.open && slash.activeCommand
-                    ? `${slashListId}-opt-${slash.activeCommand.id}`
-                    : mentions.open && mentions.activeItem
-                      ? `${mentionListId}-opt-${mentions.activeItem.id}`
-                      : undefined
-                }
-              />
-            </div>
-          </>
-        }
-        mic={
-          <>
-            {dictationActive ? (
-              <IconButton
-                icon="close"
-                label="Cancel dictation"
-                size="md"
-                tone="muted"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={dictation.cancel}
-              />
-            ) : null}
-            <IconButton
-              icon={dictationActive ? (dictationBusy ? 'loader' : 'stop') : 'mic'}
-              label={lineMic(dictation.phase, dictation.engineHint).label}
-              title={lineMic(dictation.phase, dictation.engineHint).tip}
-              size="md"
-              tone="muted"
-              active={dictation.phase === 'recording'}
-              disabled={Boolean(disabled) || dictationBusy}
-              aria-busy={dictationBusy || undefined}
-              className={dictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={dictation.toggle}
-            />
-          </>
-        }
-        attachments={
-          hasAttachmentRow ? (
-            <ComposerAttachments
-              images={images}
-              imageError={imageError}
-              files={files}
-              nativeFiles={nativeFiles}
-              audio={audio}
-              fileError={fileError}
-              audioError={audioError}
-              extracting={extracting}
-              attachLocked={inputLocked}
-              onRemove={removeImage}
-              onRemoveFile={removeFile}
-              onRemoveNativeFile={removeNativeFile}
-              onRemoveAudio={removeAudio}
-            />
-          ) : null
-        }
-        menus={
-          <>
-            <SlashCommandMenu
-              open={slash.open}
-              commands={slash.filtered}
-              mcpServers={slash.mcpServers}
-              activeIndex={slash.activeIndex}
-              onActiveIndexChange={slash.setActiveIndex}
-              onPick={onSlashAccept}
-              onDismiss={slash.dismiss}
-              anchorRef={mentionAnchorRef}
-              listId={slashListId}
-              loading={slash.loading}
-              listError={slash.listError}
-            />
-            <MentionMenu
-              open={mentions.open}
-              view={mentions.view}
-              items={mentions.items}
-              query={mentions.token?.query ?? ''}
-              activeIndex={mentions.activeIndex}
-              onActiveIndexChange={mentions.setActiveIndex}
-              onPick={onMentionAccept}
-              onDismiss={mentions.dismiss}
-              onBack={mentions.goBack}
-              anchorRef={mentionAnchorRef}
-              listId={mentionListId}
-              loading={mentions.loading}
-            />
-          </>
-        }
-        attachLabel={attachLabel}
-        attachDisabled={inputLocked || attachFullAll}
-        onAttach={() => fileRef.current?.click()}
-        onMention={() => {
-          // Typing @ is what opens the context menu; do the same at the caret.
-          taRef.current?.insertText('@')
-        }}
-        options={{
-          provider,
-          model,
-          providers,
-          optionsByProvider,
-          seedsByProvider,
-          modelMetaByValue,
-          warningsByProvider,
-          favoriteModels,
-          recentModels,
-          serviceTier,
-          secrets,
-          ollamaBaseUrl,
-          customOpenAiBaseUrl,
-          onModelChange: onProviderModel,
-          onToggleFavorite,
-          onServiceTierChange,
-          onRefreshCatalog: () => {
-            setRefreshingCatalog(true)
-            void refreshCatalog({ forceRefresh: true, provider: browsedProvider }).finally(() =>
-              setRefreshingCatalog(false)
-            )
-          },
-          onBrowseProvider: setBrowsedProvider,
-          catalogLoading,
-          agentMode,
-          onAgentModeChange,
-          chatSettings,
-          onChatSettingsChange,
-          onAddProvider: slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('providers') : undefined,
-          running,
-          disabled: settingsLocked,
-          focusInput
-        }}
-        canStart={canSend}
-        startBlockedReason={sendDisabledReason}
+        fileInput={fileInput}
+        input={field}
+        attachments={attachments}
+        controls={controls(null, { context: false, takeSendLabel: null })}
+        menus={menus}
+        onDragOver={onAttachmentDragOver}
+        onDrop={onAttachmentDrop}
+        approval={chatSettings.toolApproval ?? null}
+        canStart={sendReady}
+        startBlockedReason={takeOpen ? 'Insert or discard the dictation first' : sendDisabledReason}
         onChecksChange={(doneWhen) => {
           briefChecksRef.current = doneWhen
         }}
@@ -1303,47 +1322,56 @@ export function Composer({
   }
 
   if (isLine) {
-    const attachFullAll = imagesFull && filesFull && audioFull
-    const attachLabel = attachFullAll
-      ? 'Attachment limits reached'
-      : attachHint
-        ? `Attach files — ${attachHint}`
-        : 'Attach files — or type @ for context'
-    const dictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
-    const lineLivePhase = liveDictationPhase(dictation.phase)
-    const hasAttachmentRow =
-      images.length > 0 ||
-      files.length > 0 ||
-      nativeFiles.length > 0 ||
-      audio.length > 0 ||
-      Boolean(imageError || fileError || audioError) ||
-      extracting
-    const showReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
+    const shift = window.vyotiq?.platform === 'darwin' ? '⇧' : 'Shift'
+    const lineAction = (
+      <>
+        {running && sendReady ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            kbd={[shift, '↵']}
+            aria-label="Send now"
+            aria-keyshortcuts="Shift+Enter"
+            className="@max-[400px]:hidden"
+            title="Send it into the live run now, instead of when this turn ends"
+            onMouseDown={keepFocus}
+            onClick={steer}
+          >
+            Send now
+          </Button>
+        ) : null}
+        <Button
+          type="submit"
+          size="sm"
+          variant="secondary"
+          kbd={['↵']}
+          aria-label={running ? 'Queue' : 'Send'}
+          aria-keyshortcuts="Enter"
+          title={
+            sendReady
+              ? running
+                ? 'Queue it — it starts when this run ends'
+                : 'Send'
+              : takeOpen
+                ? 'Insert or discard the dictation first'
+                : (sendDisabledReason ?? undefined)
+          }
+          disabled={!sendReady}
+          onMouseDown={keepFocus}
+        >
+          {running ? 'Queue' : 'Send'}
+        </Button>
+      </>
+    )
     return (
       <div className={cn('shrink-0 border-t border-border bg-bg', className)} data-composer-line>
-        {bannerError || secondaryBannerError ? (
-          <div className="flex flex-col gap-2 border-b border-border px-4 py-2">
-            {secondaryBannerError ? <Alert>{secondaryBannerError}</Alert> : null}
-            {bannerError ? (
-              <Alert onDismiss={onDismissError}>
-                <div className="flex items-start justify-between gap-2">
-                  <span className="min-w-0 [overflow-wrap:anywhere]">{bannerError}</span>
-                  {showRetry ? (
-                    <Button size="xs" onClick={onRetryNetwork}>
-                      Retry
-                    </Button>
-                  ) : null}
-                </div>
-              </Alert>
-            ) : null}
-          </div>
-        ) : null}
+        {errorAlerts ? <div className="flex flex-col gap-2 border-b border-border px-4 py-2">{errorAlerts}</div> : null}
 
         {pendingFollowUps.length > 0 ? (
           <ul className="m-0 list-none p-0" data-follow-up-queue aria-label="Queued instructions">
             {pendingFollowUps.map((entry) =>
               editingFollowUpId === entry.id ? (
-                <li key={entry.id} className="flex items-start gap-2 border-b border-border px-4 py-2">
+                <li key={entry.id} className="flex items-start gap-2 border-b border-border/60 py-2 pl-4 pr-3">
                   <textarea
                     ref={followUpEditRef}
                     className="min-h-14 min-w-0 flex-1 resize-y rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg-strong outline-none focus-visible:vy-focus-ring"
@@ -1358,9 +1386,12 @@ export function Composer({
                     aria-label="Edit queued instruction"
                     rows={2}
                   />
+                  <Button size="xs" variant="ghost" aria-label="Cancel queued instruction edit" onClick={() => setEditingFollowUpId(null)}>
+                    Cancel
+                  </Button>
                   <Button
                     size="xs"
-                    variant="primary"
+                    variant="secondary"
                     aria-label="Save queued instruction edit"
                     disabled={!editingFollowUpText.trim()}
                     onClick={async () => {
@@ -1372,18 +1403,14 @@ export function Composer({
                   >
                     Save
                   </Button>
-                  <Button size="xs" variant="ghost" aria-label="Cancel queued instruction edit" onClick={() => setEditingFollowUpId(null)}>
-                    Cancel
-                  </Button>
                 </li>
               ) : (
                 <li
                   key={entry.id}
-                  className="flex h-8 items-center gap-2.5 border-b border-border px-4 text-xs"
+                  className="flex h-9 items-center gap-2 border-b border-border/60 pl-4 pr-3 text-xs"
                   data-follow-up-offline={entry.offline ? '' : undefined}
                 >
-                  {/* Offline: kept here, starts when the connection is back — the icon and the word both say so. */}
-                  <Icon name={entry.offline ? 'offline' : 'enter'} size={13} className="shrink-0 text-tertiary" />
+                  {/* Offline: kept here, starts when the connection is back — the words say so. */}
                   <span className="shrink-0 text-tertiary">{entry.offline ? 'Queued · offline' : 'Queued'}</span>
                   <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
                     {entry.preview}
@@ -1427,290 +1454,49 @@ export function Composer({
           </ul>
         ) : null}
 
-        <form
-          onSubmit={submit}
-          data-composer-shell
-          onDragOver={onAttachmentDragOver}
-          onDrop={onAttachmentDrop}
-        >
-          <input
-            ref={fileRef}
-            type="file"
-            accept={ATTACHMENT_ACCEPT}
-            multiple
-            className="hidden"
-            aria-hidden
-            tabIndex={-1}
-            onChange={(e) => {
-              void onPickAttachments(e.target.files)
-              e.target.value = ''
-            }}
-          />
-          {hasAttachmentRow || showReadiness || dictationStripState?.kind === 'error' ? (
-            <div className="flex flex-col gap-2 px-4 pt-2">
-              <ComposerAttachments
-                images={images}
-                imageError={imageError}
-                files={files}
-                nativeFiles={nativeFiles}
-                audio={audio}
-                fileError={fileError}
-                audioError={audioError}
-                extracting={extracting}
-                attachLocked={inputLocked}
-                onRemove={removeImage}
-                onRemoveFile={removeFile}
-                onRemoveNativeFile={removeNativeFile}
-                onRemoveAudio={removeAudio}
-              />
-              {showReadiness && readinessIssue ? (
-                <ModelReadinessBanner
-                  issue={readinessIssue}
-                  busy={catalogLoading}
-                  onRecheck={() => {
-                    void refreshCatalog({ forceRefresh: true, provider })
-                  }}
-                  onAddKey={() => {
-                    slashHandlers?.onOpenSettings?.('providers')
-                  }}
-                />
-              ) : null}
-              {dictationStripState?.kind === 'error' ? (
-                <DictationErrorBanner
-                  message={dictationStripState.message}
-                  settingsSection={dictationStripState.settingsSection}
-                  onDismiss={() => dictation.setError(null)}
-                  onOpenSettings={slashHandlers?.onOpenSettings}
-                />
-              ) : null}
-            </div>
-          ) : null}
-          <div className="flex min-h-11 items-start gap-2.5 px-4 py-2" data-composer-row>
-            <span aria-hidden="true" className="flex h-7 shrink-0 items-center font-mono text-md font-semibold text-accent">
-              ›
-            </span>
-            {lineLivePhase ? (
-              <DictationSession
-                phase={lineLivePhase}
-                elapsedMs={dictation.elapsedMs}
-                waveform={dictation.waveform}
-                style={dictation.waveformStyle}
-                engineHint={dictation.engineHint}
-                className="min-w-0 flex-1"
-              />
-            ) : (
-              <div ref={mentionAnchorRef} className="min-w-0 flex-1 py-1" data-composer-input-wrap>
-                <ComposerMentionInput
-                  ref={taRef}
-                  size="sm"
-                  ariaLabel="Instruction"
-                  value={text}
-                  onChange={(next) => {
-                    setText(next)
-                    requestAnimationFrame(syncCursor)
-                  }}
-                  onKeyDown={(e) => {
-                    // While a run is live, Shift+Enter steers: send it now, not at the turn's end.
-                    if (
-                      running &&
-                      e.key === 'Enter' &&
-                      e.shiftKey &&
-                      !e.ctrlKey &&
-                      !e.metaKey &&
-                      !e.altKey &&
-                      !e.nativeEvent.isComposing &&
-                      !slash.open &&
-                      !mentions.open
-                    ) {
-                      e.preventDefault()
-                      steerNextRef.current = true
-                      submit()
-                      // The send reads it synchronously; a submit that sent nothing must not leave it set.
-                      queueMicrotask(() => {
-                        steerNextRef.current = false
-                      })
-                      return
-                    }
-                    onKeyDown(e)
-                    requestAnimationFrame(syncCursor)
-                  }}
-                  onCaretChange={(offset) => setCursor(offset)}
-                  onPasteFiles={(pasted) => {
-                    void onPickAttachments(pasted)
-                  }}
-                  placeholder={
-                    composerPlaceholder?.trim() ||
-                    resolveLinePlaceholder({
-                      hasWorkspace: Boolean(hasWorkspace),
-                      running,
-                      agentMode,
-                      runCount
-                    })
-                  }
-                  disabled={inputLocked}
-                  onFocus={onFocus}
-                  aria-expanded={slash.open || mentions.open}
-                  aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
-                  aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
-                  aria-activedescendant={
-                    slash.open && slash.activeCommand
-                      ? `${slashListId}-opt-${slash.activeCommand.id}`
-                      : mentions.open && mentions.activeItem
-                        ? `${mentionListId}-opt-${mentions.activeItem.id}`
-                        : undefined
-                  }
-                />
-              </div>
-            )}
-            {dictationActive ? (
-              <IconButton
-                icon="close"
-                label="Cancel dictation"
-                size="md"
-                tone="muted"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={dictation.cancel}
-              />
-            ) : (
-              <IconButton
-                icon="paperclip"
-                label={attachLabel}
-                size="md"
-                tone="muted"
-                disabled={inputLocked || attachFullAll}
-                data-composer-plus
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => fileRef.current?.click()}
-              />
-            )}
-            <IconButton
-              icon={dictationActive ? (dictationBusy ? 'loader' : 'stop') : 'mic'}
-              label={lineMic(dictation.phase, dictation.engineHint).label}
-              title={lineMic(dictation.phase, dictation.engineHint).tip}
-              size="md"
-              tone="muted"
-              active={dictation.phase === 'recording'}
-              disabled={Boolean(disabled) || dictationBusy}
-              aria-busy={dictationBusy || undefined}
-              className={dictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={dictation.toggle}
-            />
-            <TaskOptions
-              provider={provider}
-              model={model}
-              providers={providers}
-              optionsByProvider={optionsByProvider}
-              seedsByProvider={seedsByProvider}
-              modelMetaByValue={modelMetaByValue}
-              warningsByProvider={warningsByProvider}
-              favoriteModels={favoriteModels}
-              recentModels={recentModels}
-              serviceTier={serviceTier}
-              secrets={secrets}
-              ollamaBaseUrl={ollamaBaseUrl}
-              customOpenAiBaseUrl={customOpenAiBaseUrl}
-              onModelChange={onProviderModel}
-              onToggleFavorite={onToggleFavorite}
-              onServiceTierChange={onServiceTierChange}
-              onRefreshCatalog={() => {
-                setRefreshingCatalog(true)
-                void refreshCatalog({ forceRefresh: true, provider: browsedProvider }).finally(() =>
-                  setRefreshingCatalog(false)
-                )
-              }}
-              onBrowseProvider={setBrowsedProvider}
-              catalogLoading={catalogLoading}
-              agentMode={agentMode}
-              onAgentModeChange={onAgentModeChange}
-              chatSettings={chatSettings}
-              onChatSettingsChange={onChatSettingsChange}
-              contextUsage={contextUsage}
-              metaStore={metaStore}
-              onCompactContext={onCompactContext}
-              onAddProvider={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('providers') : undefined}
-              running={running}
-              disabled={settingsLocked}
-              focusInput={focusInput}
-            />
+        <form onSubmit={submit} data-composer-shell onDragOver={onAttachmentDragOver} onDrop={onAttachmentDrop}>
+          {fileInput}
+          {readiness ? <div className="px-4 pt-3">{readiness}</div> : null}
+          <div className="px-4 pt-3">{field}</div>
+          {attachments ? <div className="px-4 pt-2">{attachments}</div> : null}
+          <div className="pb-1 pl-4 pr-3 @container">
+            {controls(lineAction, { context: true, takeSendLabel: running ? 'Queue' : 'Send' })}
           </div>
         </form>
 
-        {!dictationActive ? (
-          <>
-            <SlashCommandMenu
-              open={slash.open}
-              commands={slash.filtered}
-              mcpServers={slash.mcpServers}
-              activeIndex={slash.activeIndex}
-              onActiveIndexChange={slash.setActiveIndex}
-              onPick={onSlashAccept}
-              onDismiss={slash.dismiss}
-              anchorRef={mentionAnchorRef}
-              listId={slashListId}
-              loading={slash.loading}
-              listError={slash.listError}
-            />
-            <MentionMenu
-              open={mentions.open}
-              view={mentions.view}
-              items={mentions.items}
-              query={mentions.token?.query ?? ''}
-              activeIndex={mentions.activeIndex}
-              onActiveIndexChange={mentions.setActiveIndex}
-              onPick={onMentionAccept}
-              onDismiss={mentions.dismiss}
-              onBack={mentions.goBack}
-              anchorRef={mentionAnchorRef}
-              listId={mentionListId}
-              loading={mentions.loading}
-            />
-          </>
-        ) : null}
+        {menus}
       </div>
     )
   }
 
-  // Inline: Edit and rerun. The instruction line's controls — field, paperclip,
-  // mic, the options token — in the brief's box, where the instruction was.
-  // Enter reruns, Esc cancels; the two buttons say the same for the pointer.
-  const inlineAttachFull = imagesFull && filesFull && audioFull
-  const inlineAttachLabel = inlineAttachFull
-    ? 'Attachment limits reached'
-    : attachHint
-      ? `Attach files — ${attachHint}`
-      : 'Attach files — or type @ for context'
-  const inlineDictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
-  const inlineHasAttachmentRow =
-    images.length > 0 ||
-    files.length > 0 ||
-    nativeFiles.length > 0 ||
-    audio.length > 0 ||
-    Boolean(imageError || fileError || audioError) ||
-    extracting
-  const inlineShowReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
-  const inlineMic = lineMic(dictation.phase, dictation.engineHint)
-  const inlineLivePhase = liveDictationPhase(dictation.phase)
+  // Inline: Edit and rerun — the same field and control row in a box, where
+  // the instruction was. Enter reruns, Esc cancels; the buttons say so too.
+  const inlineAction = (
+    <>
+      {onCancelEdit ? (
+        <Button size="sm" variant="ghost" kbd={['Esc']} aria-label="Cancel edit" onMouseDown={keepFocus} onClick={onCancelEdit}>
+          Cancel
+        </Button>
+      ) : null}
+      <Button
+        type="submit"
+        size="sm"
+        variant="secondary"
+        kbd={['↵']}
+        aria-label="Rerun"
+        aria-keyshortcuts="Enter"
+        title={sendReady ? 'Rerun with the edited instruction' : (sendDisabledReason ?? undefined)}
+        disabled={!sendReady}
+        onMouseDown={keepFocus}
+      >
+        Rerun
+      </Button>
+    </>
+  )
 
   return (
     <div className={cn('flex w-full flex-col gap-2', className)} data-composer-inline>
-      {bannerError || secondaryBannerError ? (
-        <div className="flex flex-col gap-2">
-          {secondaryBannerError ? <Alert>{secondaryBannerError}</Alert> : null}
-          {bannerError ? (
-            <Alert onDismiss={onDismissError}>
-              <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0 [overflow-wrap:anywhere]">{bannerError}</span>
-                {showRetry ? (
-                  <Button size="xs" onClick={onRetryNetwork}>
-                    Retry
-                  </Button>
-                ) : null}
-              </div>
-            </Alert>
-          ) : null}
-        </div>
-      ) : null}
+      {errorAlerts ? <div className="flex flex-col gap-2">{errorAlerts}</div> : null}
 
       <form
         onSubmit={submit}
@@ -1719,228 +1505,53 @@ export function Composer({
         onDragOver={onAttachmentDragOver}
         onDrop={onAttachmentDrop}
       >
-        <input
-          ref={fileRef}
-          type="file"
-          accept={ATTACHMENT_ACCEPT}
-          multiple
-          className="hidden"
-          aria-hidden
-          tabIndex={-1}
-          onChange={(e) => {
-            void onPickAttachments(e.target.files)
-            e.target.value = ''
-          }}
-        />
-        {inlineHasAttachmentRow || inlineShowReadiness || dictationStripState?.kind === 'error' ? (
-          <div className="flex flex-col gap-2 px-3 pt-2">
-            <ComposerAttachments
-              images={images}
-              imageError={imageError}
-              files={files}
-              nativeFiles={nativeFiles}
-              audio={audio}
-              fileError={fileError}
-              audioError={audioError}
-              extracting={extracting}
-              attachLocked={inputLocked}
-              onRemove={removeImage}
-              onRemoveFile={removeFile}
-              onRemoveNativeFile={removeNativeFile}
-              onRemoveAudio={removeAudio}
-            />
-            {inlineShowReadiness && readinessIssue ? (
-              <ModelReadinessBanner
-                issue={readinessIssue}
-                busy={catalogLoading}
-                onRecheck={() => {
-                  void refreshCatalog({ forceRefresh: true, provider })
-                }}
-                onAddKey={() => {
-                  slashHandlers?.onOpenSettings?.('providers')
-                }}
-              />
-            ) : null}
-            {dictationStripState?.kind === 'error' ? (
-              <DictationErrorBanner
-                message={dictationStripState.message}
-                settingsSection={dictationStripState.settingsSection}
-                onDismiss={() => dictation.setError(null)}
-                onOpenSettings={slashHandlers?.onOpenSettings}
-              />
-            ) : null}
-          </div>
-        ) : null}
-        <div className="flex min-h-11 items-start gap-2.5 px-3 py-2" data-composer-row>
-          {inlineLivePhase ? (
-            <DictationSession
-              phase={inlineLivePhase}
-              elapsedMs={dictation.elapsedMs}
-              waveform={dictation.waveform}
-              style={dictation.waveformStyle}
-              engineHint={dictation.engineHint}
-              className="min-w-0 flex-1"
-            />
-          ) : (
-            <div ref={mentionAnchorRef} className="min-w-0 flex-1 py-1" data-composer-input-wrap>
-              <ComposerMentionInput
-                ref={taRef}
-                size="sm"
-                ariaLabel="Instruction"
-                value={text}
-                onChange={(next) => {
-                  setText(next)
-                  requestAnimationFrame(syncCursor)
-                }}
-                onKeyDown={(e) => {
-                  onKeyDown(e)
-                  requestAnimationFrame(syncCursor)
-                }}
-                onCaretChange={(offset) => setCursor(offset)}
-                onPasteFiles={(pasted) => {
-                  void onPickAttachments(pasted)
-                }}
-                placeholder={composerPlaceholder?.trim() || INLINE_PLACEHOLDER}
-                disabled={inputLocked}
-                onFocus={onFocus}
-                aria-expanded={slash.open || mentions.open}
-                aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
-                aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
-                aria-activedescendant={
-                  slash.open && slash.activeCommand
-                    ? `${slashListId}-opt-${slash.activeCommand.id}`
-                    : mentions.open && mentions.activeItem
-                      ? `${mentionListId}-opt-${mentions.activeItem.id}`
-                      : undefined
-                }
-              />
-            </div>
-          )}
-          {dictationActive ? (
-            <IconButton
-              icon="close"
-              label="Cancel dictation"
-              size="md"
-              tone="muted"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={dictation.cancel}
-            />
-          ) : (
-            <IconButton
-              icon="paperclip"
-              label={inlineAttachLabel}
-              size="md"
-              tone="muted"
-              disabled={inputLocked || inlineAttachFull}
-              data-composer-plus
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => fileRef.current?.click()}
-            />
-          )}
-          <IconButton
-            icon={dictationActive ? (inlineDictationBusy ? 'loader' : 'stop') : 'mic'}
-            label={inlineMic.label}
-            title={inlineMic.tip}
-            size="md"
-            tone="muted"
-            active={dictation.phase === 'recording'}
-            disabled={Boolean(disabled) || inlineDictationBusy}
-            aria-busy={inlineDictationBusy || undefined}
-            className={inlineDictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={dictation.toggle}
-          />
-          <TaskOptions
-            provider={provider}
-            model={model}
-            providers={providers}
-            optionsByProvider={optionsByProvider}
-            seedsByProvider={seedsByProvider}
-            modelMetaByValue={modelMetaByValue}
-            warningsByProvider={warningsByProvider}
-            favoriteModels={favoriteModels}
-            recentModels={recentModels}
-            serviceTier={serviceTier}
-            secrets={secrets}
-            ollamaBaseUrl={ollamaBaseUrl}
-            customOpenAiBaseUrl={customOpenAiBaseUrl}
-            onModelChange={onProviderModel}
-            onToggleFavorite={onToggleFavorite}
-            onServiceTierChange={onServiceTierChange}
-            onRefreshCatalog={() => {
-              setRefreshingCatalog(true)
-              void refreshCatalog({ forceRefresh: true, provider: browsedProvider }).finally(() =>
-                setRefreshingCatalog(false)
-              )
-            }}
-            onBrowseProvider={setBrowsedProvider}
-            catalogLoading={catalogLoading}
-            agentMode={agentMode}
-            onAgentModeChange={onAgentModeChange}
-            chatSettings={chatSettings}
-            onChatSettingsChange={onChatSettingsChange}
-            contextUsage={contextUsage}
-            metaStore={metaStore}
-            onCompactContext={onCompactContext}
-            onAddProvider={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('providers') : undefined}
-            running={running}
-            disabled={settingsLocked}
-            focusInput={focusInput}
-          />
-          <IconButton
-            type="submit"
-            icon="play"
-            label="Rerun"
-            title={canSend ? 'Rerun with the edited instruction' : (sendDisabledReason ?? undefined)}
-            size="md"
-            tone="muted"
-            disabled={!canSend || dictationActive}
-            onMouseDown={(e) => e.preventDefault()}
-          />
-          {onCancelEdit ? (
-            <IconButton
-              icon="close"
-              label="Cancel edit"
-              title="Cancel edit (Esc)"
-              size="md"
-              tone="muted"
-              onClick={onCancelEdit}
-            />
-          ) : null}
-        </div>
+        {fileInput}
+        {readiness ? <div className="px-3 pt-3">{readiness}</div> : null}
+        <div className="px-3 pt-2.5">{field}</div>
+        {attachments ? <div className="px-3 pt-2">{attachments}</div> : null}
+        {/* The line is hidden while an edit is open: the context reading and Compact come here. */}
+        <div className="pb-1 pl-3 pr-2 @container">{controls(inlineAction, { context: true, takeSendLabel: 'Rerun' })}</div>
       </form>
 
-      {!dictationActive ? (
-        <>
-          <SlashCommandMenu
-            open={slash.open}
-            commands={slash.filtered}
-            mcpServers={slash.mcpServers}
-            activeIndex={slash.activeIndex}
-            onActiveIndexChange={slash.setActiveIndex}
-            onPick={onSlashAccept}
-            onDismiss={slash.dismiss}
-            anchorRef={mentionAnchorRef}
-            listId={slashListId}
-            loading={slash.loading}
-            listError={slash.listError}
-          />
-          <MentionMenu
-            open={mentions.open}
-            view={mentions.view}
-            items={mentions.items}
-            query={mentions.token?.query ?? ''}
-            activeIndex={mentions.activeIndex}
-            onActiveIndexChange={mentions.setActiveIndex}
-            onPick={onMentionAccept}
-            onDismiss={mentions.dismiss}
-            onBack={mentions.goBack}
-            anchorRef={mentionAnchorRef}
-            listId={mentionListId}
-            loading={mentions.loading}
-          />
-        </>
-      ) : null}
+      {menus}
     </div>
+  )
+}
+
+/**
+ * The share of the context this task has used, beside the controls — read
+ * from the meta store so a usage patch re-renders the meter, not the
+ * composer. Nothing until the first report.
+ */
+function ComposerContextMeter({
+  provider,
+  model,
+  modelMetaByValue,
+  contextUsage,
+  metaStore,
+  onCompactContext,
+  running
+}: {
+  provider: ProviderIdAny
+  model: string
+  modelMetaByValue: Record<string, ModelInfo>
+  contextUsage?: ContextUsageState | null
+  metaStore?: ChatMetaStore
+  onCompactContext?: (focus?: string) => Promise<{ ok: true; message: string } | { ok: false; message: string }>
+  running: boolean
+}) {
+  const usage = useResolvedContextUsage(metaStore, contextUsage)
+  const advisoryHint = useResolvedCostHint(metaStore, null)
+  const meta = modelMetaByValue[modelSelectionKey(provider, model)] ?? modelMetaByValue[model]
+  const modelWindow = resolveModelContextWindow({ id: model, contextWindow: meta?.contextWindow }, provider) ?? null
+  return (
+    <ContextMeter
+      usage={usage}
+      modelWindow={modelWindow}
+      onCompact={onCompactContext}
+      compactDisabled={running}
+      advisoryHint={advisoryHint}
+      showPercent
+    />
   )
 }

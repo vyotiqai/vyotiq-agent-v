@@ -110,17 +110,30 @@ function typeBrief(text: string): void {
 }
 
 describe('New task brief', () => {
-  it('is a brief, its checks, how it runs, and what the agent will see', async () => {
+  it('is a brief with its control row, its checks, and what the agent will see', async () => {
     renderBrief()
     const page = document.querySelector('[data-new-task]') as HTMLElement
     expect(within(page).getByRole('heading', { name: 'New task', level: 1 })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: 'Brief' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Start task' }).hasAttribute('disabled')).toBe(true)
-    // Agent leads the modes, and says what it does.
-    const modes = screen.getByRole('radiogroup', { name: 'Mode' })
+    // How it runs is the composer's own control row, inside the brief's box.
+    const box = page.querySelector<HTMLElement>('[data-brief]')!
+    const row = box.querySelector<HTMLElement>('[data-composer-controls]')!
+    expect(row).toBeTruthy()
+    // Agent leads the modes.
+    const modes = within(row).getByRole('radiogroup', { name: 'Mode' })
     expect(within(modes).getAllByRole('radio')[0]!.textContent).toBe('Agent')
-    expect(page.textContent).toContain('Plans, edits files and runs commands in the workspace')
-    expect(page.textContent).toContain('Asks before edits and commands · MCP tools ask first')
+    expect(row.querySelector('[data-model-picker]')).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Attach files — or type @ for context' })).toBeTruthy()
+    // No separate section repeats them, and no @ button: typing @ is the way in.
+    expect(page.textContent).not.toContain('How it runs')
+    expect(screen.queryByRole('button', { name: 'Add context (@)' })).toBeNull()
+    // The placeholder says what Agent does.
+    expect(page.textContent).toContain('the agent plans it, does it, and shows you the result')
+    // Approvals: one quiet line beside Start task.
+    expect(page.querySelector('[data-approval-note]')?.textContent).toContain(
+      'Asks before edits and commands · MCP tools ask first'
+    )
 
     const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
     await waitFor(() => expect(sees.textContent).toContain('2 changed · 1 ahead'))
@@ -321,8 +334,6 @@ describe('New task brief', () => {
     const { props } = renderBrief()
     fireEvent.click(await screen.findByRole('button', { name: 'Where it works' }))
     fireEvent.click(await screen.findByRole('option', { name: 'New worktree' }))
-    const page = document.querySelector('[data-new-task]') as HTMLElement
-    expect(page.textContent).toContain('Plans, edits files and runs commands in the new worktree')
     const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
     // Two uncommitted files in this folder: the worktree starts without them.
     await waitFor(() => expect(sees.textContent).toContain('New worktree'))
@@ -350,9 +361,26 @@ describe('New task brief', () => {
     expect(screen.queryByRole('button', { name: 'Where it works' })).toBeNull()
   })
 
-  it('opens the context menu from the @ button, as typing @ would', () => {
-    renderBrief()
-    fireEvent.click(screen.getByRole('button', { name: 'Add context (@)' }))
-    expect(screen.getByRole('combobox', { name: 'Brief' }).textContent).toBe('@')
+  it('switches mode with Ctrl+. typed in the brief', () => {
+    const onAgentModeChange = vi.fn()
+    renderBrief({ onAgentModeChange })
+    const brief = screen.getByRole('combobox', { name: 'Brief' })
+    brief.focus()
+    fireEvent.keyDown(brief, { key: '.', ctrlKey: true })
+    expect(onAgentModeChange).toHaveBeenCalledWith('ask')
+  })
+
+  it('says what Ask does in the placeholder when Ask is picked', () => {
+    renderBrief({ agentMode: 'ask' })
+    const page = document.querySelector('[data-new-task]') as HTMLElement
+    expect(page.textContent).toContain('the agent reads and answers, and changes nothing')
+  })
+
+  it('opens Settings → Agent from the approvals line', () => {
+    const onOpenSettings = vi.fn()
+    renderBrief({ slashHandlers: { onOpenSettings } })
+    const note = document.querySelector<HTMLElement>('[data-approval-note]')!
+    fireEvent.click(within(note).getByRole('button', { name: 'Change' }))
+    expect(onOpenSettings).toHaveBeenCalledWith('agent')
   })
 })

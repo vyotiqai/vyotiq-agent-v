@@ -94,7 +94,7 @@ describe('Composer', () => {
     )
 
     expect(document.querySelector('select')).toBeNull()
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-task-options]')!)
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-model-picker]')!)
     const models = await screen.findByRole('listbox', { name: 'Models' })
     await waitFor(() => {
       expect(within(models).getByText('llama3.2')).toBeTruthy()
@@ -203,7 +203,8 @@ describe('Composer', () => {
     await waitFor(() => {
       expect(ta.textContent).toBe('')
     })
-    expect(screen.getByRole('button', { name: /^Dictate$/i })).toBeTruthy()
+    // No key for any engine yet: the mic offers setup rather than a take.
+    expect(screen.getByRole('button', { name: 'Set up dictation' })).toBeTruthy()
   })
 
   it('does not overwrite a newer draft when an earlier send fails', async () => {
@@ -328,7 +329,7 @@ describe('Composer', () => {
       expect(screen.getByAltText(/Image 1/i)).toBeTruthy()
     })
 
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-task-options]')!)
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-model-picker]')!)
     await waitFor(() => {
       const listbox = screen.getByRole('listbox', { name: 'Models' })
       expect(within(listbox).getByText('gpt-5.6')).toBeTruthy()
@@ -504,14 +505,15 @@ describe('Composer', () => {
       />
     )
 
-    const token = document.querySelector<HTMLButtonElement>('[data-task-options]')!
-    expect(token).toHaveProperty('disabled', false)
-
-    fireEvent.click(token)
-    const dialog = await screen.findByRole('dialog', { name: 'Mode, model and effort' })
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Ask' }))
+    // Mode is its own switch in the control row; a live run leaves it settable.
+    const modes = screen.getByRole('radiogroup', { name: 'Mode' })
+    fireEvent.click(within(modes).getByRole('radio', { name: 'Ask' }))
     expect(onAgentModeChange).toHaveBeenCalledWith('ask')
 
+    const picker = document.querySelector<HTMLButtonElement>('[data-model-picker]')!
+    expect(picker).toHaveProperty('disabled', false)
+    fireEvent.click(picker)
+    const dialog = await screen.findByRole('dialog', { name: 'Model and effort' })
     // The model rows load after the list opens; a busy suite catches the gap.
     fireEvent.click(await within(dialog).findByText('llama3.2'))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')

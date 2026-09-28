@@ -164,7 +164,7 @@ function seedRuns(userDataDir: string): void {
 
 async function goHome(window: Page): Promise<void> {
   await window.keyboard.press(`${MOD}+Shift+H`)
-  await expect(window.getByRole('heading', { name: 'What should the agent do?' })).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole('heading', { name: 'Home', exact: true, level: 1 })).toBeVisible({ timeout: 20_000 })
 }
 
 test.describe('Home and Usage', () => {
@@ -184,10 +184,11 @@ test.describe('Home and Usage', () => {
     if (launched) await closeApp(launched)
   })
 
-  test('Home asks what the agent should do, and holds only what the navigator can’t', async () => {
+  test('Home holds only what the navigator can’t', async () => {
     const { window } = launched
-    await expect(window.getByRole('heading', { name: 'What should the agent do?' })).toBeVisible({ timeout: 30_000 })
-    await expect(window.getByRole('textbox', { name: 'New task' })).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'Home', exact: true, level: 1 })).toBeVisible({ timeout: 30_000 })
+    // No task field: a task starts from its brief.
+    await expect(window.locator('[data-home]').getByRole('textbox')).toHaveCount(0)
     for (const name of ['Needs you', 'Workspaces', 'This week']) {
       await expect(window.getByRole('region', { name })).toBeVisible()
     }
@@ -241,12 +242,15 @@ test.describe('Home and Usage', () => {
     await expect(page).toContainText('on 1 of 30 days', { timeout: 20_000 })
   })
 
-  test('Start sends the line as a task, and Home answers its approval in place', async () => {
+  test('Home answers a started task’s approval in place', async () => {
     const { window } = launched
     await goHome(window)
-    const field = window.getByRole('textbox', { name: 'New task' })
-    await field.fill('Run the updater suite and report')
-    await field.press('Enter')
+    await window.getByRole('region', { name: 'Workspaces' }).getByRole('button', { name: `New task in ${workspaceName}` }).click()
+    const brief = window.getByRole('combobox', { name: 'Brief' })
+    await expect(brief).toBeVisible({ timeout: 20_000 })
+    await brief.fill('Run the updater suite and report')
+    // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+    await brief.press('Control+Enter')
 
     // Started at once — the record, already asking before the command.
     const card = window.locator('[data-tool-approval]')
@@ -263,8 +267,8 @@ test.describe('Home and Usage', () => {
     await expect(window.locator('[data-nav-section="needs"]')).toContainText('Run the updater suite and report')
     // And the bell: main's notification names the task and says what it wants,
     // in the same words as the row above.
-    await window.getByRole('button', { name: /^Notifications/ }).click()
-    const inbox = window.getByRole('dialog', { name: 'Notifications' })
+    await window.getByRole('button', { name: /^Inbox/ }).click()
+    const inbox = window.getByRole('dialog', { name: 'Inbox' })
     const ask = inbox.locator('[data-notification-kind="needs_you"]')
     await expect(ask).toContainText('Run the updater suite and report', { timeout: 20_000 })
     await expect(ask).toContainText('Wants to run pnpm vitest run tests/main/unit/updaterSwap.test.ts')
@@ -282,7 +286,7 @@ test.describe('Home and Usage', () => {
 
     // Answered, the ask left the inbox; the finish took its place. The run
     // edited nothing, so it is Finished, not Ready for review.
-    await window.getByRole('button', { name: /^Notifications/ }).click()
+    await window.getByRole('button', { name: /^Inbox/ }).click()
     await expect(inbox.locator('[data-notification-kind="needs_you"]')).toHaveCount(0)
     const finished = inbox.locator('[data-notification-kind="run_done"]').filter({ hasText: 'Run the updater suite and report' })
     await expect(finished).toContainText('Finished', { timeout: 20_000 })
@@ -316,16 +320,10 @@ test.describe('Home when no task can run', () => {
     if (blocked) await closeApp(blocked)
   })
 
-  test('says the provider has no key, and Start opens the brief instead of a run that can’t start', async () => {
+  test('says the provider has no key', async () => {
     const { window } = blocked
     const needs = window.getByRole('region', { name: 'Needs you' })
     await expect(needs).toContainText('OpenAI has no API key', { timeout: 30_000 })
     await expect(needs.getByRole('button', { name: 'Add key' })).toBeVisible()
-
-    const field = window.getByRole('textbox', { name: 'New task' })
-    await field.fill('Tidy the release notes')
-    await field.press('Enter')
-    await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
-    await expect(window.getByRole('combobox', { name: 'Brief' })).toHaveText('Tidy the release notes')
   })
 })

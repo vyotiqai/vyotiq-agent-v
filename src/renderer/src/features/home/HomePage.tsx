@@ -11,7 +11,6 @@ import { useHomeActivity } from './useHomeActivity'
 import { useMcpHealth } from './useMcpHealth'
 import { useIndexStatus } from './useIndexStatus'
 import { usePendingAsks } from './usePendingAsks'
-import { HomeTaskField } from './components/HomeTaskField'
 import { NeedsYouSection, type ProviderIssue, type WaitingTask } from './components/NeedsYouSection'
 import { WorkspacesSection } from './components/WorkspacesSection'
 import { ThisWeekSection } from './components/ThisWeekSection'
@@ -20,13 +19,12 @@ export type { ProviderIssue } from './components/NeedsYouSection'
 
 export type HomePageProps = {
   openWorkspaces: string[]
-  /** The active workspace: the field's default target, and whose MCP servers are checked. */
+  /** The active workspace: whose MCP servers are checked. */
   activeWorkspace?: string | null
   runsByWorkspacePath: Record<string, WorkspaceRuns>
   activeRuns?: readonly ActiveRun[]
   /** Set by the caller when the provider the next task would use has no key. */
   providerIssue?: ProviderIssue | null
-  onStartTask: (workspacePath: string, brief: string) => void
   onNewTaskInWorkspace: (workspacePath: string) => void
   onOpenTask: (workspacePath: string, runId: string) => void
   onOpenWorkspace: (workspacePath: string) => void
@@ -45,10 +43,10 @@ export type HomePageProps = {
 }
 
 /**
- * Home is where work starts. It does not repeat the navigator — running,
- * ready and done tasks are listed there, grouped the same way — so it holds
- * only what the navigator can't: a field to start a task, what is waiting on
- * you with its answer in place, the workspaces, and the week.
+ * Home does not repeat the navigator — running, ready and done tasks are
+ * listed there, grouped the same way — so it holds only what the navigator
+ * can't: what is waiting on you with its answer in place, the workspaces, and
+ * the week. A task starts from its brief (a workspace row's New task).
  */
 export function HomePage({
   openWorkspaces,
@@ -56,7 +54,6 @@ export function HomePage({
   runsByWorkspacePath,
   activeRuns,
   providerIssue,
-  onStartTask,
   onNewTaskInWorkspace,
   onOpenTask,
   onOpenWorkspace,
@@ -108,10 +105,9 @@ export function HomePage({
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-y-auto" data-home>
       <div className="@container mx-auto w-full max-w-[880px] px-8 pb-12 pt-14">
-        <h1 className={PAGE_TITLE}>What should the agent do?</h1>
+        <h1 className={PAGE_TITLE}>Home</h1>
         {hasWorkspaces ? (
           <>
-            <HomeTaskField workspaces={openWorkspaces} defaultPath={activeWorkspace ?? null} onStart={onStartTask} />
             <NeedsYouSection
               tasks={tasks}
               asks={asks}

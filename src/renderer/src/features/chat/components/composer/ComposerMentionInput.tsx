@@ -237,24 +237,19 @@ function caretSerializedOffset(root: HTMLElement): number {
   return count
 }
 
-function setCaretSerializedOffset(root: HTMLElement, target: number): void {
-  const sel = window.getSelection()
-  if (!sel) return
-
+/**
+ * The DOM point at a serialized offset — the inverse of caretSerializedOffset.
+ * An offset inside a chip snaps to the nearer side of it. Past the end: null.
+ */
+function pointAtSerializedOffset(root: HTMLElement, target: number): { node: Node; offset: number } | null {
   let remaining = Math.max(0, target)
-  const placeAt = (node: Node, offset: number): void => {
-    const range = document.createRange()
-    range.setStart(node, offset)
-    range.collapse(true)
-    sel.removeAllRanges()
-    sel.addRange(range)
-  }
+  let found: { node: Node; offset: number } | null = null
 
   const walk = (node: Node): boolean => {
     if (node.nodeType === Node.TEXT_NODE) {
       const len = (node.textContent ?? '').length
       if (remaining <= len) {
-        placeAt(node, remaining)
+        found = { node, offset: remaining }
         return true
       }
       remaining -= len
@@ -270,8 +265,7 @@ function setCaretSerializedOffset(root: HTMLElement, target: number): void {
         const parent = el.parentNode
         if (!parent) return true
         const idx = Array.from(parent.childNodes).indexOf(el)
-        if (remaining < markerLen / 2) placeAt(parent, idx)
-        else placeAt(parent, idx + 1)
+        found = { node: parent, offset: remaining < markerLen / 2 ? idx : idx + 1 }
         return true
       }
       remaining -= markerLen
@@ -281,7 +275,7 @@ function setCaretSerializedOffset(root: HTMLElement, target: number): void {
       if (remaining <= 1) {
         const parent = el.parentNode
         if (!parent) return true
-        placeAt(parent, Array.from(parent.childNodes).indexOf(el) + 1)
+        found = { node: parent, offset: Array.from(parent.childNodes).indexOf(el) + 1 }
         return true
       }
       remaining -= 1
@@ -293,12 +287,63 @@ function setCaretSerializedOffset(root: HTMLElement, target: number): void {
     return false
   }
 
-  if (!walk(root)) {
-    const range = document.createRange()
+  walk(root)
+  return found
+}
+
+function setCaretSerializedOffset(root: HTMLElement, target: number): void {
+  const sel = window.getSelection()
+  if (!sel) return
+  const range = document.createRange()
+  const point = pointAtSerializedOffset(root, target)
+  if (point) {
+    range.setStart(point.node, point.offset)
+    range.collapse(true)
+  } else {
     range.selectNodeContents(root)
     range.collapse(false)
-    sel.removeAllRanges()
-    sel.addRange(range)
+  }
+  sel.removeAllRanges()
+  sel.addRange(range)
+}
+
+/** A stretch of the draft painted with a named `::highlight()` (see styles.css). */
+export type InputHighlight = { name: string; start: number; end: number }
+
+type HighlightRegistry = { get: (n: string) => unknown; set: (n: string, h: unknown) => void }
+
+/**
+ * Paint ranges with the CSS Custom Highlight API. It styles text without
+ * touching the DOM, so the contentEditable's nodes — and its caret, and its
+ * undo — are left alone. Where the API is missing (jsdom) this does nothing.
+ */
+function paintHighlights(root: HTMLElement, highlights: readonly InputHighlight[]): () => void {
+  const registry = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights
+  const Ctor = (globalThis as { Highlight?: new (...ranges: Range[]) => { add: (r: Range) => void; delete: (r: Range) => void } })
+    .Highlight
+  if (!registry || !Ctor || highlights.length === 0) return () => undefined
+  const added: Array<{ name: string; range: Range }> = []
+  for (const h of highlights) {
+    if (h.end <= h.start) continue
+    const from = pointAtSerializedOffset(root, h.start)
+    const to = pointAtSerializedOffset(root, h.end)
+    if (!from || !to) continue
+    const range = document.createRange()
+    range.setStart(from.node, from.offset)
+    range.setEnd(to.node, to.offset)
+    const name = `vy-${h.name}`
+    let set = registry.get(name) as { add: (r: Range) => void } | undefined
+    if (!set) {
+      set = new Ctor()
+      registry.set(name, set)
+    }
+    set.add(range)
+    added.push({ name, range })
+  }
+  return () => {
+    for (const { name, range } of added) {
+      ;(registry.get(name) as { delete: (r: Range) => void } | undefined)?.delete(range)
+    }
   }
 }
 
@@ -368,6 +413,13 @@ export const ComposerMentionInput = forwardRef<
     onCaretChange?: (offset: number) => void
     placeholder?: string
     disabled?: boolean
+    /**
+     * Shown in full but not editable, and not dimmed — the draft while a
+     * dictation take writes into it.
+     */
+    readOnly?: boolean
+    /** Stretches painted with `::highlight(vy-<name>)`: a take's live and inserted words. */
+    highlights?: readonly InputHighlight[]
     className?: string
     /** Accessible name — "Instruction" on the instruction line. */
     ariaLabel?: string
@@ -390,6 +442,8 @@ export const ComposerMentionInput = forwardRef<
     onCaretChange,
     placeholder,
     disabled,
+    readOnly = false,
+    highlights,
     className,
     ariaLabel = 'Instruction',
     size = 'md',
@@ -476,6 +530,13 @@ export const ComposerMentionInput = forwardRef<
     }
   }, [value, glyphs])
 
+  // After the DOM above is in step with `value`, so the offsets land on it.
+  useLayoutEffect(() => {
+    const el = elRef.current
+    if (!el || !highlights?.length) return undefined
+    return paintHighlights(el, highlights)
+  }, [value, highlights])
+
   const emitFromDom = useCallback((): void => {
     const el = elRef.current
     if (!el) return
@@ -507,6 +568,7 @@ export const ComposerMentionInput = forwardRef<
     emitFromDom()
   }
 
+  const locked = Boolean(disabled || readOnly)
   const empty =
     !composing &&
     (!value ||
@@ -539,10 +601,10 @@ export const ComposerMentionInput = forwardRef<
           (ARIA 1.2): screen readers announce expansion only from the focused node. */}
       <div
         ref={elRef}
-        role={disabled ? 'textbox' : 'combobox'}
-        aria-expanded={disabled ? undefined : (ariaExpanded ?? false)}
-        aria-controls={disabled ? undefined : ariaControls}
-        aria-haspopup={disabled ? undefined : 'listbox'}
+        role={locked ? 'textbox' : 'combobox'}
+        aria-expanded={locked ? undefined : (ariaExpanded ?? false)}
+        aria-controls={locked ? undefined : ariaControls}
+        aria-haspopup={locked ? undefined : 'listbox'}
         aria-multiline="true"
         aria-label={ariaLabel}
         data-composer-input
@@ -550,8 +612,9 @@ export const ComposerMentionInput = forwardRef<
         aria-autocomplete={ariaAutocomplete}
         aria-activedescendant={ariaActivedescendant}
         aria-disabled={disabled || undefined}
-        tabIndex={disabled ? -1 : 0}
-        contentEditable={disabled ? false : true}
+        aria-readonly={readOnly || undefined}
+        tabIndex={locked ? -1 : 0}
+        contentEditable={locked ? false : true}
         suppressContentEditableWarning
         className={cn(
           'min-w-0 w-full overflow-y-auto whitespace-pre-wrap break-words',

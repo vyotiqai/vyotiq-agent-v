@@ -1,12 +1,42 @@
-import { useEffect, type RefObject } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import type { AgentInteractionMode } from '@shared/ipc'
-import { isMainComposerTarget, matchShortcut, shouldBlockAppShortcut } from '@renderer/lib/shortcuts'
+import { Segmented } from '@renderer/lib/ui'
+import { isMainComposerTarget, matchShortcut, shortcutLabel, shouldBlockAppShortcut } from '@renderer/lib/shortcuts'
 
-/** The two modes, as TaskOptions' Mode control and the New task brief list them. */
-export const MODES: { value: AgentInteractionMode; label: string; short: string }[] = [
-  { value: 'ask', label: 'Ask', short: 'Ask' },
-  { value: 'agent', label: 'Agent', short: 'Agent' }
+/** The two modes, Agent first: it is what a task usually is. */
+export const MODES: { value: AgentInteractionMode; label: string; note: string }[] = [
+  { value: 'agent', label: 'Agent', note: 'Plans, edits files and runs commands' },
+  { value: 'ask', label: 'Ask', note: 'Reads and answers — changes nothing' }
 ]
+
+/**
+ * Agent | Ask, first in the composer's control row. Both words show, so the
+ * other mode is one press away and never hidden in a menu; Ctrl+. flips it.
+ */
+export function ModeSwitch({
+  mode,
+  onChange,
+  disabled = false
+}: {
+  mode: AgentInteractionMode
+  onChange: (mode: AgentInteractionMode) => void
+  disabled?: boolean
+}) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  useCycleModeShortcut(rootRef, disabled, (reverse) => onChange(nextMode(mode, reverse)))
+  const chord = shortcutLabel('cycleMode')
+  return (
+    <div ref={rootRef} className="flex shrink-0" data-mode-switch>
+      <Segmented
+        label="Mode"
+        value={mode}
+        items={MODES.map((m) => ({ id: m.value, label: m.label, title: `${m.note} (${chord} switches)` }))}
+        onChange={onChange}
+        disabled={disabled}
+      />
+    </div>
+  )
+}
 
 /** Index of `agent` in MODES — the fallback for an unrecognized mode. */
 const DEFAULT_MODE_INDEX = MODES.findIndex((m) => m.value === 'agent')
@@ -57,9 +87,12 @@ export function useCycleModeShortcut(
     const onCommand = (event: Event): void => {
       const id = (event as CustomEvent<{ id?: string }>).detail?.id
       if (id !== 'cycleMode') return
+      // Split panes: only the focused pane's mode changes, as with Ctrl+.
+      const pane = rootRef.current?.closest('[data-chat-pane]')
+      if (pane?.getAttribute('data-chat-pane-focused') === '0') return
       advance(false)
     }
     window.addEventListener('vyotiq:command', onCommand)
     return () => window.removeEventListener('vyotiq:command', onCommand)
-  }, [locked, advance])
+  }, [rootRef, locked, advance])
 }

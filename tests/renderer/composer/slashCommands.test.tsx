@@ -287,6 +287,23 @@ describe('Composer slash commands', () => {
     expect(String(onSend.mock.calls[0]?.[0])).toContain('make CI green')
   })
 
+  it('steers with a slash command too: Shift+Enter survives the command lookup', async () => {
+    const onSend = vi.fn().mockResolvedValue(true)
+    const props = { ...baseProps, running: true, draft: '/code-review check the parser', onSend }
+    const { rerender } = render(<Composer {...props} />)
+    await waitFor(() => expect(window.vyotiq.slashCommandsList).toHaveBeenCalled())
+    rerender(<Composer {...props} />)
+    const field = screen.getByRole('combobox', { name: 'Instruction' })
+    // The test's caret sits at 0, inside the /token; typing leaves it past the space, menu shut.
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(field.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.keyDown(field, { key: 'Enter', shiftKey: true })
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(String(onSend.mock.calls[0]?.[0])).toContain('[Skill: code-review]')
+    // The lookup awaited before the send; steer used to be cleared by then.
+    expect(onSend.mock.calls[0]?.[3]).toMatchObject({ steer: true })
+  })
+
   it('resolves /goal pause as a client action', async () => {
     const onGoalPause = vi.fn().mockResolvedValue(true)
     const onSend = vi.fn()

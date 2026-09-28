@@ -88,7 +88,6 @@ function renderDemoHome(overrides: Partial<Parameters<typeof HomePage>[0]> = {})
     <HomePage
       openWorkspaces={[DEMO]}
       runsByWorkspacePath={baseProps.runsByWorkspacePath}
-      onStartTask={vi.fn()}
       onNewTaskInWorkspace={vi.fn()}
       onOpenTask={vi.fn()}
       onOpenWorkspace={vi.fn()}
@@ -116,13 +115,6 @@ describe('launchViewFor (App navigation-mode decision)', () => {
 })
 
 describe('Home task entry points', () => {
-  it('starts a task from one line, not from a brief', () => {
-    renderDemoHome()
-
-    expect(screen.getByRole('textbox', { name: 'New task' })).toBeTruthy()
-    expect(screen.queryByRole('combobox', { name: 'Brief' })).toBeNull()
-  })
-
   it('opens a new task in a workspace from its row', () => {
     const onNewTaskInWorkspace = vi.fn()
     renderDemoHome({ onNewTaskInWorkspace })

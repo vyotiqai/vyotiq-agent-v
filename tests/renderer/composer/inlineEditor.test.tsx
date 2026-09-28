@@ -7,11 +7,21 @@ import { Composer } from '@renderer/features/chat/components/composer'
 import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
 import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
+import { resetDictationStoreForTests } from '@renderer/features/chat/components/composer/take/dictationStore'
+
+vi.mock('@renderer/lib/audio/micCapture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@renderer/lib/audio/micCapture')>()
+  return {
+    ...actual,
+    openMicCapture: vi.fn(async () => ({ deviceLabel: 'Test Mic', deviceId: 'mic-1', stop: vi.fn() }))
+  }
+})
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   resetWorkspaceHotUiStoreForTests()
+  resetDictationStoreForTests()
 })
 
 const chatSettings: EffectiveChatSettings = {
@@ -76,9 +86,13 @@ describe('Edit and rerun', () => {
     expect(row.getByRole('combobox', { name: 'Instruction' })).toBeTruthy()
     expect(row.getByRole('button', { name: 'Attach files — or type @ for context' })).toBeTruthy()
     expect(row.getByRole('button', { name: 'Dictate' })).toBeTruthy()
-    expect(shell.querySelector('[data-task-options]')?.textContent).toContain('Agent · qwen2.5')
-    expect(row.getByRole('button', { name: 'Rerun' })).toBeTruthy()
-    expect(row.getByRole('button', { name: 'Cancel edit' })).toBeTruthy()
+    // The line's control row: mode, model, then the edit's own two actions.
+    expect(row.getByRole('radiogroup', { name: 'Mode' })).toBeTruthy()
+    expect(shell.querySelector('[data-model-picker]')?.textContent).toContain('qwen2.5')
+    expect(row.getByRole('button', { name: 'Rerun' }).textContent).toContain('Rerun')
+    expect(row.getByRole('button', { name: 'Cancel edit' }).textContent).toContain('Cancel')
+    // No usage reported yet: no context reading.
+    expect(shell.querySelector('[data-context-meter]')).toBeNull()
 
     // None of the chat-era toolbar survives.
     expect(screen.queryByRole('button', { name: /^Send$|^Resend$/ })).toBeNull()
@@ -108,10 +122,47 @@ describe('Edit and rerun', () => {
     expect(screen.getByRole('button', { name: 'Rerun' })).toHaveProperty('disabled', true)
   })
 
-  it('opens the one options popover from its token', async () => {
+  it('carries the context reading, since the line is hidden while an edit is open', () => {
+    renderInline({
+      contextUsage: {
+        step: 3,
+        used: 4000,
+        estimatedTokens: 4000,
+        inputTokens: 4000,
+        window: 32768,
+        contentWindow: 27852,
+        compactionTrigger: 27852,
+        source: 'provider',
+        layers: { system: 1000, history: 3000, tools: 0, buffer: 0 },
+        stepUsage: {
+          inputTokens: 4000,
+          billedInputTokens: 9000,
+          peakInputTokens: 4000,
+          outputTokens: 120,
+          cachedInputTokens: 0,
+          billedCachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          reasoningTokens: 0,
+          steps: 3,
+          stepsWithCacheReport: 0,
+          billedCost: 0,
+          billedCostSaved: 0,
+          stepsWithCostReport: 0,
+          estimatedCost: 0,
+          stepsWithEstimate: 0,
+          generationMs: 0
+        },
+        updatedAt: '2026-01-01T12:00:00.000Z'
+      }
+    })
+    const shell = document.querySelector<HTMLElement>('[data-composer-inline] [data-composer-shell]')!
+    expect(shell.querySelector('[data-composer-controls] [data-context-meter]')).toBeTruthy()
+  })
+
+  it('opens the model picker from its trigger', async () => {
     renderInline()
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-task-options]')!)
-    expect(await screen.findByRole('dialog', { name: 'Mode, model and effort' })).toBeTruthy()
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-model-picker]')!)
+    expect(await screen.findByRole('dialog', { name: 'Model and effort' })).toBeTruthy()
   })
 
   it('shows a Retry button on a retryable error', () => {
@@ -121,40 +172,23 @@ describe('Edit and rerun', () => {
     expect(onRetryNetwork).toHaveBeenCalledTimes(1)
   })
 
-  it('dictates the way the line does: the session takes the field’s place', async () => {
-    class FakeMediaRecorder {
-      static isTypeSupported(type: string): boolean {
-        return type.startsWith('audio/webm')
-      }
-      state: 'inactive' | 'recording' = 'inactive'
-      ondataavailable: ((ev: { data: Blob }) => void) | null = null
-      onstop: (() => void) | null = null
-      onerror: (() => void) | null = null
-      start(): void {
-        this.state = 'recording'
-      }
-      stop(): void {
-        this.state = 'inactive'
-        this.onstop?.()
-      }
-    }
-    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
-    vi.stubGlobal('navigator', {
-      ...navigator,
-      mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })) }
-    })
+  it('dictates the way the line does: the field stays, the take strip sits in the box', async () => {
     renderInline()
-
+    await waitFor(() => expect(window.vyotiq.getSettings).toHaveBeenCalled())
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     })
-    const status = await screen.findByRole('status', { name: /Listening/ })
-    expect(document.querySelector('[data-composer-row]')?.contains(status)).toBe(true)
-    expect(screen.queryByRole('combobox', { name: 'Instruction' })).toBeNull()
+    await waitFor(() => expect(document.querySelector('[data-take="listening"]')).toBeTruthy())
+    const strip = document.querySelector('[data-take="listening"]') as HTMLElement
+    expect(document.querySelector('[data-composer-inline] [data-composer-shell]')?.contains(strip)).toBe(true)
+    // The instruction being edited stays in view, read-only for the take.
+    const field = screen.getByRole('textbox', { name: 'Instruction' })
+    expect(field.textContent).toBe('Fix the parser')
+    expect(within(strip).getByRole('button', { name: /Rerun/ })).toBeTruthy()
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel dictation' }))
-    })
+    // Esc discards the take — it does not cancel the edit.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('[data-take="discarded"]')).toBeTruthy())
     expect(screen.getByRole('combobox', { name: 'Instruction' })).toBeTruthy()
   })
 })

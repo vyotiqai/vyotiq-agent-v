@@ -11,7 +11,7 @@ afterEach(() => {
   cleanup()
 })
 
-/** The shortcut's host, as TaskOptions mounts it: a root inside (or beside) the composer shell. */
+/** The shortcut's host, as ModeSwitch mounts it: a root inside (or beside) the composer shell. */
 function Host({
   mode,
   onModeChange,
@@ -27,8 +27,9 @@ function Host({
 }
 
 describe('agent modes', () => {
-  it('lists Ask and Agent', () => {
-    expect(MODES.map((m) => m.label)).toEqual(['Ask', 'Agent'])
+  it('lists Agent, then Ask', () => {
+    // Agent leads: it is what a task usually is, on every surface that lists them.
+    expect(MODES.map((m) => m.label)).toEqual(['Agent', 'Ask'])
   })
 
   it('cycles between the two, the same hop either way', () => {
@@ -93,5 +94,23 @@ describe('useCycleModeShortcut', () => {
     render(<Host mode="ask" onModeChange={onModeChange} />)
     window.dispatchEvent(new CustomEvent('vyotiq:command', { detail: { id: 'cycleMode' } }))
     expect(onModeChange).toHaveBeenCalledWith('agent')
+  })
+
+  it('leaves split panes that are not focused alone on the palette command', () => {
+    const focused = vi.fn()
+    const other = vi.fn()
+    render(
+      <>
+        <div data-chat-pane="" data-chat-pane-focused="1">
+          <Host mode="agent" onModeChange={focused} />
+        </div>
+        <div data-chat-pane="" data-chat-pane-focused="0">
+          <Host mode="agent" onModeChange={other} />
+        </div>
+      </>
+    )
+    window.dispatchEvent(new CustomEvent('vyotiq:command', { detail: { id: 'cycleMode' } }))
+    expect(focused).toHaveBeenCalledWith('ask')
+    expect(other).not.toHaveBeenCalled()
   })
 })

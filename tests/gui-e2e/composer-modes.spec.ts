@@ -7,7 +7,7 @@ import { requireActivePath } from './helpers/seedWorkspace'
 
 /**
  * Plan mode merged into Agent. Two surfaces let a user pick a mode — the
- * task options' Mode control and the slash menu — and both are assembled from
+ * composer's Mode switch and the slash menu — and both are assembled from
  * separate lists (MODES in ModePicker, BUILTIN_COMMANDS in main). A unit test on either
  * one passes while the other still offers a mode the gate no longer honours,
  * so this checks the shipped app.
@@ -52,20 +52,24 @@ test('the mode control offers Agent and Ask only', async () => {
 
   await expect(window.locator('[data-composer-input]').first()).toBeVisible({ timeout: 20_000 })
 
-  // Mode sits with the model and effort in the task options.
-  await window.locator('[data-task-options]').first().click()
-  const options = window.getByRole('dialog', { name: 'Mode, model and effort' })
-  await expect(options).toBeVisible({ timeout: 10_000 })
-  const mode = options.getByRole('radiogroup', { name: 'Mode' })
-  await expect(mode.getByRole('radio')).toHaveText(['Ask', 'Agent'])
+  // Mode leads the composer's control row: both words, one press apart.
+  const mode = window.locator('[data-composer-controls]').first().getByRole('radiogroup', { name: 'Mode' })
+  await expect(mode).toBeVisible({ timeout: 10_000 })
+  await expect(mode.getByRole('radio')).toHaveText(['Agent', 'Ask'])
   await expect(mode.getByRole('radio', { name: 'Agent' })).toHaveAttribute('aria-checked', 'true')
 
   await mode.getByRole('radio', { name: 'Ask' }).click()
   await expect(mode.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
   await mode.getByRole('radio', { name: 'Agent' }).click()
   await expect(mode.getByRole('radio', { name: 'Agent' })).toHaveAttribute('aria-checked', 'true')
+
+  // The model picker no longer carries a second Mode control.
+  await window.locator('[data-model-picker]').first().click()
+  const picker = window.getByRole('dialog', { name: 'Model and effort' })
+  await expect(picker).toBeVisible({ timeout: 10_000 })
+  await expect(picker.getByRole('radiogroup', { name: 'Mode' })).toHaveCount(0)
   await window.keyboard.press('Escape')
-  await expect(options).toHaveCount(0)
+  await expect(picker).toHaveCount(0)
 })
 
 test('the slash menu offers /ask and /agent but no /plan', async () => {

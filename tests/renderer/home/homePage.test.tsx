@@ -34,7 +34,6 @@ const ACTIVITY: HomeActivityResult = {
 }
 
 const handlers = {
-  onStartTask: vi.fn(),
   onNewTaskInWorkspace: vi.fn(),
   onOpenTask: vi.fn(),
   onOpenWorkspace: vi.fn(),
@@ -165,24 +164,11 @@ afterEach(() => cleanup())
 const needsYou = (): HTMLElement => screen.getByRole('region', { name: 'Needs you' })
 
 describe('Home', () => {
-  it('asks what the agent should do, and starts the task in the chosen workspace', async () => {
+  it('is titled Home, with no task field of its own', () => {
     renderHome()
-    expect(screen.getByRole('heading', { name: 'What should the agent do?', level: 1 })).toBeTruthy()
-    const field = screen.getByRole('textbox', { name: 'New task' })
-    const start = screen.getByRole('button', { name: 'Start' })
-    expect(start.hasAttribute('disabled')).toBe(true)
-
-    fireEvent.change(field, { target: { value: 'Fix the flaky updater test' } })
-    fireEvent.keyDown(field, { key: 'Enter' })
-    expect(handlers.onStartTask).toHaveBeenCalledWith(ALPHA, 'Fix the flaky updater test')
-    expect((field as HTMLInputElement).value).toBe('')
-
-    // Another workspace, then Start.
-    fireEvent.click(screen.getByRole('button', { name: 'Workspace' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'repo-beta' }))
-    fireEvent.change(field, { target: { value: 'Audit the session store' } })
-    fireEvent.click(start)
-    expect(handlers.onStartTask).toHaveBeenLastCalledWith(BETA, 'Audit the session store')
+    expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toBeTruthy()
+    // A task starts from its brief, not from a line on Home.
+    expect(screen.queryByRole('textbox')).toBeNull()
   })
 
   it('answers an approval in place: Deny and Allow once go to the run', async () => {
@@ -288,7 +274,6 @@ describe('Home', () => {
   it('offers to open a workspace when none is open', () => {
     renderHome({ openWorkspaces: [], activeRuns: [], runsByWorkspacePath: {} })
     expect(screen.getByText('No workspace yet')).toBeTruthy()
-    expect(screen.queryByRole('textbox', { name: 'New task' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open a workspace…' }))
     expect(handlers.onAddWorkspace).toHaveBeenCalledTimes(1)
   })
