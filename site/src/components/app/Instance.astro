@@ -1,0 +1,56 @@
+---
+import Glyph from './Glyph.astro'
+
+const tab = (id: string, sel = false) => ({ id, glyph: 'running', bg: sel ? 'var(--app-surface-2)' : 'transparent', color: sel ? 'var(--app-fg-strong)' : 'var(--app-muted)' })
+const tabs = [tab('3f9c21ab', true), tab('b71e0d4c'), tab('e24a9f07')]
+const work = [
+  { thought: 'Check what the app already uses for Redis before adding anything.' },
+  { label: 'Read and listed', detail: '2 files and 1 directory', ms: '19ms' },
+  { label: 'Created', detail: 'src/limits/tokenBucket.ts', ms: '6ms' },
+  { label: 'Created', detail: 'src/limits/memoryStore.ts', ms: '4ms' },
+  { thought: 'Type-check the new module before reporting back.' },
+  { label: 'Ran', detail: 'pnpm tsc --noEmit', ms: '8.4s' }
+]
+---
+<div style="width: 720px; height: 600px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: var(--app-bg); border: 1px solid var(--app-frame); border-radius: 10px; font-family: var(--app-font); font-size: 14px; line-height: 20px; color: var(--app-fg); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 40px 90px -30px rgba(0, 0, 0, 0.6)">
+<div style="height: 50px; flex-shrink: 0; box-sizing: border-box; border-bottom: 1px solid var(--app-border); display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--app-muted)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 8H3M7 4L3 8l4 4"></path></svg>
+<Glyph kind="running" size="15" />
+<span style="font-size: 15px; font-weight: 600; color: var(--app-fg-strong); white-space: nowrap">Token-bucket limiter</span>
+<span style="font-family: var(--app-mono); font-size: 13px; color: var(--app-tertiary)">3f9c21ab</span>
+<span style="flex-grow: 1"></span>
+{tabs.map((t) => (<Fragment>
+<span style={`height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 6px; background: ${t.bg}; font-family: var(--app-mono); font-size: 12px; color: ${t.color}`}><Glyph kind={t.glyph} size="12" />{t.id}</span>
+</Fragment>))}
+<span style="height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 500; color: var(--app-secondary)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5"></rect></svg>Stop</span>
+</div>
+
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; justify-content: center">
+<div style="width: 640px; padding-top: 16px">
+<div style="margin-bottom: 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-tertiary)">Goal</div>
+<p style="margin: 0; font-size: 15px; line-height: 23px; color: var(--app-fg-strong)">Write a token-bucket limiter in src/limits with a Redis store and an in-memory fallback. Export a check(key) that returns the calls left and the seconds until the next refill.</p>
+
+<div style="margin-top: 22px; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-tertiary)">Scope</div>
+<div style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<p style="margin: 0; display: flex; align-items: center; gap: 8px; color: var(--app-secondary)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--app-muted)" stroke-width="1.4" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"></circle><circle cx="4.5" cy="12.5" r="1.5"></circle><circle cx="11.5" cy="5.5" r="1.5"></circle><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"></path></svg>Works in its own worktree<span style="font-family: var(--app-mono); font-size: 12px; color: var(--app-muted)">vyotiq/instance/3f9c21ab-5e0d-4b7a…</span></p>
+<p style="margin: 0; display: flex; align-items: center; gap: 8px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--app-muted)" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5V12.5h12V5.5H8L6.5 3.5H2z"></path></svg><span style="font-family: var(--app-mono); font-size: 12px; color: var(--app-secondary)">src/limits</span></p>
+<p style="margin: 0; color: var(--app-muted)">Reports back to its parent · cannot start instances of its own</p>
+</div>
+
+<div style="margin-top: 20px; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-tertiary)">Work</div>
+<div style="margin-top: 6px">
+{work.map((w) => (<Fragment>
+{w.thought && (<Fragment><p style="margin: 6px 0; font-style: italic; color: var(--app-muted)">{w.thought}</p></Fragment>)}
+{w.label && (<Fragment><div style="height: 32px; display: flex; align-items: center; gap: 8px"><span style="font-weight: 600; color: var(--app-fg-strong)">{w.label}</span><span style="color: var(--app-muted)">{w.detail}</span><span style="flex-grow: 1"></span><span style="font-family: var(--app-mono); font-size: 12px; color: var(--app-tertiary)">{w.ms}</span></div></Fragment>)}
+</Fragment>))}
+<div style="margin-top: 6px; height: 40px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; background: var(--app-card)"><Glyph kind="running" size="15" /><span style="font-weight: 600; color: var(--app-fg-strong)">Now</span><span style="color: var(--app-muted)">Working</span></div>
+</div>
+</div>
+</div>
+
+<div style="height: 52px; flex-shrink: 0; box-sizing: border-box; border-top: 1px solid var(--app-border); display: flex; align-items: center; gap: 10px; padding: 0 20px; font-size: 13px; color: var(--app-muted)">
+<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"></rect><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"></path></svg>
+<span>Instances take instructions from their parent task.</span>
+<span style="font-weight: 600; color: var(--app-fg)">Add an instruction to the parent</span>
+</div>
+</div>

@@ -1,0 +1,71 @@
+---
+/**
+ * Every published release, from its GitHub release body. The app's update panel
+ * reads the same text, so what you see here is what the app shows.
+ */
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import { releases, parseNotes, formatDate } from '@/lib/releases'
+import { RELEASES } from '@/data/site'
+
+const list = (await releases()).map((r) => ({ ...r, notes: parseNotes(r.body) }))
+
+/** `code` spans in release notes, as HTML; everything else is escaped. */
+const inline = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+---
+<Base title="Changelog" description="Every Agent V release and what changed in it, from the release notes.">
+  <PageHead eyebrow="Changelog" title="What changed" lede="Every release and what it changed, from the same notes the app shows when it offers you an update." />
+
+  <div class="wrap list">
+    {list.length === 0 && (
+      <p class="muted empty">The release notes could not be loaded. They are all on <a href={RELEASES}>GitHub</a>.</p>
+    )}
+    {list.map((r) => (
+      <article class="release" id={`v${r.version}`}>
+        <header>
+          <h2 class="version"><a href={`#v${r.version}`}>{r.version}</a></h2>
+          <time datetime={r.date}>{formatDate(r.date)}</time>
+          <a href={r.url} class="gh tap">On GitHub →</a>
+        </header>
+        <div class="notes">
+          {r.notes.lede && <p class="lede-text" set:html={inline(r.notes.lede)} />}
+          {r.notes.sections.map((s) => (
+            <section>
+              <h3>{s.heading}</h3>
+              <ul>
+                {s.items.map((i) => (
+                  <li>
+                    {i.claim && <strong set:html={inline(i.claim)} />} <span set:html={inline(i.rest)} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </article>
+    ))}
+  </div>
+</Base>
+
+<style>
+  .list { padding: 24px 0 var(--section-gap); }
+  .empty a { color: var(--ink); }
+  .release { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 64px; padding: 48px 0; border-bottom: 1px solid var(--hair); }
+  header { display: flex; flex-direction: column; gap: 6px; align-self: start; position: sticky; top: 24px; }
+  .version { font-family: var(--mono); font-size: 28px; font-weight: 500; letter-spacing: -0.02em; }
+  .version a { text-decoration: none; }
+  time { color: var(--body); }
+  .gh { align-self: flex-start; font-size: 14px; color: var(--body); text-decoration: none; }
+  .notes { max-width: 760px; display: flex; flex-direction: column; gap: 32px; }
+  .lede-text { font-size: 18px; line-height: 1.55; color: var(--body-strong); }
+  h3 { font-size: 13px; font-family: var(--mono); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding-bottom: 10px; border-bottom: 1px solid var(--hair); }
+  ul { padding: 0; list-style: none; }
+  li { padding: 14px 0; border-bottom: 1px solid var(--hair); line-height: 1.55; color: var(--body); }
+  li :global(strong) { color: var(--ink); font-weight: 500; }
+  .notes :global(code) { font-family: var(--mono); font-size: 0.86em; padding: 1px 4px; background: rgb(0 0 0 / 0.05); border-radius: 3px; color: var(--ink); overflow-wrap: anywhere; }
+  @media (max-width: 1023px) {
+    .release { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    header { position: static; flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 6px 16px; }
+  }
+</style>

@@ -1,0 +1,117 @@
+---
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import { extensions, counts, KIND_LABEL, requiresLabel } from '@/lib/catalog'
+
+const filters = [
+  { id: 'all', label: 'All', n: counts.all },
+  { id: 'mcp', label: 'MCP servers', n: counts.mcp },
+  { id: 'skill', label: 'Skills', n: counts.skill },
+  { id: 'plugin', label: 'Packages', n: counts.plugin }
+]
+---
+<Base title="Extensions" description={`The ${counts.all} extensions in Agent V's catalog: ${counts.mcp} MCP servers, ${counts.skill} skills and ${counts.plugin} packages.`}>
+  <PageHead
+    eyebrow="Extensions"
+    title="Connect it once,<br />use it in every task"
+    lede={`Agent V ships with a catalog of ${counts.mcp} MCP servers, ${counts.skill} skills and ${counts.plugin} packages. Install one from Extensions in the app, or add any MCP server by URL, npm package or command.`}
+  />
+
+  <div class="wrap bar">
+    <div class="filters" role="group" aria-label="Show">
+      {filters.map((f, i) => (
+        <button type="button" data-filter={f.id} aria-pressed={i === 0 ? 'true' : 'false'}>
+          {f.label} <span>{f.n}</span>
+        </button>
+      ))}
+    </div>
+    <label class="search">
+      <span class="sr-only">Search extensions</span>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5L14 14"></path></svg>
+      <input type="search" placeholder="Search extensions" data-search />
+    </label>
+  </div>
+
+  <ul class="wrap grid" data-list>
+    {extensions.map((e) => (
+      <li data-kind={e.kind} data-text={`${e.name} ${e.publisher} ${e.description}`.toLowerCase()}>
+        <div class="top">
+          <span class="icon">{e.icon ? <img src={e.icon} alt="" width="22" height="22" loading="lazy" /> : e.name[0]}</span>
+          <div>
+            <h2>{e.name}{e.verified && <svg class="check" width="13" height="13" viewBox="0 0 16 16" aria-label="Verified"><circle cx="8" cy="8" r="7" fill="currentColor"></circle><path d="M5.2 8.2l1.9 1.9 3.8-4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>}</h2>
+            <p class="meta">{KIND_LABEL[e.kind]} · {e.publisher}</p>
+          </div>
+        </div>
+        <p class="desc">{e.description}</p>
+        {(e.signIn || e.requires.length > 0) && (
+          <p class="tags">
+            {e.signIn && <span>Needs sign-in</span>}
+            {e.requires.map((r) => <span>{requiresLabel(r)}</span>)}
+          </p>
+        )}
+      </li>
+    ))}
+  </ul>
+  <p class="wrap none muted" data-none hidden>No extension matches that search.</p>
+
+  <section class="wrap more">
+    <p class="muted">MCP servers ask before each tool runs, unless you turn that off in Settings. See <a href="/docs/extensions">Extensions</a> and <a href="/docs/rules-and-skills">Rules and skills</a> in the docs.</p>
+  </section>
+</Base>
+
+<script>
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-filter]')
+  const input = document.querySelector<HTMLInputElement>('[data-search]')!
+  const items = document.querySelectorAll<HTMLElement>('[data-list] > li')
+  const none = document.querySelector<HTMLElement>('[data-none]')!
+  let kind = 'all'
+  const apply = () => {
+    const q = input.value.trim().toLowerCase()
+    let shown = 0
+    items.forEach((li) => {
+      const ok = (kind === 'all' || li.dataset.kind === kind) && (!q || li.dataset.text!.includes(q))
+      li.hidden = !ok
+      if (ok) shown++
+    })
+    none.hidden = shown > 0
+  }
+  buttons.forEach((b) =>
+    b.addEventListener('click', () => {
+      kind = b.dataset.filter!
+      buttons.forEach((x) => x.setAttribute('aria-pressed', String(x === b)))
+      apply()
+    })
+  )
+  input.addEventListener('input', apply)
+</script>
+
+<style>
+  .bar { padding-top: 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .filters { display: flex; gap: 4px; flex-wrap: wrap; }
+  .filters button { min-height: 40px; padding: 0 14px; border: 1px solid transparent; border-radius: 5px; background: none; font: inherit; color: var(--body); cursor: pointer; }
+  .filters button span { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .filters button[aria-pressed='true'] { border-color: var(--hair); background: rgb(255 255 255 / 0.45); color: var(--ink); }
+  .search { display: flex; align-items: center; gap: 8px; width: 300px; min-height: 40px; padding: 0 12px; border: 1px solid var(--hair); border-radius: 5px; color: var(--body); background: rgb(255 255 255 / 0.35); }
+  .search input { flex-grow: 1; min-width: 0; border: 0; background: none; font: inherit; color: var(--ink); outline: none; }
+  .search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .grid { padding: 24px 0 0; list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  li { padding: 20px; border: 1px solid var(--hair); background: rgb(255 255 255 / 0.35); display: flex; flex-direction: column; gap: 12px; }
+  li[hidden] { display: none; }
+  .top { display: flex; align-items: center; gap: 12px; }
+  .icon { width: 40px; height: 40px; flex-shrink: 0; border-radius: 8px; background: #fff; border: 1px solid var(--hair); display: flex; align-items: center; justify-content: center; font-weight: 500; }
+  h2 { display: flex; align-items: center; gap: 6px; font-size: 17px; font-weight: 500; letter-spacing: -0.015em; }
+  .check { color: var(--accent); }
+  .meta { font-size: 13px; color: var(--faint); }
+  .desc { font-size: 15px; line-height: 1.45; color: var(--body-strong); }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+  .tags span { padding: 2px 8px; border-radius: 3px; background: rgb(0 0 0 / 0.05); font-size: 12px; color: var(--body); }
+  .none { padding-top: 24px; }
+  .more { padding: 48px 0 var(--section-gap); }
+  .more a { color: var(--ink); }
+  @media (max-width: 1023px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 639px) {
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .search { width: 100%; }
+    .filters button { padding: 0 10px; }
+  }
+</style>

@@ -1,0 +1,39 @@
+---
+import Shot from '@/components/site/Shot.astro'
+import Extensions from '@/components/app/Extensions.astro'
+import { counts } from '@/lib/catalog'
+
+const extras = [
+  'GitHub pull requests, reviews and issues from the task',
+  'A real browser it drives to check its own UI work',
+  'Screenshots and images it can read, to see what it built',
+  'New tools it writes itself when a job needs one'
+]
+---
+<section class="wrap section" id="extend">
+  <div class="head">
+    <h2 class="h2">Connect it once,<br />use it in every task</h2>
+    <ul>{extras.map((e) => <li>{e}</li>)}</ul>
+  </div>
+  <Shot sky="dusk" label="Extensions: Playwright, three skills and two rule files installed, with Playwright's tools and where it can run." desktop={{ w: 1200, h: 560, x: 60, y: 48, s: 0.9 }} phone={{ w: 350, h: 320, x: 14, y: 20, s: 0.5 }}>
+    <Extensions />
+  </Shot>
+  <a href="/extensions" class="more tap">Browse the {counts.all} extensions in the catalog →</a>
+</section>
+
+<style>
+  .section { padding-top: var(--section-gap); display: flex; flex-direction: column; gap: 48px; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; }
+  ul { padding: 0; list-style: none; width: 600px; flex-shrink: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 32px; color: var(--body); line-height: 1.4; }
+  li { padding-left: 14px; border-left: 1px solid var(--hair); }
+  .more { align-self: flex-start; margin-top: -30px; text-decoration: none; }
+  @media (max-width: 1023px) {
+    .head { flex-direction: column; align-items: flex-start; gap: 20px; }
+    ul { width: auto; max-width: 600px; }
+  }
+  @media (max-width: 639px) {
+    .section { gap: 24px; }
+    ul { grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: 15px; }
+    .more { margin-top: -6px; }
+  }
+</style>

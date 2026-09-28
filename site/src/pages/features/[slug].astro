@@ -1,0 +1,69 @@
+---
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import FeatureShot from '@/components/site/FeatureShot.astro'
+import { FEATURES, type Feature } from '@/data/features'
+
+export function getStaticPaths() {
+  return FEATURES.map((feature) => ({ params: { slug: feature.slug }, props: { feature } }))
+}
+
+const { feature } = Astro.props as { feature: Feature }
+const others = FEATURES.filter((f) => f.slug !== feature.slug)
+---
+<Base title={feature.nav} description={feature.lede}>
+  <PageHead eyebrow={feature.nav} title={feature.title} lede={feature.lede} />
+
+  <section class="wrap hero-shot">
+    <FeatureShot shot={feature.hero} eager />
+  </section>
+
+  <section class="wrap points" aria-label="Details">
+    {feature.points.map((p) => (
+      <div class="point">
+        <h2 class="h4">{p.title}</h2>
+        <p class="muted">{p.body}</p>
+      </div>
+    ))}
+  </section>
+
+  {feature.second && (
+    <section class="wrap second">
+      <div class="text">
+        <h2 class="h3">{feature.second.title}</h2>
+        <p class="muted">{feature.second.body}</p>
+      </div>
+      <FeatureShot shot={feature.second.shot} />
+    </section>
+  )}
+
+  <section class="wrap next">
+    <div class="docs">
+      <p class="eyebrow">In the docs</p>
+      {feature.docs.map((d) => <a href={d.href}>{d.label} →</a>)}
+    </div>
+    <nav aria-label="Other features" class="others">
+      <p class="eyebrow">More features</p>
+      {others.map((f) => <a href={`/features/${f.slug}`}>{f.nav}</a>)}
+    </nav>
+  </section>
+</Base>
+
+<style>
+  .hero-shot { padding-top: 48px; }
+  .points { padding-top: 64px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 32px; }
+  .point { display: flex; flex-direction: column; gap: 10px; padding-left: 20px; border-left: 1px solid var(--hair); }
+  .point p { font-size: 16px; }
+  .second { margin-top: var(--section-gap); display: flex; flex-direction: column; gap: 32px; }
+  .second .text { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
+  .second .text p { font-size: 17px; }
+  .next { margin: var(--section-gap) auto; padding-top: 40px; border-top: 1px solid var(--hair); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
+  .docs, .others { display: flex; flex-direction: column; gap: 10px; }
+  .next a { font-size: 19px; text-decoration: none; letter-spacing: -0.015em; }
+  @media (max-width: 1023px) { .points { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 639px) {
+    .hero-shot { padding-top: 32px; }
+    .points { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-top: 40px; }
+    .next { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>

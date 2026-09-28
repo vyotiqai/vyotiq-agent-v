@@ -1,0 +1,27 @@
+{
+  "name": "@vyotiq/site",
+  "version": "1.0.0",
+  "description": "Agent V website: vyotiq.com",
+  "type": "module",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "packageManager": "pnpm@12.4.2",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "verify": "node scripts/verify.mjs"
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "0.4.2",
+    "@fontsource/geist-mono": "5.3.0",
+    "@fontsource/inter-tight": "5.3.0",
+    "astro": "7.3.5"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.7",
+    "@astrojs/sitemap": "3.7.4",
+    "typescript": "6.0.3"
+  }
+}

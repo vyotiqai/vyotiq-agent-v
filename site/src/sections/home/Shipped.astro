@@ -1,0 +1,56 @@
+---
+/** The latest release's first notes, straight from the release body. */
+import Logo from '@/components/site/Logo.astro'
+import { latestRelease, parseNotes } from '@/lib/releases'
+
+const release = await latestRelease()
+const notes = release ? parseNotes(release.body) : null
+const rows = notes
+  ? notes.sections.flatMap((s) => s.items.filter((i) => i.claim).map((i) => ({ kind: s.heading, title: i.claim }))).slice(0, 7)
+  : []
+---
+{release && rows.length > 0 && (
+  <section class="wrap section" id="changelog" aria-labelledby="shipped">
+    <div class="side">
+      <h2 class="h2" id="shipped">Recently<br />shipped</h2>
+      <a href="/changelog" class="tile" aria-label={`Agent V ${release.version} release notes`}>
+        <Logo size={40} />
+        <span>{release.version}</span>
+      </a>
+    </div>
+    <ol>
+      {rows.map((r) => (
+        <li>
+          <a href={`/changelog#v${release.version}`}>
+            <span class="kind">{r.kind}</span>
+            <span class="title">{r.title}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>
+          </a>
+        </li>
+      ))}
+    </ol>
+  </section>
+)}
+
+<style>
+  .section { margin-top: var(--section-gap); border-top: 1px solid var(--hair); padding-top: 88px; display: flex; gap: 96px; }
+  .side { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; }
+  .tile { width: 208px; height: 108px; padding: 0 22px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: space-between; text-decoration: none; font-family: var(--mono); font-size: 22px; font-weight: 500; }
+  ol { padding: 0; list-style: none; flex-grow: 1; }
+  li a { min-height: 54px; display: flex; align-items: center; gap: 24px; border-bottom: 1px solid var(--hair); text-decoration: none; }
+  .kind { width: 96px; flex-shrink: 0; font-size: 15px; color: var(--faint); }
+  .title { flex-grow: 1; font-size: 17px; letter-spacing: -0.015em; }
+  svg { color: var(--faint); flex-shrink: 0; }
+  @media (max-width: 1023px) {
+    .section { flex-direction: column; gap: 32px; padding-top: 48px; }
+    .side { width: auto; flex-direction: row; align-items: flex-end; }
+    .tile { width: 132px; height: 68px; padding: 0 14px; font-size: 17px; }
+    .tile :global(svg) { width: 26px; height: 26px; }
+  }
+  @media (max-width: 639px) {
+    li a { flex-wrap: wrap; gap: 2px 12px; padding: 12px 0; }
+    .kind { width: 100%; font-size: 13px; }
+    .title { font-size: 16px; line-height: 1.35; }
+    svg { display: none; }
+  }
+</style>

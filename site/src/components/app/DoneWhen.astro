@@ -1,0 +1,28 @@
+---
+import Glyph from './Glyph.astro'
+
+const checks = [
+  'Calls over the limit get 429 with a Retry-After header',
+  'The existing API tests still pass',
+  'The limit can be set per environment'
+]
+---
+<div style="width: 540px; height: 372px; box-sizing: border-box; padding: 20px 24px 0; display: flex; flex-direction: column; background: var(--app-bg); border: 1px solid var(--app-frame); border-radius: 10px; font-family: var(--app-font); font-size: 13px; line-height: 20px; color: var(--app-fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 30px 70px -24px rgba(0, 0, 0, 0.50)">
+<div style="margin-bottom: 8px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-tertiary)">Result</div>
+<p style="margin: 0; font-size: 14px; line-height: 22px; color: var(--app-fg-strong)">Every call to <span style="font-family: var(--app-mono); font-size: 12.5px; padding: 0 4px; border-radius: 4px; background: var(--app-surface)">/api</span> now passes a token bucket keyed by API key. Past 100 a minute it answers 429 with Retry-After. The limit reads <span style="font-family: var(--app-mono); font-size: 12.5px; padding: 0 4px; border-radius: 4px; background: var(--app-surface)">RATE_LIMIT_PER_MINUTE</span>, so staging can raise it.</p>
+<div style="margin-top: 16px; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--app-fg-strong)">Checked · 3 of 3 done-when checks met</div>
+<div style="margin-top: 6px; display: flex; flex-direction: column; gap: 6px">
+{checks.map((c) => (<Fragment>
+<div style="display: flex; align-items: flex-start; gap: 10px">
+<span style="margin-top: 3px; flex-shrink: 0; display: flex"><Glyph kind="review" size="14" /></span>
+<span style="color: var(--app-secondary)">{c}</span>
+</div>
+</Fragment>))}
+</div>
+<span style="flex-grow: 1"></span>
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--app-border); font-family: var(--app-mono); font-size: 11.5px; color: var(--app-tertiary)">
+<span style="flex-grow: 1">4m 12s · 3/3 checks met · 48k tok (in+out) · 71% cache hit · ~$0.42</span>
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-label="Mark helpful"><path d="M5 7v6.5H2.5V7zM5 7l2.5-4.5c1 0 1.7.8 1.5 1.8L8.6 6.5h3.9a1.2 1.2 0 0 1 1.2 1.4l-.8 4.4a1.4 1.4 0 0 1-1.4 1.2H5"></path></svg>
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-label="Mark unhelpful"><path d="M11 9V2.5h2.5V9zM11 9l-2.5 4.5c-1 0-1.7-.8-1.5-1.8l.4-2.2H3.5a1.2 1.2 0 0 1-1.2-1.4l.8-4.4a1.4 1.4 0 0 1 1.4-1.2H11"></path></svg>
+</div>
+</div>

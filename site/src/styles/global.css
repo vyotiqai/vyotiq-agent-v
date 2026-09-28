@@ -1,0 +1,148 @@
+@import '@fontsource/inter-tight/400.css';
+@import '@fontsource/inter-tight/500.css';
+@import '@fontsource/geist-mono/400.css';
+@import '@fontsource/geist-mono/500.css';
+
+/* Site: warm stone ground, near-black ink, one accent. */
+:root {
+  --ground: #e8e6e1;
+  --ink: #151515;
+  --body: #625f5a;
+  --body-strong: #4e4c48;
+  --faint: #67645e;
+  --nav: #67645e;
+  --hair: #d5d1ca;
+  --night: #1b1b1b;
+  --night-fg: #ededea;
+  --night-body: #cfcdc8;
+  --night-muted: #8c8a86;
+  --night-dim: #8a8884;
+  --night-hair: #2e2e2e;
+  --accent: #b43e0d;
+  --button-fg: #f2f1ee;
+
+  --font: 'Inter Tight', system-ui, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, monospace;
+  --grain: url('/grain.png');
+
+  --page: 1200px;
+  --gutter: 20px;
+  --section-gap: 112px;
+
+  /* Agent V's own UI, Native skin, dark: used only inside the app screens. */
+  --app-font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --app-mono: 'Cascadia Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
+  --app-chrome: #121212;
+  --app-bg: #1a1a1a;
+  --app-raised: #1e1e1d;
+  --app-card: #232221;
+  --app-surface: #252423;
+  --app-surface-2: #2e2c2b;
+  --app-sunken: #141414;
+  --app-border: #2c2a28;
+  --app-divider: rgb(44 42 40 / 0.6);
+  --app-border-strong: #423f3c;
+  --app-frame: #393735;
+  --app-fg-strong: #faf9f7;
+  --app-fg: #ebe9e6;
+  --app-secondary: #c8c3bd;
+  --app-muted: #9e9891;
+  --app-tertiary: #86817c;
+  --app-accent: #fb923c;
+  --app-accent-fg: #1c0d03;
+  --app-accent-soft: rgb(251 146 60 / 0.15);
+  --app-success: #3dbb7b;
+  --app-success-soft: rgb(61 187 123 / 0.15);
+  --app-danger: #f26b5e;
+  --app-danger-soft: rgb(242 107 94 / 0.15);
+  --app-warning: #e9a23b;
+  --app-info: #4fb3e8;
+}
+
+@media (max-width: 1023px) {
+  :root { --section-gap: 88px; }
+}
+@media (max-width: 639px) {
+  :root { --section-gap: 64px; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  background: var(--ground);
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  scroll-padding-top: 16px;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+body {
+  margin: 0;
+  background: var(--ground) var(--grain);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+a:hover { opacity: 0.72; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+img, svg { display: block; max-width: 100%; }
+h1, h2, h3, p, ul, ol, figure { margin: 0; }
+
+.wrap {
+  width: min(var(--page), 100% - 2 * var(--gutter));
+  margin-inline: auto;
+}
+
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  padding: 8px 12px;
+  background: var(--night);
+  color: var(--night-fg);
+  z-index: 10;
+}
+.skip:focus { top: 12px; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* A standalone text link: a hit area at least 32px tall that does not move the text. */
+.tap { padding-block: 6px; margin-block: -6px; }
+
+/* Type scale shared by every page. */
+.display { font-size: clamp(42px, 4.9vw, 56px); line-height: 1.07; font-weight: 400; letter-spacing: -0.024em; text-wrap: balance; }
+.h2 { font-size: clamp(32px, 3.4vw, 44px); line-height: 1.08; font-weight: 400; letter-spacing: -0.03em; }
+.h3 { font-size: clamp(26px, 2.4vw, 32px); line-height: 1.12; font-weight: 400; letter-spacing: -0.03em; }
+.h4 { font-size: 20px; line-height: 1.3; font-weight: 500; letter-spacing: -0.02em; }
+.lede { font-size: clamp(17px, 1.4vw, 19px); line-height: 1.45; color: var(--body); text-wrap: pretty; }
+.muted { color: var(--body); }
+.eyebrow { font-family: var(--mono); font-size: 13px; color: var(--faint); letter-spacing: 0; }
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 5px;
+  background: var(--night);
+  color: var(--button-fg);
+  text-decoration: none;
+  font-size: 16px;
+}
+.button.light { background: var(--night-fg); color: var(--ink); }
+.link { text-decoration: none; }

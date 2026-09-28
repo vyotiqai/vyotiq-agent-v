@@ -1,0 +1,22 @@
+---
+/** A section title with an optional note set against its right edge. */
+interface Props {
+  title: string
+  note?: string
+  id?: string
+}
+const { title, note, id } = Astro.props
+---
+<div class="head">
+  <h2 class="h2" id={id} set:html={title} />
+  {note ? <p class="muted">{note}</p> : <slot />}
+</div>
+
+<style>
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; }
+  p { width: 360px; flex-shrink: 0; }
+  @media (max-width: 1023px) {
+    .head { flex-direction: column; align-items: flex-start; gap: 14px; }
+    p { width: auto; max-width: 560px; }
+  }
+</style>

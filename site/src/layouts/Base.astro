@@ -1,0 +1,48 @@
+---
+import '@/styles/global.css'
+import Nav from '@/components/site/Nav.astro'
+import Footer from '@/components/site/Footer.astro'
+import { TAGLINE } from '@/data/site'
+import { pagePath } from '@/lib/paths'
+
+interface Props {
+  /** Page name; the home page passes none and gets the product line instead. */
+  title?: string
+  description?: string
+}
+const { title, description = TAGLINE } = Astro.props
+const fullTitle = title ? `${title} · Agent V` : 'Agent V: hand off the task, then review the work'
+const canonical = new URL(pagePath(Astro.url.pathname), Astro.site)
+const card = new URL('/og.png', Astro.site)
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    <meta name="theme-color" content="#e8e6e1" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Agent V" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={card} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Agent V running a task: the task record beside its instances" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <Nav />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

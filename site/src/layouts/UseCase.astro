@@ -1,0 +1,97 @@
+---
+/**
+ * One use case: the path so far on the left, then the job, its brief, what
+ * you will see and what to check, and the docs that go deeper.
+ */
+import '@/styles/prose.css'
+import Base from './Base.astro'
+import BriefCard from '@/components/site/BriefCard.astro'
+import { allUseCases, useCaseStages, type UseCase as UseCaseEntry } from '@/lib/useCases'
+
+interface Props {
+  useCase: UseCaseEntry
+}
+const { useCase } = Astro.props
+const { data } = useCase
+const stages = await useCaseStages()
+const list = await allUseCases()
+const i = list.findIndex((u) => u.id === useCase.id)
+const prev = list[i - 1]
+const next = list[i + 1]
+---
+<Base title={data.title} description={data.description}>
+  <div class="wrap layout">
+    <nav class="side" aria-label="Use cases">
+      <details class="side-toggle" open>
+        <summary>All use cases</summary>
+        {stages.map((s) => (
+          <div class="group">
+            <p class="group-name">{s.stage}</p>
+            {s.cases.map((u) => (
+              <a href={`/use-cases/${u.id}`} aria-current={u.id === useCase.id ? 'page' : undefined}>
+                <span class="n">{u.data.order}</span>{u.data.title}
+              </a>
+            ))}
+          </div>
+        ))}
+      </details>
+    </nav>
+
+    <article>
+      <p class="eyebrow">Use case {data.order} of {list.length} · {data.stage}</p>
+      <h1 class="title">{data.title}</h1>
+      <p class="lede">{data.description}</p>
+      <p class="teaches"><span class="sr-only">Teaches: </span>{data.teaches.map((t) => <span class="tag">{t}</span>)}</p>
+
+      <BriefCard mode={data.mode} kind={data.kind} brief={data.brief} checks={data.checks} />
+
+      <div class="prose body"><slot /></div>
+
+      <section class="more" aria-labelledby="more-title">
+        <h2 id="more-title" class="more-title">In the docs</h2>
+        <ul>{data.docs.map((d) => <li><a href={d.href}>{d.label}</a></li>)}</ul>
+      </section>
+
+      <nav class="pager" aria-label="Previous and next use case">
+        {prev ? <a href={`/use-cases/${prev.id}`}><span>Previous</span>{prev.data.title}</a> : <a href="/use-cases/"><span>Back to</span>All use cases</a>}
+        {next ? <a href={`/use-cases/${next.id}`} class="next"><span>Next</span>{next.data.title}</a> : <a href="/docs/" class="next"><span>Keep going</span>The docs</a>}
+      </nav>
+    </article>
+  </div>
+</Base>
+
+<style>
+  .layout { display: grid; grid-template-columns: 260px minmax(0, 720px); gap: 64px; padding: 56px 0 var(--section-gap); }
+  .side { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; }
+  .side-toggle summary { display: none; }
+  .group { display: flex; flex-direction: column; margin-bottom: 22px; }
+  .group-name { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 6px; }
+  .group a { display: flex; gap: 10px; padding: 5px 0; font-size: 15px; line-height: 1.35; color: var(--body); text-decoration: none; }
+  .group a[aria-current='page'] { color: var(--ink); font-weight: 500; }
+  .n { flex-shrink: 0; width: 18px; font-family: var(--mono); font-size: 13px; color: var(--faint); padding-top: 1px; }
+  .title { margin-top: 10px; font-size: clamp(34px, 3.6vw, 46px); line-height: 1.08; font-weight: 400; letter-spacing: -0.03em; text-wrap: balance; }
+  .lede { margin: 14px 0 0; font-size: 19px; color: var(--body); max-width: 640px; }
+  .teaches { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 32px; }
+  .tag { font-size: 14px; padding: 3px 10px; border: 1px solid var(--hair); border-radius: 999px; color: var(--body-strong); }
+  .body { margin-top: 8px; }
+  .more { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--hair); }
+  .more-title { font-family: var(--mono); font-size: 12px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+  .more ul { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px 24px; }
+  .more a { display: inline-block; padding: 4px 0; font-size: 17px; }
+  .pager { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--hair); }
+  .pager a { display: flex; flex-direction: column; gap: 2px; text-decoration: none; font-size: 17px; }
+  .pager a span { font-size: 13px; color: var(--faint); }
+  .pager .next { text-align: right; }
+
+  @media (max-width: 1023px) {
+    .layout { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 24px; }
+    .side { position: static; max-height: none; border-bottom: 1px solid var(--hair); }
+    .side-toggle summary { display: block; padding: 12px 0; cursor: pointer; font-weight: 500; }
+    .side-toggle:not([open]) .group { display: none; }
+  }
+</style>
+
+<script>
+  // On narrow screens the path starts folded so the use case comes first.
+  if (matchMedia('(max-width: 1023px)').matches) document.querySelector('.side-toggle')?.removeAttribute('open')
+</script>

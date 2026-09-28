@@ -130,8 +130,9 @@ Draft-first is deliberate: the updater can never see a half-uploaded release.
 across Windows/macOS/Linux: typecheck, tests with coverage, lint, build,
 `pnpm audit --audit-level high`, an unpacked packaging smoke test, and GUI e2e.
 
-**There is no website right now.** The old vyotiq.com (`landing/`) was removed on
-2026-09-27 and GitHub Pages was unpublished while a new site is built; see §11.
+**The website**, vyotiq.com, is the Astro site in `site/`, deployed to GitHub
+Pages by `.github/workflows/deploy-site.yml`. It reads the releases API when it
+is built, and `release.yml` starts that deploy once a release is published; see §11.
 
 ---
 
@@ -571,17 +572,44 @@ Print: `PHASE 7 verify — PASS — 8 installers + 3 manifests, SHA512 matched, 
 
 ## 11. PHASE 8 — The website
 
-**There is no website right now.** The old vyotiq.com (`landing/`, an Astro site
-deployed to GitHub Pages by `deploy-landing.yml`) was removed on 2026-09-27, and
-Pages was unpublished, while a new site is built. Both removed versions are kept
-under the git tags `archive/site-old` and `archive/site-new`; their page files
-are in `docs/site-pages/`.
+vyotiq.com is built from `site/` (Astro, its own pnpm project) by
+`deploy-site.yml`. Its Download and Changelog pages and the "is out" bar read the
+releases API of `vyotiqai/vyotiq-agent-v-releases` at build time, so the site shows
+a release only after it rebuilds. `finalize-release` starts that rebuild in its
+last step, "Rebuild the website". That step may fail without failing the release,
+so check it here.
 
-Skip this phase. If a new site exists by the time you run this prompt and this
-section has not been rewritten for it, **STOP and ask** (§B) how it learns about a
-release and what deploys it. Do not restore the old pipeline from the tags.
+1. **The deploy ran and passed.**
 
-Print: `PHASE 8 site — SKIPPED — no website`.
+   ```bash
+   gh run list --workflow deploy-site.yml --repo vyotiqai/vyotiq-agent-v --limit 3
+   ```
+
+   If no run started after the release, start one and watch it:
+
+   ```bash
+   gh workflow run deploy-site.yml --repo vyotiqai/vyotiq-agent-v --ref main
+   gh run watch --repo vyotiqai/vyotiq-agent-v
+   ```
+
+2. **The live site shows the version.** Both must print a match:
+
+   ```bash
+   curl -s https://vyotiq.com/download | grep -o "X.Y.Z is out"
+   curl -s https://vyotiq.com/changelog | grep -o 'id="vX.Y.Z"'
+   ```
+
+3. **The notes read right.** The changelog page renders the release body, so the
+   format in §5.2 is what the site shows too. To fix wording, edit the release
+   body (§9) and rebuild; never edit `site/` for release wording.
+
+If the deploy fails at "Verify", its output names the page and the problem: a
+third-party script, stylesheet or font, a broken link, or a page without its
+title, description or single h1. That is a site defect, not a release defect: fix
+it on `main` and rebuild. If it fails because GitHub Pages is not enabled for the
+repository, **STOP and ask** (§B); enabling Pages is the user's call.
+
+Print: `PHASE 8 site — PASS — vyotiq.com shows X.Y.Z`, or `— FAIL — <reason>`.
 
 ---
 
@@ -626,7 +654,8 @@ Stop, state what you found, and ask, if any of these are true:
 
 1. The version you are about to release **is already published**.
 2. `main` is red and the fix is not obviously yours.
-3. A new website exists but §11 does not yet say how to update it.
+3. The site deploy fails for a reason §11 does not cover, or GitHub Pages is not
+   enabled for the repository.
 4. The release needs a **major** bump, or a breaking change needs a migration you
    were not asked to write.
 5. Tests fail in a way you cannot attribute, or the failure set has grown beyond
@@ -655,6 +684,7 @@ A release is done when every box is ticked with evidence:
 - [ ] 8 installers + `latest.yml` + `latest-linux.yml` + `latest-mac.yml` + blockmaps
 - [ ] Downloaded installer SHA512 matched, installed, launched, version confirmed
 - [ ] Pointer release mirrored on the source repo, marked Latest
+- [ ] vyotiq.com rebuilt and showing X.Y.Z on Download and Changelog
 - [ ] In-app updater offers the new version from an older installation
 - [ ] Signing / crash-reporting status stated honestly
 
@@ -669,6 +699,7 @@ Release        https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/
 Installers     <n> assets, 3 manifests, SHA512 verified on <platform>
 Notes          <n> sections, <m> bullets, authored
 Updater        <offered from A.B.C | not verified — reason>
+Website        <vyotiq.com shows X.Y.Z | failed — reason>
 Signing        Windows <signed|unsigned> · macOS <notarized|unsigned>
 Crash report   Sentry DSN <present|absent at build time>
 

@@ -1,0 +1,68 @@
+---
+/** The use cases as one path: grouped by stage, numbered in the order to try them. */
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import { STAGE_NOTE, useCaseStages } from '@/lib/useCases'
+
+const stages = await useCaseStages()
+const first = stages[0]?.cases[0]
+const count = stages.reduce((n, s) => n + s.cases.length, 0)
+---
+<Base title="Use cases" description="What to hand Agent V, in the order to learn it: from reading an unfamiliar codebase to work that runs while you are away.">
+  <PageHead
+    eyebrow="Use cases"
+    title="Learn it in the order<br />you would use it"
+    lede={`${count} jobs, each with a brief you can paste. Start with the first: each one builds on the ones before it.`}
+  >
+    {first && <a href={`/use-cases/${first.id}`} class="button start">Start with use case 1</a>}
+  </PageHead>
+
+  <div class="wrap stages">
+    {stages.map((s) => (
+      <section class="stage" aria-labelledby={`stage-${s.stage.replace(/\W+/g, '-').toLowerCase()}`}>
+        <div class="stage-head">
+          <h2 id={`stage-${s.stage.replace(/\W+/g, '-').toLowerCase()}`} class="stage-name">{s.stage}</h2>
+          <p class="stage-note">{STAGE_NOTE[s.stage]}</p>
+        </div>
+        <ol>
+          {s.cases.map((u) => (
+            <li value={u.data.order}>
+              <a href={`/use-cases/${u.id}`}>
+                <span class="n" aria-hidden="true">{String(u.data.order).padStart(2, '0')}</span>
+                <span class="body">
+                  <span class="t">{u.data.title}</span>
+                  <span class="d">{u.data.description}</span>
+                </span>
+                <span class="teaches">{u.data.teaches.join(' · ')}</span>
+              </a>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))}
+  </div>
+</Base>
+
+<style>
+  .start { align-self: flex-start; margin-top: 8px; }
+  .stages { padding: 8px 0 var(--section-gap); }
+  .stage { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 40px; padding: 40px 0; border-bottom: 1px solid var(--hair); }
+  .stage-head { display: flex; flex-direction: column; gap: 8px; }
+  .stage-name { font-family: var(--mono); font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding-top: 4px; }
+  .stage-note { font-size: 15px; line-height: 1.45; color: var(--body); }
+  ol { margin: 0; padding: 0; list-style: none; }
+  li + li { border-top: 1px solid var(--hair); }
+  ol a { display: grid; grid-template-columns: 44px minmax(0, 1fr) 220px; gap: 16px; align-items: baseline; padding: 18px 0; text-decoration: none; }
+  li:first-child a { padding-top: 0; }
+  .n { font-family: var(--mono); font-size: 14px; color: var(--faint); }
+  .body { display: flex; flex-direction: column; gap: 4px; }
+  .t { font-size: 20px; letter-spacing: -0.015em; }
+  .d { font-size: 15px; line-height: 1.45; color: var(--body); }
+  .teaches { font-size: 14px; color: var(--body); text-align: right; }
+  ol a:hover .t { text-decoration: underline; text-underline-offset: 3px; }
+  @media (max-width: 1023px) {
+    .stage { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 32px 0; }
+    ol a { grid-template-columns: 36px minmax(0, 1fr); }
+    .teaches { grid-column: 2; text-align: left; }
+  }
+</style>

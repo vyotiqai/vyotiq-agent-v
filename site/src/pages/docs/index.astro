@@ -1,0 +1,39 @@
+---
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import { docGroups } from '@/lib/docs'
+
+const groups = await docGroups()
+---
+<Base title="Docs" description="How to set up Agent V, write tasks, review and ship their work, and extend it.">
+  <PageHead eyebrow="Docs" title="Using Agent V" lede="How each part of Agent V works, from the first launch to a merged pull request. New to it? Start with Getting started, then follow the use cases." />
+  <div class="wrap groups">
+    {groups.map((g) => (
+      <section>
+        <h2 class="group-name">{g.group}</h2>
+        <ul>
+          {g.docs.map((d) => (
+            <li>
+              <a href={`/docs/${d.id}`}>
+                <span class="t">{d.data.title}</span>
+                <span class="d">{d.data.description}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+  </div>
+</Base>
+
+<style>
+  .groups { padding: 24px 0 var(--section-gap); display: flex; flex-direction: column; }
+  section { display: grid; grid-template-columns: 240px 1fr; gap: 40px; padding: 32px 0; border-bottom: 1px solid var(--hair); }
+  .group-name { font-family: var(--mono); font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding-top: 4px; }
+  ul { padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; }
+  a { display: flex; flex-direction: column; gap: 4px; text-decoration: none; }
+  .t { font-size: 19px; letter-spacing: -0.015em; }
+  .d { font-size: 15px; color: var(--body); }
+  @media (max-width: 1023px) { section { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+  @media (max-width: 639px) { ul { grid-template-columns: minmax(0, 1fr); } }
+</style>

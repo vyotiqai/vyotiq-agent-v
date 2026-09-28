@@ -1,0 +1,161 @@
+---
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import { latestRelease, installers, formatSize, formatDate, type Platform } from '@/lib/releases'
+import { LATEST_RELEASE, RELEASES, REPO } from '@/data/site'
+
+const release = await latestRelease()
+const files = installers(release)
+
+type Row = { id: Platform; label: string; note: string }
+const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] = [
+  { os: 'windows', name: 'Windows', rows: [{ id: 'windows', label: 'Installer', note: 'x64 · installs for your user, no admin rights' }] },
+  {
+    os: 'mac',
+    name: 'macOS',
+    rows: [
+      { id: 'mac-arm', label: 'Apple silicon', note: 'M-series Macs · .dmg' },
+      { id: 'mac-intel', label: 'Intel', note: 'Intel Macs · .dmg' }
+    ]
+  },
+  {
+    os: 'linux',
+    name: 'Linux',
+    rows: [
+      { id: 'appimage', label: 'AppImage', note: 'x64 · updates from inside the app' },
+      { id: 'deb', label: '.deb', note: 'Debian, Ubuntu · updates through your package manager' },
+      { id: 'rpm', label: '.rpm', note: 'Fedora, RHEL · updates through your package manager' }
+    ]
+  }
+]
+---
+<Base title="Download" description="Download Agent V for Windows, macOS and Linux. Free and open source under GPL-3.0.">
+  <PageHead
+    eyebrow={release ? `Version ${release.version} · ${formatDate(release.date)}` : 'Download'}
+    title="Download Agent V"
+    lede="Free and open source. Bring your own model keys, or run local models through Ollama."
+  >
+    <div class="detect" data-detect hidden>
+      <a class="button" data-detect-link href={LATEST_RELEASE}>Download</a>
+      <span class="muted" data-detect-note></span>
+    </div>
+  </PageHead>
+
+  <section class="wrap platforms" aria-label="Installers">
+    {groups.map((g) => (
+      <div class="os" data-os={g.os}>
+        <h2 class="h3">{g.name}</h2>
+        <ul>
+          {g.rows.map((r) => {
+            const f = files[r.id]
+            return (
+              <li>
+                <div>
+                  <div class="label">{r.label}</div>
+                  <div class="note">{r.note}</div>
+                </div>
+                {f ? (
+                  <a href={f.url} class="get" data-platform={r.id} data-size={formatSize(f.size)}>
+                    Download <span>{formatSize(f.size)}</span>
+                  </a>
+                ) : (
+                  <a href={LATEST_RELEASE} class="get">On GitHub</a>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    ))}
+  </section>
+
+  <section class="wrap steps">
+    <h2 class="h3">First launch</h2>
+    <div class="cols">
+      <div>
+        <h3 class="h4">Windows</h3>
+        <p class="muted">Builds are not code-signed yet, so SmartScreen warns on first run. Choose "More info", then "Run anyway". The installer puts Agent V in your user folder and adds Start menu and desktop shortcuts.</p>
+      </div>
+      <div>
+        <h3 class="h4">macOS</h3>
+        <p class="muted">Builds are not notarized yet, so macOS blocks the first launch. Open the .dmg, drag the app to Applications and open it once. Then go to System Settings, Privacy &amp; Security, and choose "Open Anyway".</p>
+      </div>
+      <div>
+        <h3 class="h4">Linux</h3>
+        <p class="muted">Make the AppImage executable and run it, or install the .deb or .rpm with your package manager.</p>
+        <pre><code>chmod +x Vyotiq-*.AppImage</code></pre>
+      </div>
+    </div>
+    <p class="muted small">Would rather not run an unsigned build? The <a href={REPO}>source is public</a> and you can build it yourself.</p>
+  </section>
+
+  <section class="wrap needs">
+    <div>
+      <h2 class="h3">What else you need</h2>
+    </div>
+    <dl>
+      <div><dt>A model</dt><dd>An API key for one of nine providers, any OpenAI-compatible endpoint, or Ollama running locally with no key at all.</dd></div>
+      <div><dt>Git</dt><dd>Optional, but worktrees, instances, Changes and commits need it on your PATH.</dd></div>
+      <div><dt>Node or uv</dt><dd>Only for MCP servers that start with <code>npx</code> or <code>uvx</code>.</dd></div>
+    </dl>
+  </section>
+
+  <section class="wrap needs">
+    <div>
+      <h2 class="h3">Updates</h2>
+    </div>
+    <p class="muted wide">Agent V checks for a new version when it starts and every six hours. It never downloads or installs one by itself: you see the release notes, choose "Download update", then "Restart and install". You can turn the checks off with "Check automatically" in Settings, About. All versions are on <a href={RELEASES}>GitHub</a>, and what changed is on the <a href="/changelog">changelog</a>.</p>
+  </section>
+</Base>
+
+<script>
+  // Point the top button at the right installer for this machine, when it can be told.
+  const box = document.querySelector<HTMLElement>('[data-detect]')
+  const link = document.querySelector<HTMLAnchorElement>('[data-detect-link]')
+  const note = document.querySelector<HTMLElement>('[data-detect-note]')
+  const ua = navigator.userAgent
+  const pick = /Windows/.test(ua) ? ['windows', 'for Windows'] : /Mac OS X|Macintosh/.test(ua) ? ['mac-arm', 'for Mac with Apple silicon. On an Intel Mac, pick Intel below.'] : /Linux/.test(ua) && !/Android/.test(ua) ? ['appimage', 'AppImage for Linux'] : null
+  const target = pick && document.querySelector<HTMLAnchorElement>(`[data-platform="${pick[0]}"]`)
+  if (box && link && note && pick && target) {
+    link.href = target.href
+    link.textContent = `Download · ${target.dataset.size}`
+    note.textContent = pick[1]
+    box.hidden = false
+  }
+</script>
+
+<style>
+  .detect { display: flex; align-items: center; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
+  .detect[hidden] { display: none; }
+  .platforms { padding-top: 56px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .os { padding: 28px; background: rgb(255 255 255 / 0.35); border: 1px solid var(--hair); display: flex; flex-direction: column; gap: 20px; }
+  ul { padding: 0; list-style: none; }
+  li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid var(--hair); }
+  .label { font-size: 17px; }
+  .note { font-size: 14px; color: var(--body); }
+  .get { flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border-radius: 5px; background: var(--night); color: var(--button-fg); text-decoration: none; font-size: 15px; }
+  .get span { font-family: var(--mono); font-size: 12px; color: var(--night-muted); }
+  .steps { margin-top: var(--section-gap); padding-top: 56px; border-top: 1px solid var(--hair); display: flex; flex-direction: column; gap: 32px; }
+  .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
+  .cols > div { display: flex; flex-direction: column; gap: 10px; }
+  pre { margin: 6px 0 0; padding: 12px 14px; background: var(--night); color: var(--night-fg); font-family: var(--mono); font-size: 13px; overflow-x: auto; }
+  .small { font-size: 15px; }
+  .small a, .wide a { color: var(--ink); }
+  .needs { margin-top: 72px; padding-top: 40px; border-top: 1px solid var(--hair); display: grid; grid-template-columns: 300px 1fr; gap: 64px; }
+  .needs:last-of-type { margin-bottom: var(--section-gap); }
+  dl { display: flex; flex-direction: column; gap: 16px; }
+  dl div { display: grid; grid-template-columns: 140px 1fr; gap: 24px; }
+  dt { font-weight: 500; }
+  dd { margin: 0; color: var(--body); }
+  code { font-family: var(--mono); font-size: 0.88em; }
+  .wide { max-width: 720px; font-size: 17px; }
+  @media (max-width: 1023px) {
+    .platforms, .cols { grid-template-columns: minmax(0, 1fr); }
+    .needs { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  }
+  @media (max-width: 639px) {
+    .os { padding: 20px; }
+    dl div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .get { min-height: 44px; }
+  }
+</style>

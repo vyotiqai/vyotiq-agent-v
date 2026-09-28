@@ -1,0 +1,20 @@
+---
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+---
+<Base title="Page not found" description="This page does not exist.">
+  <PageHead eyebrow="404" title="Nothing here" lede="This page does not exist, or it moved.">
+    <div class="links">
+      <a href="/" class="button">Home</a>
+      <a href="/docs/" class="tap">Docs</a>
+      <a href="/download" class="tap">Download</a>
+    </div>
+  </PageHead>
+  <div class="space"></div>
+</Base>
+
+<style>
+  .links { display: flex; align-items: center; gap: 24px; margin-top: 8px; }
+  .links a:not(.button) { text-decoration: none; }
+  .space { height: var(--section-gap); }
+</style>

@@ -1,0 +1,59 @@
+---
+import Shot from '@/components/site/Shot.astro'
+import AppWindow from '@/components/app/AppWindow.astro'
+import { REPO, TAGLINE } from '@/data/site'
+---
+<section class="hero" id="top">
+  <div class="wrap head">
+    <h1 class="display">Hand off the task, then review the work.</h1>
+    <p class="lede">{TAGLINE}</p>
+    <div class="actions phone-only">
+      <a href="/download" class="button">Download</a>
+      <a href={REPO} class="link tap">Read the source →</a>
+    </div>
+  </div>
+  <Shot
+    class="bleed"
+    sky="hero"
+    eager
+    label="Agent V running a task on a sample repository: three Done when checks, a written plan, and three instances started in parallel."
+    desktop={{ w: 1320, h: 780, x: 64, y: 44, s: 0.85 }}
+    phone={{ w: 390, h: 390, x: -150, y: 28, s: 0.56 }}
+  >
+    <AppWindow />
+  </Shot>
+  <div class="wrap foot">
+    <p>Works in your repository with a terminal, a browser and git.</p>
+    <p>Checks its own result against your Done when list before it finishes.</p>
+    <span class="grow"></span>
+    <div class="actions desktop-only">
+      <a href={REPO} class="link tap">Read the source →</a>
+      <a href="/download" class="button">Download</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 40px; padding-top: 89px; }
+  .head .lede { width: 440px; flex-shrink: 0; margin-top: 17px; }
+  .hero :global(.bleed) { margin: 48px 0 0 max(var(--gutter), (100% - var(--page)) / 2); }
+  .foot { display: flex; align-items: flex-start; gap: 40px; padding-top: 48px; font-size: 17px; color: var(--body-strong); }
+  .foot p { width: 300px; }
+  .grow { flex-grow: 1; }
+  .actions { display: flex; align-items: center; gap: 20px; }
+  .phone-only { display: none; }
+
+  @media (max-width: 1023px) {
+    .head { flex-direction: column; gap: 18px; }
+    .head .lede { width: auto; margin-top: 0; max-width: 560px; }
+  }
+  @media (max-width: 639px) {
+    .head { padding-top: 36px; }
+    .phone-only { display: flex; margin-top: 6px; }
+    .phone-only .button { min-height: 44px; }
+    .desktop-only { display: none; }
+    .hero :global(.bleed) { margin: 36px 0 0; }
+    .foot { flex-direction: column; gap: 10px; padding-top: 24px; font-size: 16px; }
+    .foot p { width: auto; }
+  }
+</style>

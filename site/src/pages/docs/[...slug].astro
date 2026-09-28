@@ -1,0 +1,15 @@
+---
+import { render } from 'astro:content'
+import Doc from '@/layouts/Doc.astro'
+import { allDocs, type Doc as DocEntry } from '@/lib/docs'
+
+export async function getStaticPaths() {
+  return (await allDocs()).map((doc) => ({ params: { slug: doc.id }, props: { doc } }))
+}
+
+const { doc } = Astro.props as { doc: DocEntry }
+const { Content, headings } = await render(doc)
+---
+<Doc doc={doc} headings={headings}>
+  <Content />
+</Doc>

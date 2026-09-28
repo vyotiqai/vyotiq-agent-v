@@ -1,0 +1,14 @@
+---
+import Legal from '@/layouts/Legal.astro'
+import { Content } from '../../../PRIVACY.md'
+import raw from '../../../PRIVACY.md?raw'
+import { effectiveDate } from '@/lib/repoDoc'
+---
+<Legal
+  title="Privacy"
+  lede="What stays on your machine, what leaves it, and when. Every statement points at the code that does it."
+  file="PRIVACY.md"
+  effective={effectiveDate(raw)}
+>
+  <Content />
+</Legal>

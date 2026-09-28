@@ -1,0 +1,183 @@
+---
+import Glyph from './Glyph.astro'
+
+// The same made-up acme-api tasks as the Home screen: the two that wait on you
+// are its Needs you rows, with their ages in the accent the app gives them.
+const row = (t: string, meta: string, opts: { glyph?: string; selected?: boolean; accent?: boolean } = {}) => ({
+  t,
+  meta,
+  glyph: opts.glyph ?? '',
+  bg: opts.selected ? 'var(--app-surface-2)' : 'transparent',
+  color: opts.selected ? 'var(--app-fg-strong)' : 'var(--app-fg)',
+  metaColor: opts.accent ? 'var(--app-accent)' : 'var(--app-tertiary)'
+})
+const groups = [
+  { label: 'Needs you', glyph: 'needs', count: '2', items: [
+    row('Cache product search results', '1m', { accent: true }),
+    row('Write the orders table migration', '6m', { accent: true })
+  ] },
+  { label: 'Running', glyph: 'running', count: '1', items: [row('Add rate limiting to the public API', '2/5', { selected: true })] },
+  { label: 'Ready for review', glyph: 'review', count: '3', items: [
+    row('Fix the flaky checkout test', '3 files'),
+    row('Upgrade the Stripe SDK to v18', '7 files'),
+    row('Add request IDs to the logs', '4 files')
+  ] },
+  { label: 'Today', glyph: '', count: '2', items: [
+    row('Why do webhook retries run twice?', '2h'),
+    row('Rename the billing env vars', '5h')
+  ] },
+  { label: 'This week', glyph: '', count: '4', items: [
+    row('Explain the auth middleware', '1d'),
+    row('Move CI to Node 24', '1d', { glyph: 'stopped' }),
+    row('Profile the search endpoint', '3d', { glyph: 'failed' }),
+    row('Remove the old v1 routes', '3d')
+  ] }
+]
+const checks = [
+  'Calls over the limit get 429 with a Retry-After header',
+  'The existing API tests still pass',
+  'The limit can be set per environment'
+]
+const ids = ['3f9c21ab', 'b71e0d4c', 'e24a9f07']
+const spawned = [
+  { id: '3f9c21ab', t: '1m 10s', goal: 'Write a token-bucket limiter in src/limits with a Redis store and an in-memory fallback' },
+  { id: 'b71e0d4c', t: '1m 10s', goal: 'Add middleware that counts calls per API key and answers 429 with Retry-After' },
+  { id: 'e24a9f07', t: '1m 9s', goal: 'Write tests for the limit, the headers and per-key counting against a test Redis' }
+]
+const later = [
+  { n: '3', t: 'Merge the three branches and run the full test suite' },
+  { n: '4', t: 'Check each Done when line against what ran' }
+]
+---
+<div style="width: 1400px; height: 840px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: var(--app-bg); border: 1px solid var(--app-frame); border-radius: 10px; font-family: var(--app-font); font-size: 14px; line-height: 20px; color: var(--app-fg); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 40px 90px -30px rgba(0, 0, 0, 0.6)">
+
+<div style="height: 44px; flex-shrink: 0; box-sizing: border-box; border-bottom: 1px solid var(--app-border); display: flex; align-items: center; padding-left: 18px; position: relative">
+<svg width="18" height="18" viewBox="112 112 800 800" aria-hidden="true"><path d="M 794.908 512.000 L 370.546 757.005 L 370.546 266.995 Z" fill="var(--app-fg-strong)"></path><path d="M 858.410 540.000 L 858.410 712.000 L 512.000 912.000 L 363.044 826.000 Z" fill="var(--app-fg-strong)"></path><path d="M 314.546 798.000 L 165.590 712.000 L 165.590 312.000 L 314.546 226.000 Z" fill="var(--app-fg-strong)"></path><path d="M 363.044 198.000 L 512.000 112.000 L 858.410 312.000 L 858.410 484.000 Z" fill="var(--app-fg-strong)"></path></svg>
+<svg style="margin-left: 18px" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--app-muted)" stroke-width="1.3" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><path d="M6 3v10"></path></svg>
+<div style="position: absolute; left: 50%; top: 7px; transform: translateX(-50%); width: 440px; height: 30px; box-sizing: border-box; border-radius: 6px; background: var(--app-surface); display: flex; align-items: center; gap: 8px; padding: 0 6px 0 10px; font-size: 13px; color: var(--app-tertiary)">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5L14 14"></path></svg>
+<span style="flex-grow: 1">Search tasks, files and commands</span>
+<span style="display: flex; gap: 3px; font-family: var(--app-mono); font-size: 10px; color: var(--app-muted)"><span style="padding: 0 5px; border-radius: 3px; background: var(--app-surface-2)">Ctrl</span><span style="padding: 0 5px; border-radius: 3px; background: var(--app-surface-2)">K</span></span>
+</div>
+<span style="flex-grow: 1"></span>
+<span style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="11" height="11" viewBox="0 0 12 12" stroke="var(--app-secondary)" stroke-width="1" aria-hidden="true"><path d="M1 6h10"></path></svg></span>
+<span style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="var(--app-secondary)" stroke-width="1" aria-hidden="true"><rect x="1.5" y="3" width="7.5" height="7.5"></rect><path d="M3.5 3V1.5h7v7H9"></path></svg></span>
+<span style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="11" height="11" viewBox="0 0 12 12" stroke="var(--app-secondary)" stroke-width="1" aria-hidden="true"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"></path></svg></span>
+</div>
+
+<div style="flex-grow: 1; min-height: 0; display: flex">
+
+<nav aria-label="Tasks" style="width: 264px; flex-shrink: 0; box-sizing: border-box; border-right: 1px solid var(--app-border); display: flex; flex-direction: column">
+<div style="height: 50px; flex-shrink: 0; box-sizing: border-box; border-bottom: 1px solid var(--app-border); display: flex; align-items: center; gap: 6px; padding: 0 8px 0 18px">
+<span style="font-weight: 600; color: var(--app-fg-strong)">All workspaces</span>
+<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg>
+<span style="flex-grow: 1"></span>
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--app-muted)" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M3 5h10M5 8h6M7 11h2"></path></svg>
+<span style="margin-left: 8px; height: 26px; display: flex; align-items: center; padding: 0 9px; border-radius: 6px; background: var(--app-surface); border: 1px solid var(--app-border); font-size: 13px; color: var(--app-fg-strong)">New task</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 16px 10px 0">
+<div style="padding: 0 8px 8px; font-weight: 600; color: var(--app-fg-strong)">acme-api</div>
+{groups.map((g) => (<Fragment>
+<div style="margin-bottom: 10px">
+<div style="height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 8px; color: var(--app-muted)">
+<span style="flex-grow: 1">{g.label}</span>
+{g.glyph && (<Fragment><Glyph kind={g.glyph} size="14" /></Fragment>)}
+<span style="font-size: 13px; color: var(--app-tertiary)">{g.count}</span>
+</div>
+{g.items.map((it) => (<Fragment>
+<div style={`height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; background: ${it.bg}; color: ${it.color}`}>
+<span style="flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{it.t}</span>
+{it.glyph && (<Fragment><Glyph kind={it.glyph} size="14" /></Fragment>)}
+<span style={`flex-shrink: 0; font-size: 13px; color: ${it.metaColor}`}>{it.meta}</span>
+</div>
+</Fragment>))}
+</div>
+</Fragment>))}
+</div>
+<div style="height: 48px; flex-shrink: 0; box-sizing: border-box; border-top: 1px solid var(--app-border); display: flex; align-items: center; gap: 4px; padding: 0 8px; color: var(--app-muted)">
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 7L8 2.5 13.5 7v6.5h-11z"></path><path d="M6.5 13.5V10h3v3.5"></path></svg></span>
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"></rect><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"></path></svg></span>
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v2H3v-2.5a2 2 0 1 0 0-4z"></path></svg></span>
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M2.5 13.5h11M4.5 11V8M7 11V4.5M9.5 11V6.5M12 11V3"></path></svg></span>
+<span style="flex-grow: 1"></span>
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="8" cy="8" r="2.2"></circle><circle cx="8" cy="8" r="5.4" stroke-width="2.2" stroke-dasharray="2.1 2.14"></circle><circle cx="8" cy="8" r="4.3"></circle></svg></span>
+</div>
+</nav>
+
+<section aria-label="Task" style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column">
+<div style="height: 50px; flex-shrink: 0; box-sizing: border-box; border-bottom: 1px solid var(--app-border); display: flex; align-items: center; gap: 10px; padding: 0 12px 0 20px">
+<Glyph kind="running" size="15" />
+<span style="font-size: 15px; font-weight: 600; color: var(--app-fg-strong)">Add rate limiting to the public API</span>
+<span style="font-family: var(--app-mono); font-size: 13px; color: var(--app-tertiary)">main</span>
+<span style="flex-grow: 1"></span>
+<span style="display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 13px; color: var(--app-fg)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5"></rect></svg>Stop</span>
+<span style="width: 30px; display: flex; justify-content: center; color: var(--app-muted)"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.1"></circle><circle cx="8" cy="8" r="1.1"></circle><circle cx="12.5" cy="8" r="1.1"></circle></svg></span>
+<span style="width: 30px; display: flex; justify-content: center; color: var(--app-muted)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><path d="M10 3v10"></path></svg></span>
+</div>
+
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; justify-content: center">
+<div style="width: 820px; padding-top: 18px">
+<div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; padding: 0 10px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-tertiary)">Done when<span style="font-family: var(--app-mono); font-weight: 400; letter-spacing: 0; text-transform: none">0/3</span></div>
+{checks.map((c) => (<Fragment>
+<div style="min-height: 28px; display: flex; align-items: center; gap: 12px; padding: 0 10px">
+<Glyph kind="queued" size="15" />
+<span style="flex-grow: 1">{c}</span>
+<span style="font-size: 13px; color: var(--app-tertiary)">checked at the end</span>
+</div>
+</Fragment>))}
+<p style="margin: 12px 0 0; padding: 0 0; font-style: italic; color: var(--app-muted)">The routes all mount in src/app.ts. Let me read it and the auth middleware.</p>
+<div style="height: 40px; display: flex; align-items: center; gap: 8px"><span style="font-weight: 600; color: var(--app-fg-strong)">Read and listed</span><span style="color: var(--app-muted)">3 files and 2 directories</span><span style="flex-grow: 1"></span><span style="font-family: var(--app-mono); font-size: 12px; color: var(--app-tertiary)">38ms</span></div>
+<p style="margin: 4px 0 0; font-style: italic; color: var(--app-muted)">Three separate pieces. Plan first, then split them.</p>
+<div style="height: 40px; display: flex; align-items: center; gap: 8px"><span style="font-weight: 600; color: var(--app-fg-strong)">Wrote the plan</span><span style="color: var(--app-fg)">Add rate limiting to the public API</span><span style="flex-grow: 1"></span><span style="font-size: 13px; font-weight: 500; color: var(--app-accent)">Open plan</span></div>
+
+<div style="margin-top: 14px">
+<div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 10px"><Glyph kind="done" size="16" /><span>Find where requests enter the API</span></div>
+
+<div style="border-radius: 8px; background: var(--app-card); padding-bottom: 6px">
+<div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 10px">
+<Glyph kind="running" size="16" />
+<span style="font-weight: 600; color: var(--app-fg-strong)">Split the work across three instances</span>
+<span style="flex-grow: 1"></span>
+{ids.map((id) => (<Fragment><span style="padding: 1px 6px; border-radius: 4px; background: var(--app-surface-2); font-family: var(--app-mono); font-size: 12px; color: var(--app-secondary)">{id}</span></Fragment>))}
+<span style="margin-left: 4px; font-family: var(--app-mono); font-size: 12px; color: var(--app-tertiary)">1m 12s</span>
+<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg>
+</div>
+<p style="margin: 0; padding: 2px 38px 6px; font-style: italic; color: var(--app-muted)">Start all three in one step.</p>
+{spawned.map((s) => (<Fragment>
+<div style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 38px">
+<span style="flex-shrink: 0; font-weight: 600; color: var(--app-fg-strong)">Running instance {s.id}</span>
+<span style="flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--app-muted)">{s.goal}</span>
+<span style="flex-shrink: 0; font-size: 12px; font-weight: 500; color: var(--app-muted)">Open</span>
+<Glyph kind="running" size="11" />
+<span style="flex-shrink: 0; font-family: var(--app-mono); font-size: 12px; color: var(--app-tertiary)">{s.t}</span>
+</div>
+</Fragment>))}
+</div>
+
+{later.map((l) => (<Fragment>
+<div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 10px; color: var(--app-secondary)">
+<span style="width: 16px; height: 16px; box-sizing: border-box; border: 1px solid var(--app-border-strong); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--app-mono); font-size: 9px; color: var(--app-tertiary)">{l.n}</span>
+<span>{l.t}</span>
+</div>
+</Fragment>))}
+</div>
+
+<div style="margin-top: 16px; border-top: 1px solid var(--app-border); padding-top: 16px; font-family: var(--app-mono); font-size: 13px; color: var(--app-muted)">1m 49s · 42k tok (in+out) · 38 output tok/s · 71% cache hit</div>
+</div>
+</div>
+
+<div style="height: 98px; flex-shrink: 0; box-sizing: border-box; border-top: 1px solid var(--app-border); padding: 0 12px 0 20px; display: flex; flex-direction: column; justify-content: center; gap: 12px">
+<div style="color: var(--app-tertiary)">Add an instruction — starts when this run ends · Shift+Enter sends it now</div>
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="display: flex; padding: 2px; border-radius: 6px; background: var(--app-surface); font-size: 13px"><span style="padding: 2px 10px; border-radius: 4px; background: var(--app-surface-2); color: var(--app-fg-strong); font-weight: 600">Agent</span><span style="padding: 2px 10px; color: var(--app-muted)">Ask</span></span>
+<span style="display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--app-fg)">claude-opus-5<span style="color: var(--app-tertiary)">· High</span><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg></span>
+<span style="flex-grow: 1"></span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--app-muted)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="var(--app-border-strong)"></circle><path d="M8 2a6 6 0 0 1 2.2 0.42" stroke="var(--app-fg)"></path></svg>6%</span>
+<span style="width: 30px; display: flex; justify-content: center; color: var(--app-muted)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10.5 4.5l-5 5a1.6 1.6 0 0 0 2.3 2.3l5.4-5.4a3 3 0 0 0-4.3-4.3L3.6 7.4a4.4 4.4 0 0 0 6.2 6.2l3.7-3.7"></path></svg></span>
+<span style="width: 30px; display: flex; justify-content: center; color: var(--app-muted)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="5.5" y="1.8" width="5" height="8.4" rx="2.5"></rect><path d="M3.2 7.6a4.8 4.8 0 0 0 9.6 0M8 12.4v2"></path></svg></span>
+<span style="height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 14px; border-radius: 6px; background: var(--app-surface); font-size: 13px; font-weight: 600; color: var(--app-fg)">Queue<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.5 3.5v5h-9M6 6L3.5 8.5 6 11"></path></svg></span>
+</div>
+</div>
+</section>
+</div>
+</div>

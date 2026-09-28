@@ -1,0 +1,66 @@
+---
+/**
+ * A generated sky with one of Agent V's screens on it.
+ *
+ * The screen is laid out at its real size and scaled as a whole, so text and
+ * spacing keep the app's proportions. `desktop` and `phone` give the panel's
+ * design width and height and where the screen sits in it (x, y, scale). The
+ * panel keeps that aspect ratio and the screen's position in CSS; a small
+ * script sets the scale for the panel's actual width (--k). Before it runs the
+ * screen is drawn at design size and clipped, so nothing on the page moves.
+ */
+import { Image } from 'astro:assets'
+import { SKIES, type Sky } from '@/lib/skies'
+
+type Frame = { w: number; h: number; x: number; y: number; s: number }
+interface Props {
+  sky: Sky
+  /** What the screen shows, for screen readers: the screen itself is hidden from them. */
+  label: string
+  desktop: Frame
+  phone?: Frame
+  eager?: boolean
+  class?: string
+}
+const { sky, label, desktop: d, phone: p = d, eager = false, class: className } = Astro.props
+const vars = [
+  `--dw:${d.w}`, `--dh:${d.h}`, `--dx:${d.x}`, `--dy:${d.y}`, `--ds:${d.s}`,
+  `--pw:${p.w}`, `--ph:${p.h}`, `--px:${p.x}`, `--py:${p.y}`, `--ps:${p.s}`
+].join(';')
+// The sky is as wide as the panel: the viewport on a phone, the design width at most.
+const sizes = `(max-width: ${d.w}px) 100vw, ${d.w}px`
+---
+<figure class:list={['shot', className]} style={vars} role="img" aria-label={label} data-shot>
+  <Image src={SKIES[sky]} alt="" class="sky" widths={[640, 1280, 1920]} {sizes} loading={eager ? 'eager' : 'lazy'} fetchpriority={eager ? 'high' : undefined} />
+  <div class="stage" aria-hidden="true"><slot /></div>
+</figure>
+
+<style>
+  .shot {
+    --w: var(--dw); --h: var(--dh); --x: var(--dx); --y: var(--dy); --s: var(--ds);
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: var(--w) / var(--h);
+  }
+  @media (max-width: 639px) {
+    .shot { --w: var(--pw); --h: var(--ph); --x: var(--px); --y: var(--py); --s: var(--ps); }
+  }
+  .sky { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .stage {
+    position: absolute;
+    left: calc(var(--x) / var(--w) * 100%);
+    top: calc(var(--y) / var(--h) * 100%);
+    transform: scale(calc(var(--s) * var(--k, 1)));
+    transform-origin: 0 0;
+  }
+</style>
+
+<script>
+  const shots = document.querySelectorAll<HTMLElement>('[data-shot]')
+  const fit = (el: HTMLElement) => {
+    const w = Number(getComputedStyle(el).getPropertyValue('--w'))
+    if (w) el.style.setProperty('--k', String(el.clientWidth / w))
+  }
+  const ro = new ResizeObserver((entries) => entries.forEach((e) => fit(e.target as HTMLElement)))
+  shots.forEach((el) => { fit(el); ro.observe(el) })
+</script>

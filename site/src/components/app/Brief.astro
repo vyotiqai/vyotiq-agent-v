@@ -1,0 +1,48 @@
+---
+import Glyph from './Glyph.astro'
+
+const checks = [
+  'Calls over the limit get 429 with a Retry-After header',
+  'The existing API tests still pass',
+  'The limit can be set per environment'
+]
+---
+<div style="width: 580px; height: 412px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: var(--app-bg); border: 1px solid var(--app-frame); border-radius: 10px; font-family: var(--app-font); font-size: 13px; line-height: 20px; color: var(--app-fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 30px 70px -24px rgba(0, 0, 0, 0.54)">
+<div style="height: 40px; flex-shrink: 0; box-sizing: border-box; border-bottom: 1px solid var(--app-border); display: flex; align-items: center; gap: 4px; padding: 0 8px 0 16px; font-size: 12px; color: var(--app-muted)">
+<span style="margin-right: 8px; font-size: 13px; font-weight: 600; color: var(--app-fg-strong)">New task</span>
+in
+<span style="height: 24px; display: flex; align-items: center; gap: 4px; padding: 0 6px; color: var(--app-fg)">acme-api<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg></span>
+<span style="padding-left: 4px">on</span>
+<span style="height: 24px; display: flex; align-items: center; gap: 5px; padding: 0 6px; font-family: var(--app-mono); color: var(--app-secondary)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.4" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"></circle><circle cx="4.5" cy="12.5" r="1.5"></circle><circle cx="11.5" cy="5.5" r="1.5"></circle><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"></path></svg>main<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg></span>
+</div>
+<div style="flex-grow: 1; padding: 20px 24px 0; display: flex; flex-direction: column">
+<div style="border: 1px solid var(--app-border-strong); border-radius: 8px; background: var(--app-bg)">
+<div style="padding: 12px 16px 0; font-size: 14px; line-height: 22px; color: var(--app-fg-strong)">Add rate limiting to the public API: 100 requests a minute per key. Over the limit, answer 429 with a Retry-After header.<span style="display: inline-block; width: 1.5px; height: 17px; margin-left: 2px; vertical-align: -3px; background: var(--app-fg-strong)"></span></div>
+<div style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 8px">
+<span style="display: flex; padding: 2px; border-radius: 6px; background: var(--app-surface); font-size: 12px"><span style="padding: 2px 8px; border-radius: 4px; background: var(--app-surface-2); color: var(--app-fg-strong); font-weight: 600">Agent</span><span style="padding: 2px 8px; color: var(--app-muted)">Ask</span></span>
+<span style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--app-fg)">claude-opus-5<span style="color: var(--app-tertiary)">· High</span><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg></span>
+<span style="flex-grow: 1"></span>
+<span style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: var(--app-muted)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10.5 4.5l-5 5a1.6 1.6 0 0 0 2.3 2.3l5.4-5.4a3 3 0 0 0-4.3-4.3L3.6 7.4a4.4 4.4 0 0 0 6.2 6.2l3.7-3.7"></path></svg></span>
+<span style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: var(--app-muted)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="5.5" y="1.8" width="5" height="8.4" rx="2.5"></rect><path d="M3.2 7.6a4.8 4.8 0 0 0 9.6 0M8 12.4v2"></path></svg></span>
+</div>
+</div>
+<div style="margin-top: 18px; margin-bottom: 6px; display: flex; align-items: baseline; gap: 10px">
+<span style="font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-tertiary)">Done when</span>
+<span style="font-size: 12px; color: var(--app-tertiary)">The run is checked against these before it can finish</span>
+</div>
+<ul aria-label="Done when" style="margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--app-border); border-bottom: 1px solid var(--app-border)">
+{checks.map((c) => (<Fragment>
+<li style="height: 36px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--app-divider)">
+<Glyph kind="queued" size="14" />
+<span>{c}</span>
+</li>
+</Fragment>))}
+</ul>
+<div style="height: 30px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--app-muted)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>Add a check</div>
+<div style="margin-top: 16px; display: flex; align-items: center; gap: 8px">
+<span style="height: 32px; display: flex; align-items: center; padding: 0 14px; border-radius: 6px; background: var(--app-accent); color: var(--app-accent-fg); font-size: 13px; font-weight: 500">Start task</span>
+<span style="height: 32px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; color: var(--app-secondary); font-size: 13px; font-weight: 500">Save as draft</span>
+<span style="margin-left: auto; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--app-muted)"><span style="min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Asks before edits and commands · MCP tools ask first</span><span style="flex-shrink: 0; font-weight: 500; color: var(--app-secondary)">Change</span></span>
+</div>
+</div>
+</div>

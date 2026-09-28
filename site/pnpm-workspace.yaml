@@ -1,0 +1,9 @@
+# The website is its own pnpm project, apart from the Electron app at the repo
+# root: its own lockfile and node_modules, so installing it never touches the
+# app's dependency tree. Same supply-chain defaults as the root.
+minimumReleaseAge: 1440
+nodeLinker: isolated
+
+allowBuilds:
+  esbuild: true
+  sharp: true

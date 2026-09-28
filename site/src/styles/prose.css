@@ -1,0 +1,26 @@
+/* Long-form text: legal pages and docs. */
+.prose { max-width: 720px; font-size: 17px; line-height: 1.6; color: var(--body-strong); }
+.prose > * + * { margin-top: 1em; }
+.prose.doc-body > h2:first-child { display: none; }
+.prose h2 { margin-top: 2.2em; font-size: 26px; line-height: 1.2; font-weight: 400; letter-spacing: -0.02em; color: var(--ink); }
+.prose h3 { margin-top: 1.8em; font-size: 20px; line-height: 1.3; font-weight: 500; letter-spacing: -0.015em; color: var(--ink); }
+.prose h2 + *, .prose h3 + * { margin-top: 0.6em; }
+.prose p, .prose li { color: var(--body-strong); }
+.prose strong { color: var(--ink); font-weight: 500; }
+.prose a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.prose a:hover { text-decoration-color: var(--ink); opacity: 1; }
+.prose ul, .prose ol { padding-left: 1.2em; }
+.prose li + li { margin-top: 0.4em; }
+.prose code { font-family: var(--mono); font-size: 0.86em; padding: 1px 5px; border-radius: 4px; background: rgb(0 0 0 / 0.05); color: var(--ink); overflow-wrap: anywhere; }
+.prose pre { padding: 16px 18px; border-radius: 6px; background: var(--night); color: var(--night-fg); overflow-x: auto; font-size: 14px; line-height: 1.55; }
+.prose table code { white-space: nowrap; overflow-wrap: normal; }
+.prose pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
+.prose table { width: 100%; border-collapse: collapse; font-size: 15px; display: block; overflow-x: auto; }
+.prose th, .prose td { padding: 10px 12px 10px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--hair); }
+.prose th { font-weight: 500; color: var(--ink); }
+.prose hr { border: 0; border-top: 1px solid var(--hair); margin: 2.4em 0; }
+.prose blockquote { margin-left: 0; padding-left: 16px; border-left: 2px solid var(--hair); color: var(--body); }
+@media (max-width: 639px) {
+  .prose { font-size: 16px; }
+  .prose h2 { font-size: 23px; }
+}

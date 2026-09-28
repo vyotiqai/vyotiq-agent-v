@@ -1,0 +1,99 @@
+---
+import Logo from './Logo.astro'
+import { MAIN_NAV, REPO } from '@/data/site'
+import { latestVersion } from '@/lib/releases'
+import { samePath } from '@/lib/paths'
+
+const path = samePath(Astro.url.pathname)
+const version = await latestVersion()
+const isCurrent = (href: string) => {
+  const h = samePath(href)
+  return path === h || path.startsWith(h + '/')
+}
+---
+<header class="top">
+  <div class="bar">
+    <div class="wrap bar-row">
+      {version ? <span>Agent V {version} is out</span> : <span>Agent V</span>}
+      <a href="/changelog" class="bar-link tap">See what shipped →</a>
+      <span class="grow"></span>
+      <a href={REPO} class="bar-link tap wide">github.com/vyotiqai</a>
+    </div>
+  </div>
+  <div class="wrap nav-row">
+    <a href="/" class="brand" aria-label="Agent V home">
+      <Logo size={22} />
+      <span>Agent V</span>
+    </a>
+    <nav aria-label="Main" class="links">
+      {MAIN_NAV.map((l) => (
+        <a href={l.href} aria-current={isCurrent(l.href) ? 'page' : undefined}>{l.label}</a>
+      ))}
+    </nav>
+    <a href={REPO} class="source">Source</a>
+    <a href="/download" class="button">Download</a>
+    <details class="menu">
+      <summary aria-label="Menu">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 6.5h14M3 13.5h14"></path></svg>
+      </summary>
+      <nav aria-label="Menu" class="sheet">
+        {MAIN_NAV.map((l) => <a href={l.href} aria-current={isCurrent(l.href) ? 'page' : undefined}>{l.label}</a>)}
+        <a href="/faq">FAQ</a>
+        <a href={REPO}>Source</a>
+      </nav>
+    </details>
+  </div>
+</header>
+
+<script>
+  // The mobile menu is a <details>; close it on Escape, on a click outside it
+  // and on following one of its links.
+  const menu = document.querySelector<HTMLDetailsElement>('.top .menu')
+  if (menu) {
+    const close = (focus: boolean) => {
+      if (!menu.open) return
+      menu.open = false
+      if (focus) menu.querySelector('summary')?.focus()
+    }
+    document.addEventListener('keydown', (e) => e.key === 'Escape' && close(menu.contains(document.activeElement)))
+    document.addEventListener('click', (e) => !menu.contains(e.target as Node) && close(false))
+    menu.querySelectorAll('.sheet a').forEach((a) => a.addEventListener('click', () => close(false)))
+  }
+</script>
+
+<style>
+  .bar { background: var(--night); font-size: 14px; letter-spacing: -0.005em; color: var(--night-fg); }
+  .bar-row { height: 36px; display: flex; align-items: center; gap: 12px; }
+  .bar-link { color: var(--night-muted); text-decoration: none; }
+  .grow { flex-grow: 1; }
+  .nav-row { height: 88px; display: flex; align-items: center; gap: 8px; position: relative; }
+  .brand { width: 200px; display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none; font-size: 21px; font-weight: 500; letter-spacing: -0.03em; }
+  .links { display: flex; align-items: center; gap: 36px; flex-grow: 1; font-size: 18px; letter-spacing: -0.015em; }
+  .links a { color: var(--nav); text-decoration: none; padding: 12px 0; }
+  .links a[aria-current='page'] { color: var(--ink); }
+  .source { display: flex; align-items: center; min-height: 40px; padding: 0 16px; text-decoration: none; }
+  .menu { display: none; }
+  .menu summary { list-style: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .menu summary::-webkit-details-marker { display: none; }
+  .sheet { position: absolute; right: 0; top: 72px; z-index: 5; min-width: 220px; padding: 8px; display: flex; flex-direction: column; background: var(--ground); border: 1px solid var(--hair); box-shadow: 0 20px 40px -20px rgb(0 0 0 / 0.3); }
+  .sheet a { padding: 12px; text-decoration: none; font-size: 17px; color: var(--nav); }
+  .sheet a[aria-current='page'] { color: var(--ink); }
+
+  /* Six links and Source share the row with the brand down to 1024px. */
+  @media (max-width: 1239px) {
+    .brand { width: 170px; }
+    .links { gap: 28px; }
+  }
+  @media (max-width: 1023px) {
+    .brand { width: auto; flex-grow: 1; }
+    .links, .source { display: none; }
+    .menu { display: block; }
+  }
+  @media (max-width: 639px) {
+    .bar-row { height: 34px; font-size: 13px; }
+    .wide { display: none; }
+    .nav-row { height: 64px; }
+    .brand { font-size: 19px; }
+    .sheet { top: 56px; }
+  }
+</style>

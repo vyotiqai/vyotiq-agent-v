@@ -1,0 +1,86 @@
+---
+import Shot from '@/components/site/Shot.astro'
+import Brief from '@/components/app/Brief.astro'
+import Instance from '@/components/app/Instance.astro'
+import Changes from '@/components/app/Changes.astro'
+import RewindDialog from '@/components/app/RewindDialog.astro'
+import PullRequest from '@/components/app/PullRequest.astro'
+import { allUseCases } from '@/lib/useCases'
+
+const useCaseCount = (await allUseCases()).length
+---
+<section class="wrap section" id="how">
+  <h2 class="h2">From brief to merged branch,<br />you only step in where it counts.</h2>
+
+  <div class="step">
+    <div class="text">
+      <div class="eyebrow">01</div>
+      <h3 class="h3">Write the brief</h3>
+      <p class="muted">Say what you want and how you will know it is done. Agent mode plans, edits files and runs commands; Ask mode reads and answers.</p>
+    </div>
+    <Shot sky="sand" label="The New task page: a brief about rate limiting, three Done when checks, and Start task." desktop={{ w: 592, h: 440, x: 28, y: 34, s: 0.92 }} phone={{ w: 350, h: 260, x: 14, y: 20, s: 0.555 }}>
+      <Brief />
+    </Shot>
+  </div>
+
+  <div class="step flip">
+    <div class="text">
+      <div class="eyebrow">02</div>
+      <h3 class="h3">It does the work</h3>
+      <p class="muted">It reads code, edits files, runs your commands and tests, and drives a browser when the job needs one. Bigger jobs go to instances, each on its own worktree branch, that report back to the task that started them.</p>
+    </div>
+    <Shot sky="fog" label="An instance's page: its goal, its own worktree branch and folder scope, and the files it created so far." desktop={{ w: 592, h: 440, x: 16, y: 24, s: 0.78 }} phone={{ w: 350, h: 260, x: 14, y: 18, s: 0.5 }}>
+      <Instance />
+    </Shot>
+  </div>
+
+  <div class="step">
+    <div class="text">
+      <div class="eyebrow">03</div>
+      <h3 class="h3">You review it</h3>
+      <p class="muted">Changes shows every file the task touched. Keep it, undo it, or rewind to before any instruction. Edits you made since are left alone.</p>
+    </div>
+    <Shot sky="sage" label="The Changes tab with a diff, and the rewind dialog listing the files it would put back." desktop={{ w: 592, h: 440, x: 24, y: 28, s: 1 }} phone={{ w: 350, h: 260, x: 14, y: 18, s: 0.54 }}>
+      <div class="stack">
+        <Changes />
+        <div class="over"><RewindDialog /></div>
+      </div>
+    </Shot>
+  </div>
+
+  <div class="step flip">
+    <div class="text">
+      <div class="eyebrow">04</div>
+      <h3 class="h3">Ship it</h3>
+      <p class="muted">Commit and open the pull request from the task, then watch its checks in the PR tab. A failing check goes back to the agent in one click.</p>
+    </div>
+    <Shot sky="slate" label="The PR tab: the pull request's passing checks and a Squash and merge button." desktop={{ w: 592, h: 440, x: 16, y: 24, s: 1 }} phone={{ w: 350, h: 260, x: 14, y: 18, s: 0.575 }}>
+      <PullRequest />
+    </Shot>
+  </div>
+
+  <a href="/use-cases/" class="more tap">See {useCaseCount} jobs to hand it, in the order to learn them →</a>
+</section>
+
+<style>
+  .section { padding-top: var(--section-gap); display: flex; flex-direction: column; gap: 40px; }
+  .section > h2 { margin-bottom: 32px; }
+  .step { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; align-items: center; }
+  .text { display: flex; flex-direction: column; gap: 14px; padding-right: 96px; }
+  .text p { font-size: 17px; line-height: 1.5; }
+  .flip .text { order: 2; padding: 0 0 0 96px; }
+  .stack { position: relative; }
+  .over { position: absolute; left: 112px; top: 148px; }
+  .more { align-self: flex-start; text-decoration: none; font-size: 17px; }
+
+  @media (max-width: 1023px) {
+    .step { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    .text, .flip .text { order: 0; padding: 0; max-width: 620px; }
+  }
+  @media (max-width: 639px) {
+    .section { gap: 44px; }
+    .section > h2 { margin-bottom: 0; }
+    .text { gap: 8px; }
+    .text p { font-size: 16px; }
+  }
+</style>

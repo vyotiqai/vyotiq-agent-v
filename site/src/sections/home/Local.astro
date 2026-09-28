@@ -1,0 +1,37 @@
+---
+import Shot from '@/components/site/Shot.astro'
+import Approval from '@/components/app/Approval.astro'
+
+const facts = [
+  'Open source under GPL-3.0',
+  'Your own model keys, or local models through Ollama',
+  'You choose which actions wait for your approval',
+  'Each task can run in its own git worktree',
+  'Every write is checkpointed and can be rewound',
+  'The code index runs on your machine, and dictation can too'
+]
+---
+<section class="wrap section" id="local">
+  <div class="text">
+    <h2 class="h2">Runs on your machine,<br />with the keys and limits<br />you set</h2>
+    <ul>{facts.map((f) => <li>{f}</li>)}</ul>
+    <a href="/privacy" class="more tap">What leaves your machine →</a>
+  </div>
+  <Shot sky="fog" label="An approval card: the agent asks to run a database migration command, with Allow once, Allow for this task, Always allow and Deny." desktop={{ w: 592, h: 440, x: 76, y: 104, s: 1 }} phone={{ w: 350, h: 210, x: 10, y: 18, s: 0.75 }}>
+    <Approval />
+  </Shot>
+</section>
+
+<style>
+  .section { margin-top: var(--section-gap); border-top: 1px solid var(--hair); padding-top: 104px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; align-items: start; }
+  .text { padding-right: 64px; display: flex; flex-direction: column; gap: 40px; }
+  ul { padding: 0; list-style: none; border-top: 1px solid var(--hair); }
+  li { min-height: 44px; display: flex; align-items: center; border-bottom: 1px solid var(--hair); color: var(--body-strong); }
+  .more { align-self: flex-start; margin-top: -22px; text-decoration: none; }
+  @media (max-width: 1023px) {
+    .section { grid-template-columns: minmax(0, 1fr); gap: 32px; padding-top: 48px; }
+    .text { padding: 0; gap: 24px; }
+    .more { margin-top: -6px; }
+  }
+  @media (max-width: 639px) { li { padding: 10px 0; font-size: 15px; line-height: 1.4; } }
+</style>

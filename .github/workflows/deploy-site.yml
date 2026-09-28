@@ -1,0 +1,94 @@
+name: Deploy site
+
+# vyotiq.com is built from site/ plus files it reads from the rest of the repo:
+# PRIVACY.md, TERMS.md, SECURITY.md and the extensions catalog. The Download and
+# Changelog pages read the GitHub releases API at build time, so a new release
+# changes nothing on the site until this runs again. release.yml starts this
+# workflow (workflow_dispatch) once a release is published: its pointer release
+# is made with github.token, which starts no workflow on its own. The release
+# trigger covers a release published by hand on this repository.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'PRIVACY.md'
+      - 'TERMS.md'
+      - 'SECURITY.md'
+      - 'resources/marketplace/**'
+      - '.github/workflows/deploy-site.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Never cancel an in-flight deploy: a half-replaced site is worse than a late one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # setup-node resolves the package manager for its cache, so pnpm must be
+      # on PATH before it runs.
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.4.2 --activate
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm check
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      # Authenticated, so the releases fetch is not held to the 60 requests an
+      # hour allowed without a token. In CI a failed fetch fails the build
+      # rather than publishing a site with no downloads.
+      - name: Build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm build
+
+      # Third-party scripts, stylesheets and fonts, broken internal links, and
+      # pages without a title, description or single h1 all fail here.
+      - name: Verify
+        run: pnpm verify
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -1,0 +1,55 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "redesign-voice",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--config",
+        "src/redesign/voice/vite.config.ts"
+      ],
+      "port": 5199
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "site/node_modules/astro/bin/astro.mjs",
+        "dev",
+        "--root",
+        "site",
+        "--port",
+        "4321"
+      ],
+      "port": 4321
+    },
+    {
+      "name": "site-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "site/node_modules/astro/bin/astro.mjs",
+        "preview",
+        "--root",
+        "site",
+        "--port",
+        "4322"
+      ],
+      "port": 4322
+    },
+    {
+      "name": "token-tweak",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5217",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/ajay/AppData/Local/Temp/claude/C--Users-ajay-Documents-VYOTIQ---AGENT-V-VYOTIQ---AGENT-V/04db4eff-113d-46a3-bfc7-76df66b79041/scratchpad/token-tweak/dist"
+      ],
+      "port": 5217
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+---
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import { FAQ } from '@/data/faq'
+import { ISSUES } from '@/data/site'
+---
+<Base title="FAQ" description="Short answers about Agent V: cost, models, privacy, offline use, supported systems, git, instances and updates.">
+  <PageHead eyebrow="FAQ" title="Questions, answered" lede="The short version. The docs have the details." />
+  <div class="wrap list">
+    {FAQ.map((item, i) => (
+      <details open={i < 3}>
+        <summary><h2>{item.q}</h2></summary>
+        <p set:html={item.a} />
+      </details>
+    ))}
+    <p class="muted more">Not here? <a href="/docs/">Read the docs</a> or <a href={ISSUES}>ask on GitHub</a>.</p>
+  </div>
+</Base>
+
+<style>
+  .list { max-width: 880px; margin-inline: max(var(--gutter), (100% - var(--page)) / 2) auto; padding: 24px 0 var(--section-gap); }
+  details { border-bottom: 1px solid var(--hair); }
+  summary { list-style: none; cursor: pointer; padding: 22px 36px 22px 0; position: relative; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: '+'; position: absolute; right: 4px; top: 18px; font-size: 24px; color: var(--faint); }
+  details[open] summary::after { content: '−'; }
+  h2 { font-size: 20px; font-weight: 500; letter-spacing: -0.02em; }
+  details p { padding: 0 0 24px; max-width: 720px; font-size: 17px; line-height: 1.55; color: var(--body-strong); }
+  details :global(a), .more a { color: var(--ink); }
+  .more { padding-top: 32px; }
+  @media (max-width: 639px) { h2 { font-size: 18px; } details p { font-size: 16px; } }
+</style>

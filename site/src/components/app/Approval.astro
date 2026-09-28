@@ -1,0 +1,23 @@
+---
+import Glyph from './Glyph.astro'
+---
+<div style="width: 440px; height: 232px; box-sizing: border-box; border: 1px solid var(--app-accent); border-radius: 8px; overflow: hidden; background: var(--app-bg); font-family: var(--app-font); font-size: 13px; line-height: 20px; color: var(--app-fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 24px 60px -16px rgba(0, 0, 0, 0.52)">
+<div style="height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--app-accent-soft); font-size: 12px">
+<Glyph kind="needs" size="12" />
+<span style="font-weight: 600; color: var(--app-accent)">Needs you — run a command?</span>
+<span style="flex-grow: 1"></span>
+<span style="color: var(--app-muted)">Step 2 · Migrate the billing webhooks</span>
+</div>
+<div style="padding: 12px; display: flex; flex-direction: column; gap: 12px">
+<div style="color: var(--app-fg)">Apply the new webhook table before the handler tests run.</div>
+<div style="border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-sunken); padding: 8px 12px; font-family: var(--app-mono); font-size: 12px; line-height: 18px; color: var(--app-fg-strong)"><span style="color: var(--app-tertiary)">$ </span>pnpm db:migrate --env test</div>
+<div style="font-size: 12px; line-height: 18px; color: var(--app-muted)">Can change files or run code · in acme-api · times out after 5 min · denied automatically in 14 min</div>
+<div style="display: flex; align-items: center; gap: 6px">
+<span style="height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 6px; background: var(--app-accent); color: var(--app-accent-fg); font-size: 12px; font-weight: 500"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 8.5l3 3 7-7"></path></svg>Allow once</span>
+<span style="height: 28px; box-sizing: border-box; display: flex; align-items: center; padding: 0 10px; border-radius: 6px; border: 1px solid var(--app-border); background: var(--app-bg); font-size: 12px; font-weight: 500; color: var(--app-fg)">Allow for this task</span>
+<span style="height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 8px; font-size: 12px; font-weight: 500; color: var(--app-secondary)">Always allow <span style="font-family: var(--app-mono); font-size: 11px">pnpm</span></span>
+<span style="flex-grow: 1"></span>
+<span style="height: 28px; box-sizing: border-box; display: flex; align-items: center; padding: 0 10px; border-radius: 6px; border: 1px solid var(--app-border); font-size: 12px; font-weight: 500; color: var(--app-danger)">Deny</span>
+</div>
+</div>
+</div>

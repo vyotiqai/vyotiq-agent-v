@@ -1,0 +1,22 @@
+---
+/** A feature: its screen first, then a short title and one or two sentences. */
+interface Props {
+  title: string
+  href?: string
+}
+const { title, href } = Astro.props
+---
+<article class="card">
+  <slot />
+  <div class="text">
+    <h3 class="h4">{href ? <a href={href}>{title}</a> : title}</h3>
+    <p class="muted"><slot name="body" /></p>
+  </div>
+</article>
+
+<style>
+  .card { display: flex; flex-direction: column; gap: 18px; }
+  .text { display: flex; flex-direction: column; gap: 6px; }
+  a { text-decoration: none; }
+  @media (max-width: 639px) { .card { gap: 16px; } .text p { font-size: 15px; } }
+</style>

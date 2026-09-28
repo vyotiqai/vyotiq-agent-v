@@ -1,0 +1,103 @@
+---
+import '@/styles/prose.css'
+import Base from '@/layouts/Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import Shot from '@/components/site/Shot.astro'
+import Approval from '@/components/app/Approval.astro'
+import { Content } from '../../../SECURITY.md'
+import { REPO } from '@/data/site'
+
+/** Each control as the app implements it today; the limits are stated next to the controls. */
+const controls = [
+  {
+    title: 'You choose what asks first',
+    body: 'At setup you pick "Edits and commands", "Every tool" or "Unattended", which turns approvals off. You can change it per workspace. With "Edits and commands", reading and searching run freely and anything that changes files or runs code asks.'
+  },
+  {
+    title: 'Some tools always ask',
+    body: 'Tools from MCP servers (unless you turn that setting off) and tools the agent wrote itself ask before they run, even when approvals are off. The "Unattended mode" switch in Settings, Agent approves the rest on its own but still asks before deleting files, running terminal commands, editing files and committing.'
+  },
+  {
+    title: 'Approvals are narrow',
+    body: 'Allow once, allow for this task, or always allow one tool or command in this workspace. A command that chains or redirects is never offered "Always allow". A request nobody answers is denied after 15 minutes.'
+  },
+  {
+    title: 'Work happens on a branch',
+    body: 'A task can run in its own git worktree. An instance that writes gets its own branch when a worktree can be made; otherwise it must be limited to folders, and it cannot write outside them.'
+  },
+  {
+    title: 'Every write can be undone',
+    body: 'Each file the agent writes is checkpointed with a hash of what it wrote. Rewinding puts files back and leaves alone any file you changed since.'
+  },
+  {
+    title: 'Ask mode reads',
+    body: 'In Ask mode the agent gets read-only tools: it can read, search and answer, not edit files or run commands. By default it can switch itself to Agent mode when a task needs changes. Turn off "Switch between Ask and Agent on its own" in Settings, Agent to keep it in Ask.'
+  },
+  {
+    title: 'Keys stay encrypted',
+    body: 'API keys are encrypted with your operating system\'s secure storage and never written in plain text. Shells the agent starts get an environment with your API keys and tokens removed.'
+  },
+  {
+    title: 'The browser is fenced',
+    body: 'In Ask mode the built-in browser cannot reach private or loopback addresses. In Agent mode it can, so it can test your local server. You can limit it to a list of domains. Remote MCP servers are refused on private addresses too. None of this covers terminal commands or local MCP servers.'
+  }
+]
+---
+<Base title="Security" description="How Agent V keeps an agent that can run commands and edit files under your control, and how to report a vulnerability.">
+  <PageHead
+    eyebrow="Security"
+    title="An agent that works on your machine,<br />on your terms"
+    lede="Agent V can run commands, edit files, commit and drive a browser. These are the controls that decide what it does without asking, and their limits."
+  />
+
+  <section class="wrap intro">
+    <Shot sky="fog" label="An approval card asking to run a database migration command, with Allow once, Allow for this task, Always allow and Deny." desktop={{ w: 1200, h: 440, x: 380, y: 104, s: 1 }} phone={{ w: 350, h: 220, x: 10, y: 22, s: 0.75 }}>
+      <Approval />
+    </Shot>
+  </section>
+
+  <section class="wrap controls" aria-label="Controls">
+    {controls.map((c) => (
+      <div class="control">
+        <h2 class="h4">{c.title}</h2>
+        <p class="muted">{c.body}</p>
+      </div>
+    ))}
+  </section>
+
+  <section class="wrap limits">
+    <h2 class="h3">What it does not do</h2>
+    <div class="limit-list">
+      <p><strong>Agent-built tools are not sandboxed.</strong> A tool the agent writes runs with full Node.js access in its own process, with a 30-second limit. That is why it asks before every run, and why an "Always allow" is tied to the exact contents of the file: change the file and it asks again.</p>
+      <p><strong>There is no command blocklist.</strong> Terminal commands are controlled by approvals, not by a list of forbidden commands. Keep "Edits and commands" on for work you are not watching.</p>
+    </div>
+  </section>
+
+  <section class="wrap report">
+    <div class="prose"><Content /></div>
+    <p class="muted note">This section is <a href={`${REPO}/blob/main/SECURITY.md`}>SECURITY.md</a> from the public repository.</p>
+  </section>
+</Base>
+
+<style>
+  .intro { padding-top: 56px; }
+  .controls { padding-top: 64px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px 32px; }
+  .control { display: flex; flex-direction: column; gap: 10px; padding-left: 20px; border-left: 1px solid var(--hair); }
+  .control p { font-size: 15px; }
+  .limits { margin-top: var(--section-gap); padding-top: 56px; border-top: 1px solid var(--hair); display: grid; grid-template-columns: 300px 1fr; gap: 64px; }
+  .limit-list { display: flex; flex-direction: column; gap: 18px; max-width: 720px; font-size: 17px; color: var(--body-strong); }
+  .limit-list strong { color: var(--ink); font-weight: 500; }
+  .report { margin-top: var(--section-gap); padding: 56px 0 var(--section-gap); border-top: 1px solid var(--hair); }
+  .report :global(.prose > h2:first-child) { display: block; font-size: clamp(32px, 3.4vw, 44px); line-height: 1.08; font-weight: 400; letter-spacing: -0.03em; color: var(--ink); margin-bottom: 0.6em; }
+  .note { margin-top: 32px; font-size: 14px; }
+  .note a { color: var(--ink); }
+  @media (max-width: 1023px) {
+    .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .limits { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  }
+  @media (max-width: 639px) {
+    .intro { padding-top: 32px; }
+    .controls { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-top: 40px; }
+    .limit-list { font-size: 16px; }
+  }
+</style>

@@ -1,0 +1,60 @@
+---
+import { Image } from 'astro:assets'
+import Logo from '@/components/site/Logo.astro'
+import { SKIES } from '@/lib/skies'
+import { REPO } from '@/data/site'
+---
+<section class="cta" id="download">
+  <div class="wrap grid">
+    <div class="title">
+      <h2>Stop putting it off.<br />Hand it to Agent V.</h2>
+      <Logo size={44} />
+    </div>
+    <div class="panel">
+      <Image src={SKIES.dusk} alt="" class="sky" widths={[640, 1280]} sizes="(max-width: 1023px) 100vw, 760px" loading="lazy" />
+      <a href="/download" class="go">Download Agent V →</a>
+    </div>
+    <div class="notes">
+      <p>A desktop coding agent that works in your repository and checks its own result.</p>
+      <p>Bring your own model keys, or run local models through Ollama.</p>
+      <a href={REPO} class="tap">Read the source</a>
+    </div>
+    <ul class="platforms">
+      <li>Windows · x64 installer</li>
+      <li>macOS · Apple silicon and Intel</li>
+      <li>Linux · AppImage, deb, rpm</li>
+    </ul>
+  </div>
+</section>
+
+<style>
+  .cta { margin-top: var(--section-gap); background: var(--night) var(--grain); color: var(--night-fg); }
+  .grid { display: grid; grid-template-columns: 760px 1fr; column-gap: 120px; padding: 120px 0 96px; }
+  .title { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 72px; }
+  h2 { font-size: clamp(36px, 4.4vw, 56px); line-height: 1.06; font-weight: 400; letter-spacing: -0.035em; }
+  .title :global(svg) { margin-top: 8px; flex-shrink: 0; }
+  .panel { position: relative; margin-top: 72px; height: 300px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .sky { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .go { position: relative; display: flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 4px; background: var(--night); color: var(--button-fg); text-decoration: none; font-size: 15px; }
+  .notes { grid-column: 1; margin-top: 52px; display: flex; align-items: flex-end; gap: 40px; font-size: 14px; color: var(--night-body); }
+  .notes p { width: 220px; }
+  .notes a { margin-left: auto; color: var(--night-muted); text-decoration: none; font-size: 15px; }
+  .platforms { grid-column: 2; align-self: end; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 12px; color: var(--night-muted); text-align: right; }
+
+  @media (max-width: 1239px) {
+    .grid { grid-template-columns: minmax(0, 1fr); padding: 88px 0 64px; }
+    .title { gap: 32px; }
+    .notes, .platforms { grid-column: 1; }
+    .platforms { margin-top: 24px; text-align: left; }
+  }
+  @media (max-width: 639px) {
+    .grid { padding: 56px 0 44px; }
+    .title { flex-direction: column-reverse; gap: 20px; }
+    .title :global(svg) { width: 32px; height: 32px; margin: 0; }
+    .panel { margin-top: 32px; height: 180px; }
+    .go { min-height: 44px; font-size: 16px; }
+    .notes { flex-direction: column; align-items: flex-start; gap: 12px; font-size: 15px; }
+    .notes p { width: auto; }
+    .notes a { margin-left: 0; color: var(--night-fg); }
+  }
+</style>

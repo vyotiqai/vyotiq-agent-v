@@ -1,0 +1,14 @@
+---
+import Legal from '@/layouts/Legal.astro'
+import { Content } from '../../../TERMS.md'
+import raw from '../../../TERMS.md?raw'
+import { effectiveDate } from '@/lib/repoDoc'
+---
+<Legal
+  title="Terms"
+  lede="The terms for this website and for how installers are distributed. The software itself is licensed under GPL-3.0-or-later."
+  file="TERMS.md"
+  effective={effectiveDate(raw)}
+>
+  <Content />
+</Legal>

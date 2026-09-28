@@ -1,0 +1,35 @@
+---
+/** A repository document (PRIVACY.md, TERMS.md…) rendered as a page, with a link to its history. */
+import '@/styles/prose.css'
+import Base from './Base.astro'
+import PageHead from '@/components/site/PageHead.astro'
+import { REPO } from '@/data/site'
+
+interface Props {
+  title: string
+  lede: string
+  file: string
+  /** "Effective date" line pulled out of the document, if it has one. */
+  effective?: string
+}
+const { title, lede, file, effective } = Astro.props
+---
+<Base title={title} description={lede}>
+  <PageHead eyebrow={effective ? `Effective ${effective}` : undefined} title={title} lede={lede} />
+  <div class="wrap body">
+    <article class="prose doc-body"><slot /></article>
+    <aside class="side">
+      <p>This page is <a href={`${REPO}/blob/main/${file}`}>{file}</a> from the public repository. Its full history is in <a href={`${REPO}/commits/main/${file}`}>git</a>.</p>
+    </aside>
+  </div>
+</Base>
+
+<style>
+  .body { display: grid; grid-template-columns: minmax(0, 720px) 1fr; gap: 80px; padding: 56px 0 var(--section-gap); }
+  .side { font-size: 14px; color: var(--body); position: sticky; top: 24px; align-self: start; }
+  .side a { color: var(--ink); }
+  @media (max-width: 1023px) {
+    .body { grid-template-columns: minmax(0, 1fr); gap: 32px; padding-top: 32px; }
+    .side { position: static; order: -1; }
+  }
+</style>

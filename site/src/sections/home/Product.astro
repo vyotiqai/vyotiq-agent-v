@@ -1,0 +1,44 @@
+---
+import Shot from '@/components/site/Shot.astro'
+import Card from '@/components/site/Card.astro'
+import SectionHead from '@/components/site/SectionHead.astro'
+import Home from '@/components/app/Home.astro'
+import Usage from '@/components/app/Usage.astro'
+import DoneWhen from '@/components/app/DoneWhen.astro'
+import ModelPicker from '@/components/app/ModelPicker.astro'
+---
+<section class="wrap section" id="product">
+  <SectionHead title="Built to be handed work" note="Each task gets a brief, a plan, and a record of what it read, changed and ran." />
+  <div class="grid">
+    <Card title="Sorted by what needs you" href="/features/approvals">
+      <Shot sky="sand" label="Home: two tasks waiting on you, an approval and a question, above your workspaces and this week's totals." desktop={{ w: 592, h: 460, x: 44, y: 36, s: 0.84 }} phone={{ w: 350, h: 260, x: 18, y: 20, s: 0.49 }}>
+        <Home />
+      </Shot>
+      <Fragment slot="body">Home lists the approvals and questions from every running task. Allow or deny a command right there, or open the task that asked.</Fragment>
+    </Card>
+    <Card title="See what it cost" href="/features/usage">
+      <Shot sky="slate" label="Usage for the last seven days: 23 tasks, 18.4M tokens, $4.12 estimated spend, 87% finished, and tasks per day." desktop={{ w: 592, h: 460, x: 44, y: 36, s: 0.84 }} phone={{ w: 350, h: 260, x: 18, y: 20, s: 0.49 }}>
+        <Usage />
+      </Shot>
+      <Fragment slot="body">Usage shows tasks, tokens and estimated spend per day, which models did the work, which tools failed, and which edits never had a passing check.</Fragment>
+    </Card>
+    <Card title="Checks its own work" href="/features/task-record">
+      <Shot sky="sage" label="A finished task: all three Done when checks passed, the result, and a receipt with time, tokens and cost." desktop={{ w: 592, h: 420, x: 26, y: 24, s: 1 }} phone={{ w: 350, h: 240, x: 14, y: 18, s: 0.595 }}>
+        <DoneWhen />
+      </Shot>
+      <Fragment slot="body">Write what done looks like. Each line is checked at the end against what it actually read and ran, and the receipt shows the time, tokens and cost.</Fragment>
+    </Card>
+    <Card title="Uses the model you trust">
+      <Shot sky="fog" label="The model picker: providers on the left, Anthropic's models with context size and price on the right, and the effort below." desktop={{ w: 592, h: 420, x: 16, y: 14, s: 1 }} phone={{ w: 350, h: 240, x: 14, y: 16, s: 0.575 }}>
+        <ModelPicker />
+      </Shot>
+      <Fragment slot="body">Nine providers on your own keys, any OpenAI-compatible endpoint, or local models through Ollama. Pick the mode and the effort for each task.</Fragment>
+    </Card>
+  </div>
+</section>
+
+<style>
+  .section { padding-top: var(--section-gap); display: flex; flex-direction: column; gap: 48px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px 16px; }
+  @media (max-width: 639px) { .grid { grid-template-columns: minmax(0, 1fr); gap: 36px; } .section { gap: 28px; } }
+</style>

@@ -1,0 +1,110 @@
+---
+const runs: [string, number][] = [['Tu', 2], ['We', 4], ['Th', 5], ['Fr', 3], ['Sa', 0], ['Su', 1], ['Mo', 8]]
+const stats = [
+  { label: 'Tasks', value: '23', detail: 'on 6 of 7 days', rule: 'transparent' },
+  { label: 'Tokens', value: '18.4M', detail: '17.9M in · 512K out', rule: 'var(--app-border)' },
+  { label: 'Spend', value: '$4.12 est.', detail: '$0.18 a task', rule: 'var(--app-border)' },
+  { label: 'Finished', value: '87%', detail: '2 failed · 1 stopped · 1 running', rule: 'var(--app-border)' }
+]
+const days = runs.map(([day, n], i) => ({
+  day,
+  label: n ? String(n) : '',
+  h: n ? Math.round((n / 8) * 110) + 'px' : '2px',
+  fill: i === runs.length - 1 ? 'var(--app-accent)' : n ? 'var(--app-border-strong)' : 'var(--app-border)'
+}))
+const models = [
+  { letter: 'C', id: 'claude-opus-5', pct: '61%' },
+  { letter: 'G', id: 'gpt-5.6', pct: '27%' },
+  { letter: 'D', id: 'deepseek-v4-flash', pct: '12%' }
+]
+const fails = [
+  { tool: 'terminal', err: 'exit 1 · 2 tests failed in checkout.spec.ts', n: '9 of 488' },
+  { tool: 'edit', err: 'edit requires contents or diff', n: '3 of 212' },
+  { tool: 'read', err: 'ENOENT: no such file src/routes/v1', n: '2 of 530' },
+  { tool: 'browser_click', err: 'element is not visible', n: '1 of 34' }
+]
+const unchecked = [
+  { t: 'Upgrade the Stripe SDK to v18', n: '7 files' },
+  { t: 'Remove the old v1 routes', n: '12 files' }
+]
+---
+<div style="width: 640px; height: 580px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: var(--app-bg); border: 1px solid var(--app-frame); border-radius: 10px; font-family: var(--app-font); font-size: 14px; line-height: 20px; color: var(--app-fg); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 40px 90px -30px rgba(0, 0, 0, 0.6)">
+<div style="height: 50px; flex-shrink: 0; box-sizing: border-box; border-bottom: 1px solid var(--app-border); display: flex; align-items: center; gap: 6px; padding: 0 10px 0 20px">
+<span style="color: var(--app-fg)">All workspaces</span>
+<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--app-tertiary)" stroke-width="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg>
+<span style="flex-grow: 1"></span>
+<span style="display: flex; padding: 2px; border-radius: 6px; background: var(--app-surface); font-size: 13px"><span style="padding: 2px 10px; border-radius: 4px; background: var(--app-surface-2); color: var(--app-fg-strong); font-weight: 600">7 days</span><span style="padding: 2px 10px; color: var(--app-muted)">30 days</span></span>
+</div>
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 24px 32px 0">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--app-border); border-bottom: 1px solid var(--app-border)">
+{stats.map((s) => (<Fragment>
+<div style="padding: 16px 16px 14px">
+<div style="font-size: 13px; color: var(--app-muted)">{s.label}</div>
+<div style="margin-top: 4px; font-family: var(--app-mono); font-size: 26px; line-height: 34px; font-weight: 600; color: var(--app-fg-strong)">{s.value}</div>
+<div style="margin-top: 2px; font-size: 13px; color: var(--app-muted)">{s.detail}</div>
+</div>
+</Fragment>))}
+</div>
+
+<div style="margin-top: 32px; display: grid; row-gap: 40px">
+<div>
+<div style="display: flex; align-items: baseline; gap: 10px"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-muted)">Tasks per day</span><span style="font-size: 13px; color: var(--app-tertiary)">peak 8</span></div>
+<div style="margin-top: 18px; height: 144px; display: flex; align-items: flex-end; gap: 8px">
+{days.map((d) => (<Fragment>
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%">
+<span style="font-family: var(--app-mono); font-size: 11px; color: var(--app-muted)">{d.label}</span>
+<div style={`width: 100%; height: ${d.h}; border-radius: 2px; background: ${d.fill}`}></div>
+</div>
+</Fragment>))}
+</div>
+<div style="margin-top: 8px; display: flex; gap: 8px; font-family: var(--app-mono); font-size: 11px; color: var(--app-tertiary)">
+{days.map((d) => (<Fragment><span style="flex: 1; text-align: center">{d.day}</span></Fragment>))}
+</div>
+</div>
+<div>
+<div style="display: flex; align-items: center; gap: 10px"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-muted)">Spend per day</span><span style="font-size: 13px; color: var(--app-tertiary)">total $4.12</span><span style="flex-grow: 1"></span>
+<span style="display: flex; padding: 2px; border-radius: 6px; background: var(--app-surface); font-size: 12px"><span style="padding: 1px 9px; border-radius: 4px; background: var(--app-surface-2); color: var(--app-fg-strong); font-weight: 600">Spend</span><span style="padding: 1px 9px; color: var(--app-muted)">Tokens</span></span></div>
+<svg style="display: block; margin-top: 14px" width="100%" height="148" viewBox="0 0 440 148" preserveAspectRatio="none" aria-hidden="true">
+<path d="M0 120 L73 104 L147 86 L220 98 L293 146 L367 132 L440 40 L440 148 L0 148 Z" fill="var(--app-accent-soft)"></path>
+<path d="M0 120 L73 104 L147 86 L220 98 L293 146 L367 132 L440 40" fill="none" stroke="var(--app-accent)" stroke-width="1.6"></path>
+</svg>
+<div style="margin-top: 8px; display: flex; justify-content: space-between; font-family: var(--app-mono); font-size: 11px; color: var(--app-tertiary)">
+{days.map((d) => (<Fragment><span>{d.day}</span></Fragment>))}
+</div>
+</div>
+</div>
+
+<div style="margin-top: 40px; display: grid; row-gap: 40px">
+<div>
+<div style="display: flex; align-items: baseline; gap: 10px"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-muted)">Model mix</span><span style="font-size: 13px; color: var(--app-tertiary)">output tokens</span></div>
+{models.map((m) => (<Fragment>
+<div style="margin-top: 14px">
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 16px; height: 16px; border-radius: 3px; background: var(--app-surface-2); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: var(--app-secondary)">{m.letter}</span><span style="flex-grow: 1; font-family: var(--app-mono); font-size: 13px; font-weight: 600; color: var(--app-fg-strong)">{m.id}</span><span style="font-family: var(--app-mono); font-size: 12px; color: var(--app-muted)">{m.pct}</span></div>
+<div style="margin-top: 7px; height: 3px; border-radius: 2px; background: var(--app-border)"><div style={`width: ${m.pct}; height: 3px; border-radius: 2px; background: var(--app-fg)`}></div></div>
+</div>
+</Fragment>))}
+</div>
+<div>
+<div style="display: flex; align-items: baseline; gap: 10px"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-muted)">Tool failures</span><span style="font-size: 13px; color: var(--app-tertiary)">of 1,412 calls</span></div>
+{fails.map((f) => (<Fragment>
+<div style="height: 38px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--app-border); font-size: 13px">
+<span style="flex-shrink: 0; font-family: var(--app-mono); font-weight: 600; color: var(--app-fg-strong)">{f.tool}</span>
+<span style="flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--app-muted)">{f.err}</span>
+<span style="flex-shrink: 0; font-family: var(--app-mono); font-size: 12px; color: var(--app-secondary)">{f.n}</span>
+</div>
+</Fragment>))}
+</div>
+<div>
+<div style="display: flex; align-items: baseline; gap: 10px"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--app-muted)">Unchecked</span><span style="font-size: 13px; color: var(--app-tertiary)">edits with no passing check after</span></div>
+{unchecked.map((u) => (<Fragment>
+<div style="height: 38px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--app-border); font-size: 13px">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--app-warning)" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.8v3.6M8 11h0"></path></svg>
+<span style="flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{u.t}</span>
+<span style="flex-shrink: 0; color: var(--app-muted)">{u.n}</span>
+</div>
+</Fragment>))}
+<p style="margin: 12px 0 0; font-size: 13px; color: var(--app-tertiary)">Worth a test run before you commit.</p>
+</div>
+</div>
+</div>
+</div>

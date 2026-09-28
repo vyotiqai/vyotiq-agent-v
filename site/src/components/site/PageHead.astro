@@ -1,0 +1,21 @@
+---
+/** The top of every inner page: a small label, the title, and one line under it. */
+interface Props {
+  eyebrow?: string
+  title: string
+  lede?: string
+}
+const { eyebrow, title, lede } = Astro.props
+---
+<header class="wrap page-head">
+  {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+  <h1 class="display" set:html={title} />
+  {lede && <p class="lede">{lede}</p>}
+  <slot />
+</header>
+
+<style>
+  .page-head { padding: 72px 0 56px; border-bottom: 1px solid var(--hair); display: flex; flex-direction: column; gap: 18px; }
+  .lede { max-width: 640px; }
+  @media (max-width: 639px) { .page-head { padding: 40px 0 36px; gap: 14px; } }
+</style>

@@ -1,0 +1,24 @@
+---
+/** Renders a feature page's named screen inside its sky. */
+import Shot from './Shot.astro'
+import AppWindow from '@/components/app/AppWindow.astro'
+import Brief from '@/components/app/Brief.astro'
+import DoneWhen from '@/components/app/DoneWhen.astro'
+import Instance from '@/components/app/Instance.astro'
+import Approval from '@/components/app/Approval.astro'
+import Home from '@/components/app/Home.astro'
+import RewindDialog from '@/components/app/RewindDialog.astro'
+import Usage from '@/components/app/Usage.astro'
+import type { FeatureShot } from '@/data/features'
+
+interface Props {
+  shot: FeatureShot
+  eager?: boolean
+}
+const { shot, eager } = Astro.props
+const SCREENS = { app: AppWindow, brief: Brief, doneWhen: DoneWhen, instance: Instance, approval: Approval, home: Home, rewind: RewindDialog, usage: Usage }
+const Screen = SCREENS[shot.name]
+---
+<Shot sky={shot.sky} label={shot.label} desktop={shot.desktop} phone={shot.phone} eager={eager}>
+  <Screen />
+</Shot>

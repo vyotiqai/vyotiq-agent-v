@@ -1,0 +1,30 @@
+---
+const props = Astro.props as { kind?: string; size?: number | string }
+const k = props.kind ?? 'running'
+const s = Number(props.size ?? 40)
+const px = s + 'px'
+const is = { running: k === 'running', needs: k === 'needs', review: k === 'review', done: k === 'done', failed: k === 'failed', queued: k === 'queued', stopped: k === 'stopped' }
+---
+<span style={`display: inline-flex; flex-shrink: 0; width: ${px}; height: ${px}; color: var(--app-fg)`}>
+{is.running && (<Fragment>
+<svg width="100%" height="100%" viewBox="60 60 904 904" aria-label="Running"><path d="M 794.908 512.000 L 370.546 757.005 L 370.546 266.995 Z" fill="currentColor"></path><path d="M 858.410 540.000 L 858.410 712.000 L 512.000 912.000 L 363.044 826.000 Z" fill="currentColor" opacity="0.35"></path><path d="M 314.546 798.000 L 165.590 712.000 L 165.590 312.000 L 314.546 226.000 Z" fill="currentColor" opacity="0.6"></path><path d="M 363.044 198.000 L 512.000 112.000 L 858.410 312.000 L 858.410 484.000 Z" fill="currentColor"></path></svg>
+</Fragment>)}
+{is.needs && (<Fragment>
+<svg width="100%" height="100%" viewBox="0 0 16 16" aria-label="Needs you"><rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1.6" transform="rotate(45 8 8)" fill="var(--app-accent)"></rect></svg>
+</Fragment>)}
+{is.review && (<Fragment>
+<svg width="100%" height="100%" viewBox="0 0 16 16" aria-label="Ready for review"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--app-success)" stroke-width="1.5"></circle><path d="M5.3 8.2l1.8 1.8 3.6-3.8" fill="none" stroke="var(--app-success)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</Fragment>)}
+{is.done && (<Fragment>
+<svg width="100%" height="100%" viewBox="0 0 16 16" aria-label="Done"><circle cx="8" cy="8" r="7" fill="var(--app-tertiary)"></circle><path d="M5.3 8.2l1.8 1.8 3.6-3.8" fill="none" stroke="var(--app-bg)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</Fragment>)}
+{is.failed && (<Fragment>
+<svg width="100%" height="100%" viewBox="0 0 16 16" aria-label="Failed"><circle cx="8" cy="8" r="7" fill="var(--app-danger)"></circle><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" fill="none" stroke="var(--app-bg)" stroke-width="1.7" stroke-linecap="round"></path></svg>
+</Fragment>)}
+{is.queued && (<Fragment>
+<svg width="100%" height="100%" viewBox="0 0 16 16" aria-label="Queued"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--app-tertiary)" stroke-width="1.5" stroke-dasharray="2.4 2.2"></circle></svg>
+</Fragment>)}
+{is.stopped && (<Fragment>
+<svg width="100%" height="100%" viewBox="0 0 16 16" aria-label="Stopped"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--app-tertiary)" stroke-width="1.5"></circle><rect x="5.9" y="5.9" width="4.2" height="4.2" rx="0.6" fill="var(--app-tertiary)"></rect></svg>
+</Fragment>)}
+</span>

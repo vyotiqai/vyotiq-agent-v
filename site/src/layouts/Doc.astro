@@ -1,0 +1,90 @@
+---
+/** A docs page: sidebar of every page by group, the article, and previous/next. */
+import '@/styles/prose.css'
+import Base from './Base.astro'
+import { allDocs, docGroups, type Doc as DocEntry } from '@/lib/docs'
+import { REPO } from '@/data/site'
+
+interface Props {
+  doc: DocEntry
+  headings: { depth: number; slug: string; text: string }[]
+}
+const { doc, headings } = Astro.props
+const groups = await docGroups()
+const docs = await allDocs()
+const i = docs.findIndex((d) => d.id === doc.id)
+const prev = docs[i - 1]
+const next = docs[i + 1]
+const toc = headings.filter((h) => h.depth === 2)
+---
+<Base title={doc.data.title} description={doc.data.description}>
+  <div class="wrap layout">
+    <nav class="side" aria-label="Docs">
+      <details class="side-toggle" open>
+        <summary>All docs</summary>
+        {groups.map((g) => (
+          <div class="group">
+            <p class="group-name">{g.group}</p>
+            {g.docs.map((d) => (
+              <a href={`/docs/${d.id}`} aria-current={d.id === doc.id ? 'page' : undefined}>{d.data.title}</a>
+            ))}
+          </div>
+        ))}
+      </details>
+    </nav>
+
+    <article>
+      <p class="eyebrow">{doc.data.group}</p>
+      <h1 class="title">{doc.data.title}</h1>
+      <p class="lede">{doc.data.description}</p>
+      <div class="prose"><slot /></div>
+      <nav class="pager" aria-label="Previous and next">
+        {prev ? <a href={`/docs/${prev.id}`}><span>Previous</span>{prev.data.title}</a> : <span></span>}
+        {next ? <a href={`/docs/${next.id}`} class="next"><span>Next</span>{next.data.title}</a> : <span></span>}
+      </nav>
+      <p class="edit"><a href={`${REPO}/issues/new?title=${encodeURIComponent(`Docs: ${doc.data.title}`)}`}>Something wrong on this page? Tell us on GitHub.</a></p>
+    </article>
+
+    {toc.length > 1 && (
+      <aside class="toc" aria-label="On this page">
+        <p class="group-name">On this page</p>
+        {toc.map((h) => <a href={`#${h.slug}`}>{h.text}</a>)}
+      </aside>
+    )}
+  </div>
+</Base>
+
+<style>
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 720px) 1fr; gap: 56px; padding: 56px 0 var(--section-gap); }
+  .side { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; }
+  .side-toggle summary { display: none; }
+  .group { display: flex; flex-direction: column; margin-bottom: 22px; }
+  .group-name { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 6px; }
+  .group a, .toc a { padding: 4px 0; font-size: 15px; color: var(--body); text-decoration: none; }
+  .group a[aria-current='page'] { color: var(--ink); font-weight: 500; }
+  .title { margin-top: 10px; font-size: clamp(34px, 3.6vw, 46px); line-height: 1.08; font-weight: 400; letter-spacing: -0.03em; }
+  .lede { margin: 14px 0 36px; font-size: 19px; color: var(--body); max-width: 640px; }
+  .toc { position: sticky; top: 24px; align-self: start; display: flex; flex-direction: column; }
+  .pager { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--hair); }
+  .pager a { display: flex; flex-direction: column; gap: 2px; text-decoration: none; font-size: 17px; }
+  .pager a span { font-size: 13px; color: var(--faint); }
+  .pager .next { text-align: right; }
+  .edit { margin-top: 32px; font-size: 14px; }
+  .edit a { color: var(--body); }
+
+  @media (max-width: 1239px) {
+    .layout { grid-template-columns: 220px minmax(0, 1fr); }
+    .toc { display: none; }
+  }
+  @media (max-width: 1023px) {
+    .layout { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 24px; }
+    .side { position: static; max-height: none; border-bottom: 1px solid var(--hair); }
+    .side-toggle summary { display: block; padding: 12px 0; cursor: pointer; font-weight: 500; }
+    .side-toggle:not([open]) .group { display: none; }
+  }
+</style>
+
+<script>
+  // On narrow screens the sidebar starts folded so the article comes first.
+  if (matchMedia('(max-width: 1023px)').matches) document.querySelector('.side-toggle')?.removeAttribute('open')
+</script>
