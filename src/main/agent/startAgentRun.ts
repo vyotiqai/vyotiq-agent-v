@@ -24,7 +24,12 @@ import { sweepRetentionAuto } from '@main/storage/retention'
 import { logger } from '../../shared/logger'
 import { appendEvent, loadStatus } from './state'
 import { hydrateFollowUpsFromDisk, loadFollowUps, saveFollowUps } from './followUpStore'
-import { registerParentInstanceEmitter, registerRunIpcSender, handleInlineInstanceFinished } from './agentInstances'
+import {
+  registerParentInstanceEmitter,
+  registerRunIpcSender,
+  handleInlineInstanceFinished,
+  noteInstanceChildEvent
+} from './agentInstances'
 import { notifyBadgeChange } from '../app/badges'
 import { resolveAvailableRuntime, type RunHandle } from './runtimes'
 import {
@@ -211,6 +216,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
           }
         }
         batcher.push(ev as AgentEvent)
+        noteInstanceChildEvent(runId, ev as AgentEvent)
         if (terminal) markRunTurnComplete(runId, invokeId)
       }
     } catch (err) {
@@ -351,7 +357,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         !relaunchedActiveGoal
       ) {
         const failed = terminalStatus === 'error'
-        const notice = finishedNoticeFor({ workspacePath, runId, runDir, failed, status: persisted })
+        const notice = await finishedNoticeFor({ workspacePath, runId, runDir, failed, status: persisted })
         publishLifecycleNotification({
           source: 'agent',
           kind: failed ? 'run_error' : 'run_done',

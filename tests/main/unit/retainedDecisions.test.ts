@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
+  askQuestionPromptEnd,
   extractAskQuestionDecisions,
   parseAskQuestionResult,
   loopHintForRetainedDecisions,
   mergeCompactionFocus
 } from '@main/agent/context/retainedDecisions'
 import type { ChatMessage } from '@shared/ipc'
+import {
+  ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE,
+  ASK_QUESTION_NO_ANSWER_GUIDANCE,
+  ASK_QUESTION_SUPERSEDED_GUIDANCE
+} from '@shared/utils/agentQuestionForm'
 
 const ASK_QUESTION_MSG_6 = [
   'User answered:',
@@ -126,5 +132,64 @@ describe('retainedDecisions', () => {
     expect(decisions).toContain(
       'Observability: pino only now, or add OpenTelemetry?: Include minimal structured logging/OTel from P0'
     )
+  })
+})
+
+describe('retainedDecisions: what counts as a decision', () => {
+  const tool = (content: string, ok = true): ChatMessage => ({
+    role: 'tool',
+    toolCallId: `t-${content.length}`,
+    toolName: 'ask_question',
+    ok,
+    content
+  })
+
+  it('never keeps skips, supersedes, failures or stubs', () => {
+    const messages = [
+      tool(ASK_QUESTION_NO_ANSWER_GUIDANCE),
+      tool(ASK_QUESTION_SUPERSEDED_GUIDANCE),
+      tool(ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE),
+      tool('ask_question requires an app window but none is listening. Retry.', false),
+      tool('Interrupted', false),
+      tool('Cancelled', false),
+      // A failed call whose text happens to look like an answer still is not one.
+      tool('User answered:\n- Fake?: yes', false)
+    ]
+    expect(extractAskQuestionDecisions(messages)).toEqual([])
+  })
+
+  it('drops (no answer) bullets from a multi-question form', () => {
+    expect(parseAskQuestionResult('User answered:\n- Which DB?: Postgres\n- Region?: (no answer)')).toEqual(
+      ['Which DB?: Postgres']
+    )
+  })
+
+  it('keeps an indented multi-line answer in its own bullet', () => {
+    expect(
+      parseAskQuestionResult('User answered:\n- What should change?: Two things:\n  - the header\n  - the footer')
+    ).toEqual(['What should change?: Two things: - the header - the footer'])
+  })
+
+  it('keeps an older same-line answer whole, bullets included', () => {
+    expect(parseAskQuestionResult('User answered: Do these:\n- x\n- y')).toEqual(['Do these: - x - y'])
+  })
+
+  it('clips a long prompt before the answer', () => {
+    const [decision] = parseAskQuestionResult(`User answered:\n- ${'Why '.repeat(80)}?: Postgres`)
+    expect(decision!.length).toBeLessThanOrEqual(240)
+    expect(decision).toMatch(/^Why Why .*…: Postgres$/)
+  })
+
+  it('splits prompt from answer at the first "?: ", never inside the answer', () => {
+    const decision = 'Which regex?: use (?:a|b): then more'
+    expect(decision.slice(0, askQuestionPromptEnd(decision))).toBe('Which regex?')
+  })
+
+  it('keeps the newest decisions in the loop hint', () => {
+    const decisions = Array.from({ length: 10 }, (_, i) => `Q${i}?: A${i}`)
+    const hint = loopHintForRetainedDecisions(decisions)!
+    expect(hint).toContain('Q9?: A9')
+    expect(hint).not.toContain('Q0?: A0')
+    expect(hint).toContain('(+2 earlier)')
   })
 })

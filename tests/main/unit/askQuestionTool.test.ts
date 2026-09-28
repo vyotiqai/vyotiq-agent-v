@@ -4,7 +4,8 @@ import type { AgentQuestionAnswer } from '@shared/ipc'
 import {
   ASK_QUESTION_ARGS_HINT,
   ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE,
-  ASK_QUESTION_NO_ANSWER_GUIDANCE
+  ASK_QUESTION_NO_ANSWER_GUIDANCE,
+  ASK_QUESTION_SUPERSEDED_GUIDANCE
 } from '@shared/utils/agentQuestionForm'
 import { AGENT_TOOLS, validateToolArgs } from '@main/agent/schemas/tools'
 import { mergeOpenAiCompatToolArgDelta } from '@main/agent/toolArgWire'
@@ -90,7 +91,7 @@ describe('ask_question tool', () => {
       }
     )
     expect(result.ok).toBe(true)
-    expect(result.content).toBe('User answered: A')
+    expect(result.content).toBe('User answered:\n- Pick one: A')
   })
 
   it('formats multi-question answers with prompts', async () => {
@@ -146,7 +147,7 @@ describe('ask_question tool', () => {
     expect(result.ok).toBe(true)
     expect(asked?.questions[0]!.type).toBe('text')
     expect(asked?.questions[0]!.options).toBeUndefined()
-    expect(result.content).toBe('User answered: A')
+    expect(result.content).toBe('User answered:\n- Only one?: A')
   })
 
   it('skips in autonomous mode only when autonomousSkipQuestions is skip', async () => {
@@ -193,11 +194,30 @@ describe('ask_question tool', () => {
       }
     )
     expect(result.ok).toBe(true)
-    expect(result.content).toBe('User answered: Yes')
+    expect(result.content).toBe('User answered:\n- Continue?: Yes')
     expect(askQuestion).toHaveBeenCalledOnce()
   })
 
-  it('returns ok guidance when the form is skipped or times out', async () => {
+  it('tells the model a Send now message replaced the answer, not that it was skipped', async () => {
+    const { AgentQuestionSupersededError } = await import('@main/agent/agentQuestion')
+    const result = await executeTool(
+      'ask_question',
+      JSON.stringify({ question: 'Continue?' }),
+      '/ws',
+      new AbortController().signal,
+      {
+        runId: 'run-1',
+        toolCallId: 'tc-1',
+        askQuestion: async () => {
+          throw new AgentQuestionSupersededError()
+        }
+      }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.content).toBe(ASK_QUESTION_SUPERSEDED_GUIDANCE)
+  })
+
+  it('returns ok guidance when the form is skipped', async () => {
     const result = await executeTool(
       'ask_question',
       JSON.stringify({ question: 'Continue?' }),
@@ -227,7 +247,7 @@ describe('ask_question tool', () => {
       }
     )
     expect(ok.ok).toBe(true)
-    expect(ok.content).toBe('User answered: yes')
+    expect(ok.content).toBe('User answered:\n- Ready?: yes')
 
     const bad = await executeTool(
       'ask_question',
@@ -278,7 +298,7 @@ describe('ask_question tool', () => {
       }
     )
     expect(noType.ok).toBe(true)
-    expect(noType.content).toBe('User answered: Compact dashboard')
+    expect(noType.content).toBe('User answered:\n- Which direction should the redesign take?: Compact dashboard')
 
     const badType = await executeTool(
       'ask_question',
@@ -346,7 +366,7 @@ describe('ask_question tool', () => {
       }
     )
     expect(bare.ok).toBe(true)
-    expect(bare.content).toBe('User answered: Yes')
+    expect(bare.content).toBe('User answered:\n- Bare?: Yes')
 
     const coerced = validateToolArgs(
       'ask_question',
@@ -418,7 +438,7 @@ describe('ask_question tool', () => {
       }
     )
     expect(result.ok).toBe(true)
-    expect(result.content).toBe('User answered: A')
+    expect(result.content).toBe('User answered:\n- Which topic?: A')
   })
 
   it('reports malformed arguments instead of claiming questions is missing', async () => {

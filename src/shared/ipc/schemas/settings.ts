@@ -324,27 +324,47 @@ export type CodeIndexPauseRequest = z.infer<typeof CodeIndexPauseRequestSchema>
 export const DictationEngineSchema = z.enum(['openai', 'openrouter', 'local'])
 export type DictationEngine = z.infer<typeof DictationEngineSchema>
 
-export const DictationLocalModelIdSchema = z.enum(['whisper-tiny.en', 'whisper-small.en'])
+export const DictationLocalModelIdSchema = z.enum(['whisper-tiny.en', 'whisper-small.en', 'moonshine-base'])
 export type DictationLocalModelId = z.infer<typeof DictationLocalModelIdSchema>
 
-export const DictationWaveformStyleSchema = z.enum(['bars', 'dots', 'line', 'mirror'])
-export type DictationWaveformStyle = z.infer<typeof DictationWaveformStyleSchema>
+/** What Enter does while a take is open; Ctrl/Cmd+Enter does the other. */
+export const DictationEnterActionSchema = z.enum(['insert', 'send'])
+export type DictationEnterAction = z.infer<typeof DictationEnterActionSchema>
 
+/**
+ * The removed `waveformStyle` key needs no migration: `z.object` strips keys
+ * it does not know, so a stored one is dropped on the next read.
+ */
 export const DictationSettingsSchema = z.object({
-  /** Cloud vs on-device STT. Default keeps today's OpenAI path. */
+  /** Where the audio goes: a cloud transcription API, or Whisper on this machine. */
   engine: DictationEngineSchema.default('openai'),
   /** Which installed local model to use. Empty until the user selects/installs. */
   localModelId: z.union([z.literal(''), DictationLocalModelIdSchema]).default(''),
-  /** Composer listening visualizer. */
-  waveformStyle: DictationWaveformStyleSchema.default('bars')
+  /** `MediaDeviceInfo.deviceId` of the chosen microphone; empty follows the OS default. */
+  deviceId: z.string().max(512).default(''),
+  /** ISO-639-1 hint for the cloud engines; empty detects. Local Whisper is English-only. */
+  language: z.string().max(8).default(''),
+  /** Holding the shortcut records until it is let go; a tap still starts and stops a take. */
+  holdToTalk: z.boolean().default(true),
+  enterAction: DictationEnterActionSchema.default('insert'),
+  /** OpenAI writes words while you speak (a live session) — about 4× the price per minute. */
+  liveWords: z.boolean().default(false)
 })
 export type DictationSettings = z.infer<typeof DictationSettingsSchema>
 
 export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   engine: 'openai',
   localModelId: '',
-  waveformStyle: 'bars'
+  deviceId: '',
+  language: '',
+  holdToTalk: true,
+  enterAction: 'insert',
+  liveWords: false
 }
+
+/** The OS's answer about microphone access (Electron `getMediaAccessStatus`). */
+export const DictationMicAccessSchema = z.enum(['granted', 'denied', 'restricted', 'not-determined', 'unknown'])
+export type DictationMicAccess = z.infer<typeof DictationMicAccessSchema>
 
 export const DictationModelPhaseSchema = z.enum([
   'idle',
@@ -358,7 +378,9 @@ export type DictationModelPhase = z.infer<typeof DictationModelPhaseSchema>
 export const DictationInstalledModelSchema = z.object({
   id: DictationLocalModelIdSchema,
   bytesOnDisk: z.number().int().nonnegative(),
-  loaded: z.boolean()
+  loaded: z.boolean(),
+  /** Typical time one phrase takes on this PC; null until it has run once since the app started. */
+  callMs: z.number().nonnegative().nullable().optional()
 })
 export type DictationInstalledModel = z.infer<typeof DictationInstalledModelSchema>
 
@@ -577,6 +599,8 @@ export const SettingsSchema = z.object({
   favoriteModels: z.array(z.string()).default([]),
   /** Session keys (`${workspacePath}␀${runId}`) pinned above the Home recency list. */
   pinnedRuns: z.array(z.string()).max(24).default([]),
+  /** Session keys (same shape as pinnedRuns) put out of the navigator's way without deleting them. */
+  archivedRuns: z.array(z.string()).max(500).default([]),
   recentModels: z.array(z.string()).max(5).default([]),
   thinkingPrefsByProvider: z.partialRecord(ProviderIdSchemaAny, ThinkingPrefsSchema).default({}),
   serviceTierByModel: z.record(z.string(), ServiceTierSchema).default({}),
@@ -645,8 +669,9 @@ export const SettingsSchema = z.object({
    */
   autonomousMode: z.boolean().default(false),
   /**
-   * When autonomousMode is on: skip ask_question immediately, or wait for answers
-   * until the normal 15-minute question timeout.
+   * When autonomousMode is on: skip ask_question immediately, or wait for the
+   * user's answer. There is no question timeout, so 'wait' can park an
+   * unattended run until someone answers or cancels it.
    */
   autonomousSkipQuestions: AutonomousSkipQuestionsSchema.default('wait'),
   /** Storage retention policy (checkpoint GC, orphan reaper, size cap). */
@@ -708,6 +733,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showThinking: true,
   favoriteModels: [],
   pinnedRuns: [],
+  archivedRuns: [],
   recentModels: [],
   thinkingPrefsByProvider: {},
   serviceTierByModel: {},

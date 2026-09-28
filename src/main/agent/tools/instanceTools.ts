@@ -10,6 +10,8 @@ import {
   type PullAgentInstanceView
 } from '../agentInstances'
 import { loadStatus } from '../state'
+import { canonicalTodoId } from '../../../shared/utils/todoContent'
+import { readTodos } from './todo'
 import { resolveRunDir } from '@main/storage/paths'
 import { recordMergedInstanceChanges } from './mergeCheckpoint'
 import { readString } from './argAccess'
@@ -49,16 +51,35 @@ export const instanceHandlers = {
         ? args.path_scope.filter((p): p is string => typeof p === 'string')
         : undefined,
       isolation: args.isolation === 'shared' ? 'shared' : undefined,
+      stepId: readString(args, 'step_id') || undefined,
+      readOnly: args.read_only === true,
       emitParentEvent: context.emitAgentEvent
     })
     if (!result.ok) return toolFail('spawn_agent_instance', 'spawn', result.error)
     const branchLine = result.worktreeBranch
       ? `\nworktree_branch: ${result.worktreeBranch}\nWhen done, merge one branch at a time with merge_agent_instance (refused only if your uncommitted or untracked changes overlap the branch's changed files).`
       : ''
+    const notes: string[] = []
+    if (result.sharedBecause) {
+      notes.push(
+        `No worktree (${result.sharedBecause}): the child runs in this workspace inside path_scope, where terminal is refused. For a child that only reads, pass read_only: true.`
+      )
+    }
+    // A step_id the list does not hold files the child nowhere: run 528a737f
+    // passed s1/s2 to a plan published without todos.
+    const stepId = readString(args, 'step_id')
+    if (stepId && context.runDir) {
+      const ids = readTodos(context.runDir).map((todo) => todo.id)
+      if (!ids.includes(canonicalTodoId(stepId))) {
+        notes.push(
+          `step_id "${stepId}" names no todo in this run's list (${ids.length > 0 ? ids.join(', ') : 'the list is empty'}), so the task record cannot show this child under a step. Publish the steps as todos (create_plan todos, or todo_write) and spawn with their ids.`
+        )
+      }
+    }
     return toolOk(
       'spawn_agent_instance',
       result.label,
-      `${result.label}\nrun_id: ${result.runId}${branchLine}`
+      `${result.label}\nrun_id: ${result.runId}${branchLine}${notes.map((note) => `\n\nNote: ${note}`).join('')}`
     )
   },
   await_agent_instance: async (workspace, args, signal, context) => {

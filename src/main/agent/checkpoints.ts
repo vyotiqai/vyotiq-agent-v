@@ -12,13 +12,14 @@ import {
   writeFileSync,
   type Stats
 } from 'fs'
-import { copyFile, mkdir, readdir, stat } from 'fs/promises'
+import { copyFile, mkdir, readdir, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, dirname, join, relative } from 'path'
 import { createHash, randomUUID } from 'crypto'
 import { realpathIfExists, resolveInsideWorkspace } from '../workspace/safePath'
 import { atomicWriteFile, atomicWriteJson } from '@main/storage/atomicWrite'
 import { logger } from '../../shared/logger'
+import { readJsonDocCached } from './jsonDocCache'
 import { looksLikeWorkspacePath } from './pathPlausibility'
 
 export type CheckpointFileAction = 'created' | 'modified' | 'deleted'
@@ -105,17 +106,41 @@ function blobPathFor(checkpointDir: string, relPath: string): string {
   return join(checkpointDir, 'files', ...parts)
 }
 
+/** Most files a directory delete snapshots for undo; past it, none of the tree is undoable. */
+const DIR_RESTORE_FILE_CAP = 20_000
+let dirRestoreFileCap = DIR_RESTORE_FILE_CAP
+
+/** Test helper — a small cap, so the overflow path runs without 20,000 files. */
+export function setDirRestoreFileCapForTests(cap: number | null): void {
+  dirRestoreFileCap = cap ?? DIR_RESTORE_FILE_CAP
+}
+
+/** Delete these paths' copies, a batch at a time so thousands do not queue at once. */
+async function removeBlobs(checkpointDir: string, relPaths: readonly string[]): Promise<void> {
+  for (let i = 0; i < relPaths.length; i += 64) {
+    await Promise.all(
+      relPaths
+        .slice(i, i + 64)
+        .map((relPath) => rm(blobPathFor(checkpointDir, relPath), { force: true }).catch(() => undefined))
+    )
+  }
+}
+
+/** The index's well-formed entries; anything else in it is ignored. */
+function indexEntries(raw: unknown): CheckpointIndex['checkpoints'] {
+  const list = (raw as { checkpoints?: unknown } | null)?.checkpoints
+  return (Array.isArray(list) ? list : []).filter(
+    (c): c is { id: string; createdAt: string; undone?: boolean } =>
+      c != null && typeof c === 'object' && typeof (c as { id?: unknown }).id === 'string' &&
+      CHECKPOINT_ID_RE.test((c as { id: string }).id)
+  )
+}
+
 function loadIndex(runDir: string): CheckpointIndex {
   const p = join(runDir, 'checkpoints', 'index.json')
   if (!existsSync(p)) return { checkpoints: [] }
   try {
-    const raw = JSON.parse(readFileSync(p, 'utf8')) as CheckpointIndex
-    const checkpoints = (Array.isArray(raw.checkpoints) ? raw.checkpoints : []).filter(
-      (c): c is { id: string; createdAt: string; undone?: boolean } =>
-        c != null && typeof c === 'object' && typeof (c as { id?: unknown }).id === 'string' &&
-        CHECKPOINT_ID_RE.test((c as { id: string }).id)
-    )
-    return { checkpoints }
+    return { checkpoints: indexEntries(JSON.parse(readFileSync(p, 'utf8'))) }
   } catch {
     return { checkpoints: [] }
   }
@@ -158,6 +183,27 @@ export function listCheckpointMetas(runDir: string): WriteCheckpointMeta[] {
   for (const entry of loadIndex(runDir).checkpoints) {
     const meta = loadMeta(runDir, entry.id)
     if (meta) out.push(entry.undone && !meta.undone ? { ...meta, undone: true } : meta)
+  }
+  return out
+}
+
+/**
+ * listCheckpointMetas without blocking, for summaries asked for again and
+ * again (the Changes list, the navigator). Reads go through the parse cache,
+ * so a meta that has not changed is not read or parsed again — one large
+ * directory delete's meta is 4 MB. The metas are shared between callers:
+ * read them, never change them.
+ */
+export async function listCheckpointMetasAsync(runDir: string): Promise<readonly WriteCheckpointMeta[]> {
+  const dir = join(runDir, 'checkpoints')
+  const index = await readJsonDocCached(join(dir, 'index.json'))
+  if (!index.ok) return []
+  const out: WriteCheckpointMeta[] = []
+  for (const entry of indexEntries(index.doc)) {
+    const doc = await readJsonDocCached(join(dir, entry.id, 'meta.json'))
+    if (!doc.ok || doc.doc == null || typeof doc.doc !== 'object') continue
+    const meta = doc.doc as WriteCheckpointMeta
+    out.push(entry.undone && !meta.undone ? { ...meta, undone: true } : meta)
   }
   return out
 }
@@ -283,7 +329,6 @@ export class InvokeWriteCheckpoint {
       // Snapshot the directory tree so the delete is undoable. Each file becomes
       // its own 'deleted' checkpoint entry; restoring them recreates the original
       // tree (v1 could not restore directories — now fixed).
-      const maxDirRestoreFiles = 20000
       let fileCount = 0
       let overflow = false
       const recordedChildren: string[] = []
@@ -304,7 +349,7 @@ export class InvokeWriteCheckpoint {
             continue
           }
           if (!entry.isFile()) continue // skip symlinks / sockets / devices
-          if (fileCount >= maxDirRestoreFiles) {
+          if (fileCount >= dirRestoreFileCap) {
             overflow = true
             return
           }
@@ -324,7 +369,7 @@ export class InvokeWriteCheckpoint {
       }
       await snapshotTree(resolved)
       if (overflow) {
-        // `overflow` can flip true only AFTER up to maxDirRestoreFiles children
+        // `overflow` can flip true only AFTER up to dirRestoreFileCap children
         // were already recorded as undoable. Marking just the parent
         // non-undoable left Undo restoring that partial subtree and reporting
         // it as a completed undo — a directory silently missing most of its
@@ -333,6 +378,9 @@ export class InvokeWriteCheckpoint {
           const entry = this.files.get(childRel)
           if (entry) this.files.set(childRel, { ...entry, undoable: false })
         }
+        // Nothing reads a non-undoable entry's copy, so the copies already made
+        // are dead weight — 119 MB for one 20,000-file node_modules delete.
+        await removeBlobs(this.checkpointDir(), recordedChildren)
         logger.warn('Directory delete too large to snapshot for undo; marked non-undoable', {
           scope: 'agent',
           path: rel

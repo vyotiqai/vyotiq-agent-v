@@ -10,6 +10,7 @@ import {
   WorkspaceAgentContextChangedSchema,
   UpdaterStatePayloadSchema,
   DictationRuntimeStatusSchema,
+  DictationLiveEventSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
   ToolCatalogResultSchema,
@@ -171,11 +172,6 @@ const api: VyotiqApi = {
           '[vyotiq] Invalid question request dropped',
           parsed.error.issues[0]?.message
         )
-        const rejectParsed = AgentQuestionRejectSchema.safeParse(raw)
-        if (rejectParsed.success) {
-          void ipcRenderer.invoke(IPC.agentQuestionReject, rejectParsed.data)
-          return
-        }
         if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
           const partial = raw as { requestId?: unknown; runId?: unknown }
           const requestId =
@@ -186,14 +182,19 @@ const api: VyotiqApi = {
             typeof partial.runId === 'string' && partial.runId.trim()
               ? partial.runId
               : undefined
+          // The zod reason travels with the reject so the model's tool result
+          // says what was wrong, not just "Invalid agent question payload".
+          const issue = parsed.error.issues[0]
+          const reason = issue
+            ? `${issue.path.length ? `${issue.path.join('.')}: ` : ''}${issue.message}`
+            : undefined
+          const reject = AgentQuestionRejectSchema.safeParse({
+            ...(requestId ? { requestId } : {}),
+            ...(runId ? { runId } : {}),
+            ...(reason ? { reason } : {})
+          })
           // Either id is enough — main looks up pending by requestId or runId.
-          if (requestId || runId) {
-            void ipcRenderer.invoke(IPC.agentQuestionReject, {
-              ...(requestId ? { requestId } : {}),
-              ...(runId ? { runId } : {}),
-              reason: parsed.error.issues[0]?.message
-            })
-          }
+          if (reject.success) void ipcRenderer.invoke(IPC.agentQuestionReject, reject.data)
         }
         return
       }
@@ -211,10 +212,28 @@ const api: VyotiqApi = {
   extractAttachment: (payload) => ipcRenderer.invoke(IPC.attachmentExtract, payload),
   transcribeDictation: (payload) => ipcRenderer.invoke(IPC.dictationTranscribe, payload),
   cancelDictation: (requestId) => ipcRenderer.invoke(IPC.dictationCancel, { requestId }),
+  dictationPrepare: () => ipcRenderer.invoke(IPC.dictationPrepare),
+  dictationTakeStats: (payload) => ipcRenderer.invoke(IPC.dictationTakeStats, payload),
+  dictationLiveOpen: (payload) => ipcRenderer.invoke(IPC.dictationLiveOpen, payload),
+  dictationLiveAudio: (payload) => ipcRenderer.invoke(IPC.dictationLiveAudio, payload),
+  dictationLiveCommit: (takeId) => ipcRenderer.invoke(IPC.dictationLiveCommit, { takeId }),
+  dictationLiveClose: (takeId) => ipcRenderer.invoke(IPC.dictationLiveClose, { takeId }),
+  onDictationLiveEvent: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = DictationLiveEventSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.dictationLiveEvent, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.dictationLiveEvent, listener)
+    }
+  },
   dictationStatus: () => ipcRenderer.invoke(IPC.dictationStatus),
   dictationInstall: (payload) => ipcRenderer.invoke(IPC.dictationInstall, payload),
   dictationUnload: () => ipcRenderer.invoke(IPC.dictationUnload),
   dictationDeleteCache: (payload) => ipcRenderer.invoke(IPC.dictationDeleteCache, payload),
+  dictationMicAccess: () => ipcRenderer.invoke(IPC.dictationMicAccess),
+  dictationOpenMicSettings: () => ipcRenderer.invoke(IPC.dictationOpenMicSettings),
   onDictationStatus: (handler) => {
     const listener = (_: IpcRendererEvent, status: unknown): void => {
       const parsed = DictationRuntimeStatusSchema.safeParse(status)

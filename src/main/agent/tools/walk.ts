@@ -540,6 +540,10 @@ export async function collectWorkspaceFilesPage(
       if (IGNORED_DIRS.has(entry.name)) continue
       // Never follow symlinks — a link inside the tree can point outside.
       if (entry.isSymbolicLink()) continue
+      // A file of a kind the caller has no use for goes before the ignore
+      // rules, for the same result: each of 1,800 images in one folder was
+      // matched against every pattern first, on the main thread.
+      if (exts && entry.isFile() && !exts.has(extname(entry.name).toLowerCase())) continue
       if (dirMatcher.shouldIgnoreEntry(entry.name, entry.isDirectory())) continue
       const full = join(next.dir, entry.name)
       const childRel = (next.relDir ? `${next.relDir}/${entry.name}` : entry.name).replace(
@@ -554,7 +558,6 @@ export async function collectWorkspaceFilesPage(
         if (lowerName.startsWith('dist-') || skipDirNames?.has(lowerName)) continue
         queue.push({ dir: full, relDir: childRel })
       } else if (entry.isFile()) {
-        if (exts && !exts.has(extname(entry.name).toLowerCase())) continue
         if (keepRel && !keepRel(childRel, full)) continue
         if (isIndexClutterFileName(entry.name)) continue
         if (!pastCursor) {

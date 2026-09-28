@@ -37,6 +37,12 @@ describe('isToolGated', () => {
     expect(isToolGated('read', 'all', none, [])).toBe(true)
   })
 
+  it('never gates ask_question — the question form is itself the user gate', () => {
+    for (const mode of ['off', 'mutating', 'all'] as const) {
+      expect(isToolGated('ask_question', mode, none, [])).toBe(false)
+    }
+  })
+
   it('skips tools on either allowlist', () => {
     expect(isToolGated('edit', 'all', new Set(['edit']), [])).toBe(false)
     expect(isToolGated('edit', 'all', none, ['edit'])).toBe(false)

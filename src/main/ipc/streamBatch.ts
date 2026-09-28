@@ -1,28 +1,33 @@
 import type { AgentEvent } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
 import { workspacePathsEqual } from '../../shared/workspacePathMatch'
+import { nextEventSeq } from '../agent/eventSeq'
 
 const ACTIVE_BATCH_MS = 16
 const BACKGROUND_BATCH_MS = 80
 
 /**
- * Backstop caps for a wedged renderer whose slot stays attached: delta
- * segments are reconstructable from events.jsonl catch-up, so once the queue
- * exceeds either cap the oldest delta segments are dropped instead of
- * ballooning the main heap (OOM amplifier, 2026-09-11 crash).
+ * Backstop caps for a wedged renderer whose slot stays attached: once the
+ * queue exceeds either cap the oldest delta segments are dropped instead of
+ * ballooning the main heap (OOM amplifier, 2026-09-11 crash). A dropped delta
+ * leaves a gap only until its step ends: the step's `assistant_message`
+ * carries the whole text and reasoning, and replaces what streamed; tool
+ * chrome comes back from events.jsonl on catch-up.
  */
 const PENDING_SEGMENTS_MAX = 512
 const PENDING_SEGMENTS_MAX_BYTES = 8 * 1024 * 1024
 
 type PendingSegment =
-  | { kind: 'text'; text: string; invokeId?: number }
-  | { kind: 'thinking'; text: string; step?: number; invokeId?: number }
+  | { kind: 'text'; text: string; invokeId?: number; seq?: number }
+  | { kind: 'thinking'; text: string; step?: number; invokeId?: number; seq?: number }
   | {
       kind: 'tool_call_delta'
       toolCallId: string
       name?: string
       argumentsDelta: string
       invokeId?: number
+      seq?: number
+      replacesToolCallId?: string
     }
   | {
       kind: 'terminal_output_delta'
@@ -30,6 +35,7 @@ type PendingSegment =
       text: string
       stream?: 'stdout' | 'stderr'
       invokeId?: number
+      seq?: number
     }
 
 /**
@@ -318,7 +324,9 @@ export class ChatEventDispatcher {
     }
   }
 
-  push(runId: string, ev: AgentEvent): void {
+  push(runId: string, event: AgentEvent): void {
+    // Every event leaves with a seq; one already persisted keeps its row's.
+    const ev: AgentEvent = typeof event.seq === 'number' ? event : { ...event, seq: nextEventSeq() }
     const slot = this.slots.get(runId)
     if (!slot) {
       recordPush(ev.type)
@@ -338,7 +346,7 @@ export class ChatEventDispatcher {
     }
 
     if (ev.type === 'text_delta') {
-      this.appendSegment(slot, { kind: 'text', text: ev.text, invokeId: ev.invokeId })
+      this.appendSegment(slot, { kind: 'text', text: ev.text, invokeId: ev.invokeId, seq: ev.seq })
       this.schedule(slot)
       return
     }
@@ -348,7 +356,8 @@ export class ChatEventDispatcher {
         kind: 'thinking',
         text: ev.text,
         step: ev.step,
-        invokeId: ev.invokeId
+        invokeId: ev.invokeId,
+        seq: ev.seq
       })
       this.schedule(slot)
       return
@@ -360,7 +369,9 @@ export class ChatEventDispatcher {
         toolCallId: ev.toolCallId,
         name: ev.name,
         argumentsDelta: ev.argumentsDelta,
-        invokeId: ev.invokeId
+        invokeId: ev.invokeId,
+        seq: ev.seq,
+        ...(ev.replacesToolCallId ? { replacesToolCallId: ev.replacesToolCallId } : {})
       })
       this.schedule(slot)
       return
@@ -372,7 +383,8 @@ export class ChatEventDispatcher {
         toolCallId: ev.toolCallId,
         text: ev.text,
         stream: ev.stream,
-        invokeId: ev.invokeId
+        invokeId: ev.invokeId,
+        seq: ev.seq
       })
       this.schedule(slot)
       return
@@ -395,6 +407,9 @@ export class ChatEventDispatcher {
 
     if (ev.type === 'step_usage' || ev.type === 'context_usage') {
       if (isActiveWorkspace(slot.workspacePath)) {
+        // Meters held while the workspace was in the background are older than
+        // this one: they go ahead of it, not after the queue drains.
+        this.queueHeldUsage(slot)
         // Ride the batch timer in emission order instead of forcing a flush.
         // Forcing one here emitted every pending delta early and restarted the
         // coalescing window up to three times per step for the meters alone.
@@ -439,19 +454,28 @@ export class ChatEventDispatcher {
     return this.slots.size
   }
 
+  /** Held background meters in emission order: step asc, step_usage before context_usage. */
+  private heldUsageInOrder(slot: RunSlot): AgentEvent[] {
+    return [...slot.pendingUsageByStep.entries()]
+      .sort((a, b) => {
+        const ka = parseUsageKey(a[0])
+        const kb = parseUsageKey(b[0])
+        if (ka.step !== kb.step) return ka.step - kb.step
+        return ka.kind - kb.kind
+      })
+      .map(([, usageEv]) => usageEv)
+  }
+
+  /** Move held background meters onto the ordered queue. */
+  private queueHeldUsage(slot: RunSlot): void {
+    if (slot.pendingUsageByStep.size === 0) return
+    for (const usageEv of this.heldUsageInOrder(slot)) slot.pendingSegments.push({ kind: 'event', event: usageEv })
+    slot.pendingUsageByStep.clear()
+  }
+
   private flushPendingUsageEvents(slot: RunSlot): void {
     if (slot.pendingUsageByStep.size === 0) return
-    // Rebuild emission order: step asc; step_usage before context_usage within
-    // a step (matches the loop's emission order).
-    const ordered = [...slot.pendingUsageByStep.entries()].sort((a, b) => {
-      const ka = parseUsageKey(a[0])
-      const kb = parseUsageKey(b[0])
-      if (ka.step !== kb.step) return ka.step - kb.step
-      return ka.kind - kb.kind
-    })
-    for (const [, usageEv] of ordered) {
-      this.emit(slot, usageEv)
-    }
+    for (const usageEv of this.heldUsageInOrder(slot)) this.emit(slot, usageEv)
     slot.pendingUsageByStep.clear()
   }
 
@@ -591,14 +615,16 @@ export class ChatEventDispatcher {
           kind: 'thinking',
           text: last.text + segment.text,
           step: segment.step,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          seq: segment.seq
         }
         slot.pendingBytes += segment.text.length
       } else if (segment.kind === 'text' && last.kind === 'text') {
         queue[queue.length - 1] = {
           kind: 'text',
           text: last.text + segment.text,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          seq: segment.seq
         }
         slot.pendingBytes += segment.text.length
       } else if (segment.kind === 'tool_call_delta' && last.kind === 'tool_call_delta') {
@@ -607,7 +633,9 @@ export class ChatEventDispatcher {
           toolCallId: last.toolCallId,
           name: segment.name ?? last.name,
           argumentsDelta: last.argumentsDelta + segment.argumentsDelta,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          seq: segment.seq,
+          ...(last.replacesToolCallId ? { replacesToolCallId: last.replacesToolCallId } : {})
         }
         slot.pendingBytes += segment.argumentsDelta.length
       } else if (segment.kind === 'terminal_output_delta' && last.kind === 'terminal_output_delta') {
@@ -616,7 +644,8 @@ export class ChatEventDispatcher {
           toolCallId: last.toolCallId,
           text: last.text + segment.text,
           stream: segment.stream,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          seq: segment.seq
         }
         slot.pendingBytes += segment.text.length
       }
@@ -661,13 +690,16 @@ export class ChatEventDispatcher {
         this.emit(slot, segment.event)
         continue
       }
+      // A merged delta carries its newest part's seq.
+      const seq = segment.seq != null ? { seq: segment.seq } : {}
       if (segment.kind === 'text') {
         if (!segment.text) continue
         this.emit(slot, {
           type: 'text_delta',
           runId,
           text: segment.text,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          ...seq
         })
       } else if (segment.kind === 'thinking') {
         if (!segment.text) continue
@@ -676,7 +708,8 @@ export class ChatEventDispatcher {
           runId,
           text: segment.text,
           step: segment.step,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          ...seq
         })
       } else if (segment.kind === 'tool_call_delta') {
         this.emit(slot, {
@@ -685,7 +718,9 @@ export class ChatEventDispatcher {
           toolCallId: segment.toolCallId,
           name: segment.name,
           argumentsDelta: segment.argumentsDelta,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          ...seq,
+          ...(segment.replacesToolCallId ? { replacesToolCallId: segment.replacesToolCallId } : {})
         })
       } else {
         if (!segment.text) continue
@@ -695,7 +730,8 @@ export class ChatEventDispatcher {
           toolCallId: segment.toolCallId,
           text: segment.text,
           stream: segment.stream,
-          invokeId: segment.invokeId
+          invokeId: segment.invokeId,
+          ...seq
         })
       }
     }

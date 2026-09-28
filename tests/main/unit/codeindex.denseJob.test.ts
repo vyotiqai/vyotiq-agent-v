@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CodeIndexStore } from '@main/agent/codeindex/store'
 import {
   denseEmbedInput,
@@ -78,6 +78,26 @@ describe('runDenseVectorization', () => {
     expect(log.calls).toEqual([2, 1])
     expect(store.denseStatus()).toEqual({ total: 3, vectorized: 3 })
     expect(store.getDenseModel()).toEqual({ model: EMBED_MODEL_ID, dim: EMBED_DIM })
+  })
+
+  it('offers a WAL checkpoint after each stored batch and takes one when it is done', async () => {
+    const store = CodeIndexStore.openMemory()
+    seed(
+      store,
+      'a.ts',
+      Array.from({ length: 17 }, (_, i) => ({ startLine: i * 10 + 1, name: `fn${i}`, text: `alpha ${i}` }))
+    )
+    const due = vi.spyOn(store, 'checkpointIfDue').mockResolvedValue()
+    const checkpoint = vi.spyOn(store, 'checkpointOffThread')
+    const res = await runDenseVectorization(store, { embed: stubEmbedder(), batchSize: 1 })
+    expect(res.embedded).toBe(17)
+    expect(due).toHaveBeenCalledTimes(17)
+    expect(checkpoint).toHaveBeenCalledTimes(1)
+    due.mockClear()
+    checkpoint.mockClear()
+    await runDenseVectorization(store, { embed: stubEmbedder(), batchSize: 1 })
+    expect(due).not.toHaveBeenCalled()
+    expect(checkpoint).not.toHaveBeenCalled()
   })
 
   it('resumes: only vec-NULL rows are embedded on a second run', async () => {

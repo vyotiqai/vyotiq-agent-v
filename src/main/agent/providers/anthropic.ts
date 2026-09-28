@@ -514,6 +514,9 @@ export const anthropicProvider: LlmProvider = {
     const thinkingBlocks: AnthropicThinkingBlock[] = []
     let currentThinkingText = ''
     let currentBlockType: 'thinking' | 'redacted_thinking' | null = null
+    /** Words streamed in this response, and a call begun since the last of them. */
+    let textSeen = false
+    let callSinceText = false
 
     const drops = { dropped: 0 }
 
@@ -569,6 +572,7 @@ export const anthropicProvider: LlmProvider = {
       if (type === 'content_block_delta') {
         const delta = event.delta as Record<string, unknown>
         if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+          if (delta.text) textSeen = true
           yield { type: 'text', text: delta.text }
         }
         if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
@@ -607,7 +611,14 @@ export const anthropicProvider: LlmProvider = {
       if (type === 'content_block_start') {
         const block = event.content_block as Record<string, unknown>
         const index = typeof event.index === 'number' ? event.index : currentIndex + 1
+        if (block?.type === 'text' && textSeen && callSinceText) {
+          // A text block after a call is a new paragraph: the step's words are
+          // one string, and glued on this one ran into the last ("…read it.Then…").
+          callSinceText = false
+          yield { type: 'text', text: '\n\n' }
+        }
         if (block?.type === 'tool_use') {
+          if (textSeen) callSinceText = true
           currentIndex = index
           toolCalls.set(index, {
             id: String(block.id),

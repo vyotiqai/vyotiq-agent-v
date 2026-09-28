@@ -96,3 +96,48 @@ describe('alignTurnUsageSlots', () => {
     expect(next[0]?.billedInputTokens).toBe(0)
   })
 })
+
+describe('child instance usage in the parent turn', () => {
+  const usage = {
+    billedInputTokens: 921_701,
+    billedCachedInputTokens: 796_672,
+    cacheCreationInputTokens: 0,
+    outputTokens: 8_325,
+    reasoningTokens: 3_298,
+    steps: 21,
+    stepsWithCacheReport: 21,
+    billedCost: 0,
+    billedCostSaved: 0,
+    stepsWithCostReport: 0,
+    estimatedCost: 0,
+    stepsWithEstimate: 0,
+    generationMs: 200_000
+  }
+
+  it("adds a finished child's usage to the turn it finished in, and leaves the parent's window alone", () => {
+    const slots = turnUsageFromPersistedEvents(
+      [
+        {
+          at: '2026-09-28T09:48:20.000Z',
+          event: { type: 'step_usage', runId: 'p', step: 1, inputTokens: 20_000, cachedInputTokens: 0, outputTokens: 500 }
+        },
+        {
+          at: '2026-09-28T09:49:32.000Z',
+          event: { type: 'agent_instance_update', runId: 'p', parentRunId: 'p', instanceRunId: 'c', phase: 'started', usage }
+        },
+        {
+          at: '2026-09-28T09:53:51.000Z',
+          event: { type: 'agent_instance_update', runId: 'p', parentRunId: 'p', instanceRunId: 'c', phase: 'done', usage }
+        }
+      ],
+      ['2026-09-28T09:48:00.000Z']
+    )
+    // Counted once — the started update carries no final usage to add.
+    expect(slots[0]!.billedInputTokens).toBe(20_000 + 921_701)
+    expect(slots[0]!.outputTokens).toBe(500 + 8_325)
+    expect(slots[0]!.steps).toBe(22)
+    // The context meter's figures stay the parent's.
+    expect(slots[0]!.inputTokens).toBe(20_000)
+    expect(slots[0]!.peakInputTokens).toBe(20_000)
+  })
+})

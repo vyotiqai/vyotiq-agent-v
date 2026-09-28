@@ -128,3 +128,36 @@ describe('create_plan todos validation', () => {
     expect(result.ok).toBe(true)
   })
 })
+
+describe('todo_write naming only known ids', () => {
+  it('merges a shorter replace of existing ids instead of dropping the rest (run dd5aafe0)', () => {
+    const runDir = mkdtempSync(join(tmpdir(), 'vyotiq-todo-subset-'))
+    try {
+      toolTodoWrite(runDir, [
+        { id: 's1', content: 'Inspect', status: 'completed' },
+        { id: 's2', content: 'Child A', status: 'completed' },
+        { id: 's5', content: 'Verify', status: 'in_progress' }
+      ])
+      const result = toolTodoWrite(runDir, [{ id: 's5', content: 'Verify', status: 'completed' }])
+      expect(readTodos(runDir).map((t) => `${t.id}:${t.status}`)).toEqual(['s1:completed', 's2:completed', 's5:completed'])
+      expect(result.notice).toContain('merged as a status update')
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+
+  it('still replaces the list when a write names a new id', () => {
+    const runDir = mkdtempSync(join(tmpdir(), 'vyotiq-todo-replan-'))
+    try {
+      toolTodoWrite(runDir, [
+        { id: 'a', content: 'Old one', status: 'pending' },
+        { id: 'b', content: 'Old two', status: 'pending' }
+      ])
+      const result = toolTodoWrite(runDir, [{ id: 'c', content: 'New plan', status: 'in_progress' }])
+      expect(readTodos(runDir).map((t) => t.id)).toEqual(['c'])
+      expect(result.notice).toBeUndefined()
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+})

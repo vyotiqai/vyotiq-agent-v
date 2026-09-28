@@ -154,7 +154,6 @@ import {
   clearRunStorageLostHandler,
   flushStatusWrites,
   loadMessagesAsync,
-  patchLatestTodoWriteMessage,
   GOAL_SECTION_RE
 } from './state'
 import { enqueueMessageRewrite } from './messageAppendQueue'
@@ -516,7 +515,11 @@ function* applyDrainedFollowUps(
 ): Generator<AgentEvent, boolean> {
   const entry = mode === 'next' ? takeNextFollowUp(runId) : takeNextReadyFollowUp(runId)
   if (!entry) return false
-  const message = ensureUserMessageAt(entry.message)
+  // 'ready' drains a follow-up mid-turn (Send now / steer): the agent had not
+  // finished, so the record carries its plan on across it. 'next' comes after
+  // the turn ended, and starts the next one from nothing.
+  const stamped = ensureUserMessageAt(entry.message)
+  const message: ChatMessage = mode === 'ready' ? { ...stamped, midTurn: true } : stamped
   messages.push(message)
   appendMessage(runDir, message)
   const ev: AgentEvent = {
@@ -812,6 +815,27 @@ function resolveStepToolCalls(
   })
 }
 
+/** Give a streamed call its real id, keeping its place among the step's calls. */
+function renameStreamedToolCall(streamed: Map<string, ToolCall>, fromId: string, toId: string): void {
+  const moved = streamed.get(fromId)
+  if (!moved) return
+  const entries = [...streamed.entries()]
+  streamed.clear()
+  for (const [id, call] of entries) {
+    if (id === toId) continue
+    if (id === fromId) {
+      const already = entries.find(([other]) => other === toId)?.[1]
+      streamed.set(toId, {
+        id: toId,
+        name: mergeStreamedToolName(moved.name, already?.name ?? ''),
+        arguments: `${moved.arguments}${already?.arguments ?? ''}`
+      })
+      continue
+    }
+    streamed.set(id, call)
+  }
+}
+
 function accumulateStreamedToolDelta(
   streamed: Map<string, ToolCall>,
   toolCallId: string,
@@ -826,6 +850,18 @@ function accumulateStreamedToolDelta(
     existing.arguments = mergeOpenAiCompatToolArgDelta(existing.arguments, delta.arguments).arguments
   }
   streamed.set(toolCallId, existing)
+}
+
+/**
+ * The name a streaming call is shown under: the catalog name its accumulated
+ * name resolves to (`write` → `edit`, `bash` → `terminal`), the one tool_start
+ * will carry. Streamed under the alias, the row settled its look for a tool
+ * that does not exist — a created file streamed as a one-line row and became
+ * an edit card only on reload. Execution resolves the alias on its own.
+ */
+function streamedToolDisplayName(streamed: Map<string, ToolCall>, toolCallId: string): string | undefined {
+  const name = streamed.get(toolCallId)?.name
+  return name ? canonicalizeAgentToolName(name) : undefined
 }
 
 /** Cadence for durable in-flight assistant snapshots (crash-recovery granularity). */
@@ -865,7 +901,8 @@ function* flushPartialAssistant(
       ? { thinking: thinkingText }
       : {}),
     ...(reasoningState ? { reasoningState } : {}),
-    ...(mappedCalls.length ? { toolCalls: mappedCalls } : {})
+    ...(mappedCalls.length ? { toolCalls: mappedCalls } : {}),
+    at: new Date().toISOString()
   }
   messages.push(assistant)
   appendMessage(runDir, assistant)
@@ -885,7 +922,8 @@ function* flushPartialAssistant(
       toolCallId: call.id,
       toolName: call.name,
       content: stub,
-      ok: false
+      ok: false,
+      at: new Date().toISOString()
     }
     messages.push(unfinished)
     appendMessage(runDir, unfinished)
@@ -959,7 +997,7 @@ async function reconstructStreamSnapshotAssistant(
     }
     break
   }
-  const recovered: ChatMessage = { role: 'assistant', content: snapshot }
+  const recovered: ChatMessage = { role: 'assistant', content: snapshot, at: new Date().toISOString() }
   messages.push(recovered)
   appendMessage(runDir, recovered)
   appendEvent(runDir, { type: 'assistant_message', runId, content: snapshot })
@@ -1128,8 +1166,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   const writeStatus = (patch: Parameters<typeof updateStatus>[1]): void => {
     if (!runDir || !isCurrentInvoke(runId, invokeId)) return
     if (patch.status === 'done' || patch.status === 'error' || patch.status === 'cancelled') {
+      // todos.json only: the model reads the list from it every step. The
+      // todo_write results in messages.jsonl stay as written — rewriting them
+      // erased which step was in progress when (the record groups work by it)
+      // and changed mid-history bytes the next invoke's cached prefix covers.
       finalizeTodosOnRunEnd(runDir, patch.status)
-      void patchLatestTodoWriteMessage(runDir, patch.status)
     }
     // Abort (including quit) must not pause. User Stop/Esc pauses in chat:cancel
     // so an active goal can resume after restart.
@@ -2692,8 +2733,31 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                   ? `pending_${delta.index}`
                   : `pending_${streamedToolCalls.size}`
             }
+            let replacesToolCallId: string | undefined
             if (typeof delta.index === 'number') {
+              const priorId = streamedToolCallIndex.get(delta.index)
               if (delta.id?.trim()) {
+                // The host named the call only now (it streamed under a stand-in
+                // id): one call, re-keyed in place. Kept under both ids, the
+                // stand-in ran as a second call with the arguments cut short.
+                if (priorId && priorId !== toolCallId) {
+                  renameStreamedToolCall(streamedToolCalls, priorId, toolCallId)
+                  if (liveForwardedToolIds.delete(priorId)) liveForwardedToolIds.add(toolCallId)
+                  replacesToolCallId = priorId
+                  // A reload mid-step rebuilds this chrome from events.jsonl: say the
+                  // stand-in's row is this call's, or it shows twice until the step ends.
+                  if (runDir && persistedLiveToolIds.has(priorId) && !persistedLiveToolIds.has(toolCallId)) {
+                    persistedLiveToolIds.add(toolCallId)
+                    appendEvent(runDir, {
+                      type: 'tool_call_delta',
+                      runId,
+                      toolCallId,
+                      name: streamedToolCalls.get(toolCallId)?.name || undefined,
+                      argumentsDelta: '',
+                      replacesToolCallId: priorId
+                    })
+                  }
+                }
                 streamedToolCallIndex.set(delta.index, delta.id.trim())
               } else if (!streamedToolCallIndex.has(delta.index)) {
                 streamedToolCallIndex.set(delta.index, toolCallId)
@@ -2705,13 +2769,15 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               name: delta.name,
               arguments: argumentsDelta
             })
-            persistLiveToolChrome(toolCallId, delta.name, argumentsDelta)
+            const liveName = delta.name ? streamedToolDisplayName(streamedToolCalls, toolCallId) : undefined
+            persistLiveToolChrome(toolCallId, liveName, argumentsDelta)
             yield {
               type: 'tool_call_delta',
               runId,
               toolCallId,
-              name: delta.name || undefined,
-              argumentsDelta
+              name: liveName,
+              argumentsDelta,
+              ...(replacesToolCallId ? { replacesToolCallId } : {})
             }
           } else if (chunk.type === 'tool_call' && chunk.toolCall) {
             const [ensured] = ensureToolCallIds([chunk.toolCall], {
@@ -2733,12 +2799,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             liveForwardedToolIds.add(tc.id)
             const merged = mergeOpenAiCompatToolArgDelta(prevArgs, tc.arguments)
             const argumentsDelta = already ? merged.yieldDelta : merged.arguments
-            persistLiveToolChrome(tc.id, tc.name, argumentsDelta || tc.arguments || '')
+            const liveName = tc.name ? streamedToolDisplayName(streamedToolCalls, tc.id) : undefined
+            persistLiveToolChrome(tc.id, liveName, argumentsDelta || tc.arguments || '')
             yield {
               type: 'tool_call_delta',
               runId,
               toolCallId: tc.id,
-              name: tc.name || undefined,
+              name: liveName,
               argumentsDelta
             }
           } else if (chunk.type === 'done') {
@@ -3364,7 +3431,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           ...(!thinkingFromReasoningState(stepReasoningState) && thinkingText
             ? { thinking: thinkingText }
             : {}),
-          ...(stepReasoningState ? { reasoningState: stepReasoningState } : {})
+          ...(stepReasoningState ? { reasoningState: stepReasoningState } : {}),
+          at: new Date().toISOString()
         }
         messages.push(assistant)
         appendMessage(runDir, assistant)
@@ -3476,7 +3544,16 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // is the half that judges a plan the run chose to publish.
         // Asking for a plan at all stays with the mode section and
         // `create_plan`'s own advisory quality feedback.
-        if (!isInlineInstance && agentMode === 'agent' && planQualityNudges < 2) {
+        // Not once the work the plan described is done and checked: run
+        // 528a737f (2026-09-28) gave its answer with every check met, was sent
+        // back to add a diagram to the plan, and its "Plan refined" reply took
+        // the answer's place as the task's result.
+        const checksNow = readChecks(runDir)
+        const todosNow = readTodos(runDir)
+        const workSettled =
+          (checksNow.length > 0 && checksNow.every((check) => check.verdict !== null)) ||
+          (todosNow.length > 0 && todosNow.every((todo) => todo.status === 'completed' || todo.status === 'cancelled'))
+        if (!isInlineInstance && agentMode === 'agent' && planQualityNudges < 2 && !workSettled) {
           const planRaw = await readPlanRawAsync(runDir)
           const quality = isPlanDraftReady(planRaw) ? scorePlanQuality(planRaw) : null
           if (quality && quality.issues.length > 0) {
@@ -3722,7 +3799,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         content: scrubbedAssistantText,
         toolCalls: mappedCalls,
         ...(!derivedThinking && thinkingText ? { thinking: thinkingText } : {}),
-        ...(stepReasoningState ? { reasoningState: stepReasoningState } : {})
+        ...(stepReasoningState ? { reasoningState: stepReasoningState } : {}),
+        at: new Date().toISOString()
       }
       messages.push(assistantWithTools)
       appendMessage(runDir, assistantWithTools)
@@ -3810,7 +3888,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           // Surface persist failures before the next tool mutates the workspace.
           await flushMessageAppends(runDir!)
         },
-        appendEvent: (ev: AgentEvent) => appendEvent(runDir!, ev),
+        appendEvent: (ev: AgentEvent, at?: string) => appendEvent(runDir!, ev, at),
         approval: approvalGate,
         agentMode,
         getAgentMode: () => agentMode,

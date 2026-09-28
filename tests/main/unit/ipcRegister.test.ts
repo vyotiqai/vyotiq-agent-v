@@ -514,6 +514,32 @@ describe('registerIpc', () => {
     })
   })
 
+  describe('dictationTranscribe', () => {
+    it('returns a dictation failure as its code, not as a handler fault', async () => {
+      const { DictationError } = await import('@main/dictation/errors')
+      transcribeDictationMock.mockRejectedValueOnce(new DictationError('rejected_key', 'OpenAI turned the key down (401)'))
+      const result = await handlers.get(IPC.dictationTranscribe)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { requestId: 'r1', mime: 'audio/wav', pcm16k: 'AAAA' }
+      )
+      expect(result).toEqual({
+        ok: false,
+        error: 'OpenAI turned the key down (401)',
+        code: 'dictation:rejected_key'
+      })
+    })
+
+    it('rejects a request with no audio at the boundary', async () => {
+      const result = (await handlers.get(IPC.dictationTranscribe)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { requestId: 'r2', mime: 'audio/wav' }
+      )) as { ok: boolean; code?: string }
+      expect(result.ok).toBe(false)
+      expect(result.code).toBe('IPC_VALIDATION')
+      expect(transcribeDictationMock).not.toHaveBeenCalledWith(expect.objectContaining({ requestId: 'r2' }), expect.anything())
+    })
+  })
+
   describe('getSystemTheme', () => {
     it('rejects invalid senders', async () => {
       fromWebContents.mockReturnValueOnce(null)

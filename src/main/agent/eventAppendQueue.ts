@@ -2,6 +2,7 @@ import { readdirSync } from 'fs'
 import { appendFile, open, readdir, rename, stat, unlink, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 import { logger } from '../../shared/logger'
+import { stampEventSeq } from './eventSeq'
 import {
   bumpFailure,
   formatAppendFailure,
@@ -250,8 +251,15 @@ async function rotateEventsFileIfNeeded(path: string, dir: string): Promise<void
   })
 }
 
-export function enqueueEventAppend(dir: string, event: unknown): void {
-  const line = `${JSON.stringify({ at: new Date().toISOString(), event })}\n`
+/**
+ * @param at When it happened, if not now — a parallel tool's result is written
+ *   in call order once the whole batch settles, but it settled when it did.
+ */
+export function enqueueEventAppend(dir: string, event: unknown, at?: string): void {
+  // Stamped on the event itself: the object the loop goes on to send carries
+  // the same seq as its row (see eventSeq).
+  stampEventSeq(event)
+  const line = `${JSON.stringify({ at: at ?? new Date().toISOString(), event })}\n`
   const lineBytes = Buffer.byteLength(line, 'utf8')
   const pending = pendingBytes.get(dir) ?? 0
   const isStreamSnapshot =

@@ -1,4 +1,4 @@
-import type { AgentEvent } from '../ipc'
+import type { AgentEvent, InstanceUsage } from '../ipc'
 
 export type StepUsageTotals = {
   /** Latest step's full context / input window size (not cumulative bill). */
@@ -135,6 +135,79 @@ export function mergeStepUsageTotals(a: StepUsageTotals, b: StepUsageTotals): St
     estimatedCost: a.estimatedCost + (b.stepsWithEstimate > 0 ? b.estimatedCost : 0),
     stepsWithEstimate: a.stepsWithEstimate + b.stepsWithEstimate,
     generationMs: a.generationMs + b.generationMs
+  }
+}
+
+/** The additive part of a run's totals — what a child instance adds to its parent's bill. */
+export function instanceUsageOf(totals: StepUsageTotals): InstanceUsage {
+  return {
+    billedInputTokens: totals.billedInputTokens,
+    billedCachedInputTokens: totals.billedCachedInputTokens,
+    billedPromptTokens: totals.billedPromptTokens ?? 0,
+    cacheCreationInputTokens: totals.cacheCreationInputTokens,
+    outputTokens: totals.outputTokens,
+    reasoningTokens: totals.reasoningTokens,
+    ...(totals.inputTokensIncludesCache !== undefined
+      ? { inputTokensIncludesCache: totals.inputTokensIncludesCache }
+      : {}),
+    steps: totals.steps,
+    stepsWithCacheReport: totals.stepsWithCacheReport,
+    billedCost: totals.billedCost,
+    billedCostSaved: totals.billedCostSaved,
+    stepsWithCostReport: totals.stepsWithCostReport,
+    estimatedCost: totals.estimatedCost,
+    stepsWithEstimate: totals.stepsWithEstimate,
+    generationMs: totals.generationMs
+  }
+}
+
+/** `b` minus `a`, field by field: what a child used since its last update. */
+export function instanceUsageDelta(a: InstanceUsage | undefined, b: InstanceUsage): InstanceUsage {
+  if (!a) return b
+  const d = (x: number, y: number): number => Math.max(0, y - x)
+  return {
+    billedInputTokens: d(a.billedInputTokens, b.billedInputTokens),
+    billedCachedInputTokens: d(a.billedCachedInputTokens, b.billedCachedInputTokens),
+    billedPromptTokens: d(a.billedPromptTokens ?? 0, b.billedPromptTokens ?? 0),
+    cacheCreationInputTokens: d(a.cacheCreationInputTokens, b.cacheCreationInputTokens),
+    outputTokens: d(a.outputTokens, b.outputTokens),
+    reasoningTokens: d(a.reasoningTokens, b.reasoningTokens),
+    ...(b.inputTokensIncludesCache !== undefined ? { inputTokensIncludesCache: b.inputTokensIncludesCache } : {}),
+    steps: d(a.steps, b.steps),
+    stepsWithCacheReport: d(a.stepsWithCacheReport, b.stepsWithCacheReport),
+    billedCost: d(a.billedCost, b.billedCost),
+    billedCostSaved: b.billedCostSaved - a.billedCostSaved,
+    stepsWithCostReport: d(a.stepsWithCostReport, b.stepsWithCostReport),
+    estimatedCost: d(a.estimatedCost, b.estimatedCost),
+    stepsWithEstimate: d(a.stepsWithEstimate, b.stepsWithEstimate),
+    generationMs: d(a.generationMs, b.generationMs)
+  }
+}
+
+/**
+ * A child instance's usage added to the parent's: the bill, the steps and the
+ * generation time sum; the window fields (inputTokens, cachedInputTokens,
+ * peak) stay the parent's, since they size its context meter.
+ */
+export function addInstanceUsage(a: StepUsageTotals, child: InstanceUsage): StepUsageTotals {
+  const flag = a.inputTokensIncludesCache ?? child.inputTokensIncludesCache
+  return {
+    ...a,
+    ...(flag !== undefined ? { inputTokensIncludesCache: flag } : {}),
+    billedInputTokens: a.billedInputTokens + child.billedInputTokens,
+    billedCachedInputTokens: a.billedCachedInputTokens + child.billedCachedInputTokens,
+    billedPromptTokens: (a.billedPromptTokens ?? 0) + (child.billedPromptTokens ?? 0),
+    cacheCreationInputTokens: a.cacheCreationInputTokens + child.cacheCreationInputTokens,
+    outputTokens: a.outputTokens + child.outputTokens,
+    reasoningTokens: a.reasoningTokens + child.reasoningTokens,
+    steps: a.steps + child.steps,
+    stepsWithCacheReport: a.stepsWithCacheReport + child.stepsWithCacheReport,
+    billedCost: a.billedCost + child.billedCost,
+    billedCostSaved: a.billedCostSaved + child.billedCostSaved,
+    stepsWithCostReport: a.stepsWithCostReport + child.stepsWithCostReport,
+    estimatedCost: a.estimatedCost + child.estimatedCost,
+    stepsWithEstimate: a.stepsWithEstimate + child.stepsWithEstimate,
+    generationMs: a.generationMs + child.generationMs
   }
 }
 

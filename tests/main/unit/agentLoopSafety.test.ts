@@ -475,6 +475,69 @@ describe('runAgent loop continuation integration', () => {
     expectNoLoopSafetyStop(events)
   })
 
+  it('runs a call the host named only mid-stream once, under its real id, with all of its arguments', async () => {
+    // OpenAI-compat hosts may send a call's id after its first chunk; the
+    // provider streams it under a stand-in (`call_0`) until then. Kept under
+    // both ids, the stand-in ran as a second call with its arguments cut short.
+    const runId = 'safety-late-tool-id'
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        yield { type: 'tool_call_delta', toolCallDelta: { index: 0, id: 'call_0', name: 'read', arguments: '{"path":' } }
+        yield { type: 'tool_call_delta', toolCallDelta: { index: 0, id: 'real_1', arguments: '"a.ts"}' } }
+        yield { type: 'tool_call', toolCall: { id: 'real_1', name: 'read', arguments: '{"path":"a.ts"}' } }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      yield { type: 'text', text: 'read it' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'a.ts', content: 'contents' })
+
+    const events = (await collect(runId, workspace)) as Array<CapturedEvent & {
+      toolCallId?: string
+      replacesToolCallId?: string
+      toolCalls?: Array<{ id: string; arguments: string }>
+    }>
+
+    expect(executeTool).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(executeTool.mock.calls[0])).toContain('a.ts')
+    const renamed = events.find((e) => e.type === 'tool_call_delta' && e.replacesToolCallId)
+    expect(renamed).toMatchObject({ toolCallId: 'real_1', replacesToolCallId: 'call_0' })
+    const answer = events.find((e) => e.type === 'assistant_message' && e.toolCalls?.length)
+    expect(answer?.toolCalls?.map((c) => [c.id, c.arguments])).toEqual([['real_1', '{"path":"a.ts"}']])
+    expect(events.filter((e) => e.type === 'tool_start').map((e) => e.toolCallId)).toEqual(['real_1'])
+  })
+
+  it('streams a call under the catalog name its alias resolves to, from the first chunk', async () => {
+    // A model that calls `Write` runs `edit`; streamed under the alias, the
+    // window settled the row as a one-line call and drew the edit card only
+    // after a reload.
+    const runId = 'safety-alias-tool-name'
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        yield { type: 'tool_call_delta', toolCallDelta: { index: 0, id: 'w1', name: 'Write', arguments: '{"path":"a.ts",' } }
+        yield { type: 'tool_call_delta', toolCallDelta: { index: 0, id: 'w1', arguments: '"contents":"x"}' } }
+        yield { type: 'tool_call', toolCall: { id: 'w1', name: 'Write', arguments: '{"path":"a.ts","contents":"x"}' } }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      yield { type: 'text', text: 'written' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'a.ts', content: 'Created a.ts' })
+
+    const events = (await collect(runId, workspace)) as Array<CapturedEvent & { toolCallId?: string; name?: string }>
+
+    const named = events.filter((e) => e.type === 'tool_call_delta' && e.name).map((e) => e.name)
+    expect(named.length).toBeGreaterThan(0)
+    expect(new Set(named)).toEqual(new Set(['edit']))
+    expect(events.find((e) => e.type === 'tool_start')?.name).toBe('edit')
+  })
+
   it('runs a batch of exactly MAX_TOOL_CALLS_PER_STEP calls', async () => {
     let call = 0
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {

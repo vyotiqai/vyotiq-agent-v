@@ -149,7 +149,7 @@ describe('finishedNoticeFor', () => {
     ])
 
     expect(
-      finishedNoticeFor({ workspacePath: workspace, runId: 'run-1', runDir, failed: false, status: { goal: 'Tidy a.txt' } as never })
+      await finishedNoticeFor({ workspacePath: workspace, runId: 'run-1', runDir, failed: false, status: { goal: 'Tidy a.txt' } as never })
     ).toEqual({ title: 'Tidy a.txt', body: 'Ready for review · 2 files · 1/2 checks met', reviewFiles: 2 })
   })
 
@@ -160,13 +160,13 @@ describe('finishedNoticeFor', () => {
     resolveWrites(runDir, workspace, { checkpointId: meta!.id, action: 'keep' })
 
     expect(
-      finishedNoticeFor({ workspacePath: workspace, runId: 'run-1', runDir, failed: false, status: { goal: 'Tidy' } as never })
+      await finishedNoticeFor({ workspacePath: workspace, runId: 'run-1', runDir, failed: false, status: { goal: 'Tidy' } as never })
     ).toEqual({ title: 'Tidy', body: 'Finished' })
   })
 
-  it('reports the status error of a failed run', () => {
+  it('reports the status error of a failed run', async () => {
     expect(
-      finishedNoticeFor({
+      await finishedNoticeFor({
         workspacePath: workspace,
         runId: 'run-1',
         runDir,

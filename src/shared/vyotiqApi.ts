@@ -67,7 +67,12 @@ import type {
   CodeIndexRuntimeStatus,
   ProcessMetricsSnapshot,
   DictationRuntimeStatus,
+  DictationMicAccess,
   DictationLocalModelId,
+  DictationTakeStats,
+  DictationLiveOpenRequest,
+  DictationLiveAudioRequest,
+  DictationLiveEvent,
   TelemetryStatus,
   AppInfo,
   UpdateInfo,
@@ -370,6 +375,16 @@ export interface VyotiqApi {
     payload: DictationTranscribeRequest
   ) => Promise<IpcResult<DictationTranscribeResult>>
   cancelDictation: (requestId: string) => Promise<IpcResult<boolean>>
+  /** Load the Whisper models a take on this PC will use, so its first words are not held up. */
+  dictationPrepare: () => Promise<IpcResult<boolean>>
+  /** How a take went, for the log (timings and counts, never words). */
+  dictationTakeStats: (payload: DictationTakeStats) => Promise<IpcResult<boolean>>
+  /** OpenAI live words for a take: open a session, stream audio, commit each phrase, close. */
+  dictationLiveOpen: (payload: DictationLiveOpenRequest) => Promise<IpcResult<boolean>>
+  dictationLiveAudio: (payload: DictationLiveAudioRequest) => Promise<IpcResult<boolean>>
+  dictationLiveCommit: (takeId: string) => Promise<IpcResult<boolean>>
+  dictationLiveClose: (takeId: string) => Promise<IpcResult<boolean>>
+  onDictationLiveEvent: (handler: (event: DictationLiveEvent) => void) => () => void
   dictationStatus: () => Promise<IpcResult<DictationRuntimeStatus>>
   dictationInstall: (payload: {
     modelId: DictationLocalModelId
@@ -379,6 +394,10 @@ export interface VyotiqApi {
     modelId: DictationLocalModelId
   }) => Promise<IpcResult<DictationRuntimeStatus>>
   onDictationStatus: (handler: (status: DictationRuntimeStatus) => void) => () => void
+  /** What the OS says about microphone access for this app. */
+  dictationMicAccess: () => Promise<IpcResult<DictationMicAccess>>
+  /** Open the OS page where microphone access is switched on. */
+  dictationOpenMicSettings: () => Promise<IpcResult<boolean>>
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

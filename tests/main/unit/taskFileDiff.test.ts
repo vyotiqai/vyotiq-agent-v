@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import { tmpdir } from 'os'
 
 vi.mock('@main/app/window', () => ({
@@ -9,9 +9,12 @@ vi.mock('@main/app/window', () => ({
 
 import {
   beginWriteCheckpoint,
+  checkpointBeforeImagePath,
   finalizeWriteCheckpoint,
+  listCheckpointMetas,
   resetWriteCheckpointsForTests,
-  resolveWrites
+  resolveWrites,
+  setDirRestoreFileCapForTests
 } from '@main/agent/checkpoints'
 import { executeTool } from '@main/agent/tools'
 import { toolTodoWrite } from '@main/agent/tools/todo'
@@ -49,6 +52,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setDirRestoreFileCapForTests(null)
   resetWriteCheckpointsForTests()
   rmSync(workspace, { recursive: true, force: true })
   rmSync(runDir, { recursive: true, force: true })
@@ -63,7 +67,7 @@ describe('taskFileStats', () => {
         new_string: '  await closeStagingWatcher()\n  await rename(staged, target)'
       })
     )
-    expect(taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified', add: 1, del: 0 }])
+    expect(await taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified', add: 1, del: 0 }])
   })
 
   it('nets every turn against the first before-image, and agrees with the navigator', async () => {
@@ -72,13 +76,13 @@ describe('taskFileStats', () => {
       await run('str_replace', { path: 'swap.ts', old_string: 'prepareStaging()', new_string: 'prepare()' })
       await run('edit', { path: 'notes.md', contents: 'one\ntwo\n' })
     })
-    const stats = taskFileStats(runDir, workspace)
+    const stats = await taskFileStats(runDir, workspace)
     // swap.ts went there and back: nothing left to review in it.
     expect(stats).toEqual([
       { path: 'notes.md', action: 'created', add: 2, del: 0 },
       { path: 'swap.ts', action: 'modified', add: 0, del: 0 }
     ])
-    expect(pendingReviewSummary(runDir, workspace)).toEqual({ files: 2, add: 2, del: 0 })
+    expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 2, add: 2, del: 0 })
   })
 
   it('keeps kept files, and nets out what was undone', async () => {
@@ -90,13 +94,56 @@ describe('taskFileStats', () => {
     const again = await turn(() => run('str_replace', { path: 'swap.ts', old_string: 'ready()', new_string: 'set()' }))
     resolveWrites(runDir, workspace, { checkpointId: again, action: 'discard' })
     // gone.ts was created and undone: nothing left. swap.ts is back to the kept edit.
-    expect(taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified', add: 1, del: 1 }])
+    expect(await taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified', add: 1, del: 1 }])
   })
 
   it('has no numbers for a file it cannot read as text', async () => {
     await turn(() => run('edit', { path: 'blob.txt', contents: 'text for now\n' }))
     writeFileSync(join(workspace, 'blob.txt'), Buffer.from([0x61, 0x00, 0x62]))
-    expect(taskFileStats(runDir, workspace)).toEqual([{ path: 'blob.txt', action: 'created' }])
+    expect(await taskFileStats(runDir, workspace)).toEqual([{ path: 'blob.txt', action: 'created' }])
+  })
+
+  // It ran in one synchronous piece: a task that wrote 20,000 files held the
+  // main thread for over a minute, and the window showed "Not Responding".
+  it('lets other work run while it counts', async () => {
+    await turn(async () => {
+      for (let i = 0; i < 40; i++) await run('edit', { path: `gen/f${i}.ts`, contents: `export const v${i} = ${i}\n` })
+    })
+    let otherWorkRan = false
+    setImmediate(() => {
+      otherWorkRan = true
+    })
+    const stats = await taskFileStats(runDir, workspace)
+    expect(otherWorkRan).toBe(true)
+    expect(stats).toHaveLength(40)
+  })
+
+  it('reads no copy for a write that cannot be undone, as its diff shows none', async () => {
+    const cp = beginWriteCheckpoint(runDir, workspace)
+    writeFileSync(join(workspace, 'swap.ts'), 'changed by a command\n', 'utf8')
+    await cp.recordObservedMutation('swap.ts', 'modified')
+    const id = finalizeWriteCheckpoint(runDir)!.id
+    // A copy on disk all the same, as an oversized directory delete used to leave.
+    const copy = checkpointBeforeImagePath(runDir, id, 'swap.ts')
+    mkdirSync(dirname(copy), { recursive: true })
+    writeFileSync(copy, 'a\nb\nc\n', 'utf8')
+    expect(taskFileDiff(runDir, workspace, 'swap.ts').reason).toBe('unrestorable')
+    expect(await taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified' }])
+  })
+
+  it('keeps no copies of a directory delete too large to undo', async () => {
+    mkdirSync(join(workspace, 'deps'))
+    for (let i = 0; i < 5; i++) writeFileSync(join(workspace, 'deps', `m${i}.js`), `module.exports = ${i}\n`, 'utf8')
+    setDirRestoreFileCapForTests(3)
+    const id = await turn(() => run('delete', { path: 'deps', recursive: true }))
+    const files = listCheckpointMetas(runDir).find((meta) => meta.id === id)!.files
+    expect(files.length).toBeGreaterThan(1)
+    expect(files.every((file) => !file.undoable)).toBe(true)
+    for (const file of files.filter((f) => f.path !== 'deps')) {
+      expect(existsSync(checkpointBeforeImagePath(runDir, id, file.path))).toBe(false)
+    }
+    const stats = await taskFileStats(runDir, workspace)
+    expect(stats.every((s) => s.action === 'deleted' && s.add === undefined)).toBe(true)
   })
 })
 
@@ -146,25 +193,25 @@ describe('taskFileDiff', () => {
       diff: null,
       reason: 'unrestorable'
     })
-    expect(taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified' }])
+    expect(await taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified' }])
   })
 
   it('a file the task created and then deleted is nothing to review — for the navigator too', async () => {
     await turn(() => run('edit', { path: 'tmp.ts', contents: 'scratch\n' }))
     await turn(() => run('delete_file', { path: 'tmp.ts' }))
-    expect(taskFileStats(runDir, workspace)).toEqual([])
-    expect(pendingReviewSummary(runDir, workspace)).toBeUndefined()
+    expect(await taskFileStats(runDir, workspace)).toEqual([])
+    expect(await pendingReviewSummary(runDir, workspace)).toBeUndefined()
   })
 
   it('re-counts only the file that changed', async () => {
     await turn(() => run('edit', { path: 'one.ts', contents: 'a\n' }))
     await turn(() => run('edit', { path: 'two.ts', contents: 'b\n' }))
-    expect(taskFileStats(runDir, workspace).map((s) => [s.path, s.add])).toEqual([
+    expect((await taskFileStats(runDir, workspace)).map((s) => [s.path, s.add])).toEqual([
       ['one.ts', 1],
       ['two.ts', 1]
     ])
     writeFileSync(join(workspace, 'two.ts'), 'b\nc\nd\n', 'utf8')
-    expect(taskFileStats(runDir, workspace).map((s) => [s.path, s.add])).toEqual([
+    expect((await taskFileStats(runDir, workspace)).map((s) => [s.path, s.add])).toEqual([
       ['one.ts', 1],
       ['two.ts', 3]
     ])

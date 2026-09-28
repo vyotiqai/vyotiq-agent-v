@@ -114,6 +114,10 @@ export function toolSkill(
         : ''
     const out = [
       `# Skill: ${skill.name}`,
+      // Absolute, so a skill that ships scripts can say "run scripts/x.py"
+      // and the agent can find it — the Skill tool only reads files, it cannot
+      // tell a terminal where the package was installed.
+      bundled.length > 0 ? `Skill directory: ${skill.root}` : '',
       '',
       wrapUntrustedContent(
         [body, extras].filter(Boolean).join('\n'),

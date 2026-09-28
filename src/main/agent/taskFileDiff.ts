@@ -1,8 +1,15 @@
-import { existsSync, readFileSync, statSync } from 'fs'
+import { existsSync, readFileSync, statSync, type Stats } from 'fs'
+import { readFile, stat } from 'fs/promises'
 import { lineDiffStat } from '../../shared/utils/lineDiffStat'
+import { mapLimit } from '../../shared/utils/mapLimit'
 import { formatUnifiedDiff, lineDiff } from '../../shared/utils/unifiedDiff'
-import { resolveInsideWorkspace } from '../workspace/safePath'
-import { checkpointBeforeImagePath, listCheckpointMetas } from './checkpoints'
+import { createWorkspacePathResolver, resolveInsideWorkspace } from '../workspace/safePath'
+import {
+  checkpointBeforeImagePath,
+  listCheckpointMetas,
+  listCheckpointMetasAsync,
+  type WriteCheckpointMeta
+} from './checkpoints'
 
 /**
  * What a task did to each file it wrote, net of all its turns: the
@@ -40,16 +47,21 @@ const MAX_DIFF_BYTES = 2 * 1024 * 1024
 
 type Written = { path: string; firstAction: TaskFileAction; beforePath: string | null; undoable: boolean }
 
-/** Every file the task wrote; the earliest checkpoint that touched a path owns its before-image. */
-function collectWritten(runDir: string): Map<string, Written> {
+/**
+ * Every file the task wrote; the earliest checkpoint that touched a path owns
+ * its before-image. A write that cannot be undone has none to use: its diff is
+ * `unrestorable` and its row has no counts, whatever copy may sit on disk.
+ */
+function collectWritten(runDir: string, metas: readonly WriteCheckpointMeta[]): Map<string, Written> {
   const byPath = new Map<string, Written>()
-  for (const meta of listCheckpointMetas(runDir)) {
+  for (const meta of metas) {
     for (const file of meta.files) {
       if (byPath.has(file.path)) continue
       byPath.set(file.path, {
         path: file.path,
         firstAction: file.action,
-        beforePath: file.action === 'created' ? null : safeBeforePath(runDir, meta.id, file.path),
+        beforePath:
+          file.action === 'created' || !file.undoable ? null : safeBeforePath(runDir, meta.id, file.path),
         undoable: file.undoable
       })
     }
@@ -102,16 +114,6 @@ function sides(written: Written, workspaceRoot: string): { before: string | null
   return { before, after, existsNow }
 }
 
-function statSignature(path: string | null): string {
-  if (!path) return '-'
-  try {
-    const st = statSync(path)
-    return `${st.size}:${st.mtimeMs}`
-  } catch {
-    return 'missing'
-  }
-}
-
 /**
  * Per file: its entry, and the before-image and file-now signatures it was
  * counted from. Keyed per file, so a write to one file re-reads and re-diffs
@@ -121,34 +123,99 @@ function statSignature(path: string | null): string {
 const statsCache = new Map<string, { signature: string; stat: TaskFileStat | null }>()
 const STATS_CACHE_MAX = 50_000
 
-/** One entry per file the task wrote, with exact counts where they can be had. */
-export function taskFileStats(runDir: string, workspaceRoot: string): TaskFileStat[] {
-  const out: TaskFileStat[] = []
-  for (const written of collectWritten(runDir).values()) {
-    const signature = `${written.firstAction}:${written.undoable ? 1 : 0}:${statSignature(written.beforePath)}:${statSignature(workspaceFile(workspaceRoot, written.path))}`
-    const key = `${runDir}\0${workspaceRoot}\0${written.path}`
-    let hit = statsCache.get(key)
-    if (!hit || hit.signature !== signature) {
-      hit = { signature, stat: statFor(written, workspaceRoot) }
-      if (statsCache.size >= STATS_CACHE_MAX) statsCache.clear()
-      statsCache.set(key, hit)
-    }
-    if (hit.stat) out.push(hit.stat)
-  }
-  return out.sort((a, b) => a.path.localeCompare(b.path))
+/** Files counted at once: enough to keep the disk busy without taking the whole fs thread pool. */
+const STATS_CONCURRENCY = 8
+
+/**
+ * One entry per file the task wrote, with exact counts where they can be had.
+ *
+ * Per-file path resolution, stats and reads are async. They ran on the main
+ * thread in one piece — for a task that wrote 20,000 files, over a minute in
+ * which the window could not paint or answer ("Not Responding" at every
+ * launch, since the Changes list asks on open).
+ */
+export async function taskFileStats(runDir: string, workspaceRoot: string): Promise<TaskFileStat[]> {
+  const written = [...collectWritten(runDir, await listCheckpointMetasAsync(runDir)).values()]
+  const resolve = createWorkspacePathResolver(workspaceRoot)
+  const stats = await mapLimit(written, STATS_CONCURRENCY, (file) => cachedStatFor(file, runDir, workspaceRoot, resolve))
+  return stats.filter((s): s is TaskFileStat => s !== null).sort((a, b) => a.path.localeCompare(b.path))
 }
 
-function statFor(written: Written, workspaceRoot: string): TaskFileStat | null {
-  const { before, after, existsNow } = sides(written, workspaceRoot)
+export async function statOrNull(path: string | null): Promise<Stats | null> {
+  if (!path) return null
+  try {
+    return await stat(path)
+  } catch {
+    return null
+  }
+}
+
+function statSignature(path: string | null, st: Stats | null): string {
+  if (!path) return '-'
+  return st ? `${st.size}:${st.mtimeMs}` : 'missing'
+}
+
+async function cachedStatFor(
+  written: Written,
+  runDir: string,
+  workspaceRoot: string,
+  resolve: ReturnType<typeof createWorkspacePathResolver>
+): Promise<TaskFileStat | null> {
+  const beforePath = written.beforePath
+  const resolved = await resolve(written.path)
+  const abs = resolved?.real ?? null
+  const [beforeSt, afterSt] = await Promise.all([
+    statOrNull(beforePath),
+    resolved?.exists ? statOrNull(abs) : Promise.resolve(null)
+  ])
+  const signature = `${written.firstAction}:${written.undoable ? 1 : 0}:${statSignature(beforePath, beforeSt)}:${statSignature(abs, afterSt)}`
+  const key = `${runDir}\0${workspaceRoot}\0${written.path}`
+  const hit = statsCache.get(key)
+  if (hit && hit.signature === signature) return hit.stat
+  const entry = await statFor(written, beforePath, beforeSt, abs, afterSt)
+  if (statsCache.size >= STATS_CACHE_MAX) statsCache.clear()
+  statsCache.set(key, { signature, stat: entry })
+  return entry
+}
+
+/** Text of a file already stat'ed: '' when a missing file means empty, null when it cannot be diffed. */
+export async function readStatedText(
+  path: string | null,
+  st: Stats | null,
+  missingIsEmpty: boolean
+): Promise<string | null> {
+  if (!path) return null
+  if (!st) return missingIsEmpty ? '' : null
+  if (!st.isFile() || st.size > MAX_DIFF_BYTES) return null
+  try {
+    const buf = await readFile(path)
+    // NUL in the first 8 KB is how git decides a file is binary.
+    if (buf.subarray(0, 8192).includes(0)) return null
+    return buf.toString('utf8')
+  } catch {
+    return null
+  }
+}
+
+async function statFor(
+  written: Written,
+  beforePath: string | null,
+  beforeSt: Stats | null,
+  abs: string | null,
+  afterSt: Stats | null
+): Promise<TaskFileStat | null> {
+  const existsNow = afterSt !== null
   // Created, then deleted again: the task left nothing behind here.
   if (written.firstAction === 'created' && !existsNow) return null
   const entry: TaskFileStat = { path: written.path, action: netAction(written, existsNow) }
-  if (before !== null && after !== null) {
-    const stat = lineDiffStat(before, after)
-    if (stat) {
-      entry.add = stat.add
-      entry.del = stat.del
-    }
+  const before = written.firstAction === 'created' ? '' : await readStatedText(beforePath, beforeSt, false)
+  if (before === null) return entry
+  const after = await readStatedText(abs, afterSt, true)
+  if (after === null) return entry
+  const counts = lineDiffStat(before, after)
+  if (counts) {
+    entry.add = counts.add
+    entry.del = counts.del
   }
   return entry
 }
@@ -160,7 +227,7 @@ export function resetTaskFileStatsCacheForTests(): void {
 /** The diff of one file the task wrote, as `git diff` would print it. */
 export function taskFileDiff(runDir: string, workspaceRoot: string, relPath: string): TaskFileDiff {
   const path = relPath.replace(/\\/g, '/').replace(/^\.\//, '')
-  const written = collectWritten(runDir).get(path)
+  const written = collectWritten(runDir, listCheckpointMetas(runDir)).get(path)
   if (!written) return { path, action: null, diff: null, reason: 'not_in_task' }
   // No before-image was kept — a recursive folder delete, or a terminal
   // command's change once the snapshot budget was spent. Say what happened to

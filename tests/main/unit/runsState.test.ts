@@ -24,12 +24,12 @@ import {
   collectProtectedInstanceRunIds,
   interruptOrphanRuns,
   loadEvents,
+  loadEventsForHydrationAsync,
   loadMessages,
   createRun,
   renameRun,
   resumeRun,
-  syncMessages,
-  patchLatestTodoWriteMessage
+  syncMessages
 } from '@main/agent/state'
 import { RUN_INTERRUPTED_ERROR } from '@shared/runInterrupt'
 import { finalizeTodosOnRunEnd, readTodos, toolTodoWrite } from '@main/agent/tools/todo'
@@ -422,12 +422,13 @@ describe('listRuns / interruptOrphanRuns', () => {
 
     const messages = loadMessages(workspace, runId)
     const todoMessage = messages.find((message) => message.role === 'tool' && message.toolName === 'todo_write')
-    expect(todoMessage?.content).toContain('[-] Audit core library files')
-    expect(todoMessage?.content).not.toContain('[~]')
+    // The transcript keeps the snapshot as written: it is the record of which
+    // step was in progress when. The current list is todos.json.
+    expect(todoMessage?.content).toBe('0/5 complete\n[~] Audit core library files\n[ ] Audit API routes')
     expect(readTodos(dir).find((todo) => todo.id === '1')?.status).toBe('cancelled')
   })
 
-  it('patches latest todo_write message to pending when finalize returns done content', async () => {
+  it('settles todos.json at run end and leaves the transcript snapshot as written', async () => {
     const runId = 'todo-done-patch'
     const dir = resolveRunDir(workspace, runId)
     writeStatus(dir, {
@@ -453,12 +454,10 @@ describe('listRuns / interruptOrphanRuns', () => {
     ])
     toolTodoWrite(dir, [{ id: '1', content: 'Ship', status: 'in_progress' }])
     finalizeTodosOnRunEnd(dir, 'done')
-    await patchLatestTodoWriteMessage(dir, 'done')
     const todoMessage = loadMessages(workspace, runId).find(
       (message) => message.role === 'tool' && message.toolName === 'todo_write'
     )
-    expect(todoMessage?.content).toContain('[ ] Ship')
-    expect(todoMessage?.content).not.toContain('[~]')
+    expect(todoMessage?.content).toBe('0/1 complete\n[~] Ship')
     expect(readTodos(dir)[0]?.status).toBe('pending')
   })
 
@@ -651,5 +650,31 @@ describe('listRuns / interruptOrphanRuns', () => {
     const dir = createRun(workspace, runId, 'old goal')
     writeFileSync(join(dir, 'status.json'), '{"nonsense": true}', 'utf8')
     await expect(renameRun(workspace, runId, 'new goal')).rejects.toThrow('Invalid run status')
+  })
+})
+
+describe('loadEventsForHydrationAsync', () => {
+  it('puts rows from before the loaded tail in front, in the order they happened', async () => {
+    const dir = join(tmpdir(), `vyotiq-hydrate-order-${process.pid}-${Date.now()}`)
+    mkdirSync(dir, { recursive: true })
+    try {
+      const t = (s: number): string => new Date(Date.parse('2026-09-27T10:00:00.000Z') + s * 1000).toISOString()
+      const rows = [
+        { at: t(0), event: { type: 'error', runId: 'r', message: 'old failure' } },
+        { at: t(1), event: { type: 'mode_changed', runId: 'r', mode: 'agent' } },
+        { at: t(2), event: { type: 'text_delta', runId: 'r', text: 'a' } },
+        { at: t(3), event: { type: 'status', runId: 'r', status: 'running' } },
+        { at: t(4), event: { type: 'tool_start', runId: 'r', toolCallId: 'c', name: 'read', summary: 'x' } }
+      ]
+      writeFileSync(join(dir, 'events.jsonl'), `${rows.map((row) => JSON.stringify(row)).join(String.fromCharCode(10))}${String.fromCharCode(10)}`)
+      const loaded = await loadEventsForHydrationAsync(dir, 'r', { limit: 2 })
+      // Neither the old error nor the mode is in the short tail: both come back,
+      // ahead of it and in the order they happened — never after newer rows.
+      const types = loaded.map((row) => (row.event as { type: string }).type)
+      expect(types.slice(0, 2)).toEqual(['error', 'mode_changed'])
+      expect(types[types.length - 1]).toBe('tool_start')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

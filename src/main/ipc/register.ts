@@ -98,6 +98,10 @@ import {
   ExtractAttachmentRequestSchema,
   DictationTranscribeRequestSchema,
   DictationCancelRequestSchema,
+  DictationTakeStatsSchema,
+  DictationLiveOpenRequestSchema,
+  DictationLiveAudioRequestSchema,
+  DictationLiveTakeRequestSchema,
   WorkspaceSuggestPathsRequestSchema,
   WorkspaceReadTextRequestSchema,
   WorkspaceReadImageRequestSchema,
@@ -172,7 +176,10 @@ import {
   MAX_ATTACHMENT_BYTES,
   WORKSPACE_FILE_BINARY_MAX_BYTES,
   type ExtractAttachmentResult,
+  type DictationTranscribeRequest,
   type DictationTranscribeResult,
+  type DictationMicAccess,
+  dictationIpcCode,
   type IpcResult,
   type Settings,
   type StorageCleanupPreviewResult,
@@ -351,7 +358,12 @@ import {
   listComposerAttachmentsForWorkspace,
   setComposerAttachmentsForWorkspace
 } from '../attachments/composerStore'
-import { transcribeDictation } from '../dictation/transcribe'
+import { requireKey, transcribeDictation, type DictationRequestExtras } from '../dictation/transcribe'
+import { appendLiveAudio, closeLiveTake, commitLive, openLiveTake } from '../dictation/liveOpenAI'
+import { dictationKeywordsFromFiles } from '../dictation/keywords'
+import { dictationFinalModelId, prepareLocalDictation } from '../dictation/local'
+import { isDictationError } from '../dictation/errors'
+import { dictationMicAccess, openMicSettings } from '../dictation/micAccess'
 import {
   listPendingToolApprovals,
   resolveToolApproval
@@ -565,6 +577,7 @@ import {
 } from '@main/workspace/fileService'
 import {
   invalidateWorkspaceFileListCache,
+  peekWorkspaceFileListCached,
   readWorkspaceFileListCached
 } from '@main/workspace/fileListCache'
 import {
@@ -1730,8 +1743,11 @@ export function registerIpc(): void {
           controller = new AbortController()
           dictationTranscriptions.set(requestId, controller)
         }
-        return ok(await transcribeDictation(req, controller?.signal))
+        return ok(await transcribeDictation(req, controller?.signal, dictationExtras(req)))
       } catch (err) {
+        // A failure the take can act on (no key, offline, no model) is an
+        // answer, not a handler fault: return its code, log nothing.
+        if (isDictationError(err)) return { ok: false, error: err.message, code: dictationIpcCode(err.code) }
         return failFrom(err, IPC.dictationTranscribe)
       } finally {
         if (requestId && dictationTranscriptions.get(requestId) === controller) {
@@ -1740,6 +1756,35 @@ export function registerIpc(): void {
       }
     }
   )
+
+  /**
+   * A cloud final gets the open workspace's names to listen for. Only from
+   * a list already walked: a cold workspace starts its walk for the next
+   * phrase instead of holding this one up.
+   */
+  function dictationExtras(req: DictationTranscribeRequest): DictationRequestExtras {
+    if (req.draft || !req.workspacePath || !isOpenWorkspace(req.workspacePath)) return {}
+    const files = peekWorkspaceFileListCached(req.workspacePath)
+    return files ? { keywords: dictationKeywordsFromFiles(files) } : {}
+  }
+
+  ipcMain.handle(IPC.dictationMicAccess, async (event): Promise<IpcResult<DictationMicAccess>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(dictationMicAccess())
+    } catch (err) {
+      return failFrom(err, IPC.dictationMicAccess)
+    }
+  })
+
+  ipcMain.handle(IPC.dictationOpenMicSettings, async (event): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(await openMicSettings())
+    } catch (err) {
+      return failFrom(err, IPC.dictationOpenMicSettings)
+    }
+  })
 
   ipcMain.handle(IPC.dictationCancel, async (event, raw): Promise<IpcResult<boolean>> => {
     if (!senderOk(event)) return fail('Invalid sender')
@@ -1750,6 +1795,108 @@ export function registerIpc(): void {
       return ok(Boolean(controller))
     } catch (err) {
       return failFrom(err, IPC.dictationCancel)
+    }
+  })
+
+  ipcMain.handle(IPC.dictationPrepare, async (event): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      await prepareLocalDictation()
+      return ok(true)
+    } catch (err) {
+      // The take's own first request loads the model again and reports why it
+      // could not; a warm-up that failed is not worth a second message.
+      if (isDictationError(err)) return ok(false)
+      return failFrom(err, IPC.dictationPrepare)
+    }
+  })
+
+  /** Live sessions by take, with the window that owns each: only it may feed or end one. */
+  const liveOwners = new Map<string, number>()
+
+  ipcMain.handle(IPC.dictationLiveOpen, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = DictationLiveOpenRequestSchema.parse(raw)
+      const apiKey = requireKey('openai')
+      const files =
+        req.workspacePath && isOpenWorkspace(req.workspacePath) ? peekWorkspaceFileListCached(req.workspacePath) : null
+      const sender = event.sender
+      liveOwners.set(req.takeId, sender.id)
+      sender.once('destroyed', () => {
+        if (liveOwners.get(req.takeId) !== sender.id) return
+        liveOwners.delete(req.takeId)
+        closeLiveTake(req.takeId)
+      })
+      openLiveTake({
+        takeId: req.takeId,
+        apiKey,
+        language: req.language?.trim() || undefined,
+        keywords: files ? dictationKeywordsFromFiles(files) : undefined,
+        emit: (payload) => {
+          if (!sender.isDestroyed()) sender.send(IPC.dictationLiveEvent, payload)
+          if (payload.kind === 'error') liveOwners.delete(req.takeId)
+        }
+      })
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.dictationLiveOpen)
+    }
+  })
+
+  ipcMain.handle(IPC.dictationLiveAudio, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { takeId, pcm16k } = DictationLiveAudioRequestSchema.parse(raw)
+      if (liveOwners.get(takeId) !== event.sender.id) return ok(false)
+      const bytes = Buffer.from(pcm16k, 'base64')
+      if (bytes.byteLength % 2 !== 0) return fail('Invalid dictation PCM length')
+      const pcm = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+      return ok(appendLiveAudio(takeId, pcm))
+    } catch (err) {
+      return failFrom(err, IPC.dictationLiveAudio)
+    }
+  })
+
+  ipcMain.handle(IPC.dictationLiveCommit, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { takeId } = DictationLiveTakeRequestSchema.parse(raw)
+      if (liveOwners.get(takeId) !== event.sender.id) return ok(false)
+      return ok(commitLive(takeId))
+    } catch (err) {
+      return failFrom(err, IPC.dictationLiveCommit)
+    }
+  })
+
+  ipcMain.handle(IPC.dictationLiveClose, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { takeId } = DictationLiveTakeRequestSchema.parse(raw)
+      if (liveOwners.get(takeId) !== event.sender.id) return ok(false)
+      liveOwners.delete(takeId)
+      closeLiveTake(takeId)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.dictationLiveClose)
+    }
+  })
+
+  ipcMain.handle(IPC.dictationTakeStats, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { outcome, engine, ...numbers } = DictationTakeStatsSchema.parse(raw)
+      const counts = Object.fromEntries(Object.entries(numbers).filter(([, v]) => v != null))
+      logger.info('Dictation take', {
+        scope: 'dictation',
+        status: outcome,
+        provider: engine,
+        ...(engine === 'local' ? { model: dictationFinalModelId() ?? undefined } : {}),
+        ...counts
+      })
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.dictationTakeStats)
     }
   })
 
@@ -2149,7 +2296,7 @@ export function registerIpc(): void {
         const req = TaskFileStatsRequestSchema.parse(raw)
         if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
         if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
-        return ok({ files: taskFileStats(resolveRunDir(req.workspacePath, req.runId), req.workspacePath) })
+        return ok({ files: await taskFileStats(resolveRunDir(req.workspacePath, req.runId), req.workspacePath) })
       } catch (err) {
         return failFrom(err, IPC.runsTaskFileStats)
       }

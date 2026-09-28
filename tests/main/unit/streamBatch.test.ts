@@ -12,6 +12,13 @@ import {
 import { registerRunAbort, resetActiveRunsForTests } from '@main/agent/runRegistry'
 import type { AgentEvent } from '@shared/ipc'
 
+/** Every event leaves with a seq (checked here); the shapes below leave it out. */
+function shapeOf(ev: AgentEvent): AgentEvent {
+  expect(Number.isSafeInteger(ev.seq) && (ev.seq ?? 0) > 0).toBe(true)
+  const { seq: _seq, ...rest } = ev
+  return rest as AgentEvent
+}
+
 describe('ChatEventBatcher', () => {
   let sent: AgentEvent[]
 
@@ -30,7 +37,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('preserves interleaved thinking and text order within a batch window', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({ type: 'thinking_delta', runId: 'run-1', text: 'reason ' })
     batcher.push({ type: 'text_delta', runId: 'run-1', text: 'answer' })
@@ -49,7 +56,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('coalesces consecutive segments of the same kind', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({ type: 'text_delta', runId: 'run-1', text: 'hel' })
     batcher.push({ type: 'text_delta', runId: 'run-1', text: 'lo' })
@@ -60,7 +67,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('coalesces terminal_output_delta for the same toolCallId and stream', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({
       type: 'terminal_output_delta',
@@ -91,7 +98,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('flushes pending deltas before non-delta events', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({ type: 'thinking_delta', runId: 'run-1', text: 'think' })
     batcher.push({ type: 'status', runId: 'run-1', status: 'done' })
@@ -100,7 +107,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('batches tool_call_delta with pending text and preserves order', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({ type: 'text_delta', runId: 'run-1', text: 'Looking up.' })
     batcher.push({
@@ -131,7 +138,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('coalesces tool_call_delta for the same toolCallId', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({
       type: 'tool_call_delta',
@@ -163,7 +170,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('keeps separate toolCallIds as separate segments', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({
       type: 'tool_call_delta',
@@ -188,7 +195,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('preserves invoke ids on batched deltas and keeps thinking steps separate', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({
       type: 'thinking_delta',
@@ -216,7 +223,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('tracks push vs sent counts for baseline measurement', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     batcher.push({ type: 'text_delta', runId: 'run-1', text: 'a' })
     batcher.push({ type: 'text_delta', runId: 'run-1', text: 'b' })
@@ -245,7 +252,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('drops oldest deltas when the pending queue exceeds the count cap', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     // Alternating invoke ids prevent adjacent coalescing, so 600 pushes are
     // 600 distinct segments — past the cap, oldest must be dropped and the
@@ -271,7 +278,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('drops oldest deltas when pending bytes exceed the byte cap', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     const big = 'x'.repeat(1024 * 1024)
     for (let i = 0; i < 12; i++) {
@@ -292,7 +299,7 @@ describe('ChatEventBatcher', () => {
   })
 
   it('never drops pending usage events when enforcing the cap', () => {
-    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    const batcher = new ChatEventBatcher((ev) => sent.push(shapeOf(ev)))
 
     for (let i = 0; i < 600; i++) {
       batcher.push({
@@ -352,7 +359,7 @@ describe('ChatEventDispatcher priority', () => {
     setChatEventActivePathResolver(() => '/ws-active')
 
     const dispatcher = new ChatEventDispatcher()
-    dispatcher.attach('run-bg', '/ws-bg', (ev) => sent.push(ev))
+    dispatcher.attach('run-bg', '/ws-bg', (ev) => sent.push(shapeOf(ev)))
 
     dispatcher.push('run-bg', {
       type: 'step_usage',
@@ -387,7 +394,7 @@ describe('ChatEventDispatcher priority', () => {
     const sent: AgentEvent[] = []
     setChatEventActivePathResolver(() => '/ws-active')
     const dispatcher = new ChatEventDispatcher()
-    dispatcher.attach('run-bg', '/ws-bg', (ev) => sent.push(ev))
+    dispatcher.attach('run-bg', '/ws-bg', (ev) => sent.push(shapeOf(ev)))
     dispatcher.push('run-bg', { type: 'text_delta', runId: 'run-bg', text: 'a' })
     vi.advanceTimersByTime(16)
     expect(sent).toHaveLength(0)
@@ -403,7 +410,7 @@ describe('ChatEventDispatcher priority', () => {
     const sent: AgentEvent[] = []
     setChatEventActivePathResolver(() => '/ws-active')
     const dispatcher = new ChatEventDispatcher()
-    dispatcher.attach('run-fg', '/ws-active', (ev) => sent.push(ev))
+    dispatcher.attach('run-fg', '/ws-active', (ev) => sent.push(shapeOf(ev)))
     dispatcher.push('run-fg', { type: 'text_delta', runId: 'run-fg', text: 'a' })
     vi.advanceTimersByTime(16)
     expect(sent).toHaveLength(1)
@@ -425,8 +432,8 @@ describe('ChatEventDispatcher priority', () => {
   it('does not emit gated deltas for unsubscribed runs', () => {
     const sent: AgentEvent[] = []
     const dispatcher = new ChatEventDispatcher()
-    dispatcher.attach('parent', '/ws', (ev) => sent.push(ev))
-    dispatcher.attach('child', '/ws', (ev) => sent.push(ev))
+    dispatcher.attach('parent', '/ws', (ev) => sent.push(shapeOf(ev)))
+    dispatcher.attach('child', '/ws', (ev) => sent.push(shapeOf(ev)))
     excludeChatEventUiSubscription('child')
     dispatcher.push('parent', { type: 'text_delta', runId: 'parent', text: 'p' })
     dispatcher.push('child', { type: 'text_delta', runId: 'child', text: 'c' })
@@ -442,7 +449,7 @@ describe('ChatEventDispatcher priority', () => {
   it('does not emit tool_start for unsubscribed runs', () => {
     const sent: AgentEvent[] = []
     const dispatcher = new ChatEventDispatcher()
-    dispatcher.attach('child', '/ws', (ev) => sent.push(ev))
+    dispatcher.attach('child', '/ws', (ev) => sent.push(shapeOf(ev)))
     excludeChatEventUiSubscription('child')
     dispatcher.push('child', {
       type: 'tool_start',
@@ -459,12 +466,53 @@ describe('ChatEventDispatcher priority', () => {
   it('streams a child after subscribe replaces the visible set', () => {
     const sent: AgentEvent[] = []
     const dispatcher = new ChatEventDispatcher()
-    dispatcher.attach('child', '/ws', (ev) => sent.push(ev))
+    dispatcher.attach('child', '/ws', (ev) => sent.push(shapeOf(ev)))
     excludeChatEventUiSubscription('child')
     dispatcher.push('child', { type: 'text_delta', runId: 'child', text: 'hidden' })
     setChatEventUiSubscriptions(['child'])
     dispatcher.push('child', { type: 'text_delta', runId: 'child', text: 'shown' })
     vi.advanceTimersByTime(16)
     expect(sent).toEqual([{ type: 'text_delta', runId: 'child', text: 'shown' }])
+  })
+})
+
+describe('event seq', () => {
+  beforeEach(() => {
+    resetChatEventDispatcher()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    setChatEventActivePathResolver(null)
+    resetChatEventDispatcher()
+    vi.useRealTimers()
+  })
+
+  it('keeps a persisted event’s seq, gives others one, and grows in send order', () => {
+    const sent: AgentEvent[] = []
+    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+    batcher.push({ type: 'status', runId: 'r', status: 'running', seq: 42 })
+    batcher.push({ type: 'text_delta', runId: 'r', text: 'a' })
+    batcher.push({ type: 'text_delta', runId: 'r', text: 'b' })
+    batcher.push({ type: 'tool_start', runId: 'r', toolCallId: 't', name: 'read', summary: 'x' })
+    batcher.flush()
+    expect(sent.map((ev) => ev.type)).toEqual(['status', 'text_delta', 'tool_start'])
+    expect(sent[0]!.seq).toBe(42)
+    // The merged delta carries its newest part’s seq, still before the next event.
+    expect(sent[1]!.seq).toBeGreaterThan(0)
+    expect(sent[2]!.seq).toBeGreaterThan(sent[1]!.seq!)
+  })
+
+  it('sends meters held in the background ahead of a newer one once the workspace is active', () => {
+    const sent: AgentEvent[] = []
+    let active: string | null = '/other'
+    setChatEventActivePathResolver(() => active)
+    const dispatcher = new ChatEventDispatcher()
+    dispatcher.attach('run', '/ws', (ev) => sent.push(ev))
+    dispatcher.push('run', { type: 'step_usage', runId: 'run', step: 1, inputTokens: 1, outputTokens: 1 })
+    active = '/ws'
+    dispatcher.push('run', { type: 'step_usage', runId: 'run', step: 2, inputTokens: 2, outputTokens: 2 })
+    dispatcher.flush('run')
+    expect(sent.map((ev) => (ev.type === 'step_usage' ? ev.step : null))).toEqual([1, 2])
   })
 })

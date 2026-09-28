@@ -9,6 +9,11 @@ import {
 } from '../../app/browserUrl'
 import {
   normalizeAskQuestionArgs,
+  AGENT_QUESTION_MAX_ITEMS,
+  AGENT_QUESTION_MAX_OPTION_CHARS,
+  AGENT_QUESTION_MAX_OPTIONS,
+  AGENT_QUESTION_MAX_PROMPT_CHARS,
+  AGENT_QUESTION_MAX_TITLE_CHARS,
   AGENT_QUESTION_TYPES,
   ASK_QUESTION_ARGS_HINT
 } from '../../../shared/utils/agentQuestionForm'
@@ -791,10 +796,18 @@ const strReplaceArgs = z
       .optional()
   })
 
-/** Catalog + loose item shape. Stringified questions[] is coerced in normalizeAskQuestionArgs. */
+/**
+ * Catalog + loose item shape. Stringified questions[] is coerced in normalizeAskQuestionArgs.
+ * Published stricter than accepted on purpose: `type` and `prompt` are required
+ * here so models send them, while normalize still infers a missing type and
+ * takes `question` for `prompt`. The maxima mirror the limits normalize enforces.
+ */
 const askQuestionItemCatalog = z.object({
   id: z.string().optional().describe('Stable id used to match the answer'),
-  prompt: z.string().describe('Question text shown to the user'),
+  prompt: z
+    .string()
+    .max(AGENT_QUESTION_MAX_PROMPT_CHARS)
+    .describe('Question text shown to the user'),
   question: z.string().optional().describe('Alias for prompt'),
   type: z
     .enum(AGENT_QUESTION_TYPES)
@@ -802,7 +815,8 @@ const askQuestionItemCatalog = z.object({
       'single=one option; multi=many; boolean=yes/no; text=freeform. Defaults to single with 2+ options, else text'
     ),
   options: z
-    .array(z.string())
+    .array(z.string().max(AGENT_QUESTION_MAX_OPTION_CHARS))
+    .max(AGENT_QUESTION_MAX_OPTIONS)
     .optional()
     .describe('Required for single/multi (at least 2 choices)'),
   allowCustom: z
@@ -815,11 +829,13 @@ const askQuestionItemCatalog = z.object({
 const askQuestionArgs = z.object({
   title: z
     .string()
+    .max(AGENT_QUESTION_MAX_TITLE_CHARS)
     .optional()
     .describe('Optional form title when asking multiple questions'),
   questions: z
     .array(askQuestionItemCatalog)
     .min(1)
+    .max(AGENT_QUESTION_MAX_ITEMS)
     .optional()
     .describe('Typed question form. Prefer this over legacy fields.'),
   question: z
@@ -988,6 +1004,20 @@ const spawnAgentInstanceArgs = z.object({
     .enum(['worktree', 'shared'])
     .describe(
       "Isolation mode: 'worktree' (default) gives the child its own git worktree branch; 'shared' runs the child directly in this workspace — cheaper, but requires path_scope and disjoint scopes across concurrent children."
+    )
+    .optional(),
+  step_id: z
+    .string()
+    .trim()
+    .min(1)
+    .describe(
+      'The id of the plan step (todo) this child carries out. The task record files the child, its awaits and its time under that step — pass it for every spawn made from a plan.'
+    )
+    .optional(),
+  read_only: z
+    .boolean()
+    .describe(
+      'true for a child that only reads and reports (analysis, review, research): it runs in Ask mode — read-only tools, no terminal, no edits — directly in this workspace, with no worktree to create and nothing to merge.'
     )
     .optional()
 })
@@ -1191,12 +1221,12 @@ export const TOOL_REGISTRY = {
   },
   todo_write: {
     description:
-      "This run's task list. Pass todos: [{ id, content, status }]. Default replace clears omitted ids and requires full items; merge:true upserts by id — omit content on an existing id to update status only (content backfilled from the stored todo). Extra in_progress items are demoted to pending (one kept). completed counts toward N/M; cancelled stays in the denominator.",
+      "This run's task list. Pass todos: [{ id, content, status }]. Default replace clears omitted ids and requires full items — but a shorter list naming only ids already in the list is a status update and merges instead (mark a step cancelled to drop it); merge:true upserts by id — omit content on an existing id to update status only (content backfilled from the stored todo). Extra in_progress items are demoted to pending (one kept). completed counts toward N/M; cancelled stays in the denominator.",
     schema: todoWriteArgs
   },
   create_plan: {
     description:
-      'Publish this run plan.md. Publishing changes no mode — the run carries straight on and implements it; in root runs the plan Steps are the fan-out manifest, every step mapping to one child instance. Inspect the workspace first: the plan may only name paths and symbols verified in this run. title is the H1. Canonical structure for plan: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Architecture` (a ```mermaid diagram of the affected components and data flow, nodes named after real files or symbols), `## Steps` (ordered; each names the paths or symbols it touches and the runnable check that proves it done — a test, command, or output), `## Done when` (a `- [ ]` checklist of concrete, observable criteria), `## Risks` (trade-offs, unknowns). The result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
+      'Publish this run plan.md. Publishing changes no mode — the run carries straight on and implements it; in root runs the plan Steps are the fan-out manifest, every step mapping to one child instance (spawn it with that step’s id as step_id). Only one todo may be in_progress — extras are demoted and the result says so; a step whose child runs shows as running on its own. Inspect the workspace first: the plan may only name paths and symbols verified in this run. title is the H1. Canonical structure for plan: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Architecture` (a ```mermaid diagram of the affected components and data flow, nodes named after real files or symbols), `## Steps` (ordered; each names the paths or symbols it touches and the runnable check that proves it done — a test, command, or output), `## Done when` (a `- [ ]` checklist of concrete, observable criteria), `## Risks` (trade-offs, unknowns). The result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
     schema: createPlanArgs
   },
   create_goal: {
@@ -1333,7 +1363,7 @@ export const TOOL_REGISTRY = {
   },
   ask_question: {
     description:
-      'Ask the user a typed form in the transcript (single, multi, boolean, text; prefer 1–2 focused questions). Each questions[] item needs prompt; type defaults to single when options are given, else text. Never call with {} — pass questions[] or a legacy question/prompt. Blocks until answer, skip, or 15-minute timeout.',
+      'Ask the user a typed form in the transcript (single, multi, boolean, text; prefer 1–2 focused questions). Each questions[] item needs prompt; type defaults to single when options are given, else text. Never call with {} — pass questions[] or a legacy question/prompt. Blocks until the user answers or skips (no timeout). Ask it alone: tool calls after it in the same step are not run, because they were written before the answer — re-issue them next step if the answer still calls for them.',
     schema: askQuestionArgs
   },
   switch_mode: {
@@ -1420,17 +1450,17 @@ export const TOOL_REGISTRY = {
   },
   spawn_agent_instance: {
     description:
-      'Spawn an Agent V child instance for one small, independent workstream — plan first with create_plan, decompose the request into structured small-scope briefs, and fan out when two or more independent workstreams are worth running in parallel; the parent handles small work directly, and spawns are never denied (root runs only; depth 1). Each spawn carries a structured brief — outcome, sub_tasks, done_when — composed verbatim into the child prompt plus goal context and path_scope prefixes; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available: the worktree starts from HEAD plus your uncommitted tracked changes inside its checkout, and shares the parent node_modules. isolation: "shared" runs the child directly in this workspace (requires path_scope). Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step.',
+      'Spawn an Agent V child instance for one small, independent workstream — plan first with create_plan, decompose the request into structured small-scope briefs, and fan out when two or more independent workstreams are worth running in parallel; the parent handles small work directly, and spawns are never denied (root runs only; depth 1). Each spawn carries a structured brief — outcome, sub_tasks, done_when — composed verbatim into the child prompt plus goal context and path_scope prefixes; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available: the worktree starts from HEAD plus your uncommitted tracked changes inside its checkout, and shares the parent node_modules. isolation: "shared" runs the child directly in this workspace (requires path_scope); read_only: true runs a read-and-report child in Ask mode in this workspace. Pass step_id with the plan step each child carries out. Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step.',
     schema: spawnAgentInstanceArgs
   },
   await_agent_instance: {
     description:
-      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. Each call waits at most the timeout_ms cap (see timeout_ms); on timeout the child keeps running — await again for another bounded wait, pull_agent_instance, or cancel_agent_instance. The returned summary is capped (~6,000 chars, ends with a [...truncated N chars] marker when cut); use pull_agent_instance views for more detail.',
+      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. Each call waits at most the timeout_ms cap (see timeout_ms); on timeout the child keeps running — await again for another bounded wait, pull_agent_instance, or cancel_agent_instance. The returned summary is capped (~20,000 chars, ends with a [...truncated N chars] marker when cut); pull_agent_instance view summary returns the full report.',
     schema: awaitAgentInstanceArgs
   },
   pull_agent_instance: {
     description:
-      'Pull child summary, outline, or tail. Bounded: summary ≤6,000 chars, outline ≤10,000 chars (280 per line), tail newest 40 messages ≤12,000 chars — cut payloads end with a [...truncated N chars] marker.',
+      'Pull child summary, outline, or tail. Bounded: summary ≤60,000 chars (the child’s whole final report), outline ≤10,000 chars (280 per line), tail newest 40 messages ≤12,000 chars — cut payloads end with a [...truncated N chars] marker.',
     schema: pullAgentInstanceArgs
   },
   merge_agent_instance: {

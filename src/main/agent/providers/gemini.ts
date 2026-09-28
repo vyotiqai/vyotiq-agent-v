@@ -370,6 +370,10 @@ export const geminiProvider: LlmProvider = {
     }
 
     let toolIndex = 0
+    // Id-less calls get one made up — unique to this stream, not just to this
+    // step: `gemini_0` in every step sent a later step's events and results to
+    // an earlier step's call.
+    const streamTag = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`
     let lastUsage: TokenUsage | undefined
     let stopReason: StopReason | undefined
     const pendingCalls = new Map<string, ToolCall>()
@@ -407,7 +411,7 @@ export const geminiProvider: LlmProvider = {
         const fc = part.functionCall as { name?: string; args?: unknown; id?: string } | undefined
         if (fc?.name) {
           const id =
-            typeof fc.id === 'string' && fc.id ? fc.id : `gemini_${toolIndex++}`
+            typeof fc.id === 'string' && fc.id ? fc.id : `gemini_${streamTag}_${toolIndex++}`
           const argsJson = JSON.stringify(fc.args ?? {})
           const existing = pendingCalls.get(id)
           if (existing) {

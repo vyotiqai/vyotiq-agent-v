@@ -1,8 +1,8 @@
-import { mkdtempSync } from 'fs'
+import { copyFileSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildChunkFtsBody, CodeIndexStore, ftsQueryTokens, literalRunForPattern } from '@main/agent/codeindex/store'
 import { CODE_INDEX_SCHEMA_VERSION } from '@main/agent/codeindex/types'
 
@@ -183,6 +183,158 @@ describe('CodeIndexStore', () => {
     expect(store.listFilePaths()).toEqual(['src/auth.ts'])
     expect(store.getStatus().fileCount).toBe(1)
     store.close()
+  })
+
+  it('keeps one search row per chunk, keyed by its id, through a reindex and a delete', () => {
+    const store = CodeIndexStore.openMemory()
+    seed(store)
+    const ftsRows = (): { rowid: number; chunk_id: number }[] =>
+      store.db.prepare('SELECT rowid, chunk_id FROM chunks_fts ORDER BY rowid').all() as never
+    const chunkIds = (): number[] =>
+      (store.db.prepare('SELECT id FROM chunks ORDER BY id').all() as { id: number }[]).map((r) => r.id)
+    expect(ftsRows().map((r) => r.rowid)).toEqual(chunkIds())
+
+    store.replaceFileChunks('src/auth.ts', 'hash-auth-2', 200, 50, [
+      {
+        startLine: 1,
+        endLine: 4,
+        kind: 'module',
+        name: 'auth module',
+        ftsBody: buildChunkFtsBody('src/auth.ts', { name: 'auth module', text: 'import { init } from "./init"' })
+      }
+    ])
+    expect(ftsRows().map((r) => r.rowid)).toEqual(chunkIds())
+    expect(ftsRows().every((r) => r.rowid === Number(r.chunk_id))).toBe(true)
+    expect(store.searchFts('validateToken', 10)).toEqual([])
+
+    store.deleteFilesNotIn(new Set(['src/payments/refund.ts']))
+    expect(ftsRows().map((r) => r.rowid)).toEqual(chunkIds())
+    expect(chunkIds()).toHaveLength(1)
+    store.close()
+  })
+
+  // chunk_id is UNINDEXED: matching on it read the whole search table for
+  // every reindexed file. A row whose chunk_id says something else still
+  // goes, because the delete keys on rowid.
+  it('deletes a file’s search rows by rowid, not by scanning chunk_id', () => {
+    const store = CodeIndexStore.openMemory()
+    seed(store)
+    store.db.exec(`UPDATE chunks_fts SET chunk_id = -1 WHERE path = 'src/auth.ts'`)
+    store.deleteFilesNotIn(new Set(['src/payments/refund.ts']))
+    expect(store.db.prepare(`SELECT COUNT(*) AS c FROM chunks_fts WHERE path = 'src/auth.ts'`).get()).toEqual({
+      c: 0
+    })
+    store.close()
+  })
+
+  it('keeps a store from before rowids were set, once it checks they line up', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-codeindex-store-'))
+    const dbPath = join(dir, 'index.sqlite')
+    const first = CodeIndexStore.openDbPath(dbPath)
+    seed(first)
+    first.close()
+    const raw = new DatabaseSync(dbPath)
+    raw.prepare(`DELETE FROM meta WHERE key = 'ftsRowids'`).run()
+    raw.close()
+    const reopened = CodeIndexStore.openDbPath(dbPath)
+    expect(reopened.getStatus().chunkCount).toBe(3)
+    expect(reopened.getMeta('ftsRowids')).toBe('chunkId')
+    reopened.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('rebuilds a store whose search rows are not keyed by their chunk ids', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-codeindex-store-'))
+    const dbPath = join(dir, 'index.sqlite')
+    const first = CodeIndexStore.openDbPath(dbPath)
+    seed(first)
+    first.close()
+    const raw = new DatabaseSync(dbPath)
+    raw.prepare(`DELETE FROM meta WHERE key = 'ftsRowids'`).run()
+    raw.exec(`INSERT INTO chunks_fts(rowid, chunk_id, path, name, body) VALUES(900, 1, 'src/auth.ts', 'x', 'stray row')`)
+    raw.close()
+    const reopened = CodeIndexStore.openDbPath(dbPath)
+    // Deleting by rowid would leave that row behind forever: start over.
+    expect(reopened.getStatus().fileCount).toBe(0)
+    expect(reopened.db.prepare('SELECT COUNT(*) AS c FROM chunks_fts').get()).toEqual({ c: 0 })
+    expect(reopened.getMeta('ftsRowids')).toBe('chunkId')
+    reopened.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // SQLite checkpoints inside whichever commit crosses 1,000 WAL pages: every
+  // page written back and fsynced on the main thread, seconds at a time while
+  // a sync reindexed a workspace. Commits leave the WAL alone; a worker
+  // copies it back when an index job asks.
+  it('never checkpoints inside a commit, and checkpoints from a worker when asked', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-codeindex-store-'))
+    const dbPath = join(dir, 'index.sqlite')
+    const store = CodeIndexStore.openDbPath(dbPath)
+    expect(store.db.prepare('PRAGMA wal_autocheckpoint').get()).toEqual({ wal_autocheckpoint: 0 })
+    // Well past 1,000 pages of writes.
+    for (let i = 0; i < 40; i++) {
+      store.replaceFileChunks(`src/f${i}.ts`, `hash-${i}`, 1, 1, [
+        { startLine: 1, endLine: 1, kind: 'function', name: `fn${i}`, ftsBody: `body ${i} `.repeat(4000), text: 'x'.repeat(40_000) }
+      ])
+    }
+    // What the database file holds without its WAL.
+    const chunksInFile = (): number => {
+      const copy = join(dir, 'copy.sqlite')
+      copyFileSync(dbPath, copy)
+      const raw = new DatabaseSync(copy)
+      try {
+        return (raw.prepare('SELECT COUNT(*) AS c FROM chunks').get() as { c: number }).c
+      } catch {
+        return 0 // not even the table has reached the file yet
+      } finally {
+        raw.close()
+        rmSync(copy, { force: true })
+        rmSync(`${copy}-wal`, { force: true })
+        rmSync(`${copy}-shm`, { force: true })
+      }
+    }
+    expect(chunksInFile()).toBe(0)
+    await store.checkpointOffThread()
+    expect(chunksInFile()).toBe(40)
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // A job offers a checkpoint after every write; one runs only once 2 s have
+  // passed since the last, so a sync of small files does not start a worker
+  // per handful of them.
+  it('checkpoints only when due', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-codeindex-store-'))
+    const dbPath = join(dir, 'index.sqlite')
+    try {
+      const store = CodeIndexStore.openDbPath(dbPath)
+      store.replaceFileChunks('src/a.ts', 'hash-a', 1, 1, [
+        { startLine: 1, endLine: 1, kind: 'function', name: 'a', ftsBody: 'alpha', text: 'alpha' }
+      ])
+      const inFile = (): number => {
+        const copy = join(dir, 'copy.sqlite')
+        copyFileSync(dbPath, copy)
+        const raw = new DatabaseSync(copy)
+        try {
+          return (raw.prepare('SELECT COUNT(*) AS c FROM chunks').get() as { c: number }).c
+        } catch {
+          return 0
+        } finally {
+          raw.close()
+          for (const suffix of ['', '-wal', '-shm']) rmSync(copy + suffix, { force: true })
+        }
+      }
+      await store.checkpointIfDue()
+      expect(inFile()).toBe(0)
+      vi.setSystemTime(Date.now() + 2_000)
+      await store.checkpointIfDue()
+      expect(inFile()).toBe(1)
+      store.close()
+    } finally {
+      vi.useRealTimers()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('updates the file stamp on unchanged content (hash fast path)', () => {

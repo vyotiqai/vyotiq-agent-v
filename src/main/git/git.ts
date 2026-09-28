@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'child_process'
-import { existsSync, statSync, readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
-import { stat } from 'fs/promises'
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
+import { readFile, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { promisify } from 'util'
@@ -11,8 +11,9 @@ import type {
   GitStatus,
   GitStatusResult
 } from '../../shared/ipc'
+import { mapLimit } from '../../shared/utils/mapLimit'
 import { isSafeWorkspaceRelPath } from '../../shared/utils/workspacePath'
-import { resolveInsideWorkspace } from '../workspace/safePath'
+import { createWorkspacePathResolver, resolveInsideWorkspace } from '../workspace/safePath'
 import { sanitizedTerminalEnv } from '../agent/tools/terminal'
 
 const execFile = promisify(execFileCb)
@@ -97,6 +98,8 @@ export function resetGitAvailableCacheForTests(): void {
 
 /** Counting lines means reading the file, so only do it for plausible source. */
 const UNTRACKED_LINE_COUNT_MAX_BYTES = 512 * 1024
+/** Untracked files read at once while counting their lines. */
+const UNTRACKED_LINE_COUNT_CONCURRENCY = 8
 
 /**
  * Git never runs interactively here. A credential or editor prompt in a process
@@ -324,18 +327,29 @@ export function parseGitObjectId(raw: string | null | undefined): string | null 
   return GIT_OBJECT_ID_RE.test(sha) ? sha : null
 }
 
-function countFileLines(cwd: string, relPath: string): number {
+/**
+ * Lines in an untracked file, or null for a binary one — numstat has no line
+ * count for binary files either, and git calls a file binary when its first
+ * 8 KB hold a NUL.
+ */
+async function countFileLines(
+  resolveInWorkspace: ReturnType<typeof createWorkspacePathResolver>,
+  relPath: string
+): Promise<number | null> {
   try {
     // Directory placeholders from `git status -unormal` (e.g. `node_modules/`).
     if (relPath.endsWith('/') || relPath.endsWith('\\')) return 0
-    const full = resolveInsideWorkspace(cwd, relPath)
-    const stat = statSync(full)
-    if (!stat.isFile() || stat.size > UNTRACKED_LINE_COUNT_MAX_BYTES) return 0
-    const text = readFileSync(full, 'utf8')
-    if (!text) return 0
-    const lines = text.split('\n')
-    if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
-    return lines.length
+    const resolved = await resolveInWorkspace(relPath)
+    if (!resolved?.exists) return 0
+    const st = await stat(resolved.real)
+    if (!st.isFile() || st.size === 0 || st.size > UNTRACKED_LINE_COUNT_MAX_BYTES) return 0
+    const buf = await readFile(resolved.real)
+    if (buf.subarray(0, 8192).includes(0)) return null
+    // Newlines counted in the bytes: a 0x0A byte is a newline in UTF-8 wherever
+    // it falls, so this matches splitting the decoded text without decoding it.
+    let lines = 0
+    for (let i = buf.indexOf(10); i !== -1; i = buf.indexOf(10, i + 1)) lines++
+    return buf[buf.length - 1] === 10 ? lines : lines + 1
   } catch {
     return 0
   }
@@ -546,19 +560,27 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   const files = all.slice(0, GIT_STATUS_FILE_LIMIT)
 
   // Measure untracked files only once we know which ones ship. Every count is
-  // a synchronous statSync + readFileSync on the main thread, so doing this
-  // inside the parse loop meant a workspace carrying a large untracked tree
-  // (a vendored toolchain, an MSYS2 install, a VM image) read tens of
-  // thousands of files — blocking the process outright — to then discard all
-  // but GIT_STATUS_FILE_LIMIT of them. Untracked files past the cap report 0
+  // a file read, so doing this inside the parse loop meant a workspace
+  // carrying a large untracked tree (a vendored toolchain, an MSYS2 install,
+  // a VM image) read tens of thousands of files to then discard all but
+  // GIT_STATUS_FILE_LIMIT of them. Untracked files past the cap report 0
   // added lines; the cap itself is already announced through `truncated`.
-  for (const file of files) {
-    if (!untrackedPaths.has(file.path)) continue
-    if (!shouldCountUntrackedLines(file.path)) continue
-    const lines = countFileLines(cwd, file.path)
+  // The reads are async: synchronous, 200 of them held the main thread on
+  // every status refresh.
+  const counted = files.filter((file) => untrackedPaths.has(file.path) && shouldCountUntrackedLines(file.path))
+  const resolveInWorkspace = createWorkspacePathResolver(cwd)
+  const lineCounts = await mapLimit(counted, UNTRACKED_LINE_COUNT_CONCURRENCY, (file) =>
+    countFileLines(resolveInWorkspace, file.path)
+  )
+  counted.forEach((file, i) => {
+    const lines = lineCounts[i]!
+    if (lines === null) {
+      file.binary = true
+      return
+    }
     file.added = lines
     file.addedUnstaged = lines
-  }
+  })
 
   let added = 0
   let removed = 0

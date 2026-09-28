@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
+import { ASK_QUESTION_NO_ANSWER_GUIDANCE } from '@shared/utils/agentQuestionForm'
 
 const userData = join(tmpdir(), `vyotiq-e2e-audit-settings-${process.pid}-${Date.now()}`)
 
@@ -53,6 +54,7 @@ import type { UiToolRow } from '@shared/transcript'
 const T1_MALFORMED_QUESTIONS =
   '[{"id": "how_open", "prompt": "How?", "type": "single", "options": ["A VS Code "Live Server" or similar", "Other"]}]'
 
+/** Skip text from before the question timeout was removed; old transcripts still hold it. */
 const T1_TIMEOUT_CONTENT =
   'Question timed out or was dismissed without answers. Continue with a reasonable default.'
 
@@ -185,8 +187,9 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     msgs = appendToolResult(msgs, 'tc-interrupted', 'ask_question', 'Interrupted', false)
 
     const tools = toolRowsFromMessages(msgs)
+    // Nothing times out any more, so the legacy text reads as "No answer".
     expect(parseStatusMessageData(tools.find((t) => t.id === 'tc-timeout')!).chip).toBe(
-      'Timed out'
+      'No answer'
     )
     expect(parseStatusMessageData(tools.find((t) => t.id === 'tc-interrupted')!).chip).toBe(
       'Interrupted'
@@ -196,7 +199,7 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     ).toBe('Diagnosing your empty screen')
   })
 
-  it('E2: executeTool empty answers yields T1 timeout content', async () => {
+  it('E2: executeTool empty answers yields the skip guidance', async () => {
     const result = await executeTool(
       'ask_question',
       JSON.stringify({
@@ -212,7 +215,7 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
       }
     )
     expect(result.ok).toBe(true)
-    expect(result.content).toBe(T1_TIMEOUT_CONTENT)
+    expect(result.content).toBe(ASK_QUESTION_NO_ANSWER_GUIDANCE)
   })
 
   it('E3: executeTool unknown write_file_check — friendly content; UI not titled placeholder', async () => {

@@ -17,9 +17,16 @@ export const AGENT_QUESTION_MAX_ANSWER_VALUES = 16
 export const ASK_QUESTION_ARGS_HINT =
   'Pass questions: [{ id, prompt, type: "boolean"|"text"|"single"|"multi", options? }] (type defaults to "single" when 2+ options are given, else "text") or legacy { question: "…" }.'
 
-/** Tool result when the user skips, dismisses, or the wait times out. */
+/**
+ * Tool result when the user skips the form. There is no answer timeout — the
+ * question waits until it is answered, skipped, or the run is cancelled.
+ */
 export const ASK_QUESTION_NO_ANSWER_GUIDANCE =
-  'Question timed out or was dismissed without answers. Continue with a reasonable default.'
+  'User skipped the question without answering. Continue with a reasonable default.'
+
+/** Tool result when the user sends a message (Send now) instead of answering the form. */
+export const ASK_QUESTION_SUPERSEDED_GUIDANCE =
+  'User sent a message instead of answering the question; it follows. Treat it as the answer if it addresses the question.'
 
 /** Tool result when autonomous mode skips the form. */
 export const ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE =
@@ -77,7 +84,30 @@ function questionPromptFromRecord(rec: Record<string, unknown>): string {
 function validateItem(item: AgentQuestionItem, index: number): string | null {
   if (!item.id.trim()) return `questions[${index}].id is required`
   if (!item.prompt.trim()) return `questions[${index}].prompt is required`
+  if (item.prompt.length > AGENT_QUESTION_MAX_PROMPT_CHARS) {
+    return `questions[${index}].prompt is ${item.prompt.length} characters; the limit is ${AGENT_QUESTION_MAX_PROMPT_CHARS}`
+  }
+  const options = item.options ?? []
+  if (options.length > AGENT_QUESTION_MAX_OPTIONS) {
+    return `questions[${index}] has ${options.length} options; the limit is ${AGENT_QUESTION_MAX_OPTIONS}`
+  }
+  const longOption = options.findIndex((option) => option.length > AGENT_QUESTION_MAX_OPTION_CHARS)
+  if (longOption >= 0) {
+    return `questions[${index}].options[${longOption}] is longer than ${AGENT_QUESTION_MAX_OPTION_CHARS} characters`
+  }
   return null
+}
+
+function validateTitle(title: string | undefined): string | null {
+  if (title && title.length > AGENT_QUESTION_MAX_TITLE_CHARS) {
+    return `title is ${title.length} characters; the limit is ${AGENT_QUESTION_MAX_TITLE_CHARS}`
+  }
+  return null
+}
+
+/** Collapse whitespace so a prompt fits one bullet line. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 function coerceQuestionRecord(raw: unknown): Record<string, unknown> | null {
@@ -144,6 +174,8 @@ export function normalizeAskQuestionArgs(
 ): { ok: true; form: NormalizedAskQuestionForm } | { ok: false; error: string } {
   const title =
     typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined
+  const titleError = validateTitle(title)
+  if (titleError) return { ok: false, error: titleError }
   let questionsInput = args.questions
   if (typeof questionsInput === 'string') {
     const parsed = parseJsonish(questionsInput)
@@ -158,6 +190,12 @@ export function normalizeAskQuestionArgs(
       return {
         ok: false,
         error: `questions must contain at least 1 item. ${ASK_QUESTION_ARGS_HINT}`
+      }
+    }
+    if (questionsInput.length > AGENT_QUESTION_MAX_ITEMS) {
+      return {
+        ok: false,
+        error: `questions has ${questionsInput.length} items; the limit is ${AGENT_QUESTION_MAX_ITEMS} — ask the few that matter most`
       }
     }
     const questions: AgentQuestionItem[] = []
@@ -218,6 +256,8 @@ export function normalizeAskQuestionArgs(
         }
       : {})
   }
+  const itemError = validateItem(item, 0)
+  if (itemError) return { ok: false, error: itemError }
 
   return {
     ok: true,
@@ -227,8 +267,9 @@ export function normalizeAskQuestionArgs(
 
 /**
  * Validate + sanitize renderer answers against the asked questions: unknown
- * question ids are dropped, values are trimmed and capped, and single/boolean
- * keep at most one value. An empty result means the user skipped the form.
+ * question ids are dropped, values are trimmed, deduped and capped, choices are
+ * checked against the options, and everything but multi keeps at most one
+ * value. An empty result means the user skipped the form.
  */
 export function sanitizeQuestionAnswers(
   questions: readonly AgentQuestionItem[],
@@ -236,56 +277,95 @@ export function sanitizeQuestionAnswers(
 ): AgentQuestionAnswer[] {
   if (!answers.length) return []
   const byId = new Map(questions.map((q) => [q.id, q]))
+  const answered = new Set<string>()
   const out: AgentQuestionAnswer[] = []
   for (const answer of answers) {
     const question = byId.get(answer.questionId)
-    if (!question) continue
+    // One answer per question: a duplicate entry for the same id is ignored.
+    if (!question || answered.has(question.id)) continue
     const rawValues = Array.isArray(answer.values) ? answer.values : []
-    const values = rawValues
-      .map((value) => String(value).trim())
-      .filter(Boolean)
-    if (question.type === 'single' || question.type === 'boolean') {
-      values.length = Math.min(values.length, 1)
+    const values: string[] = []
+    const seen = new Set<string>()
+    for (const raw of rawValues) {
+      const value = acceptedAnswerValue(question, raw)
+      if (!value || seen.has(value)) continue
+      seen.add(value)
+      values.push(value)
     }
+    const cap =
+      question.type === 'multi' ? AGENT_QUESTION_MAX_ANSWER_VALUES : 1
+    values.length = Math.min(values.length, cap)
     if (values.length === 0) continue
+    answered.add(question.id)
     out.push({ questionId: question.id, values })
   }
   return out
 }
 
-/** Human-readable tool result for the model. */
+/**
+ * One renderer value checked against its question: trimmed and capped, a
+ * boolean folded to Yes/No, and a choice outside the options dropped unless
+ * the question allows a custom answer.
+ */
+function acceptedAnswerValue(question: AgentQuestionItem, raw: unknown): string | null {
+  const text = String(raw ?? '').trim()
+  if (!text) return null
+  if (question.type === 'boolean') {
+    if (/^(yes|true)$/i.test(text)) return 'Yes'
+    if (/^(no|false)$/i.test(text)) return 'No'
+    return null
+  }
+  if ((question.type === 'single' || question.type === 'multi') && !question.allowCustom) {
+    return question.options?.includes(text) ? text : null
+  }
+  return text.length > AGENT_QUESTION_MAX_ANSWER_CHARS
+    ? `${text.slice(0, AGENT_QUESTION_MAX_ANSWER_CHARS - 1)}…`
+    : text
+}
+
+/**
+ * Human-readable tool result for the model, one bullet per question:
+ *
+ *     User answered:
+ *     - <prompt on one line>: <answer>
+ *       <continuation lines of a multi-line answer, indented>
+ *
+ * The prompt is always included so the answer still reads on its own once it
+ * is pulled out as a retained decision after a fold. `retainedDecisions.ts`,
+ * `verifyCompaction.ts` and the renderer's status parser read this shape.
+ */
 export function formatQuestionAnswers(
   form: NormalizedAskQuestionForm,
   answers: AgentQuestionAnswer[]
 ): string {
-  if (answers.length === 0) return 'User provided no answer.'
-
   const byId = new Map(answers.map((a) => [a.questionId, a.values.filter((v) => v.trim())]))
-  const { questions } = form
-
-  if (questions.length === 1) {
-    const q = questions[0]!
-    const values = byId.get(q.id) ?? []
-    if (values.length === 0) return 'User provided no answer.'
-    if (values.length === 1) return `User answered: ${values[0]}`
-    return `User answered:\n${values.map((a) => `- ${a}`).join('\n')}`
+  if (![...byId.values()].some((values) => values.length > 0)) {
+    return ASK_QUESTION_NO_ANSWER_GUIDANCE
   }
 
   const lines = ['User answered:']
-  for (const q of questions) {
+  for (const q of form.questions) {
     const values = byId.get(q.id) ?? []
-    const formatted =
-      values.length === 0 ? '(no answer)' : values.length === 1 ? values[0]! : values.join(', ')
-    lines.push(`- ${q.prompt}: ${formatted}`)
+    const formatted = values.length === 0 ? '(no answer)' : values.join(', ')
+    const [first, ...rest] = formatted.split(/\r?\n/)
+    lines.push(`- ${oneLine(q.prompt)}: ${first ?? ''}`)
+    for (const line of rest) lines.push(`  ${line}`)
   }
   return lines.join('\n')
 }
 
-/** Short summary for tool row / activity label. */
+const ASK_QUESTION_SUMMARY_CHARS = 120
+
+/** Short summary for tool row / activity label (same shape toolSummary uses while running). */
 export function askQuestionSummary(form: NormalizedAskQuestionForm): string {
-  if (form.title) return form.title.slice(0, 80)
-  if (form.questions.length === 1) return form.questions[0]!.prompt.slice(0, 80)
-  return `${form.questions.length} questions`
+  const text = form.title
+    ? oneLine(form.title)
+    : form.questions.length === 1
+      ? oneLine(form.questions[0]!.prompt)
+      : `${form.questions.length} questions`
+  return text.length > ASK_QUESTION_SUMMARY_CHARS
+    ? `${text.slice(0, ASK_QUESTION_SUMMARY_CHARS - 1)}…`
+    : text
 }
 
 export function questionTypeHint(type: AgentQuestionType): string {

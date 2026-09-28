@@ -369,3 +369,34 @@ describe('eventAppendQueue', () => {
     expect(types).toContain('status')
   })
 })
+
+describe('event rows carry their place and time', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-event-seq-'))
+    resetEventAppendQueueForTests()
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    resetEventAppendQueueForTests()
+  })
+
+  it('stamps a growing seq on the event itself, and keeps a given time', async () => {
+    const first: { type: string; seq?: number } = { type: 'tool_start' }
+    const second: { type: string; seq?: number } = { type: 'tool_result' }
+    enqueueEventAppend(dir, first)
+    enqueueEventAppend(dir, second, '2026-09-27T10:00:00.000Z')
+    await flushEventAppends(dir)
+    // The object the loop goes on to send carries the row’s seq.
+    expect(first.seq).toBeGreaterThan(0)
+    expect(second.seq).toBeGreaterThan(first.seq!)
+    const rows = readFileSync(join(dir, 'events.jsonl'), 'utf8')
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { at: string; event: { seq: number } })
+    expect(rows.map((row) => row.event.seq)).toEqual([first.seq, second.seq])
+    expect(rows[1]!.at).toBe('2026-09-27T10:00:00.000Z')
+  })
+})

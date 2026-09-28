@@ -107,10 +107,11 @@ import type {
 import { basename, join } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
-import { askQuestionThroughRenderer } from '../agentQuestion'
+import { askQuestionThroughRenderer, isAgentQuestionSupersededError } from '../agentQuestion'
 import {
   ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE,
   ASK_QUESTION_NO_ANSWER_GUIDANCE,
+  ASK_QUESTION_SUPERSEDED_GUIDANCE,
   askQuestionSummary,
   formatQuestionAnswers,
   normalizeAskQuestionArgs
@@ -518,7 +519,13 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     )
     const n = next.length
     const countLabel = n === 1 ? '1 task' : `${n} tasks`
-    return toolOk('todo_write', notice ? `${countLabel}; ${notice}` : countLabel, content)
+    // The model reads the content, not the summary: a demotion or merge it
+    // does not hear about is one it repeats.
+    return toolOk(
+      'todo_write',
+      notice ? `${countLabel}; ${notice}` : countLabel,
+      notice ? `${content}\n\nNote: ${notice}` : content
+    )
   },
   create_goal: (_workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -629,14 +636,17 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       ...(form.title ? { title: form.title } : {}),
       questions: form.questions
     }
-    const liveSettings = context.invokeSettings ?? getSettings()
-    if (liveSettings.autonomousMode && liveSettings.autonomousSkipQuestions === 'skip') {
+    // The invoke snapshot, like the approval gate's autonomousMode (loop.ts):
+    // Unattended mode is decided once per turn, not mid-step.
+    const settings = context.invokeSettings ?? getSettings()
+    if (settings.autonomousMode && settings.autonomousSkipQuestions === 'skip') {
       return toolOk('ask_question', summary, ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE)
     }
     const ask =
       context.askQuestion ??
       ((req, sig) => askQuestionThroughRenderer(req, sig, context.invokeId))
-    // Hard run cancel only — soft stream interrupt (Send now) must not dismiss the card.
+    // Hard run cancel only: the soft stream interrupt must not abort the wait.
+    // Send now closes the card on purpose, through dismissPendingQuestions.
     const waitSignal = context.runSignal ?? signal
     try {
       const answers = await ask(request, waitSignal)
@@ -646,6 +656,9 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       return toolOk('ask_question', summary, formatQuestionAnswers(form, answers))
     } catch (err) {
       if (isAbortError(err)) throw err
+      if (isAgentQuestionSupersededError(err)) {
+        return toolOk('ask_question', summary, ASK_QUESTION_SUPERSEDED_GUIDANCE)
+      }
       const message = err instanceof Error ? err.message : 'Question failed'
       return toolFail(
         'ask_question',

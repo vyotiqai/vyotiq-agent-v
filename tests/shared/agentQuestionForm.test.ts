@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AGENT_QUESTION_MAX_ANSWER_CHARS,
+  AGENT_QUESTION_MAX_ITEMS,
+  AGENT_QUESTION_MAX_OPTIONS,
+  AGENT_QUESTION_MAX_PROMPT_CHARS,
+  AGENT_QUESTION_MAX_TITLE_CHARS,
+  ASK_QUESTION_NO_ANSWER_GUIDANCE,
+  askQuestionSummary,
   formatQuestionAnswers,
-  normalizeAskQuestionArgs
+  normalizeAskQuestionArgs,
+  sanitizeQuestionAnswers,
+  type AgentQuestionItem
 } from '@shared/utils/agentQuestionForm'
 
 describe('normalizeAskQuestionArgs', () => {
@@ -282,13 +291,130 @@ describe('normalizeAskQuestionArgs', () => {
 })
 
 describe('formatQuestionAnswers', () => {
-  it('formats a single value', () => {
+  it('formats a single value with its prompt, so it reads on its own after a fold', () => {
     expect(
       formatQuestionAnswers(
         { questions: [{ id: 'q1', prompt: 'Pick?', type: 'single', options: ['A', 'B'] }] },
         [{ questionId: 'q1', values: ['A'] }]
       )
-    ).toBe('User answered: A')
+    ).toBe('User answered:\n- Pick?: A')
+  })
+
+  it('puts a multi-line prompt on one line and indents a multi-line answer', () => {
+    expect(
+      formatQuestionAnswers(
+        { questions: [{ id: 'q1', prompt: 'Which\n- option?', type: 'text' }] },
+        [{ questionId: 'q1', values: ['Two things:\n- a\n- b'] }]
+      )
+    ).toBe('User answered:\n- Which - option?: Two things:\n  - a\n  - b')
+  })
+
+  it('joins several values of one question on its line', () => {
+    expect(
+      formatQuestionAnswers(
+        { questions: [{ id: 'q1', prompt: 'Which?', type: 'multi', options: ['A', 'B', 'C'] }] },
+        [{ questionId: 'q1', values: ['A', 'C'] }]
+      )
+    ).toBe('User answered:\n- Which?: A, C')
+  })
+
+  it('returns the skip guidance when no question has a value', () => {
+    expect(
+      formatQuestionAnswers({ questions: [{ id: 'q1', prompt: 'Pick?', type: 'text' }] }, [
+        { questionId: 'q1', values: ['  '] }
+      ])
+    ).toBe(ASK_QUESTION_NO_ANSWER_GUIDANCE)
+  })
+})
+
+describe('askQuestionSummary', () => {
+  it('is one line and marks a cut with an ellipsis', () => {
+    const summary = askQuestionSummary({
+      questions: [{ id: 'q1', prompt: `First line\nsecond ${'x'.repeat(200)}`, type: 'text' }]
+    })
+    expect(summary).not.toContain('\n')
+    expect(summary).toHaveLength(120)
+    expect(summary.endsWith('…')).toBe(true)
+  })
+})
+
+describe('sanitizeQuestionAnswers', () => {
+  const questions: AgentQuestionItem[] = [
+    { id: 'pick', prompt: 'Pick?', type: 'single', options: ['A', 'B'] },
+    { id: 'other', prompt: 'Other?', type: 'single', options: ['A', 'B'], allowCustom: true },
+    { id: 'many', prompt: 'Many?', type: 'multi', options: ['A', 'B', 'C'] },
+    { id: 'yn', prompt: 'OK?', type: 'boolean' },
+    { id: 'free', prompt: 'Notes?', type: 'text' }
+  ]
+
+  it('drops a choice outside the options unless custom answers are allowed', () => {
+    expect(
+      sanitizeQuestionAnswers(questions, [
+        { questionId: 'pick', values: ['Z'] },
+        { questionId: 'other', values: ['Z'] }
+      ])
+    ).toEqual([{ questionId: 'other', values: ['Z'] }])
+  })
+
+  it('folds a boolean to Yes/No and drops anything else', () => {
+    expect(
+      sanitizeQuestionAnswers(questions, [{ questionId: 'yn', values: ['true'] }])
+    ).toEqual([{ questionId: 'yn', values: ['Yes'] }])
+    expect(sanitizeQuestionAnswers(questions, [{ questionId: 'yn', values: ['maybe'] }])).toEqual(
+      []
+    )
+  })
+
+  it('dedupes values, keeps one per non-multi question, and ignores a repeated id', () => {
+    expect(
+      sanitizeQuestionAnswers(questions, [
+        { questionId: 'many', values: ['A', 'A', 'C'] },
+        { questionId: 'free', values: ['one', 'two'] },
+        { questionId: 'free', values: ['three'] }
+      ])
+    ).toEqual([
+      { questionId: 'many', values: ['A', 'C'] },
+      { questionId: 'free', values: ['one'] }
+    ])
+  })
+
+  it('caps a long text answer', () => {
+    const [answer] = sanitizeQuestionAnswers(questions, [
+      { questionId: 'free', values: ['x'.repeat(AGENT_QUESTION_MAX_ANSWER_CHARS + 50)] }
+    ])
+    expect(answer!.values[0]).toHaveLength(AGENT_QUESTION_MAX_ANSWER_CHARS)
+    expect(answer!.values[0]!.endsWith('…')).toBe(true)
+  })
+})
+
+describe('normalizeAskQuestionArgs limits', () => {
+  it('rejects too many questions, too many options, and over-long text', () => {
+    const tooMany = normalizeAskQuestionArgs({
+      questions: Array.from({ length: AGENT_QUESTION_MAX_ITEMS + 1 }, (_, i) => ({
+        id: `q${i}`,
+        prompt: `Q${i}?`,
+        type: 'text'
+      }))
+    })
+    expect(tooMany.ok).toBe(false)
+    if (!tooMany.ok) expect(tooMany.error).toContain(`limit is ${AGENT_QUESTION_MAX_ITEMS}`)
+
+    const options = normalizeAskQuestionArgs({
+      question: 'Pick?',
+      options: Array.from({ length: AGENT_QUESTION_MAX_OPTIONS + 1 }, (_, i) => `O${i}`)
+    })
+    expect(options.ok).toBe(false)
+
+    const longPrompt = normalizeAskQuestionArgs({
+      questions: [{ prompt: 'x'.repeat(AGENT_QUESTION_MAX_PROMPT_CHARS + 1), type: 'text' }]
+    })
+    expect(longPrompt.ok).toBe(false)
+
+    const longTitle = normalizeAskQuestionArgs({
+      title: 't'.repeat(AGENT_QUESTION_MAX_TITLE_CHARS + 1),
+      question: 'Pick?'
+    })
+    expect(longTitle.ok).toBe(false)
   })
 
   it('formats multi-question answers with prompts', () => {

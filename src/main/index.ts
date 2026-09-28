@@ -20,7 +20,7 @@ import { initAutoUpdater, applyUpdateCheckSchedule } from '@main/updater'
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
 import { primeLoginShellPath } from '@main/agent/mcp/binaries'
-import { resolveEffectiveMcpServers, repairMissingPackageDependencies, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
+import { resolveEffectiveMcpServers, repairMissingPackageDependencies, installDefaultBundledPackages, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
 import { getSettings } from '@main/settings/settings'
 import { migrateLegacySessions } from '@main/storage/migrations/migrateSessions'
 import { migrateWorkspaceRuns } from './storage/migrateWorkspaceRuns'
@@ -36,7 +36,8 @@ import {
 } from '@main/agent/state'
 import { flushBeforeQuit, type EditorFlushStatus } from '@main/quitFlush'
 import { shutdownTokenizerPool } from '@main/agent/context/tokenizerPool'
-import { getDictationUtilityClient } from '@main/dictation/whisperUtilityClient'
+import { shutdownDictationUtilityClients } from '@main/dictation/whisperUtilityClient'
+import { closeAllLiveTakes } from '@main/dictation/liveOpenAI'
 import {
   getWorkspaces,
   interruptOrphanRunsForWorkspaces
@@ -332,6 +333,14 @@ if (!gotLock) {
           removed: orphan.removed
         })
       }
+      // Built-ins first, so the dependency repair below also covers them.
+      const builtIns = await installDefaultBundledPackages()
+      if (builtIns.length > 0) {
+        logger.info('Installed built-in marketplace packages', {
+          scope: 'main',
+          packages: builtIns
+        })
+      }
       // Before the MCP sync: a dependency restored here may itself be an MCP
       // package that then needs a settings entry.
       const restored = await repairMissingPackageDependencies()
@@ -454,7 +463,8 @@ if (!gotLock) {
         // stopped.
         ['egress ledger', flushEgressRunLedgers()],
         ['MCP servers', shutdownMcpServers()],
-        ['dictation utility', getDictationUtilityClient().shutdown()]
+        ['dictation utility', shutdownDictationUtilityClients()],
+        ['dictation live sessions', Promise.resolve(closeAllLiveTakes())]
       ]
       for (const [label, task] of shutdowns) {
         try {

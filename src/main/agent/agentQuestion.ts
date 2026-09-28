@@ -102,7 +102,8 @@ export function pendingQuestionRunId(requestId: string): string | undefined {
 
 /**
  * Preload invokes when AgentQuestionRequestSchema fails — rejects the pending
- * ask_question wait immediately instead of timing out after ~15 minutes.
+ * ask_question wait immediately; with no answer timeout it would otherwise
+ * wait until the run is cancelled.
  * Looks up by requestId when present; otherwise rejects pending for runId.
  */
 export function rejectAgentQuestion(payload: {
@@ -164,13 +165,32 @@ export function cancelPendingQuestions(runId: string, invokeId?: number): void {
   dismissLifecycleNotification(needsYouDedupeKey(runId))
 }
 
-/** Dismiss open question cards without aborting the run (empty answers, same as timeout). */
+/** The user sent a message (Send now) while the question waited — see ASK_QUESTION_SUPERSEDED_GUIDANCE. */
+export class AgentQuestionSupersededError extends Error {
+  constructor() {
+    super('Question superseded by a user message')
+    this.name = 'AgentQuestionSupersededError'
+  }
+}
+
+export function isAgentQuestionSupersededError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AgentQuestionSupersededError'
+}
+
+/**
+ * Close open question cards without aborting the run, because the user sent a
+ * message instead of answering. The tool settles with the superseded guidance,
+ * never as a skip, so the model reads the message as the likely answer.
+ */
 export function dismissPendingQuestions(runId: string, invokeId?: number): void {
+  let dismissed = false
   for (const [, entry] of pending) {
     if (entry.runId !== runId) continue
     if (invokeId !== undefined && entry.invokeId !== invokeId) continue
-    entry.resolve([])
+    entry.cancel(new AgentQuestionSupersededError())
+    dismissed = true
   }
+  if (dismissed) dismissLifecycleNotification(needsYouDedupeKey(runId))
 }
 
 export function askQuestionThroughRenderer(
@@ -194,7 +214,8 @@ export function askQuestionThroughRenderer(
 
   return new Promise<AgentQuestionAnswer[]>((resolve, reject) => {
     // No answer timeout (run-stopping cap removed — user decision): the
-    // question waits indefinitely for the user; abort/cancel still applies.
+    // question waits indefinitely for the user; abort/cancel still applies,
+    // and Settings → "Questions while unattended" → Skip is the opt-out.
     let heartbeatId: ReturnType<typeof setInterval> | undefined
     let settled = false
     const clearWaiters = (): void => {
@@ -222,6 +243,7 @@ export function askQuestionThroughRenderer(
     }
     function onAbort(): void {
       cancel(abortQuestionError())
+      dismissLifecycleNotification(needsYouDedupeKey(request.runId))
     }
     if (signal.aborted) {
       reject(abortQuestionError())

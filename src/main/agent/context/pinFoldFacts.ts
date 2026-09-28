@@ -43,6 +43,16 @@ function uniqueStrings(values: readonly string[], cap: number): string[] {
   return out
 }
 
+/**
+ * uniqueStrings for decisions, keeping the newest: a later answer can replace
+ * an earlier one, so on overflow the oldest go. A repeat moves to its latest
+ * position. Input is oldest-first, and so is the output.
+ */
+function newestUniqueStrings(values: readonly string[], cap: number): string[] {
+  const newestFirst = uniqueStrings([...values].reverse(), cap)
+  return newestFirst.reverse()
+}
+
 function uniquePaths(values: readonly string[], cap: number): string[] {
   const out: string[] = []
   const seen = new Set<string>()
@@ -92,7 +102,7 @@ export function foldFactsToPinned(facts: FoldFacts): PinnedFoldFacts {
   return {
     files: uniquePaths([...wroteFiles, ...inspect], CAPS.files),
     wroteFiles,
-    decisions: uniqueStrings(facts.decisions, CAPS.decisions),
+    decisions: newestUniqueStrings(facts.decisions, CAPS.decisions),
     todos: uniqueStrings(facts.todos, CAPS.todos),
     doneWhen: uniqueStrings(facts.doneWhen, CAPS.doneWhen),
     constraints: uniqueStrings(facts.constraints ?? [], CAPS.constraints),
@@ -107,7 +117,7 @@ export function mergeFoldFacts(base: FoldFacts | undefined, extra: FoldFacts): F
   return {
     files: uniquePaths([...left.files, ...extra.files], CAPS.files),
     wroteFiles: uniquePaths([...left.wroteFiles, ...extra.wroteFiles], CAPS.wroteFiles),
-    decisions: uniqueStrings([...left.decisions, ...extra.decisions], CAPS.decisions),
+    decisions: newestUniqueStrings([...left.decisions, ...extra.decisions], CAPS.decisions),
     todos: uniqueStrings([...left.todos, ...extra.todos], CAPS.todos),
     doneWhen: uniqueStrings([...left.doneWhen, ...extra.doneWhen], CAPS.doneWhen),
     constraints: uniqueStrings(

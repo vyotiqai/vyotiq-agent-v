@@ -85,6 +85,24 @@ export async function readWorkspaceFileListCached(
   return entry.files
 }
 
+/**
+ * The list when there already is one, without waiting for a walk: null
+ * starts one (or leaves the one in flight) for next time. For callers that
+ * must not stall on a cold workspace, like a dictation request.
+ */
+export function peekWorkspaceFileListCached(workspacePath: string): readonly string[] | null {
+  const key = cacheKey(workspacePath)
+  const entry = entries.get(key)
+  if (entry?.files) {
+    if (!entry.walk && Date.now() - entry.walkedAt >= FILE_LIST_REVALIDATE_AFTER_MS) {
+      void startWalk(key, entry, workspacePath).catch(() => undefined)
+    }
+    return entry.files
+  }
+  void readWorkspaceFileListCached(workspacePath).catch(() => undefined)
+  return null
+}
+
 /** Drop one workspace's list (every list, without a path) so its next query walks. */
 export function invalidateWorkspaceFileListCache(workspacePath?: string): void {
   if (workspacePath == null) entries.clear()

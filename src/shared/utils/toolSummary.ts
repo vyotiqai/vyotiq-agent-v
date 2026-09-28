@@ -296,14 +296,19 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
     if (typeof promptName === 'string' && promptName.trim()) return truncate(promptName)
   }
   if (name === 'ask_question') {
+    // One line, like askQuestionSummary, so the row reads the same before and after it settles.
+    const flat = (text: string): string => truncate(text.replace(/\s+/g, ' '))
     const title = args.title
-    if (typeof title === 'string' && title.trim()) return truncate(title)
+    if (typeof title === 'string' && title.trim()) return flat(title)
     let questions = args.questions
-    // Mirror validate coerce: stringified / unclosed questions[] via parseJsonish.
+    // Mirror validate coerce: stringified / unclosed questions[] via parseJsonish,
+    // and a lone question object for questions[].
     if (typeof questions === 'string') {
       const parsed = parseJsonish(questions)
-      if (Array.isArray(parsed)) questions = parsed
-      else if (parsed !== null && typeof parsed === 'object') questions = [parsed]
+      if (parsed !== undefined) questions = parsed
+    }
+    if (questions !== null && typeof questions === 'object' && !Array.isArray(questions)) {
+      questions = [questions]
     }
     if (Array.isArray(questions) && questions.length > 0) {
       if (questions.length === 1) {
@@ -314,14 +319,14 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
             : typeof item?.question === 'string' && item.question.trim()
               ? item.question
               : ''
-        if (prompt) return truncate(prompt)
+        if (prompt) return flat(prompt)
       }
       return `${questions.length} questions`
     }
     const question = args.question
-    if (typeof question === 'string' && question.trim()) return truncate(question)
+    if (typeof question === 'string' && question.trim()) return flat(question)
     const prompt = args.prompt
-    if (typeof prompt === 'string' && prompt.trim()) return truncate(prompt)
+    if (typeof prompt === 'string' && prompt.trim()) return flat(prompt)
   }
   if (name === 'switch_mode') {
     const mode = args.mode
@@ -441,7 +446,7 @@ export function summarizeToolArgs(name: string, args: string | undefined): strin
               : typeof item?.question === 'string' && item.question.trim()
                 ? item.question
                 : ''
-          if (prompt) return truncate(prompt)
+          if (prompt) return truncate(prompt.replace(/\s+/g, ' '))
         }
         return `${arr.length} questions`
       }

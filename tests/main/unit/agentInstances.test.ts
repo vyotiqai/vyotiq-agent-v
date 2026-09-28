@@ -40,6 +40,7 @@ import {
   emitAgentInstanceUpdate,
   handleInlineInstanceFinished,
   mergeAgentInstanceBranch,
+  noteInstanceChildEvent,
   noteInlineInstanceDeniedTool,
   notifyChildTerminal,
   pullChildRun,
@@ -526,6 +527,82 @@ describe('agentInstances', () => {
     clearRunAbort(child.runId)
   })
 
+  it("tells the parent what a running child is doing, at most once a second, and bills its usage when it ends", async () => {
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'progress',
+      outcome: 'progress outcome',
+      subTasks: ['progress step'],
+      doneWhen: 'progress complete',
+      pathScope: ['src'],
+      stepId: 's3'
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    type Sent = { type: string; phase?: string; step?: number; activity?: string; stepId?: string }
+    const progress = (): Sent[] =>
+      mainWindowSend.mock.calls
+        .map((call) => call[1] as Sent)
+        .filter((ev) => ev?.type === 'agent_instance_update' && ev.phase === 'started' && ev.step !== undefined)
+    mainWindowSend.mockClear()
+    vi.useFakeTimers()
+    try {
+      noteInstanceChildEvent(child.runId, {
+        type: 'context_usage',
+        runId: child.runId,
+        step: 2,
+        estimatedTokens: 1,
+        contextWindow: 10,
+        compactionTrigger: 5,
+        source: 'estimate'
+      })
+      expect(progress()).toEqual([expect.objectContaining({ step: 2, activity: 'Thinking', stepId: 's3' })])
+      noteInstanceChildEvent(child.runId, { type: 'tool_start', runId: child.runId, toolCallId: 'c1', name: 'read', summary: 'src/a.ts' })
+      noteInstanceChildEvent(child.runId, {
+        type: 'step_usage',
+        runId: child.runId,
+        step: 2,
+        inputTokens: 1_000,
+        cachedInputTokens: 600,
+        outputTokens: 50
+      })
+      // Held until a second has passed since the last one, then sent as one.
+      expect(progress()).toHaveLength(1)
+      vi.advanceTimersByTime(1_000)
+      expect(progress()).toHaveLength(2)
+      expect(progress()[1]).toMatchObject({ step: 2, activity: 'Reading src/a.ts' })
+    } finally {
+      vi.useRealTimers()
+    }
+    notifyChildTerminal(child.runId, 'done', 'ok')
+    await flushEventAppends()
+    const terminal = readFileSync(join(resolveRunDir(workspacePath, parentRunId), 'events.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { event: { type: string; phase?: string; stepId?: string; usage?: { outputTokens: number; billedInputTokens: number } } })
+      .find((row) => row.event.type === 'agent_instance_update' && row.event.phase === 'done')
+    expect(terminal?.event.stepId).toBe('s3')
+    expect(terminal?.event.usage).toMatchObject({ outputTokens: 50, billedInputTokens: 1_000 })
+    clearRunAbort(child.runId)
+  })
+
+  it('tells the parent when a child it asked a worktree for runs shared, and names a step_id the list lacks', async () => {
+    const { instanceHandlers } = await import('@main/agent/tools/instanceTools')
+    const result = await instanceHandlers.spawn_agent_instance(
+      workspacePath,
+      { goal: 'g', outcome: 'o', sub_tasks: ['t'], done_when: 'd', path_scope: ['src'], step_id: 's1' },
+      new AbortController().signal,
+      { runId: parentRunId, runDir: resolveRunDir(workspacePath, parentRunId) } as Parameters<typeof instanceHandlers.spawn_agent_instance>[3]
+    )
+    expect(result.ok).toBe(true)
+    // Not a git repository here: the child runs in path_scope, and says so.
+    expect(result.content).toContain('Note: No worktree (Not a git repository)')
+    expect(result.content).toContain('step_id "s1" names no todo in this run\'s list (the list is empty)')
+    const runId = /run_id: (\S+)/.exec(result.content ?? '')?.[1]
+    if (runId) clearRunAbort(runId)
+  })
+
   it('await does not hang when child is already terminal on disk', async () => {
     const child = await spawnAgentInstance({
       parentRunId,
@@ -849,15 +926,34 @@ describe('agentInstances', () => {
       inlineInstance: true
     })
     const runDir = resolveRunDir(workspacePath, childRunId)
-    const huge = 'x'.repeat(9_000)
+    const huge = 'x'.repeat(23_000)
     writeFileSync(
       join(runDir, 'messages.jsonl'),
       `${JSON.stringify({ role: 'user', content: 'go' })}\n${JSON.stringify({ role: 'assistant', content: huge })}\n`
     )
     const summary = await summarizeChildRunAsync(workspacePath, childRunId)
     expect(summary).toContain('[...truncated')
-    expect(summary.length).toBeLessThanOrEqual(6_100)
-    expect(summary.endsWith('[...truncated 3000 chars]')).toBe(true)
+    expect(summary.length).toBeLessThanOrEqual(20_200)
+    // The cut says where the rest is, and the pull view returns it whole.
+    expect(summary.endsWith('[...truncated 3000 chars — pull_agent_instance with view "summary" returns the rest]')).toBe(true)
+    const pulled = await pullChildRun(workspacePath, childRunId, 'summary')
+    expect(pulled).not.toContain('[...truncated')
+    expect(pulled).toContain(huge)
+  })
+
+  it('keeps a report the old 6,000-char cap cut short whole', async () => {
+    const childRunId = `sumfull-${Date.now()}`
+    createRun(workspacePath, childRunId, 'summary full', {
+      mode: 'agent',
+      parentRunId,
+      inlineInstance: true
+    })
+    const report = `# Map\n\n${'y'.repeat(9_000)}`
+    writeFileSync(
+      join(resolveRunDir(workspacePath, childRunId), 'messages.jsonl'),
+      `${JSON.stringify({ role: 'user', content: 'go' })}\n${JSON.stringify({ role: 'assistant', content: report })}\n`
+    )
+    expect(await summarizeChildRunAsync(workspacePath, childRunId)).toBe(report)
   })
 
   it('tail shows only the newest 40 messages in original order with true counts', async () => {
@@ -1382,6 +1478,53 @@ describe('agentInstances worktree', () => {
       expect(status?.worktreeBranch).toBeUndefined()
       clearRunAbort(shared.runId)
     }
+  })
+
+  it('runs a read-only child in Ask mode in this workspace, with no worktree and no path_scope', async () => {
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'read only',
+      outcome: 'a report',
+      subTasks: ['read'],
+      doneWhen: 'reported',
+      readOnly: true,
+      stepId: 's2'
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    const status = loadStatus(resolveRunDir(workspacePath, child.runId))
+    expect(status?.mode).toBe('ask')
+    expect(status?.worktreePath).toBeUndefined()
+    expect(child.worktreeBranch).toBeUndefined()
+    await flushEventAppends()
+    const started = readFileSync(join(resolveRunDir(workspacePath, parentRunId), 'events.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { event: { type: string; instanceRunId?: string; stepId?: string; at?: string } })
+      .find((row) => row.event.type === 'agent_instance_update' && row.event.instanceRunId === child.runId)
+    expect(started?.event.stepId).toBe('s2')
+    expect(typeof started?.event.at).toBe('string')
+    clearRunAbort(child.runId)
+  })
+
+  it("points a worktree child's brief at its own checkout, not the parent's root", async () => {
+    vi.mocked(startAgentRunInBackground).mockClear()
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: `Map the code at workspace root ${resolve(workspacePath)}.`,
+      outcome: 'a map',
+      subTasks: ['read'],
+      doneWhen: 'mapped'
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    const worktreePath = loadStatus(resolveRunDir(workspacePath, child.runId))!.worktreePath!
+    const prompt = String(vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0].agentInput.messages?.[0]?.content)
+    expect(prompt).toContain(`workspace root ${worktreePath}.`)
+    expect(prompt).not.toContain(resolve(workspacePath) + '.')
+    clearRunAbort(child.runId)
   })
 
   it('deleting a done instance run deletes the branch it kept', async () => {

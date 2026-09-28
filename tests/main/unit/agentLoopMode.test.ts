@@ -313,6 +313,39 @@ describe('runAgent mode and API key', () => {
     expect(JSON.stringify(second.messages)).toMatch(/Plan published but shallow/)
   })
 
+  it('does not send a finished run back to polish its plan (run 528a737f)', async () => {
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'The answer, in three lines.' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+
+    const runId = 'plan-shallow-but-done'
+    const runDir = createRun(workspace, runId, 'answer it', 'agent')
+    writeFileSync(
+      join(runDir, 'plan.md'),
+      ['# Thin plan', '', '## Goal', '', 'Ship it.', '', '## Steps', '', '1. Do it.', '', '## Done when', '', '- [ ] Done.'].join('\n')
+    )
+    // Every done-when check marked: the plan is history, the answer stands.
+    writeFileSync(
+      join(runDir, 'checks.json'),
+      JSON.stringify({
+        checks: [{ id: 'c1', text: 'Done.', source: 'plan', verdict: 'met', createdAt: new Date().toISOString(), evidence: 'seen', markedAt: new Date().toISOString() }],
+        lastId: 1
+      })
+    )
+
+    for await (const _ of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'answer it' }],
+      workspacePath: workspace,
+      mode: 'agent'
+    })) {
+      // drain
+    }
+
+    expect(streamChat).toHaveBeenCalledTimes(1)
+  })
+
   it('finishes a text-only step when plan.md is already ready', async () => {
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
       yield { type: 'text', text: 'Plan is ready for review.' }

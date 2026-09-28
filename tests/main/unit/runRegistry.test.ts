@@ -356,7 +356,9 @@ describe('runRegistry cancel clears pending gates', () => {
     expect(streamSignalFor(runId, handle.controller.signal).aborted).toBe(true)
     expect(handle.controller.signal.aborted).toBe(false)
     expect(listPendingAgentQuestions(runId)).toHaveLength(0)
-    await expect(pending).resolves.toEqual([])
+    // Settled as superseded, not as a skip: the handler tells the model the
+    // follow-up is the likely answer (ASK_QUESTION_SUPERSEDED_GUIDANCE).
+    await expect(pending).rejects.toMatchObject({ name: 'AgentQuestionSupersededError' })
     resetAgentQuestionForTests()
   })
 

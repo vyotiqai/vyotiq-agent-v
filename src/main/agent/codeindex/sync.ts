@@ -272,6 +272,8 @@ export async function syncCodeIndex(
     seen.add(rel)
     indexed++
     report(onProgress, progressUpdate())
+    // Commits leave the WAL to grow; it is copied back off the main thread.
+    await store.checkpointIfDue()
   }
 
   let removed = 0
@@ -315,6 +317,7 @@ export async function syncCodeIndex(
   }
 
   store.setMeta('lastIndexedAt', new Date().toISOString())
+  if (indexed > 0 || removed > 0) await store.checkpointOffThread()
   report(
     onProgress,
     {

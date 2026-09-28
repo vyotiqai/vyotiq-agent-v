@@ -3,6 +3,8 @@ import {
   askQuestionThroughRenderer,
   AGENT_QUESTION_HEARTBEAT_MS,
   cancelPendingQuestions,
+  dismissPendingQuestions,
+  isAgentQuestionSupersededError,
   listPendingAgentQuestions,
   registerQuestionSender,
   resetAgentQuestionForTests,
@@ -53,6 +55,18 @@ describe('agentQuestion', () => {
     await Promise.resolve()
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('settles a prompt as superseded when the user sends a message instead', async () => {
+    registerQuestionSender('run-1', () => {})
+    const pending = askQuestionThroughRenderer(REQUEST, new AbortController().signal, 7)
+    await Promise.resolve()
+    // Another turn's prompt is left alone.
+    dismissPendingQuestions('run-1', 8)
+    expect(listPendingAgentQuestions('run-1')).toHaveLength(1)
+    dismissPendingQuestions('run-1', 7)
+    await expect(pending).rejects.toSatisfy(isAgentQuestionSupersededError)
+    expect(listPendingAgentQuestions('run-1')).toHaveLength(0)
   })
 
   it('releases prompts left over when a run ends', async () => {

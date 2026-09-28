@@ -7,7 +7,8 @@ function themeTokens(css: string, blockRe: RegExp): Record<string, string> {
   const m = css.match(blockRe)
   if (!m) return {}
   const out: Record<string, string> = {}
-  for (const line of m[1].split(';')) {
+  // A token written right after a comment would otherwise start with `/*` and be skipped.
+  for (const line of m[1].replace(/\/\*[\s\S]*?\*\//g, '').split(';')) {
     const trimmed = line.trim()
     if (!trimmed.startsWith('--')) continue
     const idx = trimmed.indexOf(':')
@@ -98,6 +99,25 @@ function expectAaOnPair(
   expect(contrastRatio(fg, bg), label).toBeGreaterThanOrEqual(minRatio)
 }
 
+/** `color-mix(in srgb, fg p, transparent)` painted over an opaque backdrop. */
+function softOver(fg: string, backdrop: string, p: number): string {
+  const channel = (hex: string, at: number): number => parseInt(hex.replace('#', '').slice(at, at + 2), 16)
+  return `#${[0, 2, 4]
+    .map((at) => Math.round(channel(fg, at) * p + channel(backdrop, at) * (1 - p)))
+    .map((c) => c.toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
+/** Every plane text can sit on: resting panes, then the hover and selected fills. */
+const PLANES = [
+  '--vy-bg',
+  '--vy-card',
+  '--vy-sunken',
+  '--vy-chrome',
+  '--vy-surface',
+  '--vy-surface-2'
+] as const
+
 describe('skin contrast smoke', () => {
   const css = readFileSync(
     join(process.cwd(), 'src/renderer/src/styles.css'),
@@ -139,6 +159,46 @@ describe('skin contrast smoke', () => {
       it(`${skin} ${theme} keeps focus indicator visible on bg`, () => {
         const tokens = mergedSkinTokens(css, skin, theme)
         expectAaOnBg(tokens, '--vy-focus', `${skin} ${theme} focus`, 3)
+      })
+
+      // Muted and the status hues label selected rows and hover fills, not just the page.
+      it(`${skin} ${theme} keeps muted, status and accent text readable on every plane`, () => {
+        const tokens = mergedSkinTokens(css, skin, theme)
+        for (const fg of ['--vy-muted', '--vy-success', '--vy-warning', '--vy-danger', '--vy-accent']) {
+          for (const plane of PLANES) {
+            expectAaOnPair(tokens, fg, plane, `${skin} ${theme} ${fg} on ${plane}`)
+          }
+        }
+      })
+
+      it(`${skin} ${theme} keeps status and accent text readable on their own -soft tint`, () => {
+        const tokens = mergedSkinTokens(css, skin, theme)
+        const bg = resolveToken(tokens, '--vy-bg')
+        const mix = parseFloat(resolveToken(tokens, '--vy-soft-mix')) / 100
+        for (const role of ['--vy-success', '--vy-warning', '--vy-danger', '--vy-accent']) {
+          const fg = resolveToken(tokens, role)
+          expect(contrastRatio(fg, softOver(fg, bg, mix)), `${skin} ${theme} ${role} on its -soft`)
+            .toBeGreaterThanOrEqual(4.5)
+        }
+      })
+
+      // Tertiary carries step counts, hashes and section labels at 11px. It clears AA on
+      // the page; on hover and selected fills it stays above the 3:1 non-text floor.
+      it(`${skin} ${theme} keeps tertiary readable`, () => {
+        const tokens = mergedSkinTokens(css, skin, theme)
+        expectAaOnBg(tokens, '--vy-tertiary', `${skin} ${theme} tertiary`)
+        for (const plane of PLANES) {
+          expectAaOnPair(tokens, '--vy-tertiary', plane, `${skin} ${theme} tertiary on ${plane}`, 3)
+        }
+      })
+
+      it(`${skin} ${theme} keeps tertiary a step quieter than muted`, () => {
+        const tokens = mergedSkinTokens(css, skin, theme)
+        const bg = resolveToken(tokens, '--vy-bg')
+        expect(
+          contrastRatio(resolveToken(tokens, '--vy-muted'), bg),
+          `${skin} ${theme} muted vs tertiary`
+        ).toBeGreaterThan(contrastRatio(resolveToken(tokens, '--vy-tertiary'), bg))
       })
     }
   }

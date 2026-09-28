@@ -67,7 +67,7 @@ describe('default skin baseline', () => {
     expectToken('--vy-surface-2', '#e3e9ee')
     expectToken('--vy-border', '#dde4ea')
     expectToken('--vy-fg', '#1a252d')
-    expectToken('--vy-muted', '#5d6b76')
+    expectToken('--vy-muted', '#5c6a75')
     expectToken('--vy-accent', '#00638e')
   })
 

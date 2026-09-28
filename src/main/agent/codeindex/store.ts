@@ -10,8 +10,12 @@ import type {
 } from './types'
 import { CODE_INDEX_SCHEMA_VERSION } from './types'
 import { codeindexDbPath, codeindexRoot } from '../indexStoragePaths'
+import { checkpointInWorker } from './walCheckpoint'
 
 export { codeindexRoot, codeindexDbPath } from '../indexStoragePaths'
+
+/** Longest an index job writes between WAL checkpoints; see checkpointIfDue. */
+const CHECKPOINT_INTERVAL_MS = 2_000
 
 /**
  * One SQLite store per workspace: a `files` table for incremental sync and
@@ -25,6 +29,9 @@ export class CodeIndexStore {
   readonly dbPath: string
   /** Lazily prepared statements, cached per SQL text and reused across calls. */
   private stmtCache = new Map<string, StatementSync>()
+  /** total_changes() and the time at the last WAL checkpoint; see checkpointOffThread. */
+  private changesAtCheckpoint = 0
+  private lastCheckpointAt = Date.now()
 
   private constructor(db: DatabaseSync, dbPath: string) {
     this.db = db
@@ -44,6 +51,8 @@ export class CodeIndexStore {
     db.exec('PRAGMA journal_mode = WAL;')
     db.exec('PRAGMA synchronous = NORMAL;')
     db.exec('PRAGMA busy_timeout = 5000;')
+    // Commits never checkpoint here; see checkpointOffThread.
+    db.exec('PRAGMA wal_autocheckpoint = 0;')
     migrate(db)
     return new CodeIndexStore(db, dbPath)
   }
@@ -71,6 +80,46 @@ export class CodeIndexStore {
       /* already closed */
     }
     this.stmtCache.clear()
+  }
+
+  /**
+   * Copy the WAL back into the database from a worker thread. By default
+   * SQLite does it inside whichever commit crosses 1,000 pages: every page
+   * written back and fsynced on the main thread, which held it for one to
+   * several seconds every few files a sync reindexed — a reindexed file writes
+   * ~150 pages. Commits here never checkpoint (wal_autocheckpoint = 0); the
+   * index jobs call this between their writes and await it, with nothing else
+   * writing. Nothing written since the last one, nothing to do. If the worker
+   * cannot, it is done here, as SQLite would have.
+   */
+  async checkpointOffThread(): Promise<void> {
+    if (this.dbPath === ':memory:') return
+    let changes: number
+    try {
+      changes = (this.prepareCached('SELECT total_changes() AS n').get() as { n: number }).n
+    } catch {
+      return // closed meanwhile: closing checkpointed it
+    }
+    if (changes === this.changesAtCheckpoint) return
+    if (!(await checkpointInWorker(this.dbPath))) {
+      try {
+        this.db.prepare('PRAGMA wal_checkpoint(PASSIVE)').get()
+      } catch {
+        /* closed meanwhile */
+      }
+    }
+    this.changesAtCheckpoint = changes
+    this.lastCheckpointAt = Date.now()
+  }
+
+  /**
+   * checkpointOffThread once CHECKPOINT_INTERVAL_MS has passed since the last
+   * one, for a job to call after each write: about SQLite's own cadence on a
+   * busy sync, without a worker per handful of small files.
+   */
+  async checkpointIfDue(): Promise<void> {
+    if (Date.now() - this.lastCheckpointAt < CHECKPOINT_INTERVAL_MS) return
+    await this.checkpointOffThread()
   }
 
   getMeta(key: string): string | null {
@@ -126,8 +175,11 @@ export class CodeIndexStore {
   private deleteFile(path: string): void {
     // Set-based FTS cleanup, executed BEFORE the chunks delete: one DELETE
     // over the path's chunk ids instead of a SELECT + per-id DELETE (N+1).
+    // By rowid, which is the chunk id: chunk_id is UNINDEXED, so matching on
+    // it read the whole FTS table for every file — 30 ms a file warm, most of
+    // a second cold, all of it on the main thread.
     this.prepareCached(
-      'DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM chunks WHERE path = ?)'
+      'DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE path = ?)'
     ).run(path)
     // Dense rows share the chunk ids, so deleting by path is a single set-based
     // DELETE too (dense_chunks carries its own path column).
@@ -185,7 +237,7 @@ export class CodeIndexStore {
          VALUES(?, ?, ?, ?, ?, ?)`
       )
       const insertFts = this.prepareCached(
-        `INSERT INTO chunks_fts(chunk_id, path, name, body) VALUES(?, ?, ?, ?)`
+        `INSERT INTO chunks_fts(rowid, chunk_id, path, name, body) VALUES(?, ?, ?, ?, ?)`
       )
       const insertDense = this.prepareCached(
         `INSERT INTO dense_chunks(id, path, start_line, end_line, kind, name, parent_name, text)
@@ -194,7 +246,7 @@ export class CodeIndexStore {
       for (const c of chunks) {
         const info = insertChunk.run(path, c.startLine, c.endLine, c.kind, c.name, c.parentName ?? null)
         const id = Number(info.lastInsertRowid)
-        insertFts.run(id, path, c.name, c.ftsBody)
+        insertFts.run(id, id, path, c.name, c.ftsBody)
         // Same transaction, same id: chunks + dense rows commit or roll back together.
         if (c.text !== undefined) {
           insertDense.run(id, path, c.startLine, c.endLine, c.kind, c.name, c.parentName ?? null, c.text)
@@ -317,7 +369,9 @@ export class CodeIndexStore {
 
   /**
    * Dense (semantic) leg: rows not yet vectorized, id order, capped at `limit`.
-   * Backed by the partial vec-NULL index.
+   * Backed by the partial vec-NULL index, named outright: left to choose, the
+   * planner walks the table in id order to spare a sort, reading every row's
+   * text on the way — tens of ms per batch, on the main thread.
    */
   pendingDenseBatch(limit: number): {
     id: number
@@ -328,7 +382,8 @@ export class CodeIndexStore {
   }[] {
     const rows = this.prepareCached(
       `SELECT id, path, name, parent_name AS parentName, text
-       FROM dense_chunks WHERE vec IS NULL ORDER BY id LIMIT ?`
+       FROM dense_chunks INDEXED BY idx_dense_chunks_vec_pending
+       WHERE vec IS NULL ORDER BY id LIMIT ?`
     ).all(limit) as {
       id: number
       path: string
@@ -365,32 +420,50 @@ export class CodeIndexStore {
     } | undefined
     return row ?? null
   }
-  /**
-   * Store the dense vector for a dense row. Validate the dimension — reject a
-   * vector whose length contradicts the configured `denseDim` meta or an already
-   * stored vector for the same row — a silent mismatch would poison cosine
-   * search.
-   */
+  /** Store the dense vector for one dense row; see setDenseVectors. */
   setDenseVector(id: number, vec: Float32Array): void {
+    this.setDenseVectors([{ id, vec }])
+  }
+
+  /**
+   * Store dense vectors. Validate the dimension — reject a vector whose length
+   * contradicts the configured `denseDim` meta or an already stored vector for
+   * the same row — a silent mismatch would poison cosine search. A batch is
+   * one transaction, so one commit: a row at a time was a commit per vector,
+   * and now and then a WAL checkpoint, on the main thread. A rejected vector
+   * writes none of its batch.
+   */
+  setDenseVectors(rows: readonly { id: number; vec: Float32Array }[]): void {
+    if (rows.length === 0) return
     const dimMeta = this.getMeta('denseDim')
-    if (dimMeta != null) {
-      const dim = Number(dimMeta)
-      if (Number.isInteger(dim) && dim > 0 && vec.length !== dim) {
+    const dim = dimMeta == null ? null : Number(dimMeta)
+    const existingDim = this.prepareCached(`SELECT length(vec) / 4 AS dim FROM dense_chunks WHERE id = ?`)
+    for (const { id, vec } of rows) {
+      if (dim != null && Number.isInteger(dim) && dim > 0 && vec.length !== dim) {
         throw new Error(
           `setDenseVector: vector length ${vec.length} does not match configured dense dimension ${dim}`
         )
       }
+      const existing = existingDim.get(id) as { dim: number | null } | undefined
+      if (existing?.dim != null && existing.dim > 0 && vec.length !== existing.dim) {
+        throw new Error(
+          `setDenseVector: vector length ${vec.length} does not match existing vector length ${existing.dim} for dense row ${id}`
+        )
+      }
     }
-    const existing = this.prepareCached(
-      `SELECT length(vec) / 4 AS dim FROM dense_chunks WHERE id = ?`
-    ).get(id) as { dim: number | null } | undefined
-    if (existing?.dim != null && existing.dim > 0 && vec.length !== existing.dim) {
-      throw new Error(
-        `setDenseVector: vector length ${vec.length} does not match existing vector length ${existing.dim} for dense row ${id}`
-      )
+    const update = this.prepareCached(`UPDATE dense_chunks SET vec = ? WHERE id = ?`)
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      for (const { id, vec } of rows) update.run(encodeDenseVec(vec), id)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        /* ignore */
+      }
+      throw err
     }
-    const blob = encodeDenseVec(vec)
-    this.prepareCached(`UPDATE dense_chunks SET vec = ? WHERE id = ?`).run(blob, id)
   }
 
   /**
@@ -408,14 +481,17 @@ export class CodeIndexStore {
     }
   }
 
-  /** Total dense rows and how many carry a vector — one SELECT, SUM/CASE. */
+  /**
+   * Total dense rows and how many carry a vector. Two counts over indexes: one
+   * SUM/CASE over the rows read every chunk's text off disk — tens of ms, and
+   * the vector job asks after every batch.
+   */
   denseStatus(): DenseStatus {
-    const row = this.prepareCached(
-      `SELECT COUNT(*) AS total,
-              COALESCE(SUM(CASE WHEN vec IS NOT NULL THEN 1 ELSE 0 END), 0) AS vectorized
-       FROM dense_chunks`
-    ).get() as { total: number; vectorized: number }
-    return { total: row.total, vectorized: row.vectorized }
+    const total = (this.prepareCached('SELECT COUNT(*) AS c FROM dense_chunks').get() as { c: number }).c
+    const pending = (
+      this.prepareCached('SELECT COUNT(*) AS c FROM dense_chunks WHERE vec IS NULL').get() as { c: number }
+    ).c
+    return { total, vectorized: total - pending }
   }
 
   /**
@@ -506,6 +582,21 @@ function schemaColumnsMatch(db: DatabaseSync): boolean {
   return true
 }
 
+/**
+ * Rows leave the FTS table by rowid, which is right only while each row's
+ * rowid is its chunk id. Inserts set it; rows written before they did got it
+ * anyway, since FTS5 and `chunks` each hand out the next id and were written
+ * in lockstep. A store is checked once, and one that is off is rebuilt.
+ */
+function ftsRowidsAreChunkIds(db: DatabaseSync): boolean {
+  const marked = db.prepare(`SELECT value FROM meta WHERE key = 'ftsRowids'`).get() as
+    | { value: string }
+    | undefined
+  if (marked?.value === 'chunkId') return true
+  if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chunks_fts'`).get()) return true
+  return db.prepare('SELECT 1 FROM chunks_fts WHERE rowid != chunk_id LIMIT 1').get() === undefined
+}
+
 function migrate(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS meta (
@@ -519,7 +610,7 @@ function migrate(db: DatabaseSync): void {
       | undefined
     return row?.value ?? null
   })()
-  if (version !== CODE_INDEX_SCHEMA_VERSION || !schemaColumnsMatch(db)) {
+  if (version !== CODE_INDEX_SCHEMA_VERSION || !schemaColumnsMatch(db) || !ftsRowidsAreChunkIds(db)) {
     // Foreign or structurally legacy schema (e.g. the old embedding store whose
     // meta row claims our version) — rebuild from scratch.
     db.exec(
@@ -570,6 +661,11 @@ function migrate(db: DatabaseSync): void {
     `INSERT INTO meta(key, value) VALUES('schemaVersion', ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
   ).run(CODE_INDEX_SCHEMA_VERSION)
+  // Checked above or empty, and every insert sets it from here on.
+  db.prepare(
+    `INSERT INTO meta(key, value) VALUES('ftsRowids', 'chunkId')
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run()
   // Fail loud when the runtime SQLite lacks FTS5/trigram — never degrade silently.
   db.prepare(`SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH '"abc"' LIMIT 1`).get()
 }

@@ -6,6 +6,14 @@ import { contentDisplayText, DEFAULT_MAX_PARALLEL_INSTANCES, RunReceiptSchema } 
 import { getSettings } from '@main/settings/settings'
 import { IPC } from '../../shared/channels'
 import { formatAgentInstanceLabel } from '../../shared/utils/agentInstance'
+import {
+  emptyStepUsageTotals,
+  instanceUsageOf,
+  mergeStepUsageTotals,
+  stepUsageFromEvent,
+  type StepUsageTotals
+} from '../../shared/utils/runTelemetry'
+import { TOOL_LABELS } from '../../shared/utils/toolSummary'
 import { logger } from '../../shared/logger'
 import { abortError } from '../../shared/errors'
 import { AWAIT_AGENT_INSTANCE_MAX_MS } from './schemas/tools'
@@ -45,6 +53,25 @@ const childWaiters = new Map<
 >()
 const runIpcSenders = new Map<string, WebContents>()
 const parentInstanceEmitters = new Map<string, (event: AgentEvent) => void>()
+
+/**
+ * What a running child is doing, for its parent's record: without it the
+ * parent heard "started" and then, minutes later, "done" — its rows could say
+ * nothing in between, and its bill left the children out.
+ */
+type ChildProgress = {
+  stepId?: string
+  step: number
+  activity?: string
+  usage: StepUsageTotals
+  /** When the last progress update went out, and one waiting to go. */
+  sentAt: number
+  timer?: ReturnType<typeof setTimeout>
+}
+const childProgress = new Map<string, ChildProgress>()
+/** At most one live progress update per child per this many ms. */
+const PROGRESS_INTERVAL_MS = 1_000
+const ACTIVITY_MAX_CHARS = 200
 
 export { formatAgentInstanceLabel }
 
@@ -120,6 +147,9 @@ export function registerChildInstance(
 export function unregisterChildInstance(childRunId: string): void {
   const parentRunId = childToParent.get(childRunId)
   childWorkspace.delete(childRunId)
+  const progress = childProgress.get(childRunId)
+  if (progress?.timer) clearTimeout(progress.timer)
+  childProgress.delete(childRunId)
   if (!parentRunId) return
   childToParent.delete(childRunId)
   unregisterInlineChildRun(childRunId)
@@ -157,6 +187,70 @@ export function emitAgentInstanceUpdate(
   sendLiveParentInstanceEvent(parentRunId, event)
 }
 
+function sendChildProgress(childRunId: string): void {
+  const progress = childProgress.get(childRunId)
+  const parentRunId = childToParent.get(childRunId)
+  if (!progress || !parentRunId) return
+  if (progress.timer) {
+    clearTimeout(progress.timer)
+    progress.timer = undefined
+  }
+  progress.sentAt = Date.now()
+  // Live only: progress is how the row reads while it runs, and a reload of
+  // a finished run has the terminal update, which carries the final usage.
+  sendLiveParentInstanceEvent(parentRunId, {
+    type: 'agent_instance_update',
+    runId: parentRunId,
+    parentRunId,
+    instanceRunId: childRunId,
+    phase: 'started',
+    at: new Date(progress.sentAt).toISOString(),
+    ...(progress.stepId ? { stepId: progress.stepId } : {}),
+    step: progress.step,
+    ...(progress.activity ? { activity: progress.activity } : {}),
+    usage: instanceUsageOf(progress.usage)
+  })
+}
+
+function scheduleChildProgress(childRunId: string, progress: ChildProgress): void {
+  const wait = progress.sentAt + PROGRESS_INTERVAL_MS - Date.now()
+  if (wait <= 0) {
+    sendChildProgress(childRunId)
+    return
+  }
+  if (!progress.timer) progress.timer = setTimeout(() => sendChildProgress(childRunId), wait)
+}
+
+function activityOf(name: string, summary: string): string {
+  const verb = TOOL_LABELS[name]?.running ?? name
+  const line = `${verb} ${summary.replace(/\s+/g, ' ').trim()}`.trim()
+  return line.length <= ACTIVITY_MAX_CHARS ? line : `${line.slice(0, ACTIVITY_MAX_CHARS - 1)}…`
+}
+
+/**
+ * Every event a child run yields passes here (startAgentRun's stream loop);
+ * anything that is not an inline child returns at once. A new step, a tool
+ * starting and a step's usage are what the parent's row shows.
+ */
+export function noteInstanceChildEvent(childRunId: string, ev: AgentEvent): void {
+  const progress = childProgress.get(childRunId)
+  if (!progress || !childToParent.has(childRunId)) return
+  if (ev.type === 'context_usage') {
+    if (ev.step === progress.step) return
+    progress.step = ev.step
+    progress.activity = 'Thinking'
+  } else if (ev.type === 'tool_start') {
+    progress.activity = activityOf(ev.name, ev.summary)
+  } else if (ev.type === 'step_usage') {
+    const usage = stepUsageFromEvent(ev)
+    if (!usage) return
+    progress.usage = mergeStepUsageTotals(progress.usage, usage)
+  } else {
+    return
+  }
+  scheduleChildProgress(childRunId, progress)
+}
+
 function instanceUiStatusLine(phase: 'done' | 'error' | 'cancelled'): string {
   if (phase === 'cancelled') return 'Instance cancelled.'
   if (phase === 'error') return 'Instance failed.'
@@ -172,13 +266,21 @@ export function notifyChildTerminal(
   const parentRunId = childToParent.get(childRunId)
   const workspacePath = childWorkspace.get(childRunId)
   if (!parentRunId || !workspacePath) return
+  const progress = childProgress.get(childRunId)
+  if (progress?.timer) {
+    clearTimeout(progress.timer)
+    progress.timer = undefined
+  }
   emitAgentInstanceUpdate(workspacePath, parentRunId, {
     parentRunId,
     instanceRunId: childRunId,
     phase,
     summary: instanceUiStatusLine(phase),
+    at: new Date().toISOString(),
     ...(opts?.goal ? { goal: opts.goal } : {}),
-    ...(opts?.pathScope ? { pathScope: opts.pathScope } : {})
+    ...(opts?.pathScope ? { pathScope: opts.pathScope } : {}),
+    ...(progress?.stepId ? { stepId: progress.stepId } : {}),
+    ...(progress && progress.usage.steps > 0 ? { step: progress.step, usage: instanceUsageOf(progress.usage) } : {})
   })
   const waiters = childWaiters.get(childRunId)
   if (!waiters) return
@@ -217,16 +319,22 @@ function formatWroteFilesBlock(wroteFiles: string[]): string | null {
   return `wroteFiles:\n${lines.join('\n')}`
 }
 
-const CHILD_SUMMARY_MAX_CHARS = 6_000
+/**
+ * What an await hands the parent. Run dd5aafe0's three reports were all cut at
+ * the old 6,000 and the parent answered from the stubs; this fits a full
+ * report. `pull_agent_instance` view summary goes to the larger cap.
+ */
+const CHILD_SUMMARY_MAX_CHARS = 20_000
+const CHILD_PULL_SUMMARY_MAX_CHARS = 60_000
 const CHILD_OUTLINE_LINE_MAX_CHARS = 280
 const CHILD_OUTLINE_MAX_CHARS = 10_000
 const CHILD_TAIL_MAX_MESSAGES = 40
 const CHILD_TAIL_MESSAGE_MAX_CHARS = 2_000
 const CHILD_TAIL_MAX_CHARS = 12_000
 
-function capChildText(text: string, max: number): string {
+function capChildText(text: string, max: number, more?: string): string {
   if (text.length <= max) return text
-  return `${text.slice(0, max)}\n[...truncated ${text.length - max} chars]`
+  return `${text.slice(0, max)}\n[...truncated ${text.length - max} chars${more ? ` — ${more}` : ''}]`
 }
 
 /**
@@ -267,7 +375,7 @@ export async function summarizeChildRunAsync(
     childRunId,
     await loadMessagesAsync(workspacePath, childRunId)
   )
-  return capChildText(summary, CHILD_SUMMARY_MAX_CHARS)
+  return capChildText(summary, CHILD_SUMMARY_MAX_CHARS, 'pull_agent_instance with view "summary" returns the rest')
 }
 
 function formatChildOutline(
@@ -329,7 +437,7 @@ export async function pullChildRun(
     case 'summary': {
       const status = loadStatus(resolveRunDir(workspacePath, childRunId))
       const summary = `${formatAgentInstanceLabel(childRunId)}\nstatus: ${status?.status ?? 'unknown'}\n\n${formatChildSummary(workspacePath, childRunId, messages)}`
-      return capChildText(summary, CHILD_SUMMARY_MAX_CHARS)
+      return capChildText(summary, CHILD_PULL_SUMMARY_MAX_CHARS)
     }
     case 'outline':
       return formatChildOutline(workspacePath, childRunId, messages)
@@ -489,11 +597,41 @@ export type SpawnAgentInstanceInput = {
   doneWhen: string
   pathScope?: string[]
   isolation?: 'worktree' | 'shared'
+  /** The plan step (todo id) this child carries out. */
+  stepId?: string
+  /** A read-and-report child: Ask mode, in this workspace, no worktree. */
+  readOnly?: boolean
   emitParentEvent?: (event: AgentEvent) => void
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * A worktree child is sandboxed to its checkout, so a brief naming the
+ * parent's absolute root points outside it: run dd5aafe0's children each spent
+ * reasoning on "the path is outside the sandbox". The same file lives at the
+ * same relative path in the worktree, so the root is rewritten there.
+ */
+export function rewriteWorkspaceRoot(text: string, fromRoot: string, toRoot: string): string {
+  const from = resolve(fromRoot).replace(/[\\/]+$/, '')
+  if (!from) return text
+  // Either slash style, case-insensitive where the filesystem is.
+  const pattern = escapeRegExp(from).replace(/\\\\/g, '[\\\\/]')
+  const flags = process.platform === 'win32' || process.platform === 'darwin' ? 'gi' : 'g'
+  return text.replace(new RegExp(pattern, flags), () => toRoot)
+}
+
 export type SpawnAgentInstanceResult =
-  | { ok: true; runId: string; label: string; worktreeBranch?: string }
+  | {
+      ok: true
+      runId: string
+      label: string
+      worktreeBranch?: string
+      /** Why a child asked for a worktree runs shared in path_scope instead. */
+      sharedBecause?: string
+    }
   | { ok: false; error: string }
 
 function resolveSpawnPathScope(
@@ -613,13 +751,21 @@ export async function spawnAgentInstance(
   registerChildInstance(input.parentRunId, childRunId, input.workspacePath)
   const releaseChildIpc = registerRunIpcSender(childRunId, wc)
 
-  const mode: AgentInteractionMode = 'agent'
+  // A read-and-report child runs in Ask mode (read-only tools, enforced by
+  // the mode gate) right in this workspace: nothing to isolate, so no
+  // worktree — run dd5aafe0 spent 19 s creating three, one at a time behind
+  // the worktree lock, for children that only read.
+  const readOnly = input.readOnly === true
+  const mode: AgentInteractionMode = readOnly ? 'ask' : 'agent'
   // Write-capable instances get a git worktree when possible; otherwise shared
   // + required path_scope. isolation: 'shared' skips the worktree (requires
   // path_scope) for cheap, disjoint-scope workstreams.
   let worktreePath: string | undefined
   let worktreeBranch: string | undefined
-  if (input.isolation === 'shared') {
+  let sharedBecause: string | undefined
+  if (readOnly) {
+    // Nothing to set up.
+  } else if (input.isolation === 'shared') {
     if (!pathScope?.length) {
       releaseChildIpc()
       unregisterChildInstance(childRunId)
@@ -641,7 +787,16 @@ export async function spawnAgentInstance(
       unregisterChildInstance(childRunId)
       clearRunAbort(childRunId, registered.invokeId)
       return { ok: false, error: wt.error }
-    } else if (!pathScope?.length) {
+    } else if (pathScope?.length) {
+      // Run 528a737f's children fell back here with nothing said: they found
+      // out only when `terminal` was refused to them.
+      sharedBecause = wt.error
+      logger.warn('instance worktree unavailable; child runs shared in path_scope', {
+        scope: 'agentInstances',
+        childRunId,
+        reason: wt.error
+      })
+    } else {
       releaseChildIpc()
       unregisterChildInstance(childRunId)
       clearRunAbort(childRunId, registered.invokeId)
@@ -670,8 +825,9 @@ export async function spawnAgentInstance(
     }
   }
 
+  const childPrompt = worktreePath ? rewriteWorkspaceRoot(composedGoal, input.workspacePath, worktreePath) : composedGoal
   try {
-    createRun(input.workspacePath, childRunId, composedGoal, {
+    createRun(input.workspacePath, childRunId, childPrompt, {
       mode,
       parentRunId: input.parentRunId,
       inlineInstance: true,
@@ -697,9 +853,16 @@ export async function spawnAgentInstance(
   // outcome → sub-tasks → done-when → paths → raw goal (last line).
   const childMessage: ChatMessage = {
     role: 'user',
-    content: composedGoal
+    content: childPrompt
   }
 
+  const stepId = input.stepId?.trim() || undefined
+  childProgress.set(childRunId, {
+    ...(stepId ? { stepId } : {}),
+    step: 0,
+    usage: emptyStepUsageTotals(),
+    sentAt: 0
+  })
   const startedUpdate: AgentEvent = {
     type: 'agent_instance_update',
     runId: input.parentRunId,
@@ -707,6 +870,8 @@ export async function spawnAgentInstance(
     instanceRunId: childRunId,
     phase: 'started',
     goal: goalText,
+    at: new Date().toISOString(),
+    ...(stepId ? { stepId } : {}),
     ...(pathScope?.length ? { pathScope } : {})
   }
   // emitLiveEvent (emitParentEvent) already appends agent_instance_update — avoid double persist.
@@ -735,7 +900,8 @@ export async function spawnAgentInstance(
     ok: true,
     runId: childRunId,
     label: formatAgentInstanceLabel(childRunId),
-    ...(worktreeBranch ? { worktreeBranch } : {})
+    ...(worktreeBranch ? { worktreeBranch } : {}),
+    ...(sharedBecause ? { sharedBecause } : {})
   }
 }
 
@@ -823,4 +989,6 @@ export function resetAgentInstancesForTests(): void {
   childWaiters.clear()
   runIpcSenders.clear()
   parentInstanceEmitters.clear()
+  for (const progress of childProgress.values()) if (progress.timer) clearTimeout(progress.timer)
+  childProgress.clear()
 }

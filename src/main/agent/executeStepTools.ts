@@ -147,7 +147,8 @@ export type ToolStepContext = {
   /** Run-level cancel only — distinguishes Interrupted vs Cancelled. */
   runSignal?: AbortSignal
   appendMessage: (msg: ChatMessage) => Promise<void>
-  appendEvent: (ev: AgentEvent) => void
+  /** `at`: when it happened, if not now (a parallel result persisted after its batch). */
+  appendEvent: (ev: AgentEvent, at?: string) => void
   /** Session-scoped paths already inspected or edited (read-before-edit soft warn). */
   knownPaths?: Set<string>
   /** Run-scoped paths the agent actually changed (scopes git_commit staging). */
@@ -329,8 +330,10 @@ async function runSingleTool(
   emitToolStart(ctx, events[0]!)
 
   try {
-    // Ask before doing anything: the tool_start event is already out, so the
-    // renderer can show the approval card in the row the user is looking at.
+    // Ask before doing anything. The request goes to the renderer directly and
+    // can overtake this tool_start, which waits in the loop's live queue; the
+    // card still lands in the call's row, which the step's assistant_message
+    // (sent before any call ran) already made, and keeps its own request time.
     if (ctx.approval) {
       const verdict = await ctx.approval.authorize(call)
       if (!verdict.allowed) {
@@ -536,9 +539,9 @@ async function runSingleTool(
 }
 
 /** Write the settled result to disk once the repeat-failure hint has been applied. */
-function persistToolResult(ctx: ToolStepContext, outcome: ToolOutcome): void {
+function persistToolResult(ctx: ToolStepContext, outcome: ToolOutcome, settledAt?: string): void {
   for (const ev of outcome.events) {
-    if (ev.type === 'tool_result') ctx.appendEvent(toolResultEventForPersistence(ev))
+    if (ev.type === 'tool_result') ctx.appendEvent(toolResultEventForPersistence(ev), settledAt)
   }
 }
 
@@ -563,13 +566,28 @@ function toolFailureReasonForLog(toolName: string, content: string): string {
   return parts.join(' · ')
 }
 
+/**
+ * Result for a call that came after ask_question in the same step. It was
+ * written before the user answered, so running it could act against the answer
+ * (`[ask_question("Delete X?"), delete X]` deleting after a "No").
+ */
+export const HELD_FOR_ANSWER_CONTENT =
+  'Not run: this call came after ask_question in the same step, so it was written before the user answered. Re-issue it next step if the answer still calls for it.'
+
+function heldForAnswerResult(call: ToolCall, ctx: ToolStepContext): ToolOutcome {
+  return abortedToolResult(call, ctx, {
+    content: HELD_FOR_ANSWER_CONTENT,
+    summary: 'not run'
+  })
+}
+
 function abortedToolResult(
   call: ToolCall,
   ctx: ToolStepContext,
-  options?: { emitStart?: boolean }
+  options?: { emitStart?: boolean; content?: string; summary?: string }
 ): ToolOutcome {
-  const content = abortToolContent(ctx)
-  const summary = abortToolSummary(ctx)
+  const content = options?.content ?? abortToolContent(ctx)
+  const summary = options?.summary ?? abortToolSummary(ctx)
   const toolMsg: ChatMessage = {
     role: 'tool',
     toolCallId: call.id,
@@ -763,18 +781,35 @@ export async function executeStepToolCalls(
     for (const ev of outcome.events) emitToolResult(ctx, ev)
   }
 
-  const collect = async (outcome: ToolOutcome, alreadyEmitted = false): Promise<void> => {
+  /**
+   * @param settledAt When the call finished. Parallel results are written in
+   *   call order after the whole batch settles; each keeps its own moment, or
+   *   a fast call beside a slow one would read as taking as long.
+   */
+  const collect = async (
+    outcome: ToolOutcome,
+    alreadyEmitted = false,
+    settledAt = new Date().toISOString()
+  ): Promise<void> => {
     // Live tool_result before persist so UI updates without waiting on disk.
     if (!alreadyEmitted) emitLive(outcome)
-    await ctx.appendMessage(outcome.message)
-    persistToolResult(ctx, outcome)
-    messages.push(outcome.message)
+    const message = outcome.message.at ? outcome.message : { ...outcome.message, at: settledAt }
+    await ctx.appendMessage(message)
+    persistToolResult(ctx, outcome, settledAt)
+    messages.push(message)
     events.push(...outcome.events)
   }
+
+  // Set once an ask_question call settles: nothing after it in this step runs.
+  let heldForAnswer = false
 
   for (const group of groups) {
     if (ctx.signal.aborted) {
       for (const call of group) await collect(abortedToolResult(call, ctx))
+      continue
+    }
+    if (heldForAnswer) {
+      for (const call of group) await collect(heldForAnswerResult(call, ctx))
       continue
     }
 
@@ -783,16 +818,19 @@ export async function executeStepToolCalls(
     const parallel = group.length > 1 && isParallelBatchClass(batchClass)
     if (parallel) {
       const liveEmitted = new Set<string>()
+      const settledAt = new Map<string, string>()
       const cap = parallelLimitForBatchClass(batchClass)
       const parallelLimit = Number.isFinite(cap) ? cap : group.length
       const batch = await runParallelBatch(group, ctx, parallelLimit, stepFlags, (call, outcome) => {
         liveEmitted.add(call.id)
+        settledAt.set(call.id, new Date().toISOString())
         emitLive(outcome)
       })
-      // Persist and report in call order — settle order is not reproducible.
+      // Persist and report in call order — settle order is not reproducible —
+      // each with the moment it settled.
       for (const call of group) {
         const outcome = batch.get(call.id) ?? abortedToolResult(call, ctx)
-        await collect(outcome, liveEmitted.has(call.id))
+        await collect(outcome, liveEmitted.has(call.id), settledAt.get(call.id))
       }
       await yieldToEventLoop()
     } else {
@@ -801,7 +839,12 @@ export async function executeStepToolCalls(
           await collect(abortedToolResult(call, ctx))
           continue
         }
+        if (heldForAnswer) {
+          await collect(heldForAnswerResult(call, ctx))
+          continue
+        }
         await collect(await runSingleTool(call, ctx, stepFlags))
+        if (call.name === 'ask_question') heldForAnswer = true
         await yieldToEventLoop()
       }
     }

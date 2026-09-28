@@ -64,8 +64,12 @@ export function executeCreatePlan(
       : ''
 
   const todos = Array.isArray(args.todos) ? (args.todos as TodoItem[]) : []
+  // The list as it now stands, so the model (and the record) see what was
+  // kept — several in_progress todos come back with all but one demoted.
+  let todoNote = ''
   if (todos.length > 0) {
-    toolTodoWrite(runDir, todos, true)
+    const written = toolTodoWrite(runDir, todos, true)
+    todoNote = `\n\n${written.content}${written.notice ? `\n\nNote: ${written.notice}` : ''}`
   }
 
   const quality = scorePlanQuality(markdown)
@@ -83,7 +87,7 @@ export function executeCreatePlan(
     ok: true,
     summary: title,
     content: doneWhen
-      ? `${wrote} Copied Done when into contract.md ## Done when.${checksNote}${feedback}`
-      : `${wrote}${checksNote}${feedback}`
+      ? `${wrote} Copied Done when into contract.md ## Done when.${checksNote}${feedback}${todoNote}`
+      : `${wrote}${checksNote}${feedback}${todoNote}`
   }
 }

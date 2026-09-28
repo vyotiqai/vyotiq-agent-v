@@ -12,7 +12,6 @@ import {
 import { enqueueEventAppend, flushEventAppends, listEventArchives, listEventArchivesSync, removeEventArchives } from './eventAppendQueue'
 import {
   enqueueMessageAppend,
-  enqueueMessageRewrite,
   flushMessageAppends,
   listMessageArchives,
   listMessageArchivesSync,
@@ -57,7 +56,6 @@ import { finalizeInterruptedTodos } from './tools/todo'
 import { readGoal } from './runGoal'
 import { readLenientReceiptCost } from './runStats'
 import { readJsonDocCached } from './jsonDocCache'
-import { finalizeTodoContentOnRunEnd, type TodoFinalizeOutcome } from '../../shared/utils/todoContent'
 import { DEFAULT_PLAN_STUB, stripPlanStubChrome } from '../../shared/planStub'
 import { pendingReviewSummary } from './reviewSummary'
 import { ensureWorkspaceStorage, resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
@@ -262,8 +260,24 @@ export async function syncMessagesAsync(dir: string, messages: ChatMessage[]): P
   invalidateMessagesCache(dir)
 }
 
+/**
+ * Every appended row carries when it happened: a user message when it was sent,
+ * an assistant message when its step finished streaming, a tool result when it
+ * settled. The record reads these directly; before, a reload borrowed stamps
+ * from the loaded events tail and shifted them onto the wrong steps whenever
+ * that tail was shorter than the messages window.
+ */
+function ensureMessageAt(message: ChatMessage): ChatMessage {
+  if (message.at) return message
+  if (message.role === 'user') return ensureUserMessageAt(message)
+  if (message.role === 'assistant' || message.role === 'tool') {
+    return { ...message, at: new Date().toISOString() }
+  }
+  return message
+}
+
 export function appendMessage(dir: string, message: ChatMessage): Promise<void> {
-  const line = `${JSON.stringify(ensureUserMessageAt(message))}\n`
+  const line = `${JSON.stringify(ensureMessageAt(message))}\n`
   return enqueueMessageAppend(dir, line)
 }
 
@@ -338,8 +352,9 @@ export function createRun(
 }
 
 /** Persist trimmed agent events to events.jsonl (full tool output stays in messages.jsonl). */
-export function appendEvent(dir: string, event: unknown): void {
-  enqueueEventAppend(dir, event)
+/** @param at When it happened, if not now (see enqueueEventAppend). */
+export function appendEvent(dir: string, event: unknown, at?: string): void {
+  enqueueEventAppend(dir, event, at)
 }
 
 /**
@@ -1090,6 +1105,7 @@ function mergeCriticalHydrationEvents(
 ): PersistedEvent[] {
   if (critical.length === 0) return uiEvents
   const out = [...uiEvents]
+  const older: PersistedEvent[] = []
   for (const crit of critical) {
     const event = crit.event
     if (!event || typeof event !== 'object') continue
@@ -1107,9 +1123,13 @@ function mergeCriticalHydrationEvents(
       }
       return true
     })
-    if (!already) out.push(crit)
+    if (!already) older.push(crit)
   }
-  return out
+  // Rows the loaded tail does not hold come from before it: they go in front,
+  // in the order they happened. Appended, an old error read as the latest
+  // turn's — a box and banner on a run that since finished fine.
+  older.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+  return [...older, ...out]
 }
 
 /**
@@ -1209,7 +1229,7 @@ async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promis
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)
       if (workspaceRoot && !status.inlineInstance) {
-        const review = pendingReviewSummary(dir, workspaceRoot)
+        const review = await pendingReviewSummary(dir, workspaceRoot)
         if (review) summary.review = review
       }
       if (status.inlineInstance && status.parentRunId) {
@@ -1368,41 +1388,6 @@ function appendOrphanToolStubs(dir: string, runId: string): void {
     }
   }
   if (changed) syncMessages(dir, repaired)
-}
-
-/**
- * Demote in-progress markers on every todo_write tool message after run-end.
- * Keeps historical checklist snapshots; only clears spinners (`[~]`).
- */
-export async function patchLatestTodoWriteMessage(
-  dir: string,
-  outcomeOrContent: TodoFinalizeOutcome | string
-): Promise<void> {
-  // Queued behind pending appends: the terminal error paths flush a partial
-  // assistant message without awaiting, and an unserialized rewrite would drop it.
-  await enqueueMessageRewrite(dir, () => {
-    // Stitched content: the rewrite replaces the live file wholesale and
-    // syncMessages removes archives, so archive heads must be folded in first.
-    const content = stitchedMessagesContentSync(dir)
-    if (content == null) return
-    const messages = parseMessagesJsonl(content)
-    let changed = false
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index]
-      if (message?.role !== 'tool' || message.toolName !== 'todo_write') continue
-      const current = toolMessageText(message.content)
-      const next =
-        outcomeOrContent === 'done' ||
-        outcomeOrContent === 'error' ||
-        outcomeOrContent === 'cancelled'
-          ? finalizeTodoContentOnRunEnd(current, outcomeOrContent)
-          : outcomeOrContent
-      if (next === current) continue
-      messages[index] = { ...message, content: next }
-      changed = true
-    }
-    if (changed) syncMessages(dir, messages)
-  })
 }
 
 /**
@@ -1578,8 +1563,10 @@ async function interruptRunningRunOnDisk(
   // and rewrites the complete transcript rather than racing the append chain.
   await flushMessageAppends(dir)
   appendOrphanToolStubs(dir, runId)
+  // todos.json is the run's current list (the model reads it every step); the
+  // todo_write results in the transcript stay as written — they are the
+  // history of which step was in progress when, which the record groups by.
   finalizeInterruptedTodos(dir)
-  await patchLatestTodoWriteMessage(dir, 'cancelled')
   // Keep the branch. finalizeInstanceWorktree commits the instance's dirty
   // edits and then removes the checkout; deleting the branch too would destroy
   // the very work a `resumable: true` run promises to come back to.

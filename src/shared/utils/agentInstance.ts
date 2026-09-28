@@ -1,9 +1,21 @@
+import type { InstanceUsage } from '../ipc'
+
 export type AgentInstanceUiState = {
   instanceRunId: string
   phase: 'started' | 'done' | 'error' | 'cancelled'
   goal?: string
   summary?: string
   pathScope?: string[]
+  /** The plan step (todo id) the parent spawned it for. */
+  stepId?: string
+  /** When it started and when it reached a terminal phase (ISO). */
+  startedAt?: string
+  endedAt?: string
+  /** While it runs: the step it is on and what it is doing. */
+  step?: number
+  activity?: string
+  /** Its usage so far (final once terminal). */
+  usage?: InstanceUsage
 }
 
 export function formatAgentInstanceLabel(runId: string): string {

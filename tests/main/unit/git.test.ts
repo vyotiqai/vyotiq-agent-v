@@ -544,11 +544,11 @@ describe.skipIf(!canGit)('git status file-list cap', () => {
       expect(status.files).toHaveLength(GIT_STATUS_FILE_LIMIT)
       expect(status.fileCount).toBe(extra)
       // Untracked files count as wholly added — one line each — but only the
-      // files that actually ship are measured. Measuring one means reading it
-      // synchronously (~2ms), so counting every untracked path blocked the
-      // main process for minutes on a workspace carrying a large untracked
-      // tree. Tracked totals still cover every change; they come from a single
-      // numstat call. `truncated` announces that the count stops at the cap.
+      // files that actually ship are measured. Measuring one means reading it,
+      // so counting every untracked path read tens of thousands of files on a
+      // workspace carrying a large untracked tree. Tracked totals still cover
+      // every change; they come from a single numstat call. `truncated`
+      // announces that the count stops at the cap.
       expect(status.added).toBe(GIT_STATUS_FILE_LIMIT)
     } finally {
       rmSync(repo, { recursive: true, force: true })
@@ -568,6 +568,31 @@ describe.skipIf(!canGit)('git status file-list cap', () => {
       expect(status.truncated).toBe(false)
       expect(status.files).toHaveLength(2)
       expect(status.fileCount).toBe(2)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe.skipIf(!canGit)('git status untracked line counts', () => {
+  // Counted from the bytes, as numstat would count them: lines for text, with
+  // or without a final newline, and none for a binary file — before, a PNG
+  // was decoded and split into a line count that meant nothing.
+  it('counts text as git does and calls a file with a NUL binary', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-untracked-'))
+    try {
+      git(repo, 'init', '--initial-branch=main')
+      writeFileSync(join(repo, 'crlf.txt'), 'a\r\nb\r\nc', 'utf8')
+      writeFileSync(join(repo, 'empty.txt'), '', 'utf8')
+      writeFileSync(join(repo, 'blank.txt'), '\n', 'utf8')
+      writeFileSync(join(repo, 'frame.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x0a]))
+      const status = expectOk(await readGitStatus(repo))
+      const byPath = new Map(status.files.map((file) => [file.path, file]))
+      expect(byPath.get('crlf.txt')).toMatchObject({ added: 3, addedUnstaged: 3, binary: false })
+      expect(byPath.get('empty.txt')).toMatchObject({ added: 0, binary: false })
+      expect(byPath.get('blank.txt')).toMatchObject({ added: 1, binary: false })
+      expect(byPath.get('frame.png')).toMatchObject({ added: 0, addedUnstaged: 0, binary: true })
+      expect(status.added).toBe(4)
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }

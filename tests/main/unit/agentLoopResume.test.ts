@@ -519,7 +519,8 @@ describe('runAgent session continuation', () => {
     expect(loadMessages(workspace, runId)).toEqual([
       { role: 'user', content: 'do work' },
       { role: 'assistant', content: 'partial reply' },
-      { role: 'assistant', content: 'resumed work' }
+      // Stamped when it finished streaming, as every appended message is.
+      { role: 'assistant', content: 'resumed work', at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) }
     ])
     expect(loadStatus(runDir)?.resumable).toBeUndefined()
     expect(loadStatus(runDir)?.status).toBe('done')

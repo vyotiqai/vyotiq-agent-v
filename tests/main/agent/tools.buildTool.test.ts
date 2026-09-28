@@ -80,6 +80,14 @@ describe('build_tool handler', () => {
     )
     await expect(handler(validInput({ code: '   ' }))).rejects.toThrow(/non-empty code/)
     await expect(handler(validInput({ schema: 'nope' }))).rejects.toThrow(/schema to be a JSON object/)
+    // A malformed schema rides every later request and 400s strict hosts.
+    await expect(
+      handler(
+        validInput({
+          schema: { type: 'object', properties: { a: { type: 'number' } }, required: { item: 'a' } }
+        })
+      )
+    ).rejects.toThrow(/schema is not valid JSON Schema: required must be an array/)
     await expect(handler(validInput({ description: '  ' }))).rejects.toThrow(/non-empty description/)
     await expect(handler(null)).rejects.toThrow(/requires an input object/)
   })

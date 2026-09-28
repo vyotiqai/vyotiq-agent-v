@@ -233,7 +233,10 @@ export function markRunTurnComplete(runId: string, invokeId: number): void {
 
 type CancelGateWaitersOpts = {
   invokeId?: number
-  /** Soft-steer enqueue: keep question prompts parked while a follow-up waits. */
+  /**
+   * Leave question prompts to the caller: Send now settles them as superseded
+   * (dismissPendingQuestions) instead of aborting the tool call.
+   */
   skipQuestions?: boolean
 }
 
@@ -547,6 +550,8 @@ export function promoteFollowUp(
   item.ready = true
   entry.followUps.unshift(item)
   entry.streamInterrupt?.abort()
+  // The message answers the open question, if any: settle it as superseded so
+  // the model reads the follow-up as the reply rather than as a skip.
   dismissPendingQuestions(runId, entry.invokeId)
   cancelPendingGateWaiters(runId, {
     invokeId: entry.invokeId,

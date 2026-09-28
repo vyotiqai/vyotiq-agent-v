@@ -40,6 +40,7 @@ import {
   pinnedFactsToFoldFacts
 } from './context/pinFoldFacts'
 import {
+  RETAINED_DECISIONS_MAX,
   extractAskQuestionDecisions,
   mergeCompactionFocus
 } from './context/retainedDecisions'
@@ -649,7 +650,7 @@ export async function* executeCompactEvents(
     verifyCoverage: scored.coverage,
     pinnedFacts: foldFactsToPinned(facts),
     ...(retainedDecisions.length > 0
-      ? { retainedDecisions: retainedDecisions.slice(0, 8) }
+      ? { retainedDecisions: retainedDecisions.slice(-RETAINED_DECISIONS_MAX) }
       : {})
   }
   if (!saveCompaction(plan.runDir, compactionRecord)) {
@@ -696,7 +697,7 @@ export async function* executeCompactEvents(
     contextWindow: ctxWindow,
     contentWindow: cWin,
     retainedDecisions:
-      retainedDecisions.length > 0 ? retainedDecisions.slice(0, 8) : undefined,
+      retainedDecisions.length > 0 ? retainedDecisions.slice(-RETAINED_DECISIONS_MAX) : undefined,
     verified: true,
     verifyCoverage: scored.coverage
   }

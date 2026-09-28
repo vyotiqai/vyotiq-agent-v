@@ -1,5 +1,6 @@
 import { isAgentEvent } from './eventUtils'
 import {
+  addInstanceUsage,
   emptyStepUsageTotals,
   mergeStepUsageTotals,
   stepUsageFromEvent,
@@ -45,7 +46,11 @@ export function turnUsageFromPersistedEvents(
   for (const row of events) {
     if (!isAgentEvent(row.event)) continue
     const partial = stepUsageFromEvent(row.event)
-    if (!partial) continue
+    // A child instance's usage lands on the turn it finished in, with its
+    // terminal update — the only one that is persisted.
+    const child =
+      row.event.type === 'agent_instance_update' && row.event.phase !== 'started' ? row.event.usage : undefined
+    if (!partial && !child) continue
     const eventMs = row.at ? Date.parse(row.at) : Number.NaN
     let idx = 0
     if (Number.isFinite(eventMs)) {
@@ -56,7 +61,7 @@ export function turnUsageFromPersistedEvents(
     } else {
       idx = n - 1
     }
-    slots[idx] = mergeStepUsageTotals(slots[idx]!, partial)
+    slots[idx] = partial ? mergeStepUsageTotals(slots[idx]!, partial) : addInstanceUsage(slots[idx]!, child!)
   }
   return slots
 }

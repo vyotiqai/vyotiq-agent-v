@@ -1329,6 +1329,47 @@ describe('anthropic thinking block boundaries', () => {
     })
     expect(deltas[1]?.toolCallDelta?.arguments).toBe('{"path":"a.ts"}')
   })
+
+  it('starts a new paragraph when words resume after a call in the same response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sseBody([
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I will read it."}}\n\n',
+          'data: {"type":"content_block_stop","index":0}\n\n',
+          'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"read"}}\n\n',
+          'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}\n\n',
+          'data: {"type":"content_block_stop","index":1}\n\n',
+          'data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}\n\n',
+          'data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Then the tests."}}\n\n',
+          'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}\n\n'
+        ])
+      )
+    )
+
+    const chunks = await collect(anthropicProvider.streamChat(baseReq()))
+    const text = chunks.filter((c) => c.type === 'text').map((c) => c.text).join('')
+    expect(text).toBe('I will read it.\n\nThen the tests.')
+  })
+
+  it('adds no break before the first words, even after a call', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sseBody([
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read"}}\n\n',
+          'data: {"type":"content_block_stop","index":0}\n\n',
+          'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n',
+          'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Read."}}\n\n',
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n'
+        ])
+      )
+    )
+
+    const chunks = await collect(anthropicProvider.streamChat(baseReq()))
+    expect(chunks.filter((c) => c.type === 'text').map((c) => c.text).join('')).toBe('Read.')
+  })
 })
 
 describe('openai compat tool-before-text ordering', () => {

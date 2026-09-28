@@ -161,6 +161,9 @@ export function isToolGated(
   opts?: { mcpProtection?: boolean; agentBuiltAllowKey?: string }
 ): boolean {
   const canonical = canonicalizeAgentToolName(name)
+  // The question form is itself the user gate — even "Ask for every tool" must
+  // not put an approval card ("Wants to use asked") in front of it.
+  if (canonical === 'ask_question') return false
   // An agent-built tool is allowlisted under `<name>@<contentHash>`, never its
   // bare name — the file behind the name can be rewritten by a later
   // build_tool call, and a standing allow must not follow it.

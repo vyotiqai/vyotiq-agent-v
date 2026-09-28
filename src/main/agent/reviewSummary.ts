@@ -1,7 +1,13 @@
-import { existsSync, readFileSync, statSync } from 'fs'
 import { lineDiffStat } from '../../shared/utils/lineDiffStat'
-import { resolveInsideWorkspace } from '../workspace/safePath'
-import { checkpointBeforeImagePath, listCheckpointMetas, type CheckpointFileAction } from './checkpoints'
+import { mapLimit } from '../../shared/utils/mapLimit'
+import { createWorkspacePathResolver } from '../workspace/safePath'
+import {
+  checkpointBeforeImagePath,
+  listCheckpointMetasAsync,
+  type CheckpointFileAction,
+  type WriteCheckpointMeta
+} from './checkpoints'
+import { readStatedText, statOrNull } from './taskFileDiff'
 
 /**
  * A finished task's edits that still wait on Keep or Undo — the navigator's
@@ -14,25 +20,44 @@ import { checkpointBeforeImagePath, listCheckpointMetas, type CheckpointFileActi
  * Counts compare the before-image the agent's first write saved with the file
  * as it is now. They are exact or absent: a file that is binary, too large or
  * unreadable drops the numbers for the whole task instead of under-counting.
+ *
+ * Asked for every task each time the task list is read, so nothing here
+ * blocks: a task that left a thousand files waiting was a second of
+ * synchronous stat and read calls on the main thread per listing.
  */
 export type PendingReview = { files: number; add?: number; del?: number }
 
-/** Files above this are not diffed; the task then shows a file count only. */
-const MAX_DIFF_BYTES = 2 * 1024 * 1024
-
 type Pending = { path: string; action: CheckpointFileAction; beforePath: string | null }
+
+/** Workspace files checked at once. */
+const STAT_CONCURRENCY = 8
 
 const cache = new Map<string, { signature: string; review: PendingReview | undefined }>()
 
-export function pendingReviewSummary(runDir: string, workspaceRoot: string): PendingReview | undefined {
+export async function pendingReviewSummary(
+  runDir: string,
+  workspaceRoot: string
+): Promise<PendingReview | undefined> {
+  const resolve = createWorkspacePathResolver(workspaceRoot)
+  const candidates = await mapLimit(
+    collectPending(runDir, await listCheckpointMetasAsync(runDir)),
+    STAT_CONCURRENCY,
+    async (file) => {
+      const resolved = await resolve(file.path)
+      const st = resolved?.exists ? await statOrNull(resolved.real) : null
+      return { ...file, resolved, st }
+    }
+  )
   // A file the task created and later deleted left nothing to review — the
   // Changes list skips it too, so the count here must.
-  const pending = collectPending(runDir).filter((p) => p.action !== 'created' || fileExists(workspaceRoot, p.path))
+  const pending = candidates.filter((p) => p.action !== 'created' || p.resolved?.exists === true)
   if (pending.length === 0) {
     cache.delete(runDir)
     return undefined
   }
-  const signature = pending.map((p) => `${p.path}:${p.action}:${statSignature(workspaceRoot, p.path)}`).join('|')
+  const signature = pending
+    .map((p) => `${p.path}:${p.action}:${p.st ? `${p.st.size}:${p.st.mtimeMs}` : 'missing'}`)
+    .join('|')
   const hit = cache.get(runDir)
   if (hit && hit.signature === signature) return hit.review
 
@@ -43,8 +68,14 @@ export function pendingReviewSummary(runDir: string, workspaceRoot: string): Pen
   for (const file of pending) {
     // Before the agent's first write, against the file as it is now — so a
     // file created and later deleted by the task nets out to nothing.
-    const before = file.action === 'created' ? '' : readText(file.beforePath)
-    const after = readWorkspaceText(workspaceRoot, file.path)
+    const before =
+      file.action === 'created' ? '' : await readStatedText(file.beforePath, await statOrNull(file.beforePath), false)
+    // Gone now (the agent deleted it, or someone did since): every line removed.
+    const after = !file.resolved
+      ? null
+      : !file.resolved.exists
+        ? ''
+        : await readStatedText(file.resolved.real, file.st, false)
     if (before === null || after === null) {
       exact = false
       break
@@ -66,9 +97,9 @@ export function pendingReviewSummary(runDir: string, workspaceRoot: string): Pen
 }
 
 /** Unresolved files, deduped by path; the earliest checkpoint that touched a path owns its before-image. */
-function collectPending(runDir: string): Pending[] {
+function collectPending(runDir: string, metas: readonly WriteCheckpointMeta[]): Pending[] {
   const byPath = new Map<string, Pending>()
-  for (const meta of listCheckpointMetas(runDir)) {
+  for (const meta of metas) {
     if (meta.undone || meta.resolved) continue
     for (const file of meta.files) {
       if (file.resolved || !file.undoable) continue
@@ -86,49 +117,6 @@ function collectPending(runDir: string): Pending[] {
 function safeBeforePath(runDir: string, checkpointId: string, relPath: string): string | null {
   try {
     return checkpointBeforeImagePath(runDir, checkpointId, relPath)
-  } catch {
-    return null
-  }
-}
-
-function fileExists(workspaceRoot: string, relPath: string): boolean {
-  try {
-    return existsSync(resolveInsideWorkspace(workspaceRoot, relPath))
-  } catch {
-    return false
-  }
-}
-
-function statSignature(workspaceRoot: string, relPath: string): string {
-  try {
-    const st = statSync(resolveInsideWorkspace(workspaceRoot, relPath))
-    return `${st.size}:${st.mtimeMs}`
-  } catch {
-    return 'missing'
-  }
-}
-
-function readWorkspaceText(workspaceRoot: string, relPath: string): string | null {
-  let abs: string
-  try {
-    abs = resolveInsideWorkspace(workspaceRoot, relPath)
-  } catch {
-    return null
-  }
-  // Gone now (the agent deleted it, or someone did since): every line removed.
-  if (!existsSync(abs)) return ''
-  return readText(abs)
-}
-
-function readText(path: string | null): string | null {
-  if (!path) return null
-  try {
-    const st = statSync(path)
-    if (!st.isFile() || st.size > MAX_DIFF_BYTES) return null
-    const buf = readFileSync(path)
-    // NUL in the first 8 KB is how git decides a file is binary.
-    if (buf.subarray(0, 8192).includes(0)) return null
-    return buf.toString('utf8')
   } catch {
     return null
   }

@@ -10,6 +10,7 @@ vi.mock('@main/agent/tools', () => ({
 import {
   executeStepToolCalls,
   groupStepToolCalls,
+  HELD_FOR_ANSWER_CONTENT,
   isDeadlineExemptTool,
   TOOL_SOFT_DEADLINE_MS
 } from '@main/agent/executeStepTools'
@@ -476,6 +477,34 @@ describe('executeStepToolCalls', () => {
     expect(outcome.messages.map((m) => m.content)).toEqual(['a.ts', 'b.ts'])
   })
 
+  it('stamps each parallel result with when it settled, though it is written in call order', async () => {
+    executeTool.mockImplementation(async (_name: string, args: string) => {
+      const path = String((JSON.parse(args) as { path: string }).path)
+      await new Promise((r) => setTimeout(r, path === 'a.ts' ? 120 : 1))
+      return { ok: true, summary: path, content: path }
+    })
+    const persisted: Array<{ id: string; at: string | undefined }> = []
+    const { ctx } = makeCtx(new AbortController().signal)
+    ;(ctx as { appendEvent: (ev: AgentEvent, at?: string) => void }).appendEvent = (ev, at) => {
+      if (ev.type === 'tool_result') persisted.push({ id: ev.toolCallId, at })
+    }
+    const outcome = await executeStepToolCalls(
+      [
+        { id: 'c1', name: 'read', arguments: '{"path":"a.ts"}' },
+        { id: 'c2', name: 'read', arguments: '{"path":"b.ts"}' }
+      ],
+      ctx
+    )
+
+    // Written in call order…
+    expect(persisted.map((row) => row.id)).toEqual(['c1', 'c2'])
+    // …each at its own settle time: the quick b.ts well before the slow a.ts.
+    const ms = (iso: string | undefined): number => Date.parse(iso ?? '')
+    expect(ms(persisted[1]!.at)).toBeLessThan(ms(persisted[0]!.at) - 50)
+    // The tool messages carry the same moments.
+    expect(outcome.messages.map((m) => m.at)).toEqual(persisted.map((row) => row.at))
+  })
+
   it('keeps parallel reads when an approval gate is present', async () => {
     let concurrent = 0
     let maxConcurrent = 0
@@ -691,6 +720,32 @@ describe('executeStepToolCalls', () => {
       expect.anything(),
       expect.anything()
     )
+  })
+
+  it('holds every call after ask_question in the same step — written before the answer', async () => {
+    executeTool.mockImplementation(async (name: string) => ({
+      ok: true,
+      summary: name,
+      content: name === 'ask_question' ? 'User answered:\n- Delete X?: No' : `ran:${name}`
+    }))
+    const { ctx } = makeCtx(new AbortController().signal)
+    const outcome = await executeStepToolCalls(
+      [
+        { id: 'c0', name: 'read', arguments: '{"path":"a.ts"}' },
+        { id: 'c1', name: 'ask_question', arguments: '{"question":"Delete X?"}' },
+        { id: 'c2', name: 'delete', arguments: '{"path":"x.ts"}' },
+        { id: 'c3', name: 'read', arguments: '{"path":"b.ts"}' },
+        { id: 'c4', name: 'ask_question', arguments: '{"question":"Also Y?"}' }
+      ],
+      ctx
+    )
+    // Calls before the question run; nothing after it does.
+    expect(executeTool.mock.calls.map((call) => call[0])).toEqual(['read', 'ask_question'])
+    expect(outcome.messages.map((m) => m.toolCallId)).toEqual(['c0', 'c1', 'c2', 'c3', 'c4'])
+    for (const held of outcome.messages.slice(2)) {
+      expect(held.ok).toBe(false)
+      expect(held.content).toBe(HELD_FOR_ANSWER_CONTENT)
+    }
   })
 
   it('passes ask_question array args through without wrapping', async () => {

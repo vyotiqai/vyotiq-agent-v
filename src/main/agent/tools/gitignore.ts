@@ -97,6 +97,22 @@ const EMPTY_MATCHER: GitignoreMatcher = {
 
 const matcherCache = new Map<string, GitignoreMatcher>()
 
+/**
+ * Parsed `.gitignore` per directory. Each directory's matcher takes the rules
+ * of every ancestor, so without this the root file — 140 patterns, a RegExp
+ * each — was read and parsed again for every directory a walk entered.
+ */
+const ruleSetCache = new Map<string, RuleSet | null>()
+
+function cachedRuleSet(dir: string): RuleSet | null {
+  let rules = ruleSetCache.get(dir)
+  if (rules === undefined) {
+    rules = readRuleSet(dir)
+    ruleSetCache.set(dir, rules)
+  }
+  return rules
+}
+
 /** True when a mutated workspace-relative path is a `.gitignore` file. */
 export function isGitignoreRelPath(relPath: string): boolean {
   const n = relPath.replace(/\\/g, '/')
@@ -107,11 +123,15 @@ export function isGitignoreRelPath(relPath: string): boolean {
 export function clearGitignoreMatcherCache(workspaceRoot?: string): void {
   if (!workspaceRoot) {
     matcherCache.clear()
+    ruleSetCache.clear()
     return
   }
   const prefix = `${workspaceRoot}::`
   for (const key of matcherCache.keys()) {
     if (key.startsWith(prefix)) matcherCache.delete(key)
+  }
+  for (const dir of ruleSetCache.keys()) {
+    if (dir.startsWith(workspaceRoot)) ruleSetCache.delete(dir)
   }
 }
 
@@ -129,7 +149,7 @@ export function gitignoreMatcherForDir(
   for (let i = 0; i <= parts.length; i++) {
     const dir =
       i === 0 ? workspaceRoot : join(workspaceRoot, ...parts.slice(0, i))
-    const rules = readRuleSet(dir)
+    const rules = cachedRuleSet(dir)
     if (rules) ruleSets.push(rules)
   }
 

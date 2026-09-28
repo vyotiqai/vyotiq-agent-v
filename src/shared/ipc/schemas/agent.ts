@@ -1,6 +1,15 @@
 import { z } from 'zod'
-import { AgentInteractionModeSchema } from './settings'
+import { AgentInteractionModeSchema, DictationEngineSchema } from './settings'
 import { ProviderIdSchemaAny } from './providers'
+import {
+  AGENT_QUESTION_MAX_ANSWER_CHARS,
+  AGENT_QUESTION_MAX_ANSWER_VALUES,
+  AGENT_QUESTION_MAX_ITEMS,
+  AGENT_QUESTION_MAX_OPTION_CHARS,
+  AGENT_QUESTION_MAX_OPTIONS,
+  AGENT_QUESTION_MAX_PROMPT_CHARS,
+  AGENT_QUESTION_MAX_TITLE_CHARS
+} from '../../utils/agentQuestionForm'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -128,7 +137,16 @@ export const ChatMessageSchema = z.object({
   /** Loop-injected protocol turn (goal continue / plan nudge). Persisted for
    * the model, but never rendered as a user chat bubble. */
   synthetic: z.boolean().optional(),
-  /** ISO timestamp when the user sent this message (turn-duration start). */
+  /**
+   * A user follow-up the loop applied while the agent was still mid-turn (Send
+   * now / steer), rather than after it finished. The record keeps the plan
+   * going across it instead of starting the next run from nothing.
+   */
+  midTurn: z.literal(true).optional(),
+  /**
+   * ISO timestamp: when the user sent a user message (turn-duration start);
+   * when an assistant message finished streaming; when a tool result settled.
+   */
   at: z.string().datetime().optional()
 })
 export type ChatMessage = z.infer<typeof ChatMessageSchema>
@@ -203,9 +221,39 @@ export type IncompleteReason = z.infer<typeof IncompleteReasonSchema>
  * the event: a run is reused across turns, so runId alone cannot tell a live event apart
  * from one arriving late from the previous turn.
  */
+/**
+ * A child instance's summed step usage — the additive half of
+ * `StepUsageTotals`. Its per-step window fields (inputTokens, peak) stay out:
+ * they size the child's context, never the parent's meter.
+ */
+export const InstanceUsageSchema = z.object({
+  billedInputTokens: z.number().min(0),
+  billedCachedInputTokens: z.number().min(0),
+  billedPromptTokens: z.number().min(0).optional(),
+  cacheCreationInputTokens: z.number().min(0),
+  outputTokens: z.number().min(0),
+  reasoningTokens: z.number().min(0),
+  inputTokensIncludesCache: z.boolean().optional(),
+  steps: z.number().int().min(0),
+  stepsWithCacheReport: z.number().int().min(0),
+  billedCost: z.number(),
+  billedCostSaved: z.number(),
+  stepsWithCostReport: z.number().int().min(0),
+  estimatedCost: z.number(),
+  stepsWithEstimate: z.number().int().min(0),
+  generationMs: z.number().min(0)
+})
+export type InstanceUsage = z.infer<typeof InstanceUsageSchema>
+
 const eventBase = {
   runId: z.string(),
-  invokeId: z.number().int().min(1).optional()
+  invokeId: z.number().int().min(1).optional(),
+  /**
+   * The event's place in one order shared by events.jsonl and the live
+   * stream (main's eventSeq): a renderer reloading a run mid-stream skips
+   * what its disk snapshot already holds.
+   */
+  seq: z.number().int().positive().optional()
 }
 
 /**
@@ -315,7 +363,12 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     ...eventBase,
     toolCallId: z.string(),
     name: z.string().optional(),
-    argumentsDelta: z.string()
+    argumentsDelta: z.string(),
+    /**
+     * The provider named this call only now; until here it streamed under this
+     * id. The row keeps its place and takes the new id.
+     */
+    replacesToolCallId: z.string().optional()
   }),
   z.object({
     type: z.literal('tool_result'),
@@ -347,7 +400,16 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     phase: z.enum(['started', 'done', 'error', 'cancelled']),
     goal: z.string().optional(),
     summary: z.string().optional(),
-    pathScope: z.array(z.string().min(1)).optional()
+    pathScope: z.array(z.string().min(1)).optional(),
+    /** When main made this update — a live event has no events.jsonl row stamp. */
+    at: z.string().optional(),
+    /** The plan step (todo id) the parent spawned it for. */
+    stepId: z.string().min(1).optional(),
+    /** While it runs: the step it is on and what it is doing (live only, never persisted). */
+    step: z.number().int().min(0).optional(),
+    activity: z.string().max(300).optional(),
+    /** Its usage so far; final on a terminal update. Summed into the parent's turn. */
+    usage: InstanceUsageSchema.optional()
   }),
   z.object({
     /** Incremental stdout/stderr from a running terminal tool call (not persisted). */
@@ -1746,9 +1808,12 @@ export const AgentQuestionTypeSchema = z.enum(['single', 'multi', 'boolean', 'te
 export const AgentQuestionItemSchema = z
   .object({
     id: z.string().min(1),
-    prompt: z.string().min(1),
+    prompt: z.string().min(1).max(AGENT_QUESTION_MAX_PROMPT_CHARS),
     type: AgentQuestionTypeSchema,
-    options: z.array(z.string().min(1)).optional(),
+    options: z
+      .array(z.string().min(1).max(AGENT_QUESTION_MAX_OPTION_CHARS))
+      .max(AGENT_QUESTION_MAX_OPTIONS)
+      .optional(),
     allowCustom: z.boolean().optional()
   })
   .superRefine((item, ctx) => {
@@ -1771,26 +1836,28 @@ export const AgentQuestionRequestSchema = z.object({
   requestId: z.string().min(1),
   runId: z.string().min(1),
   toolCallId: z.string().min(1),
-  title: z.string().min(1).optional(),
-  questions: z.array(AgentQuestionItemSchema).min(1)
+  title: z.string().min(1).max(AGENT_QUESTION_MAX_TITLE_CHARS).optional(),
+  questions: z.array(AgentQuestionItemSchema).min(1).max(AGENT_QUESTION_MAX_ITEMS)
 })
 export type AgentQuestionRequest = z.infer<typeof AgentQuestionRequestSchema>
 export type AgentQuestionItem = z.infer<typeof AgentQuestionItemSchema>
 
 export const AgentQuestionAnswerSchema = z.object({
   questionId: z.string().min(1),
-  values: z.array(z.string())
+  values: z
+    .array(z.string().max(AGENT_QUESTION_MAX_ANSWER_CHARS))
+    .max(AGENT_QUESTION_MAX_ANSWER_VALUES)
 })
 export type AgentQuestionAnswer = z.infer<typeof AgentQuestionAnswerSchema>
 
 export const AgentQuestionResponseSchema = z.object({
   requestId: z.string().min(1),
   runId: z.string().min(1),
-  answers: z.array(AgentQuestionAnswerSchema)
+  answers: z.array(AgentQuestionAnswerSchema).max(AGENT_QUESTION_MAX_ITEMS)
 })
 export type AgentQuestionResponse = z.infer<typeof AgentQuestionResponseSchema>
 
-/** Preload → main when a question payload fails Zod validation (fail fast, no 15m wait). */
+/** Preload → main when a question payload fails Zod validation (fail fast instead of waiting until cancel). */
 export const AgentQuestionRejectSchema = z
   .object({
     requestId: z.string().min(1).optional(),
@@ -2046,37 +2113,156 @@ export const MAX_LOCAL_AUDIO_BYTES = 120 * 1024 * 1024
 export const MAX_LOCAL_AUDIO_DATA_CHARS = Math.ceil(MAX_LOCAL_AUDIO_BYTES * (4 / 3)) + 128
 
 /**
- * UX auto-stop. Local engines chunk/process the whole clip, so we let them run
- * up to an hour. Cloud engines share the same generous window; their true
- * ceiling is the 25 MiB byte guard checked at upload time, not a duration cap.
+ * The longest take. A take is transcribed segment by segment while it runs, so
+ * no single request comes near the byte limits; this bounds the PCM a take
+ * holds in memory (30 min of 16 kHz Int16 ≈ 58 MiB) so Retry and Restore can
+ * replay it.
  */
-export const MAX_DICTATION_MS = 60 * 60 * 1000
-export const MAX_LOCAL_DICTATION_MS = 60 * 60 * 1000
+export const MAX_TAKE_MS = 30 * 60 * 1000
 
-export const DictationTranscribeRequestSchema = z.object({
-  requestId: z.string().min(1).max(100).optional(),
-  mime: z.string().max(200).default('audio/webm'),
-  /**
-   * Base64 of the recording bytes. Cloud callers stay under `MAX_DICTATION_BYTES`
-   * (OpenAI limit, enforced in `transcribe.ts`); local callers may be larger and
-   * are bounded by `MAX_LOCAL_AUDIO_BYTES` in `local.ts`.
-   */
-  data: z.string().min(1).max(MAX_LOCAL_AUDIO_DATA_CHARS),
-  /**
-   * Optional 16 kHz mono little-endian Int16 PCM (base64). Required when
-   * `settings.dictation.engine === 'local'`. Cloud callers omit it.
-   */
-  pcm16k: z.string().min(1).max(MAX_LOCAL_AUDIO_DATA_CHARS).optional()
-})
+/** How long before `MAX_TAKE_MS` the take strip starts showing the time left. */
+export const TAKE_WARN_MS = 60 * 1000
+
+export const DictationTranscribeRequestSchema = z
+  .object({
+    requestId: z.string().min(1).max(100).optional(),
+    /**
+     * 16 kHz mono little-endian Int16 PCM (base64) — what the take captures.
+     * Local Whisper reads it directly; the cloud engines get it as a WAV.
+     */
+    pcm16k: z.string().min(1).max(MAX_LOCAL_AUDIO_DATA_CHARS).optional(),
+    /** Encoded audio (webm, mp3…), for callers that only have a file. Cloud engines only. */
+    data: z.string().min(1).max(MAX_LOCAL_AUDIO_DATA_CHARS).optional(),
+    mime: z.string().max(200).default('audio/webm'),
+    /** Use this engine instead of the one in settings (a failed take's "Try This PC"). */
+    engine: z.enum(['openai', 'openrouter', 'local']).optional(),
+    /** The composer's open workspace: its file names become words to listen for. */
+    workspacePath: z.string().min(1).max(4096).optional(),
+    /** ISO-639-1 hint for the cloud engines. */
+    language: z.string().max(8).optional(),
+    /**
+     * A segment of a take may be silence: answer `''` instead of failing. The
+     * take decides afterwards whether the whole of it said nothing.
+     */
+    allowEmpty: z.boolean().optional(),
+    /**
+     * A provisional pass over speech that is still coming in (live words).
+     * On this PC it may go to a faster model than the chosen one; the answer
+     * then says `provisional`.
+     */
+    draft: z.boolean().optional(),
+    /**
+     * The words just before this piece, for the cloud engines: a take is sent
+     * in pieces, and without them each piece starts cold — casing, punctuation
+     * and names drift between them.
+     */
+    prompt: z.string().max(1000).optional()
+  })
+  .refine((r) => Boolean(r.pcm16k || r.data), { message: 'pcm16k or data is required' })
 export type DictationTranscribeRequest = z.infer<typeof DictationTranscribeRequestSchema>
+
+/**
+ * Why a transcription failed, so the take can offer the fix that matches
+ * rather than guessing it from the message text.
+ */
+export const DICTATION_ERROR_CODES = [
+  'no_key',
+  'rejected_key',
+  'rate_limited',
+  'offline',
+  'model_missing',
+  'too_long',
+  'engine_failed'
+] as const
+export type DictationErrorCode = (typeof DICTATION_ERROR_CODES)[number]
+
+/** `IpcResult.code` for a dictation failure: `dictation:<DictationErrorCode>`. */
+export function dictationIpcCode(code: DictationErrorCode): string {
+  return `dictation:${code}`
+}
+
+export function parseDictationIpcCode(code: string | undefined): DictationErrorCode | null {
+  if (!code?.startsWith('dictation:')) return null
+  const rest = code.slice('dictation:'.length)
+  return (DICTATION_ERROR_CODES as readonly string[]).includes(rest) ? (rest as DictationErrorCode) : null
+}
 
 export const DictationCancelRequestSchema = z.object({
   requestId: z.string().min(1).max(100)
 })
 export type DictationCancelRequest = z.infer<typeof DictationCancelRequestSchema>
 
+const takeMs = z.number().int().nonnegative().max(24 * 60 * 60 * 1000)
+const takeCount = z.number().int().nonnegative().max(100_000)
+
+/** 16 kHz Int16 PCM of one mic chunk, base64: a couple of hundred ms at most in practice. */
+const LIVE_AUDIO_MAX_CHARS = 700_000
+
+/** Start an OpenAI live session for a take (Settings → Voice → Words as you speak). */
+export const DictationLiveOpenRequestSchema = z.object({
+  takeId: z.string().min(1).max(100),
+  language: z.string().max(8).optional(),
+  workspacePath: z.string().min(1).max(4096).optional()
+})
+export type DictationLiveOpenRequest = z.infer<typeof DictationLiveOpenRequestSchema>
+
+export const DictationLiveAudioRequestSchema = z.object({
+  takeId: z.string().min(1).max(100),
+  pcm16k: z.string().min(1).max(LIVE_AUDIO_MAX_CHARS)
+})
+export type DictationLiveAudioRequest = z.infer<typeof DictationLiveAudioRequestSchema>
+
+/** Commit (a phrase ended) or close (the take is over) a live session. */
+export const DictationLiveTakeRequestSchema = z.object({
+  takeId: z.string().min(1).max(100)
+})
+export type DictationLiveTakeRequest = z.infer<typeof DictationLiveTakeRequestSchema>
+
+/**
+ * What a live session says back. `ordinal` is the phrase's place among the
+ * take's commits: 0 is the first phrase cut, and the number of commits so
+ * far is the phrase still being spoken.
+ */
+export const DictationLiveEventSchema = z.discriminatedUnion('kind', [
+  z.object({ takeId: z.string(), kind: z.literal('open') }),
+  z.object({
+    takeId: z.string(),
+    kind: z.literal('words'),
+    ordinal: z.number().int().nonnegative(),
+    text: z.string(),
+    final: z.boolean()
+  }),
+  z.object({ takeId: z.string(), kind: z.literal('item_failed'), ordinal: z.number().int().nonnegative() }),
+  z.object({ takeId: z.string(), kind: z.literal('error'), message: z.string() })
+])
+export type DictationLiveEvent = z.infer<typeof DictationLiveEventSchema>
+
+/** How one take went, for the log: timings and counts only, never words. */
+export const DictationTakeStatsSchema = z.object({
+  outcome: z.enum(['insert', 'send', 'kept', 'failed', 'discarded']),
+  engine: DictationEngineSchema,
+  audioMs: takeMs,
+  speechMs: takeMs,
+  /** From the mic opening to the first words on screen. */
+  firstWordsMs: takeMs.nullable(),
+  /** From stopping to the words landing (or the take failing). */
+  finishWaitMs: takeMs.nullable(),
+  segments: takeCount,
+  finals: takeCount,
+  finalAvgMs: takeMs.nullable(),
+  drafts: takeCount,
+  draftFailures: takeCount,
+  /** Segments whose words came from a draft because the final ran past the budget. */
+  standIns: takeCount,
+  /** Segments a final-quality draft settled with no final request. */
+  reusedDrafts: takeCount
+})
+export type DictationTakeStats = z.infer<typeof DictationTakeStatsSchema>
+
 export const DictationTranscribeResultSchema = z.object({
-  text: z.string()
+  text: z.string(),
+  /** A draft model answered, not the chosen one: these words are not final. */
+  provisional: z.boolean().optional()
 })
 export type DictationTranscribeResult = z.infer<typeof DictationTranscribeResultSchema>
 

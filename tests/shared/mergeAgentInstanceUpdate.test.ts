@@ -63,3 +63,37 @@ describe('mergeAgentInstanceMaps', () => {
     expect(merged.child?.summary).toBe('ok')
   })
 })
+
+describe('instance progress', () => {
+  const update = (
+    phase: 'started' | 'done',
+    extra: Record<string, unknown> = {}
+  ): Parameters<typeof mergeAgentInstanceUpdate>[1] => ({
+    type: 'agent_instance_update',
+    runId: 'parent',
+    parentRunId: 'parent',
+    instanceRunId: 'child',
+    phase,
+    ...extra
+  })
+
+  it('keeps when it started, takes each step and activity, and drops the activity once it ends', () => {
+    let map = mergeAgentInstanceUpdate({}, update('started', { at: '2026-09-28T09:49:32.000Z', stepId: 's2' }))
+    map = mergeAgentInstanceUpdate(map, update('started', { at: '2026-09-28T09:50:00.000Z', step: 4, activity: 'Reading loop.ts' }))
+    expect(map.child).toMatchObject({ startedAt: '2026-09-28T09:49:32.000Z', step: 4, activity: 'Reading loop.ts', stepId: 's2' })
+    map = mergeAgentInstanceUpdate(map, update('done', { at: '2026-09-28T09:53:51.000Z' }))
+    expect(map.child).toMatchObject({ phase: 'done', endedAt: '2026-09-28T09:53:51.000Z', step: 4 })
+    expect(map.child?.activity).toBeUndefined()
+  })
+
+  it('does not let a late progress update reopen a finished child', () => {
+    const done = mergeAgentInstanceUpdate({}, update('done', { at: '2026-09-28T09:53:51.000Z' }))
+    const late = mergeAgentInstanceUpdate(done, update('started', { step: 20, activity: 'Reading' }))
+    expect(late.child?.phase).toBe('done')
+  })
+
+  it('stamps an update from its events.jsonl row when the event has no stamp of its own', () => {
+    const map = mergeAgentInstanceUpdate({}, update('started'), '2026-09-28T09:49:32.432Z')
+    expect(map.child?.startedAt).toBe('2026-09-28T09:49:32.432Z')
+  })
+})

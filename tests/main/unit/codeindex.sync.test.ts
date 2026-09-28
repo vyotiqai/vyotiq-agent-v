@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { syncCodeIndex } from '@main/agent/codeindex/sync'
 import { CodeIndexStore } from '@main/agent/codeindex/store'
 import type { IndexProgressUpdate } from '@main/agent/codeindex/indexProgress'
@@ -33,6 +33,26 @@ function writeRepo(): string {
 }
 
 describe('syncCodeIndex', () => {
+  // Commits no longer checkpoint the WAL on the main thread; the sync offers
+  // it to a worker after each reindexed file and hands it over at the end.
+  it('offers a WAL checkpoint after each reindexed file and takes one when it is done', async () => {
+    const ws = writeRepo()
+    for (let i = 0; i < 31; i++) writeFileSync(join(ws, 'src', `gen${i}.ts`), `export const v${i} = ${i}\n`, 'utf8')
+    const store = CodeIndexStore.openMemory()
+    const due = vi.spyOn(store, 'checkpointIfDue').mockResolvedValue()
+    const checkpoint = vi.spyOn(store, 'checkpointOffThread')
+    expect((await syncCodeIndex(ws, store)).indexed).toBe(33)
+    expect(due).toHaveBeenCalledTimes(33)
+    expect(checkpoint).toHaveBeenCalledTimes(1)
+    // Nothing reindexed: nothing to copy back.
+    due.mockClear()
+    checkpoint.mockClear()
+    expect((await syncCodeIndex(ws, store)).indexed).toBe(0)
+    expect(due).not.toHaveBeenCalled()
+    expect(checkpoint).not.toHaveBeenCalled()
+    store.close()
+  })
+
   it('indexes production source, skipping tests and lockfiles', async () => {
     const ws = writeRepo()
     const store = CodeIndexStore.openMemory()

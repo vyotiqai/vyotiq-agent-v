@@ -8,6 +8,7 @@ import type { Dirent } from 'fs'
 import { join } from 'path'
 import type { AgentToolDef } from './types'
 import { pathSafeName, resolveAgentToolsDir } from './paths'
+import { normalizeAgentToolSchema } from './schema'
 import { BUILTIN_TOOL_NAMES } from '../schemas/tools'
 
 const HEADER_MARKER = '/* @agent-tool'
@@ -171,7 +172,9 @@ export async function agentBuiltToolDefinitions(): Promise<
       .map((def) => ({
         name: def.name,
         description: def.description,
-        parameters: def.inputSchema
+        // Files written before build_tool validated schemas can be malformed,
+        // and one bad schema fails every request on a strict host.
+        parameters: normalizeAgentToolSchema(def.inputSchema)
       }))
   } catch {
     return []

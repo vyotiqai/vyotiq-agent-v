@@ -43,8 +43,8 @@ afterEach(() => {
 })
 
 describe('pendingReviewSummary', () => {
-  it('is absent for a task that wrote nothing', () => {
-    expect(pendingReviewSummary(runDir, workspace)).toBeUndefined()
+  it('is absent for a task that wrote nothing', async () => {
+    expect(await pendingReviewSummary(runDir, workspace)).toBeUndefined()
   })
 
   it('counts unresolved edits exactly, as git would', async () => {
@@ -54,17 +54,17 @@ describe('pendingReviewSummary', () => {
     finalizeWriteCheckpoint(runDir)
 
     // a.txt: −two +TWO +and a half; b.txt: +new +file
-    expect(pendingReviewSummary(runDir, workspace)).toEqual({ files: 2, add: 4, del: 1 })
+    expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 2, add: 4, del: 1 })
   })
 
   it('drops a task from review once its edits are kept', async () => {
     beginWriteCheckpoint(runDir, workspace)
     await run('str_replace', { path: 'a.txt', old_string: 'two', new_string: '2' })
     const meta = finalizeWriteCheckpoint(runDir)
-    expect(pendingReviewSummary(runDir, workspace)).toEqual({ files: 1, add: 1, del: 1 })
+    expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 1, add: 1, del: 1 })
 
     resolveWrites(runDir, workspace, { checkpointId: meta!.id, action: 'keep' })
-    expect(pendingReviewSummary(runDir, workspace)).toBeUndefined()
+    expect(await pendingReviewSummary(runDir, workspace)).toBeUndefined()
   })
 
   it('drops a task from review once its edits are undone', async () => {
@@ -72,17 +72,31 @@ describe('pendingReviewSummary', () => {
     await run('str_replace', { path: 'a.txt', old_string: 'two', new_string: '2' })
     const meta = finalizeWriteCheckpoint(runDir)
     resolveWrites(runDir, workspace, { checkpointId: meta!.id, action: 'discard' })
-    expect(pendingReviewSummary(runDir, workspace)).toBeUndefined()
+    expect(await pendingReviewSummary(runDir, workspace)).toBeUndefined()
   })
 
   it('reads the file as it is now, so a later edit by you is counted', async () => {
     beginWriteCheckpoint(runDir, workspace)
     await run('str_replace', { path: 'a.txt', old_string: 'two', new_string: '2' })
     finalizeWriteCheckpoint(runDir)
-    expect(pendingReviewSummary(runDir, workspace)).toEqual({ files: 1, add: 1, del: 1 })
+    expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 1, add: 1, del: 1 })
 
     writeFileSync(join(workspace, 'a.txt'), 'one\n2\nthree\nfour\n', 'utf8')
-    expect(pendingReviewSummary(runDir, workspace)).toEqual({ files: 1, add: 2, del: 1 })
+    expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 1, add: 2, del: 1 })
+  })
+
+  // Asked for every task each time the task list is read. Synchronous, a task
+  // that left a thousand files waiting held the main thread for a second.
+  it('lets other work run while it counts', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    for (let i = 0; i < 40; i++) await run('edit', { path: `gen/f${i}.ts`, contents: `export const v${i} = ${i}\n` })
+    finalizeWriteCheckpoint(runDir)
+    let otherWorkRan = false
+    setImmediate(() => {
+      otherWorkRan = true
+    })
+    expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 40, add: 40, del: 0 })
+    expect(otherWorkRan).toBe(true)
   })
 
   it('keeps the file count but drops numbers it cannot count exactly', async () => {
@@ -91,6 +105,6 @@ describe('pendingReviewSummary', () => {
     finalizeWriteCheckpoint(runDir)
     // Something since turned it binary: a NUL byte, as git would detect it.
     writeFileSync(join(workspace, 'data.txt'), Buffer.from([0x50, 0x00, 0x4b]))
-    expect(pendingReviewSummary(runDir, workspace)).toEqual({ files: 1 })
+    expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 1 })
   })
 })

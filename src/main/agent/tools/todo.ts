@@ -3,6 +3,7 @@ import { join } from 'path'
 import { z } from 'zod'
 import { atomicWriteJson } from '@main/storage/atomicWrite'
 import type { ChatMessage } from '../../../shared/ipc'
+import { canonicalTodoId } from '../../../shared/utils/todoContent'
 import { wrapPromptSection } from '../promptSections'
 
 export const TodoStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'cancelled'])
@@ -125,7 +126,12 @@ export function syncTodosAfterRewind(runDir: string, messages: readonly ChatMess
     if (existsSync(path)) rmSync(path, { force: true })
     return
   }
-  atomicWriteJson(path, { updatedAt: new Date().toISOString(), todos })
+  // The snapshot is history, written mid-run; a rewound run is not running, so
+  // its list carries the run-end semantics (in progress → pending).
+  const settled = todos.map((todo) =>
+    todo.status === 'in_progress' ? { ...todo, status: 'pending' as const } : todo
+  )
+  atomicWriteJson(path, { updatedAt: new Date().toISOString(), todos: settled })
 }
 
 /** Drop run-dir todos.json when rewind removed every todo_write from history. */
@@ -136,16 +142,6 @@ export function clearTodosIfOrphaned(runDir: string, messages: readonly ChatMess
 /** Collapse whitespace so checklist lines stay one-item-per-line for the UI parser. */
 export function sanitizeTodoItemContent(content: string): string {
   return content.replace(/\s+/g, ' ').trim()
-}
-
-/**
- * Canonical id safe for the `[x] (id) content` checklist line format: any
- * whitespace or parenthesis in a raw id would break parseSerializedTodoContent
- * (rewind sync re-parses these lines), so ids are canonicalized once at write
- * time. Deterministic, so merge-by-id stays stable across todo_write calls.
- */
-function canonicalTodoId(id: string): string {
-  return id.replace(/[\s()]+/g, '')
 }
 
 function normalizeTodoItems(todos: TodoItem[]): TodoItem[] {
@@ -219,6 +215,21 @@ export function toolTodoWrite(
 ): { content: string; todos: TodoItem[]; notice?: string } {
   if (!runDir) throw new Error('todo_write is only available inside a run')
 
+  // A replace that names fewer todos than the list holds, every one of them
+  // already in it, is a status update the model forgot to mark merge:true —
+  // run dd5aafe0 (2026-09-28) sent `[{ s5, completed }]` and wiped s1–s4, so
+  // the finished record lost the steps its children ran under. Merge it, and
+  // say so. Dropping a step is `cancelled`; a real re-plan names new ids.
+  let mergeNotice: string | undefined
+  if (!merge && todos.length > 0) {
+    const stored = readTodos(runDir)
+    const storedIds = new Set(stored.map((todo) => todo.id))
+    if (todos.length < stored.length && todos.every((todo) => storedIds.has(canonicalTodoId(todo.id)))) {
+      merge = true
+      mergeNotice = `named only existing ids (${todos.length} of ${stored.length}), so it was merged as a status update; the other todos are kept — mark one cancelled to drop it`
+    }
+  }
+
   // merge:true is a partial patch: an entry may omit content entirely to
   // update only the status of a stored todo by id — backfill it from the
   // stored list before normalization. Content that is present but blank stays
@@ -250,7 +261,7 @@ export function toolTodoWrite(
   for (let i = 0; i < next.length; i++) {
     if (next[i]!.status === 'in_progress') inProgressIndexes.push(i)
   }
-  let notice: string | undefined
+  let notice: string | undefined = mergeNotice
   if (inProgressIndexes.length > 1) {
     const keepIdx = inProgressIndexes[inProgressIndexes.length - 1]!
     const demoted: string[] = []
@@ -261,7 +272,8 @@ export function toolTodoWrite(
       }
       return todo
     })
-    notice = `only one task may be in_progress; demoted ${demoted.join(', ')} to pending (kept ${next[keepIdx]!.id})`
+    const demotion = `only one task may be in_progress; demoted ${demoted.join(', ')} to pending (kept ${next[keepIdx]!.id})`
+    notice = notice ? `${notice}; ${demotion}` : demotion
   }
 
   atomicWriteJson(todoPath(runDir), { updatedAt: new Date().toISOString(), todos: next })

@@ -71,6 +71,25 @@ describe('gitignore-aware search', () => {
     clearGitignoreMatcherCache(dir)
     expect(gitignoreMatcherForDir(dir, '').shouldIgnoreEntry('secret', true)).toBe(true)
   })
+
+  // Every directory's matcher takes its ancestors' rules. The root file was
+  // read and parsed again for each directory a walk entered; it is read once.
+  it('reads a parent’s .gitignore once for all its directories, and again after a clear', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-gitignore-shared-'))
+    dirs.push(dir)
+    mkdirSync(join(dir, 'a', 'b', 'c'), { recursive: true })
+    writeFileSync(join(dir, '.gitignore'), 'secret/\n', 'utf8')
+    expect(gitignoreMatcherForDir(dir, 'a').shouldIgnoreEntry('secret', true)).toBe(true)
+
+    writeFileSync(join(dir, '.gitignore'), 'other/\n', 'utf8')
+    // Not walked before, yet it takes the root's rules as they were read.
+    expect(gitignoreMatcherForDir(dir, 'a/b').shouldIgnoreEntry('secret', true)).toBe(true)
+
+    clearGitignoreMatcherCache(dir)
+    const fresh = gitignoreMatcherForDir(dir, 'a/b/c')
+    expect(fresh.shouldIgnoreEntry('secret', true)).toBe(false)
+    expect(fresh.shouldIgnoreEntry('other', true)).toBe(true)
+  })
 })
 
 describe('gitignore match order and path helpers', () => {

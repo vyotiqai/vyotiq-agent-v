@@ -25,6 +25,7 @@ export const PUSH_CHANNEL_NAMES = [
   'ptySessionsChanged',
   'codeIndexStatusEvent',
   'dictationStatusEvent',
+  'dictationLiveEvent',
   'githubAuthStatusEvent',
   'skillsChanged',
   'notificationsChanged',

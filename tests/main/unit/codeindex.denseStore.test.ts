@@ -2,7 +2,7 @@ import { mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CodeIndexStore } from '@main/agent/codeindex/store'
 import { CODE_INDEX_SCHEMA_VERSION } from '@main/agent/codeindex/types'
 
@@ -140,6 +140,26 @@ describe('CodeIndexStore dense layer', () => {
         .get() as { sql: string }
     ).sql
     expect(sqls.toUpperCase()).toContain('WHERE VEC IS NULL')
+    store.close()
+  })
+
+  // The vector job asks for its next batch and the counts after every batch.
+  // Walking the table for them read every chunk's text each time: tens of
+  // milliseconds a batch on a real workspace, on the main thread.
+  it('answers the next batch and both counts from indexes, not the table', () => {
+    const store = CodeIndexStore.openMemory()
+    const prepare = vi.spyOn(store.db, 'prepare')
+    store.pendingDenseBatch(32)
+    store.denseStatus()
+    const prepared = prepare.mock.calls.map(([sql]) => sql)
+    prepare.mockRestore()
+    expect(prepared).toHaveLength(3)
+    for (const sql of prepared) {
+      const plan = (store.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as { detail: string }[])
+        .map((r) => r.detail)
+        .join(' / ')
+      expect(plan, sql).toMatch(/USING (COVERING )?INDEX idx_dense_chunks_/)
+    }
     store.close()
   })
 
@@ -314,6 +334,36 @@ describe('CodeIndexStore dense layer', () => {
     ])
     const otherId = (rawDenseRows(store) as { id: number }[]).find((r) => r.path === 'src/other.ts')!.id
     expect(() => store.setDenseVector(otherId, new Float32Array([1, 2, 3]))).toThrow(/dense dimension 4/)
+    store.close()
+  })
+
+  it('stores a batch of vectors in one commit, and a rejected vector writes none of it', () => {
+    const store = CodeIndexStore.openMemory()
+    replaceWithText(store, 'src/auth.ts', [
+      { startLine: 1, endLine: 10, name: 'fnA', text: 'function fnA() {}' },
+      { startLine: 11, endLine: 20, name: 'fnB', text: 'function fnB() {}' },
+      { startLine: 21, endLine: 30, name: 'fnC', text: 'function fnC() {}' }
+    ])
+    store.setDenseModel('mock-embed', 2)
+    const [a, b, c] = (rawDenseRows(store) as { id: number }[]).map((r) => r.id)
+    expect(() =>
+      store.setDenseVectors([
+        { id: a!, vec: new Float32Array([1, 0]) },
+        { id: b!, vec: new Float32Array([1, 0, 0]) }
+      ])
+    ).toThrow(/dense dimension 2/)
+    expect(store.denseStatus()).toEqual({ total: 3, vectorized: 0 })
+
+    const exec = vi.spyOn(store.db, 'exec')
+    store.setDenseVectors([
+      { id: a!, vec: new Float32Array([1, 0]) },
+      { id: b!, vec: new Float32Array([0, 1]) },
+      { id: c!, vec: new Float32Array([1, 1]) }
+    ])
+    expect(exec.mock.calls.filter(([sql]) => sql === 'COMMIT')).toHaveLength(1)
+    exec.mockRestore()
+    expect(store.denseStatus()).toEqual({ total: 3, vectorized: 3 })
+    expect(store.pendingDenseBatch(10)).toEqual([])
     store.close()
   })
 

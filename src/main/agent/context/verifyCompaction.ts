@@ -1,4 +1,5 @@
 import { pathCandidatesIn, type FoldFacts } from './foldFacts'
+import { askQuestionPromptEnd } from './retainedDecisions'
 import {
   isStrictWorkspaceFilePath,
   normalizeWorkspaceFileRelPath
@@ -211,9 +212,7 @@ function foldDecisionText(value: string): string {
  * answer as the recommendation; requiring the original answer then false-fails.
  */
 function askQuestionPromptNeedle(decision: string): string | null {
-  const qIdx = decision.lastIndexOf('?:')
-  const cIdx = decision.lastIndexOf(': ')
-  const idx = qIdx >= 12 ? qIdx : cIdx
+  const idx = askQuestionPromptEnd(decision)
   if (idx < 12) return null
   const prompt = foldDecisionText(decision.slice(0, idx).replace(/^[-*]\s+/, ''))
   return prompt.length >= 12 ? prompt : null

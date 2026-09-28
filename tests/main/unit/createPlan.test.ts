@@ -210,3 +210,29 @@ describe('create_plan title-derivation validation and hints', () => {
     expect(result.ok).toBe(true)
   })
 })
+
+describe('create_plan todos', () => {
+  it('echoes the list it kept, and says which in-progress steps it demoted', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-plan-todos-'))
+    try {
+      const result = executeCreatePlan(
+        dir,
+        {
+          plan: COMPLETE_PLAN,
+          todos: [
+            { id: 's1', content: 'Inspect', status: 'completed' },
+            { id: 's2', content: 'Child A', status: 'in_progress' },
+            { id: 's3', content: 'Child B', status: 'in_progress' }
+          ]
+        },
+        { runDir: dir }
+      )
+      expect(result.ok).toBe(true)
+      // The model reads this: before, the demotion happened silently.
+      expect(result.content).toContain('1/3 complete\n[x] (s1) Inspect\n[ ] (s2) Child A\n[~] (s3) Child B')
+      expect(result.content).toContain('Note: only one task may be in_progress; demoted s2 to pending (kept s3)')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

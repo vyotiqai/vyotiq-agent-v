@@ -60,13 +60,13 @@ export async function runDenseVectorization(
     }
     // Persist the completed batch FIRST, then honor an abort — a preempted job
     // keeps every batch it already paid for, so reruns only embed what remains.
-    for (let i = 0; i < batch.length; i++) {
-      store.setDenseVector(batch[i]!.id, vecs[i]!)
-      embedded++
-    }
+    store.setDenseVectors(batch.map((row, i) => ({ id: row.id, vec: vecs[i]! })))
+    embedded += batch.length
     if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    await store.checkpointIfDue()
     const status = store.denseStatus()
     opts.onProgress?.({ done: status.vectorized, total: status.total })
   }
+  if (embedded > 0) await store.checkpointOffThread()
   return { embedded, total }
 }

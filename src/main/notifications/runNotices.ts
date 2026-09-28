@@ -117,17 +117,17 @@ export function questionNoticeFor(
  * The notice for a run that just stopped: its edits and checks as they are on
  * disk now — the loop wrote its last checkpoint before the run ended.
  */
-export function finishedNoticeFor(input: {
+export async function finishedNoticeFor(input: {
   workspacePath: string
   runId: string
   runDir: string
   failed: boolean
   status: RunStatus | null | undefined
-}): RunNotice {
+}): Promise<RunNotice> {
   const { workspacePath, runId, runDir, failed, status } = input
   let reviewFiles: number | undefined
   try {
-    reviewFiles = pendingReviewSummary(runDir, workspacePath)?.files
+    reviewFiles = (await pendingReviewSummary(runDir, workspacePath))?.files
   } catch (err) {
     logger.warn('Could not count the edits a finished run left for review', {
       scope: 'notifications',

@@ -7,6 +7,7 @@
 import { mkdir, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { ensureAgentToolsDir, pathSafeName } from '../agentTools/paths'
+import { agentToolSchemaProblems } from '../agentTools/schema'
 import { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from '../schemas/tools'
 
 export type BuildToolInput = {
@@ -81,6 +82,12 @@ export async function handler(input: unknown): Promise<BuildToolResult> {
   }
   if (schema == null || typeof schema !== 'object' || Array.isArray(schema)) {
     throw new Error('build_tool requires schema to be a JSON object')
+  }
+  // The schema rides every later request's tool list; a malformed one there
+  // fails the whole request on strict hosts, not just calls to this tool.
+  const schemaProblems = agentToolSchemaProblems(schema)
+  if (schemaProblems.length) {
+    throw new Error(`build_tool schema is not valid JSON Schema: ${schemaProblems.join('; ')}`)
   }
   if (typeof code !== 'string' || !code.trim()) {
     throw new Error('build_tool requires non-empty code')
