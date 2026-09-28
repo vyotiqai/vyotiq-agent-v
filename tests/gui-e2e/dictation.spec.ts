@@ -5,6 +5,16 @@ import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { requireActivePath } from './helpers/seedWorkspace'
 
+/*
+  Dictation end to end in the real app: real getUserMedia plumbing, real Web
+  Audio capture (AudioContext + the ScriptProcessor tap), the real segmenter
+  and take controller, IPC to main, and main's fixture transcriber.
+
+  The one stand-in is the microphone itself: getUserMedia returns a stream
+  from an oscillator gated on and off like phrases with pauses, so the take
+  hears "speech", cuts it at the pauses, and transcribes while listening.
+*/
+
 const FIXTURE_TRANSCRIPT = 'E2E dictation transcript.'
 
 let launched: LaunchedApp
@@ -18,40 +28,28 @@ test.beforeAll(async () => {
   launched = await launchApp({ e2eFixture: true })
 
   await launched.window.addInitScript(() => {
-    class FakeMediaRecorder {
-      static isTypeSupported(type: string): boolean {
-        return type.startsWith('audio/webm')
+    const speakingMic = async (): Promise<MediaStream> => {
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      osc.frequency.value = 220
+      const gate = ctx.createGain()
+      gate.gain.value = 0
+      // 1.2 s of "phrase", 0.9 s of pause, repeated for a minute.
+      const t0 = ctx.currentTime + 0.05
+      for (let i = 0; i < 30; i++) {
+        gate.gain.setValueAtTime(0.4, t0 + i * 2.1)
+        gate.gain.setValueAtTime(0, t0 + i * 2.1 + 1.2)
       }
-      state: 'inactive' | 'recording' = 'inactive'
-      ondataavailable: ((ev: { data: Blob }) => void) | null = null
-      onstop: (() => void) | null = null
-      onerror: (() => void) | null = null
-      start(): void {
-        this.state = 'recording'
-      }
-      stop(): void {
-        this.state = 'inactive'
-        this.ondataavailable?.({
-          data: new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'audio/webm' })
-        })
-        this.onstop?.()
-      }
+      const out = ctx.createMediaStreamDestination()
+      osc.connect(gate).connect(out)
+      osc.start()
+      return out.stream
     }
-    // @ts-expect-error stub for e2e
-    window.MediaRecorder = FakeMediaRecorder
-    Object.defineProperty(navigator, 'mediaDevices', {
-      configurable: true,
-      value: {
-        getUserMedia: async () => ({
-          getTracks: () => [{ stop: () => undefined }]
-        })
-      }
-    })
+    const devices = navigator.mediaDevices
+    Object.defineProperty(devices, 'getUserMedia', { configurable: true, value: speakingMic })
   })
 
-  const addRes = await launched.window.evaluate(async (path) => {
-    return window.vyotiq.addWorkspace(path)
-  }, workspacePath)
+  const addRes = await launched.window.evaluate(async (path) => window.vyotiq.addWorkspace(path), workspacePath)
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
 
@@ -78,32 +76,59 @@ test.afterAll(async () => {
   }
 })
 
-test('Mic stop inserts fixture transcript into Message', async () => {
+test('a take writes into the brief while listening, and Enter inserts it', async () => {
   const { window } = launched
 
   const expand = window.getByRole('button', { name: /show navigator/i })
-  if (await expand.isVisible().catch(() => false)) {
-    await expand.click()
-  }
+  if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  const composer = window.getByRole('combobox', { name: 'Brief' })
-  await expect(composer).toBeVisible({ timeout: 20_000 })
+  const brief = window.locator('[aria-label="Brief"][data-composer-input]')
+  await expect(brief).toBeVisible({ timeout: 20_000 })
 
-  // The dictate preflight requires the provider secret. On headless Linux
-  // there is no OS keyring, setSecret fails, and the hook correctly blocks
-  // recording — skip only when the write demonstrably failed; if it
-  // succeeded, the flow must run and the spec keeps its teeth.
+  // The engine needs the provider secret. On headless Linux there is no OS
+  // keyring, setSecret fails, and the mic correctly offers setup instead —
+  // skip only when the write demonstrably failed.
   if (secretWrite && !secretWrite.ok) {
     test.skip(true, `setSecret unavailable: ${JSON.stringify(secretWrite.error)}`)
   }
 
-  const dictate = window.getByRole('button', { name: /^Dictate$/i })
-  await expect(dictate).toBeVisible()
-  await dictate.click()
+  await window.getByRole('button', { name: /^Dictate$/ }).click()
+  const strip = window.locator('[data-take]')
+  await expect(strip).toHaveAttribute('data-take', 'listening', { timeout: 10_000 })
+  await expect(strip).toHaveAttribute('data-take-open', '')
+  await expect(strip.getByText('OpenAI')).toBeVisible()
+  // The level meter moves: some bar is taller than the 2px floor.
+  await expect
+    .poll(async () =>
+      strip.locator('[data-take-meter] span').evaluateAll((bars) => bars.some((b) => (b as HTMLElement).offsetHeight > 4))
+    )
+    .toBe(true)
 
-  const stopDictate = window.getByRole('button', { name: /^Stop dictation$/i })
-  await expect(stopDictate).toBeVisible()
-  await stopDictate.click()
+  // The first phrase closes at its pause and is transcribed while still listening.
+  await expect(brief).toContainText(FIXTURE_TRANSCRIPT, { timeout: 15_000 })
+  await expect(strip).toHaveAttribute('data-take', 'listening')
+  await expect(brief).toHaveAttribute('contenteditable', 'false')
 
-  await expect(composer).toContainText(FIXTURE_TRANSCRIPT, { timeout: 15_000 })
+  await window.keyboard.press('Enter')
+  await expect(strip).toHaveAttribute('data-take', 'inserted', { timeout: 15_000 })
+  await expect(strip).toContainText('words inserted')
+  await expect(brief).toHaveAttribute('contenteditable', 'true')
+  await expect(brief).toContainText(FIXTURE_TRANSCRIPT)
+
+  // Undo takes the whole take back out.
+  await strip.getByRole('button', { name: /Undo/ }).click()
+  await expect(brief).not.toContainText(FIXTURE_TRANSCRIPT)
+})
+
+test('Esc discards a take and Restore brings it back listening', async () => {
+  const { window } = launched
+  const strip = window.locator('[data-take]')
+  await window.getByRole('button', { name: /^Dictate$/ }).click()
+  await expect(strip).toHaveAttribute('data-take', 'listening', { timeout: 10_000 })
+  await window.keyboard.press('Escape')
+  await expect(strip).toHaveAttribute('data-take', 'discarded')
+  await strip.getByRole('button', { name: 'Restore' }).click()
+  await expect(strip).toHaveAttribute('data-take', 'listening', { timeout: 10_000 })
+  await window.keyboard.press('Escape')
+  await expect(strip).toHaveAttribute('data-take', 'discarded')
 })

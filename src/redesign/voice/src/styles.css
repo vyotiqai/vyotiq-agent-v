@@ -1,0 +1,18 @@
+/*
+  The renderer's own stylesheet — tokens, skins, @theme, @utility helpers —
+  imported whole, so every class here resolves exactly as it does in the app.
+
+  Tailwind's automatic source detection starts at this Vite root, which does
+  not reach the renderer, so the primitives' classes need an explicit @source.
+*/
+@import '../../../renderer/src/styles.css';
+
+@source '../../../renderer/src';
+@source '.';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}

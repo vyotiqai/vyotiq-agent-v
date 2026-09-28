@@ -9,9 +9,11 @@ import {
   type DictationTranscribeResult,
   type Settings
 } from '../../shared/ipc'
-import { dictationCatalogEntry, DICTATION_LOCAL_MODEL_IDS } from '../../shared/dictation'
+import { DICTATION_LOCAL_CATALOG, dictationCatalogEntry, DICTATION_LOCAL_MODEL_IDS } from '../../shared/dictation'
 import { getSettings, setSettings } from '../settings/settings'
 import {
+  DICTATION_MOONSHINE_OPTIONAL_FILES,
+  DICTATION_MOONSHINE_REQUIRED_FILES,
   DICTATION_WHISPER_OPTIONAL_FILES,
   DICTATION_WHISPER_REQUIRED_FILES,
   recommendedDictationModelId
@@ -23,13 +25,37 @@ import {
   type DownloadFileSpec
 } from './download'
 import { dictationModelDir } from './modelPaths'
+import { DictationError } from './errors'
 import { getDictationRuntimeStatus, setDictationRuntimeStatus } from './modelStatus'
 import {
   getDictationUtilityClient,
-  type DictationWhisperBackend
+  shutdownDictationUtilityClients,
+  type DictationWhisperBackend,
+  type DictationWorkerRole
 } from './whisperUtilityClient'
 
+/**
+ * Loaded models go after this long without a take: both workers hold a few
+ * hundred MB, and someone who dictated once this morning should get it back.
+ * Loading again costs a couple of seconds, while the mic opens.
+ */
+export const DICTATION_IDLE_UNLOAD_MS = 15 * 60_000
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+let transcribesInFlight = 0
+
+/** How long a call takes on this PC, per model, smoothed — Voice settings shows it. */
+const callMsByModel = new Map<DictationLocalModelId, number>()
+
+/** The model a take's words come from, once loaded. */
 let loadedModelId: DictationLocalModelId | null = null
+/**
+ * What each worker holds, least recently used first. The final worker has the
+ * chosen model; the draft worker has the faster one live words come from
+ * (only when that is a different model). Mirrors each worker's two-slot
+ * eviction.
+ */
+let loadedByRole: Record<DictationWorkerRole, DictationLocalModelId[]> = { final: [], draft: [] }
+const MAX_LOADED = 2
 let installInFlight: DictationLocalModelId | null = null
 let installChain: Promise<void> = Promise.resolve()
 let testBackend: DictationWhisperBackend | null = null
@@ -42,9 +68,43 @@ export function setDictationWhisperBackendForTests(
 
 export function resetDictationLocalStateForTests(): void {
   loadedModelId = null
+  loadedByRole = { final: [], draft: [] }
   installInFlight = null
   installChain = Promise.resolve()
   testBackend = null
+  clearIdleUnload()
+  transcribesInFlight = 0
+  callMsByModel.clear()
+}
+
+function clearIdleUnload(): void {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = null
+}
+
+/** (Re)start the idle clock; any load or take pushes the unload back. */
+function armIdleUnload(): void {
+  clearIdleUnload()
+  idleTimer = setTimeout(() => {
+    idleTimer = null
+    if (installInFlight || transcribesInFlight > 0) {
+      armIdleUnload()
+      return
+    }
+    if (loadedByRole.final.length === 0 && loadedByRole.draft.length === 0) return
+    void unloadIdleDictation()
+  }, DICTATION_IDLE_UNLOAD_MS)
+  idleTimer.unref?.()
+}
+
+async function unloadIdleDictation(): Promise<void> {
+  try {
+    await unloadDictationModel()
+    // The worker processes too: an idle Node runtime with ORT loaded still holds memory.
+    if (!testBackend) await shutdownDictationUtilityClients()
+  } catch {
+    /* the next take loads again either way */
+  }
 }
 
 function safeGetSettings(): Settings {
@@ -61,23 +121,27 @@ function patchDictationLocalModelId(localModelId: Settings['dictation']['localMo
   setSettings({ dictation: { ...current, localModelId } })
 }
 
-function whisperFiles(hubRepo: string): DownloadFileSpec[] {
+function specs(
+  hubRepo: string,
+  required: readonly string[],
+  optional: readonly string[]
+): DownloadFileSpec[] {
   return [
-    ...DICTATION_WHISPER_REQUIRED_FILES.map((relativePath) => ({
-      relativePath,
-      url: hfResolve(hubRepo, relativePath)
-    })),
-    ...DICTATION_WHISPER_OPTIONAL_FILES.map((relativePath) => ({
-      relativePath,
-      url: hfResolve(hubRepo, relativePath),
-      optional: true
-    }))
+    ...required.map((relativePath) => ({ relativePath, url: hfResolve(hubRepo, relativePath) })),
+    ...optional.map((relativePath) => ({ relativePath, url: hfResolve(hubRepo, relativePath), optional: true }))
   ]
+}
+
+function whisperFiles(hubRepo: string): DownloadFileSpec[] {
+  return specs(hubRepo, DICTATION_WHISPER_REQUIRED_FILES, DICTATION_WHISPER_OPTIONAL_FILES)
 }
 
 /** Curated download specs for any local dictation model. */
 function curatedFiles(modelId: DictationLocalModelId): DownloadFileSpec[] {
-  return whisperFiles(dictationCatalogEntry(modelId).hubRepo)
+  const entry = dictationCatalogEntry(modelId)
+  return entry.backend === 'moonshine'
+    ? specs(entry.hubRepo, DICTATION_MOONSHINE_REQUIRED_FILES, DICTATION_MOONSHINE_OPTIONAL_FILES)
+    : whisperFiles(entry.hubRepo)
 }
 
 function normalizeHubRelativePath(raw: string): string {
@@ -120,6 +184,8 @@ export function selectDictationDownloadFiles(
 
 async function resolveWhisperFiles(modelId: DictationLocalModelId): Promise<DownloadFileSpec[]> {
   const entry = dictationCatalogEntry(modelId)
+  // The registry lists every dtype of Moonshine's files; the curated set is the one it runs.
+  if (entry.backend === 'moonshine') return curatedFiles(modelId)
   if (process.env.VITEST === 'true' || process.env.VITEST === '1') {
     return selectDictationDownloadFiles(entry.hubRepo)
   }
@@ -169,19 +235,29 @@ function dirSizeBytes(dir: string): number {
   return total
 }
 
+function markLoaded(role: DictationWorkerRole, id: DictationLocalModelId): void {
+  const list = [...loadedByRole[role].filter((m) => m !== id), id]
+  while (list.length > MAX_LOADED) list.shift()
+  loadedByRole = { ...loadedByRole, [role]: list }
+  if (loadedModelId && !loadedByRole.final.includes(loadedModelId)) loadedModelId = null
+}
+
+function isLoaded(id: DictationLocalModelId): boolean {
+  return loadedByRole.final.includes(id) || loadedByRole.draft.includes(id)
+}
+
+/** Models with every file on disk — no sizes, so it is cheap enough for every request. */
+function installedModelIds(): DictationLocalModelId[] {
+  return DICTATION_LOCAL_MODEL_IDS.filter((id) => modelFilesPresent(dictationModelDir(id), curatedFiles(id)))
+}
+
 export function listInstalledDictationModels(): DictationRuntimeStatus['installed'] {
-  const out: DictationRuntimeStatus['installed'] = []
-  for (const id of DICTATION_LOCAL_MODEL_IDS) {
-    const dir = dictationModelDir(id)
-    const files = curatedFiles(id)
-    if (!modelFilesPresent(dir, files)) continue
-    out.push({
-      id,
-      bytesOnDisk: dirSizeBytes(dir),
-      loaded: loadedModelId === id
-    })
-  }
-  return out
+  return installedModelIds().map((id) => ({
+    id,
+    bytesOnDisk: dirSizeBytes(dictationModelDir(id)),
+    loaded: isLoaded(id),
+    callMs: callMsByModel.has(id) ? Math.round(callMsByModel.get(id)!) : null
+  }))
 }
 
 function publishStatus(
@@ -201,27 +277,41 @@ export function readDictationRuntimeStatus(): DictationRuntimeStatus {
   return publishStatus()
 }
 
-async function resolveBackend(): Promise<DictationWhisperBackend> {
+async function resolveBackend(role: DictationWorkerRole = 'final'): Promise<DictationWhisperBackend> {
   if (testBackend) return testBackend
-  const client = getDictationUtilityClient()
+  const client = getDictationUtilityClient(role)
   if (!client.isAvailable) {
-    throw new Error('Local dictation worker is unavailable')
+    throw new DictationError('engine_failed', 'Whisper could not start on this PC')
   }
   return client
 }
 
-async function ensureLoaded(modelId: DictationLocalModelId, signal?: AbortSignal): Promise<void> {
+/**
+ * `draft`: the model only drafts live words for a take. It loads without
+ * showing in Voice settings — "Loading Whisper Tiny" there would read as the
+ * chosen model changing.
+ */
+async function ensureLoaded(
+  modelId: DictationLocalModelId,
+  signal?: AbortSignal,
+  opts: { draft?: boolean } = {}
+): Promise<void> {
   const dir = dictationModelDir(modelId)
   const files = curatedFiles(modelId)
   if (!modelFilesPresent(dir, files)) {
-    throw new Error('Install a local Whisper model in Settings → Voice to use dictation')
+    throw new DictationError('model_missing', 'Install a Whisper model to dictate on this PC')
   }
   // Always re-establish the worker session: the utility process can die
-  // between utterances (abort teardown, crash), and a stale `loadedModelId`
-  // must not skip the ensure handshake — transcribe would then reach a fresh
+  // between utterances (abort teardown, crash), and a stale `loadedByRole` must
+  // not skip the ensure handshake — transcribe would then reach a fresh
   // worker with no session ("call ensure first"). `ensure` is idempotent when
-  // the same model is already loaded, so the repeated call is cheap.
-  if (loadedModelId !== modelId) {
+  // the model is already loaded, so the repeated call is cheap. Status is
+  // only published when something changes: a take sends a request every
+  // second or so, and each publish walks the model folders and messages
+  // every window.
+  const role: DictationWorkerRole = opts.draft ? 'draft' : 'final'
+  const wasLoaded = loadedByRole[role].includes(modelId) && (opts.draft || loadedModelId === modelId)
+  if (!wasLoaded && !opts.draft) {
     publishStatus({
       phase: 'loading',
       progress: null,
@@ -231,28 +321,30 @@ async function ensureLoaded(modelId: DictationLocalModelId, signal?: AbortSignal
     })
   }
   try {
-    const backend = await resolveBackend()
-    if (loadedModelId && loadedModelId !== modelId) {
-      try {
-        await backend.dispose()
-      } catch {
-        /* ignore */
-      }
-      loadedModelId = null
-    }
+    const backend = await resolveBackend(role)
     if (signal) await backend.ensure(dir, modelId, signal)
     else await backend.ensure(dir, modelId)
-    loadedModelId = modelId
-    publishStatus({
-      phase: 'ready',
-      progress: 1,
-      error: null,
-      message: 'Ready',
-      activeModelId: null
-    })
+    markLoaded(role, modelId)
+    if (!opts.draft) loadedModelId = modelId
+    armIdleUnload()
+    if (!wasLoaded && !opts.draft) {
+      publishStatus({
+        phase: 'ready',
+        progress: 1,
+        error: null,
+        message: 'Ready',
+        activeModelId: null
+      })
+    } else if (!wasLoaded) {
+      // The drafter holds memory too: Voice settings marks it loaded (and
+      // offers Unload) without a loading phase for it.
+      publishStatus()
+    }
   } catch (err) {
+    if (opts.draft) throw err
     if (signal?.aborted) {
       loadedModelId = null
+      loadedByRole = { ...loadedByRole, final: [] }
       const installed = listInstalledDictationModels()
       publishStatus({
         phase: installed.length > 0 ? 'ready' : 'idle',
@@ -274,16 +366,64 @@ async function ensureLoaded(modelId: DictationLocalModelId, signal?: AbortSignal
   }
 }
 
-function resolveLocalModelId(): DictationLocalModelId {
-  const installed = listInstalledDictationModels()
+function resolveLocalModelId(installed: DictationLocalModelId[] = installedModelIds()): DictationLocalModelId {
   if (installed.length === 0) {
-    throw new Error('Install a local Whisper model in Settings → Voice to use dictation')
+    throw new DictationError('model_missing', 'Install a Whisper model to dictate on this PC')
   }
   const wanted = safeGetSettings().dictation?.localModelId
-  if (wanted && installed.some((m) => m.id === wanted)) return wanted
+  if (wanted && installed.includes(wanted)) return wanted
   const rec = recommendedDictationModelId()
-  if (installed.some((m) => m.id === rec)) return rec
-  return installed[0]!.id
+  if (installed.includes(rec)) return rec
+  return installed[0]!
+}
+
+/** The model a take's final words come from, or null with none on disk. */
+export function dictationFinalModelId(): DictationLocalModelId | null {
+  try {
+    return resolveLocalModelId()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The model that drafts live words: the fast one when it is on disk, since
+ * Whisper pads every call to 30 s of audio — Small takes ~2 s a call on a
+ * laptop CPU whatever the length, Tiny ~0.5 s. Without it, the chosen model
+ * drafts too, just less often.
+ */
+export function draftDictationModelId(
+  finalId: DictationLocalModelId,
+  installed: DictationLocalModelId[] = installedModelIds()
+): DictationLocalModelId {
+  const fast = DICTATION_LOCAL_CATALOG.find((m) => m.role === 'fast' && installed.includes(m.id))
+  return fast?.id ?? finalId
+}
+
+/**
+ * Load what a take on this PC will use before its first words arrive: the
+ * chosen model and the drafter. Called as the mic opens, so the load overlaps
+ * it instead of delaying the first words.
+ */
+export async function prepareLocalDictation(): Promise<void> {
+  const installed = installedModelIds()
+  if (installed.length === 0) return
+  const finalId = resolveLocalModelId(installed)
+  const draftId = draftDictationModelId(finalId, installed)
+  await ensureLoaded(finalId)
+  if (draftId !== finalId) await ensureLoaded(draftId, undefined, { draft: true })
+}
+
+/**
+ * Whisper names what it hears when there are no words — `[BLANK_AUDIO]`,
+ * `(wind blowing)` — and those must not land in a brief as text.
+ */
+export function cleanWhisperText(raw: string): string {
+  return raw
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/^\s*\([^)]*\)\s*$/, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function assertPcm16kBase64(b64: string): void {
@@ -304,26 +444,55 @@ function assertPcm16kBase64(b64: string): void {
   }
 }
 
+/**
+ * Whisper pads every call to 30 s of audio, so one call costs about the same
+ * whatever was said: a smoothed time per call is what a phrase costs here.
+ * Status goes out on the first timing only — after that Settings reads it
+ * when it opens.
+ */
+function noteCallMs(modelId: DictationLocalModelId, ms: number): void {
+  const prev = callMsByModel.get(modelId)
+  callMsByModel.set(modelId, prev == null ? ms : prev * 0.7 + ms * 0.3)
+  if (prev == null) publishStatus()
+}
+
 export async function transcribeLocalDictation(
   request: DictationTranscribeRequest,
   signal?: AbortSignal
 ): Promise<DictationTranscribeResult> {
   const pcmB64 = request.pcm16k?.trim()
   if (!pcmB64) {
-    throw new Error(
-      'Local dictation needs 16 kHz PCM from the microphone. Try again, or switch engine in Settings → Voice.'
-    )
+    throw new DictationError('engine_failed', 'Whisper on this PC needs audio from the microphone, not a file')
   }
   assertPcm16kBase64(pcmB64)
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-  const modelId = resolveLocalModelId()
-  await ensureLoaded(modelId, signal)
-  const backend = await resolveBackend()
-  const text = (await (signal
-    ? backend.transcribe(pcmB64, 16000, signal)
-    : backend.transcribe(pcmB64, 16000))).trim()
-  if (!text) throw new Error('Dictation returned empty transcript')
-  return { text }
+  const installed = installedModelIds()
+  const finalId = resolveLocalModelId(installed)
+  const modelId = request.draft ? draftDictationModelId(finalId, installed) : finalId
+  const provisional = modelId !== finalId
+  let raw: string
+  transcribesInFlight++
+  try {
+    await ensureLoaded(modelId, signal, { draft: provisional })
+    const backend = await resolveBackend(provisional ? 'draft' : 'final')
+    const startedAt = Date.now()
+    try {
+      raw = await backend.transcribe(pcmB64, 16000, signal, modelId)
+    } catch (err) {
+      if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) throw err
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new DictationError('engine_failed', `Whisper stopped: ${msg}`)
+    }
+    noteCallMs(modelId, Date.now() - startedAt)
+  } finally {
+    transcribesInFlight--
+    armIdleUnload()
+  }
+  const text = cleanWhisperText(raw)
+  if (!text && request.allowEmpty !== true) {
+    throw new DictationError('engine_failed', 'Nothing was heard in that take')
+  }
+  return provisional ? { text, provisional: true } : { text }
 }
 
 export async function installDictationModel(
@@ -389,8 +558,12 @@ export async function installDictationModel(
 }
 
 export async function unloadDictationModel(): Promise<DictationRuntimeStatus> {
-  const backend = testBackend ?? (getDictationUtilityClient().isAvailable ? getDictationUtilityClient() : null)
-  if (backend) {
+  const backends: DictationWhisperBackend[] = testBackend
+    ? [testBackend]
+    : (['final', 'draft'] as const)
+        .map((role) => getDictationUtilityClient(role))
+        .filter((c) => c.isAvailable)
+  for (const backend of backends) {
     try {
       await backend.dispose()
     } catch {
@@ -398,6 +571,8 @@ export async function unloadDictationModel(): Promise<DictationRuntimeStatus> {
     }
   }
   loadedModelId = null
+  loadedByRole = { final: [], draft: [] }
+  clearIdleUnload()
   const installed = listInstalledDictationModels()
   return publishStatus({
     phase: installed.length > 0 ? 'ready' : 'idle',
@@ -414,7 +589,7 @@ export async function deleteDictationModelCache(
   if (installInFlight === modelId) {
     throw new Error('Cannot delete a model while it is downloading')
   }
-  if (loadedModelId === modelId) {
+  if (isLoaded(modelId)) {
     await unloadDictationModel()
   }
   const dir = dictationModelDir(modelId)

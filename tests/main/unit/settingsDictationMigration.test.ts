@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { DEFAULT_SETTINGS, SETTINGS_FORMAT_VERSION } from '@shared/ipc'
+import { DEFAULT_DICTATION_SETTINGS, DEFAULT_SETTINGS, SETTINGS_FORMAT_VERSION } from '@shared/ipc'
 
 const userData = join(tmpdir(), `vyotiq-settings-dictation-${process.pid}-${Date.now()}`)
 
@@ -145,10 +145,11 @@ describe('removed dictation engine migration', () => {
     )
 
     const loaded = getSettings()
+    // The removed waveform style is dropped; the new fields take their defaults.
     expect(loaded.dictation).toEqual({
+      ...DEFAULT_DICTATION_SETTINGS,
       engine: 'openrouter',
-      localModelId: 'whisper-small.en',
-      waveformStyle: 'dots'
+      localModelId: 'whisper-small.en'
     })
     expect(readPersisted().settingsVersion).toBe(SETTINGS_FORMAT_VERSION)
   })

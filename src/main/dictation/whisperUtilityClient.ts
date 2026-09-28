@@ -3,6 +3,7 @@
  * Do not run ORT on the Electron main loop.
  */
 import { existsSync } from 'node:fs'
+import { cpus } from 'node:os'
 import { basename, join } from 'node:path'
 import { logger } from '../../shared/logger'
 import { logErrorSummary } from '../../shared/utils/logPolicy'
@@ -44,7 +45,8 @@ type UtilityChild = {
 
 export type DictationWhisperBackend = {
   ensure: (modelDir: string, modelId: string, signal?: AbortSignal) => Promise<void>
-  transcribe: (pcm16k: string, sampleRate: number, signal?: AbortSignal) => Promise<string>
+  /** `modelId` picks one of the loaded models; without it, the last one ensured. */
+  transcribe: (pcm16k: string, sampleRate: number, signal?: AbortSignal, modelId?: string) => Promise<string>
   dispose: () => Promise<void>
 }
 
@@ -66,19 +68,39 @@ function canUseUtilityProcess(): boolean {
   }
 }
 
-function electronFork(script: string): UtilityChild {
+/**
+ * Which worker: a take's final words, or its live drafts. They are separate
+ * processes so a draft never queues behind a final — Whisper Small can take
+ * several seconds a call on a busy laptop, and live words would stall for all
+ * of it.
+ */
+export type DictationWorkerRole = 'final' | 'draft'
+
+/**
+ * ORT threads per worker, with both running at once in mind. Measured on an
+ * 8-core / 16-thread laptop under everyday load: past 4 threads Small barely
+ * gets faster, and the two workers mostly compete with whatever else is
+ * running rather than with each other.
+ */
+export function dictationWorkerThreads(role: DictationWorkerRole, cores = cpus().length): number {
+  if (role === 'draft') return cores >= 8 ? 4 : 2
+  return cores >= 12 ? 6 : 4
+}
+
+function electronFork(script: string, role: DictationWorkerRole): UtilityChild {
   const { utilityProcess } = require('electron') as {
     utilityProcess: {
       fork: (
         modulePath: string,
         args?: string[],
-        options?: { serviceName?: string; stdio?: string }
+        options?: { serviceName?: string; stdio?: string; env?: NodeJS.ProcessEnv }
       ) => UtilityChild
     }
   }
   return utilityProcess.fork(script, [], {
-    serviceName: 'vyotiq-dictation-whisper',
-    stdio: 'pipe'
+    serviceName: role === 'draft' ? 'vyotiq-dictation-whisper-draft' : 'vyotiq-dictation-whisper',
+    stdio: 'pipe',
+    env: { ...process.env, VYOTIQ_ORT_INTRA_OP_THREADS: String(dictationWorkerThreads(role)) }
   })
 }
 
@@ -93,13 +115,16 @@ export class DictationUtilityClient implements DictationWhisperBackend {
   private readonly spawnTimeoutMs: number
   private readonly forkImpl: ((script: string) => UtilityChild) | null
   private readonly scriptPath: string
+  private readonly role: DictationWorkerRole
 
   constructor(opts?: {
     forkImpl?: (script: string) => UtilityChild
     scriptPath?: string
     timeoutMs?: number
     spawnTimeoutMs?: number
+    role?: DictationWorkerRole
   }) {
+    this.role = opts?.role ?? 'final'
     this.timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.spawnTimeoutMs = opts?.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS
     this.forkImpl = opts?.forkImpl ?? null
@@ -115,12 +140,15 @@ export class DictationUtilityClient implements DictationWhisperBackend {
     if (!res.ok) throw new Error(res.error ?? 'Dictation worker failed to load Whisper')
   }
 
-  async transcribe(pcm16k: string, sampleRate: number, signal?: AbortSignal): Promise<string> {
-    const res = await this.request({ op: 'transcribe', pcm16k, sampleRate }, this.timeoutMs, signal)
+  /** `''` when the audio had no words — a pause is an answer, not a failure. */
+  async transcribe(pcm16k: string, sampleRate: number, signal?: AbortSignal, modelId?: string): Promise<string> {
+    const res = await this.request(
+      { op: 'transcribe', pcm16k, sampleRate, ...(modelId ? { modelId } : {}) },
+      this.timeoutMs,
+      signal
+    )
     if (!res.ok) throw new Error(res.error ?? 'Dictation worker transcription failed')
-    const text = res.text?.trim() ?? ''
-    if (!text) throw new Error('Dictation returned empty transcript')
-    return text
+    return res.text?.trim() ?? ''
   }
 
   async dispose(): Promise<void> {
@@ -216,8 +244,7 @@ export class DictationUtilityClient implements DictationWhisperBackend {
     if (!this.forkImpl && !existsSync(script)) {
       throw new Error(`Dictation worker script missing (${basename(script)})`)
     }
-    const fork = this.forkImpl ?? electronFork
-    const child = fork(script)
+    const child = this.forkImpl ? this.forkImpl(script) : electronFork(script, this.role)
     this.child = child
     this.spawned = false
 
@@ -334,14 +361,23 @@ export class DictationUtilityClient implements DictationWhisperBackend {
   }
 }
 
-let shared: DictationUtilityClient | null = null
+const shared = new Map<DictationWorkerRole, DictationUtilityClient>()
 
-export function getDictationUtilityClient(): DictationUtilityClient {
-  if (!shared) shared = new DictationUtilityClient()
-  return shared
+export function getDictationUtilityClient(role: DictationWorkerRole = 'final'): DictationUtilityClient {
+  let client = shared.get(role)
+  if (!client) {
+    client = new DictationUtilityClient({ role })
+    shared.set(role, client)
+  }
+  return client
+}
+
+/** Both workers, on quit. */
+export async function shutdownDictationUtilityClients(): Promise<void> {
+  await Promise.all([...shared.values()].map((c) => c.shutdown()))
 }
 
 export function resetDictationUtilityClientForTests(): void {
-  void shared?.shutdown()
-  shared = null
+  for (const c of shared.values()) void c.shutdown()
+  shared.clear()
 }

@@ -1,12 +1,18 @@
 /**
- * Curated local dictation catalog. One backend:
- *  - `whisper`: ONNX weights run in-process via @huggingface/transformers.
+ * Curated local dictation catalog. Both backends run ONNX weights in the
+ * dictation worker via @huggingface/transformers:
+ *  - `whisper`: pads every call to 30 s of audio, so a call costs the same
+ *    whatever was said — Small takes seconds on a laptop CPU.
+ *  - `moonshine`: costs in proportion to the audio, so a phrase takes a
+ *    fraction of a second. It invents words for audio cut mid-word, which
+ *    finished phrases (cut at pauses) never are — so it writes final words
+ *    and Whisper Tiny still drafts the live ones.
  */
 
-export const DICTATION_LOCAL_MODEL_IDS = ['whisper-tiny.en', 'whisper-small.en'] as const
+export const DICTATION_LOCAL_MODEL_IDS = ['whisper-tiny.en', 'whisper-small.en', 'moonshine-base'] as const
 export type DictationLocalModelId = (typeof DICTATION_LOCAL_MODEL_IDS)[number]
 
-export type DictationLocalBackend = 'whisper'
+export type DictationLocalBackend = 'whisper' | 'moonshine'
 
 export type DictationLocalCatalogEntry = {
   id: DictationLocalModelId
@@ -14,7 +20,8 @@ export type DictationLocalCatalogEntry = {
   hubRepo: string
   label: string
   language: string
-  role: 'fast' | 'quality'
+  /** `fast` drafts live words for the others when it is installed. */
+  role: 'fast' | 'quality' | 'instant'
   roleLabel: string
   approxDownloadLabel: string
   ramHint: string
@@ -42,6 +49,17 @@ export const DICTATION_LOCAL_CATALOG: readonly DictationLocalCatalogEntry[] = [
     roleLabel: 'Recommended',
     approxDownloadLabel: '~249 MB',
     ramHint: 'Better accuracy when you have 8 GB+ RAM'
+  },
+  {
+    id: 'moonshine-base',
+    backend: 'moonshine',
+    hubRepo: 'onnx-community/moonshine-base-ONNX',
+    label: 'Moonshine Base',
+    language: 'English',
+    role: 'instant',
+    roleLabel: 'Fastest',
+    approxDownloadLabel: '~123 MB',
+    ramHint: 'Words land moments after each pause · a little less accurate than Whisper Small'
   }
 ]
 

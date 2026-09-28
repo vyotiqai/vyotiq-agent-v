@@ -34,3 +34,14 @@ describe('dictation ortSessionOptions', () => {
     expect(buildOrtSessionOptions('8').intraOpNumThreads).toBe(1)
   })
 })
+
+describe('dictation worker threads', () => {
+  it('gives the final worker 4 threads, 6 on a big machine, and the drafter 2 to 4', async () => {
+    const { dictationWorkerThreads } = await import('@main/dictation/whisperUtilityClient')
+    expect(dictationWorkerThreads('final', 16)).toBe(6)
+    expect(dictationWorkerThreads('final', 10)).toBe(4)
+    expect(dictationWorkerThreads('final', 4)).toBe(4)
+    expect(dictationWorkerThreads('draft', 16)).toBe(4)
+    expect(dictationWorkerThreads('draft', 4)).toBe(2)
+  })
+})

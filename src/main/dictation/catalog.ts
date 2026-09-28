@@ -30,3 +30,18 @@ export const DICTATION_WHISPER_REQUIRED_FILES = [
 ] as const
 
 export const DICTATION_WHISPER_OPTIONAL_FILES = ['generation_config.json'] as const
+
+/**
+ * Moonshine's encoder runs in full precision: the model's own web demo does,
+ * and the decoder — where the time goes — is q8 as Whisper's is.
+ */
+export const DICTATION_MOONSHINE_REQUIRED_FILES = [
+  'config.json',
+  'tokenizer.json',
+  'tokenizer_config.json',
+  'preprocessor_config.json',
+  'onnx/encoder_model.onnx',
+  'onnx/decoder_model_merged_quantized.onnx'
+] as const
+
+export const DICTATION_MOONSHINE_OPTIONAL_FILES = ['generation_config.json', 'special_tokens_map.json'] as const

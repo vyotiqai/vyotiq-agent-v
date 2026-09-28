@@ -4,6 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 import {
+  DICTATION_MOONSHINE_REQUIRED_FILES,
   DICTATION_WHISPER_REQUIRED_FILES,
   DICTATION_WHISPER_OPTIONAL_FILES
 } from '@main/dictation/catalog'
@@ -17,15 +18,21 @@ vi.mock('@main/settings/settings', () => ({
 }))
 
 import {
+  DICTATION_IDLE_UNLOAD_MS,
   deleteDictationModelCache,
   installDictationModel,
+  prepareLocalDictation,
   resetDictationLocalStateForTests,
   selectDictationDownloadFiles,
   setDictationWhisperBackendForTests,
   transcribeLocalDictation,
   unloadDictationModel
 } from '@main/dictation/local'
-import { getDictationRuntimeStatus, resetDictationRuntimeStatusForTests } from '@main/dictation/modelStatus'
+import {
+  getDictationRuntimeStatus,
+  onDictationRuntimeStatus,
+  resetDictationRuntimeStatusForTests
+} from '@main/dictation/modelStatus'
 import { setDictationModelsRootOverrideForTests } from '@main/dictation/modelPaths'
 import { dictationCatalogEntry } from '@shared/dictation'
 
@@ -82,7 +89,7 @@ describe('local dictation Whisper cache', () => {
         mime: 'audio/webm',
         pcm16k: Buffer.from([0, 0, 1, 0]).toString('base64')
       })
-    ).rejects.toThrow(/Settings → Voice/)
+    ).rejects.toMatchObject({ code: 'model_missing' })
   })
 
   it('transcribes with a mocked pipeline when cache is present', async () => {
@@ -108,7 +115,7 @@ describe('local dictation Whisper cache', () => {
     })
     expect(result).toEqual({ text: 'hello local' })
     expect(transcribe).toHaveBeenCalledTimes(1)
-    expect(transcribe).toHaveBeenCalledWith(Buffer.from(pcm.buffer).toString('base64'), 16000)
+    expect(transcribe).toHaveBeenCalledWith(Buffer.from(pcm.buffer).toString('base64'), 16000, undefined, modelId)
   })
 
   it('re-ensures the worker session when the utility restarted between utterances', async () => {
@@ -156,6 +163,148 @@ describe('local dictation Whisper cache', () => {
     expect(secondEnsure).toHaveBeenCalledTimes(1)
     expect(secondTranscribe).toHaveBeenCalledTimes(1)
     expect(res).toEqual({ text: 'second' })
+  })
+
+  describe('live drafts', () => {
+    const pcm16k = Buffer.from(new Int16Array([0, 100, -100]).buffer).toString('base64')
+
+    function useSmall(): void {
+      getSettingsMock.mockReturnValue({
+        ...DEFAULT_SETTINGS,
+        dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'local', localModelId: 'whisper-small.en' }
+      })
+    }
+
+    it('drafts on Whisper Tiny when it is installed next to the chosen model, and says so', async () => {
+      writeRequiredFiles(join(modelsRoot, 'whisper-tiny.en'))
+      writeRequiredFiles(join(modelsRoot, 'whisper-small.en'))
+      useSmall()
+      const ensure = vi.fn(async () => undefined)
+      const transcribe = vi.fn(async (_pcm: string, _rate: number, _signal?: AbortSignal, modelId?: string) =>
+        modelId === 'whisper-tiny.en' ? 'draft words' : 'final words'
+      )
+      setDictationWhisperBackendForTests({ ensure, transcribe, dispose: vi.fn(async () => undefined) })
+
+      await expect(transcribeLocalDictation({ mime: 'audio/wav', pcm16k, draft: true })).resolves.toEqual({
+        text: 'draft words',
+        provisional: true
+      })
+      await expect(transcribeLocalDictation({ mime: 'audio/wav', pcm16k })).resolves.toEqual({ text: 'final words' })
+      expect(transcribe.mock.calls.map((c) => c[3])).toEqual(['whisper-tiny.en', 'whisper-small.en'])
+      // Loading the drafter never shows in Voice settings as the chosen model loading.
+      expect(getDictationRuntimeStatus().loadedModelId).toBe('whisper-small.en')
+    })
+
+    it('drafts on the chosen model when it is the only one, and those words can stand', async () => {
+      writeRequiredFiles(join(modelsRoot, 'whisper-small.en'))
+      useSmall()
+      const transcribe = vi.fn(async (_pcm: string, _rate: number, _signal?: AbortSignal, _modelId?: string) => 'same model')
+      setDictationWhisperBackendForTests({
+        ensure: vi.fn(async () => undefined),
+        transcribe,
+        dispose: vi.fn(async () => undefined)
+      })
+      await expect(transcribeLocalDictation({ mime: 'audio/wav', pcm16k, draft: true })).resolves.toEqual({
+        text: 'same model'
+      })
+      expect(transcribe.mock.calls[0]![3]).toBe('whisper-small.en')
+    })
+
+    it('an empty answer is text, not a failure, when the take allows it', async () => {
+      writeRequiredFiles(join(modelsRoot, 'whisper-small.en'))
+      useSmall()
+      setDictationWhisperBackendForTests({
+        ensure: vi.fn(async () => undefined),
+        transcribe: vi.fn(async () => '[BLANK_AUDIO]'),
+        dispose: vi.fn(async () => undefined)
+      })
+      await expect(transcribeLocalDictation({ mime: 'audio/wav', pcm16k, allowEmpty: true })).resolves.toEqual({
+        text: ''
+      })
+    })
+
+    it('publishes status when a model loads, not on every request', async () => {
+      writeRequiredFiles(join(modelsRoot, 'whisper-small.en'))
+      useSmall()
+      setDictationWhisperBackendForTests({
+        ensure: vi.fn(async () => undefined),
+        transcribe: vi.fn(async () => 'words'),
+        dispose: vi.fn(async () => undefined)
+      })
+      const published = vi.fn()
+      const off = onDictationRuntimeStatus(published)
+      try {
+        await transcribeLocalDictation({ mime: 'audio/wav', pcm16k })
+        const afterLoad = published.mock.calls.length
+        expect(afterLoad).toBeGreaterThan(0)
+        for (let i = 0; i < 5; i++) await transcribeLocalDictation({ mime: 'audio/wav', pcm16k, draft: true })
+        expect(published.mock.calls.length).toBe(afterLoad)
+      } finally {
+        off()
+      }
+    })
+
+    it('prepare loads the chosen model and the drafter before the first words', async () => {
+      writeRequiredFiles(join(modelsRoot, 'whisper-tiny.en'))
+      writeRequiredFiles(join(modelsRoot, 'whisper-small.en'))
+      useSmall()
+      const ensure = vi.fn(async () => undefined)
+      setDictationWhisperBackendForTests({ ensure, transcribe: vi.fn(async () => ''), dispose: vi.fn(async () => undefined) })
+      await prepareLocalDictation()
+      expect(ensure.mock.calls.map((c) => (c as unknown[])[1])).toEqual(['whisper-small.en', 'whisper-tiny.en'])
+      expect(getDictationRuntimeStatus().installed.filter((m) => m.loaded).map((m) => m.id).sort()).toEqual([
+        'whisper-small.en',
+        'whisper-tiny.en'
+      ])
+    })
+
+    it('times each model on this PC for Voice settings', async () => {
+      writeRequiredFiles(join(modelsRoot, 'whisper-tiny.en'))
+      writeRequiredFiles(join(modelsRoot, 'whisper-small.en'))
+      useSmall()
+      let clock = 1_000
+      const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+      try {
+        setDictationWhisperBackendForTests({
+          ensure: vi.fn(async () => undefined),
+          transcribe: vi.fn(async () => {
+            clock += 2000
+            return 'words'
+          }),
+          dispose: vi.fn(async () => undefined)
+        })
+        await transcribeLocalDictation({ mime: 'audio/wav', pcm16k })
+        const byId = (): Record<string, number | null | undefined> =>
+          Object.fromEntries(getDictationRuntimeStatus().installed.map((m) => [m.id, m.callMs]))
+        expect(byId()).toEqual({ 'whisper-small.en': 2000, 'whisper-tiny.en': null })
+        await transcribeLocalDictation({ mime: 'audio/wav', pcm16k })
+        expect(byId()['whisper-small.en']).toBe(2000)
+      } finally {
+        now.mockRestore()
+      }
+    })
+
+    it('gives the memory back after a quiet spell, and a take pushes that back', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        writeRequiredFiles(join(modelsRoot, 'whisper-tiny.en'))
+        writeRequiredFiles(join(modelsRoot, 'whisper-small.en'))
+        useSmall()
+        const dispose = vi.fn(async () => undefined)
+        setDictationWhisperBackendForTests({ ensure: vi.fn(async () => undefined), transcribe: vi.fn(async () => 'w'), dispose })
+        await prepareLocalDictation()
+        await vi.advanceTimersByTimeAsync(DICTATION_IDLE_UNLOAD_MS - 1000)
+        await transcribeLocalDictation({ mime: 'audio/wav', pcm16k })
+        await vi.advanceTimersByTimeAsync(DICTATION_IDLE_UNLOAD_MS - 1000)
+        expect(dispose).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(2000)
+        expect(dispose).toHaveBeenCalled()
+        expect(getDictationRuntimeStatus().installed.some((m) => m.loaded)).toBe(false)
+        expect(getDictationRuntimeStatus().loadedModelId).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   it('publishes error phase when Whisper load fails after files are on disk', async () => {
@@ -209,6 +358,31 @@ describe('local dictation Whisper cache', () => {
         engine: 'local',
         localModelId: 'whisper-tiny.en'
       }
+    })
+  })
+
+  it('installs Moonshine with its own files — a full-precision encoder — and drafts its live words on Tiny', async () => {
+    const ensure = vi.fn(async () => undefined)
+    const transcribe = vi.fn(async (_pcm: string, _rate: number, _signal?: AbortSignal, modelId?: string) => `from ${modelId}`)
+    setDictationWhisperBackendForTests({ ensure, transcribe, dispose: vi.fn(async () => undefined) })
+    const urls: string[] = []
+    const fetchImpl = (async (url: string | URL) => {
+      urls.push(String(url))
+      return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { 'content-length': '4' } })
+    }) as typeof fetch
+    await installDictationModel('moonshine-base', { fetchImpl })
+    const modelDir = join(modelsRoot, 'moonshine-base')
+    for (const relative of DICTATION_MOONSHINE_REQUIRED_FILES) expect(existsSync(join(modelDir, relative))).toBe(true)
+    expect(urls.every((u) => u.includes('onnx-community/moonshine-base-ONNX'))).toBe(true)
+    expect(urls.some((u) => u.endsWith('onnx/encoder_model.onnx'))).toBe(true)
+    expect(urls.some((u) => u.includes('encoder_model_quantized'))).toBe(false)
+
+    writeRequiredFiles(join(modelsRoot, 'whisper-tiny.en'))
+    const pcm16k = Buffer.from(new Int16Array([0, 100, -100]).buffer).toString('base64')
+    await expect(transcribeLocalDictation({ mime: 'audio/wav', pcm16k })).resolves.toEqual({ text: 'from moonshine-base' })
+    await expect(transcribeLocalDictation({ mime: 'audio/wav', pcm16k, draft: true })).resolves.toEqual({
+      text: 'from whisper-tiny.en',
+      provisional: true
     })
   })
 

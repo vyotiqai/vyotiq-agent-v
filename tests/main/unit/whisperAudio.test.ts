@@ -1,6 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { invokeWhisperAsr, pcmPayloadToFloat32 } from '@main/dictation/whisperAudio'
+import {
+  invokeAsr,
+  invokeWhisperAsr,
+  moonshineDecodeLimits,
+  pcmPayloadToFloat32,
+  whisperDecodeLimits
+} from '@main/dictation/whisperAudio'
 import {
   DictationUtilityClient,
   resetDictationUtilityClientForTests
@@ -121,6 +127,43 @@ describe('whisper Float32 PCM for Transformers.js', () => {
       expect.any(Float32Array),
       expect.objectContaining({ chunk_length_s: 30, stride_length_s: 5 })
     )
+  })
+
+  it('bounds decoding so a clip cut mid-word cannot loop until the decoder is full', async () => {
+    const asr = vi.fn(async (_audio: Float32Array, _options?: Record<string, unknown>) => ({ text: 'ok' }))
+    await invokeWhisperAsr(asr, int16Base64())
+    expect(asr.mock.calls[0]![1]).toMatchObject({ no_repeat_ngram_size: 4 })
+    expect(whisperDecodeLimits(2).max_new_tokens).toBe(40)
+    expect(whisperDecodeLimits(0).max_new_tokens).toBe(24)
+    // Chunks are 30 s at most, and the decoder holds 448 positions.
+    expect(whisperDecodeLimits(600).max_new_tokens).toBe(264)
+    expect(whisperDecodeLimits(30).max_new_tokens).toBeLessThanOrEqual(440)
+  })
+
+  it('Moonshine gets tokens for the audio it has — some even under a second — and no Whisper chunking', async () => {
+    expect(moonshineDecodeLimits(0.5).max_new_tokens).toBe(10)
+    expect(moonshineDecodeLimits(4).max_new_tokens).toBe(32)
+    const asr = vi.fn(async (_audio: Float32Array, _options?: Record<string, unknown>) => ({ text: 'phrase' }))
+    await expect(invokeAsr(asr, int16Base64(), 'moonshine')).resolves.toBe('phrase')
+    expect(asr.mock.calls[0]![1]).toEqual(expect.objectContaining({ no_repeat_ngram_size: 4 }))
+    expect(asr.mock.calls[0]![1]).not.toHaveProperty('chunk_length_s')
+  })
+
+  it('Moonshine hears a clip past 30 s in windows, joined in order', async () => {
+    const seconds = 65
+    const pcm = Buffer.from(new Int16Array(16000 * seconds).buffer).toString('base64')
+    const lengths: number[] = []
+    const asr = vi.fn(async (audio: Float32Array) => {
+      lengths.push(audio.length / 16000)
+      return { text: `part${lengths.length}` }
+    })
+    await expect(invokeAsr(asr, pcm, 'moonshine')).resolves.toBe('part1 part2 part3')
+    expect(lengths).toEqual([30, 30, 5])
+  })
+
+  it('answers no words with an empty string, not an error — a take sends its pauses too', async () => {
+    const asr = vi.fn(async () => ({ text: '  ' }))
+    await expect(invokeWhisperAsr(asr, int16Base64())).resolves.toBe('')
   })
 
   it('concatenates chunked Whisper output (array of { text })', async () => {

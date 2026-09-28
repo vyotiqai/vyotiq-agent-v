@@ -4,13 +4,18 @@
  *
  * Protocol (parentPort / postMessage):
  *   req:  { id, op: 'ensure'|'transcribe'|'dispose'|'ping', modelDir?, modelId?, pcm16k?, sampleRate? }
- *   res:  { id, ok, error?, text?, modelId? }
+ *   res:  { id, ok, error?, text?, modelId?, loaded? }
+ *
+ * Up to two models stay loaded: the one a take's words come from, and a
+ * faster one that drafts live words while you speak. `transcribe` names the
+ * model; without one it uses the last one ensured.
  *
  * pcm16k is base64 Int16 LE PCM at 16 kHz. Rebuild Float32Array in this process —
  * do not pass postMessage clones / Buffers / `{ raw }` objects to Whisper.
  */
+import { DICTATION_LOCAL_CATALOG, type DictationLocalBackend } from '../../shared/dictation'
 import { applyOrtThreadEnvHints, buildOrtSessionOptions, resolveOrtIntraOpThreads } from './ortSessionOptions'
-import { invokeWhisperAsr, type WhisperAsrFn } from './whisperAudio'
+import { invokeAsr, type WhisperAsrFn } from './whisperAudio'
 
 type UtilityOp = 'ensure' | 'transcribe' | 'dispose' | 'ping'
 
@@ -30,7 +35,12 @@ type UtilityResponse = {
   error?: string
   text?: string
   modelId?: string
+  /** Every model loaded after this request, least recently used first. */
+  loaded?: string[]
 }
+
+/** The chosen model plus a drafter. A third evicts the least recently used. */
+const MAX_SESSIONS = 2
 
 type AsrPipeline = WhisperAsrFn & {
   dispose?: () => Promise<void> | void
@@ -38,10 +48,17 @@ type AsrPipeline = WhisperAsrFn & {
 
 type LoadedSession = {
   modelId: string
+  backend: DictationLocalBackend
   asr: AsrPipeline
 }
 
-let session: LoadedSession | null = null
+function backendOf(modelId: string): DictationLocalBackend {
+  return DICTATION_LOCAL_CATALOG.find((m) => m.id === modelId)?.backend ?? 'whisper'
+}
+
+/** Insertion order is recency: a use moves the model to the end. */
+const sessions = new Map<string, LoadedSession>()
+let lastEnsured: string | null = null
 let writeChain: Promise<void> = Promise.resolve()
 
 function post(res: UtilityResponse): void {
@@ -57,15 +74,31 @@ function enqueueWrite(fn: () => Promise<void>): Promise<void> {
   return next
 }
 
-async function disposeSession(): Promise<void> {
-  const current = session
-  session = null
-  if (!current) return
+async function disposeOne(current: LoadedSession): Promise<void> {
   try {
     await current.asr.dispose?.()
   } catch {
     /* ignore */
   }
+}
+
+async function disposeAll(): Promise<void> {
+  const all = [...sessions.values()]
+  sessions.clear()
+  lastEnsured = null
+  for (const s of all) await disposeOne(s)
+}
+
+function touch(modelId: string): LoadedSession | null {
+  const s = sessions.get(modelId)
+  if (!s) return null
+  sessions.delete(modelId)
+  sessions.set(modelId, s)
+  return s
+}
+
+function loadedIds(): string[] {
+  return [...sessions.keys()]
 }
 
 async function loadSession(modelDir: string, modelId: string): Promise<LoadedSession> {
@@ -78,13 +111,14 @@ async function loadSession(modelDir: string, modelId: string): Promise<LoadedSes
   env.useBrowserCache = false
   ;(env as { cacheDir?: string }).cacheDir = modelDir
 
+  const backend = backendOf(modelId)
   const asr = (await pipeline('automatic-speech-recognition', modelDir, {
     local_files_only: true,
-    dtype: 'q8',
+    dtype: backend === 'moonshine' ? { encoder_model: 'fp32', decoder_model_merged: 'q8' } : 'q8',
     session_options: buildOrtSessionOptions(undefined, 'utility')
   })) as AsrPipeline
 
-  return { modelId, asr }
+  return { modelId, backend, asr }
 }
 
 async function handle(msg: UtilityRequest): Promise<void> {
@@ -92,31 +126,36 @@ async function handle(msg: UtilityRequest): Promise<void> {
   try {
     switch (op) {
       case 'ping':
-        post({ id, ok: true, modelId: session?.modelId })
+        post({ id, ok: true, modelId: lastEnsured ?? undefined, loaded: loadedIds() })
         return
       case 'dispose':
-        await disposeSession()
-        post({ id, ok: true })
+        await disposeAll()
+        post({ id, ok: true, loaded: [] })
         return
       case 'ensure': {
         const modelDir = msg.modelDir?.trim()
         const modelId = msg.modelId?.trim()
         if (!modelDir || !modelId) throw new Error('ensure requires modelDir and modelId')
-        if (session?.modelId === modelId) {
-          post({ id, ok: true, modelId: session.modelId })
-          return
+        if (!touch(modelId)) {
+          while (sessions.size >= MAX_SESSIONS) {
+            const [oldestId, oldest] = sessions.entries().next().value as [string, LoadedSession]
+            sessions.delete(oldestId)
+            await disposeOne(oldest)
+          }
+          sessions.set(modelId, await loadSession(modelDir, modelId))
         }
-        await disposeSession()
-        session = await loadSession(modelDir, modelId)
-        post({ id, ok: true, modelId: session.modelId })
+        lastEnsured = modelId
+        post({ id, ok: true, modelId, loaded: loadedIds() })
         return
       }
       case 'transcribe': {
+        const wanted = msg.modelId?.trim() || lastEnsured
+        const session = wanted ? touch(wanted) : null
         if (!session) throw new Error('Whisper session not loaded — call ensure first')
         if (typeof msg.pcm16k !== 'string' || !msg.pcm16k.trim()) {
           throw new Error('transcribe requires pcm16k')
         }
-        const text = await invokeWhisperAsr(session.asr, msg.pcm16k)
+        const text = await invokeAsr(session.asr, msg.pcm16k, session.backend)
         post({ id, ok: true, text, modelId: session.modelId })
         return
       }

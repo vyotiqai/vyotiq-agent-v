@@ -1,9 +1,12 @@
-export { transcribeDictation, isDictationFixtureEnabled, DICTATION_FIXTURE_TEXT } from './transcribe'
+export { transcribeDictation, isDictationFixtureEnabled, DICTATION_FIXTURE_TEXT, pcm16kToWav } from './transcribe'
+export { DictationError, isDictationError } from './errors'
+export { dictationMicAccess, openMicSettings } from './micAccess'
 export {
   installDictationModel,
   unloadDictationModel,
   deleteDictationModelCache,
   transcribeLocalDictation,
+  prepareLocalDictation,
   readDictationRuntimeStatus,
   listInstalledDictationModels,
   setDictationWhisperBackendForTests,
