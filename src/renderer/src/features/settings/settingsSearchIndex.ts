@@ -339,26 +339,50 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Voice
   {
     id: 'dictation-engine',
-    title: 'Engine',
-    keywords: ['dictation', 'voice', 'whisper', 'transcribe', 'microphone', 'speech', 'dictation engine', 'local', 'openai', 'openrouter'],
+    title: 'Runs on',
+    keywords: ['dictation', 'voice', 'whisper', 'transcribe', 'speech', 'engine', 'this pc', 'local', 'offline', 'private', 'openai', 'openrouter', 'cloud'],
     section: 'voice'
   },
   {
-    id: 'dictation-waveform',
-    title: 'Waveform',
-    keywords: ['dictation', 'voice', 'waveform', 'bars', 'dots', 'line', 'mirror'],
+    id: 'dictation-live-words',
+    title: 'Words as you speak',
+    keywords: ['dictation', 'voice', 'live', 'realtime', 'streaming', 'openai', 'words', 'as you speak'],
     section: 'voice'
   },
   {
-    id: 'dictation-whisper-tiny',
-    title: 'Whisper Tiny',
-    keywords: ['dictation', 'voice', 'whisper', 'tiny', 'local model', 'offline'],
+    id: 'dictation-model',
+    title: 'Model',
+    keywords: ['dictation', 'voice', 'whisper', 'moonshine', 'tiny', 'small', 'base', 'fastest', 'local model', 'offline', 'install', 'download'],
     section: 'voice'
   },
   {
-    id: 'dictation-whisper-small',
-    title: 'Whisper Small',
-    keywords: ['dictation', 'voice', 'whisper', 'small', 'local model', 'offline'],
+    id: 'dictation-language',
+    title: 'Language',
+    keywords: ['dictation', 'voice', 'language', 'english', 'detect'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-input',
+    title: 'Microphone',
+    keywords: ['dictation', 'voice', 'microphone', 'mic', 'input', 'device', 'test', 'level', 'headset'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-shortcut',
+    title: 'Shortcut',
+    keywords: ['dictation', 'voice', 'shortcut', 'ctrl m', 'key'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-hold',
+    title: 'Hold to talk',
+    keywords: ['dictation', 'voice', 'push to talk', 'hold', 'walkie'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-enter',
+    title: 'Enter ends a take by',
+    keywords: ['dictation', 'voice', 'enter', 'insert', 'send', 'take'],
     section: 'voice'
   },
 

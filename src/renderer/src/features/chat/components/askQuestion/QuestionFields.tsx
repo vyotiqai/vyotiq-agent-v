@@ -3,6 +3,7 @@ import { Icon } from '@renderer/lib/icons'
 import { Input, cn } from '@renderer/lib/ui'
 import { CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type { UiAgentQuestionItem } from '@shared/transcript'
+import { AGENT_QUESTION_MAX_ANSWER_CHARS } from '@shared/utils/agentQuestionForm'
 
 /**
  * The focus ring drawn inside the option: an outline would sit on the selected
@@ -39,6 +40,8 @@ export type QuestionFieldProps = {
    *  forms where an accidental arrow would submit the answer. */
   selectOnArrow?: boolean
   onChange: (values: string[], customText: string) => void
+  /** Ctrl/Cmd+Enter in a text answer, where plain Enter is a newline. */
+  onSubmitShortcut?: () => void
 }
 
 function OptionMark({
@@ -78,11 +81,13 @@ function OptionMark({
 function CustomOther({
   value,
   disabled,
-  onChange
+  onChange,
+  onFocus
 }: {
   value: string
   disabled?: boolean
   onChange: (text: string) => void
+  onFocus?: () => void
 }): JSX.Element {
   return (
     <Input
@@ -91,9 +96,11 @@ function CustomOther({
       className="mt-1"
       placeholder="Other…"
       aria-label="Other answer"
+      maxLength={AGENT_QUESTION_MAX_ANSWER_CHARS}
       disabled={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onFocus={onFocus}
     />
   )
 }
@@ -105,7 +112,8 @@ function optionSelections(
 ): string[] {
   const custom = customText.trim()
   const selected = options.filter((o) => values.includes(o))
-  return custom ? [...selected, custom] : selected
+  // Other text naming a ticked option is that option, not a second answer.
+  return custom && !selected.includes(custom) ? [...selected, custom] : selected
 }
 
 /**
@@ -158,41 +166,48 @@ export function SingleChoiceField({
   const selected = values[0] ?? ''
   const options = item.options ?? []
   const allowCustom = item.allowCustom === true
-  const customActive = allowCustom && customText.trim().length > 0
+  // The Other text is the answer only while it is what's selected: picking an
+  // option keeps the typed text (focus the field again to go back to it).
+  const custom = customText.trim()
+  const customActive =
+    allowCustom && custom.length > 0 && selected === custom && !options.includes(custom)
   const selectedIndex = customActive ? -1 : options.indexOf(selected)
   const { tabIndexFor, setOptionRef, onGroupKeyDown } = useRovingOptions(
     options.length,
     selectedIndex >= 0 ? selectedIndex : 0,
-    selectOnArrow === false ? undefined : (index) => onChange([options[index]!], '')
+    selectOnArrow === false ? undefined : (index) => onChange([options[index]!], customText)
   )
 
   return (
-    <div
-      role="radiogroup"
-      aria-labelledby={promptId}
-      tabIndex={-1}
-      className="flex flex-col gap-0.5"
-      onKeyDown={onGroupKeyDown}
-    >
-      {options.map((option, index) => {
-        const active = !customActive && selected === option
-        return (
-          <button
-            key={option}
-            ref={setOptionRef(index)}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            tabIndex={tabIndexFor(index)}
-            disabled={disabled}
-            className={cn(OPTION_BASE, active ? OPTION_ACTIVE : OPTION_IDLE)}
-            onClick={() => onChange([option], '')}
-          >
-            <OptionMark kind="radio" active={active} />
-            <span className="min-w-0 break-words">{option}</span>
-          </button>
-        )
-      })}
+    <div className="flex flex-col">
+      <div
+        role="radiogroup"
+        aria-labelledby={promptId}
+        tabIndex={-1}
+        className="flex flex-col gap-0.5"
+        onKeyDown={onGroupKeyDown}
+      >
+        {options.map((option, index) => {
+          const active = !customActive && selected === option
+          return (
+            <button
+              key={option}
+              ref={setOptionRef(index)}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              tabIndex={tabIndexFor(index)}
+              disabled={disabled}
+              className={cn(OPTION_BASE, active ? OPTION_ACTIVE : OPTION_IDLE)}
+              onClick={() => onChange([option], customText)}
+            >
+              <OptionMark kind="radio" active={active} />
+              <span className="min-w-0 break-words">{option}</span>
+            </button>
+          )
+        })}
+      </div>
+      {/* Outside the radiogroup: a text field is not one of its radios. */}
       {allowCustom ? (
         <CustomOther
           value={customText}
@@ -200,6 +215,9 @@ export function SingleChoiceField({
           onChange={(text) => {
             const trimmed = text.trim()
             onChange(trimmed ? [trimmed] : [], text)
+          }}
+          onFocus={() => {
+            if (custom && selected !== custom) onChange([custom], customText)
           }}
         />
       ) : null}
@@ -325,7 +343,8 @@ export function TextField({
   values,
   disabled,
   promptId,
-  onChange
+  onChange,
+  onSubmitShortcut
 }: QuestionFieldProps): JSX.Element {
   return (
     <textarea
@@ -333,9 +352,15 @@ export function TextField({
       className={cn(TEXTAREA_CHROME, 'min-h-[64px] w-full resize-y px-3 py-1.5 text-sm')}
       placeholder="Your answer…"
       aria-labelledby={promptId}
+      maxLength={AGENT_QUESTION_MAX_ANSWER_CHARS}
       disabled={disabled}
       value={values[0] ?? ''}
       onChange={(e) => onChange(e.target.value ? [e.target.value] : [], '')}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || !onSubmitShortcut) return
+        e.preventDefault()
+        onSubmitShortcut()
+      }}
     />
   )
 }

@@ -1547,7 +1547,7 @@ describe('settings', () => {
       data: {
         ...idle,
         phase: 'ready' as const,
-        installed: [{ id: 'whisper-tiny.en' as const, bytesOnDisk: 41, loaded: true }],
+        installed: [{ id: 'whisper-tiny.en' as const, bytesOnDisk: 41 * 1024 * 1024, loaded: true }],
         loadedModelId: 'whisper-tiny.en' as const
       }
     }))
@@ -1556,7 +1556,7 @@ describe('settings', () => {
       data: {
         ...idle,
         phase: 'ready' as const,
-        installed: [{ id: 'whisper-tiny.en' as const, bytesOnDisk: 41, loaded: false }]
+        installed: [{ id: 'whisper-tiny.en' as const, bytesOnDisk: 41 * 1024 * 1024, loaded: false }]
       }
     }))
     const deleteCache = vi.fn(async () => ({ ok: true as const, data: idle }))
@@ -1577,9 +1577,9 @@ describe('settings', () => {
     openSection('Voice')
     expect(document.querySelector('[data-settings-field="dictation-engine"]')).toBeTruthy()
     fireEvent.click(await screen.findByRole('button', { name: 'Install Whisper Tiny' }))
-    await waitFor(() =>
-      expect(install).toHaveBeenCalledWith({ modelId: 'whisper-tiny.en' })
-    )
+    await waitFor(() => expect(install).toHaveBeenCalledWith({ modelId: 'whisper-tiny.en' }))
+    const tiny = (): Element => document.querySelector('[data-dictation-model="whisper-tiny.en"]')!
+    await waitFor(() => expect(tiny().textContent).toMatch(/41 MB on disk · loaded/))
     // Loaded, the row's menu offers Unload; once it is only on disk, Delete.
     const more = (): HTMLButtonElement =>
       screen.getByRole('button', { name: 'More for Whisper Tiny' }) as HTMLButtonElement
@@ -1591,29 +1591,10 @@ describe('settings', () => {
     fireEvent.click(more())
     expect(screen.queryByRole('menuitem', { name: 'Unload from memory' })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete download' }))
-    await waitFor(() =>
-      expect(deleteCache).toHaveBeenCalledWith({ modelId: 'whisper-tiny.en' })
-    )
+    await waitFor(() => expect(deleteCache).toHaveBeenCalledWith({ modelId: 'whisper-tiny.en' }))
   })
 
-  it('disables Local dictation engine until a model is installed', async () => {
-    render(
-      <SettingsView
-        settings={baseSettings}
-        secrets={emptySecrets}
-        onClose={vi.fn()}
-        onUpdate={vi.fn(async () => ({ ok: true as const }))}
-        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
-        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
-      />
-    )
-    openSection('Voice')
-    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    const engine = screen.getByRole('radiogroup', { name: 'Dictation engine' })
-    expect((within(engine).getByRole('radio', { name: 'Local' }) as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('Waveform menu patches dictation.waveformStyle', async () => {
+  it('Runs on is never disabled: This PC with no model picks the one to install', async () => {
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     render(
       <SettingsView
@@ -1626,16 +1607,61 @@ describe('settings', () => {
       />
     )
     openSection('Voice')
-    expect(document.querySelector('[data-settings-field="dictation-waveform"]')).toBeTruthy()
-    fireEvent.click(screen.getByLabelText('Waveform'))
-    fireEvent.click(await waitFor(() => screen.getByRole('option', { name: /^Dots$/i })))
+    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
+    const engine = screen.getByRole('radiogroup', { name: 'Runs on' })
+    const thisPc = within(engine).getByRole('radio', { name: /This PC/ }) as HTMLButtonElement
+    expect(thisPc.disabled).toBe(false)
+    fireEvent.click(thisPc)
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     expect(onUpdate).toHaveBeenCalledWith({
-      dictation: { ...DEFAULT_SETTINGS.dictation, waveformStyle: 'dots' }
+      dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'local', localModelId: 'whisper-small.en' }
     })
   })
 
-  it('switching to Local does not send empty localModelId from stale form state', async () => {
+  it('a cloud engine without its key says so on the row and links to Providers', async () => {
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    openSection('Voice')
+    const row = document.querySelector('[data-settings-field="dictation-engine"]')!
+    expect(row.textContent).toMatch(/Audio is sent to OpenAI with your key/)
+    expect(within(row as HTMLElement).getByRole('alert').textContent).toMatch(/No OpenAI key yet/)
+    fireEvent.click(within(row as HTMLElement).getByRole('button', { name: /Add key/ }))
+    await waitFor(() => expect(document.querySelector('[data-settings-section="providers"][aria-current="page"]')).toBeTruthy())
+  })
+
+  it('Enter action and hold-to-talk patch their dictation fields', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        onClose={vi.fn()}
+        onUpdate={onUpdate}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    openSection('Voice')
+    expect(document.querySelector('[data-settings-field="dictation-waveform"]')).toBeNull()
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Enter ends a take by' })).getByRole('radio', { name: 'Sending' }))
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith({ dictation: { ...DEFAULT_SETTINGS.dictation, enterAction: 'send' } })
+    )
+    fireEvent.click(screen.getByRole('switch', { name: 'Hold to talk' }))
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith({ dictation: { ...DEFAULT_SETTINGS.dictation, holdToTalk: false } })
+    )
+  })
+
+  it('switching to This PC keeps the installed model instead of sending an empty one', async () => {
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1653,10 +1679,7 @@ describe('settings', () => {
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     render(
       <SettingsView
-        settings={{
-          ...baseSettings,
-          dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'openai', localModelId: '' }
-        }}
+        settings={{ ...baseSettings, dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'openai', localModelId: '' } }}
         secrets={emptySecrets}
         onClose={vi.fn()}
         onUpdate={onUpdate}
@@ -1665,23 +1688,15 @@ describe('settings', () => {
       />
     )
     openSection('Voice')
-    const local = await waitFor(() => {
-      const radio = screen.getByRole('radio', { name: 'Local' }) as HTMLButtonElement
-      expect(radio.disabled).toBe(false)
-      return radio
-    })
-    fireEvent.click(local)
+    await waitFor(() => expect(document.querySelector('[data-dictation-model="whisper-tiny.en"]')?.textContent).toMatch(/loaded/))
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Runs on' })).getByRole('radio', { name: /This PC/ }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     expect(onUpdate).toHaveBeenCalledWith({
-      dictation: {
-        ...DEFAULT_SETTINGS.dictation,
-        engine: 'local',
-        localModelId: 'whisper-tiny.en'
-      }
+      dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'local', localModelId: 'whisper-tiny.en' }
     })
   })
 
-  it('Voice cards prefer Error over Ready when load failed with files on disk', async () => {
+  it('a model that failed to load says why on its row', async () => {
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1698,14 +1713,7 @@ describe('settings', () => {
     }))
     render(
       <SettingsView
-        settings={{
-          ...baseSettings,
-          dictation: {
-            ...DEFAULT_SETTINGS.dictation,
-            engine: 'local',
-            localModelId: 'whisper-tiny.en'
-          }
-        }}
+        settings={{ ...baseSettings, dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'local', localModelId: 'whisper-tiny.en' } }}
         secrets={emptySecrets}
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
@@ -1714,13 +1722,10 @@ describe('settings', () => {
       />
     )
     openSection('Voice')
-    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    const tiny = document.querySelector('[data-settings-field="dictation-whisper-tiny"]')
-    expect(tiny).toBeTruthy()
-    expect(tiny!.textContent).toMatch(/Error/)
-    expect(tiny!.textContent).toMatch(/ONNX load failed/)
-    expect(tiny!.textContent).not.toMatch(/Ready · on disk/)
-    expect(tiny!.textContent).toMatch(/In use/)
+    await waitFor(() => expect(document.querySelector('[data-dictation-model="whisper-tiny.en"]')?.textContent).toMatch(/ONNX load failed/))
+    const tiny = document.querySelector('[data-dictation-model="whisper-tiny.en"]')!
+    expect(tiny.textContent).not.toMatch(/on disk/)
+    expect(within(tiny as HTMLElement).getByRole('radio').getAttribute('aria-checked')).toBe('true')
   })
 
   it('shows an indeterminate load bar without a stuck 0%', async () => {
@@ -1740,14 +1745,7 @@ describe('settings', () => {
     }))
     render(
       <SettingsView
-        settings={{
-          ...baseSettings,
-          dictation: {
-            ...DEFAULT_SETTINGS.dictation,
-            engine: 'local',
-            localModelId: 'whisper-tiny.en'
-          }
-        }}
+        settings={{ ...baseSettings, dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'local', localModelId: 'whisper-tiny.en' } }}
         secrets={emptySecrets}
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
@@ -1756,16 +1754,14 @@ describe('settings', () => {
       />
     )
     openSection('Voice')
-    const bar = await waitFor(() =>
-      screen.getByRole('progressbar', { name: /whisper-tiny\.en load progress/i })
-    )
+    const bar = await waitFor(() => screen.getByRole('progressbar', { name: /Whisper Tiny load progress/ }))
     expect(bar.getAttribute('aria-valuenow')).toBeNull()
-    const tiny = document.querySelector('[data-settings-field="dictation-whisper-tiny"]')
-    expect(tiny?.textContent).toMatch(/Loading whisper-tiny\.en/)
+    const tiny = document.querySelector('[data-dictation-model="whisper-tiny.en"]')
+    expect(tiny?.textContent).toMatch(/Loading into memory/)
     expect(tiny?.textContent).not.toMatch(/0%/)
   })
 
-  it('Use on an installed card sets localModelId without changing engine or loading', async () => {
+  it('picking another installed model sets localModelId without loading anything', async () => {
     const install = vi.fn(async () => ({ ok: false as const, error: 'not used' }))
     const unload = vi.fn(async () => ({ ok: false as const, error: 'not used' }))
     window.vyotiq.dictationInstall = install
@@ -1782,7 +1778,7 @@ describe('settings', () => {
           { id: 'whisper-small.en' as const, bytesOnDisk: 249, loaded: false }
         ],
         recommendedModelId: 'whisper-small.en' as const,
-        engine: 'openai' as const,
+        engine: 'local' as const,
         activeModelId: null,
         loadedModelId: null
       }
@@ -1790,14 +1786,7 @@ describe('settings', () => {
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     render(
       <SettingsView
-        settings={{
-          ...baseSettings,
-          dictation: {
-            ...DEFAULT_SETTINGS.dictation,
-            engine: 'openai',
-            localModelId: 'whisper-small.en'
-          }
-        }}
+        settings={{ ...baseSettings, dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'local', localModelId: 'whisper-small.en' } }}
         secrets={emptySecrets}
         onClose={vi.fn()}
         onUpdate={onUpdate}
@@ -1806,24 +1795,27 @@ describe('settings', () => {
       />
     )
     openSection('Voice')
-    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    const small = document.querySelector('[data-settings-field="dictation-whisper-small"]')
-    expect(small?.textContent).toMatch(/In use/)
-    expect(screen.queryByRole('button', { name: /Use Whisper Small/i })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Use Whisper Tiny/i }))
+    const models = await waitFor(() => {
+      const group = screen.getByRole('radiogroup', { name: 'Model' })
+      // Installed models can be picked; one not on disk offers Install instead.
+      expect((within(group).getByRole('radio', { name: /^Whisper Tiny/ }) as HTMLButtonElement).disabled).toBe(false)
+      expect((within(group).getByRole('radio', { name: /^Whisper Small/ }) as HTMLButtonElement).disabled).toBe(false)
+      expect((within(group).getByRole('radio', { name: /^Moonshine Base/ }) as HTMLButtonElement).disabled).toBe(true)
+      expect(within(group).getByRole('button', { name: 'Install Moonshine Base' })).toBeTruthy()
+      return group
+    })
+    expect(within(models).getByRole('radio', { name: /^Whisper Small/ }).getAttribute('aria-checked')).toBe('true')
+    expect(document.querySelector('[data-dictation-model="whisper-small.en"]')?.textContent).toMatch(/Best for this PC/)
+    fireEvent.click(within(models).getByRole('radio', { name: /^Whisper Tiny/ }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     expect(onUpdate).toHaveBeenCalledWith({
-      dictation: {
-        ...DEFAULT_SETTINGS.dictation,
-        engine: 'openai',
-        localModelId: 'whisper-tiny.en'
-      }
+      dictation: { ...DEFAULT_SETTINGS.dictation, engine: 'local', localModelId: 'whisper-tiny.en' }
     })
     expect(install).not.toHaveBeenCalled()
     expect(unload).not.toHaveBeenCalled()
   })
 
-  it('settings search navigates to dictation engine', async () => {
+  it('settings search navigates to where dictation runs', async () => {
     Element.prototype.scrollIntoView = vi.fn()
     render(
       <SettingsView
@@ -1837,7 +1829,7 @@ describe('settings', () => {
     )
     const search = screen.getByLabelText(/Search settings/i)
     fireEvent.change(search, { target: { value: 'whisper' } })
-    fireEvent.click(screen.getByRole('option', { name: /^Engine/ }))
+    fireEvent.click(screen.getByRole('option', { name: /^Runs on/ }))
     expect(
       await waitFor(() => {
         const el = document.querySelector('[data-settings-field="dictation-engine"]')
@@ -2199,8 +2191,8 @@ describe('settings', () => {
     await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
     expect(screen.getByText('Dictation')).toBeTruthy()
     await waitFor(() => {
-      const smallField = document.querySelector('[data-settings-field="dictation-whisper-small"]')
-      expect(smallField?.textContent).toMatch(/recommended for this PC/)
+      const small = document.querySelector('[data-dictation-model="whisper-small.en"]')
+      expect(small?.textContent).toMatch(/Best for this PC/)
     })
   })
 
@@ -2242,8 +2234,8 @@ describe('settings', () => {
     fireEvent.click(more)
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete download' }))
     await waitFor(() => expect(screen.getByText('cache delete boom')).toBeTruthy())
-    pushStatus?.({ ...status, phase: 'ready' })
-    await waitFor(() => expect(screen.getByText(/Ready · on disk/i)).toBeTruthy())
+    pushStatus?.({ ...status, phase: 'ready', installed: [{ id: 'whisper-tiny.en', bytesOnDisk: 41, loaded: true }] })
+    await waitFor(() => expect(document.querySelector('[data-dictation-model="whisper-tiny.en"]')?.textContent).toMatch(/loaded/))
     expect(screen.getByText('cache delete boom')).toBeTruthy()
   })
 

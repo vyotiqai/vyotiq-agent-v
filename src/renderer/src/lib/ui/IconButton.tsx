@@ -9,10 +9,13 @@ const interactive = 'vy-transition disabled:vy-disabled-state'
  * Tone is how loud the icon is at rest. `default` for an action the row is
  * about, `muted` for secondary chrome (thumbs, attach, dismiss), `inherit`
  * when the caller sets the colour itself — one class, so nothing to override.
+ * `onSurface` is `muted` for a button whose base is already `bg-surface`,
+ * where that hover fill would not show (HOVER_ON_SURFACE).
  */
 const tones = {
   default: 'text-secondary hover:bg-surface hover:text-fg-strong',
   muted: 'text-tertiary hover:bg-surface hover:text-fg',
+  onSurface: 'text-tertiary hover:bg-surface-2 hover:text-fg',
   inherit: 'hover:bg-surface'
 } as const
 
@@ -25,8 +28,13 @@ const legacyVariants = {
   subtle: 'border border-border bg-bg text-fg hover:border-border-strong hover:bg-surface'
 } as const
 
+/**
+ * `xs` draws at 20px but hits at 24px: the `before:` plate reaches 2px past each
+ * edge, so a row action or a pair of neighbours still meets WCAG 2.5.8 without
+ * the pane header growing. Keep neighbours `gap-1` apart so plates never overlap.
+ */
 const sizes = {
-  xs: 'size-5 rounded-sm',
+  xs: 'relative size-5 rounded-sm before:absolute before:-inset-0.5',
   sm: 'size-6 rounded-md',
   md: 'size-7 rounded-md',
   lg: 'size-8 rounded-md'

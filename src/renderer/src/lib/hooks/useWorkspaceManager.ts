@@ -83,17 +83,15 @@ const INTERRUPTED_RUNS_TOAST_KEY = 'vyotiq:interrupted-runs-toast'
  */
 const UI_WRITE_EPOCH = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 
-/** Rehydrate ask_question cards after remount while main is still waiting. */
+/**
+ * Rehydrate ask_question cards after remount while main is still waiting, and
+ * drop any card main is no longer waiting on.
+ */
 async function restorePendingQuestions(
   controller: ChatStreamController,
   runId: string
 ): Promise<void> {
-  if (!window.vyotiq?.listPendingAgentQuestions) return
-  const res = await window.vyotiq.listPendingAgentQuestions(runId)
-  if (!res.ok) return
-  for (const request of res.data) {
-    controller.handleQuestionRequest(request)
-  }
+  await controller.refreshPendingQuestions(runId)
 }
 
 /** Rehydrate tool-approval cards after remount while main is still waiting. */
@@ -909,6 +907,9 @@ export function useWorkspaceManager(options?: {
       if (!buffered?.length) return
       questionBufferRef.current.delete(runId)
       for (const request of buffered) ctrl.handleQuestionRequest(request)
+      // A buffered question may have settled while it waited here (its result
+      // replayed first, or arrived while the UI was suspended): ask main.
+      void ctrl.refreshPendingQuestions(runId)
     },
     []
   )

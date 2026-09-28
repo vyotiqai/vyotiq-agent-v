@@ -56,7 +56,8 @@ test('a task in a new worktree: started there, merged into main, then removed', 
   const sees = page.getByRole('complementary', { name: 'What the agent will see' })
   await expect(sees).toContainText('New worktree')
   await expect(sees).toContainText('from main · 1 uncommitted file stays here')
-  await expect(page.locator('[data-new-task]')).toContainText('Plans, edits files and runs commands in the new worktree')
+  // Where it works is said in the header, where it was picked.
+  await expect(page.locator('[data-new-task] [data-task-header]')).toContainText('New worktree')
 
   // Put aside and continued: the draft is the parent's, and starting spends it there.
   await brief.fill('Add backpressure to the chat stream')

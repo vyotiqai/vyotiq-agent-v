@@ -413,3 +413,40 @@ describe('createChatStreamController', () => {
     expect(chatStart).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('rewinding keeps what came before the cut, and only that', () => {
+  const t = (s: number): string => new Date(Date.parse('2026-09-27T10:00:00.000Z') + s * 1000).toISOString()
+  const messages = [
+    { role: 'user' as const, content: 'first', at: t(0) },
+    { role: 'assistant' as const, content: 'reply-1', at: t(2) },
+    { role: 'user' as const, content: 'second', at: t(10) },
+    { role: 'assistant' as const, content: 'reply-2', at: t(14) },
+    { role: 'user' as const, content: 'third', at: t(20) },
+    { role: 'assistant' as const, content: 'reply-3', at: t(22) }
+  ]
+  const events = [
+    { at: t(0), event: { type: 'status', runId: 'r1', status: 'running' } },
+    { at: t(1), event: { type: 'compaction', runId: 'r1', summary: 'Folded turn one.' } },
+    { at: t(3), event: { type: 'error', runId: 'r1', message: 'Provider dropped', errorId: 'e1' } },
+    { at: t(4), event: { type: 'status', runId: 'r1', status: 'error' } },
+    { at: t(10), event: { type: 'status', runId: 'r1', status: 'running' } },
+    { at: t(12), event: { type: 'compaction', runId: 'r1', summary: 'Folded turn two.' } },
+    { at: t(15), event: { type: 'status', runId: 'r1', status: 'done' } }
+  ]
+
+  it('carries an earlier turn’s fold and error box, and drops the rewound turn’s fold', async () => {
+    const chatRewind = vi.fn().mockResolvedValue({ ok: true, data: { messages: messages.slice(0, 3), restored: [], skipped: [] } })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatRewind }
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    controller.hydrateTranscript(messages, events as never)
+    expect(controller.items.some((i) => i.kind === 'compaction' && i.summary === 'Folded turn two.')).toBe(true)
+
+    await controller.revertToUserMessage(2)
+
+    const shape = controller.items.map((i) =>
+      i.kind === 'message' ? `${i.role}:${i.content}` : i.kind === 'compaction' ? `fold:${i.summary}` : i.kind
+    )
+    expect(shape).toEqual(['user:first', 'fold:Folded turn one.', 'assistant:reply-1', 'run_error', 'user:second'])
+  })
+})

@@ -28,6 +28,8 @@ export type LaunchOptions = {
   fixtureFile?: string
   /** Write userData disk state before Electron boots (orphan-run tests). */
   preLaunchSeed?: (userDataDir: string) => void
+  /** More Chromium/Electron switches (a fake microphone fed from a file, say). */
+  extraArgs?: string[]
 }
 
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
@@ -84,7 +86,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
 
   const app = await electron.launch({
     executablePath: electronExecutable,
-    args: [mainEntry, `--user-data-dir=${userDataDir}`],
+    args: [mainEntry, `--user-data-dir=${userDataDir}`, ...(options.extraArgs ?? [])],
     cwd: repoRoot,
     env,
     timeout: 45_000,

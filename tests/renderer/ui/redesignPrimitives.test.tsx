@@ -8,7 +8,7 @@ import {
   IconButton,
   Keys,
   ProgressBar,
-  Ring,
+  Pie,
   Segmented,
   StatusGlyph,
   STATE_LABEL,
@@ -77,6 +77,15 @@ describe('IconButton', () => {
   it('keeps a focus ring', () => {
     render(<IconButton icon="more" label="More" />)
     expect(screen.getByRole('button', { name: 'More' }).className).toContain('focus-visible:vy-focus-ring')
+  })
+
+  it('gives the 20px xs size a 24px hit area (WCAG 2.5.8)', () => {
+    render(<IconButton icon="close" label="Dismiss" size="xs" />)
+    const button = screen.getByRole('button', { name: 'Dismiss' })
+    expect(button.classList.contains('size-5')).toBe(true)
+    expect(button.classList.contains('relative')).toBe(true)
+    expect(button.classList.contains('before:absolute')).toBe(true)
+    expect(button.classList.contains('before:-inset-0.5')).toBe(true)
   })
 })
 
@@ -147,7 +156,7 @@ describe('Progress', () => {
   it('warns at 70% and turns danger at 90%, one tone at a time', () => {
     const tone = (v: number) => {
       cleanup()
-      const { container } = render(<Ring value={v} />)
+      const { container } = render(<Pie value={v} />)
       return container.querySelector('svg')?.getAttribute('class') ?? ''
     }
     expect(tone(0.5)).toContain('text-fg')

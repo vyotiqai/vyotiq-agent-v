@@ -304,7 +304,7 @@ describe('createChatStreamController', () => {
     expect(parseDiffPreview(withBody.tool).some((l) => l.text === 'LIVE_LINE')).toBe(true)
   })
 
-  it('demotes in-progress todo markers when the run reaches a terminal status', async () => {
+  it('keeps a todo snapshot as written when the run reaches a terminal status', async () => {
     const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
     controller.handleEvent({ type: 'status', runId: 'r1', status: 'running', invokeId: 1 })
     controller.handleEvent({
@@ -327,11 +327,12 @@ describe('createChatStreamController', () => {
     controller.handleEvent({ type: 'status', runId: 'r1', status: 'done', invokeId: 1 })
     await flushStreamPatches()
 
+    // It is the record of which step was in progress when; the record reads
+    // the run as over from its status.
     const todo = controller.items.find((item) => item.kind === 'tool' && item.id === 'todo1')
     expect(todo?.kind).toBe('tool')
     if (todo?.kind !== 'tool') return
-    expect(todo.tool.content).toContain('[ ] (1) Ship')
-    expect(todo.tool.content).not.toContain('[~]')
+    expect(todo.tool.content).toBe('0/1 complete\n[~] (1) Ship')
   })
 
   it('replaces streamed thinking with thinking_done snapshot instead of concatenating', async () => {

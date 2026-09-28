@@ -59,6 +59,11 @@ test('streams T1 tool cards: unknown tool not titled placeholder; ask humanized'
 
   await expect(window.getByText('Audit tools fixture done.')).toBeVisible({ timeout: 20_000 })
 
+  // A finished run with an answer folds its loose work to one line; open it.
+  const looseWork = window.locator('[data-loose-work] > div > button').first()
+  await expect(looseWork).toHaveAttribute('aria-expanded', 'false')
+  await looseWork.click()
+
   // Unknown tool row must not present args.path "placeholder" as the title.
   await expect(window.getByText(/Write file check/i).first()).toBeVisible()
   const placeholderAsTitle = window.getByRole('button', { name: /^placeholder$/i })
@@ -84,6 +89,7 @@ test('streams T1 tool cards: unknown tool not titled placeholder; ask humanized'
   if (await timedOutExpand.isVisible().catch(() => false)) {
     await timedOutExpand.click()
   }
-  await expect(window.getByText(/^Timed out$/i).first()).toBeVisible()
+  // The fixture holds the pre-2026-09-28 skip text, which now reads "No answer".
+  await expect(window.getByText(/^No answer$/i).first()).toBeVisible()
   await expect(window.getByText(/^Failed$/i).first()).toBeVisible()
 })

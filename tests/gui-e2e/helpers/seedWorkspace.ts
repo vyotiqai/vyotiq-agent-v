@@ -39,7 +39,7 @@ export type SeededInterruptedRun = SeededRun & {
  * a different workspace ID than listRuns looks up (mac /var → /private/var;
  * CI run 33609263586 chatPane.drag listRuns === []).
  */
-function appCanonicalWorkspacePath(workspacePath: string): string {
+export function appCanonicalWorkspacePath(workspacePath: string): string {
   const resolved = existsSync(workspacePath) ? realpathSync(workspacePath) : workspacePath
   return canonicalizeWorkspacePath(resolved)
 }

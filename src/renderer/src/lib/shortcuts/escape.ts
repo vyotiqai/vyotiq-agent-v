@@ -9,7 +9,7 @@ export function shouldDeferAppEscapeStop(opts?: {
   if (opts?.drawerOpen) return true
   if (opts?.hasSessionQuery) return true
 
-  // Open popup / menu (ActionMenu, TaskOptions, etc.)
+  // Open popup / menu (ActionMenu, ModelPicker, etc.)
   if (document.querySelector('[aria-expanded="true"][aria-haspopup]')) return true
 
   // Overlay drawer, lightbox, or other modal dialog
@@ -28,8 +28,8 @@ export function shouldDeferAppEscapeStop(opts?: {
   if (document.querySelector('[role="listbox"][aria-label="Slash commands"]')) return true
   if (document.querySelector('[role="listbox"][aria-label="Mentions"]')) return true
 
-  // In-composer dictation strip — Esc cancels listening / ignores in-flight transcribe
-  if (document.querySelector('[data-dictation-session]')) return true
+  // An open dictation take — Esc discards it (restorable), it does not stop the run
+  if (document.querySelector('[data-take-open]')) return true
 
   // Inline cancel-edit composer — Escape cancels the edit
   const inline = document.querySelector('[data-composer-inline]')

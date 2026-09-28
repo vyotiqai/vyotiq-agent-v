@@ -554,7 +554,7 @@ export function HexEditor({
         </div>
       ) : null}
       {/* One 32px row of icons: seven labelled buttons wrapped at inspector width. */}
-      <div className={cn('flex h-8 min-w-0 shrink-0 items-center gap-0.5 border-b px-2', BORDER_DIVIDER)}>
+      <div className={cn('flex h-8 min-w-0 shrink-0 items-center gap-1 border-b px-2', BORDER_DIVIDER)}>
         <IconButton icon="undo" label="Undo" size="xs" tone="muted" onClick={undo} disabled={past.length === 0} />
         <IconButton icon="redo" label="Redo" size="xs" tone="muted" onClick={redo} disabled={future.length === 0} />
         <IconButton icon="plus" label="Insert byte" size="xs" tone="muted" onClick={insertByte} />

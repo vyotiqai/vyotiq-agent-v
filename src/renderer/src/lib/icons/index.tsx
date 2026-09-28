@@ -1,6 +1,7 @@
 import { forwardRef } from 'react'
 import type { Icon as PhosphorIcon, IconProps as PhosphorIconProps } from '@phosphor-icons/react'
 import {
+  ArchiveIcon,
   ArrowBendDownRightIcon,
   ArrowClockwiseIcon,
   ArrowCounterClockwiseIcon,
@@ -30,6 +31,7 @@ import {
   CheckSquareIcon,
   CircleHalfIcon,
   CircleIcon,
+  CloudIcon,
   ClockIcon,
   CodeIcon,
   ColumnsIcon,
@@ -79,6 +81,7 @@ import {
   LockSimpleIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
+  MicrophoneSlashIcon,
   MinusIcon,
   MonitorIcon,
   MoonIcon,
@@ -191,6 +194,8 @@ const ICONS = {
   trash: TrashIcon,
   paperclip: PaperclipIcon,
   mic: MicrophoneIcon,
+  micSlash: MicrophoneSlashIcon,
+  cloud: CloudIcon,
   circle: CircleIcon,
   circleHalf: CircleHalfIcon,
   square: SquareIcon,
@@ -234,6 +239,7 @@ const ICONS = {
   list: ListBulletsIcon,
   filter: FunnelSimpleIcon,
   pin: PushPinIcon,
+  archive: ArchiveIcon,
   sun: SunIcon,
   moon: MoonIcon,
   commit: GitCommitIcon,

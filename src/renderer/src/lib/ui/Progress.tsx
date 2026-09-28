@@ -41,33 +41,39 @@ export function ProgressBar({
 }
 
 /**
- * A fill ring for a 0–1 ratio: context used, a budget spent. It turns warning
- * at 70% and danger at 90% — the colour is backed by the number beside it.
+ * Below this share the pie draws its outline only. Any thinner wedge is a line
+ * from the centre at this size — it read as a clock hand, the way a short arc
+ * read as a spinner. The number beside the pie carries the exact share.
  */
-export function Ring({ value, size = 16, stroke = 2 }: { value: number; size?: number; stroke?: number }) {
+const PIE_MIN_SHARE = 0.1
+
+/**
+ * A pie for a 0–1 ratio: context used, a budget spent — an outline, and a
+ * wedge from twelve o'clock. Not a ring: at small sizes a short round-capped
+ * arc on a track is a loading spinner's shape, and "3%" beside one read as
+ * something loading. It turns warning at 70% and danger at 90% — the colour
+ * is backed by the number beside it.
+ */
+export function Pie({ value, size = 16 }: { value: number; size?: number }) {
   const v = Math.max(0, Math.min(1, value))
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
+  const c = size / 2
+  const outer = c - 0.5
+  // A hairline of air between the outline and the wedge keeps both legible.
+  const r = outer - 1.5
+  const a = v * 2 * Math.PI
   const tone = v >= 0.9 ? 'text-danger' : v >= 0.7 ? 'text-warning' : 'text-fg'
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      className={cn('shrink-0 -rotate-90', tone)}
-      aria-hidden="true"
-    >
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--vy-border-strong)" strokeWidth={stroke} />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={stroke}
-        strokeDasharray={`${c * v} ${c}`}
-        strokeLinecap="round"
-      />
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={cn('shrink-0', tone)} aria-hidden="true">
+      <circle cx={c} cy={c} r={outer} fill="none" stroke="currentColor" strokeWidth={1} />
+      {v >= 1 ? (
+        <circle cx={c} cy={c} r={r} fill="currentColor" data-pie-fill />
+      ) : v >= PIE_MIN_SHARE ? (
+        <path
+          d={`M${c} ${c}V${c - r}A${r} ${r} 0 ${a > Math.PI ? 1 : 0} 1 ${c + r * Math.sin(a)} ${c - r * Math.cos(a)}Z`}
+          fill="currentColor"
+          data-pie-fill
+        />
+      ) : null}
     </svg>
   )
 }

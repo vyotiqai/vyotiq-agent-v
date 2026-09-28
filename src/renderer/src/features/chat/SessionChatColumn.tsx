@@ -1,6 +1,7 @@
 import type { Ref } from 'react'
 import { memo, useCallback, useMemo } from 'react'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
+import { userTurnCount } from '@shared/utils/turnUsage'
 import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type {
   AgentInteractionMode,
@@ -392,8 +393,9 @@ export function SessionChatColumn({
     active: true
   })
 
-  // Runs so far, as the record numbers them: one per instruction you sent.
-  const runCount = useMemo(() => messages.filter((m) => m.role === 'user').length, [messages])
+  // Runs so far, as the record numbers them: one per instruction you sent —
+  // not the loop's own synthetic turns (a nudge made one run read as two).
+  const runCount = useMemo(() => userTurnCount(messages), [messages])
 
   return (
     <>

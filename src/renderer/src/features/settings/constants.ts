@@ -2,8 +2,8 @@ import type { FontScale, UiDensity } from '@shared/appearance'
 import type {
   AutonomousSkipQuestions,
   DesktopNotificationMode,
+  DictationEnterAction,
   DictationEngine,
-  DictationWaveformStyle,
   NavigationMode,
   ProviderId,
   ResponseVerbosity,
@@ -93,17 +93,38 @@ export const SEARCH_ENGINE_OPTIONS: SettingsOption<SearchEngineId>[] = [
   { value: 'google', label: 'Google' }
 ]
 
+/** Where dictation audio goes, the private option first. */
 export const DICTATION_ENGINE_OPTIONS: SettingsOption<DictationEngine>[] = [
+  { value: 'local', label: 'This PC' },
   { value: 'openai', label: 'OpenAI' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'local', label: 'Local' }
+  { value: 'openrouter', label: 'OpenRouter' }
 ]
 
-export const DICTATION_WAVEFORM_STYLE_OPTIONS: SettingsOption<DictationWaveformStyle>[] = [
-  { value: 'bars', label: 'Bars' },
-  { value: 'dots', label: 'Dots' },
-  { value: 'line', label: 'Line' },
-  { value: 'mirror', label: 'Mirror' }
+export const DICTATION_ENTER_OPTIONS: SettingsOption<DictationEnterAction>[] = [
+  { value: 'insert', label: 'Inserting' },
+  { value: 'send', label: 'Sending' }
+]
+
+/** The cloud engines' language hint (ISO-639-1). Empty detects. */
+export const DICTATION_LANGUAGE_OPTIONS: SettingsOption[] = [
+  { value: '', label: 'Detect automatically' },
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+  { value: 'it', label: 'Italian' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'nl', label: 'Dutch' },
+  { value: 'pl', label: 'Polish' },
+  { value: 'sv', label: 'Swedish' },
+  { value: 'uk', label: 'Ukrainian' },
+  { value: 'ru', label: 'Russian' },
+  { value: 'tr', label: 'Turkish' },
+  { value: 'ar', label: 'Arabic' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'ko', label: 'Korean' },
+  { value: 'zh', label: 'Chinese' }
 ]
 
 /** Mirrors the zod maxes in shared/ipc/schemas/settings.ts. */

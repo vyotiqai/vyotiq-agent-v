@@ -532,7 +532,7 @@ describe('useChatStream', () => {
     })
   })
 
-  it('does not stack later assistant text before orphaned live tools', async () => {
+  it('puts each step’s words above its own calls and after the last step’s, as a reload does', async () => {
     const { result } = renderHook(() => useChatStream('/ws'))
 
     await act(async () => {
@@ -601,12 +601,14 @@ describe('useChatStream', () => {
     expect(firstToolIdx).toBeGreaterThan(-1)
     expect(secondAssistantIdx).toBeGreaterThan(firstToolIdx)
     expect(thirdAssistantIdx).toBeGreaterThan(firstToolIdx)
+    // Step 2 streamed its call before its words; the words still head the
+    // step, as messages.jsonl (text, then tool calls) rebuilds it.
     expect(result.current.items.map((i) => (i.kind === 'message' ? i.content : i.kind))).toEqual([
       'list files',
       'First pass.',
       'tool',
-      'tool',
       'Second pass.',
+      'tool',
       'Third pass.'
     ])
   })

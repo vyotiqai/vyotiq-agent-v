@@ -14,7 +14,9 @@ import type {
   AgentQuestionRequest
 } from '@shared/ipc'
 import {
+  addInstanceUsage,
   emptyStepUsageTotals,
+  instanceUsageDelta,
   mergeStepUsageTotals,
   stepUsageFromEvent,
   type StepUsageTotals
@@ -51,8 +53,6 @@ import {
   messagesToUiItems,
   applyEventTimestamps,
   applyCompactionItems,
-  insertCompactionItem,
-  weaveCompactionItems,
   applyPersistedLiveTools,
   dropNeverStartedRunningTools,
   finalizeHydratedTranscript,
@@ -73,10 +73,6 @@ import {
 } from '@shared/transcript'
 import { isUnresolvedToolName, summarizeToolArgs } from '@shared/toolSummary'
 import { mergeOpenAiCompatToolArgDelta } from '@shared/utils/toolArgDelta'
-import {
-  finalizeTodoContentOnRunEnd,
-  type TodoFinalizeOutcome
-} from '@shared/utils/todoContent'
 import { truncateToolArgsPreview, TOOL_RESULT_IPC_PREVIEW_CHARS } from '@shared/utils/toolResultIpc'
 import { toolPresentation } from '@renderer/features/chat/toolUi/meta'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
@@ -153,14 +149,23 @@ function argsPreviewForUi(name: string, args: string): string {
   return truncateToolArgsPreview(args)
 }
 
-function withPresentationLock(tool: UiToolRow, name: string, argsPreview?: string): UiToolRow {
+/**
+ * Settle a row's presentation once, so it never flips between card and line
+ * while it streams. `priorName` is the name the row had before this update: a
+ * call streamed under an alias (`write`) and started under its real name
+ * (`edit`) is a different tool, so its presentation is worked out again —
+ * locked on the alias, a created file streamed as a one-line row and became a
+ * card only after a reload.
+ */
+function withPresentationLock(tool: UiToolRow, name: string, argsPreview?: string, priorName?: string): UiToolRow {
   const resolvedName = name && name !== 'tool' ? name : tool.name && tool.name !== 'tool' ? tool.name : ''
   // OpenAI often sends nameless first deltas; locking on placeholder "tool" would
   // permanently demote terminal/edit/etc. to compact.
   if (!resolvedName) return tool
   const preview = argsPreview ?? tool.argsPreview
   const summary = tool.summary
-  if (tool.presentation && tool.name && tool.name !== 'tool') {
+  const renamed = Boolean(priorName) && priorName !== 'tool' && priorName !== resolvedName
+  if (tool.presentation && tool.name && tool.name !== 'tool' && !renamed) {
     // Recompute terminal when args/summary arrive so read-only commands can demote.
     if (resolvedName === 'terminal') {
       return { ...tool, presentation: toolPresentation(resolvedName, preview, summary) }
@@ -187,12 +192,6 @@ function trailingToolGroupStart(items: UiItem[]): number {
   return start
 }
 
-function toolStretchEnd(items: UiItem[], start: number): number {
-  let end = start
-  while (end < items.length && items[end].kind === 'tool') end++
-  return end
-}
-
 function trailingLiveToolGroupStart(items: UiItem[]): number {
   const start = trailingToolGroupStart(items)
   if (start < 0) return -1
@@ -202,37 +201,25 @@ function trailingLiveToolGroupStart(items: UiItem[]): number {
 }
 
 /**
- * Only insert preamble text before live tools when tools arrived before any
- * assistant text in the same turn. If a finalized assistant precedes live tools,
- * new text belongs to the next turn and must stay after those tools.
+ * Place a step's assistant row (its reasoning and words). A step is one model
+ * response: its row always sits above the calls it made — the order a reload
+ * rebuilds from messages.jsonl, where one assistant message carries the text
+ * and then its tool calls. When the provider streamed calls before any words
+ * (`stepRowIds` holds the rows this step's deltas created), the row goes in
+ * front of the first of them; otherwise it starts a new stretch at the end.
  */
-function shouldInsertTextBeforeLiveTools(items: UiItem[]): boolean {
-  const liveStart = trailingLiveToolGroupStart(items)
-  if (liveStart < 0) return false
-
-  for (let i = liveStart - 1; i >= 0; i--) {
-    const item = items[i]
-    if (item.kind === 'message' && item.role === 'assistant') {
-      return item.streaming === true
-    }
-    if (item.kind === 'message' && item.role === 'user') {
-      return true
-    }
-    if (item.kind === 'tool') {
-      return false
-    }
-  }
-  return true
-}
-
-function insertAssistantItem(items: UiItem[], next: Extract<UiItem, { kind: 'message' }>): UiItem[] {
-  if (shouldInsertTextBeforeLiveTools(items)) {
-    return insertBeforeTrailingTools(items, next)
-  }
-  const liveStart = trailingLiveToolGroupStart(items)
-  if (liveStart >= 0) {
-    const end = toolStretchEnd(items, liveStart)
-    return [...items.slice(0, end), next, ...items.slice(end)]
+function insertAssistantItem(
+  items: UiItem[],
+  next: Extract<UiItem, { kind: 'message' }>,
+  stepRowIds: ReadonlySet<string>
+): UiItem[] {
+  if (stepRowIds.size > 0) {
+    const first = items.findIndex(
+      (item) =>
+        item.kind === 'tool' &&
+        (stepRowIds.has(item.id) || stepRowIds.has(item.tool.id) || (item.key != null && stepRowIds.has(item.key)))
+    )
+    if (first >= 0) return [...items.slice(0, first), next, ...items.slice(first)]
   }
   return prependClosed(items, next)
 }
@@ -260,53 +247,17 @@ function prependClosed(items: UiItem[], next: UiItem | UiItem[]): UiItem[] {
 }
 
 /**
- * Place same-turn preamble text before tools that arrived first and are still live.
- * Completed tool stretches stay chronological — next iteration text appends after them.
+ * A new tool row is the newest thing that happened: it goes at the end. (Queued
+ * follow-ups are not items, so nothing live sits after the tail; splicing it in
+ * right after the last assistant row put a new step's calls above a compaction
+ * or error card that came before them.)
  */
-function insertBeforeTrailingTools(items: UiItem[], next: UiItem | UiItem[]): UiItem[] {
-  const batch = Array.isArray(next) ? next : [next]
-  const liveStart = trailingLiveToolGroupStart(items)
-  if (liveStart >= 0) {
-    return [...items.slice(0, liveStart), ...batch, ...items.slice(liveStart)]
-  }
-  return [...closeOpenGroupTimings(items), ...batch]
-}
-
-/**
- * Where to splice a new tool row into the transcript.
- * Prefer the stretch after the latest user message when that user sits after the
- * last assistant (follow-up / continue) — otherwise tools land before the bubble
- * and inherit the previous turnIndex.
- */
-function toolInsertIndex(items: UiItem[]): number {
-  let lastUser = -1
-  let lastAssistant = -1
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i]
-    if (item.kind !== 'message') continue
-    if (lastUser < 0 && item.role === 'user') lastUser = i
-    if (lastAssistant < 0 && item.role === 'assistant') lastAssistant = i
-    if (lastUser >= 0 && lastAssistant >= 0) break
-  }
-
-  if (lastUser > lastAssistant) {
-    let insertAt = lastUser + 1
-    while (insertAt < items.length && items[insertAt]?.kind === 'tool') insertAt++
-    return insertAt
-  }
-
-  if (lastAssistant < 0) return items.length
-  let insertAt = lastAssistant + 1
-  while (insertAt < items.length && items[insertAt]?.kind === 'tool') insertAt++
-  return insertAt
-}
-
 function appendTool(
   prev: UiItem[],
   toolItem: Extract<UiItem, { kind: 'tool' }>,
   runStartedAt?: number | null
 ): UiItem[] {
-  const insertAt = toolInsertIndex(prev)
+  const insertAt = prev.length
   const before = insertAt > 0 ? prev[insertAt - 1] : undefined
   const prevGroupClosed =
     before?.kind === 'tool' && before.groupTiming?.endedAt != null
@@ -342,13 +293,19 @@ function ensureToolRowsForCalls(
             ? withCanonicalToolId(
                 {
                   ...item,
-                  tool: {
-                    ...item.tool,
-                    name: tc.name,
-                    summary: summary || item.tool.summary,
-                    status: 'running' as const,
-                    argsPreview
-                  }
+                  // A call streamed under an alias settles under its real name here.
+                  tool: withPresentationLock(
+                    {
+                      ...item.tool,
+                      name: tc.name,
+                      summary: summary || item.tool.summary,
+                      status: 'running' as const,
+                      argsPreview
+                    },
+                    tc.name,
+                    argsPreview,
+                    item.tool.name
+                  )
                 },
                 tc.id
               )
@@ -462,9 +419,15 @@ function pendingRunningToolIndices(items: UiItem[]): number[] {
 }
 
 function findToolRowIndex(items: UiItem[], toolCallId: string, toolName?: string): number {
-  const direct = items.findIndex(
-    (i) => i.kind === 'tool' && (i.id === toolCallId || i.tool.id === toolCallId)
-  )
+  // Newest first, and a live row before a settled one: an id a provider
+  // reused in an earlier step must not send this step's events to that row.
+  let direct = -1
+  for (let i = items.length - 1; i >= 0; i--) {
+    const row = items[i]!
+    if (row.kind !== 'tool' || (row.id !== toolCallId && row.tool.id !== toolCallId)) continue
+    if (row.tool.status === 'running') return i
+    if (direct < 0) direct = i
+  }
   if (direct >= 0) return direct
 
   const pendingIndex = parsePendingIndex(toolCallId)
@@ -497,6 +460,7 @@ function withCanonicalToolId(
   if (item.id === toolCallId && item.tool.id === toolCallId) return item
   return {
     ...item,
+    key: item.key ?? item.id,
     id: toolCallId,
     tool: { ...item.tool, id: toolCallId }
   }
@@ -507,6 +471,19 @@ function withCanonicalToolId(
  * that index keeps every other row's object identity, so memoized rows skip
  * re-rendering, and avoids running a closure over the whole transcript.
  */
+/**
+ * The items without a trailing reasoning-only assistant turn. Main drops such a
+ * turn before it retries an empty response — reasoning is not an answer, and it
+ * never reaches messages.jsonl — so its row goes too: kept, the thought showed
+ * until a reload, and the retry's near-identical one landed right under it.
+ */
+function withoutEmptyAssistantTail(items: UiItem[]): UiItem[] {
+  const last = items[items.length - 1]
+  if (last?.kind !== 'message' || last.role !== 'assistant') return items
+  if (last.content.trim()) return items
+  return items.slice(0, -1)
+}
+
 function replaceAt(items: UiItem[], index: number, next: UiItem): UiItem[] {
   const copy = items.slice()
   copy[index] = next
@@ -554,26 +531,47 @@ function carryTimingFromPriorItems(nextItems: UiItem[], priorItems: UiItem[]): U
   return changed ? out : nextItems
 }
 
-/** Keep fold summaries that still sit at or before the last remaining item. */
-function carryCompactionItems(nextItems: UiItem[], priorItems: UiItem[]): UiItem[] {
-  const prior = priorItems.filter(
-    (item): item is Extract<UiItem, { kind: 'compaction' }> => item.kind === 'compaction'
-  )
-  if (prior.length === 0) return nextItems
-  const lastKept = [...nextItems].reverse().find((item) => item.kind !== 'compaction')
-  if (!lastKept) return [...prior, ...nextItems]
-  const lastKeptIdx = priorItems.findIndex((item) => item.id === lastKept.id)
-  const keep =
-    lastKeptIdx < 0
-      ? prior
-      : prior.filter((item) => {
-          const idx = priorItems.findIndex((row) => row.id === item.id)
-          return idx >= 0 && idx <= lastKeptIdx
-        })
-  if (keep.length === 0) return nextItems
-  const base = nextItems.filter((item) => item.kind !== 'compaction')
-  const extras = keep.filter((extra) => !base.some((item) => item.id === extra.id))
-  return weaveCompactionItems(base, extras)
+/**
+ * Where, in the prior items, the prompt for message `messageIndex` sits: it is
+ * the k-th prompt row for the k-th user message (loop-injected ones show none).
+ * By position, not id — a follow-up shown live has an id of its own.
+ */
+function promptItemIndex(priorMessages: readonly ChatMessage[], priorItems: readonly UiItem[], messageIndex: number): number {
+  let ordinal = 0
+  for (let i = 0; i < messageIndex; i++) {
+    const m = priorMessages[i]
+    if (m?.role === 'user' && !m.synthetic) ordinal += 1
+  }
+  let seen = 0
+  for (let i = 0; i < priorItems.length; i++) {
+    const item = priorItems[i]!
+    if (item.kind !== 'message' || item.role !== 'user') continue
+    if (seen === ordinal) return i
+    seen += 1
+  }
+  return priorItems.length
+}
+
+/**
+ * An edit or rewind rebuilds the rows from messages, which hold no fold
+ * summaries or error boxes. Carry the ones from before the cut — the prompt
+ * being edited or rewound to — each back after the row it followed; the ones
+ * after the cut belonged to the work that was dropped.
+ */
+function carryWovenItems(nextItems: UiItem[], priorItems: readonly UiItem[], cut: number): UiItem[] {
+  const out = [...nextItems]
+  for (let i = 0; i < cut && i < priorItems.length; i++) {
+    const item = priorItems[i]!
+    if (item.kind !== 'compaction' && item.kind !== 'run_error') continue
+    if (item.id === LIVE_COMPACTION_ID || out.some((row) => row.id === item.id)) continue
+    let anchor = -1
+    for (let j = i - 1; j >= 0 && anchor < 0; j--) {
+      const id = priorItems[j]!.id
+      anchor = out.findIndex((row) => row.id === id)
+    }
+    out.splice(anchor + 1, 0, item)
+  }
+  return out
 }
 
 function liveCompactionItem(
@@ -620,34 +618,41 @@ function upsertLiveCompaction(
     if (live.verifyFailures === undefined) delete merged.verifyFailures
     return items.map((row, i) => (i === idx ? merged : row))
   }
-  return insertCompactionItem(items, live)
+  // A fold in flight is happening now: it is the newest thing in the record.
+  // (Weaving it by timestamp put it above rows still streaming, which have none.)
+  return prependClosed(items, live)
 }
 
 function replaceOrInsertCompaction(
   items: UiItem[],
   item: Extract<UiItem, { kind: 'compaction' }>
 ): UiItem[] {
-  const withoutLive = items.filter((row) => row.id !== LIVE_COMPACTION_ID)
-  const match = withoutLive.findIndex(
+  // The fold's own live card, if it had one, is where it happened: settle it there.
+  const liveIdx = items.findIndex((row) => row.id === LIVE_COMPACTION_ID)
+  if (liveIdx >= 0) {
+    const live = items[liveIdx] as Extract<UiItem, { kind: 'compaction' }>
+    return items.map((row, i) => (i === liveIdx ? { ...item, at: live.at ?? item.at } : row))
+  }
+  const match = items.findIndex(
     (row) => row.kind === 'compaction' && row.summary === item.summary
   )
   if (match >= 0) {
-    const existing = withoutLive[match]
-    if (
+    const existing = items[match]
+    const settledDifferently =
       existing?.kind === 'compaction' &&
       (existing.verifyStatus === 'failed' || existing.verifyStatus === 'verified') &&
       (item.verifyStatus === 'failed' || item.verifyStatus === 'verified') &&
       existing.verifyStatus !== item.verifyStatus
-    ) {
-      return insertCompactionItem(withoutLive, item)
+    if (!settledDifferently) {
+      return items.map((row, i) =>
+        i === match && row.kind === 'compaction'
+          ? { ...row, ...item, id: row.id, at: row.at ?? item.at }
+          : row
+      )
     }
-    return withoutLive.map((row, i) =>
-      i === match && row.kind === 'compaction'
-        ? { ...row, ...item, id: row.id, at: row.at ?? item.at }
-        : row
-    )
   }
-  return insertCompactionItem(withoutLive, item)
+  // A new fold: it happened now, after everything already in the record.
+  return prependClosed(items, item)
 }
 
 /** Rewrite an in-flight compact card so cancel/error does not leave it verifying. */
@@ -696,9 +701,10 @@ function clearApprovals(items: UiItem[], requestId?: string): UiItem[] {
 function finalizeTerminalItems(
   items: UiItem[],
   reason: 'Cancelled' | 'Interrupted' | 'Not completed' | 'Connection lost',
-  startedToolCallIds: Set<string>,
-  todoOutcome?: TodoFinalizeOutcome
+  startedToolCallIds: Set<string>
 ): UiItem[] {
+  // todo_write results stay as written: they are the history of which step
+  // was in progress when, and the record reads a run that is over as over.
   return settleLiveCompaction(
     clearQuestions(
       clearApprovals(
@@ -711,17 +717,6 @@ function finalizeTerminalItems(
   ).map((item) => {
     if (item.kind === 'message' && (item.streaming || item.thinkingStreaming)) {
       return { ...item, streaming: false, thinkingStreaming: false }
-    }
-    if (
-      todoOutcome &&
-      item.kind === 'tool' &&
-      item.tool.name === 'todo_write' &&
-      item.tool.content
-    ) {
-      const content = finalizeTodoContentOnRunEnd(item.tool.content, todoOutcome)
-      if (content !== item.tool.content) {
-        return { ...item, tool: { ...item.tool, content } }
-      }
     }
     return item
   })
@@ -776,9 +771,10 @@ function findToolResultRowIndex(
     if (bySummary.length === 1) return bySummary[0]!
     if (bySummary.length > 1) return bySummary[0]!
   }
-  // Ambiguous or missing summary: FIFO among same-name running rows.
+  // Ambiguous or missing summary: FIFO among same-name running rows. A row of
+  // another tool is never taken: that would rename it and put this result in
+  // its place, and its own result would then land in a row of its own.
   if (sameName.length > 0) return sameName[0]!
-  if (running.length === 1) return running[0]!
   return -1
 }
 
@@ -972,7 +968,7 @@ function agentInstancesFromEvents(events: PersistedEvent[]): Record<string, Agen
   for (const row of events) {
     if (!isAgentEvent(row.event)) continue
     if (row.event.type !== 'agent_instance_update') continue
-    map = mergeAgentInstanceUpdate(map, row.event)
+    map = mergeAgentInstanceUpdate(map, row.event, row.at)
   }
   return map
 }
@@ -1003,6 +999,18 @@ function hydrateFromDisk(
   })
   const fromDisk = agentInstancesFromEvents(events)
   const prior = opts?.priorAgentInstances
+  const agentInstances = prior ? mergeAgentInstanceMaps(prior, fromDisk) : fromDisk
+  const turnUsage = turnUsageFromPersistedEvents(events, userMessageAts(kept))
+  // Disk counts a child once it finishes; one still running is counted at the
+  // usage its live updates last reported, as the live stream had it.
+  const lastSlot = turnUsage.length - 1
+  if (lastSlot >= 0) {
+    for (const instance of Object.values(agentInstances)) {
+      if (instance.phase === 'started' && instance.usage) {
+        turnUsage[lastSlot] = addInstanceUsage(turnUsage[lastSlot]!, instance.usage)
+      }
+    }
+  }
   const incomplete = incompleteFromPersisted(events)
   return {
     messages: kept,
@@ -1028,8 +1036,8 @@ function hydrateFromDisk(
       events
     ),
     writeCheckpoint: writeCheckpointFromPersisted(events),
-    agentInstances: prior ? mergeAgentInstanceMaps(prior, fromDisk) : fromDisk,
-    turnUsage: turnUsageFromPersistedEvents(events, userMessageAts(kept))
+    agentInstances,
+    turnUsage
   }
 }
 
@@ -1371,6 +1379,8 @@ export type ChatStreamController = ChatStreamState & {
   handleApprovalRequest: (request: ToolApprovalRequest) => void
   respondToApproval: (requestId: string, decision: ToolApprovalDecision) => Promise<void>
   handleQuestionRequest: (request: AgentQuestionRequest) => void
+  /** Reconcile question cards with the ones main still waits on for this run. */
+  refreshPendingQuestions: (runId: string) => Promise<void>
   respondToQuestion: (requestId: string, answers: AgentQuestionAnswer[]) => Promise<void>
   /** Reload transcript from disk when a run finished but IPC was missed. */
   syncFromDisk: (runId: string, opts?: { ignoreActiveList?: boolean }) => Promise<boolean>
@@ -1422,6 +1432,15 @@ export type ChatStreamController = ChatStreamState & {
   dispose: () => void
 }
 
+/** A manual /compact's events: they arrive after the run's terminal status. */
+const IDLE_COMPACTION_EVENTS = new Set<AgentEvent['type']>([
+  'compaction_started',
+  'compaction_verifying',
+  'compaction_verify_retry',
+  'compaction_verify_failed',
+  'compaction'
+])
+
 /** Events still applied while UI is suspended (approvals/questions use separate handlers). */
 const UI_SUSPEND_ALLOWED_EVENTS = new Set<AgentEvent['type']>([
   'status',
@@ -1441,6 +1460,71 @@ const UI_SUSPEND_ALLOWED_EVENTS = new Set<AgentEvent['type']>([
   'goal_update',
   'loop_update'
 ])
+
+/** A message's identity for overlap checks: role, stamp, call ids and content. */
+function messageFingerprint(m: ChatMessage): string {
+  const calls = (m.toolCalls ?? []).map((call) => call.id).join(',')
+  const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+  return `${m.role}|${m.at ?? ''}|${m.toolCallId ?? ''}|${calls}|${content}`
+}
+
+/** How many rows at the end of an earlier page repeat the start of the loaded tail. */
+export function pageOverlap(page: readonly ChatMessage[], tail: readonly ChatMessage[]): number {
+  const pagePrints = page.map(messageFingerprint)
+  const tailPrints = tail.map(messageFingerprint)
+  for (let k = Math.min(pagePrints.length, tailPrints.length); k > 0; k--) {
+    let same = true
+    for (let i = 0; i < k && same; i++) same = pagePrints[pagePrints.length - k + i] === tailPrints[i]
+    if (same) return k
+  }
+  return 0
+}
+
+/** Events kept while a catch-up loads its disk snapshot (see resumeUiIfNeeded). */
+type CatchUpBuffer = { gen: number; events: AgentEvent[]; overflowed: boolean }
+
+/** What a catch-up's loaded events hold, by seq. */
+type CatchUpSnapshot = { seqs: ReadonlySet<number>; lastAssistantSeq: number }
+
+/** Past this many, a catch-up takes a fresh snapshot instead of replaying. */
+const CATCH_UP_BUFFER_MAX = 4000
+
+/** Token streams: never persisted, so a snapshot holds them only through their step's answer. */
+const STREAM_DELTA_TYPES = new Set<AgentEvent['type']>(['text_delta', 'thinking_delta', 'tool_call_delta'])
+
+function catchUpSnapshotOf(events: readonly PersistedEvent[]): CatchUpSnapshot {
+  const seqs = new Set<number>()
+  let lastAssistantSeq = 0
+  for (const row of events) {
+    const event = row.event
+    if (!isAgentEvent(event) || typeof event.seq !== 'number') continue
+    seqs.add(event.seq)
+    if (event.type === 'assistant_message' && event.seq > lastAssistantSeq) lastAssistantSeq = event.seq
+  }
+  return { seqs, lastAssistantSeq }
+}
+
+/** Whether one of the newest assistant messages is this step's (same calls, or same words). */
+function messagesHoldAssistantTurn(
+  messages: readonly ChatMessage[],
+  event: Extract<AgentEvent, { type: 'assistant_message' }>
+): boolean {
+  const ids = (event.toolCalls ?? []).map((call) => call.id).join('\u0000')
+  const content = stripToolShapedAssistantText(event.content).trim()
+  let seen = 0
+  for (let i = messages.length - 1; i >= 0 && seen < 8; i--) {
+    const message = messages[i]!
+    if (message.role !== 'assistant') continue
+    seen += 1
+    const messageIds = (message.toolCalls ?? []).map((call) => call.id).join('\u0000')
+    if (ids || messageIds) {
+      if (ids === messageIds) return true
+      continue
+    }
+    if (stripToolShapedAssistantText(contentDisplayText(message.content)).trim() === content) return true
+  }
+  return false
+}
 
 /** Per-run card expansion state persisted via workspace UI state. */
 export type RunExpansions = {
@@ -1495,6 +1579,14 @@ export function createChatStreamController(
   const itemsListeners = new Set<() => void>()
   const metaListeners = new Set<() => void>()
   const closedRuns = new Set<string>()
+  /**
+   * Questions seen to settle here — answered from this controller, or their
+   * ask_question call's result arrived. A listPendingAgentQuestions reply that
+   * left main before the answer (a poll, a buffered replay) must not bring the
+   * card back as a stale one whose answer main can no longer accept.
+   */
+  const settledQuestionIds = new Set<string>()
+  const settledQuestionTools = new Set<string>()
   let assistantId: string | null = null
   /** Row that owns the current step's reasoning, cleared when the step closes. */
   let reasoningId: string | null = null
@@ -1514,6 +1606,10 @@ export function createChatStreamController(
   let uiResumeGeneration = 0
   /** Generation of the catch-up currently awaiting disk; 0 when none. */
   let uiCatchUpStartedGen = 0
+  /** Events that arrived during the in-flight catch-up, replayed over its snapshot. */
+  let catchUpBuffer: CatchUpBuffer | null = null
+  /** The seqs the last catch-up's loaded events hold. */
+  let catchUpSnapshot: CatchUpSnapshot | null = null
   // A run is reused across turns, so runId alone cannot separate the live turn from a
   // prior one still draining. Events carry the invoke that produced them.
   let activeInvokeId: number | null = null
@@ -1522,6 +1618,12 @@ export function createChatStreamController(
   let revision = 0
   let itemsRevision = 0
   let metaRevision = 0
+  /**
+   * Tool rows the current model step's streamed call deltas created. Its
+   * assistant row goes in front of them when its words or reasoning arrive
+   * after the calls began; cleared when the step ends (assistant_message).
+   */
+  const stepRowIds = new Set<string>()
   let turnSeq = 0
   let completedTurnSeq = 0
   let runningTurnSeq = 0
@@ -1560,6 +1662,8 @@ export function createChatStreamController(
     toolCallId: string
     name?: string
     argumentsDelta: string
+    /** The id this call streamed under until the provider named it. */
+    replacesToolCallId?: string
   }> = []
   type PendingTerminalPiece = { text: string; stream: 'stdout' | 'stderr' }
   const pendingTerminalByTool = new Map<string, PendingTerminalPiece[]>()
@@ -1656,10 +1760,22 @@ export function createChatStreamController(
 
   const applyToolCallDelta = (
     items: UiItem[],
-    event: { toolCallId: string; name?: string; argumentsDelta: string },
+    event: { toolCallId: string; name?: string; argumentsDelta: string; replacesToolCallId?: string },
     runStartedAt: number | null
   ): UiItem[] => {
     startedToolCallIds.add(event.toolCallId)
+    stepRowIds.add(event.toolCallId)
+    const replaced = event.replacesToolCallId
+    if (replaced && replaced !== event.toolCallId) {
+      // Same call, now under the provider's own id: rename the row in place
+      // (it keeps its first id as its view key) and its streamed arguments.
+      const at = findToolRowIndex(items, replaced)
+      const row = at >= 0 ? items[at] : undefined
+      if (row?.kind === 'tool') items = replaceAt(items, at, withCanonicalToolId(row, event.toolCallId))
+      const args = pendingToolArgsFull.get(replaced)
+      if (args != null && !pendingToolArgsFull.has(event.toolCallId)) pendingToolArgsFull.set(event.toolCallId, args)
+      pendingToolArgsFull.delete(replaced)
+    }
     const existingIdx = findToolRowIndex(items, event.toolCallId, event.name)
     const existing =
       existingIdx >= 0 && items[existingIdx].kind === 'tool' ? items[existingIdx] : undefined
@@ -1697,7 +1813,8 @@ export function createChatStreamController(
                 summary
               },
               toolName || existing.tool.name,
-              argsPreview
+              argsPreview,
+              existing.tool.name
             )
           },
           event.toolCallId
@@ -1751,11 +1868,13 @@ export function createChatStreamController(
     if (last && last.toolCallId === event.toolCallId) {
       last.argumentsDelta += event.argumentsDelta
       if (event.name) last.name = event.name
+      if (event.replacesToolCallId && !last.replacesToolCallId) last.replacesToolCallId = event.replacesToolCallId
     } else {
       pendingToolCallDeltas.push({
         toolCallId: event.toolCallId,
         name: event.name,
-        argumentsDelta: event.argumentsDelta
+        argumentsDelta: event.argumentsDelta,
+        ...(event.replacesToolCallId ? { replacesToolCallId: event.replacesToolCallId } : {})
       })
     }
     if (toolPatchTimer != null) return
@@ -1799,8 +1918,10 @@ export function createChatStreamController(
           content: '',
           thinking: text,
           thinkingStreaming: true,
-          streaming: false
-        })
+          streaming: false,
+          // When it began: the live "Now" line counts up from here.
+          at: new Date().toISOString()
+        }, stepRowIds)
       } else {
         const current = items[index] as Extract<UiItem, { kind: 'message' }>
         const prior = current.thinking ?? ''
@@ -1829,7 +1950,7 @@ export function createChatStreamController(
           role: 'assistant',
           content: stripToolShapedAssistantTextForStream(text),
           streaming: true
-        })
+        }, stepRowIds)
       } else {
         const current = items[index] as Extract<UiItem, { kind: 'message' }>
         items = replaceAt(items, index, {
@@ -2067,6 +2188,7 @@ export function createChatStreamController(
   const clearSessionUi = (opts?: { preservePendingCancel?: boolean }): void => {
     assistantId = null
     reasoningId = null
+    stepRowIds.clear()
     runId = null
     contentRunId = null
     ignoreStreamEvents = false
@@ -2280,6 +2402,7 @@ export function createChatStreamController(
       beforeNotify: () => {
         assistantId = null
         reasoningId = null
+        stepRowIds.clear()
         runId = id
         contentRunId = id
         if (liveInvokeId != null) activeInvokeId = liveInvokeId
@@ -2292,9 +2415,18 @@ export function createChatStreamController(
       state.pendingFollowUps
     )
     adoptHydratedUsage(read.hydrated)
+    // Question cards are never on disk: keep the open ones across the catch-up
+    // (as reattach does), then let main confirm which are still waiting.
+    const openQuestions = stillActive
+      ? state.items.filter(
+          (item): item is Extract<UiItem, { kind: 'question' }> =>
+            item.kind === 'question' &&
+            !read.hydrated.items.some((row) => row.kind === 'question' && row.id === item.id)
+        )
+      : []
     patch({
       ...read.hydrated,
-      items: applyPersistedExpansions(read.hydrated.items),
+      items: applyPersistedExpansions([...read.hydrated.items, ...openQuestions]),
       pendingFollowUps: hydratedPending,
       runId: id,
       pendingRun: false,
@@ -2304,6 +2436,8 @@ export function createChatStreamController(
       transcriptEarlierCursor: read.data.earlierCursor,
       ...(read.eventsLoadError ? { error: read.eventsLoadError } : {})
     })
+    catchUpSnapshot = catchUpSnapshotOf(read.events)
+    if (stillActive) void refreshPendingQuestions(id)
     if (!stillActive) onTerminal?.()
     return true
   }
@@ -2326,6 +2460,13 @@ export function createChatStreamController(
     recordUiResume(true)
     needsUiCatchUp = false
     const id = runId ?? contentRunId
+    // Events that arrive while the snapshot loads are kept, not dropped: the
+    // ones it turns out not to hold are applied on top of it. Dropping them
+    // left a call that finished meanwhile spinning until the run ended — and
+    // then marked failed.
+    const buffer: CatchUpBuffer = { gen, events: [], overflowed: false }
+    catchUpBuffer = buffer
+    catchUpSnapshot = null
     try {
       const ok = id ? await catchUpUiFromDisk(id) : true
       if (disposed || gen !== uiResumeGeneration) return
@@ -2333,13 +2474,44 @@ export function createChatStreamController(
         needsUiCatchUp = true
         return
       }
-      // Deltas skipped during catch-up are not on this disk snapshot; clear the
-      // flag so we unsuspend and continue from the live stream afterward.
       needsUiCatchUp = false
+      const snapshot = catchUpSnapshot
+      catchUpBuffer = null
       setUiSuspended(false)
+      if (snapshot) {
+        for (const event of buffer.events) {
+          if (replaysOntoSnapshot(event, snapshot)) handleEvent(event)
+        }
+      }
+      // More arrived than it could keep: take another snapshot, which holds them.
+      if (buffer.overflowed) {
+        needsUiCatchUp = true
+        void resumeUiIfNeeded()
+      }
     } finally {
+      if (catchUpBuffer === buffer) catchUpBuffer = null
       if (uiCatchUpStartedGen === gen) uiCatchUpStartedGen = 0
     }
+  }
+
+  /**
+   * Whether an event that arrived during a catch-up still has to be applied
+   * over its snapshot. The events and the messages are read one after the
+   * other, so a step's text and a call's result are judged by the messages
+   * the items were built from; the rest by the seqs the loaded events hold.
+   */
+  const replaysOntoSnapshot = (event: AgentEvent, snapshot: CatchUpSnapshot): boolean => {
+    if (event.type === 'assistant_message') return !messagesHoldAssistantTurn(state.messages, event)
+    if (event.type === 'tool_result') {
+      return !state.messages.some((m) => m.role === 'tool' && m.toolCallId === event.toolCallId)
+    }
+    // No seq (an older main): a delta cannot be placed against the snapshot;
+    // every other event applies idempotently.
+    if (typeof event.seq !== 'number') return !STREAM_DELTA_TYPES.has(event.type)
+    if (snapshot.seqs.has(event.seq)) return false
+    // A delta of a step whose answer the snapshot already holds is in it.
+    if (STREAM_DELTA_TYPES.has(event.type) && event.seq <= snapshot.lastAssistantSeq) return false
+    return true
   }
 
   /**
@@ -2391,6 +2563,15 @@ export function createChatStreamController(
       ignoreStreamEvents &&
       event.type !== 'follow_up_applied' &&
       event.type !== 'follow_up_dropped' &&
+      // Main sends the turn's last checkpoint after its terminal status, on
+      // every exit path (startAgentRun's finally): dropped here, the run's
+      // final Undo card never appeared until a reload.
+      event.type !== 'writes_checkpoint' &&
+      // A /compact runs only once the task is idle, so its events always come
+      // after a terminal status: dropped here, a finished run you had watched
+      // showed no fold card at all (none while verifying, none when it failed)
+      // until a reload drew it from events.jsonl.
+      !IDLE_COMPACTION_EVENTS.has(event.type) &&
       // Child instance lifecycle outlives parent invoke — must still update cards.
       event.type !== 'agent_instance_update'
     ) {
@@ -2398,6 +2579,15 @@ export function createChatStreamController(
     }
 
     if (uiSuspended && !UI_SUSPEND_ALLOWED_EVENTS.has(event.type)) {
+      // A catch-up is loading its snapshot: keep the event for after it.
+      const buffer = catchUpBuffer
+      if (buffer && buffer.gen === uiResumeGeneration && !buffer.overflowed) {
+        if (buffer.events.length < CATCH_UP_BUFFER_MAX) {
+          buffer.events.push(event)
+          return
+        }
+        buffer.overflowed = true
+      }
       needsUiCatchUp = true
       recordUiSuspendSkip()
       return
@@ -2425,6 +2615,9 @@ export function createChatStreamController(
     if (event.type === 'text_delta') {
       if (!assistantId) assistantId = messageUiId('assistant', state.messages.length)
       materializePendingToolCallDeltas()
+      // Reasoning still buffered arrived before these words: paint it first, so
+      // closing the thought below closes it (and it cannot reopen afterwards).
+      if (pendingThinkingDelta) flushStreamingPatches()
       closeOpenThinkingStep()
       scheduleTextDelta(event.text)
       return
@@ -2502,7 +2695,7 @@ export function createChatStreamController(
           thinkingStreaming: false,
           streaming: false,
           at: messageAt
-        })
+        }, stepRowIds)
       }
       reasoningId = null
       const nextMessages = appendAssistantWithTools(
@@ -2516,6 +2709,8 @@ export function createChatStreamController(
       if (event.toolCalls?.length) {
         for (const tc of event.toolCalls) pendingToolArgsFull.delete(tc.id)
       }
+      // The step is over; the next one's rows are its own.
+      stepRowIds.clear()
       patch({ items: nextItems, messages: nextMessages })
     } else if (event.type === 'tool_call_delta') {
       scheduleToolCallDelta(event)
@@ -2546,7 +2741,8 @@ export function createChatStreamController(
                     status: 'running' as const
                   },
                   event.name,
-                  existing.tool.argsPreview
+                  existing.tool.argsPreview,
+                  existing.tool.name
                 )
               },
               event.toolCallId
@@ -2691,7 +2887,8 @@ export function createChatStreamController(
         }
       }
       // ask_question UI is a separate item; clear it when the tool settles
-      // (answer, interrupt, timeout) so a stale panel cannot outlive the wait.
+      // (answer, skip, Send now, interrupt) so a stale panel cannot outlive the wait.
+      if (event.name === 'ask_question') settledQuestionTools.add(event.toolCallId)
       const itemsForPatch =
         event.name === 'ask_question'
           ? clearQuestionsForTool(nextItems, event.toolCallId)
@@ -2721,9 +2918,28 @@ export function createChatStreamController(
       })
       scheduleStreamingPatch()
     } else if (event.type === 'agent_instance_update') {
-      patch({
-        agentInstances: mergeAgentInstanceUpdate(state.agentInstances, event)
-      })
+      const prior = state.agentInstances[event.instanceRunId]
+      const agentInstances = mergeAgentInstanceUpdate(state.agentInstances, event)
+      // A child's usage joins the turn that is running: what it used since its
+      // last update, so progress and the terminal total never count twice. A
+      // reload counts it once, from the terminal update (turnUsage.ts).
+      const usage = agentInstances[event.instanceRunId]?.usage
+      const delta = usage && usage !== prior?.usage ? instanceUsageDelta(prior?.usage, usage) : null
+      if (delta && (delta.steps > 0 || delta.outputTokens > 0 || delta.billedInputTokens > 0)) {
+        usageTotals = addInstanceUsage(usageTotals, delta)
+        if (turnUsageSlots.length === 0) turnUsageSlots = [emptyStepUsageTotals()]
+        const nextSlots = turnUsageSlots.slice()
+        const slotIndex = nextSlots.length - 1
+        nextSlots[slotIndex] = addInstanceUsage(nextSlots[slotIndex]!, delta)
+        turnUsageSlots = nextSlots
+        patch({
+          agentInstances,
+          turnUsage: turnUsageSlots,
+          ...(state.contextUsage ? { contextUsage: { ...state.contextUsage, stepUsage: usageTotals } } : {})
+        })
+      } else {
+        patch({ agentInstances })
+      }
     } else if (event.type === 'mode_changed') {
       notifyAgentMode(event.mode)
     } else if (event.type === 'goal_update' || event.type === 'loop_update') {
@@ -2774,6 +2990,7 @@ export function createChatStreamController(
       // corrupting the args preview for the whole retry.
       pendingToolArgsFull.clear()
       startedToolCallIds.clear()
+      stepRowIds.clear()
       flushStreamingPatches()
       const reconnectIds = new Set([assistantId, reasoningId].filter((id): id is string => !!id))
       const nextItems = state.items
@@ -2795,8 +3012,10 @@ export function createChatStreamController(
         )
       patch({ items: nextItems, networkWait: null })
     } else if (event.type === 'incomplete') {
+      const items = event.reason === 'empty_response' ? withoutEmptyAssistantTail(state.items) : state.items
       patch({
-        incomplete: { reason: event.reason, message: event.message }
+        incomplete: { reason: event.reason, message: event.message },
+        ...(items !== state.items ? { items } : {})
       })
     } else if (event.type === 'compaction_started') {
       patch({ compacting: true })
@@ -2923,7 +3142,8 @@ export function createChatStreamController(
                 content: displayText,
                 images: imageUrls.length ? imageUrls : undefined,
                 attachments: attachments.length ? attachments : undefined,
-                at: msg.at ?? new Date().toISOString()
+                at: msg.at ?? new Date().toISOString(),
+                ...(msg.midTurn ? { midTurn: true as const } : {})
               }
             })
           if (newItems.length > 0) nextItems = prependClosed(state.items, newItems)
@@ -3003,6 +3223,7 @@ export function createChatStreamController(
     } else if (event.type === 'status') {
       if (event.status === 'running') {
         startedToolCallIds.clear()
+        stepRowIds.clear()
         runningTurnSeq = turnSeq
         patch({
           running: true,
@@ -3045,6 +3266,7 @@ export function createChatStreamController(
         pendingCancel = false
         assistantId = null
         reasoningId = null
+        stepRowIds.clear()
         ignoreStreamEvents = true
         completedTurnSeq = turnSeq
         const sessionRunId = runId ?? event.runId
@@ -3070,8 +3292,7 @@ export function createChatStreamController(
             ? state.items.filter((item) => !unappliedItemIds.has(item.id))
             : state.items,
           toolStubReason,
-          startedToolCallIds,
-          event.status
+          startedToolCallIds
         ).map((item) =>
           item.kind === 'message' && item.reconnecting ? { ...item, reconnecting: false } : item
         )
@@ -3195,6 +3416,7 @@ export function createChatStreamController(
     })
     assistantId = null
     reasoningId = null
+    stepRowIds.clear()
     // After syncFromDisk / idle hydrate, session may live only on contentRunId.
     const continuingRunId = runId ?? contentRunId
     if (continuingRunId) {
@@ -3484,14 +3706,15 @@ export function createChatStreamController(
     const priorTurnStatus = state.turnStatus
     const nextMessages = messagesForNextTurn([...priorMessages.slice(0, editMessageIndex), user])
     const editedUserId = messageUiId('user', editMessageIndex)
-    const nextItems = carryCompactionItems(
+    const nextItems = carryWovenItems(
       carryTimingFromPriorItems(messagesToUiItems(nextMessages), priorItems).map((item) => {
         if (item.kind === 'message' && item.role === 'user' && item.id === editedUserId) {
           return { ...item, at: sentAt }
         }
         return item
       }),
-      priorItems
+      priorItems,
+      promptItemIndex(priorMessages, priorItems, editMessageIndex)
     )
 
     turnUsageSlots = alignTurnUsageSlots(
@@ -3526,6 +3749,7 @@ export function createChatStreamController(
     turnSeq += 1
     assistantId = null
     reasoningId = null
+    stepRowIds.clear()
     clearToolBodyCaches()
 
     // Bind local session before await so stop() can chatCancel the real id.
@@ -3680,9 +3904,11 @@ export function createChatStreamController(
     const priorTurnUsage = turnUsageSlots
     const priorTurnStatus = state.turnStatus
     const nextMessages = priorMessages.slice(0, userMessageIndex + 1)
-    const nextItems = carryCompactionItems(
+    const cut = promptItemIndex(priorMessages, priorItems, userMessageIndex)
+    const nextItems = carryWovenItems(
       carryTimingFromPriorItems(messagesToUiItems(nextMessages), priorItems),
-      priorItems
+      priorItems,
+      cut
     )
 
     turnUsageSlots = alignTurnUsageSlots(
@@ -3707,6 +3933,7 @@ export function createChatStreamController(
     clearToolBodyCaches()
     assistantId = null
     reasoningId = null
+    stepRowIds.clear()
 
     const res = await window.vyotiq.chatRewind({
       workspacePath,
@@ -3736,9 +3963,10 @@ export function createChatStreamController(
       return false
     }
 
-    const authoritativeItems = carryCompactionItems(
+    const authoritativeItems = carryWovenItems(
       carryTimingFromPriorItems(messagesToUiItems(res.data.messages), priorItems),
-      priorItems
+      priorItems,
+      cut
     )
     turnUsageSlots = alignTurnUsageSlots(
       turnUsageSlots,
@@ -3955,6 +4183,7 @@ export function createChatStreamController(
       beforeNotify: () => {
         assistantId = null
         reasoningId = null
+        stepRowIds.clear()
         // Keep session id so the next send continues this run (not a forked transcript).
         runId = id
         contentRunId = id
@@ -4034,7 +4263,7 @@ export function createChatStreamController(
       runStartedAt: null,
       compacting: false,
       runTerminalTick: state.runTerminalTick + 1,
-      items: finalizeTerminalItems(state.items, 'Cancelled', startedToolCallIds, 'cancelled')
+      items: finalizeTerminalItems(state.items, 'Cancelled', startedToolCallIds)
     })
     clearPendingFollowUps(true)
     onTerminal?.()
@@ -4117,6 +4346,7 @@ export function createChatStreamController(
     const rows = events ?? []
     assistantId = null
     reasoningId = null
+    stepRowIds.clear()
     if (activeInvokeId != null) supersededInvokeIds.add(activeInvokeId)
     activeInvokeId = null
     clearToolBodyCaches()
@@ -4222,13 +4452,12 @@ export function createChatStreamController(
         })
         return false
       }
-      const fingerprint = (m: ChatMessage): string =>
-        `${m.role}|${m.at ?? ''}|${
-          typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-        }`
-      const known = new Set(state.messages.map(fingerprint))
-      // A stale-cursor clamp can overlap the loaded tail — drop duplicates.
-      const fresh = data.messages.filter((m) => !known.has(fingerprint(m)))
+      // A stale-cursor clamp can overlap the loaded tail: the page then ends with
+      // the rows the tail starts with. Drop exactly that overlap. Matching any
+      // row seen anywhere dropped real history — every earlier tool-only
+      // assistant message (content '') once the tail held one, and any result
+      // whose text another result repeated.
+      const fresh = data.messages.slice(0, data.messages.length - pageOverlap(data.messages, state.messages))
       if (fresh.length === 0) {
         patch({
           transcriptHasEarlier: data.hasEarlier,
@@ -4383,7 +4612,9 @@ export function createChatStreamController(
       summary: request.summary,
       argsPreview: request.argsPreview,
       mutating: request.mutating,
-      ...(request.alwaysAllowCommand !== undefined ? { alwaysAllowCommand: request.alwaysAllowCommand } : {})
+      ...(request.alwaysAllowCommand !== undefined ? { alwaysAllowCommand: request.alwaysAllowCommand } : {}),
+      // The wait starts now — not when the call's arguments began to stream.
+      requestedAt: new Date().toISOString()
     }
 
     const idx = findToolRowIndex(state.items, request.toolCallId, request.name)
@@ -4457,6 +4688,9 @@ export function createChatStreamController(
   const handleQuestionRequest = (request: AgentQuestionRequest): void => {
     if (closedRuns.has(request.runId)) return
     if (runId && request.runId !== runId) return
+    if (settledQuestionIds.has(request.requestId) || settledQuestionTools.has(request.toolCallId)) {
+      return
+    }
 
     const questionItem: Extract<UiItem, { kind: 'question' }> = {
       kind: 'question',
@@ -4479,10 +4713,48 @@ export function createChatStreamController(
       (item) => item.kind === 'question' && item.question.requestId === request.requestId
     )
     if (existingIdx >= 0) {
-      patch({ items: replaceAt(state.items, existingIdx, questionItem) })
+      const existing = state.items[existingIdx]
+      // A re-push or poll of the same form changes nothing: keep the item (and
+      // its time) so the record does not rebuild every few seconds.
+      if (
+        existing?.kind === 'question' &&
+        JSON.stringify(existing.question) === JSON.stringify(questionItem.question)
+      ) {
+        return
+      }
+      patch({
+        items: replaceAt(state.items, existingIdx, {
+          ...questionItem,
+          at: existing?.at ?? questionItem.at
+        })
+      })
       return
     }
     patch({ items: [...state.items, questionItem] })
+  }
+
+  /**
+   * Reconcile question cards with what main is still waiting on for this run:
+   * add the missing ones and drop cards main no longer knows. Only cards
+   * present before the request left can be dropped, so a question pushed live
+   * while the reply was in flight survives a reply that predates it.
+   */
+  const refreshPendingQuestions = async (id: string): Promise<void> => {
+    if (!window.vyotiq?.listPendingAgentQuestions) return
+    const before = new Set(
+      state.items.flatMap((item) => (item.kind === 'question' ? [item.question.requestId] : []))
+    )
+    const res = await window.vyotiq.listPendingAgentQuestions(id)
+    if (!res.ok || disposed || closedRuns.has(id) || (runId && runId !== id)) return
+    const pendingIds = new Set(res.data.map((request) => request.requestId))
+    const kept = state.items.filter(
+      (item) =>
+        item.kind !== 'question' ||
+        pendingIds.has(item.question.requestId) ||
+        !before.has(item.question.requestId)
+    )
+    if (kept.length !== state.items.length) patch({ items: kept })
+    for (const request of res.data) handleQuestionRequest(request)
   }
 
   const respondToQuestion = async (
@@ -4511,13 +4783,15 @@ export function createChatStreamController(
       patch({ error: res.error })
       throw new Error(res.error)
     }
-    // Main returns ok(false) when the requestId is unknown — leave the card so
-    // the user can retry; otherwise the run stays parked with no UI.
+    settledQuestionIds.add(requestId)
+    // Main returns ok(false) only when it no longer waits on this request — it
+    // was already answered, skipped, superseded or cancelled. A retry can never
+    // succeed, so drop the stale card instead of offering one.
     if (res.data !== true) {
-      const message = 'Question answer was not accepted. Try again.'
-      logger.warn('Agent question response not accepted', { scope: 'chat' })
-      patch({ error: message })
-      throw new Error(message)
+      logger.warn('Agent question response not accepted', {
+        scope: 'chat',
+        reason: 'question is no longer pending'
+      })
     }
     patch({ items: clearQuestions(state.items, requestId), error: null })
   }
@@ -4897,6 +5171,7 @@ export function createChatStreamController(
     handleApprovalRequest,
     respondToApproval,
     handleQuestionRequest,
+    refreshPendingQuestions,
     respondToQuestion,
     syncFromDisk,
     applyManualCompaction,

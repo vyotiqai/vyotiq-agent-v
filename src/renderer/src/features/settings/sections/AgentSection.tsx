@@ -211,7 +211,7 @@ export function AgentSection({
         <SelectField
           id="agent-autonomous-questions"
           title="Questions while unattended"
-          help="Skip moves on without an answer. Wait holds the run until the 15-minute question timeout."
+          help="Skip moves on without an answer. Wait holds the run until you answer — however long that takes."
           nested
           value={form.settings.autonomousSkipQuestions}
           options={AUTONOMOUS_QUESTIONS_OPTIONS}

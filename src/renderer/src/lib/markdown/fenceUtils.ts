@@ -72,15 +72,26 @@ export function closeOpenFence(content: string): string {
   return `${content}\n${open.char.repeat(open.length)}`
 }
 
+/**
+ * The text whose `*` can open or close emphasis. A star in a code span is
+ * text, and so is one with whitespace or an edge on both sides (a bullet,
+ * `a * b`): counting those appended a stray `*` to finished messages that
+ * named `--vy-*` or listed with `* `.
+ */
+function emphasisMarks(text: string): string {
+  return text.replace(/(`+)[\s\S]*?(?:\1|$)/g, '').replace(/(^|\s)\*+(?=\s|$)/gm, '$1')
+}
+
 function balanceInlineSegment(text: string): string {
   let result = text
-  const doubleStars = (result.match(/(?<!\\)\*\*/g) ?? []).length
-  if (doubleStars % 2 === 1) result += '**'
-  const withoutDouble = result.replace(/(?<!\\)\*\*/g, '\u0000')
-  const singles = (withoutDouble.match(/(?<!\\)\*/g) ?? []).length
-  if (singles % 2 === 1) result += '*'
+  // Close an open code span first, so a closing star never lands inside it.
   const backticks = (result.match(/(?<!\\)`/g) ?? []).length
   if (backticks % 2 === 1) result += '`'
+  const marks = emphasisMarks(text)
+  const doubleStars = (marks.match(/(?<!\\)\*\*/g) ?? []).length
+  if (doubleStars % 2 === 1) result += '**'
+  const singles = (marks.replace(/(?<!\\)\*\*/g, '').match(/(?<!\\)\*/g) ?? []).length
+  if (singles % 2 === 1) result += '*'
   return result
 }
 

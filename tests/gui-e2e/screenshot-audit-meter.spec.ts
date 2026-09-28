@@ -59,12 +59,11 @@ test('context meter: low fill + tipCue without warning chrome (E4/R1)', async ()
 
   await expect(window.getByText('Audit meter fixture done.')).toBeVisible({ timeout: 20_000 })
 
-  // The meter opens from the instruction line's options: its ring and share
-  // lead the token, its reading is the footer button of the popover.
-  await expect(window.locator('[data-task-options]')).toContainText('%', { timeout: 15_000 })
-  await window.locator('[data-task-options]').click()
-  const meter = window.getByRole('button', { name: /context window/i })
-  await expect(meter).toBeVisible({ timeout: 15_000 })
+  // The meter is its own control in the instruction line's row: a pie and
+  // the share, its full reading in the label, the breakdown one press away.
+  const meter = window.locator('[data-composer-line] [data-context-meter]')
+  await expect(meter).toContainText('%', { timeout: 15_000 })
+  await expect(meter).toHaveAccessibleName(/context window/i)
   // The meter renders a ring + sr-free label: numbers live in aria-label/title.
   const meterLabel = (await meter.getAttribute('aria-label')) ?? ''
   expect(meterLabel).toMatch(/2\.3k/i)

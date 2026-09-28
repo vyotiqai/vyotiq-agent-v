@@ -4112,6 +4112,7 @@ export const FilesPanel = memo(function FilesPanel({
           value={effectiveExplorerWidth}
           min={FILES_EXPLORER_WIDTH_MIN}
           max={explorerMaxWidth}
+          defaultValue={FILES_EXPLORER_WIDTH_DEFAULT}
           edge="end"
           onChange={setExplorerWidthPx}
           className={narrowSurface ? 'hidden' : undefined}

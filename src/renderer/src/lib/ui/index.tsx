@@ -5,7 +5,7 @@ export { Kbd, Keys } from './Kbd'
 export { Count, DiffStat } from './Count'
 export { StatusGlyph, StepMarker, STATE_LABEL, type TaskState } from './StatusGlyph'
 export { Tabs, Segmented, type TabItem } from './Tabs'
-export { ProgressBar, Ring, Sparkbars } from './Progress'
+export { Pie, ProgressBar, Sparkbars } from './Progress'
 export {
   MENU_LABEL,
   MENU_ROW,

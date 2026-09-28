@@ -95,16 +95,16 @@
   --vy-fg-strong: #0b1318;
   --vy-fg: #1a252d;
   --vy-secondary: #3e4b55;
-  --vy-muted: #5d6b76;
-  --vy-tertiary: #8793a0;
+  --vy-muted: #5c6a75;
+  --vy-tertiary: #6d7883;
   --vy-accent: #00638e;
   --vy-accent-hover: #00506f;
   --vy-accent-fg: #ffffff;
   --vy-focus: #00638e;
 
-  --vy-success: #17804a;
-  --vy-warning: #a35a00;
-  --vy-danger: #c2372d;
+  --vy-success: #167444;
+  --vy-warning: #985502;
+  --vy-danger: #ba352c;
   --vy-soft-mix: 11%;
   --vy-overlay: rgb(12 14 16 / 0.32);
   --vy-window-close: #c42b1c;
@@ -182,7 +182,7 @@
   --vy-fg: #dde4e9;
   --vy-secondary: #b1bdc6;
   --vy-muted: #8795a1;
-  --vy-tertiary: #5e6c78;
+  --vy-tertiary: #74818b;
   --vy-accent: #4fb3e8;
   --vy-accent-hover: #7ac6ef;
   --vy-accent-fg: #04121a;
@@ -281,7 +281,7 @@
   --vy-fg: #262939;
   --vy-secondary: #44475e;
   --vy-muted: #5e6178;
-  --vy-tertiary: #8b8ea4;
+  --vy-tertiary: #717387;
   --vy-accent: #6b5f8a;
   --vy-accent-hover: #584e74;
   --vy-accent-fg: #ffffff;
@@ -300,12 +300,14 @@
   --vy-fg-strong: #f2f2f8;
   --vy-fg: #e1e1eb;
   --vy-secondary: #c0c2d4;
-  --vy-muted: #9a9db5;
-  --vy-tertiary: #6e7291;
+  --vy-muted: #a2a5bb;
+  --vy-tertiary: #888ca6;
   --vy-accent: #b6acd0;
   --vy-accent-hover: #c9c1de;
   --vy-accent-fg: #15131e;
   --vy-focus: #b6acd0;
+  --vy-success: #3ebb7c;
+  --vy-danger: #f2887f;
 }
 
 /* Bench — workshop blue; electric cyan on deep navy. */
@@ -322,8 +324,8 @@
   --vy-fg: #0e1b2a;
   --vy-secondary: #28405b;
   --vy-muted: #48627e;
-  --vy-tertiary: #7a91a8;
-  --vy-accent: #0072ce;
+  --vy-tertiary: #65788d;
+  --vy-accent: #0068bd;
   --vy-accent-hover: #005daa;
   --vy-accent-fg: #ffffff;
   --vy-focus: #0072ce;
@@ -342,7 +344,7 @@
   --vy-fg: #dce6f5;
   --vy-secondary: #aebfdc;
   --vy-muted: #8294b8;
-  --vy-tertiary: #546488;
+  --vy-tertiary: #6b7999;
   --vy-accent: #0de7ff;
   --vy-accent-hover: #62efff;
   --vy-accent-fg: #021018;
@@ -363,8 +365,8 @@
   --vy-fg: #262626;
   --vy-secondary: #4a4845;
   --vy-muted: #69655f;
-  --vy-tertiary: #9a958f;
-  --vy-accent: #c2410c;
+  --vy-tertiary: #787470;
+  --vy-accent: #b43e0d;
   --vy-accent-hover: #a3370a;
   --vy-accent-fg: #ffffff;
   --vy-focus: #e85002;
@@ -383,7 +385,7 @@
   --vy-fg: #ebe9e6;
   --vy-secondary: #c8c3bd;
   --vy-muted: #9e9891;
-  --vy-tertiary: #6d6862;
+  --vy-tertiary: #86817c;
   --vy-accent: #fb923c;
   --vy-accent-hover: #fda965;
   --vy-accent-fg: #1c0d03;
@@ -404,11 +406,15 @@
   --vy-fg: #1a1c1e;
   --vy-secondary: #3d4449;
   --vy-muted: #545c63;
-  --vy-tertiary: #868e95;
-  --vy-accent: #536878;
+  --vy-tertiary: #696f74;
+  --vy-accent: #4e6170;
   --vy-accent-hover: #43525f;
   --vy-accent-fg: #ffffff;
   --vy-focus: #536878;
+  /* Status hues go darker here: the alabaster planes sit closest to them. */
+  --vy-success: #156c40;
+  --vy-warning: #8e4f02;
+  --vy-danger: #ad322a;
 }
 
 [data-skin="gild"][data-theme="dark"] {
@@ -424,7 +430,7 @@
   --vy-fg: #e5e4e2;
   --vy-secondary: #b7c1c8;
   --vy-muted: #8d98a1;
-  --vy-tertiary: #5d666e;
+  --vy-tertiary: #737b82;
   --vy-accent: #8fa6b8;
   --vy-accent-hover: #a9bdcb;
   --vy-accent-fg: #0a0a0a;
@@ -549,16 +555,15 @@
   Seven sizes. The old scale had nine (9–17px) a pixel apart, which is the same
   as having none: nobody can tell 15 from 16 on sight.
     caption 11 · xs 12 · sm 13 (body) · md 14 · heading 15 · title 18 · display 24
-  `2xs` (10) is for keycaps and dense meta only. `3xs` and `lg` are legacy
-  aliases kept until their last caller is ported.
+  `2xs` (10) is for keycaps and dense meta only. Tailwind's own scale is
+  reset, so `text-base` or `text-lg` emits nothing instead of an off-scale size.
 
   `inline` matters: the sizes read --vy-font-scale, which lives on the element
   carrying data-skin. A non-inline theme var resolves at :root, where a nested
   preview's scale is invisible.
 */
 @theme inline {
-  --text-3xs: calc(9px * var(--vy-font-scale));
-  --text-3xs--line-height: 12px;
+  --text-*: initial;
   --text-2xs: calc(10px * var(--vy-font-scale));
   --text-2xs--line-height: 14px;
   --text-caption: calc(11px * var(--vy-font-scale));
@@ -569,8 +574,6 @@
   --text-sm--line-height: 20px;
   --text-md: calc(14px * var(--vy-font-scale));
   --text-md--line-height: 22px;
-  --text-lg: calc(15px * var(--vy-font-scale));
-  --text-lg--line-height: 22px;
   --text-heading: calc(15px * var(--vy-font-scale));
   --text-heading--line-height: 22px;
   --text-title: calc(18px * var(--vy-font-scale));
@@ -1561,4 +1564,23 @@ dialog[open] {
   .vy-agv {
     opacity: 0.75;
   }
+}
+
+/* ─── Dictation take ───────────────────────────────────────────────────────
+   Painted over the composer's text with the CSS Custom Highlight API
+   (ComposerMentionInput `highlights`), so the draft's DOM is never touched.
+   partial   words the take has heard but not settled — quiet until final
+   pending   the marker where words will land when the engine answers
+   inserted  what the last take added, for the few seconds Undo is offered */
+::highlight(vy-take-partial) {
+  color: var(--vy-tertiary);
+}
+
+::highlight(vy-take-pending) {
+  color: var(--vy-accent);
+  background-color: var(--vy-accent-soft);
+}
+
+::highlight(vy-take-inserted) {
+  background-color: var(--vy-accent-soft);
 }

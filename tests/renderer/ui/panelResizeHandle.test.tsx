@@ -160,4 +160,43 @@ describe('PanelResizeHandle', () => {
     expect(document.body.style.userSelect).toBe('')
     expect(document.body.style.cursor).toBe('')
   })
+
+  it('snaps back to the default size on double-click (WCAG 2.5.7)', () => {
+    const onChange = vi.fn()
+    render(
+      <PanelResizeHandle
+        label="Resize sidebar"
+        value={400}
+        min={180}
+        max={420}
+        defaultValue={264}
+        edge="end"
+        onChange={onChange}
+      />
+    )
+    fireEvent.doubleClick(screen.getByRole('separator', { name: /Resize sidebar/i }))
+    expect(onChange).toHaveBeenCalledWith(264)
+  })
+
+  it('ignores double-click without a default or while disabled', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <PanelResizeHandle label="Resize sidebar" value={400} min={180} max={420} edge="end" onChange={onChange} />
+    )
+    fireEvent.doubleClick(screen.getByRole('separator', { name: /Resize sidebar/i }))
+    rerender(
+      <PanelResizeHandle
+        label="Resize sidebar"
+        value={400}
+        min={180}
+        max={420}
+        defaultValue={264}
+        edge="end"
+        disabled
+        onChange={onChange}
+      />
+    )
+    fireEvent.doubleClick(screen.getByRole('separator', { name: /Resize sidebar/i }))
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })

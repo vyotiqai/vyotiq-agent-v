@@ -25,6 +25,11 @@ export type PanelResizeHandleProps = {
   onChange: (next: number) => void
   /** Optional step for Arrow keys (default 8). Shift multiplies by 5. */
   step?: number
+  /**
+   * The pane's default size. Double-clicking the handle snaps back to it: the
+   * click-only way to resize that WCAG 2.5.7 asks every drag to have.
+   */
+  defaultValue?: number
   className?: string
   disabled?: boolean
   /**
@@ -44,7 +49,7 @@ function clamp(n: number, min: number, max: number): number {
 
 /**
  * Vertical drag gutter between side-by-side panes.
- * Mouse drag + ARIA separator; keyboard arrows nudge width.
+ * Mouse drag + ARIA separator; keyboard arrows nudge width; double-click resets.
  */
 export function PanelResizeHandle({
   label,
@@ -54,6 +59,7 @@ export function PanelResizeHandle({
   edge,
   onChange,
   step = 8,
+  defaultValue,
   className,
   disabled = false,
   hairline = false
@@ -199,6 +205,7 @@ export function PanelResizeHandle({
       onPointerDown={onPointerDown}
       onMouseDown={onMouseDown}
       onKeyDown={onKeyDown}
+      onDoubleClick={defaultValue == null || disabled ? undefined : () => apply(defaultValue)}
     >
       <span
         aria-hidden

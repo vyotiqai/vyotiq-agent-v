@@ -1,5 +1,14 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent
+} from 'react'
 import { Button, StatusGlyph, Tooltip, cn, MarkdownContent } from '@renderer/lib/ui'
+import { typingElsewhere } from '@renderer/lib/a11y'
 import {
   QUESTION_GATE_BODY,
   QUESTION_GATE_FOOTER,
@@ -65,15 +74,22 @@ function isQuickSubmitForm(question: UiAgentQuestion): boolean {
   return item.type === 'single' && item.allowCustom !== true
 }
 
+/** True when focus sits in a text field outside `root` — the user is typing there. */
 export const AskQuestionPanel = memo(function AskQuestionPanel({
   question,
   onSubmit,
-  stepLabel
+  stepLabel,
+  captureFocus = true
 }: {
   question: UiAgentQuestion
   onSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   /** "Step 2 · Pick the storage format", when the question belongs to a step. */
   stepLabel?: string
+  /**
+   * Take focus on arrival. Off in unfocused panes: a quick-submit form answers
+   * on selection, so a stray Space or Enter meant for elsewhere would answer it.
+   */
+  captureFocus?: boolean
 }) {
   const [phase, setPhase] = useState<'idle' | 'pending' | 'answered' | 'skipped'>('idle')
   const [localError, setLocalError] = useState<string | null>(null)
@@ -110,15 +126,17 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by questionShapeKey
   }, [questionShapeKey])
 
-  // Focus the first control; the scroll below waits two frames so the record's own
-  // scroll settles first and the gate header stays visible.
+  // Focus the first control — only in the focused pane, and never out from under
+  // text being typed elsewhere. The scroll below waits two frames so the
+  // record's own scroll settles first and the gate header stays visible.
   useLayoutEffect(() => {
     const root = rootRef.current
-    if (!root) return
+    if (!root || !captureFocus || typingElsewhere(root)) return
     const first = root.querySelector<HTMLElement>(
       'button:not([disabled]), textarea:not([disabled]), input:not([disabled])'
     )
     first?.focus({ preventScroll: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per form shape, not on focus changes
   }, [questionShapeKey])
 
   useEffect(() => {
@@ -300,8 +318,10 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
       ) : (
         <>
           <div className={cn(QUESTION_GATE_BODY, 'flex flex-col gap-3')}>
-            {question.questions.map((item) => {
-              const promptId = `ask-q-prompt-${question.requestId}-${item.id}`
+            {question.questions.map((item, index) => {
+              // By index: a question id may hold spaces, and aria-labelledby
+              // splits on them.
+              const promptId = `ask-q-prompt-${question.requestId}-${index}`
               const state = fields[item.id] ?? { values: [], customText: '' }
               const answered = fieldIsAnswered(item, state)
               return (
@@ -325,6 +345,7 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
                     disabled={busy}
                     promptId={promptId}
                     selectOnArrow={!quickSubmit}
+                    onSubmitShortcut={submit}
                     onChange={(values, customText) => setField(item.id, values, customText)}
                   />
                 </div>

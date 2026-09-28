@@ -124,7 +124,7 @@ export function ChangesList({
               <DiffStat add={file.added} del={file.removed} className={trailing} />
             ) : null}
             {rowActions ? (
-              <span className="hidden shrink-0 items-center gap-0.5 pr-2 group-focus-within:flex group-hover:flex">
+              <span className="hidden shrink-0 items-center gap-1 pr-2 group-focus-within:flex group-hover:flex">
                 {rowActions}
               </span>
             ) : null}

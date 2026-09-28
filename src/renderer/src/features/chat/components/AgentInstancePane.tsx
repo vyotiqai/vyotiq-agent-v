@@ -113,16 +113,29 @@ const InstanceRecord = memo(function InstanceRecord({
     [controller]
   )
   useEffect(() => controller.subscribeItems(() => bump((n) => n + 1)), [controller])
-  const items = useDeferredValue(controller.items)
   const turnUsage = useResolvedTurnUsage(metaStore, controller.turnUsage)
-  const live = running || pendingRun
-  const turnStatus = controller.turnStatus
+  const liveItems = controller.items
+  const liveNow = running || pendingRun
+  const failedNow = controller.turnStatus === 'error'
+  const stoppedNow = controller.turnStatus === 'cancelled' || controller.turnStatus === 'interrupted'
+  // Items render deferred; the run's liveness defers with them so no frame
+  // pairs new items with the old run state (see TaskPane).
+  const recordInput = useMemo(
+    () => ({ items: liveItems, live: liveNow, failed: failedNow, stopped: stoppedNow }),
+    [liveItems, liveNow, failedNow, stoppedNow]
+  )
+  const deferred = useDeferredValue(recordInput)
+  const items = deferred.items
+  const live = deferred.live
   const options: BuildOptions = useMemo(
-    () => ({ running: live, failed: turnStatus === 'error', showThinking }),
-    [live, turnStatus, showThinking]
+    () => ({ running: deferred.live, failed: deferred.failed, stopped: deferred.stopped, showThinking }),
+    [deferred, showThinking]
   )
   const model = useMemo(() => buildRecordModel(items, options), [items, options])
-  const scroll = useRecordScroll({ ready: !(transcriptLoading && items.length === 0), live })
+  const scroll = useRecordScroll({
+    ready: !(transcriptLoading && items.length === 0),
+    live
+  })
   const recordActions = useMemo(() => ({ onLoadToolContent }), [onLoadToolContent])
   const lastNeeds = live ? (model.runs[model.runs.length - 1]?.needs.length ?? 0) : 0
   return (
@@ -351,10 +364,14 @@ export function AgentInstancePane({
 
   useEffect(() => {
     if (!ownsIpc || !liveReady || !window.vyotiq?.onAgentQuestionRequest) return
-    return window.vyotiq.onAgentQuestionRequest((request) => {
+    const unsubscribe = window.vyotiq.onAgentQuestionRequest((request) => {
       if (request.runId !== instanceRunId) return
       controller.handleQuestionRequest(request)
     })
+    // A question pushed between the initial list and this subscription would
+    // otherwise be missed; re-read now that the listener is live.
+    void controller.refreshPendingQuestions(instanceRunId)
+    return unsubscribe
   }, [controller, instanceRunId, liveReady, ownsIpc])
 
   useEffect(() => {

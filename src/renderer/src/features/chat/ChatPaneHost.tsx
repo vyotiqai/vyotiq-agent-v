@@ -229,6 +229,8 @@ export function ChatPaneHost({
                   minPanePx * 2,
                   Math.round(rowWidth * pairSum - minPanePx)
                 )}
+                // Double-click evens out the pair.
+                defaultValue={Math.round((rowWidth * pairSum) / 2)}
                 edge="end"
                 onChange={(next) => resizePane(index, next)}
                 // The next pane's border-l is the rule; the handle only lights it.

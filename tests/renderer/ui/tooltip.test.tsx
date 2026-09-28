@@ -159,7 +159,85 @@ describe('Tooltip', () => {
     expect(tip()).not.toBeNull()
 
     fireEvent.pointerLeave(button)
+    // A short grace lets the pointer cross onto the tip (WCAG 1.4.13).
+    expect(tip()).not.toBeNull()
+    act(() => {
+      vi.advanceTimersByTime(120)
+    })
     expect(tip()).toBeNull()
+  })
+
+  it('stays open while the pointer is on the tip, and closes when it leaves the tip', () => {
+    render(
+      <Tooltip content="Hover me" delayMs={50}>
+        <button type="button">Trigger</button>
+      </Tooltip>
+    )
+
+    const button = screen.getByRole('button', { name: 'Trigger' })
+    fireEvent.pointerEnter(button)
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+    fireEvent.pointerLeave(button)
+    fireEvent.pointerEnter(tip()!)
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(tip()?.textContent).toBe('Hover me')
+
+    fireEvent.pointerLeave(tip()!)
+    act(() => {
+      vi.advanceTimersByTime(120)
+    })
+    expect(tip()).toBeNull()
+  })
+
+  it('does not let a press on the tip reach the row behind the trigger', () => {
+    const onRowClick = vi.fn()
+    render(
+      // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+      <div onClick={onRowClick}>
+        <Tooltip content="Row tip" delayMs={50}>
+          <button type="button">In row</button>
+        </Tooltip>
+      </div>
+    )
+
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'In row' }))
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+    fireEvent.click(tip()!)
+    expect(onRowClick).not.toHaveBeenCalled()
+  })
+
+  it('shows one tip at a time while scanning a toolbar', () => {
+    render(
+      <>
+        <Tooltip content="First" delayMs={50}>
+          <button type="button">One</button>
+        </Tooltip>
+        <Tooltip content="Second" delayMs={50}>
+          <button type="button">Two</button>
+        </Tooltip>
+      </>
+    )
+
+    const one = screen.getByRole('button', { name: 'One' })
+    const two = screen.getByRole('button', { name: 'Two' })
+    fireEvent.pointerEnter(one)
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+    fireEvent.pointerLeave(one)
+    fireEvent.pointerEnter(two)
+    act(() => {
+      vi.advanceTimersByTime(0)
+    })
+    const tips = document.body.querySelectorAll('[role="tooltip"]')
+    expect(tips).toHaveLength(1)
+    expect(tips[0]?.textContent).toBe('Second')
   })
 
   it('hides a focus-opened tip when the pointer leaves', () => {
@@ -180,6 +258,9 @@ describe('Tooltip', () => {
 
     // Tips never persist without the pointer — graze closes even focus tips
     fireEvent.pointerLeave(button)
+    act(() => {
+      vi.advanceTimersByTime(120)
+    })
     expect(tip()).toBeNull()
   })
 
@@ -198,6 +279,9 @@ describe('Tooltip', () => {
     expect(tip()).not.toBeNull()
 
     fireEvent.pointerLeave(button)
+    act(() => {
+      vi.advanceTimersByTime(120)
+    })
     expect(tip()).toBeNull()
 
     // Re-enter within the fast-reopen window shows without the full delay
@@ -282,7 +366,9 @@ describe('Tooltip', () => {
     })
 
     expect(tip()?.className).not.toContain('-translate-y-full')
-    expect(tip()?.style.top).toBe('86px')
+    // The wrapper sits on the trigger's bottom edge (80); its pt-1.5 is the 6px gap.
+    expect(tip()?.style.top).toBe('80px')
+    expect(tip()?.classList.contains('pt-1.5')).toBe(true)
     spy.mockRestore()
   })
 })

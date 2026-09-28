@@ -227,9 +227,9 @@ describe('shouldDeferAppEscapeStop', () => {
     expect(shouldDeferAppEscapeStop()).toBe(true)
   })
 
-  it('defers when a dictation session strip is on screen', () => {
+  it('defers while a dictation take is open', () => {
     const strip = document.createElement('div')
-    strip.setAttribute('data-dictation-session', 'listening')
+    strip.setAttribute('data-take-open', '')
     document.body.appendChild(strip)
     expect(shouldDeferAppEscapeStop()).toBe(true)
   })

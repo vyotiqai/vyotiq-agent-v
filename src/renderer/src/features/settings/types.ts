@@ -10,8 +10,8 @@ import type {
 /**
  * Renderer-side nav contract. Two ids cross the shared boundary: the
  * notification `open_settings` action (shared/ipc/schemas/notifications.ts,
- * crash alerts → 'diagnostics') and the composer's dictation error banner
- * ('voice' | 'providers'). Renaming one means updating those call sites plus
+ * crash alerts → 'diagnostics') and a dictation take's fixes (Add key, Providers,
+ * Settings → Voice: 'voice' | 'providers'). Renaming one means updating those call sites plus
  * the in-app `Settings.section` state.
  */
 export type SettingsSection =

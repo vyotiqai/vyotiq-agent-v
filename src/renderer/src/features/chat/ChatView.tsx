@@ -985,6 +985,7 @@ export function ChatView({
                 value={dockWidthPx}
                 min={DOCK_WIDTH_MIN_PX}
                 max={dockMaxPx}
+                defaultValue={DOCK_WIDTH_DEFAULT_PX}
                 edge="start"
                 onChange={(next) => {
                   setDockWidthPx(next)

@@ -33,6 +33,10 @@ export type ActionMenuItem = {
   checked?: boolean
   /** Draw a rule above this item — to set apart an action from a list of choices. */
   separatorBefore?: boolean
+  /** A caption above this item naming the run of items it starts ("Recent"). */
+  heading?: string
+  /** Stay open after choosing it — a checklist toggled several at a time. */
+  keepOpen?: boolean
   /** Destructive (Delete): drawn in the danger tone. */
   danger?: boolean
   /** Shown but not choosable; the keyboard steps over it. */
@@ -70,6 +74,8 @@ export function ActionMenu({
   const listRef = useRef<HTMLUListElement>(null)
   const [activeIndex, setActiveIndex] = useState(-1)
   const selectable = items.flatMap((item, index) => (item.disabled ? [] : [index]))
+  // One label edge: once any row is a checkbox, every row keeps the check column.
+  const checkColumn = items.some((item) => item.checked != null)
   const firstSelectable = selectable[0] ?? -1
 
   const { position, close } = useDropdownMenu({
@@ -119,7 +125,7 @@ export function ActionMenu({
       const item = items[activeIndex]
       if (item && !item.disabled) {
         item.onSelect()
-        close(true)
+        if (!item.keepOpen) close(true)
       }
     }
   }
@@ -154,6 +160,14 @@ export function ActionMenu({
         {items.map((item, index) => (
           <li key={item.id} role="none">
             {item.separatorBefore ? <div role="separator" className={MENU_SEPARATOR} /> : null}
+            {item.heading ? (
+              <div
+                role="presentation"
+                className={cn('pb-0.5 pt-1 text-caption text-tertiary', checkColumn ? 'pl-[31px] pr-2' : 'px-2')}
+              >
+                {item.heading}
+              </div>
+            ) : null}
             <button
               type="button"
               role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
@@ -175,7 +189,7 @@ export function ActionMenu({
               onClick={() => {
                 if (item.disabled) return
                 item.onSelect()
-                close(true)
+                if (!item.keepOpen) close(true)
               }}
             >
               {item.checked != null ? (
@@ -186,6 +200,8 @@ export function ActionMenu({
                 )
               ) : item.icon ? (
                 <Icon name={item.icon} size={15} className={item.danger ? 'text-danger' : 'text-muted'} />
+              ) : checkColumn ? (
+                <span className="inline-block w-[15px] shrink-0" aria-hidden />
               ) : null}
               {item.label}
             </button>

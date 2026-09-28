@@ -290,7 +290,7 @@ describe('useChatStream', () => {
     expect(result.current.items.some((i) => i.kind === 'question')).toBe(false)
   })
 
-  it('keeps question visible when respondAgentQuestion returns data false', async () => {
+  it('drops a stale question card when respondAgentQuestion returns data false', async () => {
     const respondAgentQuestion = vi.fn().mockResolvedValue({ ok: true, data: false })
     window.vyotiq.respondAgentQuestion = respondAgentQuestion
 
@@ -309,17 +309,27 @@ describe('useChatStream', () => {
       })
     })
 
+    // ok(false) means main no longer waits on it — a retry could never succeed.
     await act(async () => {
-      await expect(
-        result.current.respondToQuestion('q-stale', [{ questionId: 'q1', values: ['yes'] }])
-      ).rejects.toThrow(/not accepted/)
+      await result.current.respondToQuestion('q-stale', [{ questionId: 'q1', values: ['yes'] }])
     })
 
     expect(
       result.current.items.some(
         (i) => i.kind === 'question' && i.question.requestId === 'q-stale'
       )
-    ).toBe(true)
+    ).toBe(false)
+
+    // A late re-push of the settled request (a poll that left before the answer) stays gone.
+    await act(async () => {
+      result.current.handleQuestionRequest({
+        requestId: 'q-stale',
+        runId: 'run-1',
+        toolCallId: 'tq1',
+        questions: [{ id: 'q1', prompt: 'Still there?', type: 'text' }]
+      })
+    })
+    expect(result.current.items.some((i) => i.kind === 'question')).toBe(false)
   })
 
   it('keeps pending question cards across stream_reset', async () => {

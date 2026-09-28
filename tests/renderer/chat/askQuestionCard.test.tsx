@@ -400,8 +400,9 @@ describe('AskQuestionPanel', () => {
     )
 
     fireEvent.click(screen.getByRole('radio', { name: 'Ask' }))
-    const modePrompt = document.getElementById('ask-q-prompt-q1-a')
-    const notesPrompt = document.getElementById('ask-q-prompt-q1-b')
+    // Prompt ids use the question's index — a question id may hold spaces.
+    const modePrompt = document.getElementById('ask-q-prompt-q1-0')
+    const notesPrompt = document.getElementById('ask-q-prompt-q1-1')
     // Emphasis comes from the neighbours: no invented opacity on the prompt.
     expect(modePrompt?.className).not.toMatch(/opacity/)
     expect(notesPrompt?.className).not.toMatch(/opacity/)
@@ -417,5 +418,69 @@ describe('AskQuestionPanel', () => {
     expect(screen.getByText('Mode?: Ask · Notes: ship it')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Submit answers' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+  })
+})
+
+describe('AskQuestionPanel focus and keyboard', () => {
+  const quick = baseQuestion({
+    questions: [{ id: 'q1', prompt: 'Proceed?', type: 'boolean' }]
+  })
+
+  it('takes focus in the focused pane', () => {
+    render(<AskQuestionPanel question={quick} onSubmit={vi.fn()} />)
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Yes' }))
+  })
+
+  it('leaves focus alone in an unfocused pane, so a stray key cannot answer it', () => {
+    render(<AskQuestionPanel question={quick} onSubmit={vi.fn()} captureFocus={false} />)
+    expect(document.activeElement).toBe(document.body)
+  })
+
+  it('never takes focus from text being typed elsewhere', () => {
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    composer.focus()
+    render(<AskQuestionPanel question={quick} onSubmit={vi.fn()} />)
+    expect(document.activeElement).toBe(composer)
+    composer.remove()
+  })
+
+  it('submits with Ctrl+Enter from a text answer', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AskQuestionPanel
+        question={baseQuestion({ questions: [{ id: 'q1', prompt: 'Notes?', type: 'text' }] })}
+        onSubmit={onSubmit}
+      />
+    )
+    const box = screen.getByPlaceholderText('Your answer…')
+    fireEvent.change(box, { target: { value: 'line one\nline two' } })
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    expect(onSubmit).toHaveBeenCalledWith('q1', [
+      { questionId: 'q1', values: ['line one\nline two'] }
+    ])
+  })
+
+  it('keeps typed Other text when an option is picked, and returns to it on focus', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AskQuestionPanel
+        question={baseQuestion({
+          questions: [
+            { id: 'q1', prompt: 'Which?', type: 'single', options: ['A', 'B'], allowCustom: true }
+          ]
+        })}
+        onSubmit={onSubmit}
+      />
+    )
+    const other = screen.getByLabelText('Other answer')
+    fireEvent.change(other, { target: { value: 'Mine' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'A' }))
+    expect((other as HTMLInputElement).value).toBe('Mine')
+    expect(screen.getByRole('radio', { name: 'A' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.focus(other)
+    expect(screen.getByRole('radio', { name: 'A' }).getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }))
+    expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['Mine'] }])
   })
 })
