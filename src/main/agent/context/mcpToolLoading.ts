@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../providers/types'
-import { parseMcpToolName } from '../mcp'
+import { mcpToolName, parseMcpToolName } from '../mcp'
 import { wrapPromptSection } from '../promptSections'
+import { parseMcpToolInvocation } from '../../../shared/slashCommands'
 
 /**
  * How a run admits connected MCP tool schemas into the per-step wire catalog.
@@ -82,16 +83,18 @@ export function selectMcpToolDefs(input: McpSelectionInput): McpCatalogSelection
   }
 }
 
-/** Full MCP names the composer's /mcp command and users write verbatim. */
+/** Full MCP names users write verbatim. */
 const MCP_FULL_NAME_RE = /mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+/g
 
 /** Most a single message may pre-load, so a long paste cannot refill the window. */
 export const MCP_SEED_FROM_MESSAGE_CAP = 8
 
 /**
- * Full MCP tool names written out in a message. The composer's `/mcp` picker
- * names the tool the user chose, so a run that starts with one should not
- * spend its first step discovering what the user already told it.
+ * MCP tools a message names. The composer's `/mcp` picker sends
+ * `formatMcpToolInvocation` text, which carries the bare tool and server names
+ * rather than the full `mcp__…` name, so that header is read first; full names
+ * anywhere in the text count too. A run that starts with one should not spend
+ * its first step discovering what the user already told it.
  */
 export function mcpToolNamesMentionedIn(
   text: string,
@@ -100,12 +103,16 @@ export function mcpToolNamesMentionedIn(
   if (!text) return []
   const out: string[] = []
   const seen = new Set<string>()
-  for (const match of text.matchAll(MCP_FULL_NAME_RE)) {
-    const name = match[0]
-    if (seen.has(name)) continue
+  const add = (name: string): void => {
+    if (seen.has(name) || out.length >= cap) return
     seen.add(name)
     out.push(name)
+  }
+  const invocation = parseMcpToolInvocation(text)
+  if (invocation) add(mcpToolName(invocation.serverId, invocation.toolName))
+  for (const match of text.matchAll(MCP_FULL_NAME_RE)) {
     if (out.length >= cap) break
+    add(match[0])
   }
   return out
 }

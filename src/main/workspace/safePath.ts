@@ -6,7 +6,8 @@ import {
   isWindowsStylePath
 } from '../../shared/utils/workspacePath'
 
-function pathKey(path: string): string {
+/** Case-folded comparison key for a Windows-style path; POSIX paths as-is. */
+export function pathKey(path: string): string {
   return isWindowsStylePath(path) ? path.toLowerCase() : path
 }
 

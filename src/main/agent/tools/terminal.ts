@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'child_process'
+import { execFile, spawn, spawnSync } from 'child_process'
 import { basename } from 'path'
 import kill from 'tree-kill'
 import { assertInsideWorkspace } from '../../../shared/workspacePath'
@@ -196,6 +196,22 @@ export function commandOnPath(bin: string): boolean {
   const found = result.status === 0 && Boolean(result.stdout?.trim())
   commandOnPathCache.set(bin, found)
   return found
+}
+
+/**
+ * Seed the PATH cache without blocking. The first run otherwise paid ~370ms
+ * of main-thread `spawnSync('where', ['pwsh'])` building its session env.
+ * Best-effort: a lookup that finishes first keeps its answer.
+ */
+export function prewarmCommandOnPath(bins: readonly string[]): void {
+  const finder = process.platform === 'win32' ? 'where' : 'which'
+  for (const bin of bins) {
+    if (commandOnPathCache.has(bin)) continue
+    execFile(finder, [bin], { encoding: 'utf8', windowsHide: true }, (err, stdout) => {
+      if (commandOnPathCache.has(bin)) return
+      commandOnPathCache.set(bin, !err && Boolean(stdout.trim()))
+    })
+  }
 }
 
 /** Clear cached PATH lookups after installing a binary mid-session. */

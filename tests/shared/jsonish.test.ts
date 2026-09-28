@@ -33,6 +33,16 @@ describe('closeUnterminatedJson', () => {
     expect(closeUnterminatedJson('{"a":')).toBeNull()
     expect(closeUnterminatedJson('[{"id":"q1"},')).toBeNull()
   })
+
+  it('refuses salvage after a bare number unless the caller saw it terminated', () => {
+    expect(closeUnterminatedJson('{"timeoutMs":12')).toBeNull()
+    expect(closeUnterminatedJson('[1, 2')).toBeNull()
+    expect(closeUnterminatedJson('{"timeoutMs":12', { numberTerminated: true })).toBe(
+      '{"timeoutMs":12}'
+    )
+    // Literals end on their last letter, so they stay closable.
+    expect(closeUnterminatedJson('{"a":true')).toBe('{"a":true}')
+  })
 })
 
 describe('parseJsonish', () => {

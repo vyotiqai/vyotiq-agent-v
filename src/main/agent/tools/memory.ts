@@ -62,9 +62,6 @@ export function toolMemoryRead(
   return readMemoryFile(workspace, normalizeMemoryRelPath(pathArg))
 }
 
-/** @deprecated Kept for callers that still import the former write cap. */
-export const MEMORY_WRITE_CAP = Number.POSITIVE_INFINITY
-
 export function toolMemoryWrite(
   workspace: string,
   pathArg: string,

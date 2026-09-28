@@ -272,7 +272,7 @@ describe('CodeIndexStore dense layer', () => {
     store.close()
   })
 
-  it('round-trips vectors through setDenseVector / iterateDenseVectors exactly', () => {
+  it('round-trips vectors through setDenseVector / denseVectorPage exactly', () => {
     const store = CodeIndexStore.openMemory()
     replaceWithText(store, 'src/auth.ts', [
       { startLine: 1, endLine: 10, name: 'fnA', text: 'function fnA() {}' },
@@ -283,7 +283,7 @@ describe('CodeIndexStore dense layer', () => {
     store.setDenseVector(ids[0]!, Float32Array.from(values.map((v) => Math.fround(v))))
     store.setDenseVector(ids[1]!, Float32Array.from([-0, 0, 1, -1, Math.fround(0.5)]))
 
-    const iterated = [...store.iterateDenseVectors()]
+    const iterated = store.denseVectorPage(0, 100)
     expect(iterated).toHaveLength(2)
     const first = iterated.find((r) => r.id === ids[0])!
     expect(first.vec.length).toBe(values.length)

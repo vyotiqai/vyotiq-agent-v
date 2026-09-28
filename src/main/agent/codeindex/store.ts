@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from 'fs'
+import { endianness } from 'os'
 import { dirname } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import type { StatementSync } from 'node:sqlite'
@@ -394,18 +395,20 @@ export class CodeIndexStore {
   }
 
   /**
-   * Stream vectorized dense rows without materializing the whole set. Rows
-   * with a NULL vec are skipped (they belong to pendingDenseBatch).
+   * Up to `limit` vectorized rows with id > `afterId`, in id order. Keyset
+   * pages hold no statement open between calls, so a caller can yield to the
+   * event loop — and let a sync write — between pages.
    */
-  *iterateDenseVectors(): Generator<{ id: number; vec: Float32Array }> {
-    const stmt = this.prepareCached(
-      `SELECT id, vec FROM dense_chunks WHERE vec IS NOT NULL ORDER BY id`
-    )
-    const rows = stmt.iterate() as IterableIterator<{ id: number; vec: Uint8Array | null }>
+  denseVectorPage(afterId: number, limit: number): { id: number; vec: Float32Array }[] {
+    const rows = this.prepareCached(
+      `SELECT id, vec FROM dense_chunks WHERE vec IS NOT NULL AND id > ? ORDER BY id LIMIT ?`
+    ).all(afterId, limit) as { id: number; vec: Uint8Array | null }[]
+    const out: { id: number; vec: Float32Array }[] = []
     for (const row of rows) {
       if (row.vec == null) continue
-      yield { id: Number(row.id), vec: decodeDenseVec(row.vec) }
+      out.push({ id: Number(row.id), vec: decodeDenseVec(row.vec) })
     }
+    return out
   }
 
   /** Total dense rows and how many carry a vector — one SELECT, SUM/CASE. */
@@ -462,9 +465,20 @@ function encodeDenseVec(vec: Float32Array): Buffer {
   return blob
 }
 
-/** Float32LE bytes -> Float32Array (exact bit round-trip, including -0). */
+const LITTLE_ENDIAN = endianness() === 'LE'
+
+/**
+ * Float32LE bytes -> Float32Array (exact bit round-trip, including -0). On a
+ * little-endian host that is one copy into an aligned buffer; the per-element
+ * DataView read was most of concept_search's main-thread time.
+ */
 function decodeDenseVec(blob: Uint8Array): Float32Array {
   const count = blob.byteLength / 4
+  if (LITTLE_ENDIAN) {
+    const aligned = new Uint8Array(count * 4)
+    aligned.set(blob.subarray(0, count * 4))
+    return new Float32Array(aligned.buffer)
+  }
   const view = new DataView(blob.buffer, blob.byteOffset, blob.byteLength)
   const vec = new Float32Array(count)
   for (let i = 0; i < count; i++) vec[i] = view.getFloat32(i * 4, true)

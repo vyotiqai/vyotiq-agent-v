@@ -5,8 +5,39 @@ import { atomicWriteFile } from '@main/storage/atomicWrite'
 import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
 import { assertWritablePath } from './writeGuard'
 
-function normalizeNewlines(text: string): string {
+export function normalizeNewlines(text: string): string {
   return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+/**
+ * The file's dominant line ending. A single stray CRLF used to flip every LF
+ * in a mostly-LF file to CRLF on the next edit.
+ */
+export function dominantEol(text: string): '\r\n' | '\n' {
+  const crlf = text.split('\r\n').length - 1
+  const lf = text.split('\n').length - 1 - crlf
+  return crlf > lf ? '\r\n' : '\n'
+}
+
+const UTF8_BOM = '\uFEFF'
+
+/** Split a leading UTF-8 BOM off decoded text so it survives the rewrite. */
+export function splitBom(text: string): { bom: string; body: string } {
+  return text.startsWith(UTF8_BOM)
+    ? { bom: UTF8_BOM, body: text.slice(UTF8_BOM.length) }
+    : { bom: '', body: text }
+}
+
+/**
+ * Permission bits of the file about to be rewritten, or undefined for a new
+ * file. atomicWriteFile otherwise stamps 0o644 — an edited script lost +x.
+ */
+export function existingFileMode(path: string): number | undefined {
+  try {
+    return statSync(path).mode & 0o777
+  } catch {
+    return undefined
+  }
 }
 
 type HunkLine = { tag: ' ' | '-' | '+'; content: string }
@@ -247,14 +278,16 @@ export function applyUnifiedDiff(original: string, diff: string): string {
   }
 
   // Rejoin with the file's dominant EOL: normalizeNewlines is for matching
-  // only — writing back LF would flip CRLF files on Windows.
-  const eol = original.includes('\r\n') ? '\r\n' : '\n'
-  let lines = normalizeNewlines(original).split('\n')
+  // only — writing back LF would flip CRLF files on Windows. A BOM is not part
+  // of line 1's text; hunks quote that line without it.
+  const { bom, body } = splitBom(original)
+  const eol = dominantEol(body)
+  let lines = normalizeNewlines(body).split('\n')
   // Apply bottom-up so earlier original line numbers stay valid.
   for (const hunk of [...hunks].reverse()) {
     lines = applyHunk(lines, hunk)
   }
-  return lines.join(eol)
+  return bom + lines.join(eol)
 }
 
 export function toolEdit(
@@ -267,8 +300,6 @@ export function toolEdit(
   if (!path) throw new Error('edit requires a non-empty path')
   const resolved = resolveInsideWorkspace(workspaceRoot, path)
   assertResolvedInsideWorkspace(workspaceRoot, dirname(resolved))
-  mkdirSync(dirname(resolved), { recursive: true })
-  assertResolvedInsideWorkspace(workspaceRoot, resolved)
 
   const existed = existsSync(resolved)
   if (existed && statSync(resolved).isDirectory()) {
@@ -277,22 +308,22 @@ export function toolEdit(
     )
   }
 
+  // Settle the new bytes and every refusal before touching the disk: a refused
+  // edit used to leave the directories it had already created behind.
+  let next: string
+  let done: string
   if (typeof contents === 'string') {
     if (existed && contents.length === 0 && statSync(resolved).size > 0) {
       throw new Error(
         `edit refuses to replace non-empty ${path} with empty contents; use diff to remove contents explicitly`
       )
     }
-    assertWritablePath(path)
-    atomicWriteFile(resolved, contents)
-    return existed
+    next = contents
+    done = existed
       ? `Wrote ${path} (${contents.length} chars)`
       : `Created ${path} (${contents.length} chars)`
-  }
-
-  if (typeof diff === 'string' && diff.trim()) {
+  } else if (typeof diff === 'string' && diff.trim()) {
     const original = existed ? readFileSync(resolved, 'utf8') : ''
-    let next: string
     try {
       next = applyUnifiedDiff(original, diff)
     } catch (err) {
@@ -308,12 +339,16 @@ export function toolEdit(
         throw err
       }
     }
-    assertWritablePath(path)
-    atomicWriteFile(resolved, next)
-    return existed ? `Applied diff to ${path}` : `Created ${path}`
+    done = existed ? `Applied diff to ${path}` : `Created ${path}`
+  } else {
+    throw new Error('edit requires contents or diff')
   }
 
-  throw new Error('edit requires contents or diff')
+  assertWritablePath(path)
+  mkdirSync(dirname(resolved), { recursive: true })
+  assertResolvedInsideWorkspace(workspaceRoot, resolved)
+  atomicWriteFile(resolved, next, existingFileMode(resolved))
+  return done
 }
 
 export async function toolEditAsync(

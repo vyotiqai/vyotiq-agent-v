@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, statSync } from 'fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'fs'
 import { basename } from 'path'
 import {
   describeMissingSkill,
   findEnabledSkillByName,
   findPluginRuleById,
+  isBinarySkillFileName,
   listSkillBundledFiles,
   loadPluginRuleBody,
   resolveSkillResourcePath
@@ -12,6 +13,29 @@ import { isSkillMdFilename, resolveSkillMdPath, SKILL_MD } from '../skills/paths
 import { findWorkspaceSettingsOverride, getWorkspaces } from '../../workspace/workspaces'
 import { wrapUntrustedContent } from '../untrustedContent'
 import type { MarketplaceOverrides } from '../../../shared/ipc'
+
+/** Most of one bundled file the Skill tool returns — the same bound MCP payloads get. */
+export const SKILL_FILE_READ_CAP = 64 * 1024
+
+/**
+ * Up to {@link SKILL_FILE_READ_CAP} bytes of a bundled file, or null when it
+ * looks binary (a NUL byte), so a stray archive never lands in history.
+ */
+function readSkillTextFile(abs: string, size: number): string | null {
+  const fd = openSync(abs, 'r')
+  try {
+    const buf = Buffer.allocUnsafe(Math.min(size, SKILL_FILE_READ_CAP))
+    const n = readSync(fd, buf, 0, buf.length, 0)
+    const bytes = buf.subarray(0, n)
+    if (bytes.includes(0)) return null
+    const text = bytes.toString('utf8')
+    return size > n
+      ? `${text}\n[Skill file truncated: showing ${n} of ${size} bytes]`
+      : text
+  } finally {
+    closeSync(fd)
+  }
+}
 
 function marketplaceOverridesFor(workspacePath: string): MarketplaceOverrides | null {
   const override = findWorkspaceSettingsOverride(getWorkspaces(), workspacePath)
@@ -147,7 +171,13 @@ export function toolSkill(
     )
     return [`Directory: ${requested}`, ...kids.map((k) => `- ${k}`)].join('\n')
   }
-  const content = readFileSync(abs, 'utf8')
+  if (isBinarySkillFileName(requested)) {
+    throw new Error(`Skill file is binary and cannot be loaded as text: ${requested}`)
+  }
+  const content = readSkillTextFile(abs, st.size)
+  if (content === null) {
+    throw new Error(`Skill file is binary and cannot be loaded as text: ${requested}`)
+  }
   const header = `# Skill file: ${skill.name} / ${requested}\n\n`
   return (
     header +

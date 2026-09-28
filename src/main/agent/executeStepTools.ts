@@ -745,14 +745,14 @@ export async function executeStepToolCalls(
   const orderedCalls = agentMode === 'agent' ? hoistTodoWriteCalls(calls) : calls
   const messages: ChatMessage[] = []
   const events: AgentEvent[] = []
-  const hasDiagnosticsSurface =
-    Boolean(ctx.diagnosticsCommand?.trim()) ||
-    hasJavaScriptProject(ctx.workspace) ||
-    hasTypeScriptProject(ctx.workspace)
+  // Cheap call-list checks first: the project probe reads and parses
+  // package.json (twice) and is only needed on a step that edits files.
   const softDiagnosticsNudge =
-    hasDiagnosticsSurface &&
     calls.some((c) => isFileMutationToolName(c.name)) &&
-    !calls.some((c) => c.name === 'diagnostics')
+    !calls.some((c) => c.name === 'diagnostics') &&
+    (Boolean(ctx.diagnosticsCommand?.trim()) ||
+      hasJavaScriptProject(ctx.workspace) ||
+      hasTypeScriptProject(ctx.workspace))
   const stepFlags = softDiagnosticsNudge ? { softDiagnosticsNudge } : undefined
 
   // Approval authorize() is awaited per call; consecutive same-class groups may still batch.

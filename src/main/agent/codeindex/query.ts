@@ -21,6 +21,8 @@ export type SearchOptions = {
 }
 
 const DOCS_OVERLAP_YIELD_EVERY = 16
+/** Vectors scored between event-loop yields in concept search. */
+const DENSE_SCAN_PAGE_ROWS = 2_000
 /** Docs walk cap — index skips `docs/`; this is search-time only. */
 const DOCS_OVERLAP_SCAN_CAP = 4_000
 /** Cap bytes read when extracting a line-bounded snippet (match indexed-file max). */
@@ -119,8 +121,9 @@ export async function collectDocsLexicalHits(
 }
 
 /**
- * Read only enough of the file to cover `[startLine, endLine]` instead of the
- * full source (up to 512KB). Falls back to empty string on any I/O error.
+ * Lines `[startLine, endLine]` of the file as it is on disk now, read from the
+ * start up to the indexed-file cap (512KB) — so a hit past the cap has no
+ * snippet. Falls back to empty string on any I/O error.
  */
 function readSnippet(
   workspaceRoot: string,
@@ -216,20 +219,29 @@ export async function conceptSearchStore(
   }
   const limit = Math.min(Math.max(1, opts.limit ?? DEFAULT_SEARCH_LIMIT), MAX_SEARCH_LIMIT)
   const top: { id: number; score: number }[] = []
-  for (const { id, vec } of store.iterateDenseVectors()) {
-    throwIfAborted(opts.signal)
-    // Defensive: a model/dim change resets vectors via the warm job; skip any
-    // incompatible leftover row instead of computing a meaningless dot product.
-    if (vec.length !== qVec.length) continue
-    let dot = 0
-    for (let i = 0; i < qVec.length; i++) dot += qVec[i]! * vec[i]!
-    if (top.length < limit) {
-      top.push({ id, score: dot })
-      top.sort((a, b) => b.score - a.score)
-    } else if (dot > top[top.length - 1]!.score) {
-      top[top.length - 1] = { id, score: dot }
-      top.sort((a, b) => b.score - a.score)
+  // Page the scan and yield between pages: one unbroken pass over 50k vectors
+  // held the main process for ~450ms, and an abort could not land mid-scan.
+  let afterId = 0
+  for (;;) {
+    const page = store.denseVectorPage(afterId, DENSE_SCAN_PAGE_ROWS)
+    if (page.length === 0) break
+    for (const { id, vec } of page) {
+      // Defensive: a model/dim change resets vectors via the warm job; skip any
+      // incompatible leftover row instead of computing a meaningless dot product.
+      if (vec.length !== qVec.length) continue
+      let dot = 0
+      for (let i = 0; i < qVec.length; i++) dot += qVec[i]! * vec[i]!
+      if (top.length < limit) {
+        top.push({ id, score: dot })
+        top.sort((a, b) => b.score - a.score)
+      } else if (dot > top[top.length - 1]!.score) {
+        top[top.length - 1] = { id, score: dot }
+        top.sort((a, b) => b.score - a.score)
+      }
     }
+    afterId = page[page.length - 1]!.id
+    await yieldToEventLoop()
+    throwIfAborted(opts.signal)
   }
   const hits: CodebaseSearchHit[] = []
   for (const t of top) {

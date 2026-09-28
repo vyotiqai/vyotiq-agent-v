@@ -70,7 +70,7 @@ describe('public MCP package connects with no credentials', () => {
     expect(server.auth).toBe('none')
 
     await connectMcpServer(server, null)
-    const tools = listMcpToolDefinitions([server])
+    const tools = listMcpToolDefinitions()
 
     expect(tools.length).toBeGreaterThan(0)
     // Names are prefixed mcp__<serverId>__<tool>, and the suffix is the tool the

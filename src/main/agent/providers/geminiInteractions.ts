@@ -2,6 +2,7 @@ import type { ChatMessage } from '../../../shared/ipc'
 import { contentToText, providerContentParts } from '../../../shared/ipc'
 import { formatError } from '../../../shared/errors'
 import { wireToolCallArguments, mergeOpenAiCompatToolArgDelta } from '../toolArgWire'
+import { syntheticToolCallIdTag } from '../dedupeToolCalls'
 import { mergeStreamedToolName } from '../../../shared/utils/toolName'
 import {
   continuationPromptKeys,
@@ -17,9 +18,8 @@ import type { ProviderChatRequest, StopReason, StreamChunk, ToolCall, TokenUsage
 import { billedCostFromUsage } from './usageFields'
 import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
-import { logProviderFailure, providerFetchFailureChunk } from './log'
+import { providerFetchFailureChunk, providerHttpFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
-import { formatProviderHttpError } from './httpErrors'
 import { parseDataUrl } from './normalize'
 import { resolveSystemZones, volatileSessionMessage } from './systemZones'
 import { liftToolImagesToUserTurn } from './toolImages'
@@ -249,8 +249,7 @@ export async function* streamGeminiInteractions(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    logProviderFailure('gemini', 'http', { status: res.status })
-    yield { type: 'error', error: formatProviderHttpError(res.status, text, 'gemini'), errorCode: 'PROVIDER_HTTP', httpStatus: res.status }
+    yield providerHttpFailureChunk('gemini', res.status, text)
     return
   }
 
@@ -260,6 +259,7 @@ export async function* streamGeminiInteractions(
   let thinkingText = ''
   let lastUsage: TokenUsage | undefined
   let stopReason: StopReason | undefined
+  const idTag = syntheticToolCallIdTag()
 
   const drops = { dropped: 0 }
 
@@ -283,7 +283,7 @@ export async function* streamGeminiInteractions(
       } else if (delta.type === 'function_call') {
         const fn = delta.function_call as Record<string, unknown> | undefined
         if (fn) {
-          const callId = String(fn.id ?? fn.call_id ?? `call_${pending.size}`)
+          const callId = String(fn.id ?? fn.call_id ?? `call_${idTag}_${pending.size}`)
           // Merge (not replace) so streamed argument fragments accumulate;
           // each delta previously overwrote the pending call and dropped the
           // earlier fragment bytes.

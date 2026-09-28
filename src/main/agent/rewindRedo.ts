@@ -6,7 +6,7 @@ import { logger } from '../../shared/logger'
 import { resolveInsideWorkspace } from '../workspace/safePath'
 import { resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
 import type { RewindRunScope, RewindWritesPlan } from './checkpoints'
-import { isActive } from './runRegistry'
+import { clearRunAbort, isActive, tryRegisterRunAbort } from './runRegistry'
 import { invalidateListRunsCache } from './runListCache'
 import {
   flushEventAppends,
@@ -269,6 +269,18 @@ export async function redoRewind(workspacePath: string, runId: string): Promise<
           : 'Something changed since the rewind, so Redo would overwrite it.'
     )
   }
+  // Hold the run slot while the record is put back: a loop tick or goal
+  // relaunch starting in between would write into the files being replaced.
+  const slot = tryRegisterRunAbort(runId, workspacePath)
+  if (!slot.ok) throw new Error('The task is running; Redo waits until it stops.')
+  try {
+    return await applyRedo(workspacePath, runId)
+  } finally {
+    clearRunAbort(runId, slot.invokeId)
+  }
+}
+
+async function applyRedo(workspacePath: string, runId: string): Promise<{ messages: ChatMessage[] }> {
   const runDir = resolveRunDir(workspacePath, runId)
   const dir = redoDir(runDir)
   const manifest = readManifest(runDir)!

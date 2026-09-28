@@ -10,7 +10,7 @@ import type { WalkedFile } from '../tools/walk'
 import type { CodebaseSearchHit, IndexStatus, SyncResult } from './types'
 import { setCodeIndexRuntimeStatus } from './status'
 import { clearIndexSyncProgress } from './indexProgress'
-import { enqueueIndexJob } from '../indexJobQueue'
+import { activeIndexJobPreemptSignal, enqueueIndexJob } from '../indexJobQueue'
 import { runDenseVectorization, type DenseEmbedder } from './denseJob'
 import {
   ensureEmbedModelFiles,
@@ -370,9 +370,14 @@ export async function runCodebaseSearch(
 
 /**
  * Background dense leg: after every completed sync, embed any vec-NULL dense
- * rows in the queue's warm slot (preempted by interactive searches). Skips
- * early when nothing is pending and the stored model identity matches, so a
- * no-op warm job never downloads the model or loads the worker.
+ * rows in the queue's warm slot. Skips early when nothing is pending and the
+ * stored model identity matches, so a no-op warm job never downloads the model
+ * or loads the worker.
+ *
+ * An interactive index job preempts it between batches: the queue is single
+ * flight, so an unpreemptable embedding pass held every refresh search, cold
+ * first search and mutation re-sync for its whole length. Finished batches are
+ * kept and the queue's requeued copy resumes at the first vec-NULL row.
  */
 function scheduleDenseWarm(workspaceRoot: string): void {
   const key = workspaceKey(workspaceRoot)
@@ -397,27 +402,41 @@ function scheduleDenseWarm(workspaceRoot: string): void {
       const client = getEmbedUtilityClient()
       await client.ensure(modelDir)
       let lastPublish = 0
-      // Pause stops it between batches; every finished batch is kept.
+      // Pause and dispose stop it between batches; every finished batch is kept.
       const abort = new AbortController()
       denseAborts.set(key, abort)
-      const { embedded } = await runDenseVectorization(store, {
-        signal: abort.signal,
-        embed: (texts) => client.embed(texts),
-        onProgress: ({ done, total }) => {
-          const now = Date.now()
-          if (now - lastPublish >= 1000) {
-            lastPublish = now
-            setCodeIndexRuntimeStatus({
-              phase: 'syncing',
-              message: `Embedding vectors · ${done}/${total}`,
-              error: null,
-              progress: total > 0 ? done / total : 1,
-              indexProgress: null,
-              workspacePath: workspaceRoot
-            })
+      const preempt = activeIndexJobPreemptSignal()
+      const signal = preempt ? AbortSignal.any([abort.signal, preempt]) : abort.signal
+      let embedded: number
+      try {
+        ;({ embedded } = await runDenseVectorization(store, {
+          signal,
+          embed: (texts) => client.embed(texts),
+          onProgress: ({ done, total }) => {
+            const now = Date.now()
+            if (now - lastPublish >= 1000) {
+              lastPublish = now
+              setCodeIndexRuntimeStatus({
+                phase: 'syncing',
+                message: `Embedding vectors · ${done}/${total}`,
+                error: null,
+                progress: total > 0 ? done / total : 1,
+                indexProgress: null,
+                workspacePath: workspaceRoot
+              })
+            }
           }
+        }))
+      } catch (err) {
+        // Dispose closes the store under the batch in flight; whatever that
+        // batch then throws is the stop we asked for, not a failure.
+        if (abort.signal.aborted && !isAbortError(err)) {
+          throw new DOMException('Aborted', 'AbortError')
         }
-      })
+        throw err
+      } finally {
+        if (denseAborts.get(key) === abort) denseAborts.delete(key)
+      }
       if (embedded > 0) {
         const after = store.denseStatus()
         setCodeIndexRuntimeStatus({
@@ -430,11 +449,7 @@ function scheduleDenseWarm(workspaceRoot: string): void {
         })
       }
     }
-  })
-    .finally(() => {
-      denseAborts.delete(key)
-    })
-    .catch((err) => {
+  }).catch((err) => {
     if (isAbortError(err)) {
       if (isCodeIndexPaused(workspaceRoot)) setCodeIndexPausedStatus(workspaceRoot)
       return

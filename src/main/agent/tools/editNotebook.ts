@@ -4,6 +4,8 @@ import { resolveInsideWorkspace, assertResolvedInsideWorkspace } from '../../wor
 import { atomicWriteFile } from '@main/storage/atomicWrite'
 import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
 import { assertWritablePath } from './writeGuard'
+import { existingFileMode } from './edit'
+import { countOccurrences, replaceFirstLiteral } from './strReplace'
 
 export const NOTEBOOK_LANGUAGES = [
   'python',
@@ -108,17 +110,20 @@ function parseNotebook(raw: string, rel: string): NotebookFile {
   return rec as NotebookFile
 }
 
-function countOccurrences(haystack: string, needle: string): number {
-  if (!needle) return 0
-  let count = 0
-  let from = 0
-  while (from <= haystack.length - needle.length) {
-    const at = haystack.indexOf(needle, from)
-    if (at < 0) break
-    count += 1
-    from = at + needle.length
-  }
-  return count
+/** Jupyter writes notebooks with a one-space indent. */
+const JUPYTER_INDENT = 1
+
+/**
+ * The indent a notebook was saved with, so a one-cell edit does not rewrite
+ * every line of a Jupyter (indent 1) file as indent 2.
+ */
+function notebookIndent(raw: string): number {
+  const match = /^\{\r?\n( +)"/.exec(raw)
+  return match ? match[1]!.length : JUPYTER_INDENT
+}
+
+function serializeNotebook(notebook: NotebookFile, indent: number): string {
+  return `${JSON.stringify(notebook, null, indent)}\n`
 }
 
 /**
@@ -145,9 +150,10 @@ export function toolEditNotebook(workspaceRoot: string, args: EditNotebookArgs):
     throw new Error(`Notebook not found: ${rel}`)
   }
 
-  const notebook = existed
-    ? parseNotebook(readFileSync(resolved, 'utf8'), rel)
-    : emptyNotebook()
+  const raw = existed ? readFileSync(resolved, 'utf8') : ''
+  const notebook = existed ? parseNotebook(raw, rel) : emptyNotebook()
+  const indent = existed ? notebookIndent(raw) : JUPYTER_INDENT
+  const mode = existingFileMode(resolved)
   const cells = Array.isArray(notebook.cells) ? [...notebook.cells] : []
 
   if (isNew) {
@@ -157,7 +163,7 @@ export function toolEditNotebook(workspaceRoot: string, args: EditNotebookArgs):
     }
     cells.splice(cellIdx, 0, makeCell(language, newString))
     notebook.cells = cells
-    atomicWriteFile(resolved, `${JSON.stringify(notebook, null, 2)}\n`)
+    atomicWriteFile(resolved, serializeNotebook(notebook, indent), mode)
     return existed
       ? `Inserted ${language} cell ${cellIdx} in ${rel}`
       : `Created ${rel} with ${language} cell 0`
@@ -181,7 +187,7 @@ export function toolEditNotebook(workspaceRoot: string, args: EditNotebookArgs):
       `old_string matched ${matches} times in cell ${cellIdx} of ${rel}; provide a unique snippet`
     )
   }
-  cell.source = toSourceLines(source.replace(oldString, newString))
+  cell.source = toSourceLines(replaceFirstLiteral(source, oldString, newString))
   if (args.cell_language) {
     cell.cell_type = cellTypeForLanguage(args.cell_language)
     if (cell.cell_type === 'code') {
@@ -191,7 +197,7 @@ export function toolEditNotebook(workspaceRoot: string, args: EditNotebookArgs):
     }
   }
   notebook.cells = cells
-  atomicWriteFile(resolved, `${JSON.stringify(notebook, null, 2)}\n`)
+  atomicWriteFile(resolved, serializeNotebook(notebook, indent), mode)
   return `Updated cell ${cellIdx} in ${rel}`
 }
 

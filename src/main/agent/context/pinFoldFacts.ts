@@ -28,34 +28,37 @@ const CAPS = {
   constraints: 32
 } as const
 
-function uniqueStrings(values: readonly string[], cap: number): string[] {
+/**
+ * Dedupe case-insensitively and keep the `cap` NEWEST entries, in their original
+ * order. Inputs run oldest to newest (prior folds first, then this fold), and a
+ * repeat counts at its latest position. Keeping the first `cap` instead froze the
+ * list once it filled: every file written or inspected after that, across every
+ * later fold, was never pinned.
+ */
+function keepNewestUnique(
+  values: readonly string[],
+  cap: number,
+  normalize: (raw: string) => string
+): string[] {
   const out: string[] = []
   const seen = new Set<string>()
-  for (const raw of values) {
-    const value = raw.replace(/\s+/g, ' ').trim().slice(0, 240)
+  for (let i = values.length - 1; i >= 0 && out.length < cap; i--) {
+    const value = normalize(values[i]!)
     if (!value) continue
     const key = value.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
     out.push(value)
-    if (out.length >= cap) break
   }
-  return out
+  return out.reverse()
+}
+
+function uniqueStrings(values: readonly string[], cap: number): string[] {
+  return keepNewestUnique(values, cap, (raw) => raw.replace(/\s+/g, ' ').trim().slice(0, 240))
 }
 
 function uniquePaths(values: readonly string[], cap: number): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const raw of values) {
-    const path = normalizeWorkspaceFileRelPath(raw)
-    if (!path) continue
-    const key = path.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(path)
-    if (out.length >= cap) break
-  }
-  return out
+  return keepNewestUnique(values, cap, normalizeWorkspaceFileRelPath)
 }
 
 function emptyFoldFacts(): FoldFacts {
@@ -102,13 +105,19 @@ export function foldFactsToPinned(facts: FoldFacts): PinnedFoldFacts {
   }
 }
 
+/**
+ * Union a prior fold's pinned facts with this fold's. History accumulates;
+ * `todos` does not — it is the run's open set *now*, so this fold's value
+ * replaces the prior one. Merging kept a todo pinned as open for the rest of the
+ * run after it was completed, and the summarizer was told to mention it.
+ */
 export function mergeFoldFacts(base: FoldFacts | undefined, extra: FoldFacts): FoldFacts {
   const left = base ?? emptyFoldFacts()
   return {
     files: uniquePaths([...left.files, ...extra.files], CAPS.files),
     wroteFiles: uniquePaths([...left.wroteFiles, ...extra.wroteFiles], CAPS.wroteFiles),
     decisions: uniqueStrings([...left.decisions, ...extra.decisions], CAPS.decisions),
-    todos: uniqueStrings([...left.todos, ...extra.todos], CAPS.todos),
+    todos: uniqueStrings(extra.todos, CAPS.todos),
     doneWhen: uniqueStrings([...left.doneWhen, ...extra.doneWhen], CAPS.doneWhen),
     constraints: uniqueStrings(
       [...(left.constraints ?? []), ...(extra.constraints ?? [])],

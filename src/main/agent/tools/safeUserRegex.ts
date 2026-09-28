@@ -14,8 +14,10 @@ function compileWithLimit(
   if (maxLength != null && trimmed.length > maxLength) {
     throw new Error(`Regex pattern exceeds ${maxLength} characters`)
   }
-  // Classic nested quantifiers: (a+)+, (a*)*, (a+){2,}
-  if (/[+*]\)[+*{]/.test(trimmed)) {
+  // Classic nested quantifiers: (a+)+, (a*)*, (a+){2,} — and a quantified group
+  // ending in an optional part, (\w+\s?)+, which backtracks just as badly.
+  // An escaped `\?)` / `\+)` is a literal, not a quantifier.
+  if (/(?<!\\)[+*?]\)[+*{]/.test(trimmed)) {
     throw new Error('Regex pattern looks too complex (nested quantifiers)')
   }
   try {

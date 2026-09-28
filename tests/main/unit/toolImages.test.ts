@@ -219,6 +219,20 @@ describe('tool image storage', () => {
     expect(text).not.toContain('QUJD')
   })
 
+  it('summarises an embedded resource blob, and keeps an embedded resource text', () => {
+    const blob = Buffer.alloc(3_000, 7).toString('base64')
+    const { text } = mcpResultContent(
+      [
+        { type: 'resource', resource: { uri: 'file:///a.bin', mimeType: 'application/pdf', blob } },
+        { type: 'resource', resource: { uri: 'file:///b.txt', text: 'plain body' } }
+      ],
+      runDir
+    )
+    expect(text).toContain('[resource uri=file:///a.bin mime=application/pdf bytes=3000]')
+    expect(text).not.toContain(blob.slice(0, 64))
+    expect(text).toContain('plain body')
+  })
+
   it('refuses an image no provider would accept', () => {
     const result = storeToolImage(runDir, png(9000, 10), { source: 'mcp' })
     expect(result.ok).toBe(false)

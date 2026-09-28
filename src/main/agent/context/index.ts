@@ -1,4 +1,4 @@
-export { assembleContext } from './assemble'
+export { assembleContext, buildMemorySection } from './assemble'
 export { contentWindow, contextWindowFor } from './budget'
 export { shouldTriggerAutoCompact } from './estimate'
 export { buildStepToolCatalog } from './toolsBudget'

@@ -1,5 +1,5 @@
 import { readdirSync } from 'fs'
-import { appendFile, open, readdir, rename, stat, unlink, writeFile } from 'fs/promises'
+import { readdir, unlink } from 'fs/promises'
 import { basename, join } from 'path'
 import { logger } from '../../shared/logger'
 import {
@@ -8,6 +8,7 @@ import {
   withTransientAppendRetry,
   type DirAppendFailures
 } from './appendRetry'
+import { appendToRunLog, resetRunLogStateForTests } from './jsonlRotation'
 
 /** Rotate events.jsonl once it grows past this size; the most recent tail is kept. */
 export const EVENTS_FILE_MAX_BYTES = 2 * 1024 * 1024
@@ -85,6 +86,15 @@ export function onRunStorageLost(dir: string, handler: () => void): void {
   storageLostHandlers.set(dir, set)
 }
 
+/**
+ * The run dir exists again (re-created, or resumed after being restored).
+ * The mark used to stay for the process lifetime, so every later invoke of
+ * that run aborted at start as "storage disappeared".
+ */
+export function clearRunStorageLost(dir: string): void {
+  storageLostDirs.delete(dir)
+}
+
 export function clearRunStorageLostHandler(dir: string, handler: () => void): void {
   const set = storageLostHandlers.get(dir)
   if (!set) return
@@ -156,9 +166,15 @@ export async function removeEventArchives(dir: string): Promise<void> {
   }
 }
 
+/** Evict the oldest archives beyond the cap, after a rotation added one. Best effort. */
 async function enforceArchiveCap(dir: string): Promise<void> {
-  const archives = await listEventArchives(dir)
-  while (archives.length >= MAX_EVENT_ARCHIVES) {
+  let archives: string[]
+  try {
+    archives = await listEventArchives(dir)
+  } catch {
+    return
+  }
+  while (archives.length > MAX_EVENT_ARCHIVES) {
     const oldest = archives.shift()
     if (!oldest) break
     try {
@@ -173,81 +189,6 @@ async function enforceArchiveCap(dir: string): Promise<void> {
       })
     }
   }
-}
-
-async function archiveDiscardedHead(dir: string, head: string): Promise<void> {
-  if (!head) return
-  await enforceArchiveCap(dir)
-  const filename = archiveFilename()
-  const archivePath = join(dir, filename)
-  const temp = `${archivePath}.tmp`
-  await writeFile(temp, head, 'utf8')
-  await rename(temp, archivePath)
-  const byteCount = Buffer.byteLength(head, 'utf8')
-  logger.info('Archived rotated events head', {
-    scope: 'state',
-    code: 'EVENTS_ARCHIVED',
-    correlationId: basename(dir),
-    filename,
-    byteCount
-  })
-}
-
-/**
- * Rewrite events.jsonl keeping only the recent tail once it exceeds the cap.
- * Runs inside the serialized append chain so it stays single-writer safe.
- */
-async function rotateEventsFileIfNeeded(path: string, dir: string): Promise<void> {
-  let size = 0
-  try {
-    size = (await stat(path)).size
-  } catch {
-    return // file does not exist yet — the append will create it
-  }
-  if (size <= EVENTS_FILE_MAX_BYTES) return
-  const targetSplit = size - EVENTS_FILE_KEEP_BYTES
-  if (targetSplit <= 0) return
-
-  const handle = await open(path, 'r')
-  let head = ''
-  let tail = ''
-  try {
-    const headLen = Math.min(size, targetSplit)
-    const headBuf = Buffer.alloc(headLen)
-    await handle.read(headBuf, 0, headLen, 0)
-    const lastNl = headBuf.lastIndexOf(0x0a)
-    let splitAt = 0
-    if (lastNl >= 0) {
-      splitAt = lastNl + 1
-      head = headBuf.subarray(0, splitAt).toString('utf8')
-      const tailLen = size - splitAt
-      const tailBuf = Buffer.alloc(tailLen)
-      await handle.read(tailBuf, 0, tailLen, splitAt)
-      tail = tailBuf.toString('utf8')
-    } else {
-      const restLen = size - targetSplit
-      const restBuf = Buffer.alloc(restLen)
-      await handle.read(restBuf, 0, restLen, targetSplit)
-      const firstNl = restBuf.indexOf(0x0a)
-      if (firstNl < 0) return
-      splitAt = targetSplit + firstNl + 1
-      head = Buffer.concat([headBuf, restBuf.subarray(0, firstNl + 1)]).toString('utf8')
-      tail = restBuf.subarray(firstNl + 1).toString('utf8')
-    }
-    if (splitAt <= 0 || splitAt >= size) return
-  } finally {
-    await handle.close()
-  }
-
-  await archiveDiscardedHead(dir, head)
-  const temp = `${path}.tmp`
-  await writeFile(temp, tail, 'utf8')
-  await rename(temp, path)
-  logger.info('Rotated events.jsonl', {
-    scope: 'state',
-    code: 'EVENTS_ROTATED',
-    correlationId: basename(dir)
-  })
 }
 
 export function enqueueEventAppend(dir: string, event: unknown): void {
@@ -277,10 +218,32 @@ export function enqueueEventAppend(dir: string, event: unknown): void {
   const prev = appendChains.get(dir) ?? Promise.resolve()
   const next = prev
     .then(async () => {
-      await withTransientAppendRetry(async () => {
-        await rotateEventsFileIfNeeded(path, dir)
-        await appendFile(path, line, 'utf8')
-      })
+      await withTransientAppendRetry(() =>
+        appendToRunLog({
+          path,
+          data: line,
+          maxBytes: EVENTS_FILE_MAX_BYTES,
+          keepBytes: EVENTS_FILE_KEEP_BYTES,
+          nextArchivePath: () => join(dir, archiveFilename()),
+          onRotated: async ({ archivePath, headBytes }) => {
+            logger.info('Rotated events.jsonl', {
+              scope: 'state',
+              code: 'EVENTS_ROTATED',
+              correlationId: basename(dir),
+              filename: basename(archivePath),
+              byteCount: headBytes
+            })
+            await enforceArchiveCap(dir)
+          },
+          onRotateFailed: (err) =>
+            logger.warn('events.jsonl rotation failed; appending unrotated', {
+              scope: 'state',
+              code: 'EVENTS_ROTATE_FAILED',
+              correlationId: basename(dir),
+              err
+            })
+        })
+      )
     })
     .catch((err) => {
       recordAppendError(dir, err)
@@ -348,4 +311,5 @@ export function resetEventAppendQueueForTests(): void {
   pendingBytes.clear()
   droppedSnapshotCounts.clear()
   pendingMaxBytes = EVENTS_PENDING_MAX_BYTES
+  resetRunLogStateForTests()
 }

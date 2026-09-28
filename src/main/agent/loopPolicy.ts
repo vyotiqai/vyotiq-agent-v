@@ -2,6 +2,7 @@ import type { ChatMessage, ThinkingEffort } from '../../shared/ipc'
 import { isAbortStubText } from '../../shared/toolStubs'
 import { codebaseSearchHitPathsFromResult } from './codeindex/query'
 import { readPathArg } from './tools/argAccess'
+import { wireToolCallArguments } from './toolArgWire'
 import { searchHitPathsFromResult } from './tools/search'
 import { loopHintForRetainedDecisions } from './context/retainedDecisions'
 import { isConcreteWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
@@ -522,7 +523,13 @@ export function seedKnownPathsFromMessages(messages: readonly SeedMessage[]): Se
   return known
 }
 
-/** Parse tool-call argument JSON for loop wiring. */
+/**
+ * Parse tool-call argument JSON for loop wiring, with the salvage execution
+ * applies (`wireToolCallArguments`). Strict parsing classified an unclosed
+ * `lsp` rename as a parallel-safe read that execution then ran as a rename.
+ * No tool name reaches here, so the write-family refusal to close a truncated
+ * payload does not apply — harmless, since execution rejects those calls.
+ */
 export function toolArgsFromCall(argumentsJson: string): Record<string, unknown> {
-  return parseToolArgs(argumentsJson)
+  return parseToolArgs(wireToolCallArguments('', argumentsJson))
 }

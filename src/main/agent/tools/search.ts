@@ -11,7 +11,7 @@ import {
   type WalkedFile
 } from './walk'
 import { compileUserRegex } from './safeUserRegex'
-import { formatOversizedNotice } from './grep'
+import { capMatchLine, formatOversizedNotice } from './grep'
 import { extractDocxText, isDocxPath, MAX_DOCX_ARCHIVE_BYTES } from './docxText'
 import {
   queryIndexCandidates,
@@ -49,13 +49,13 @@ async function contentHit(
       if (!match) return null
       const idx = match.index
       const line = text.slice(0, idx).split('\n').length
-      const snippet = text.split('\n')[line - 1]?.trim() ?? ''
+      const snippet = capMatchLine(text.split('\n')[line - 1]?.trim() ?? '')
       return `${rel}:${line}: ${snippet}`
     }
     const idx = text.toLowerCase().indexOf(q.toLowerCase())
     if (idx < 0) return null
     const line = text.slice(0, idx).split('\n').length
-    const snippet = text.split('\n')[line - 1]?.trim() ?? ''
+    const snippet = capMatchLine(text.split('\n')[line - 1]?.trim() ?? '')
     return `${rel}:${line}: ${snippet}`
   } catch {
     return null

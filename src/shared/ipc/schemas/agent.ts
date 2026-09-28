@@ -1202,7 +1202,13 @@ export const LoopCheckpointSchema = z.object({
       estimatedCost: z.number().optional(),
       stepsWithEstimate: z.number().int().min(0).optional(),
       generationMs: z.number().int().min(0),
-      lastStepInputTokens: z.number().int().min(0)
+      lastStepInputTokens: z.number().int().min(0),
+      /**
+       * Last step's whole-prompt tokens (`promptTokensFromUsage`) — the figure the
+       * auto-compact decision anchors on. `lastStepInputTokens` is the provider's
+       * raw slice, which on Anthropic excludes cache reads. Optional, additive.
+       */
+      lastStepPromptTokens: z.number().int().min(0).optional()
     })
     .optional()
 })

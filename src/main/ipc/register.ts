@@ -1558,12 +1558,24 @@ export function registerIpc(): void {
         }
       }
 
-      const prepared = await prepareRewindToUserMessage({
-        workspacePath: req.workspacePath,
-        runId: req.runId,
-        userMessageIndex: req.userMessageIndex,
-        targetUserAt: req.targetUserAt
-      })
+      // Hold the run slot while the rewind rewrites the run's files: a loop
+      // tick or goal relaunch starting in between would write into the same
+      // transcript, events and status mid-rewrite.
+      const slot = tryRegisterRunAbort(req.runId, req.workspacePath)
+      if (!slot.ok) {
+        return failExpected(slot.error, IPC.chatRewind, req.runId, slot.code)
+      }
+      let prepared: Awaited<ReturnType<typeof prepareRewindToUserMessage>>
+      try {
+        prepared = await prepareRewindToUserMessage({
+          workspacePath: req.workspacePath,
+          runId: req.runId,
+          userMessageIndex: req.userMessageIndex,
+          targetUserAt: req.targetUserAt
+        })
+      } finally {
+        clearRunAbort(req.runId, slot.invokeId)
+      }
       // Not restored.length — see chatRewindAndStart.
       if (prepared.writes.checkpointIds.length > 0) {
         invalidateAfterWorkspaceMutation(req.workspacePath)

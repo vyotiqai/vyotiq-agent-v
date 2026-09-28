@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -62,6 +62,52 @@ Do a thorough review.
     expect(notes).toContain('Extra notes')
 
     expect(() => toolSkill(dir, 'code-review', '../outside.txt')).toThrow(/Unsafe|escapes/i)
+  })
+
+  it('never lists or serves binary bundled files, and caps text reads', async () => {
+    const skillRoot = join(dir, 'review-code')
+    mkdirSync(skillRoot, { recursive: true })
+    writeFileSync(
+      join(skillRoot, 'SKILL.md'),
+      `---
+name: review-code
+description: Review code.
+---
+
+# Review
+`
+    )
+    // Bundled packages ship the Word source their SKILL.md is generated from.
+    copyFileSync(
+      join(process.cwd(), 'resources/marketplace/packages/review-code/SKILL.md.docx'),
+      join(skillRoot, 'SKILL.md.docx')
+    )
+    writeFileSync(join(skillRoot, 'blob.dat'), Buffer.from([0x50, 0x4b, 0x00, 0x01, 0x02]))
+    writeFileSync(join(skillRoot, 'BIG.md'), 'x'.repeat(200_000))
+
+    const skillsMod = await import('@main/agent/skills')
+    vi.spyOn(skillsMod, 'findEnabledSkillByName').mockReturnValue({
+      id: 'review-code',
+      name: 'review-code',
+      description: 'Review code.',
+      body: '# Review',
+      root: skillRoot,
+      skillPath: join(skillRoot, 'SKILL.md'),
+      source: 'skill',
+      modelInvocable: true
+    })
+
+    const { toolSkill, SKILL_FILE_READ_CAP } = await import('@main/agent/tools/skill')
+    const body = toolSkill(dir, 'review-code')
+    expect(body).not.toContain('SKILL.md.docx')
+    expect(body).toContain('- BIG.md')
+
+    expect(() => toolSkill(dir, 'review-code', 'SKILL.md.docx')).toThrow(/binary/)
+    expect(() => toolSkill(dir, 'review-code', 'blob.dat')).toThrow(/binary/)
+
+    const big = toolSkill(dir, 'review-code', 'BIG.md')
+    expect(big).toContain(`showing ${SKILL_FILE_READ_CAP} of 200000 bytes`)
+    expect(big.length).toBeLessThan(SKILL_FILE_READ_CAP + 1_000)
   })
 
   it('listSkillBundledFiles skips symlink entries', async () => {

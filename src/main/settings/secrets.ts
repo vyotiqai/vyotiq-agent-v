@@ -1,5 +1,5 @@
 import { app, safeStorage } from 'electron'
-import { chmodSync, existsSync, mkdirSync, readFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from 'fs'
 import { atomicWriteFile } from '../storage/atomicWrite'
 import { join } from 'path'
 import {
@@ -56,10 +56,30 @@ function assertSecretsStoreWritable(): void {
   }
 }
 
+/**
+ * Last good parse of secrets.json, with the stat it was read at. getSettings()
+ * restores MCP secrets once per server on every call, and the per-step MCP
+ * refresh checks token presence per server too: forty uncached reads of this
+ * file per agent step on a five-server install, ~0.6ms each on Windows. A stat
+ * costs ~20µs, so the parse is reused until mtime or size moves; every write
+ * from this process drops it.
+ */
+let secretsFileCache: { path: string; mtimeMs: number; size: number; data: SecretsFile } | null =
+  null
+
 function readFile(): SecretsFile {
   secretsFileLoadError = false
   const p = secretsPath()
-  if (!existsSync(p)) return {}
+  const st = statSync(p, { throwIfNoEntry: false })
+  if (!st) {
+    secretsFileCache = null
+    return {}
+  }
+  const cached = secretsFileCache
+  if (cached && cached.path === p && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+    // Callers mutate what they get back (readMutableSecretsFile → writeFile).
+    return { ...cached.data }
+  }
   try {
     const parsed: unknown = JSON.parse(readFileSync(p, 'utf8'))
     if (!isStringToStringRecord(parsed)) {
@@ -70,7 +90,8 @@ function readFile(): SecretsFile {
       })
       return {}
     }
-    return parsed
+    secretsFileCache = { path: p, mtimeMs: st.mtimeMs, size: st.size, data: parsed }
+    return { ...parsed }
   } catch (err) {
     secretsFileLoadError = true
     logger.warn('Failed to read secrets file', { scope: 'secrets', code: 'SECRETS', err })
@@ -89,6 +110,7 @@ function writeFile(data: SecretsFile): void {
   const dir = app.getPath('userData')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const p = secretsPath()
+  secretsFileCache = null
   try {
     atomicWriteFile(p, JSON.stringify(data, null, 2), 0o600)
   } catch (err) {

@@ -294,6 +294,80 @@ describe('runAgent stop-reason classification', () => {
     expect(persisted).toContain('Recovered answer')
   })
 
+  // A reasoning-only reply cut off at max tokens, or Gemini's
+  // MALFORMED_FUNCTION_CALL (normalized to `tool_calls` with nothing parsed),
+  // read as "truncated" — an uncapped paid continue. With nothing visible they
+  // are empty turns: capped at 3 retries. (Past call 8 the model answers, so
+  // the old behaviour ends too, and fails the call count instead of hanging.)
+  it.each([
+    ['a reasoning-only reply cut off at length', 'length'],
+    ['a malformed tool call', 'tool_calls']
+  ] as const)('caps %s like an empty turn', async (_label, stopReason) => {
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call <= 8) {
+        yield { type: 'thinking_delta', text: 'Weighing the options at length.' }
+        yield { type: 'done', stopReason }
+      } else {
+        yield { type: 'text', text: 'answer' }
+        yield { type: 'done', stopReason: 'stop' }
+      }
+    })
+
+    const events = await collect(`stop-invisible-${stopReason}`, workspace)
+    const incomplete = events.filter((e) => e.type === 'incomplete')
+
+    expect(call).toBe(4)
+    expect(incomplete.map((e) => e.reason)).toEqual([
+      'empty_response',
+      'empty_response',
+      'empty_response',
+      'empty_response'
+    ])
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+  })
+
+  // Left at the cap, the counter carried into the next user turn: that
+  // turn's first empty reply got no retry.
+  it('gives a follow-up turn its own empty-response retries', async () => {
+    const runId = 'stop-empty-follow-up'
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 4) {
+        expect(enqueueFollowUp(runId, { role: 'user', content: 'next question' }).ok).toBe(true)
+      }
+      if (call <= 5) {
+        yield { type: 'done', stopReason: 'stop' }
+      } else {
+        yield { type: 'text', text: 'answer to the follow-up' }
+        yield { type: 'done', stopReason: 'stop' }
+      }
+    })
+
+    const events = await collect(runId, workspace)
+
+    expect(call).toBe(6)
+    const persisted = readFileSync(join(resolveRunDir(workspace, runId), 'messages.jsonl'), 'utf8')
+    expect(persisted).toContain('answer to the follow-up')
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+  })
+
+  // A request that cannot be built (a header fetch refuses, a bad URL) fails
+  // the same way on every retry: stop once, under its own code.
+  it('stops on a request that cannot be built, without retrying', async () => {
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'error', error: 'ollama: the API key contains a character HTTP headers cannot carry', errorCode: 'PROVIDER_REQUEST' }
+    })
+
+    const events = await collect('stop-request-unbuildable', workspace)
+
+    expect(streamChat).toHaveBeenCalledTimes(1)
+    expect(events.find((e) => e.type === 'error')?.code).toBe('PROVIDER_REQUEST')
+    expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(true)
+  })
+
   it('reports a content filter stop', async () => {
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
       yield { type: 'text', text: 'partial' }

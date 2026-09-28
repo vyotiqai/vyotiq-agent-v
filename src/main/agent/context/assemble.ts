@@ -66,6 +66,15 @@ export type AssembleContextRequest = AssembleInput & {
    */
   memoryWorkspacePath?: string | null
   /**
+   * Pre-built `<memory>` section from `buildMemorySection`, used instead of
+   * re-reading state.md / index.md. Memory renders in the stable zone, so reading
+   * it every step let any `memory_write` — this run's, or a child instance's,
+   * which writes to the same session workspace — rewrite the cached prefix and
+   * re-send the whole history uncached. The loop reads it once per invoke and
+   * again after a fold, like contract.md / plan.md. Omitted: read from disk.
+   */
+  memorySection?: string
+  /**
    * The run's directory. Tool screenshots are stored there and referenced from
    * the history; assembly loads the newest ones into the request copy.
    */
@@ -217,6 +226,53 @@ export function capToTokenBudget(text: string, maxTokens: number, model: ModelIn
     out = next
   }
   return out
+}
+
+/** Leads a fold narrative whose oldest folds were cut to fit `<prior_session>`. */
+export const PRIOR_SESSION_TAIL_MARKER = '[earlier folds truncated]'
+
+/** Separator `compactMessages` writes between successive fold summaries. */
+const FOLD_SEPARATOR = '\n---\n'
+
+/**
+ * Newest-first counterpart of `capToTokenBudget`, for the rolling fold narrative.
+ *
+ * `compactMessages` appends each fold after the previous ones (`prior` + `---` +
+ * `new`) and trims its own store from the front, so the newest fold — the one that
+ * describes where the run is now — sits at the end. Capping that from the head
+ * kept fold #1 and cut the current one. The cut lands on a fold separator when the
+ * kept tail holds one, otherwise on a line boundary, so no fold or line is
+ * presented half-cut. Pure function of its inputs: the stable zone stays
+ * byte-identical for an identical summary.
+ *
+ * @internal exported for tests.
+ */
+export function capTailToTokenBudget(text: string, maxTokens: number, model: ModelInfo): string {
+  if (maxTokens <= 0) return ''
+  if (estimateTextTokens(text, model) <= maxTokens) return text
+  let maxChars = Math.max(200, maxTokens * 4)
+  for (;;) {
+    const out = tailSlice(text, maxChars)
+    if (out.length <= 200 || estimateTextTokens(out, model) <= maxTokens) return out
+    maxChars = Math.floor(maxChars * 0.8)
+  }
+}
+
+function tailSlice(text: string, maxChars: number): string {
+  const budget = maxChars - PRIOR_SESSION_TAIL_MARKER.length - 1
+  if (text.length <= budget) return text
+  if (budget <= 0) return PRIOR_SESSION_TAIL_MARKER
+  const tail = text.slice(text.length - budget)
+  const fold = tail.indexOf(FOLD_SEPARATOR)
+  let start: number
+  if (fold >= 0) {
+    start = fold + FOLD_SEPARATOR.length
+  } else {
+    const newline = tail.indexOf('\n')
+    start = newline >= 0 ? newline + 1 : 0
+  }
+  const kept = tail.slice(start).replace(/^\s+/, '')
+  return kept ? `${PRIOR_SESSION_TAIL_MARKER}\n${kept}` : PRIOR_SESSION_TAIL_MARKER
 }
 
 function harnessSectionPriority(heading: string, fromAppendix: boolean): number {
@@ -583,7 +639,8 @@ function buildStableSystem(parts: {
     const pieces = [
       ageLine,
       pinnedBody ? capToTokenBudget(pinnedBody, Math.max(reserved, 1), parts.model) : '',
-      capToTokenBudget(narrative, narrativeCap, parts.model)
+      // Tail-kept: the newest fold is last (see capTailToTokenBudget).
+      capTailToTokenBudget(narrative, narrativeCap, parts.model)
     ].filter((piece) => piece.trim().length > 0)
     sections.push({
       label: 'priorSession',
@@ -718,8 +775,11 @@ function buildSystemZones(parts: {
  * Pre-load durable workspace memory (state.md + index.md) into the stable
  * zone so the <memory> continuation flow works without spending a memory_read
  * tool call on every run. Both files are char-capped by the memory readers.
+ *
+ * Exported so the loop can freeze it per invoke (`AssembleContextRequest.memorySection`):
+ * the bytes are exactly what assemble renders from disk at the moment of the call.
  */
-async function buildMemorySection(
+export async function buildMemorySection(
   workspacePath: string | null | undefined
 ): Promise<string> {
   if (!workspacePath) return ''
@@ -738,20 +798,60 @@ async function buildMemorySection(
   return wrapPromptSection('memory', pieces.join('\n\n'))
 }
 
+/** Wire stub for a working set that a fold left starting on a non-user turn. */
+export const FOLDED_HISTORY_USER_STUB = 'Earlier turns are summarized in <prior_session>.'
+/** Same, when there is no fold summary to point at. */
+export const OMITTED_HISTORY_USER_STUB = 'Earlier turns are not shown.'
+
+/**
+ * Give the request a user turn to open on.
+ *
+ * A fold keeps a suffix of the history, and on a single-prompt agent run
+ * (`forceCompactKeepTail` splits it in half) that suffix starts on an assistant
+ * tool-call turn with no user message anywhere in it. Gemini rejects a leading
+ * function-call turn ("function call turn comes immediately after a user turn or
+ * after a function response turn"), and other hosts expect a conversation to open
+ * on the user. Wire-only — the transcript is never touched — and the stub is the
+ * same text at the same position every step, so the cached prefix does not move.
+ *
+ * @internal exported for tests.
+ */
+export function withLeadingUserTurn(messages: ChatMessage[], hasFoldSummary: boolean): ChatMessage[] {
+  const first = messages.findIndex((message) => message.role !== 'system')
+  if (first < 0 || messages[first]!.role === 'user') return messages
+  const stub: ChatMessage = {
+    role: 'user',
+    content: hasFoldSummary ? FOLDED_HISTORY_USER_STUB : OMITTED_HISTORY_USER_STUB
+  }
+  return [...messages.slice(0, first), stub, ...messages.slice(first)]
+}
+
+/** Tokens for the `\n\n` that joins the stable and volatile zones in `system`. */
+const ZONE_JOIN = '\n\n'
+
 /** `contentBudget` is passed in, not re-resolved, so every layer here is measured
- * against the same window the caller uses for overflow and compaction. */
+ * against the same window the caller uses for overflow and compaction.
+ *
+ * The system layer is the stable zone's count plus the volatile zone's, not a
+ * re-encode of `stable + volatile`. The volatile zone carries the clock, so the
+ * joined string was new every step and the whole system prompt — tens of
+ * thousands of characters — went through BPE on every step for a number that
+ * differs from the sum by a token or two at the join. The stable string is
+ * byte-identical between folds, so its count is a tokenizer-cache hit. */
 async function computeLayers(
-  system: string,
+  zones: SystemZones,
   messages: ChatMessage[],
   toolsJsonEstimate: number,
   model: ModelInfo,
   contentBudget: number,
   countReasoningReplay?: boolean
 ): Promise<ContextLayerBreakdown> {
-  const [systemTokens, history] = await Promise.all([
-    estimateTextTokensAsync(system, model),
+  const [stableTokens, history] = await Promise.all([
+    zones.stable ? estimateTextTokensAsync(zones.stable, model) : Promise.resolve(0),
     estimateMessagesTokensAsync(messages, model, { countReasoningReplay })
   ])
+  const joinTokens = zones.stable && zones.volatile ? estimateTextTokens(ZONE_JOIN, model) : 0
+  const systemTokens = stableTokens + joinTokens + zones.volatileTokens
   const used = systemTokens + history + toolsJsonEstimate
   return {
     system: systemTokens,
@@ -819,7 +919,9 @@ export async function assembleContext(
   const [workspace, rules, memorySection] = await Promise.all([
     buildWorkspaceSnapshotAsync(input.workspacePath, input.goal),
     buildWorkspaceRulesSection(input.workspacePath, input.focusedFile),
-    buildMemorySection(memoryWorkspacePath)
+    input.memorySection !== undefined
+      ? Promise.resolve(input.memorySection)
+      : buildMemorySection(memoryWorkspacePath)
   ])
 
   // Keep the original object whenever flattening changes nothing. Token
@@ -840,6 +942,7 @@ export async function assembleContext(
   messages = stripUnsupportedModalitiesFromMessages(messages, wireCaps)
   messages = capImagesPerRequest(messages, wireCaps)
   const compaction = input.priorCompaction ?? null
+  messages = withLeadingUserTurn(messages, Boolean(compaction?.summary))
 
   const estimateStarted = perfNow()
   const userRules = formatUserRules(input.userRules ?? [])
@@ -878,7 +981,7 @@ export async function assembleContext(
   })
 
   let layers = await computeLayers(
-    zones.system,
+    zones,
     messages,
     input.toolsJsonEstimate,
     input.model,
@@ -901,7 +1004,7 @@ export async function assembleContext(
     if (trimmed.some((m, i) => m !== messages[i])) {
       messages = trimmed
       layers = await computeLayers(
-        zones.system,
+        zones,
         messages,
         input.toolsJsonEstimate,
         input.model,

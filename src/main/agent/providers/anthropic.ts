@@ -15,10 +15,14 @@ import type {
 import { billedCostFromUsage } from './usageFields'
 import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
-import { logProviderFailure, providerFetchFailureChunk } from './log'
+import { logProviderFailure, providerFetchFailureChunk, providerHttpFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
 import { formatProviderHttpError, scrubProviderErrorText } from './httpErrors'
-import { anthropicThinkingBlocksFromMessage, anthropicThinkingFields } from './thinkingPolicy'
+import {
+  anthropicThinkingBlocksFromMessage,
+  anthropicThinkingFields,
+  defaultAnthropicMaxTokens
+} from './thinkingPolicy'
 import { volatileSessionMessage } from './systemZones'
 import { wireToolCallArguments } from '../toolArgWire'
 import { splitToolContent } from './toolImages'
@@ -68,6 +72,30 @@ function toAnthropicContent(content: MessageContent): string | Array<Record<stri
   return blocks
 }
 
+export const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
+
+/** HTTP status for each Messages API error `type`, used for in-band `event: error` frames. */
+const ANTHROPIC_ERROR_TYPE_STATUS: Record<string, number> = {
+  invalid_request_error: 400,
+  authentication_error: 401,
+  billing_error: 402,
+  permission_error: 403,
+  not_found_error: 404,
+  request_too_large: 413,
+  rate_limit_error: 429,
+  api_error: 500,
+  overloaded_error: 529
+}
+
+type AnthropicWireOptions = {
+  /**
+   * First-party Anthropic answers any thinking block without its signature
+   * with a 400, so unsigned blocks (persisted before signatures were kept)
+   * are left out. Compatible hosts (OpenCode Go /messages) take the bare text.
+   */
+  omitUnsignedThinking?: boolean
+}
+
 /** tool_result accepts text and image blocks, so screenshots stay with their call. */
 function toAnthropicToolResultContent(
   content: MessageContent
@@ -90,11 +118,16 @@ function toAnthropicToolResultContent(
 
 function assistantThinkingTextContent(
   thinkingBlocks: ReturnType<typeof anthropicThinkingBlocksFromMessage>,
-  m: ChatMessage
+  m: ChatMessage,
+  opts: AnthropicWireOptions
 ): Array<Record<string, unknown>> {
   const content: Array<Record<string, unknown>> = []
   for (const block of thinkingBlocks) {
-    if (block.type === 'thinking' && block.thinking) {
+    if (block.type === 'thinking' && block.signature) {
+      // Replayed unchanged: the signature covers the text, even when the
+      // text is empty (display `omitted`).
+      content.push({ type: 'thinking', thinking: block.thinking ?? '', signature: block.signature })
+    } else if (block.type === 'thinking' && block.thinking && !opts.omitUnsignedThinking) {
       content.push({ type: 'thinking', thinking: block.thinking })
     } else if (block.type === 'redacted_thinking' && block.data) {
       content.push({ type: 'redacted_thinking', data: block.data })
@@ -106,7 +139,10 @@ function assistantThinkingTextContent(
 }
 
 /** Exported for tests — map chat messages to the Messages API shape. */
-export function toAnthropicMessages(messages: ChatMessage[]): {
+export function toAnthropicMessages(
+  messages: ChatMessage[],
+  opts: AnthropicWireOptions = {}
+): {
   system?: string | Array<Record<string, unknown>>
   messages: Array<Record<string, unknown>>
 } {
@@ -137,15 +173,12 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
     if (m.role === 'assistant' && m.toolCalls?.length) {
       const content = assistantThinkingTextContent(
         anthropicThinkingBlocksFromMessage(m.reasoningState),
-        m
+        m,
+        opts
       )
       for (const t of m.toolCalls) {
-        let input: unknown = {}
-        try {
-          input = JSON.parse(wireToolCallArguments(t.name, t.arguments))
-        } catch {
-          input = {}
-        }
+        // wireToolCallArguments only returns parse-checked JSON or `{}`.
+        const input: unknown = JSON.parse(wireToolCallArguments(t.name, t.arguments))
         content.push({ type: 'tool_use', id: t.id, name: t.name, input })
       }
       out.push({ role: 'assistant', content })
@@ -153,8 +186,11 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
     }
     if (m.role === 'assistant') {
       const thinkingBlocks = anthropicThinkingBlocksFromMessage(m.reasoningState)
-      if (thinkingBlocks.length) {
-        out.push({ role: 'assistant', content: assistantThinkingTextContent(thinkingBlocks, m) })
+      const content = thinkingBlocks.length
+        ? assistantThinkingTextContent(thinkingBlocks, m, opts)
+        : []
+      if (content.length) {
+        out.push({ role: 'assistant', content })
         continue
       }
     }
@@ -265,13 +301,6 @@ function applyCacheControl(
   return { system: systemBlocks, messages: cloned }
 }
 
-function defaultMaxTokens(model: string, hint?: number): number {
-  if (hint && hint > 0) return Math.min(hint, 64_000)
-  if (/haiku/i.test(model)) return 8192
-  if (/opus|fable/i.test(model)) return 16_384
-  return 8192
-}
-
 function stripAnthropicBetas(header: string, ...fragments: string[]): string | undefined {
   const next = header
     .split(',')
@@ -287,7 +316,7 @@ async function postAnthropicMessages(
   betas: string[],
   body: Record<string, unknown>,
   signal: AbortSignal,
-  messagesUrl = 'https://api.anthropic.com/v1/messages'
+  messagesUrl = ANTHROPIC_MESSAGES_URL
 ): Promise<Response> {
   const url = messagesUrl
   type Attempt = { headers: Record<string, string>; body: Record<string, unknown> }
@@ -339,14 +368,20 @@ async function postAnthropicMessages(
       { maxAttempts: CHAT_FETCH_MAX_ATTEMPTS }
     )
     if (last.ok) return last
-    if (last.status === 401 || last.status === 403) return last
+    // Only a 400 can mean an unsupported beta or field. Anything else (429,
+    // 5xx, auth) goes back unchanged: a transient overload must not end with
+    // the request silently succeeding on a body that dropped effort/format.
+    if (last.status !== 400) return last
   }
   return last!
 }
 
 /** Exported for tests — build Anthropic messages request body. */
-export function buildAnthropicBody(req: ProviderChatRequest): Record<string, unknown> {
-  const converted = toAnthropicMessages(req.messages)
+export function buildAnthropicBody(
+  req: ProviderChatRequest,
+  opts: AnthropicWireOptions = {}
+): Record<string, unknown> {
+  const converted = toAnthropicMessages(req.messages, opts)
   const systemForCache =
     req.systemStable !== undefined || req.systemVolatile !== undefined
       ? { stable: req.systemStable ?? '', volatile: req.systemVolatile ?? '' }
@@ -355,7 +390,7 @@ export function buildAnthropicBody(req: ProviderChatRequest): Record<string, unk
   const tools = toAnthropicTools(req.tools)
   const body: Record<string, unknown> = {
     model: req.model,
-    max_tokens: defaultMaxTokens(req.model, req.maxOutputTokens),
+    max_tokens: defaultAnthropicMaxTokens(req.model, req.maxOutputTokens),
     system: cached.system,
     messages: cached.messages,
     tools: tools.length ? tools : undefined,
@@ -374,7 +409,15 @@ export function buildAnthropicBody(req: ProviderChatRequest): Record<string, unk
       }
     }
   }
-  Object.assign(body, anthropicThinkingFields(req))
+  const { output_config: thinkingOutputConfig, ...thinkingFields } = anthropicThinkingFields(req)
+  Object.assign(body, thinkingFields)
+  // Merge, not replace: effort and a structured-output format share output_config.
+  if (thinkingOutputConfig) {
+    body.output_config = {
+      ...(body.output_config as Record<string, unknown> | undefined),
+      ...(thinkingOutputConfig as Record<string, unknown>)
+    }
+  }
   applySampling(body, req)
   return body
 }
@@ -387,7 +430,7 @@ function applySampling(body: Record<string, unknown>, req: ProviderChatRequest):
 /** OpenAI-compatible-style entry point that posts to a caller-supplied Messages URL. */
 export function streamAnthropicMessages(
   req: ProviderChatRequest,
-  messagesUrl = 'https://api.anthropic.com/v1/messages',
+  messagesUrl = ANTHROPIC_MESSAGES_URL,
   extraHeaders?: Record<string, string>
 ): AsyncGenerator<StreamChunk> {
   // LlmProvider.streamChat is typed with a single argument; anthropic's implementation
@@ -463,7 +506,7 @@ export const anthropicProvider: LlmProvider = {
   },
   async *streamChat(
     req: ProviderChatRequest,
-    messagesUrl = 'https://api.anthropic.com/v1/messages',
+    messagesUrl = ANTHROPIC_MESSAGES_URL,
     extraHeaders?: Record<string, string>
   ): AsyncGenerator<StreamChunk> {
     if (!req.apiKey) {
@@ -471,7 +514,9 @@ export const anthropicProvider: LlmProvider = {
       return
     }
 
-    const body = buildAnthropicBody(req)
+    const body = buildAnthropicBody(req, {
+      omitUnsignedThinking: messagesUrl === ANTHROPIC_MESSAGES_URL
+    })
 
     // No server-side context edits: `clear_tool_uses` / `compact` are not sent.
     // LLM summarization (context/compact.ts) is the only shrink path, and the
@@ -499,10 +544,7 @@ export const anthropicProvider: LlmProvider = {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      logProviderFailure('anthropic', 'http', {
-        status: res.status
-      })
-      yield { type: 'error', error: formatProviderHttpError(res.status, text, 'anthropic'), errorCode: 'PROVIDER_HTTP', httpStatus: res.status }
+      yield providerHttpFailureChunk('anthropic', res.status, text)
       return
     }
 
@@ -513,7 +555,27 @@ export const anthropicProvider: LlmProvider = {
     let compactionText = ''
     const thinkingBlocks: AnthropicThinkingBlock[] = []
     let currentThinkingText = ''
+    let currentSignature = ''
     let currentBlockType: 'thinking' | 'redacted_thinking' | null = null
+    /** `message_stop` or a `message_delta` stop_reason — the response finished. */
+    let completed = false
+
+    // A signed block is kept even with empty text (display `omitted`): the
+    // signature is what lets the next request replay it.
+    function* closeThinkingBlock(): Generator<StreamChunk, void, unknown> {
+      if (currentBlockType !== 'thinking') return
+      if (currentThinkingText || currentSignature) {
+        thinkingBlocks.push({
+          type: 'thinking',
+          thinking: currentThinkingText,
+          ...(currentSignature ? { signature: currentSignature } : {})
+        })
+      }
+      if (currentThinkingText) yield { type: 'thinking_done', text: currentThinkingText }
+      currentThinkingText = ''
+      currentSignature = ''
+      currentBlockType = null
+    }
 
     const drops = { dropped: 0 }
 
@@ -561,9 +623,13 @@ export const anthropicProvider: LlmProvider = {
         const message = event.message as Record<string, unknown> | undefined
         applyUsage(message?.usage as Record<string, unknown> | undefined)
       }
+      if (type === 'message_stop') completed = true
       if (type === 'message_delta') {
         const delta = event.delta as Record<string, unknown> | undefined
-        if (delta?.stop_reason) stopReason = normalizeStopReason(delta.stop_reason)
+        if (delta?.stop_reason) {
+          stopReason = normalizeStopReason(delta.stop_reason)
+          completed = true
+        }
         applyUsage(event.usage as Record<string, unknown> | undefined)
       }
       if (type === 'content_block_delta') {
@@ -574,6 +640,9 @@ export const anthropicProvider: LlmProvider = {
         if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
           currentThinkingText += delta.thinking
           yield { type: 'thinking_delta', text: delta.thinking }
+        }
+        if (delta?.type === 'signature_delta' && typeof delta.signature === 'string') {
+          currentSignature += delta.signature
         }
         if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           // Route by the event's own block index: relying on the mutable
@@ -628,6 +697,7 @@ export const anthropicProvider: LlmProvider = {
           currentIndex = index
           currentBlockType = 'thinking'
           currentThinkingText = ''
+          currentSignature = typeof block.signature === 'string' ? block.signature : ''
         } else if (block?.type === 'redacted_thinking') {
           currentIndex = index
           currentBlockType = 'redacted_thinking'
@@ -643,30 +713,41 @@ export const anthropicProvider: LlmProvider = {
         }
       }
       if (type === 'error') {
-        const errObj = event.error as { message?: string } | undefined
+        const errObj = event.error as { type?: string; message?: string } | undefined
         const message = scrubProviderErrorText(errObj?.message ?? 'Anthropic stream error')
-        logProviderFailure('anthropic', 'stream', {})
+        // In-band errors carry the same classes as HTTP errors; the status lets
+        // the retry layer tell a transient overload from a permanent rejection.
+        const httpStatus = errObj?.type ? ANTHROPIC_ERROR_TYPE_STATUS[errObj.type] : undefined
+        logProviderFailure('anthropic', 'stream', { status: httpStatus, message })
         yield {
           type: 'error',
           error: message,
-          errorCode: 'PROVIDER_STREAM'
+          errorCode: 'PROVIDER_HTTP',
+          ...(httpStatus !== undefined ? { httpStatus } : {})
         }
         return
       }
       if (type === 'content_block_stop') {
-        if (currentBlockType === 'thinking' && currentThinkingText) {
-          thinkingBlocks.push({ type: 'thinking', thinking: currentThinkingText })
-          yield { type: 'thinking_done', text: currentThinkingText }
-          currentThinkingText = ''
-          currentBlockType = null
-        }
+        yield* closeThinkingBlock()
       }
     }
 
-    if (currentBlockType === 'thinking' && currentThinkingText) {
-      thinkingBlocks.push({ type: 'thinking', thinking: currentThinkingText })
-      yield { type: 'thinking_done', text: currentThinkingText }
+    // A connection that closes cleanly mid-response is not a finished turn:
+    // treating it as one executes half-streamed tool calls and ends the run on
+    // truncated text. First-party only: the protocol always ends there on
+    // `message_stop`, but no compatible host (OpenCode Go /messages) has been
+    // seen streaming, and one that skipped it would fail every reply.
+    if (!completed && messagesUrl === ANTHROPIC_MESSAGES_URL) {
+      logProviderFailure('anthropic', 'stream', { message: 'ended before message_stop' })
+      yield {
+        type: 'error',
+        error: 'Anthropic stream ended before the response completed',
+        errorCode: 'PROVIDER_NETWORK'
+      }
+      return
     }
+
+    yield* closeThinkingBlock()
 
     for (const call of toolCalls.values()) {
       yield { type: 'tool_call', toolCall: call }

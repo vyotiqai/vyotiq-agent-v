@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppError } from '@shared/utils/errors'
 import { IPC } from '@shared/channels'
 import type { AgentEvent } from '@shared/ipc'
+import type { TryRegisterRunResult } from '@main/agent/runRegistry'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -33,7 +34,7 @@ const registerRunAbortMock = vi.hoisted(() =>
   vi.fn(() => ({ controller: new AbortController(), invokeId: 42 }))
 )
 const tryRegisterRunAbortMock = vi.hoisted(() =>
-  vi.fn(() => ({ ok: true as const, controller: new AbortController(), invokeId: 42 }))
+  vi.fn((): TryRegisterRunResult => ({ ok: true, controller: new AbortController(), invokeId: 42 }))
 )
 const isRunTurnCompleteMock = vi.hoisted(() => vi.fn(() => false))
 const waitUntilRunInactiveMock = vi.hoisted(() => vi.fn(async () => true))
@@ -946,8 +947,39 @@ describe('registerIpc', () => {
         userMessageIndex: 0,
         targetUserAt: undefined
       })
-      expect(tryRegisterRunAbortMock).not.toHaveBeenCalled()
+      // The run slot is held for the rewrite and released after it; no run starts.
+      expect(tryRegisterRunAbortMock).toHaveBeenCalledWith('run-revert', '/ws')
+      expect(clearRunAbortMock).toHaveBeenCalledWith('run-revert', 42)
       expect(runAgentMock).not.toHaveBeenCalled()
+    })
+
+    // A loop tick or goal relaunch that registered first would write into the
+    // files the rewind is rewriting.
+    it('refuses to rewind a run that took its slot in the meantime', async () => {
+      runExistsMock.mockReturnValue(true)
+      isActiveMock.mockReturnValue(false)
+      tryRegisterRunAbortMock.mockReturnValueOnce({
+        ok: false,
+        error: 'Run is already active',
+        code: 'run_active'
+      })
+
+      const handler = handlers.get(IPC.chatRewind)
+      const result = await handler!({ sender: mockWc, senderFrame: mockMainFrame }, rewindPayload)
+
+      expect(result).toMatchObject({ ok: false })
+      expect(prepareRewindToUserMessageMock).not.toHaveBeenCalled()
+    })
+
+    it('releases the run slot when the rewind fails', async () => {
+      runExistsMock.mockReturnValue(true)
+      isActiveMock.mockReturnValue(false)
+      prepareRewindToUserMessageMock.mockRejectedValueOnce(new Error('disk full'))
+
+      const handler = handlers.get(IPC.chatRewind)
+      await handler!({ sender: mockWc, senderFrame: mockMainFrame }, rewindPayload)
+
+      expect(clearRunAbortMock).toHaveBeenCalledWith('run-revert', 42)
     })
 
     it('cancels an active run before rewinding', async () => {

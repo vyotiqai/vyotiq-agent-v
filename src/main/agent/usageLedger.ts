@@ -122,6 +122,41 @@ export async function readUsageLedgerAsync(runDir: string): Promise<UsageLedger 
 }
 
 /**
+ * Lower the ledger's snapshot to the totals an invoke re-seeded.
+ *
+ * Every invoke re-seeds its cumulative totals, mostly from events.jsonl, and
+ * that sum shrinks when a rewind truncates step_usage rows or an events
+ * archive rotates out. Diffed against the larger snapshot, new spend recorded
+ * nothing until it caught up, so the day totals under-counted. Lowered, the
+ * next delta is exactly the new spend. Never raised: a snapshot behind the
+ * totals is spend not yet recorded. Best-effort; never throws.
+ */
+export function rebaseUsageLedger(runDir: string, totals: StepUsageTotals): void {
+  try {
+    const prev = readUsageLedger(runDir)
+    if (!prev) return
+    const last = prev.lastTotals
+    const next: UsageLedger['lastTotals'] = {
+      steps: Math.min(last.steps, totals.steps),
+      billedInputTokens: Math.min(last.billedInputTokens, totals.billedInputTokens),
+      outputTokens: Math.min(last.outputTokens, totals.outputTokens),
+      billedCost: Math.min(last.billedCost, totals.billedCost),
+      estimatedCost: Math.min(last.estimatedCost, totals.estimatedCost),
+      cachedInputTokens: Math.min(last.cachedInputTokens, totals.billedCachedInputTokens),
+      reasoningTokens: Math.min(last.reasoningTokens, totals.reasoningTokens),
+      ...(last.promptInputTokens !== undefined
+        ? { promptInputTokens: Math.min(last.promptInputTokens, totals.billedPromptTokens ?? 0) }
+        : {})
+    }
+    const keys = Object.keys(next) as Array<keyof typeof next>
+    if (keys.every((key) => next[key] === last[key])) return
+    atomicWriteJson(join(runDir, USAGE_LEDGER_FILENAME), { ...prev, lastTotals: next })
+  } catch {
+    // Ledger is observational — a failed write must never break the run loop.
+  }
+}
+
+/**
  * Record cumulative usage deltas for a run into its per-day ledger
  * (`usage.json` next to receipt.json). Called at every agent step and once at
  * terminal teardown; each call adds only what accumulated since the previous

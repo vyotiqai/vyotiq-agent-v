@@ -40,10 +40,42 @@ function probeTimeoutSignal(parent?: AbortSignal): AbortSignal {
   return controller.signal
 }
 
-/** Lightweight connectivity probe — does not call the LLM provider. */
-export async function probeNetworkOnline(signal?: AbortSignal): Promise<boolean> {
-  if (process.env.VITEST === 'true') return true
+/** Origin of a provider endpoint, or null when it does not parse as http(s). */
+function probeOrigin(probeUrl: string | undefined): string | null {
+  if (!probeUrl?.trim()) return null
   try {
+    const url = new URL(probeUrl.trim())
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Lightweight connectivity probe — does not call the LLM provider.
+ *
+ * With `probeUrl` (a local or custom provider endpoint) the provider's own
+ * origin is probed instead of the public internet: an offline laptop running
+ * Ollama, or a network that blocks 1.1.1.1:443, would otherwise wait forever
+ * for connectivity the run does not need. Any HTTP response at all means the
+ * host is reachable; only a thrown fetch means offline.
+ */
+export async function probeNetworkOnline(
+  signal?: AbortSignal,
+  opts?: { probeUrl?: string }
+): Promise<boolean> {
+  if (process.env.VITEST === 'true') return true
+  const origin = probeOrigin(opts?.probeUrl)
+  try {
+    if (origin) {
+      const res = await fetch(`${origin}/`, {
+        method: 'HEAD',
+        redirect: 'manual',
+        signal: probeTimeoutSignal(signal)
+      })
+      await res.body?.cancel().catch(() => undefined)
+      return true
+    }
     const res = await fetch(DEFAULT_PROBE_URL, {
       method: 'GET',
       signal: probeTimeoutSignal(signal)
@@ -95,6 +127,8 @@ export type NetworkWaitCallback = (retryInMs: number) => void | Promise<void>
 export async function* iterateNetworkWait(options: {
   signal?: AbortSignal
   maxWaitMs?: number
+  /** Provider endpoint to probe instead of the public internet (see probeNetworkOnline). */
+  probeUrl?: string
 }): AsyncGenerator<number, void, unknown> {
   const maxWaitMs = options.maxWaitMs ?? Number.POSITIVE_INFINITY
   let waited = 0
@@ -105,7 +139,7 @@ export async function* iterateNetworkWait(options: {
       err.name = 'AbortError'
       throw err
     }
-    if (await probeNetworkOnline(options.signal)) return
+    if (await probeNetworkOnline(options.signal, { probeUrl: options.probeUrl })) return
 
     const retryInMs = Math.min(OFFLINE_POLL_MS, maxWaitMs - waited)
     if (retryInMs <= 0) break

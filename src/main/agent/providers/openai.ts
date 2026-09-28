@@ -45,7 +45,7 @@ import type {
   ToolCall,
   TokenUsage
 } from './types'
-import { streamOpenAiResponses } from './openaiResponses'
+import { streamOpenAiResponses, thinkingDoneLatch } from './openaiResponses'
 import { billedCostFromUsage, cacheWriteTokensFromDetails } from './usageFields'
 import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
@@ -53,6 +53,7 @@ import { logProviderFailure, providerFetchFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
 import { assertAllowedUrl, fetchWithValidatedRedirects } from '@main/net/webFetch'
 import { mergeOpenAiCompatToolArgDelta, wireToolCallArguments } from '../toolArgWire'
+import { syntheticToolCallIdTag } from '../dedupeToolCalls'
 import { mergeStreamedToolName } from '../../../shared/utils/toolName'
 import {
   formatProviderHttpError,
@@ -186,25 +187,28 @@ function parseOpenAiCompatThinkingInners(thinking: unknown): {
  * Merge streamed ThinkChunk deltas into accumulated chunks.
  * Continues the last open chunk across frames; within one delta, only the first
  * incoming row may continue — further thinking rows stay distinct chunks.
+ *
+ * Accumulates into `existing` in place and returns it: this runs once per
+ * streamed delta, and re-cloning every chunk and inner part each time made a
+ * long reasoning stream quadratic (8k deltas ≈ 1.4 s on the main thread).
+ * Incoming rows are cloned, so the accumulator never aliases a parsed frame.
  */
 export function absorbOpenAiCompatThinkChunks(
   existing: OpenAiCompatThinkChunk[],
   incoming: OpenAiCompatThinkChunk[]
 ): OpenAiCompatThinkChunk[] {
-  const out = existing.map(cloneOpenAiCompatThinkChunk)
+  const out = existing
   if (incoming.length === 0) return out
 
   const mergeIntoLast = (chunk: OpenAiCompatThinkChunk) => {
     const last = out[out.length - 1]!
     last.text += chunk.text
     if (chunk.thinking?.length) {
-      last.thinking = [
-        ...(last.thinking ?? []),
-        ...chunk.thinking.map(cloneOpenAiCompatThinkInner)
-      ]
+      last.thinking ??= []
+      for (const inner of chunk.thinking) last.thinking.push(cloneOpenAiCompatThinkInner(inner))
     } else if (chunk.text && last.thinking?.length) {
       // Continuation arrived as flat text while prior retained structured inners.
-      last.thinking = [...last.thinking, { type: 'text', text: chunk.text }]
+      last.thinking.push({ type: 'text', text: chunk.text })
     }
     if (chunk.signature !== undefined) last.signature = chunk.signature
     if (chunk.closed !== undefined) last.closed = chunk.closed
@@ -348,6 +352,9 @@ function asToolCallArray(value: unknown): Array<Record<string, unknown>> {
 /**
  * Match a tool_call row to the in-flight pending slot. Message snapshots often
  * omit `index`; using `pending.size` would fork a second id and drop live args.
+ * The single-slot fallback is only for rows that cannot name their call: a row
+ * whose id matches no pending call is a different call (two parallel calls in
+ * one snapshot), and folding it in glued the names into `readgrep`.
  */
 function pendingIndexForToolCall(
   pending: Map<number, ToolCall>,
@@ -360,7 +367,7 @@ function pendingIndexForToolCall(
       if (call.id === id) return index
     }
   }
-  if (pending.size === 1) {
+  if (!id && pending.size === 1) {
     const only = pending.keys().next().value
     if (typeof only === 'number') return only
   }
@@ -1622,15 +1629,11 @@ export function createOpenAiCompatibleProvider(
       let reasoningFormat: OpenAiCompatReasoningReplayFormat | undefined
       let thinkChunks: OpenAiCompatThinkChunk[] = []
       let stopReason: StopReason | undefined
-      let thinkingDoneEmitted = false
       const drops = { dropped: 0 }
-
-      const emitThinkingDoneIfNeeded = function* (): Generator<StreamChunk, void, unknown> {
-        if (reasoningContent && !thinkingDoneEmitted) {
-          thinkingDoneEmitted = true
-          yield { type: 'thinking_done', text: reasoningContent }
-        }
-      }
+      const thinkingDone = thinkingDoneLatch(() => reasoningContent)
+      // Hosts that send no tool-call id get a synthesized one; the tag keeps
+      // it from repeating (`call_0`) on every step of the run.
+      const idTag = syntheticToolCallIdTag()
 
       const noteReasoningFormat = (format: OpenAiCompatReasoningReplayFormat) => {
         // Prefer think_chunks once seen — mixed streams still need structured replay.
@@ -1733,7 +1736,7 @@ export function createOpenAiCompatibleProvider(
             const chunkId =
               typeof tc.id === 'string' && tc.id.trim() ? tc.id.trim() : undefined
             const existing = pending.get(index) ?? {
-              id: chunkId ?? `call_${index}`,
+              id: chunkId ?? `call_${idTag}_${index}`,
               name: '',
               arguments: ''
             }
@@ -1768,13 +1771,13 @@ export function createOpenAiCompatibleProvider(
         }
 
         if (deltaCalls.length || messageCalls.length) {
-          yield* emitThinkingDoneIfNeeded()
+          yield* thinkingDone.emit()
           if (deltaCalls.length) yield* absorbToolCalls(deltaCalls)
           if (messageCalls.length) yield* absorbToolCalls(messageCalls)
         }
 
         if (textContent) {
-          yield* emitThinkingDoneIfNeeded()
+          yield* thinkingDone.emit()
           yield { type: 'text', text: textContent }
         }
 
@@ -1791,9 +1794,7 @@ export function createOpenAiCompatibleProvider(
       for (const call of pending.values()) {
         yield { type: 'tool_call', toolCall: call }
       }
-      if (reasoningContent && !thinkingDoneEmitted) {
-        yield { type: 'thinking_done', text: reasoningContent }
-      }
+      yield* thinkingDone.emit()
       const finalizedThinkChunks =
         thinkChunks.length > 0 ? finalizeOpenAiCompatThinkChunks(thinkChunks) : undefined
       yield {

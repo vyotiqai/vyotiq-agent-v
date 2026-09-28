@@ -96,8 +96,10 @@ vi.mock('@main/agent/tools', () => ({
 import { runAgent } from '@main/agent/loop'
 import { isActive, registerRunAbort, resetActiveRunsForTests } from '@main/agent/runRegistry'
 import {
+  appendEvent,
   appendMessage,
   createRun,
+  flushEventAppends,
   flushMessageAppends,
   flushStatusWrites,
   interruptOrphanRuns,
@@ -482,6 +484,55 @@ describe('runAgent session continuation', () => {
     const record = loadCompaction(resolveRunDir(workspace, runId))
     expect(record?.foldedMessages).toBe(2)
     expect(record?.summary).toContain('Folded prior turns')
+  })
+
+  // A hard kill mid-stream leaves the answer only in stream_snapshot events.
+  // The startup sweep's own "cancelled" row used to mark it handled, so it was
+  // never recovered.
+  it('recovers a streamed answer the sweep finds only in stream snapshots', async () => {
+    const runId = 'orphan-snapshot'
+    const runDir = createRun(workspace, runId, 'crash goal')
+    syncMessages(runDir, [{ role: 'user', content: 'explain it' }])
+    appendEvent(runDir, { type: 'stream_snapshot', runId, text: 'The answer so f' })
+    appendEvent(runDir, { type: 'stream_snapshot', runId, text: 'The answer so far' })
+    await flushEventAppends(runDir)
+    await updateStatus(runDir, { status: 'running', step: 1 }, { sync: true })
+
+    expect(await interruptOrphanRuns([workspace])).toBe(1)
+    await flushMessageAppends(runDir)
+
+    expect(loadMessages(workspace, runId)).toEqual([
+      { role: 'user', content: 'explain it' },
+      { role: 'assistant', content: 'The answer so far' }
+    ])
+  })
+
+  it('puts a recovered answer before the turn that resumes the run', async () => {
+    const runId = 'snapshot-resume-order'
+    const runDir = createRun(workspace, runId, 'crash goal')
+    syncMessages(runDir, [{ role: 'user', content: 'explain it' }])
+    appendEvent(runDir, { type: 'stream_snapshot', runId, text: 'The answer so far' })
+    await flushEventAppends(runDir)
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'fresh answer' }
+    })
+    registerRunAbort(runId, workspace)
+
+    for await (const _ev of runAgent({
+      runId,
+      newMessages: [{ role: 'user', content: 'go on' }],
+      workspacePath: workspace,
+      resume: true
+    })) {
+      // drain
+    }
+
+    expect(loadMessages(workspace, runId).map((m) => `${m.role}:${String(m.content)}`)).toEqual([
+      'user:explain it',
+      'assistant:The answer so far',
+      'user:go on',
+      'assistant:fresh answer'
+    ])
   })
 
   it('resumes after orphan interrupt using disk messages without a new user turn', async () => {
