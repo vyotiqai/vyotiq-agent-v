@@ -4,6 +4,7 @@ import { requestOpenWorkspaceFile } from '@renderer/lib/chat/workspaceFileReques
 import { launchViewFor } from './launchView'
 import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
+import { toggleArchivedRun } from './navigator/archivedRuns'
 import { requestNavigatorScope } from './navigator/useNavigatorScope'
 import { requestUpdatePanel } from './navigator/UpdateChip'
 import { ChatView } from '../features/chat/ChatView'
@@ -530,6 +531,40 @@ function App() {
     [settings.pinnedRuns, update]
   )
 
+  // Archive/unarchive a settled task: it leaves the navigator (and Ctrl K) until
+  // the View menu shows archived tasks. Archiving drops a pin — a pinned task is
+  // one you asked to keep in sight. The toast's Undo puts both back.
+  const archiveSettingsRef = useRef({ archivedRuns: settings.archivedRuns, pinnedRuns: settings.pinnedRuns })
+  archiveSettingsRef.current = { archivedRuns: settings.archivedRuns, pinnedRuns: settings.pinnedRuns }
+  const onToggleArchivedRun = useCallback(
+    (path: string, runId: string): void => {
+      const key = pinnedRunKey(path, runId)
+      const before = archiveSettingsRef.current
+      if (before.archivedRuns.includes(key)) {
+        void update({ archivedRuns: toggleArchivedRun(before.archivedRuns, key) })
+        return
+      }
+      const wasPinned = before.pinnedRuns.includes(key)
+      void update({
+        archivedRuns: toggleArchivedRun(before.archivedRuns, key),
+        ...(wasPinned ? { pinnedRuns: before.pinnedRuns.filter((k) => k !== key) } : {})
+      })
+      pushToast('Task archived', {
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            const now = archiveSettingsRef.current
+            void update({
+              archivedRuns: now.archivedRuns.filter((k) => k !== key),
+              ...(wasPinned && !now.pinnedRuns.includes(key) ? { pinnedRuns: togglePinnedRun(now.pinnedRuns, key) } : {})
+            })
+          }
+        }
+      })
+    },
+    [update]
+  )
+
   const effectiveChatSettings = resolveEffectiveSettings(
     settings,
     (focusedWorkspacePath
@@ -1021,42 +1056,6 @@ function App() {
       )
     },
     [activeWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
-  )
-
-  /**
-   * Home's Start: a new task in that workspace, sent at once through the same
-   * onboarding gate, offline queue and controller the brief's Start task uses.
-   * With no key for the provider nothing could run, so the brief opens with the
-   * text in it instead, where the missing key is spelled out.
-   */
-  const onStartTaskFromHome = useCallback(
-    (path: string, brief: string): void => {
-      if (homeProviderIssue) {
-        onNewSessionInWorkspace(path, brief)
-        return
-      }
-      setOpenInstanceByParent({})
-      setView('chat')
-      void newChatInWorkspace(path).then(() =>
-        gateSendWithOnboarding(
-          (text, images, files, extras) =>
-            sendWithOfflineQueue(
-              text,
-              images,
-              files,
-              extras,
-              (t, i, f, e) => getRunControllerRef.current(null, path)?.send(t, i, f, e) ?? false,
-              { runId: null, paneId: draftPaneIdIn(path), workspacePath: path }
-            ),
-          brief,
-          undefined,
-          undefined,
-          undefined,
-          { workspacePath: path, runId: null }
-        )
-      )
-    },
-    [draftPaneIdIn, gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
   )
 
   /**
@@ -1750,13 +1749,17 @@ function App() {
     fork: (path: string, runId: string) => Promise<void>
     togglePin: (path: string, runId: string) => void
     isPinned: (path: string, runId: string) => boolean
+    toggleArchive: (path: string, runId: string) => void
+    isArchived: (path: string, runId: string) => boolean
   }>({
     rename: async () => {},
     exportRun: async () => {},
     deleteRun: async () => {},
     fork: async () => {},
     togglePin: () => {},
-    isPinned: () => false
+    isPinned: () => false,
+    toggleArchive: () => {},
+    isArchived: () => false
   })
   const renderPaneSession = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) => {
@@ -2091,6 +2094,12 @@ function App() {
             onFork: pane.runId ? () => void paneRunActionsRef.current.fork(pane.workspacePath, pane.runId!) : undefined,
             onTogglePin: pane.runId ? () => paneRunActionsRef.current.togglePin(pane.workspacePath, pane.runId!) : undefined,
             isPinned: pane.runId ? () => paneRunActionsRef.current.isPinned(pane.workspacePath, pane.runId!) : undefined,
+            onToggleArchive: pane.runId
+              ? () => paneRunActionsRef.current.toggleArchive(pane.workspacePath, pane.runId!)
+              : undefined,
+            isArchived: pane.runId
+              ? () => paneRunActionsRef.current.isArchived(pane.workspacePath, pane.runId!)
+              : undefined,
             onDelete: pane.runId
               ? () => {
                   const runId = pane.runId!
@@ -2207,8 +2216,9 @@ function App() {
     }
     refreshWorkspaceRuns(path)
     const nextPins = prunePinnedRun(settings.pinnedRuns, pinnedRunKey(path, runId))
-    if (nextPins !== settings.pinnedRuns) {
-      void update({ pinnedRuns: [...nextPins] })
+    const nextArchived = prunePinnedRun(settings.archivedRuns, pinnedRunKey(path, runId))
+    if (nextPins !== settings.pinnedRuns || nextArchived !== settings.archivedRuns) {
+      void update({ pinnedRuns: [...nextPins], archivedRuns: [...nextArchived] })
     }
   }
 
@@ -2271,7 +2281,9 @@ function App() {
     deleteRun: onDeleteRunInWorkspace,
     fork: onForkRunInWorkspace,
     togglePin: onTogglePinnedRun,
-    isPinned: (path, runId) => settings.pinnedRuns.includes(pinnedRunKey(path, runId))
+    isPinned: (path, runId) => settings.pinnedRuns.includes(pinnedRunKey(path, runId)),
+    toggleArchive: onToggleArchivedRun,
+    isArchived: (path, runId) => settings.archivedRuns.includes(pinnedRunKey(path, runId))
   }
 
   const onStopRunInWorkspace = useCallback(
@@ -2556,6 +2568,12 @@ function App() {
     },
     onCloseWorkspace,
     onAddWorkspace: onPickWorkspace,
+    recentWorkspaces: setupRecents(registry?.recentPaths ?? [], openWorkspaces, scratchPath?.path ?? null),
+    onOpenRecentWorkspace: (path: string) => {
+      void addWorkspace(path).then((added) => {
+        if (added) handoffToChatAfterWorkspaceAdd(added.activePath, added.activeRunId)
+      })
+    },
     onNewChatInWorkspace,
     onNewTaskWithText: onNewSessionInWorkspace,
     onSelectRunInWorkspace: (path: string, runId: string) => void onSelectRunInWorkspace(path, runId),
@@ -2625,6 +2643,8 @@ function App() {
       onNewChat={onNewChat}
       pinnedRunKeys={settings.pinnedRuns}
       onTogglePinnedRun={onTogglePinnedRun}
+      archivedRunKeys={settings.archivedRuns}
+      onToggleArchivedRun={onToggleArchivedRun}
       onStopRunInWorkspace={(path, runId) => void onStopRunInWorkspace(path, runId)}
       onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
       onPauseGoalInWorkspace={(path, runId, live) => void onPauseGoalInWorkspace(path, runId, live)}
@@ -2744,7 +2764,6 @@ function App() {
               runsByWorkspacePath={runsByWorkspacePath}
               activeRuns={shellWorkspaceProps.activeRuns}
               providerIssue={homeProviderIssue}
-              onStartTask={onStartTaskFromHome}
               onNewTaskInWorkspace={(path) => onNewSessionInWorkspace(path, '')}
               onOpenTask={shellWorkspaceProps.onSelectRunInWorkspace}
               onOpenWorkspace={(path) => {

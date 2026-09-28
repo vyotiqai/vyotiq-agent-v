@@ -2,7 +2,7 @@ import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { TaskDraft } from '@shared/ipc'
 import { draftTitle } from '@renderer/lib/drafts/taskDraftStore'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
-import { IconButton, StatusGlyph, cn } from '@renderer/lib/ui'
+import { IconButton, cn } from '@renderer/lib/ui'
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from '@renderer/lib/ui/ContextMenu'
 import { ageFromNow } from './navigatorModel'
 
@@ -12,22 +12,20 @@ export type NavigatorDraftActions = {
 }
 
 /**
- * A brief put aside: not started, so the hollow glyph a queued check wears;
- * its title; when it was last saved. Open continues it on New task; its menu
+ * A brief put aside: its title and when it was last saved. The Drafts heading
+ * wears the hollow "not started" glyph once, so the row wears none. Its
+ * workspace is the heading above it. Open continues it on New task; its menu
  * deletes it.
  */
 export function NavigatorDraftRow({
   workspacePath,
   draft,
-  foreign,
   selected = false,
   actions,
   onNavKeyDown
 }: {
   workspacePath: string
   draft: TaskDraft
-  /** From a workspace other than the one in front: name it. */
-  foreign: boolean
   /** Being continued on New task, which is on screen. */
   selected?: boolean
   actions: NavigatorDraftActions
@@ -40,16 +38,16 @@ export function NavigatorDraftRow({
   const age = ageFromNow(draft.updatedAt)
   const menuItems = useMemo<ContextMenuItem[]>(
     () => [
-      { id: 'open', label: 'Continue on New task', icon: 'edit', onSelect: () => actions.onOpen(workspacePath, draft) },
+      { id: 'open', label: 'Continue on New task', onSelect: () => actions.onOpen(workspacePath, draft) },
       { type: 'separator', id: 'sep' },
-      { id: 'delete', label: 'Delete draft', icon: 'trash', danger: true, shortcut: 'Del', onSelect: () => actions.onDelete(workspacePath, draft) }
+      { id: 'delete', label: 'Delete draft', danger: true, shortcut: 'Del', onSelect: () => actions.onDelete(workspacePath, draft) }
     ],
     [actions, draft, workspacePath]
   )
   return (
     <li className="group relative">
       <span id={descriptionId} className="sr-only">
-        {`Draft, saved ${age === 'now' ? 'just now' : `${age} ago`}${foreign ? `, ${formatWorkspaceName(workspacePath)}` : ''}`}
+        {`Draft, saved ${age === 'now' ? 'just now' : `${age} ago`}, ${formatWorkspaceName(workspacePath)}`}
       </span>
       <button
         ref={rowRef}
@@ -61,8 +59,10 @@ export function NavigatorDraftRow({
         aria-current={selected ? 'page' : undefined}
         title={draft.brief.trim() || title}
         className={cn(
-          'app-region-no-drag flex h-7 w-full items-center gap-2 rounded-md pl-2 pr-2 text-left vy-transition focus-visible:vy-focus-ring',
-          selected ? 'bg-surface-2' : 'hover:bg-surface'
+          'app-region-no-drag flex h-7 w-full items-center gap-2 rounded-md pl-2 text-left vy-transition focus-visible:vy-focus-ring',
+          selected ? 'bg-surface-2' : 'hover:bg-surface',
+          // Room for the ⋯ after the meta: while its menu is open, and on hover or focus.
+          menuAnchor ? 'pr-7' : 'pr-2 group-hover:pr-7 group-focus-within:pr-7'
         )}
         onClick={() => actions.onOpen(workspacePath, draft)}
         onContextMenu={(e) => {
@@ -84,16 +84,8 @@ export function NavigatorDraftRow({
           onNavKeyDown?.(e)
         }}
       >
-        <span title="Not started" className="inline-flex shrink-0">
-          <StatusGlyph state="queued" size={14} />
-        </span>
         <span className={cn('min-w-0 flex-1 truncate text-sm', selected ? 'text-fg-strong' : 'text-fg')}>{title}</span>
-        <span className={menuAnchor ? 'hidden' : 'contents group-hover:hidden group-focus-within:hidden'}>
-          <span className="shrink-0 font-mono text-caption text-tertiary tnum">
-            {foreign ? <span className="font-sans">{formatWorkspaceName(workspacePath)} · </span> : null}
-            {age}
-          </span>
-        </span>
+        <span className="min-w-[3ch] shrink-0 text-right font-mono text-caption text-tertiary tnum">{age}</span>
       </button>
       <span
         className={cn('absolute inset-y-0 right-1 items-center', menuAnchor ? 'flex' : 'hidden group-hover:flex group-focus-within:flex')}

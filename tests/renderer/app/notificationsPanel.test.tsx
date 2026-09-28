@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { NotificationItem } from '@shared/ipc'
-import { NotificationsButton } from '@renderer/app/navigator/NotificationsButton'
+import { NotificationsRow } from '@renderer/app/navigator/NotificationsRow'
 
 afterEach(cleanup)
 
@@ -41,19 +41,19 @@ const ITEMS: NotificationItem[] = [
   })
 ]
 
-function open(over: Partial<Parameters<typeof NotificationsButton>[0]> = {}) {
+function open(over: Partial<Parameters<typeof NotificationsRow>[0]> = {}) {
   const handlers = {
     onMarkRead: vi.fn(),
     onDismiss: vi.fn(),
     onOpenItem: vi.fn(),
     onOpenSettings: vi.fn()
   }
-  render(<NotificationsButton items={ITEMS} unreadCount={2} {...handlers} {...over} />)
-  fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }))
-  return { handlers, panel: screen.getByRole('dialog', { name: 'Notifications' }) }
+  render(<NotificationsRow items={ITEMS} unreadCount={2} {...handlers} {...over} />)
+  fireEvent.click(screen.getByRole('button', { name: /^Inbox/ }))
+  return { handlers, panel: screen.getByRole('dialog', { name: 'Inbox' }) }
 }
 
-describe('NotificationsButton', () => {
+describe('NotificationsRow', () => {
   it('says how many are new beside the heading', () => {
     const { panel } = open()
     expect(within(panel).getByText('2 new')).toBeTruthy()

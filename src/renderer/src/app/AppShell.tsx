@@ -36,6 +36,7 @@ import { FirstRunNavigator, Navigator, type NavigatorPlace, type NavigatorProps 
 import { requestUpdatePanel } from './navigator/UpdateChip'
 import { buildNavigatorSections, type NavRow } from './navigator/navigatorModel'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
+import { useNavigatorView } from './navigator/useNavigatorView'
 
 export type ShellView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage'
 
@@ -80,10 +81,16 @@ export type AppShellProps = {
   /** `pinnedRunKey` of every pinned task. */
   pinnedRunKeys?: readonly string[]
   onTogglePinnedRun?: (path: string, runId: string) => void
+  /** `pinnedRunKey` of every archived task. */
+  archivedRunKeys?: readonly string[]
+  onToggleArchivedRun?: (path: string, runId: string) => void
   onLoadOlderRuns?: (path: string) => void
   onSwitchWorkspace?: (path: string) => void
   onCloseWorkspace?: (path: string) => void
   onAddWorkspace?: () => void
+  /** Folders opened before and closed since, newest first. */
+  recentWorkspaces?: readonly string[]
+  onOpenRecentWorkspace?: (path: string) => void
   /** Open a workspace file in the Files panel. */
   onOpenWorkspaceFile?: (workspacePath: string, path: string) => void
   /** When true, Escape may stop the active run (after other Esc handlers). */
@@ -150,10 +157,12 @@ function AppShellInner(props: AppShellProps) {
     clampSidebarWidthPx
   )
   const [scopePath, setScopePath] = useNavigatorScope(openWorkspaces)
+  const [navigatorView, updateNavigatorView] = useNavigatorView()
   // Settings brings its own index to the navigator's column (see NavigatorSlot).
   const lendsNavigatorColumn = view === 'settings'
   const [navigatorSlot, setNavigatorSlot] = useState<HTMLElement | null>(null)
   const pinnedKeys = useMemo(() => new Set(props.pinnedRunKeys ?? []), [props.pinnedRunKeys])
+  const archivedKeys = useMemo(() => new Set(props.archivedRunKeys ?? []), [props.archivedRunKeys])
   const drawerRef = useRef<HTMLDivElement>(null)
   const drawerTriggerRef = useRef<HTMLElement | null>(null)
   const mainRef = useRef<HTMLElement>(null)
@@ -201,9 +210,12 @@ function AppShellInner(props: AppShellProps) {
         activePath: workspacePath,
         activeRuns,
         activeRunsLoaded,
-        scopePath: null
+        scopePath: null,
+        // Archived tasks stay out of Ctrl K unless the navigator is showing them too.
+        archivedKeys,
+        showArchived: navigatorView.showArchived
       }).flatMap((section) => section.rows),
-    [runsByWorkspacePath, openWorkspaces, workspacePath, activeRuns, activeRunsLoaded]
+    [runsByWorkspacePath, openWorkspaces, workspacePath, activeRuns, activeRunsLoaded, archivedKeys, navigatorView.showArchived]
   )
 
   const openTask = useCallback(
@@ -246,14 +258,19 @@ function AppShellInner(props: AppShellProps) {
   /** Where a new task goes: the workspace the navigator is filtered to, else the active one. */
   const newTaskPath = scopePath ?? workspacePath ?? openWorkspaces[0] ?? null
 
-  const onNewTask = useCallback((): void => {
-    if (newTaskPath && onNewChatInWorkspace && (!workspacePath || !workspacePathsEqual(newTaskPath, workspacePath))) {
-      onNewChatInWorkspace(newTaskPath)
-    } else {
-      onNewChat()
-    }
-    if (!isDesktop) setDrawerOpen(false)
-  }, [newTaskPath, workspacePath, onNewChatInWorkspace, onNewChat, isDesktop])
+  /** A new task in `path`; the active workspace's own New task when that is where it goes. */
+  const onNewTaskIn = useCallback(
+    (path: string | null): void => {
+      if (path && onNewChatInWorkspace && (!workspacePath || !workspacePathsEqual(path, workspacePath))) {
+        onNewChatInWorkspace(path)
+      } else {
+        onNewChat()
+      }
+      if (!isDesktop) setDrawerOpen(false)
+    },
+    [workspacePath, onNewChatInWorkspace, onNewChat, isDesktop]
+  )
+  const onNewTask = useCallback((): void => onNewTaskIn(newTaskPath), [onNewTaskIn, newTaskPath])
 
   const switchWorkspaceByIndex = useCallback(
     (index: number): void => {
@@ -360,6 +377,7 @@ function AppShellInner(props: AppShellProps) {
       scopePath={scopePath}
       onScopeChange={setScopePath}
       onNewTask={onNewTask}
+      onNewTaskIn={onNewTaskIn}
       onOpenHome={() => {
         props.onOpenHome()
         if (!isDesktop) setDrawerOpen(false)
@@ -373,11 +391,9 @@ function AppShellInner(props: AppShellProps) {
         if (!isDesktop) setDrawerOpen(false)
       }}
       onOpenSettings={props.onOpenSettings}
-      onOpenShortcuts={() => {
-        if (props.onOpenSettingsSection) props.onOpenSettingsSection('shortcuts')
-        else props.onOpenSettings()
-      }}
       onAddWorkspace={() => props.onAddWorkspace?.()}
+      recentPaths={props.recentWorkspaces}
+      onOpenRecentWorkspace={props.onOpenRecentWorkspace}
       onCloseWorkspace={(path) => {
         if (scopePath && workspacePathsEqual(scopePath, path)) setScopePath(null)
         props.onCloseWorkspace?.(path)
@@ -394,9 +410,13 @@ function AppShellInner(props: AppShellProps) {
         onResume: props.onResumeRunInWorkspace,
         onPauseGoal: props.onPauseGoalInWorkspace,
         onStopLoop: props.onStopLoopInWorkspace,
-        onTogglePin: props.onTogglePinnedRun
+        onTogglePin: props.onTogglePinnedRun,
+        onToggleArchive: props.onToggleArchivedRun
       }}
       pinnedKeys={pinnedKeys}
+      archivedKeys={archivedKeys}
+      view={navigatorView}
+      onViewChange={updateNavigatorView}
       drafts={props.drafts}
       notifications={{
         items: notifications.items,
@@ -441,6 +461,7 @@ function AppShellInner(props: AppShellProps) {
               value={navigatorWidthPx}
               min={SIDEBAR_WIDTH_MIN_PX}
               max={SIDEBAR_WIDTH_MAX_PX}
+              defaultValue={SIDEBAR_WIDTH_PX}
               edge="end"
               onChange={setNavigatorWidthPx}
               // Main's border is the line; the handle lights it up.

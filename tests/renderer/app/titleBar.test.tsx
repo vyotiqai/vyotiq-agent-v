@@ -55,7 +55,7 @@ describe('TitleBar', () => {
     const { container } = renderBar('win32', { width: 300 })
     const brand = container.querySelector('[data-titlebar-brand]') as HTMLElement
     expect(brand.style.width).toBe('300px')
-    expect(brand.textContent).toContain('Agent V')
+    expect(brand.textContent).not.toContain('Agent V')
   })
 
   it('names the toggle by what it will do, with its shortcut', () => {

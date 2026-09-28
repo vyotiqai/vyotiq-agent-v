@@ -89,7 +89,7 @@ test('the band spans the whole window, over the navigator too', async () => {
 
 test('its empty stretches drag the window', async () => {
   const brand = await launched.window.locator('[data-titlebar-brand]').boundingBox()
-  // Between the "Agent V" label and the toggle.
+  // Past the toggle, which sits beside the mark.
   const hit = await probe((brand?.x ?? 0) + (brand?.width ?? 0) - 60, 18)
   expect(hit).toEqual({ inside: 'band', region: 'drag' })
 })

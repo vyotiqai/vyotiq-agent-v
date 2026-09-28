@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import type { ActiveRun, RunSummary } from '@shared/ipc'
 import { RUN_INTERRUPTED_ERROR } from '@shared/runInterrupt'
-import { buildNavigatorSections, type NavigatorInput } from '@renderer/app/navigator/navigatorModel'
+import {
+  buildNavigatorSections,
+  draftsPassFilter,
+  filterNavigatorSections,
+  groupSectionsByWorkspace,
+  navFilterActive,
+  NO_NAV_FILTER,
+  splitRowsByDate,
+  type NavigatorInput
+} from '@renderer/app/navigator/navigatorModel'
+import { toggleArchivedRun, ARCHIVED_RUNS_CAP } from '@renderer/app/navigator/archivedRuns'
+import { parseNavigatorView, DEFAULT_NAVIGATOR_VIEW } from '@renderer/app/navigator/useNavigatorView'
 import { pinnedRunKey } from '@renderer/features/home/pinnedRuns'
 
 const NOW = Date.parse('2026-09-23T12:00:00.000Z')
@@ -236,5 +247,145 @@ describe('buildNavigatorSections', () => {
       input({ runsByWorkspacePath: { [A]: { runs: [run('r1')] } }, unreadRunIds: new Set(['r1']) })
     )
     expect(sectionOf(sections, 'r1')?.row.unread).toBe(true)
+  })
+})
+
+describe('splitRowsByDate', () => {
+  // Local noon, so the calendar-day edges don't depend on the test machine's zone.
+  const now = new Date(2026, 8, 23, 12, 0, 0).getTime()
+  const at = (days: number, hour = 12): string => new Date(2026, 8, 23 - days, hour, 0, 0).toISOString()
+  const rowsFor = (runs: RunSummary[]) =>
+    buildNavigatorSections(input({ openPaths: [A], runsByWorkspacePath: { [A]: { runs } }, now })).find(
+      (section) => section.key === 'done'
+    )!.rows
+
+  it('splits by calendar day: Today, Yesterday, the five days before, then Older', () => {
+    const rows = rowsFor([
+      run('t', { updatedAt: at(0, 1) }),
+      run('y', { updatedAt: at(1, 23) }),
+      run('w6', { updatedAt: at(6) }),
+      run('o7', { updatedAt: at(7) })
+    ])
+    const groups = splitRowsByDate(rows, now)
+    expect(groups.map((g) => [g.label, g.rows.map((r) => r.runId)])).toEqual([
+      ['Today', ['t']],
+      ['Yesterday', ['y']],
+      ['This week', ['w6']],
+      ['Older', ['o7']]
+    ])
+  })
+
+  it('leaves out empty days and files an unreadable time under Older', () => {
+    const groups = splitRowsByDate(rowsFor([run('bad', { updatedAt: 'not a date' })]), now)
+    expect(groups.map((g) => g.key)).toEqual(['older'])
+  })
+})
+
+describe('groupSectionsByWorkspace', () => {
+  it('gives each workspace its own sections, the one waiting on you first', () => {
+    const sections = buildNavigatorSections(
+      input({
+        runsByWorkspacePath: { [A]: { runs: [run('a1')] }, [B]: { runs: [run('b1', { status: 'running' })] } },
+        activeRuns: [live('b1', { workspacePath: B, waiting: { kind: 'approval', since: minsAgo(1) } })]
+      })
+    )
+    const blocks = groupSectionsByWorkspace(sections, [A, B], A)
+    expect(blocks.map((b) => [b.name, b.sections.map((s) => s.key)])).toEqual([
+      ['beta', ['needs']],
+      ['alpha', ['done']]
+    ])
+  })
+
+  it('keeps the active workspace ahead of the rest when nothing is live', () => {
+    const sections = buildNavigatorSections(
+      input({ runsByWorkspacePath: { [A]: { runs: [run('a1')] }, [B]: { runs: [run('b1')] } }, activePath: B })
+    )
+    expect(groupSectionsByWorkspace(sections, [A, B], B).map((b) => b.name)).toEqual(['beta', 'alpha'])
+  })
+})
+
+describe('archived tasks', () => {
+  const archivedKeys = new Set([pinnedRunKey(A, 'old'), pinnedRunKey(A, 'busy')])
+  const runs = { [A]: { runs: [run('old'), run('busy', { status: 'running' }), run('fresh')] } }
+
+  it('leaves an archived task out until the view asks for it, then lists it last', () => {
+    const hidden = buildNavigatorSections(input({ runsByWorkspacePath: runs, archivedKeys, activeRuns: [live('busy')] }))
+    expect(hidden.flatMap((s) => s.rows.map((r) => r.runId))).toEqual(['busy', 'fresh'])
+    const shown = buildNavigatorSections(
+      input({ runsByWorkspacePath: runs, archivedKeys, activeRuns: [live('busy')], showArchived: true })
+    )
+    expect(shown.map((s) => s.key)).toEqual(['running', 'done', 'archived'])
+    expect(shown.at(-1)!.rows.map((r) => [r.runId, r.archived])).toEqual([['old', true]])
+  })
+
+  it('keeps a live task in sight even when it was archived', () => {
+    const sections = buildNavigatorSections(input({ runsByWorkspacePath: runs, archivedKeys, activeRuns: [live('busy')] }))
+    const running = sections.find((s) => s.key === 'running')!
+    expect(running.rows.map((r) => [r.runId, r.archived])).toEqual([['busy', true]])
+  })
+
+  it('archives and unarchives by key, dropping the oldest past the cap', () => {
+    expect(toggleArchivedRun(['a'], 'b')).toEqual(['a', 'b'])
+    expect(toggleArchivedRun(['a', 'b'], 'a')).toEqual(['b'])
+    const full = Array.from({ length: ARCHIVED_RUNS_CAP }, (_, i) => `k${i}`)
+    const next = toggleArchivedRun(full, 'new')
+    expect(next).toHaveLength(ARCHIVED_RUNS_CAP)
+    expect(next[0]).toBe('k1')
+    expect(next.at(-1)).toBe('new')
+  })
+})
+
+describe('the View menu filter', () => {
+  const sections = () =>
+    buildNavigatorSections(
+      input({
+        runsByWorkspacePath: {
+          [A]: {
+            runs: [
+              run('ok'),
+              run('bad', { status: 'error' }),
+              run('rv', { review: { files: 1 } }),
+              run('wt', { worktreePath: 'C:\\wt\\x', worktreeBranch: 'task/x' }),
+              run('go', { status: 'running' })
+            ]
+          }
+        },
+        activeRuns: [live('go')],
+        unreadRunIds: new Set(['bad'])
+      })
+    )
+  const ids = (list: ReturnType<typeof sections>): string[] => list.flatMap((s) => s.rows.map((r) => r.runId)).sort()
+
+  it('keeps everything while nothing is unticked', () => {
+    expect(navFilterActive(NO_NAV_FILTER)).toBe(false)
+    expect(ids(filterNavigatorSections(sections(), NO_NAV_FILTER))).toEqual(['bad', 'go', 'ok', 'rv', 'wt'])
+  })
+
+  it('hides unticked states, and drops a group left empty', () => {
+    const filtered = filterNavigatorSections(sections(), { ...NO_NAV_FILTER, hiddenStates: ['done', 'running'] })
+    expect(ids(filtered)).toEqual(['bad', 'rv'])
+    expect(filtered.map((s) => s.key)).toEqual(['review', 'done'])
+  })
+
+  it('keeps only unread tasks, and tells in-place from worktree tasks', () => {
+    expect(ids(filterNavigatorSections(sections(), { ...NO_NAV_FILTER, unreadOnly: true }))).toEqual(['bad'])
+    expect(ids(filterNavigatorSections(sections(), { ...NO_NAV_FILTER, hiddenWhere: ['inPlace'] }))).toEqual(['wt'])
+    expect(ids(filterNavigatorSections(sections(), { ...NO_NAV_FILTER, hiddenWhere: ['worktree'] }))).not.toContain('wt')
+  })
+
+  it('shows drafts unless Drafts is unticked or only unread tasks are wanted', () => {
+    expect(draftsPassFilter(NO_NAV_FILTER)).toBe(true)
+    expect(draftsPassFilter({ ...NO_NAV_FILTER, hiddenStates: ['drafts'] })).toBe(false)
+    expect(draftsPassFilter({ ...NO_NAV_FILTER, unreadOnly: true })).toBe(false)
+  })
+
+  it('reads a stored view, dropping what it does not know', () => {
+    expect(parseNavigatorView(null)).toEqual(DEFAULT_NAVIGATOR_VIEW)
+    expect(parseNavigatorView('not json')).toEqual(DEFAULT_NAVIGATOR_VIEW)
+    expect(
+      parseNavigatorView(
+        JSON.stringify({ hiddenStates: ['done', 'bogus'], unreadOnly: 1, hiddenWhere: ['worktree'], showArchived: true, collapsed: [A, 3] })
+      )
+    ).toEqual({ hiddenStates: ['done'], unreadOnly: false, hiddenWhere: ['worktree'], showArchived: true, collapsed: [A] })
   })
 })

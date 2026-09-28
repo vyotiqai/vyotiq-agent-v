@@ -4,19 +4,58 @@ import { NavigatorDraftRow, type NavigatorDraftActions } from './NavigatorDraftR
 import type { ActiveRun, NotificationItem, NotificationMutateRequest, RunSummary } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon, type IconName } from '@renderer/lib/icons'
-import { ActionMenu, IconButton, cn } from '@renderer/lib/ui'
-import { SECTION_LABEL } from '@renderer/lib/utils/layout'
+import {
+  ActionMenu,
+  Button,
+  IconButton,
+  StatusGlyph,
+  Tooltip,
+  cn,
+  type ActionMenuItem,
+  type TaskState
+} from '@renderer/lib/ui'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
-import { buildNavigatorSections, type NavSection } from './navigatorModel'
+import {
+  buildNavigatorSections,
+  draftsPassFilter,
+  filterNavigatorSections,
+  groupSectionsByWorkspace,
+  navFilterActive,
+  splitRowsByDate,
+  NO_NAV_FILTER,
+  type NavRow,
+  type NavSection,
+  type NavSectionKey,
+  type NavStateFilter,
+  type NavWhereFilter,
+  type NavWorkspaceBlock
+} from './navigatorModel'
 import { NavigatorTaskRow, type NavigatorRowActions } from './NavigatorTaskRow'
-import { NotificationsButton } from './NotificationsButton'
+import { NotificationsRow } from './NotificationsRow'
 import { UpdateChip } from './UpdateChip'
+import { DEFAULT_NAVIGATOR_VIEW, isCollapsed, type NavigatorView } from './useNavigatorView'
 
 export type NavigatorPlace = 'home' | 'extensions' | 'usage' | 'settings' | 'task' | 'other'
 
-/** How many finished tasks show before "N more". */
-const DONE_LIMIT = 5
+/**
+ * The state a group says once, on its heading, so its rows don't repeat it: a
+ * row wears a glyph only when it ended some other way (a failed task with
+ * edits under Ready for review, a stopped one under Today). Pinned and the
+ * date groups are history, so their heading has none and a plain done row is
+ * bare.
+ */
+const GROUP_STATE: Record<NavSectionKey, { glyph: TaskState | null; rows: TaskState }> = {
+  needs: { glyph: 'needs', rows: 'needs' },
+  running: { glyph: 'running', rows: 'running' },
+  review: { glyph: 'review', rows: 'review' },
+  pinned: { glyph: null, rows: 'done' },
+  done: { glyph: null, rows: 'done' },
+  archived: { glyph: null, rows: 'done' }
+}
+
+type ViewUpdate = (update: (prev: NavigatorView) => NavigatorView) => void
 
 export type NavigatorProps = {
   place: NavigatorPlace
@@ -35,18 +74,27 @@ export type NavigatorProps = {
   scopePath: string | null
   onScopeChange: (path: string | null) => void
   onNewTask: () => void
+  /** Start a task in one workspace: a workspace heading's +. */
+  onNewTaskIn?: (path: string) => void
   onOpenHome: () => void
   onOpenExtensions: () => void
   onOpenUsage: () => void
   onOpenSettings: () => void
-  onOpenShortcuts: () => void
   onAddWorkspace: () => void
+  /** Folders opened before and closed since, newest first — the workspace menu's Recent. */
+  recentPaths?: readonly string[]
+  onOpenRecentWorkspace?: (path: string) => void
   onCloseWorkspace: (path: string) => void
   onLoadOlderRuns: (path: string) => void
   onDismissRunsError: (path: string) => void
   rowActions: NavigatorRowActions
   /** `pinnedRunKey` of every pinned task. */
   pinnedKeys?: ReadonlySet<string>
+  /** `pinnedRunKey` of every archived task. */
+  archivedKeys?: ReadonlySet<string>
+  /** What the View menu is set to, and folded workspaces. Kept here when the caller does not own it. */
+  view?: NavigatorView
+  onViewChange?: ViewUpdate
   notifications: {
     items: NotificationItem[]
     unreadCount: number
@@ -92,14 +140,29 @@ export function FirstRunNavigator({ workspaceName, widthPx }: { workspaceName: s
   )
 }
 
+type Draft = { workspacePath: string; draft: TaskDraft }
+
 /**
- * The navigator: what needs you first, then what is running, what is waiting
- * for your review, and what is done. The workspace switcher filters it; a row
- * from a workspace other than the active one names that workspace in its meta.
+ * The navigator, in three zones fenced by the same hairline:
+ *
+ *   head   the workspace switcher as plain text; on the right the View menu
+ *          (what to list) and New task
+ *   tasks  per workspace while it lists all of them, each foldable under its
+ *          name: what needs you, what is running, what waits on review,
+ *          pinned, drafts, everything else by day — Today, Yesterday, This
+ *          week, Older — and, when asked for, Archived
+ *   foot   Home, Inbox, Extensions and Usage as icons, and Settings
+ *
+ * One left edge runs the whole height: switcher, workspace and group names,
+ * task titles and places all start on it. Glyphs hang on the right, beside the
+ * number they qualify.
  */
 export function Navigator(props: NavigatorProps) {
   const { place, selected, openPaths, activePath, runsByWorkspacePath, scopePath } = props
-  const [doneExpanded, setDoneExpanded] = useState(false)
+  const [ownView, setOwnView] = useState<NavigatorView>(DEFAULT_NAVIGATOR_VIEW)
+  const view = props.view ?? ownView
+  const updateView: ViewUpdate = props.onViewChange ?? setOwnView
+  const filterOn = navFilterActive(view)
 
   const unreadRunIds = useMemo(() => {
     const ids = new Set<string>()
@@ -131,7 +194,9 @@ export function Navigator(props: NavigatorProps) {
         activeRunsLoaded: props.activeRunsLoaded,
         scopePath,
         unreadRunIds,
-        pinnedKeys: props.pinnedKeys
+        pinnedKeys: props.pinnedKeys,
+        archivedKeys: props.archivedKeys,
+        showArchived: view.showArchived
       }),
     [
       runsByWorkspacePath,
@@ -141,9 +206,23 @@ export function Navigator(props: NavigatorProps) {
       props.activeRunsLoaded,
       scopePath,
       unreadRunIds,
-      props.pinnedKeys
+      props.pinnedKeys,
+      props.archivedKeys,
+      view.showArchived
     ]
   )
+  const shownSections = useMemo(() => filterNavigatorSections(sections, view), [sections, view])
+  const shownDrafts = draftsPassFilter(view) ? drafts : []
+  const hiddenCount = countRows(sections) + drafts.length - countRows(shownSections) - shownDrafts.length
+
+  // Every workspace at once: one block each, so their tasks never interleave.
+  // One workspace (or one picked): a single block, named by the switcher alone.
+  const grouped = scopePath == null && openPaths.length > 1
+  const blocks = useMemo<NavWorkspaceBlock[]>(() => {
+    if (grouped) return groupSectionsByWorkspace(shownSections, openPaths, activePath)
+    const path = scopePath ?? openPaths[0]
+    return path ? [{ path, name: formatWorkspaceName(path), sections: shownSections }] : []
+  }, [grouped, shownSections, openPaths, activePath, scopePath])
 
   // A restart interrupts every live task, whatever the switcher shows.
   const runningCount = useMemo(() => {
@@ -156,15 +235,6 @@ export function Navigator(props: NavigatorProps) {
     }
     return count
   }, [openPaths, runsByWorkspacePath, props.activeRuns])
-
-  const cappedPaths = useMemo(
-    () =>
-      openPaths.filter(
-        (path) =>
-          (!scopePath || workspacePathsEqual(path, scopePath)) && runsByWorkspacePath[path]?.runsCapped === true
-      ),
-    [openPaths, scopePath, runsByWorkspacePath]
-  )
 
   const onNavKeyDown = useCallback((e: KeyboardEvent<HTMLButtonElement>) => {
     const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End']
@@ -180,6 +250,10 @@ export function Navigator(props: NavigatorProps) {
   }, [])
 
   const hasWorkspace = openPaths.length > 0
+  const empty = !hasWorkspace || (sections.length === 0 && drafts.length === 0)
+  // Everything there is, hidden by the View menu: one line says so, not one per workspace.
+  const allFiltered = !empty && shownSections.length === 0 && shownDrafts.length === 0
+  const clearFilter = (): void => updateView((prev) => ({ ...prev, ...NO_NAV_FILTER }))
 
   return (
     <nav
@@ -188,36 +262,46 @@ export function Navigator(props: NavigatorProps) {
       className="app-region-no-drag flex h-full shrink-0 flex-col bg-chrome"
       style={{ width: props.widthPx }}
     >
-      <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+      <div className={cn('flex h-10 shrink-0 items-center border-b px-2', BORDER_DIVIDER)} data-navigator-head>
         <WorkspaceScope
           openPaths={openPaths}
-          activePath={activePath}
           scopePath={scopePath}
           onScopeChange={props.onScopeChange}
           onAddWorkspace={props.onAddWorkspace}
+          recentPaths={props.recentPaths ?? []}
+          onOpenRecent={props.onOpenRecentWorkspace}
           onCloseWorkspace={props.onCloseWorkspace}
         />
-        <IconButton
-          icon="plus"
-          label={`New task (${shortcutLabel('newChat')})`}
-          size="md"
-          disabled={!hasWorkspace}
-          onClick={props.onNewTask}
-        />
+        {/* The only gap: a long workspace name gets every pixel up to the controls. */}
+        <span className="min-w-2 flex-1" />
+        <div className="flex shrink-0 items-center gap-1">
+          {hasWorkspace ? <ViewMenu view={view} grouped={grouped} openPaths={openPaths} onChange={updateView} /> : null}
+          {hasWorkspace ? (
+            <Tooltip content={`New task (${shortcutLabel('newChat')})`} side="bottom">
+              <Button size="xs" variant="secondary" onClick={props.onNewTask} data-navigator-new-task>
+                New task
+              </Button>
+            </Tooltip>
+          ) : (
+            // A disabled Button shows its title as a tooltip itself.
+            <Button size="xs" variant="secondary" disabled title="Add a workspace to start a task" data-navigator-new-task>
+              New task
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-px px-2">
-        <PlaceRow icon="home" label="Home" active={place === 'home'} onClick={props.onOpenHome} />
-        <PlaceRow icon="extensions" label="Extensions" active={place === 'extensions'} onClick={props.onOpenExtensions} />
-        <PlaceRow icon="chart" label="Usage" active={place === 'usage'} onClick={props.onOpenUsage} />
-      </div>
-
-      <div className="scroll-thin mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-navigator-tasks>
+      {/* The 8px scrollbar gutter is always reserved and stands in for the right
+          padding, so the rows' right edge meets the head's and the foot's whether
+          or not the list scrolls. */}
+      <div
+        className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2 pl-2 pt-2 [scrollbar-gutter:stable]"
+        data-navigator-tasks
+      >
         {openPaths
           .filter((path) => (!scopePath || workspacePathsEqual(path, scopePath)) && runsByWorkspacePath[path]?.runsError)
           .map((path) => (
             <p key={path} role="alert" className="flex items-start gap-1.5 px-2 py-1 text-xs text-danger">
-              <Icon name="warningCircle" size={13} className="mt-[3px] shrink-0" />
               <span className="min-w-0 flex-1">
                 Couldn’t load the tasks in {formatWorkspaceName(path)}.
                 <span className="block truncate text-muted" title={runsByWorkspacePath[path]?.runsError ?? undefined}>
@@ -233,118 +317,483 @@ export function Navigator(props: NavigatorProps) {
               />
             </p>
           ))}
-        {!hasWorkspace || (sections.length === 0 && drafts.length === 0) ? (
-          <p className="px-2 pt-2 text-xs leading-[18px] text-tertiary">
+        {filterOn && !empty ? (
+          // What the View menu hides is said once, at the top, with the way back.
+          <div className="mb-1 flex h-7 items-center gap-2 px-2 text-xs text-muted" data-nav-filter-notice>
+            <span className="min-w-0 flex-1 truncate">
+              {hiddenCount === 0 ? 'Filtered' : `${hiddenCount} hidden by the filter`}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 rounded-sm text-xs text-muted vy-transition hover:text-fg-strong focus-visible:vy-focus-ring"
+              onClick={clearFilter}
+            >
+              Show all
+            </button>
+          </div>
+        ) : null}
+        {empty ? (
+          <p className="px-2 pt-1 text-xs leading-[18px] text-tertiary">
             Tasks you start show up here, grouped by what they need from you.
           </p>
+        ) : allFiltered ? (
+          <p className="px-2 text-xs text-tertiary">No tasks match the filter.</p>
         ) : (
-          // Drafts sit just above Done: not started, so after everything live.
-          [
-            ...sections.filter((section) => section.key !== 'done').map((section) => ({ kind: 'tasks' as const, section })),
-            ...(drafts.length > 0 ? [{ kind: 'drafts' as const }] : []),
-            ...sections.filter((section) => section.key === 'done').map((section) => ({ kind: 'tasks' as const, section }))
-          ].map((block) =>
-            block.kind === 'drafts' ? (
-              <section key="drafts" className="mt-3 first:mt-1" aria-labelledby="nav-section-drafts" data-nav-section="drafts">
-                <h3 id="nav-section-drafts" className={cn('flex h-6 items-center gap-1.5 px-2', SECTION_LABEL)}>
-                  Drafts
-                  <span className="font-mono font-normal tnum">{drafts.length}</span>
-                </h3>
-                <ul className="space-y-px">
-                  {drafts.map(({ workspacePath, draft }) => (
-                    <NavigatorDraftRow
-                      key={`${workspacePath}::${draft.id}`}
-                      workspacePath={workspacePath}
-                      draft={draft}
-                      foreign={openPaths.length > 1 && !scopePath && !(activePath && workspacePathsEqual(activePath, workspacePath))}
-                      selected={
-                        props.drafts?.open?.draftId === draft.id &&
-                        workspacePathsEqual(props.drafts.open.workspacePath, workspacePath)
-                      }
-                      actions={props.drafts!.actions}
-                      onNavKeyDown={onNavKeyDown}
-                    />
-                  ))}
-                </ul>
-              </section>
-            ) : (
-            <TaskSection
-              key={block.section.key}
-              section={block.section}
+          blocks.map((block, index) => (
+            <WorkspaceBlock
+              key={block.path}
+              index={index}
+              block={block}
+              heading={grouped}
+              collapsed={grouped && isCollapsed(view, block.path)}
+              onToggleCollapsed={() =>
+                updateView((prev) => ({
+                  ...prev,
+                  collapsed: isCollapsed(prev, block.path)
+                    ? prev.collapsed.filter((p) => !workspacePathsEqual(p, block.path))
+                    : [...prev.collapsed, block.path]
+                }))
+              }
+              onNewTask={props.onNewTaskIn ? () => props.onNewTaskIn?.(block.path) : undefined}
+              filtered={filterOn}
+              drafts={shownDrafts.filter((d) => workspacePathsEqual(d.workspacePath, block.path))}
+              draftActions={props.drafts?.actions}
+              openDraft={props.drafts?.open ?? null}
+              capped={runsByWorkspacePath[block.path]?.runsCapped === true}
+              onLoadOlder={() => props.onLoadOlderRuns(block.path)}
               selected={place === 'task' ? selected : null}
               isRunOpen={place === 'task' ? props.isRunOpen : undefined}
               actions={props.rowActions}
               onNavKeyDown={onNavKeyDown}
-              expanded={doneExpanded}
-              onExpand={() => setDoneExpanded(true)}
-              trailing={
-                block.section.key === 'done' &&
-                (doneExpanded || block.section.rows.length <= DONE_LIMIT) &&
-                cappedPaths.length > 0 ? (
-                  <MoreButton label="Show older tasks" onClick={() => cappedPaths.forEach((path) => props.onLoadOlderRuns(path))} />
-                ) : null
-              }
             />
-            )
-          )
+          ))
         )}
       </div>
 
-      <div className="flex h-10 shrink-0 items-center gap-0.5 px-2">
-        <NotificationsButton {...props.notifications} />
-        <IconButton
-          icon="gear"
-          label={`Settings (${shortcutLabel('settings')})`}
-          size="md"
-          tone="muted"
-          active={place === 'settings'}
-          onClick={props.onOpenSettings}
-        />
-        <IconButton icon="question" label="Help & shortcuts" size="md" tone="muted" onClick={props.onOpenShortcuts} />
-        <span className="flex-1" />
-        <UpdateChip runningCount={runningCount} />
+      <div className={cn('shrink-0 border-t', BORDER_DIVIDER)} data-navigator-places>
+        {/* The app's one update surface. Renders nothing while the install is current. */}
+        <div className="flex px-4 pt-2 empty:hidden">
+          <UpdateChip runningCount={runningCount} />
+        </div>
+        {/* One 40px row of places, the head's height. pl-2.5 puts the first glyph on
+            the column's 16px left edge; Settings ends on the right edge New task does. */}
+        <div className="flex h-10 items-center gap-1 pl-2.5 pr-2" role="group" aria-label="Places">
+          <PlaceButton icon="home" label="Home" place="home" active={place === 'home'} onClick={props.onOpenHome} />
+          <NotificationsRow {...props.notifications} />
+          <PlaceButton
+            icon="extensions"
+            label="Extensions"
+            place="extensions"
+            active={place === 'extensions'}
+            onClick={props.onOpenExtensions}
+          />
+          <PlaceButton icon="chart" label="Usage" place="usage" active={place === 'usage'} onClick={props.onOpenUsage} />
+          <span className="flex-1" />
+          <PlaceButton
+            icon="gear"
+            label={`Settings (${shortcutLabel('settings')})`}
+            place="settings"
+            active={place === 'settings'}
+            onClick={props.onOpenSettings}
+          />
+        </div>
       </div>
     </nav>
   )
 }
 
-function TaskSection({
-  section,
+function countRows(sections: readonly NavSection[]): number {
+  return sections.reduce((n, section) => n + section.rows.length, 0)
+}
+
+/**
+ * One workspace's tasks. While the navigator lists every workspace it opens on
+ * the workspace's name, which folds it away; after the first, a hairline
+ * fences it from the one above. Live groups first, then drafts, then Earlier
+ * by day, then Archived when the view lists it.
+ */
+function WorkspaceBlock({
+  index,
+  block,
+  heading,
+  collapsed,
+  onToggleCollapsed,
+  onNewTask,
+  filtered,
+  drafts,
+  draftActions,
+  openDraft,
+  capped,
+  onLoadOlder,
   selected,
   isRunOpen,
   actions,
-  onNavKeyDown,
-  expanded,
-  onExpand,
-  trailing
+  onNavKeyDown
 }: {
-  section: NavSection
+  index: number
+  block: NavWorkspaceBlock
+  heading: boolean
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  onNewTask?: () => void
+  /** The View menu is hiding something: an empty block says "nothing matches", not "no tasks". */
+  filtered: boolean
+  drafts: Draft[]
+  draftActions?: NavigatorDraftActions
+  openDraft: { workspacePath: string; draftId: string } | null
+  capped: boolean
+  onLoadOlder: () => void
   selected: { workspacePath: string; runId: string } | null
   isRunOpen?: (workspacePath: string, runId: string) => boolean
   actions: NavigatorRowActions
   onNavKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void
-  expanded: boolean
-  onExpand: () => void
-  trailing: ReactNode
 }) {
-  const limited = section.key === 'done' && !expanded
-  const shown = limited ? section.rows.slice(0, DONE_LIMIT) : section.rows
-  const hidden = section.rows.length - shown.length
-  const headingId = `nav-section-${section.key}`
+  const idBase = `nav-${index}`
+  const live = block.sections.filter((section) => section.key !== 'done' && section.key !== 'archived')
+  const earlier = block.sections.find((section) => section.key === 'done')
+  const archived = block.sections.find((section) => section.key === 'archived')
+  const days = earlier ? splitRowsByDate(earlier.rows) : []
+  const rowProps = { selected, isRunOpen, actions, onNavKeyDown }
+  const olderButton = capped ? (
+    <button
+      type="button"
+      className="mt-px flex h-7 w-full items-center rounded-md px-2 text-xs text-muted vy-transition hover:bg-surface hover:text-fg-strong focus-visible:vy-focus-ring"
+      onClick={onLoadOlder}
+    >
+      Show older tasks
+    </button>
+  ) : null
+
+  const nothing = block.sections.length === 0 && drafts.length === 0
+  const body = (
+    <div className="space-y-3">
+      {live.map((section) => (
+        <TaskSection key={section.key} id={`${idBase}-${section.key}`} section={section} {...rowProps} />
+      ))}
+      {drafts.length > 0 && draftActions ? (
+        <section aria-labelledby={`${idBase}-drafts`} data-nav-section="drafts">
+          <GroupHeading id={`${idBase}-drafts`} glyph="queued" label="Drafts" count={drafts.length} />
+          <ul className="space-y-px">
+            {drafts.map(({ workspacePath, draft }) => (
+              <NavigatorDraftRow
+                key={`${workspacePath}::${draft.id}`}
+                workspacePath={workspacePath}
+                draft={draft}
+                selected={openDraft?.draftId === draft.id && workspacePathsEqual(openDraft.workspacePath, workspacePath)}
+                actions={draftActions}
+                onNavKeyDown={onNavKeyDown}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {days.length > 0 ? (
+        // Earlier, by day. One wrapper, so "everything that is over" stays one thing to find.
+        <div className="space-y-3" data-nav-section="done">
+          {days.map((day, i) => (
+            <TaskSection
+              key={day.key}
+              id={`${idBase}-${day.key}`}
+              section={{ key: 'done', label: day.label, rows: day.rows }}
+              date={day.key}
+              trailing={i === days.length - 1 ? olderButton : null}
+              {...rowProps}
+            />
+          ))}
+        </div>
+      ) : (
+        olderButton
+      )}
+      {archived ? <TaskSection id={`${idBase}-archived`} section={archived} {...rowProps} /> : null}
+      {heading && nothing ? (
+        <p className="px-2 text-xs text-tertiary">{filtered ? 'Nothing here matches the filter.' : 'No tasks yet.'}</p>
+      ) : null}
+    </div>
+  )
+
+  if (!heading) return body
+  const bodyId = `${idBase}-body`
   return (
-    <section className="mt-3 first:mt-1" aria-labelledby={headingId} data-nav-section={section.key}>
-      <h3
-        id={headingId}
-        className={cn('flex h-6 items-center gap-1.5 px-2', SECTION_LABEL)}
-      >
-        {section.label}
-        <span className="font-mono font-normal tnum">{section.rows.length}</span>
-      </h3>
+    <section
+      aria-label={block.name}
+      data-nav-workspace={block.name}
+      data-collapsed={collapsed ? '' : undefined}
+      className={cn(index > 0 && cn('mt-4 border-t pt-3', BORDER_DIVIDER))}
+    >
+      <WorkspaceHeading
+        name={block.name}
+        path={block.path}
+        count={countRows(block.sections) + drafts.length}
+        urgent={
+          block.sections.some((section) => section.key === 'needs')
+            ? 'needs'
+            : block.sections.some((section) => section.key === 'running')
+              ? 'running'
+              : null
+        }
+        collapsed={collapsed}
+        controls={bodyId}
+        onToggle={onToggleCollapsed}
+        onNewTask={onNewTask}
+      />
+      {collapsed ? null : (
+        <div id={bodyId} className="mt-1">
+          {body}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * A workspace's name on the left edge; clicking it folds the workspace away.
+ * On hover a chevron says it folds and a + starts a task there; folded, the
+ * chevron and the task count stay, so a folded workspace never reads as empty,
+ * and the glyph of what needs you or is running, so folding never buries it.
+ */
+function WorkspaceHeading({
+  name,
+  path,
+  count,
+  urgent,
+  collapsed,
+  controls,
+  onToggle,
+  onNewTask
+}: {
+  name: string
+  path: string
+  count: number
+  /** The most pressing group inside, said on the heading while it is folded. */
+  urgent: TaskState | null
+  collapsed: boolean
+  controls: string
+  onToggle: () => void
+  onNewTask?: () => void
+}) {
+  return (
+    <div className="group relative">
+      <h2>
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          aria-controls={collapsed ? undefined : controls}
+          title={path}
+          data-workspace-heading
+          className={cn(
+            'flex h-7 w-full items-center gap-2 rounded-md pl-2 text-left text-sm font-medium text-fg-strong vy-transition hover:bg-surface focus-visible:vy-focus-ring',
+            // Room for the + after the chevron, on hover or focus — the row's ⋯ rule.
+            onNewTask ? 'pr-2 group-hover:pr-7 group-focus-within:pr-7' : 'pr-2'
+          )}
+          onClick={onToggle}
+        >
+          <span className="min-w-0 flex-1 truncate">{name}</span>
+          {collapsed ? (
+            <>
+              {urgent ? (
+                <span className="inline-flex shrink-0" data-heading-urgent={urgent}>
+                  <StatusGlyph state={urgent} size={14} />
+                </span>
+              ) : null}
+              <Icon name="chevronRight" size={11} className="shrink-0 text-tertiary" />
+              <span className="min-w-[3ch] shrink-0 text-right font-mono text-caption font-normal text-tertiary tnum">
+                {count}
+              </span>
+            </>
+          ) : (
+            // The span hides it, not the Icon: Icon's own inline-block would win over `hidden`.
+            <span data-heading-chevron className="hidden shrink-0 group-focus-within:flex group-hover:flex">
+              <Icon name="chevron" size={11} className="text-tertiary" />
+            </span>
+          )}
+        </button>
+      </h2>
+      {onNewTask ? (
+        <span className="absolute inset-y-0 right-1 hidden items-center group-focus-within:flex group-hover:flex">
+          <IconButton icon="plus" label={`New task in ${name}`} size="xs" tone="muted" onClick={onNewTask} />
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+const STATE_ITEMS: ReadonlyArray<{ key: NavStateFilter; label: string }> = [
+  { key: 'needs', label: 'Needs you' },
+  { key: 'running', label: 'Running' },
+  { key: 'review', label: 'Ready for review' },
+  { key: 'failed', label: 'Failed' },
+  { key: 'drafts', label: 'Drafts' },
+  { key: 'done', label: 'Done' }
+]
+
+const WHERE_ITEMS: ReadonlyArray<{ key: NavWhereFilter; label: string }> = [
+  { key: 'inPlace', label: 'In place' },
+  { key: 'worktree', label: 'In a worktree' }
+]
+
+function toggled<T>(list: readonly T[], item: T): T[] {
+  return list.includes(item) ? list.filter((x) => x !== item) : [...list, item]
+}
+
+/**
+ * What the list shows: a checklist of states and of where a task runs (every
+ * one ticked until you untick it), Unread only, archived tasks, and folding
+ * every workspace at once. A dot on the icon says a filter is hiding something.
+ */
+function ViewMenu({
+  view,
+  grouped,
+  openPaths,
+  onChange
+}: {
+  view: NavigatorView
+  grouped: boolean
+  openPaths: readonly string[]
+  onChange: ViewUpdate
+}) {
+  const [open, setOpen] = useState(false)
+  const filterOn = navFilterActive(view)
+  const foldReason = 'Only while every workspace is listed'
+  const items: ActionMenuItem[] = [
+    ...STATE_ITEMS.map(({ key, label }) => ({
+      id: `state:${key}`,
+      label,
+      checked: !view.hiddenStates.includes(key),
+      keepOpen: true,
+      onSelect: () => onChange((prev) => ({ ...prev, hiddenStates: toggled(prev.hiddenStates, key) }))
+    })),
+    {
+      id: 'unread',
+      label: 'Unread only',
+      checked: view.unreadOnly,
+      keepOpen: true,
+      onSelect: () => onChange((prev) => ({ ...prev, unreadOnly: !prev.unreadOnly }))
+    },
+    ...WHERE_ITEMS.map(({ key, label }, i) => ({
+      id: `where:${key}`,
+      label,
+      checked: !view.hiddenWhere.includes(key),
+      separatorBefore: i === 0,
+      keepOpen: true,
+      onSelect: () => onChange((prev) => ({ ...prev, hiddenWhere: toggled(prev.hiddenWhere, key) }))
+    })),
+    {
+      id: 'archived',
+      label: 'Show archived',
+      checked: view.showArchived,
+      separatorBefore: true,
+      keepOpen: true,
+      onSelect: () => onChange((prev) => ({ ...prev, showArchived: !prev.showArchived }))
+    },
+    {
+      id: 'collapse',
+      label: 'Collapse all',
+      separatorBefore: true,
+      disabled: !grouped,
+      disabledReason: foldReason,
+      onSelect: () => onChange((prev) => ({ ...prev, collapsed: [...openPaths] }))
+    },
+    {
+      id: 'expand',
+      label: 'Expand all',
+      disabled: !grouped,
+      disabledReason: foldReason,
+      onSelect: () => onChange((prev) => ({ ...prev, collapsed: [] }))
+    },
+    ...(filterOn
+      ? [
+          {
+            id: 'reset',
+            label: 'Show all tasks',
+            separatorBefore: true,
+            onSelect: () => onChange((prev) => ({ ...prev, ...NO_NAV_FILTER }))
+          }
+        ]
+      : [])
+  ]
+  return (
+    <ActionMenu
+      open={open}
+      onOpenChange={setOpen}
+      placement="down"
+      align="end"
+      aria-label="View"
+      items={items}
+      trigger={(t) => (
+        <span className="relative inline-flex">
+          <IconButton
+            ref={t.ref}
+            icon="filter"
+            label={filterOn ? 'View, filtered' : 'View'}
+            size="xs"
+            active={open}
+            aria-expanded={t['aria-expanded']}
+            aria-controls={t['aria-controls']}
+            aria-haspopup={t['aria-haspopup']}
+            data-navigator-view
+            onClick={t.onClick}
+          />
+          {filterOn ? (
+            <span
+              aria-hidden="true"
+              data-filter-dot
+              className="pointer-events-none absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-accent"
+            />
+          ) : null}
+        </span>
+      )}
+    />
+  )
+}
+
+/**
+ * A group's name, said once: the name on the left edge, and on the right its
+ * state glyph (none for history) beside its count.
+ */
+function GroupHeading({ id, glyph, label, count }: { id: string; glyph: TaskState | null; label: string; count: number }) {
+  return (
+    <h3 id={id} className="flex h-7 items-center gap-2 px-2 text-xs font-medium text-muted">
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {glyph ? <StatusGlyph state={glyph} size={14} /> : null}
+      <span className="shrink-0 font-mono text-caption font-normal text-tertiary tnum">{count}</span>
+    </h3>
+  )
+}
+
+function TaskSection({
+  id,
+  section,
+  date,
+  selected,
+  isRunOpen,
+  actions,
+  onNavKeyDown,
+  trailing = null
+}: {
+  id: string
+  section: NavSection
+  /** Set for one of Earlier's days. */
+  date?: string
+  selected: { workspacePath: string; runId: string } | null
+  isRunOpen?: (workspacePath: string, runId: string) => boolean
+  actions: NavigatorRowActions
+  onNavKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void
+  trailing?: ReactNode
+}) {
+  const group = GROUP_STATE[section.key]
+  return (
+    <section
+      aria-labelledby={id}
+      data-nav-section={date ? undefined : section.key}
+      data-nav-date={date}
+    >
+      <GroupHeading id={id} glyph={group.glyph} label={section.label} count={section.rows.length} />
       <ul className="space-y-px">
-        {shown.map((row) => (
+        {section.rows.map((row: NavRow) => (
           <NavigatorTaskRow
             key={`${row.workspacePath}::${row.runId}`}
             row={row}
+            groupState={group.rows}
             selected={
               selected != null &&
               selected.runId === row.runId &&
@@ -356,90 +805,86 @@ function TaskSection({
           />
         ))}
       </ul>
-      {hidden > 0 ? <MoreButton label={`${hidden} more`} onClick={onExpand} /> : trailing}
+      {trailing}
     </section>
   )
 }
 
-function MoreButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      className="mt-0.5 flex h-6 w-full items-center gap-1.5 rounded-md px-2 text-xs text-tertiary vy-transition hover:bg-surface hover:text-muted focus-visible:vy-focus-ring"
-      onClick={onClick}
-    >
-      <Icon name="chevron" size={11} />
-      {label}
-    </button>
-  )
-}
-
-function PlaceRow({
+/** A place in the foot: an icon, named by its tooltip, filled while you're on it. */
+function PlaceButton({
   icon,
   label,
+  place,
   active,
   onClick
 }: {
   icon: IconName
   label: string
+  place: string
   active: boolean
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
+    <IconButton
+      icon={icon}
+      label={label}
+      size="md"
+      active={active}
       aria-current={active ? 'page' : undefined}
-      className={cn(
-        'flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-sm vy-transition focus-visible:vy-focus-ring',
-        active ? 'bg-surface-2 font-medium text-fg-strong' : 'text-secondary hover:bg-surface hover:text-fg-strong'
-      )}
+      data-place={place}
       onClick={onClick}
-    >
-      <Icon name={icon} size={16} className={active ? 'text-fg-strong' : 'text-muted'} />
-      {label}
-    </button>
+    />
   )
 }
 
-/** Filters the list, and is where workspaces are opened and closed. */
+/**
+ * Filters the list, and is where workspaces are opened and closed. Close names
+ * the one workspace the list is showing; while it shows all of them there is
+ * no single one to close, so the item is not offered.
+ */
 function WorkspaceScope({
   openPaths,
-  activePath,
   scopePath,
   onScopeChange,
   onAddWorkspace,
+  recentPaths,
+  onOpenRecent,
   onCloseWorkspace
 }: {
   openPaths: readonly string[]
-  activePath: string | null
   scopePath: string | null
   onScopeChange: (path: string | null) => void
   onAddWorkspace: () => void
+  recentPaths: readonly string[]
+  onOpenRecent?: (path: string) => void
   onCloseWorkspace: (path: string) => void
 }) {
   const [open, setOpen] = useState(false)
-  const label = scopePath ? formatWorkspaceName(scopePath) : openPaths.length > 0 ? 'All workspaces' : 'No workspace'
-  const items = [
+  // One workspace open: "All workspaces" would name a choice there isn't.
+  const shown = scopePath ?? (openPaths.length === 1 ? openPaths[0]! : null)
+  const label = shown ? formatWorkspaceName(shown) : openPaths.length > 0 ? 'All workspaces' : 'No workspace'
+  const items: ActionMenuItem[] = [
     ...(openPaths.length > 1 || scopePath
       ? [{ id: 'all', label: 'All workspaces', checked: scopePath === null, onSelect: () => onScopeChange(null) }]
       : []),
     ...openPaths.map((path) => ({
       id: `ws:${path}`,
       label: formatWorkspaceName(path),
-      checked: scopePath != null && workspacePathsEqual(scopePath, path),
+      checked: shown != null && workspacePathsEqual(shown, path),
       onSelect: () => onScopeChange(path)
     })),
-    { id: 'add', label: 'Add workspace…', icon: 'folderPlus' as const, separatorBefore: true, onSelect: onAddWorkspace },
-    ...(scopePath ?? activePath
-      ? [
-          {
-            id: 'close',
-            label: `Close ${formatWorkspaceName(scopePath ?? activePath)}`,
-            icon: 'close' as const,
-            onSelect: () => onCloseWorkspace((scopePath ?? activePath)!)
-          }
-        ]
-      : [])
+    // Folders opened before and closed since: one click opens one again.
+    ...(onOpenRecent
+      ? recentPaths.map((path, i) => ({
+          id: `recent:${path}`,
+          label: formatWorkspaceName(path),
+          heading: i === 0 ? 'Recent' : undefined,
+          separatorBefore: i === 0,
+          onSelect: () => onOpenRecent(path)
+        }))
+      : []),
+    { id: 'add', label: 'Add workspace…', separatorBefore: true, onSelect: onAddWorkspace },
+    ...(shown ? [{ id: 'close', label: `Close ${formatWorkspaceName(shown)}`, onSelect: () => onCloseWorkspace(shown) }] : [])
   ]
   return (
     <ActionMenu
@@ -456,10 +901,10 @@ function WorkspaceScope({
           aria-controls={t['aria-controls']}
           aria-haspopup={t['aria-haspopup']}
           onClick={t.onClick}
-          title={scopePath ?? undefined}
-          className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm font-medium text-fg-strong vy-transition hover:bg-surface focus-visible:vy-focus-ring"
+          title={shown ?? undefined}
+          data-workspace-scope
+          className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-left text-sm font-medium text-fg-strong vy-transition hover:bg-surface focus-visible:vy-focus-ring"
         >
-          <Icon name="workspace" size={15} className="text-muted" />
           <span className="min-w-0 truncate">{label}</span>
           <Icon name="chevron" size={11} className="shrink-0 text-tertiary" />
         </button>

@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { DiffStat, IconButton, StatusGlyph, cn } from '@renderer/lib/ui'
+import { IconButton, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from '@renderer/lib/ui/ContextMenu'
 import {
   markSessionDragEnd,
@@ -7,6 +7,10 @@ import {
   writeSessionDragPayload
 } from '@renderer/lib/chat/chatPaneLayout'
 import type { NavMeta, NavRow } from './navigatorModel'
+import { TaskHoverCard, hoverCardAnchor, type TaskHoverCardAnchor } from './TaskHoverCard'
+
+/** A resting pointer, not one passing through on its way down the list. */
+const HOVER_CARD_DELAY_MS = 500
 
 export type NavigatorRowActions = {
   onSelect: (workspacePath: string, runId: string) => void
@@ -23,23 +27,31 @@ export type NavigatorRowActions = {
   /** Disarm a scheduled loop. */
   onStopLoop?: (workspacePath: string, runId: string) => void
   onTogglePin?: (workspacePath: string, runId: string) => void
+  /** Archive a settled task, or bring an archived one back. */
+  onToggleArchive?: (workspacePath: string, runId: string) => void
 }
 
 /**
- * One task: status glyph, title, one meta cell. Everything else a row can do
- * (stop, resume, pause its goal, stop its loop, pin, rename, export, copy
- * link, delete) is in its menu — right-click, Shift F10, or the ⋯ that takes
- * the meta cell's place on hover — so the resting row carries nothing it does
- * not need to say.
+ * One task: the title on the navigator's one left edge, then on the right a
+ * glyph and one meta cell. The glyph is left out while the row is in the state
+ * its group's heading already says; it shows only for a row that ended some
+ * other way, beside the number it qualifies. Everything else a row can do
+ * (stop, resume, pause its goal, stop its loop, pin, archive, rename, export,
+ * copy link, delete) is in its menu — right-click, Shift F10, or the ⋯ that
+ * slides in after the meta on hover — so the resting row carries nothing it
+ * does not need to say. A pointer that rests on the row gets its hover card.
  */
 export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   row,
+  groupState,
   selected,
   open = false,
   actions,
   onNavKeyDown
 }: {
   row: NavRow
+  /** The state the group's heading says; a row in it shows no glyph of its own. */
+  groupState?: TaskState
   /** In the focused pane. */
   selected: boolean
   /** Open in another pane (split view) but not the focused one. */
@@ -51,10 +63,28 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [menuAnchor, setMenuAnchor] = useState<ContextMenuAnchor | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [card, setCard] = useState<TaskHoverCardAnchor | null>(null)
+  const cardTimer = useRef<number | null>(null)
   const rowRef = useRef<HTMLButtonElement>(null)
   const descriptionId = useId()
   const busyRef = useRef(false)
   busyRef.current = renaming || confirmingDelete
+
+  const hideCard = (): void => {
+    if (cardTimer.current != null) window.clearTimeout(cardTimer.current)
+    cardTimer.current = null
+    setCard(null)
+  }
+  useEffect(() => () => {
+    if (cardTimer.current != null) window.clearTimeout(cardTimer.current)
+  }, [])
+  // The card never follows its row around: any scroll puts it away.
+  useEffect(() => {
+    if (!card) return
+    const onScroll = (): void => setCard(null)
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [card])
 
   const { workspacePath, runId } = row
   const live = row.state === 'running' || row.state === 'needs'
@@ -63,58 +93,71 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   const loopArmed = row.run.loopArmed === true
   const menuItems = useMemo<ContextMenuItem[]>(() => {
     const items: ContextMenuItem[] = []
-    const { onStop, onResume, onPauseGoal, onStopLoop, onTogglePin } = actions
+    const { onStop, onResume, onPauseGoal, onStopLoop, onTogglePin, onToggleArchive } = actions
     if (live && onStop) {
-      items.push({ id: 'stop', label: 'Stop', icon: 'stop', onSelect: () => onStop(workspacePath, runId) })
+      items.push({ id: 'stop', label: 'Stop', onSelect: () => onStop(workspacePath, runId) })
     }
     if (interrupted && onResume) {
-      items.push({ id: 'resume', label: 'Resume', icon: 'play', onSelect: () => onResume(workspacePath, runId) })
+      items.push({ id: 'resume', label: 'Resume', onSelect: () => onResume(workspacePath, runId) })
     }
     if (goalActive && onPauseGoal) {
-      items.push({ id: 'pause-goal', label: 'Pause goal', icon: 'pause', onSelect: () => onPauseGoal(workspacePath, runId, live) })
+      items.push({ id: 'pause-goal', label: 'Pause goal', onSelect: () => onPauseGoal(workspacePath, runId, live) })
     }
     if (loopArmed && onStopLoop) {
-      items.push({ id: 'stop-loop', label: 'Stop loop', icon: 'repeat', onSelect: () => onStopLoop(workspacePath, runId) })
+      items.push({ id: 'stop-loop', label: 'Stop loop', onSelect: () => onStopLoop(workspacePath, runId) })
     }
     if (items.length > 0) items.push({ type: 'separator', id: 'sep-run' })
-    if (onTogglePin) {
+    // An archived task is out of the way already; pinning it would pull it back.
+    if (onTogglePin && !row.archived) {
       items.push({
         id: 'pin',
         label: row.pinned ? 'Unpin' : 'Pin',
-        icon: 'pin',
         onSelect: () => onTogglePin(workspacePath, runId)
       })
     }
-    items.push({ id: 'rename', label: 'Rename', icon: 'edit', onSelect: () => setRenaming(true) })
+    // A live task can't be put away: it still has something to say.
+    if (onToggleArchive && (row.archived || !live)) {
+      items.push({
+        id: 'archive',
+        label: row.archived ? 'Unarchive' : 'Archive',
+        onSelect: () => onToggleArchive(workspacePath, runId)
+      })
+    }
+    items.push({ id: 'rename', label: 'Rename', onSelect: () => setRenaming(true) })
     if (actions.onExport) {
       const onExport = actions.onExport
       items.push({
         id: 'export',
         label: 'Export as Markdown',
-        icon: 'download',
         onSelect: () => onExport(workspacePath, runId)
       })
     }
     if (actions.onCopyLink) {
       const onCopyLink = actions.onCopyLink
-      items.push({ id: 'copy-link', label: 'Copy link', icon: 'copy', onSelect: () => onCopyLink(workspacePath, runId) })
+      items.push({ id: 'copy-link', label: 'Copy link', onSelect: () => onCopyLink(workspacePath, runId) })
     }
     items.push({ type: 'separator', id: 'sep-danger' })
     items.push({
       id: 'delete',
       label: 'Delete',
-      icon: 'trash',
       danger: true,
       shortcut: 'Del',
       onSelect: () => setConfirmingDelete(true)
     })
     return items
-  }, [actions, goalActive, interrupted, live, loopArmed, row.pinned, runId, workspacePath])
+  }, [actions, goalActive, interrupted, live, loopArmed, row.archived, row.pinned, runId, workspacePath])
 
-  const dimmed = row.state === 'done' || row.state === 'stopped'
+  const dimmed = row.archived || row.state === 'done' || row.state === 'stopped'
+  const showGlyph = row.state !== groupState
   // The name is the title alone, so the row is found by what it says; the
   // state, its one number and a foreign workspace are its description.
-  const description = [row.stateLabel, metaLabel(row.meta), row.foreign ? row.workspaceName : null]
+  const description = [
+    row.stateLabel,
+    metaLabel(row.meta),
+    row.run.worktreeBranch ? `worktree ${row.run.worktreeBranch}` : null,
+    row.foreign ? row.workspaceName : null,
+    row.archived ? 'archived' : null
+  ]
     .filter(Boolean)
     .join(', ')
 
@@ -150,13 +193,24 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         aria-describedby={descriptionId}
         data-session-open={selected || open ? '1' : '0'}
         data-session-focused={selected ? '1' : '0'}
-        title={row.foreign ? `${row.tooltip} — ${row.workspaceName}` : row.tooltip}
         className={cn(
           'app-region-no-drag flex h-7 w-full items-center gap-2 rounded-md pl-2 text-left vy-transition focus-visible:vy-focus-ring',
           selected ? 'bg-surface-2' : 'hover:bg-surface',
-          confirmingDelete ? 'pr-[108px]' : 'pr-2',
+          // Room for the ⋯ after the meta: while its menu is open, and on hover or focus.
+          confirmingDelete ? 'pr-[108px]' : menuAnchor ? 'pr-7' : 'pr-2 group-hover:pr-7 group-focus-within:pr-7',
           dragging && 'opacity-50'
         )}
+        onPointerEnter={(e) => {
+          if (e.pointerType !== 'mouse' || menuAnchor || confirmingDelete || dragging) return
+          const el = e.currentTarget
+          hideCard()
+          cardTimer.current = window.setTimeout(() => {
+            cardTimer.current = null
+            if (el.isConnected) setCard(hoverCardAnchor(el))
+          }, HOVER_CARD_DELAY_MS)
+        }}
+        onPointerLeave={hideCard}
+        onPointerDown={hideCard}
         onClick={() => actions.onSelect(workspacePath, runId)}
         onDoubleClick={(e) => {
           e.preventDefault()
@@ -164,6 +218,7 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         }}
         onContextMenu={(e) => {
           e.preventDefault()
+          hideCard()
           setMenuAnchor({ x: e.clientX, y: e.clientY })
         }}
         onKeyDown={(e) => {
@@ -186,6 +241,7 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
           onNavKeyDown?.(e)
         }}
         onDragStart={(e) => {
+          hideCard()
           writeSessionDragPayload(e.dataTransfer, { workspacePath, runId })
           markSessionDragStart()
           setDragging(true)
@@ -195,22 +251,25 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
           setDragging(false)
         }}
       >
-        <span title={row.stateLabel} className="inline-flex shrink-0">
-          <StatusGlyph state={row.state} size={14} />
-        </span>
         <span
           className={cn(
             'min-w-0 flex-1 truncate text-sm',
-            selected || open ? 'text-fg-strong' : dimmed ? 'text-muted' : 'text-fg',
-            row.unread && 'font-semibold'
+            // Unread lifts to full strength, never bold: a weight change made a
+            // column of mixed weights and re-cut every unread title shorter.
+            selected || open || row.unread ? 'text-fg-strong' : dimmed ? 'text-muted' : 'text-fg'
           )}
         >
           {row.title}
         </span>
         {confirmingDelete ? null : (
-          <span className={menuAnchor ? 'hidden' : 'contents group-hover:hidden group-focus-within:hidden'}>
+          <>
+            {showGlyph ? (
+              <span className="inline-flex shrink-0" data-row-glyph>
+                <StatusGlyph state={row.state} size={14} />
+              </span>
+            ) : null}
             <RowMeta row={row} />
-          </span>
+          </>
         )}
       </button>
 
@@ -252,6 +311,8 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         </span>
       )}
 
+      {card && !menuAnchor && !confirmingDelete ? <TaskHoverCard row={row} anchor={card} /> : null}
+
       {menuAnchor ? (
         <ContextMenu
           anchor={menuAnchor}
@@ -275,10 +336,10 @@ function RowMeta({ row }: { row: NavRow }) {
       </span>
     )
   }
-  if (meta.kind === 'diff') {
-    return <DiffStat add={meta.add} del={meta.del} className="shrink-0" />
-  }
-  if (meta.kind === 'files') {
+  // Review rows all say one thing, the file count: exact line counts are not
+  // always known (a binary or oversized file drops them), and a column that
+  // switched between "+52 −4" and "3 files" read as two kinds of number.
+  if (meta.kind === 'diff' || meta.kind === 'files') {
     return (
       <span className="shrink-0 text-caption text-tertiary">
         {meta.files} {meta.files === 1 ? 'file' : 'files'}
@@ -286,8 +347,8 @@ function RowMeta({ row }: { row: NavRow }) {
     )
   }
   return (
-    <span className={cn('shrink-0 font-mono text-caption tnum', meta.accent ? 'text-accent' : 'text-tertiary')}>
-      {row.foreign ? <span className="font-sans">{row.workspaceName} · </span> : null}
+    // min-w and right-aligned, so a glyph beside "2h" stands where it does beside "15h".
+    <span className={cn('min-w-[3ch] shrink-0 text-right font-mono text-caption tnum', meta.accent ? 'text-accent' : 'text-tertiary')}>
       {meta.text}
     </span>
   )
@@ -298,7 +359,7 @@ function metaLabel(meta: NavMeta): string {
     case 'steps':
       return `step ${meta.current} of ${meta.total}`
     case 'diff':
-      return `${meta.add} added, ${meta.del} removed`
+      return `${meta.files} ${meta.files === 1 ? 'file' : 'files'} changed, ${meta.add} ${meta.add === 1 ? 'line' : 'lines'} added, ${meta.del} removed`
     case 'files':
       return `${meta.files} ${meta.files === 1 ? 'file' : 'files'} changed`
     case 'age':
@@ -365,7 +426,7 @@ function DeleteConfirm({
       data-inline-confirm
       role="group"
       aria-label={`Delete ${title}?`}
-      className="absolute inset-y-0 right-1 flex items-center gap-0.5"
+      className="absolute inset-y-0 right-1 flex items-center gap-1"
     >
       <span className="mr-1 text-caption text-danger">Delete?</span>
       <IconButton icon="check" label={`Delete ${title}`} size="xs" tone="muted" onClick={onConfirm} onKeyDown={onKeyDown} />

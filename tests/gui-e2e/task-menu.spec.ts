@@ -76,3 +76,18 @@ test('Fork opens a new task with the same conversation, listed beside the origin
   await expect(window.locator('[data-navigator]')).toContainText(`${TITLE} (fork)`)
   await expect(window.locator('[data-navigator]').getByRole('button', { name: new RegExp(`^${TITLE}(?! \\(fork\\))`) }).first()).toBeVisible()
 })
+
+test('Archive from the task menu takes it out of the navigator, and Unarchive brings it back', async () => {
+  const { window } = launched
+  const forkRow = window.locator('[data-nav-row]').filter({ hasText: `${TITLE} (fork)` })
+  await expect(forkRow).toHaveCount(1)
+  await openMenu()
+  await window.getByRole('menuitem', { name: 'Archive' }).click()
+  await expect(forkRow).toHaveCount(0)
+  await expect(window.getByText('Task archived')).toBeVisible()
+  // Still open where you are; its menu now offers Unarchive, and no Pin.
+  await openMenu()
+  await expect(window.getByRole('menuitem', { name: 'Pin', exact: true })).toHaveCount(0)
+  await window.getByRole('menuitem', { name: 'Unarchive' }).click()
+  await expect(forkRow).toHaveCount(1)
+})

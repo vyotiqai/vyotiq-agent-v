@@ -27,7 +27,7 @@ function useMaximized(): boolean {
 
 /**
  * The 36px band across the whole window. Three fixed things and nothing else:
- * the mark and the navigator toggle over the navigator column, the search
+ * the mark with the navigator toggle beside it over the navigator column, the search
  * trigger centred on the window, and the caption buttons. Nothing portals in
  * here — panels keep their tabs in their own 40px row below the band, which is
  * what ended the three fights over this strip.
@@ -60,7 +60,7 @@ export function TitleBar({
       aria-label="Window title bar"
     >
       <div
-        className="flex h-full shrink-0 items-center gap-1 whitespace-nowrap pl-3"
+        className="flex h-full shrink-0 items-center gap-2 whitespace-nowrap pl-3"
         style={{
           width: compact ? undefined : navigatorOpen ? navigatorWidthPx : COLLAPSED_LEFT_PX,
           paddingLeft: isDarwin ? MACOS_TITLEBAR_INSET_PX : undefined
@@ -68,8 +68,7 @@ export function TitleBar({
         data-titlebar-brand
       >
         <VyotiqMark size={15} className="text-fg-strong" decorative />
-        <span className="ml-1.5 text-xs font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong">Agent V</span>
-        <span className="flex-1" />
+        {/* Beside the mark, open or collapsed: the toggle never moves. */}
         <IconButton
           icon="sidebar"
           label={toggleLabel}
@@ -78,7 +77,7 @@ export function TitleBar({
           active={compact ? navigatorOpen : false}
           aria-expanded={navigatorOpen}
           aria-controls={compact ? 'app-nav-drawer' : undefined}
-          className="app-region-no-drag mr-2"
+          className="app-region-no-drag"
           onClick={onToggleNavigator}
           data-navigator-toggle
         />

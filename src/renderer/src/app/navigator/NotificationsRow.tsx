@@ -7,8 +7,8 @@ import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { Badge, Button, IconButton, MENU_SURFACE, StatusGlyph, cn } from '@renderer/lib/ui'
 
 function unreadLabel(count: number): string {
-  if (count <= 0) return 'Notifications'
-  return count === 1 ? 'Notifications, 1 unread' : `Notifications, ${count} unread`
+  if (count <= 0) return 'Inbox'
+  return count === 1 ? 'Inbox, 1 unread' : `Inbox, ${count} unread`
 }
 
 /**
@@ -36,11 +36,12 @@ export function NotificationGlyph({ item }: { item: Pick<NotificationItem, 'kind
 }
 
 /**
- * The inbox behind the bell: tasks that want you, wait on your review,
- * finished or failed, and app alerts. A dot on the bell says something is
- * unread; the count is in its name and in the panel, not on the navigator.
+ * The navigator's Inbox and the panel it opens: tasks that want you, wait on
+ * your review, finished or failed, and app alerts. An icon in the foot's row;
+ * a dot on it says something is unread, and the count is in its name and in
+ * the panel.
  */
-export function NotificationsButton({
+export function NotificationsRow({
   items,
   unreadCount,
   onMarkRead,
@@ -77,7 +78,7 @@ export function NotificationsButton({
         ref={panelRef}
         id={panelId}
         role="dialog"
-        aria-label="Notifications"
+        aria-label="Inbox"
         tabIndex={-1}
         data-notifications-panel
         className={cn(
@@ -91,7 +92,7 @@ export function NotificationsButton({
         }}
       >
         <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2">
-          <h2 className="text-sm font-semibold text-fg-strong">Notifications</h2>
+          <h2 className="text-sm font-semibold text-fg-strong">Inbox</h2>
           {unreadCount > 0 ? <Badge tone="accent">{unreadCount} new</Badge> : null}
           <span className="flex-1" />
           <Button size="xs" variant="ghost" disabled={unreadCount === 0} onClick={() => onMarkRead({ all: true })}>
@@ -173,18 +174,22 @@ export function NotificationsButton({
       <span className="relative inline-flex">
         <IconButton
           ref={triggerRef}
-          icon="bell"
+          icon="inbox"
           label={label}
           size="md"
-          tone="muted"
           active={open}
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-controls={open ? panelId : undefined}
+          data-place="inbox"
           onClick={() => setOpen((prev) => !prev)}
         />
         {unreadCount > 0 ? (
-          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 size-1.5 rounded-full bg-accent" />
+          <span
+            aria-hidden="true"
+            data-unread-dot
+            className="pointer-events-none absolute right-1 top-1 size-1.5 rounded-full bg-accent"
+          />
         ) : null}
       </span>
       {panel ? createPortal(panel, document.body) : null}

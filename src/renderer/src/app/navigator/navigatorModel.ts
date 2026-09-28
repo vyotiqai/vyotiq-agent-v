@@ -11,16 +11,20 @@ import { runTitle, runTooltip } from './runTitle'
 /**
  * The navigator: tasks grouped by what they want from you.
  *
- *   Needs you → Running → Ready for review → Pinned → Done
+ *   Needs you → Running → Ready for review → Pinned → Earlier → Archived
  *
  * Every state is read from real data:
  * - needs     a live run with an approval or question pending (`ActiveRun.waiting`)
  * - running   a live run; a run whose loop is armed waits here as `queued`
  * - review    a finished run whose edits still wait on Keep or Undo (`RunSummary.review`)
  * - pinned    a task you pinned that would otherwise be done — it never folds away
- * - done      everything else: done, failed, stopped, interrupted, goal paused
+ * - done      everything else: done, failed, stopped, interrupted, goal paused.
+ *             Headed "Earlier", not "Done": each row's glyph says how it ended,
+ *             and a stopped or failed task under "Done" read as finished.
+ * - archived  a task you archived, listed only while the view asks for it. A
+ *             task that goes live again ignores its archive until it settles.
  */
-export type NavSectionKey = 'needs' | 'running' | 'review' | 'pinned' | 'done'
+export type NavSectionKey = 'needs' | 'running' | 'review' | 'pinned' | 'done' | 'archived'
 
 export type NavMeta =
   /** "4/5": the step in progress of the todo list. */
@@ -47,6 +51,8 @@ export type NavRow = {
   unread: boolean
   /** You pinned it. A pinned task still shows where its state puts it until it is done. */
   pinned: boolean
+  /** You archived it. */
+  archived: boolean
   run: RunSummary
 }
 
@@ -57,10 +63,11 @@ export const NAV_SECTION_LABEL: Record<NavSectionKey, string> = {
   running: 'Running',
   review: 'Ready for review',
   pinned: 'Pinned',
-  done: 'Done'
+  done: 'Earlier',
+  archived: 'Archived'
 }
 
-const ORDER: NavSectionKey[] = ['needs', 'running', 'review', 'pinned', 'done']
+const ORDER: NavSectionKey[] = ['needs', 'running', 'review', 'pinned', 'done', 'archived']
 
 export type NavigatorInput = {
   runsByWorkspacePath: Readonly<Record<string, { runs: readonly RunSummary[] }>>
@@ -75,12 +82,23 @@ export type NavigatorInput = {
   unreadRunIds?: ReadonlySet<string>
   /** `pinnedRunKey` of every pinned task. */
   pinnedKeys?: ReadonlySet<string>
+  /** `pinnedRunKey` of every archived task. */
+  archivedKeys?: ReadonlySet<string>
+  /** List archived tasks in their own group; otherwise they are left out. */
+  showArchived?: boolean
   now?: number
 }
 
 export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
   const now = input.now ?? Date.now()
-  const buckets: Record<NavSectionKey, NavRow[]> = { needs: [], running: [], review: [], pinned: [], done: [] }
+  const buckets: Record<NavSectionKey, NavRow[]> = {
+    needs: [],
+    running: [],
+    review: [],
+    pinned: [],
+    done: [],
+    archived: []
+  }
   const waitingSince = new Map<string, number>()
 
   for (const path of input.openPaths) {
@@ -94,8 +112,14 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
       )
       const placed = place(run, live, input.activeRunsLoaded, now)
       if (live?.waiting) waitingSince.set(run.runId, Date.parse(live.waiting.since))
-      const pinned = input.pinnedKeys?.has(pinnedRunKey(path, run.runId)) ?? false
-      buckets[pinned && placed.section === 'done' ? 'pinned' : placed.section].push({
+      const key = pinnedRunKey(path, run.runId)
+      const pinned = input.pinnedKeys?.has(key) ?? false
+      const archived = input.archivedKeys?.has(key) ?? false
+      const settled = placed.section !== 'needs' && placed.section !== 'running'
+      if (archived && settled && !input.showArchived) continue
+      const section: NavSectionKey =
+        archived && settled ? 'archived' : pinned && placed.section === 'done' ? 'pinned' : placed.section
+      buckets[section].push({
         runId: run.runId,
         workspacePath: path,
         workspaceName: formatWorkspaceName(path),
@@ -107,6 +131,7 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
         foreign,
         unread: input.unreadRunIds?.has(run.runId) ?? false,
         pinned,
+        archived,
         run
       })
     }
@@ -121,6 +146,7 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
   buckets.review.sort(byRecency)
   buckets.pinned.sort(byRecency)
   buckets.done.sort(byRecency)
+  buckets.archived.sort(byRecency)
 
   return ORDER.filter((key) => buckets[key].length > 0).map((key) => ({
     key,
@@ -261,6 +287,135 @@ function untilText(iso: string, now: number): string {
   const mins = Math.round(ms / 60_000)
   if (mins < 60) return `in ${mins}m`
   const hrs = Math.round(mins / 60)
-  if (hrs < 48) return `in ${hrs}h`
+  if (hrs < 24) return `in ${hrs}h`
   return `in ${Math.round(hrs / 24)}d`
+}
+
+/** Earlier, split by when each task last moved. */
+export type NavDateKey = 'today' | 'yesterday' | 'week' | 'older'
+
+export const NAV_DATE_LABEL: Record<NavDateKey, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  week: 'This week',
+  older: 'Older'
+}
+
+export type NavDateGroup = { key: NavDateKey; label: string; rows: NavRow[] }
+
+const DAY_MS = 86_400_000
+
+/**
+ * Earlier's rows by calendar day in local time: Today, Yesterday, the five
+ * days before that as This week, then Older. Rows keep their order (newest
+ * first), and an empty group is left out. A time that can't be read counts as
+ * Older rather than vanishing.
+ */
+export function splitRowsByDate(rows: readonly NavRow[], now: number = Date.now()): NavDateGroup[] {
+  const midnight = new Date(now)
+  midnight.setHours(0, 0, 0, 0)
+  const today = midnight.getTime()
+  const bucket = (row: NavRow): NavDateKey => {
+    const at = Date.parse(row.run.updatedAt)
+    if (!Number.isFinite(at)) return 'older'
+    if (at >= today) return 'today'
+    if (at >= today - DAY_MS) return 'yesterday'
+    if (at >= today - 6 * DAY_MS) return 'week'
+    return 'older'
+  }
+  const groups: Record<NavDateKey, NavRow[]> = { today: [], yesterday: [], week: [], older: [] }
+  for (const row of rows) groups[bucket(row)].push(row)
+  return (Object.keys(NAV_DATE_LABEL) as NavDateKey[])
+    .filter((key) => groups[key].length > 0)
+    .map((key) => ({ key, label: NAV_DATE_LABEL[key], rows: groups[key] }))
+}
+
+export type NavWorkspaceBlock = { path: string; name: string; sections: NavSection[] }
+
+/**
+ * The same sections, one block per open workspace — what the navigator shows
+ * while it lists every workspace, so no two workspaces' tasks interleave.
+ *
+ * A workspace with something waiting on you comes first, then one with a task
+ * running, then the active workspace, then the rest in slot order: grouping by
+ * workspace must never bury a task that wants you under another's history.
+ */
+export function groupSectionsByWorkspace(
+  sections: readonly NavSection[],
+  openPaths: readonly string[],
+  activePath: string | null
+): NavWorkspaceBlock[] {
+  const blocks = openPaths.map((path) => ({
+    path,
+    name: formatWorkspaceName(path),
+    sections: sections
+      .map((section) => ({ ...section, rows: section.rows.filter((row) => workspacePathsEqual(row.workspacePath, path)) }))
+      .filter((section) => section.rows.length > 0)
+  }))
+  const rank = (block: NavWorkspaceBlock): number => {
+    if (block.sections.some((s) => s.key === 'needs')) return 0
+    if (block.sections.some((s) => s.key === 'running')) return 1
+    if (activePath && workspacePathsEqual(block.path, activePath)) return 2
+    return 3
+  }
+  return blocks
+    .map((block, slot) => ({ block, slot }))
+    .sort((a, b) => rank(a.block) - rank(b.block) || a.slot - b.slot)
+    .map(({ block }) => block)
+}
+
+/** What the View menu's state checklist names; each covers the row states under it. */
+export type NavStateFilter = 'needs' | 'running' | 'review' | 'failed' | 'drafts' | 'done'
+/** Where a task's edits land: the workspace itself, or a worktree of its own. */
+export type NavWhereFilter = 'inPlace' | 'worktree'
+
+export type NavFilter = {
+  /** States left out of the list. */
+  hiddenStates: readonly NavStateFilter[]
+  /** Only tasks that finished since you last looked. */
+  unreadOnly: boolean
+  hiddenWhere: readonly NavWhereFilter[]
+}
+
+export const NO_NAV_FILTER: NavFilter = { hiddenStates: [], unreadOnly: false, hiddenWhere: [] }
+
+export function navFilterActive(filter: NavFilter): boolean {
+  return filter.hiddenStates.length > 0 || filter.unreadOnly || filter.hiddenWhere.length > 0
+}
+
+/** The checklist entry a row answers to: stopped and paused tasks count as done. */
+export function rowStateFilter(state: TaskState): Exclude<NavStateFilter, 'drafts'> {
+  switch (state) {
+    case 'needs':
+      return 'needs'
+    case 'running':
+    case 'queued':
+      return 'running'
+    case 'review':
+      return 'review'
+    case 'failed':
+      return 'failed'
+    default:
+      return 'done'
+  }
+}
+
+export function rowPassesFilter(row: NavRow, filter: NavFilter): boolean {
+  if (filter.hiddenStates.includes(rowStateFilter(row.state))) return false
+  if (filter.unreadOnly && !row.unread) return false
+  const where: NavWhereFilter = row.run.worktreePath ? 'worktree' : 'inPlace'
+  return !filter.hiddenWhere.includes(where)
+}
+
+/** The sections with only the rows the filter keeps; a group left empty is dropped. */
+export function filterNavigatorSections(sections: readonly NavSection[], filter: NavFilter): NavSection[] {
+  if (!navFilterActive(filter)) return [...sections]
+  return sections
+    .map((section) => ({ ...section, rows: section.rows.filter((row) => rowPassesFilter(row, filter)) }))
+    .filter((section) => section.rows.length > 0)
+}
+
+/** Drafts are never unread and have not started anywhere, so only their own entry and Unread only apply. */
+export function draftsPassFilter(filter: NavFilter): boolean {
+  return !filter.hiddenStates.includes('drafts') && !filter.unreadOnly
 }
