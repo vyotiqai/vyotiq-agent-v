@@ -65,8 +65,9 @@ test('boot interrupts an orphan running run and the navigator says so', async ()
     await expand.click()
   }
 
-  // Stopped glyph, named: "Interrupted", never shown as still running.
-  await expect(window.locator('[data-navigator]').getByTitle('Interrupted', { exact: true })).toBeVisible({
-    timeout: 20_000
-  })
+  // Named "Interrupted", never shown as still running: the row's description
+  // leads with its state, and a row off its group's state carries a glyph.
+  const row = window.locator('[data-navigator]').getByRole('button', { name: 'Orphan boot test', exact: true })
+  await expect(row).toHaveAccessibleDescription(/^Interrupted\b/, { timeout: 20_000 })
+  await expect(row.locator('[data-row-glyph]')).toBeVisible()
 })

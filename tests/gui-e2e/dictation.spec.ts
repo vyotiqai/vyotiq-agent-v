@@ -96,7 +96,9 @@ test('a take writes into the brief while listening, and Enter inserts it', async
   const strip = window.locator('[data-take]')
   await expect(strip).toHaveAttribute('data-take', 'listening', { timeout: 10_000 })
   await expect(strip).toHaveAttribute('data-take-open', '')
-  await expect(strip.getByText('OpenAI')).toBeVisible()
+  // Where the audio goes is named once per take. The token hides under a
+  // 420px row, which CI's window reaches, so check it is rendered, not shown.
+  await expect(strip.getByTitle(/OpenAI/)).toBeAttached()
   // The level meter moves: some bar is taller than the 2px floor.
   await expect
     .poll(async () =>
@@ -122,6 +124,10 @@ test('a take writes into the brief while listening, and Enter inserts it', async
 
 test('Esc discards a take and Restore brings it back listening', async () => {
   const { window } = launched
+  // Same guard as above: without a stored key the mic offers setup, not Dictate.
+  if (secretWrite && !secretWrite.ok) {
+    test.skip(true, `setSecret unavailable: ${JSON.stringify(secretWrite.error)}`)
+  }
   const strip = window.locator('[data-take]')
   await window.getByRole('button', { name: /^Dictate$/ }).click()
   await expect(strip).toHaveAttribute('data-take', 'listening', { timeout: 10_000 })
