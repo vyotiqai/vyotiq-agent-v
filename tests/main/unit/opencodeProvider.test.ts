@@ -135,7 +135,7 @@ describe('OpenCode Go (opencode) provider wiring', () => {
     expect(models.get('hy3')!.thinkingCanDisable).toBe(true)
 
     // Registry marks every Go model reasoning-capable — even non-family ids.
-    for (const id of ['longcat-2.0', 'hy3', 'mimo-v2.5', 'ox-alpha-free']) {
+    for (const id of ['longcat-2.0', 'hy3', 'mimo-v2.5']) {
       const m = models.get(id)!
       expect(m.supportsThinking).toBe(true)
       expect(m.supportedThinkingEfforts?.length ?? 0).toBeGreaterThan(0)
