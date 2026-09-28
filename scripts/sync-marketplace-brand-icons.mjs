@@ -109,6 +109,7 @@ export const GLYPHS = {
   'repo-onboarding': 'compass',
   'flake-hunter': 'bug-beetle',
   'analyze-api': 'list-magnifying-glass',
+  'design-level-up': 'palette',
   // Vendored from github.com/mattpocock/skills (MIT) — see NOTICE. Third-party
   // authorship shows as the catalog entry's publisher; the art is ours, drawn
   // from the same Phosphor set as everything above so the grid stays one kit.

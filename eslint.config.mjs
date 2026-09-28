@@ -37,7 +37,7 @@ export default [
   {
     // errand-main is a separate reference codebase (no node_modules of its own);
     // linting it fails on unresolvable plugins and is out of scope.
-    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**', 'errand-main/**', 'docs/site-pages/**']
+    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**', 'errand-main/**', 'site/**']
   },
   js.configs.recommended,
   {
@@ -45,6 +45,16 @@ export default [
     languageOptions: {
       globals: { ...globals.node },
       sourceType: 'module',
+      ecmaVersion: 'latest'
+    }
+  },
+  {
+    // Scripts a bundled skill hands the agent to inline into a user's page:
+    // classic browser scripts, never loaded by the app itself.
+    files: ['resources/marketplace/packages/**/assets/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.browser },
+      sourceType: 'script',
       ecmaVersion: 'latest'
     }
   },

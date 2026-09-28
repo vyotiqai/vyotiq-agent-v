@@ -76,6 +76,9 @@ resources/marketplace/**/*.md
 !resources/marketplace/packages/release-notes/SKILL.md
 !resources/marketplace/packages/repo-onboarding/SKILL.md
 !resources/marketplace/packages/standup-digest/SKILL.md
+# Built-in design skill: SKILL.md plus references/ and assets/ templates, all
+# authored as Markdown with no .md.docx source, so it is a whole-package rule.
+!resources/marketplace/packages/design-level-up/**/*.md
 
 # Skills vendored from github.com/mattpocock/skills (MIT — see NOTICE). Each
 # carries supporting Markdown its SKILL.md links to, so these are whole-package
@@ -163,8 +166,6 @@ venv/
 # Same: hand-authored, no .docx source, linked from the README. States the
 # egress gate's coverage boundary, so it has to ship with the code it describes.
 !/docs/egress.md
-# The page files of the removed websites, kept for the next one.
-!/docs/site-pages/**
 # Same again. Describes what an agent-authored tool module is actually allowed
 # to do, and what bounds it; a security boundary documented only on one machine
 # is no boundary at all.

@@ -15,6 +15,11 @@ export function marketplaceIndexPath(): string {
   return join(marketplaceRoot(), 'index.json')
 }
 
+/** Ids of built-in packages startup has already installed once. */
+export function marketplaceSeededDefaultsPath(): string {
+  return join(marketplaceRoot(), 'seeded-defaults.json')
+}
+
 export function marketplaceCatalogCachePath(): string {
   return join(marketplaceRoot(), 'cache', 'catalog.json')
 }

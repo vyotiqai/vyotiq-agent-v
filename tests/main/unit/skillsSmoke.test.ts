@@ -103,7 +103,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
   })
 
   it('finds the workflow skills plus UI/API skills with SKILL.md', () => {
-    expect(firstPartyDirs.length).toBe(21)
+    expect(firstPartyDirs.length).toBe(22)
     for (const dir of skillDirs) {
       expect(existsSync(join(dir, 'SKILL.md')), dir).toBe(true)
     }
@@ -121,6 +121,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
       'create-skill',
       // Recurring-loop skills: each spans two connected tools on a cadence.
       'dependency-upgrade',
+      'design-level-up',
       'docs',
       'explain-code',
       'fix-bug',
@@ -492,6 +493,110 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
     const { toolSkill } = await import('@main/agent/tools/skill')
     expect(toolSkill(USER_DATA, 'grill-me')).toContain('grilling')
     expect(toolSkill(USER_DATA, 'grilling')).toContain('frontier')
+  })
+
+  it('marks only bundled, installable entries as built-ins', () => {
+    const builtIns = catalogPackages().filter(
+      (pkg) => (pkg as CatalogEntry & { installByDefault?: boolean }).installByDefault
+    )
+    expect(builtIns.map((pkg) => pkg.id)).toEqual(['design-level-up'])
+    for (const pkg of builtIns) {
+      // Startup installs these without a click, so they must never reach the
+      // network or the untrusted-source ack gate.
+      expect(pkg.source, pkg.id).toBe('bundled')
+      expect(pkg.installable, pkg.id).not.toBe(false)
+    }
+  })
+
+  /**
+   * A built-in arrives with no Add click, exactly once. The second half is the
+   * contract that matters: an uninstall is the user's decision, and the next
+   * launch must not quietly put the package back.
+   */
+  it('installs built-ins once at startup and respects an uninstall', async () => {
+    const { writeMarketplaceIndex, readMarketplaceIndex, removeInstalledItem } = await import(
+      '@main/marketplace/indexStore'
+    )
+    writeMarketplaceIndex({ schemaVersion: 1, items: [] })
+    rmSync(join(USER_DATA, 'marketplace', 'seeded-defaults.json'), { force: true })
+    const { installDefaultBundledPackages } = await import('@main/marketplace/install')
+
+    expect(await installDefaultBundledPackages()).toEqual(['design-level-up'])
+    expect(readMarketplaceIndex().items.map((i) => i.id)).toEqual(['design-level-up'])
+    // Nothing to do on the next launch.
+    expect(await installDefaultBundledPackages()).toEqual([])
+
+    removeInstalledItem('design-level-up')
+    expect(await installDefaultBundledPackages()).toEqual([])
+    expect(readMarketplaceIndex().items).toEqual([])
+  })
+
+  /**
+   * SKILL.md drift is repaired elsewhere, but only SKILL.md: a built-in that
+   * ships scripts would keep its first copy of them forever. A new bundled
+   * version reinstalls the whole package — and a disabled one stays disabled.
+   */
+  it('refreshes an installed built-in when the app ships a new version', async () => {
+    const { writeMarketplaceIndex, readMarketplaceIndex, setInstalledEnabled } = await import(
+      '@main/marketplace/indexStore'
+    )
+    writeMarketplaceIndex({ schemaVersion: 1, items: [] })
+    rmSync(join(USER_DATA, 'marketplace', 'seeded-defaults.json'), { force: true })
+    const { installDefaultBundledPackages } = await import('@main/marketplace/install')
+    await installDefaultBundledPackages()
+    setInstalledEnabled('design-level-up', false)
+
+    const stale = readMarketplaceIndex().items.map((i) =>
+      i.id === 'design-level-up' ? { ...i, version: '0.9.0' } : i
+    )
+    writeMarketplaceIndex({ schemaVersion: 1, items: stale })
+
+    expect(await installDefaultBundledPackages()).toEqual(['design-level-up'])
+    const item = readMarketplaceIndex().items.find((i) => i.id === 'design-level-up')
+    expect(item?.version).toBe('1.0.0')
+    expect(item?.enabled).toBe(false)
+
+    // The other bundle sharing this userData may carry a newer copy; an older
+    // bundle must leave it alone rather than swap versions every launch.
+    const newer = readMarketplaceIndex().items.map((i) =>
+      i.id === 'design-level-up' ? { ...i, version: '1.10.0' } : i
+    )
+    writeMarketplaceIndex({ schemaVersion: 1, items: newer })
+    expect(await installDefaultBundledPackages()).toEqual([])
+    expect(readMarketplaceIndex().items.find((i) => i.id === 'design-level-up')?.version).toBe(
+      '1.10.0'
+    )
+  })
+
+  /**
+   * design-level-up tells the agent to run `scripts/slop_check.py`; the Skill
+   * tool only reads files, so loading it has to say where it was installed.
+   */
+  it('serves the design skill with its directory, scripts and references', async () => {
+    const { writeMarketplaceIndex } = await import('@main/marketplace/indexStore')
+    writeMarketplaceIndex({ schemaVersion: 1, items: [] })
+    rmSync(join(USER_DATA, 'marketplace', 'seeded-defaults.json'), { force: true })
+    const { installDefaultBundledPackages } = await import('@main/marketplace/install')
+    await installDefaultBundledPackages()
+
+    const { toolSkill } = await import('@main/agent/tools/skill')
+    const loaded = toolSkill(USER_DATA, 'design-level-up')
+    const dir = /Skill directory: (.+)/.exec(loaded)?.[1]?.trim()
+    expect(dir).toBeTruthy()
+    for (const file of [
+      'scripts/slop_check.py',
+      'scripts/tweak.py',
+      'scripts/word_timestamps.py',
+      'assets/tweak-panel.js',
+      'assets/artboards.html',
+      'references/advanced.md'
+    ]) {
+      expect(existsSync(join(dir!, file)), file).toBe(true)
+      expect(loaded, file).toContain(file)
+    }
+    expect(toolSkill(USER_DATA, 'design-level-up', 'references/easy.md')).toContain(
+      'Design system first'
+    )
   })
 
   it('installs transitive dependencies once and leaves existing installs alone', async () => {

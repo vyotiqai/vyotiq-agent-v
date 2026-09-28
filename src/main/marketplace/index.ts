@@ -17,6 +17,7 @@ export {
   installMarketplacePackage,
   detectPackageAt,
   repairMissingPackageDependencies,
+  installDefaultBundledPackages,
   syncMarketplaceMcpIntoSettings,
   mcpServerFromManifest
 } from './install'

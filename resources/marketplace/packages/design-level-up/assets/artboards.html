@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artboards</title>
+<!--
+  artboards.html - compare design variants side by side (design-level-up, Advanced trick 22).
+  For agents without a built-in design canvas. Put this file next to the variant pages, then open:
+    artboards.html?v=hero-a.html,hero-b.html,hero-c.html            desktop frames (1440x900)
+    artboards.html?v=hero-a.html,hero-b.html&device=mobile          phone frames (390x844)
+    artboards.html?v=a.html,b.html&w=1280&h=720&labels=Calm,Bold    custom size and names
+  Or fill the VARIANTS list below and open the file with no query string.
+  "Pick" copies a one-line answer ("Go with B: hero-b.html") to paste back to the agent.
+-->
+<style>
+  :root { --bg: #f4f4f2; --panel: #ffffff; --fg: #1c1c1e; --muted: #6c6c70; --line: #dcdcd8; --accent: #2f5bd8; --on-accent: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141416; --panel: #1d1d20; --fg: #f1f1f3; --muted: #a1a1a8; --line: #333338; --accent: #8aa7ff; --on-accent: #10131c; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; }
+  header .spacer { flex: 1; }
+  button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--col, 420px), 1fr)); gap: 24px; padding: 24px 16px; align-items: start; }
+  figure { margin: 0; }
+  figcaption { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  figcaption strong { font-size: 14px; }
+  figcaption .file { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  figcaption a { color: var(--accent); }
+  .frame { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .frame iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; background: #fff; }
+  figure.picked .frame { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .empty { padding: 32px 16px; color: var(--muted); max-width: 640px; }
+  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 6px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Artboards</h1>
+  <span id="count" style="color: var(--muted)"></span>
+  <span class="spacer"></span>
+  <button type="button" data-device="desktop">Desktop</button>
+  <button type="button" data-device="mobile">Mobile</button>
+  <button type="button" id="zoom" title="Toggle between fit-to-column and 50%">Fit</button>
+</header>
+<main id="board"></main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+  // Edit this list when you cannot pass ?v=... (paths are relative to this file).
+  const VARIANTS = [
+    // { file: 'hero-a.html', label: 'A - Calm' },
+  ];
+
+  const q = new URLSearchParams(location.search);
+  const labels = (q.get('labels') || '').split(',').map((s) => s.trim());
+  let variants = (q.get('v') || '').split(',').map((s) => s.trim()).filter(Boolean)
+    .map((file, i) => ({ file, label: labels[i] || String.fromCharCode(65 + i) }));
+  if (!variants.length) variants = VARIANTS;
+
+  const SIZES = { desktop: [1440, 900], mobile: [390, 844] };
+  let device = q.get('device') === 'mobile' ? 'mobile' : 'desktop';
+  let custom = q.get('w') && q.get('h') ? [+q.get('w'), +q.get('h')] : null;
+  let fit = true;
+  const board = document.getElementById('board');
+
+  function size() { return custom && device === 'desktop' ? custom : SIZES[device]; }
+
+  function render() {
+    const [w, h] = size();
+    document.querySelectorAll('[data-device]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.device === device)));
+    document.getElementById('zoom').textContent = fit ? 'Fit' : '50%';
+    document.getElementById('count').textContent = variants.length ? variants.length + ' variant(s), ' + w + 'x' + h : '';
+    board.style.setProperty('--col', device === 'mobile' ? '260px' : '420px');
+    board.textContent = '';
+    if (!variants.length) {
+      board.innerHTML = '<p class="empty">No variants yet. Open this file as <code>artboards.html?v=a.html,b.html,c.html</code> (paths relative to this file), or fill the VARIANTS list at the bottom of the file.</p>';
+      return;
+    }
+    for (const v of variants) {
+      const fig = document.createElement('figure');
+      fig.innerHTML = '<figcaption><strong></strong><span class="file"></span><a target="_blank" rel="noopener">Open</a><button type="button">Pick</button></figcaption><div class="frame"><iframe loading="lazy"></iframe></div>';
+      fig.querySelector('strong').textContent = v.label;
+      fig.querySelector('.file').textContent = v.file;
+      fig.querySelector('a').href = v.file;
+      const iframe = fig.querySelector('iframe');
+      iframe.src = v.file;
+      iframe.title = v.label + ' - ' + v.file;
+      iframe.width = w;
+      iframe.height = h;
+      fig.querySelector('button').addEventListener('click', () => pick(fig, v));
+      board.appendChild(fig);
+    }
+    requestAnimationFrame(scale);
+  }
+
+  function scale() {
+    const [w, h] = size();
+    for (const frame of board.querySelectorAll('.frame')) {
+      const k = fit ? frame.parentElement.clientWidth / w : 0.5;
+      frame.style.height = Math.round(h * k) + 'px';
+      if (!fit) frame.style.width = Math.round(w * k) + 'px'; else frame.style.width = '';
+      frame.querySelector('iframe').style.transform = 'scale(' + k + ')';
+    }
+  }
+
+  async function pick(fig, v) {
+    board.querySelectorAll('figure').forEach((f) => f.classList.toggle('picked', f === fig));
+    const text = 'Go with ' + v.label + ': ' + v.file;
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { ok = false; }
+    toast(ok ? 'Copied: ' + text : text);
+  }
+
+  let timer = 0;
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(timer);
+    timer = setTimeout(() => t.classList.remove('on'), 2200);
+  }
+
+  document.querySelectorAll('[data-device]').forEach((b) => b.addEventListener('click', () => { device = b.dataset.device; render(); }));
+  document.getElementById('zoom').addEventListener('click', () => { fit = !fit; scale(); document.getElementById('zoom').textContent = fit ? 'Fit' : '50%'; });
+  addEventListener('resize', scale);
+  render();
+</script>
+</body>
+</html>

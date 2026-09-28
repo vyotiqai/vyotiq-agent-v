@@ -324,7 +324,14 @@ export const MarketplaceCatalogEntrySchema = z.object({
    * included. Ids must resolve to installable catalog entries and the graph must
    * be acyclic — both asserted by the bundled-catalog integrity test.
    */
-  dependsOn: z.array(MarketplaceSegmentSchema).optional()
+  dependsOn: z.array(MarketplaceSegmentSchema).optional(),
+  /**
+   * A built-in: startup installs it once, from resources, with no Add click.
+   * Once is the contract — an uninstall sticks, because the seeded ids are
+   * recorded (see installDefaultBundledPackages). Bundled entries only; the
+   * integrity test asserts it.
+   */
+  installByDefault: z.boolean().optional()
 })
 export type MarketplaceCatalogEntry = z.infer<typeof MarketplaceCatalogEntrySchema>
 

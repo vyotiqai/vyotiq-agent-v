@@ -339,6 +339,20 @@
       "installable": true
     },
     {
+      "id": "design-level-up",
+      "name": "Design level-up",
+      "version": "1.0.0",
+      "description": "Make AI-built design look professional: 25 techniques in Easy, Intermediate and Advanced levels, from a design system and real fonts to de-slop audits, icon packs, GSAP motion and live tweak panels.",
+      "kind": "skill",
+      "bundledPath": "design-level-up",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "iconPath": "icons/design-level-up.svg",
+      "installable": true,
+      "installByDefault": true
+    },
+    {
       "id": "accessibility",
       "name": "Accessibility",
       "version": "1.0.0",

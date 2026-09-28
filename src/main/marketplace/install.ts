@@ -43,8 +43,10 @@ import {
   bundledPackagePath,
   marketplacePackageDir,
   marketplacePackagesRoot,
+  marketplaceSeededDefaultsPath,
   resolveInstalledPackageRoot
 } from './paths'
+import { atomicWriteJson } from '../storage/atomicWrite'
 import { remoteMcpIdFromUrl, headersWithoutAuthorization } from '../../shared/utils/mcpAuth'
 import { setMcpAuthToken } from '../settings/secrets'
 import { synthesizeVyotiqMcpManifest } from './mcpImport'
@@ -620,6 +622,84 @@ export async function repairMissingPackageDependencies(): Promise<string[]> {
     }
   }
   return repaired
+}
+
+/**
+ * Dotted numeric compare. Newer-only, never "different": the dev build and the
+ * packaged app share one userData store, so two bundles carrying different
+ * versions of a built-in would otherwise swap it back and forth every launch.
+ */
+function isNewerVersion(candidate: string, installed: string): boolean {
+  const a = candidate.split('.').map((n) => Number.parseInt(n, 10) || 0)
+  const b = installed.split('.').map((n) => Number.parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0)
+  }
+  return false
+}
+
+function readSeededDefaults(): Set<string> {
+  const path = marketplaceSeededDefaultsPath()
+  if (!existsSync(path)) return new Set()
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { seeded?: unknown }
+    return new Set(Array.isArray(raw.seeded) ? raw.seeded.filter((s) => typeof s === 'string') : [])
+  } catch {
+    // Unreadable reads as "nothing seeded": the worst case is one reinstall of
+    // a built-in the user had removed, never a built-in that silently vanishes.
+    return new Set()
+  }
+}
+
+/**
+ * Install the catalog's built-ins (`installByDefault`) that startup has never
+ * installed, and refresh ones already installed from resources when the app
+ * ships a new version of them.
+ *
+ * Seeding happens once per id, then the id is recorded: uninstalling a
+ * built-in is a choice that must survive the next launch, so an id already in
+ * the record is never installed again. The version refresh exists because
+ * `repairBundledSkillPackagesFromResources` only rewrites SKILL.md, and a
+ * built-in with scripts and references would otherwise keep the first copy
+ * of those forever. Disabled stays disabled — registerInstalled keeps it.
+ */
+export async function installDefaultBundledPackages(): Promise<string[]> {
+  const defaults = loadBundledCatalog().packages.filter(
+    (e) => e.installByDefault && e.source === 'bundled' && e.bundledPath && e.installable !== false
+  )
+  if (defaults.length === 0) return []
+  const seeded = readSeededDefaults()
+  const recordedBefore = seeded.size
+  const installed: string[] = []
+  for (const entry of defaults) {
+    const bundledPath = entry.bundledPath!
+    try {
+      const prior = getInstalledItem(entry.id)
+      if (!seeded.has(entry.id)) {
+        if (!prior) {
+          await installMarketplacePackage({ source: 'bundled', target: bundledPath, kind: entry.kind })
+          installed.push(entry.id)
+        }
+        seeded.add(entry.id)
+        continue
+      }
+      if (!prior || prior.installSource !== 'bundled') continue
+      const root = bundledPackagePath(bundledPath)
+      if (!existsSync(root) || !isNewerVersion(detectPackageAt(root).version, prior.version)) continue
+      await installMarketplacePackage({ source: 'bundled', target: bundledPath, kind: entry.kind })
+      installed.push(entry.id)
+    } catch (err) {
+      logger.warn('Could not install built-in marketplace package', {
+        scope: 'marketplace',
+        id: entry.id,
+        err: formatError(err)
+      })
+    }
+  }
+  if (seeded.size !== recordedBefore) {
+    atomicWriteJson(marketplaceSeededDefaultsPath(), { seeded: [...seeded].sort() })
+  }
+  return installed
 }
 
 async function materializeToTemp(req: MarketplaceInstallRequest): Promise<{

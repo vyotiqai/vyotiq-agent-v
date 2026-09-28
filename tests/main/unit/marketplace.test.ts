@@ -494,6 +494,7 @@ describe('bundled marketplace catalog', () => {
       // Recurring-loop skills: each spans two connected tools on a cadence,
       // rather than restating what the agent already does on request.
       'dependency-upgrade',
+      'design-level-up',
       'docs',
       'explain-code',
       'fix-bug',
