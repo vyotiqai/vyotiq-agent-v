@@ -3,31 +3,45 @@ import { parseAgentInstanceRunId, parseAgentInstanceRunIdFromArgs, formatAgentIn
 import { formatElapsed } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
 import { StepMarker, cn } from '@renderer/lib/ui'
-import { NUM, ROW_HOVER } from '@renderer/lib/utils/layout'
+import { HOVER_ON_SURFACE, NUM, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
-import type { RecordStep } from '../recordModel'
+import { useRunSession } from '@renderer/features/chat/RunSessionContext'
+import type { RecordStep, RecordTail } from '../recordModel'
 import { RecordOpenContext, stepOpenKey } from '../recordFind'
 import { RecordRow } from './RecordLayout'
 import { NowLine, WorkList, workIsLive } from './WorkItems'
 
-/** The plan's steps; only the live step is open, the rest are one line each. */
+/**
+ * The plan's steps; only the step the live work is going into is open, the
+ * rest are one line each. Work done while no step was in progress sits after
+ * the step it followed, outside it.
+ */
 export function Steps({
   steps,
   runN,
+  tail = null,
   activity = null
 }: {
   steps: readonly RecordStep[]
   runN: number
-  /** The live run's activity, shown at the end of the live step's work. */
+  /** Where the live run's latest work is going; null once the run is over. */
+  tail?: RecordTail | null
+  /** The live run's activity, shown where its latest work is going. */
   activity?: string | null
 }) {
   if (steps.length === 0) return null
-  const liveKey = steps.find((s) => s.state === 'running' || s.state === 'needs')?.key
   return (
     <RecordRow>
       <ol className="-mx-2" aria-label="Steps">
         {steps.map((s) => (
-          <StepRow key={s.key} step={s} runN={runN} activity={s.key === liveKey ? activity : null} />
+          <StepRow
+            key={s.key}
+            step={s}
+            runN={runN}
+            holdsTail={tail?.kind === 'step' && tail.key === s.key}
+            activity={tail?.kind === 'step' && tail.key === s.key ? activity : null}
+            betweenActivity={tail?.kind === 'between' && tail.key === s.key ? activity : null}
+          />
         ))}
       </ol>
     </RecordRow>
@@ -42,15 +56,15 @@ export function showNeedsYou(from: Element): void {
   card.querySelector<HTMLElement>('button:not([disabled]), [href], input, textarea')?.focus({ preventScroll: true })
 }
 
-/** Instances this step started, by the short id the navigator and panes use. */
-function instanceKeys(step: RecordStep): string[] {
-  const keys: string[] = []
+/** Instances this step started, with the short id the navigator and panes use. */
+function instancesOf(step: RecordStep): { runId: string; shortId: string }[] {
+  const out: { runId: string; shortId: string }[] = []
   for (const w of step.work) {
     if (w.kind !== 'instance' || w.tool.tool.name !== 'spawn_agent_instance') continue
     const runId = parseAgentInstanceRunId(w.tool.tool.content) ?? parseAgentInstanceRunIdFromArgs(w.tool.tool.argsPreview)
-    if (runId) keys.push(formatAgentInstanceShortId(runId))
+    if (runId && !out.some((i) => i.runId === runId)) out.push({ runId, shortId: formatAgentInstanceShortId(runId) })
   }
-  return keys
+  return out
 }
 
 function editSummaryText(edits: RecordStep['edits']): string | null {
@@ -60,23 +74,48 @@ function editSummaryText(edits: RecordStep['edits']): string | null {
   return `${files} · +${edits.add} −${edits.del}`
 }
 
-function StepRow({ step, runN, activity }: { step: RecordStep; runN: number; activity: string | null }) {
+function StepRow({
+  step,
+  runN,
+  holdsTail,
+  activity,
+  betweenActivity
+}: {
+  step: RecordStep
+  runN: number
+  /** The live run's latest work is going into this step. */
+  holdsTail: boolean
+  activity: string | null
+  /** The live run's activity, when its latest work sits after this step. */
+  betweenActivity: string | null
+}) {
   const live = step.state === 'running' || step.state === 'needs'
   const [open, setOpen] = useState<boolean | null>(null)
   // Find in record opens a step that holds a match, whatever you last chose.
   const forced = useContext(RecordOpenContext).has(stepOpenKey(runN, step.key))
-  const expanded = forced || (open ?? live)
+  // The step the live work is going into stays open, even one marked done:
+  // what is happening now is never folded away.
+  const expanded = forced || (open ?? (live || holdsTail))
   const quiet = step.state === 'queued'
   const now = useSharedNow(live && step.startedAt != null)
   const durationMs =
     step.startedAt == null ? null : step.endedAt != null ? step.endedAt - step.startedAt : live ? now - step.startedAt : null
-  const instances = instanceKeys(step)
+  const instances = instancesOf(step)
+  const { onOpenAgentInstance } = useRunSession()
   const summary = editSummaryText(step.edits)
   const tail = step.work[step.work.length - 1]
   const showActivity = activity != null && !(tail && workIsLive(tail))
   const canOpen = step.work.length > 0 || showActivity
+  const errors = step.work.filter((w) => w.kind === 'error')
+  const betweenTail = step.between[step.between.length - 1]
+  const showBetweenActivity = betweenActivity != null && !(betweenTail && workIsLive(betweenTail))
   return (
-    <li className={cn('rounded-lg', live && 'bg-card')} data-step={step.n} data-step-state={step.state}>
+    <li
+      className={cn('rounded-lg', live && 'bg-card')}
+      data-step={step.n}
+      data-step-state={step.state}
+      {...(step.superseded ? { 'data-step-superseded': '' } : {})}
+    >
       {/* The title button stretches over the whole row (its ::after), so the row
           toggles anywhere; the needs-you link sits above it as its own control. */}
       <div
@@ -93,20 +132,39 @@ function StepRow({ step, runN, activity }: { step: RecordStep; runN: number; act
           onClick={() => setOpen(!expanded)}
           className={cn(
             'min-w-0 flex-1 truncate rounded-sm text-left text-sm after:absolute after:inset-0 after:rounded-lg focus-visible:vy-focus-ring disabled:cursor-default',
-            live ? 'font-medium text-fg-strong' : quiet ? 'text-muted' : 'text-secondary'
+            live ? 'font-medium text-fg-strong' : quiet || step.superseded ? 'text-muted' : 'text-secondary'
           )}
         >
           {step.title}
         </button>
-        {instances.map((k) => (
-          <span
-            key={k}
-            className={cn('inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted', NUM)}
-            title={`Instance ${k}`}
-          >
-            {k}
+        {step.superseded ? (
+          <span className="shrink-0 text-xs text-tertiary" title="A later plan dropped or renamed this step">
+            replaced
           </span>
-        ))}
+        ) : null}
+        {/* The step's children, each a way into it — above the row's own
+            toggle, like the needs-you link. */}
+        {instances.map(({ runId, shortId }) =>
+          onOpenAgentInstance ? (
+            <button
+              key={runId}
+              type="button"
+              onClick={() => onOpenAgentInstance(runId)}
+              aria-label={`Open instance ${shortId}`}
+              className={cn(
+                'relative z-[1] inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted hover:text-fg-strong focus-visible:vy-focus-ring',
+                HOVER_ON_SURFACE,
+                NUM
+              )}
+            >
+              {shortId}
+            </button>
+          ) : (
+            <span key={runId} className={cn('inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted', NUM)}>
+              {shortId}
+            </span>
+          )
+        )}
         {step.state === 'needs' ? (
           <button
             type="button"
@@ -135,6 +193,19 @@ function StepRow({ step, runN, activity }: { step: RecordStep; runN: number; act
         <div className="space-y-2 pb-3 pl-[36px] pr-2">
           {step.work.length > 0 ? <WorkList items={step.work} /> : null}
           {showActivity ? <NowLine text={activity!} /> : null}
+        </div>
+      ) : errors.length > 0 ? (
+        // Folded, a step still shows why its run failed — and Retry with it.
+        <div className="pb-3 pl-[36px] pr-2" data-step-errors={step.n}>
+          <WorkList items={errors} />
+        </div>
+      ) : null}
+      {step.between.length > 0 || showBetweenActivity ? (
+        // Done after this step settled and before another started: on the
+        // run's own edge, never folded into the step above it.
+        <div className="space-y-2 px-2 pb-3 pt-1" data-step-between={step.n}>
+          {step.between.length > 0 ? <WorkList items={step.between} /> : null}
+          {showBetweenActivity ? <NowLine text={betweenActivity!} /> : null}
         </div>
       ) : null}
     </li>

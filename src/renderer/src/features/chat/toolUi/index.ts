@@ -5,6 +5,7 @@ export {
   toolCategory,
   toolLabel,
   isInterruptedToolContent,
+  approvalRefusalOf,
   categoryLabels,
   mixedGroupLabels,
   toolIconName

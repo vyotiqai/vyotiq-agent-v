@@ -178,6 +178,18 @@ export function isInterruptedToolContent(content: string | undefined | null): bo
 }
 
 /**
+ * A call held for approval that never ran: you denied it, or the approval
+ * timed out. Main settles it as a failure with this reason (toolApproval.ts);
+ * it is a decision, not a fault, so it reads as one word, not as an error.
+ */
+export function approvalRefusalOf(content: string | undefined | null): 'Denied' | 'Timed out' | null {
+  const text = content?.trimStart() ?? ''
+  if (text.startsWith('The user denied permission to run ')) return 'Denied'
+  if (/^Tool approval for \S+ timed out and was auto-denied/.test(text)) return 'Timed out'
+  return null
+}
+
+/**
  * Human verb for a tool row. Interrupted tools never completed, so they use the
  * in-progress form (e.g. "Asking") rather than past tense ("Asked").
  */

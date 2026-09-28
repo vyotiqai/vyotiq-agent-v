@@ -12,6 +12,8 @@ export type TodoParsed = {
   done: number
   total: number
   items: TodoItem[]
+  /** todos.json's own write stamp (ISO); absent for a tool result's checklist. */
+  updatedAt?: string
 }
 
 const STATUS_MAP: Record<string, TodoStatus> = {
@@ -52,7 +54,13 @@ export function parseTodosJson(raw: string): TodoParsed | null {
       })
     }
     const done = items.filter((item) => item.status === 'completed').length
-    return { done, total: items.length, items }
+    const updatedAt = (data as { updatedAt?: unknown }).updatedAt
+    return {
+      done,
+      total: items.length,
+      items,
+      ...(typeof updatedAt === 'string' && updatedAt ? { updatedAt } : {})
+    }
   } catch {
     return null
   }

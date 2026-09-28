@@ -29,7 +29,8 @@ import type { ChatItemsStore, ChatMetaStore } from '@renderer/features/chat/chat
 import { taskHeaderState } from '@renderer/app/navigator/navigatorModel'
 import { runTitle } from '@renderer/app/navigator/runTitle'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
-import { buildRecordModel, type BuildOptions } from './recordModel'
+import { useRunSession } from '@renderer/features/chat/RunSessionContext'
+import { buildRecordModel, type BuildOptions, type InstanceFacts } from './recordModel'
 import { RecordBody, TaskHeader } from './record/RecordLayout'
 import { useRewindRedo } from './rewindRedo'
 import { TaskWorktreeStrip, useTaskWorktree } from './taskWorktree'
@@ -49,6 +50,9 @@ export type TaskPaneRunActions = {
   /** Pin or unpin: a pinned task keeps its own navigator group. Read when the menu draws. */
   onTogglePin?: () => void
   isPinned?: () => boolean
+  /** Archive or unarchive: an archived task leaves the navigator until its View shows archived ones. */
+  onToggleArchive?: () => void
+  isArchived?: () => boolean
   /** Open another task beside this one. */
   onSplit?: () => void
   /** Close this pane (only when there is more than one). */
@@ -164,20 +168,60 @@ export function PaneHeaderActions({
   )
 }
 
+/**
+ * The run's children as the record needs them — phase and times. A running
+ * child reports its step and activity every second; the record is rebuilt
+ * only when one of these changes, and the rows read the rest themselves.
+ */
+function useInstanceFacts(): Readonly<Record<string, InstanceFacts>> | undefined {
+  const { agentInstances } = useRunSession()
+  const key = agentInstances
+    ? Object.values(agentInstances)
+        .map((i) => `${i.instanceRunId}:${i.phase}:${i.startedAt ?? ''}:${i.endedAt ?? ''}`)
+        .join('|')
+    : ''
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` is the facts' identity
+  return useMemo(() => (agentInstances ? { ...agentInstances } : undefined), [key])
+}
+
 export function TaskPane(props: TaskPaneProps) {
   const { workspacePath, runId, running, pendingRun, showThinking } = props
-  const live = running || pendingRun
+  const liveNow = running || pendingRun
   const liveItems = useChatLiveItems(props.itemsStore, props.items)
-  const items = useDeferredValue(liveItems)
+  const todos = useRunTodos({ workspacePath, runId, running: liveNow, active: true })
+  const todosData = liveNow ? todos.data : null
+  // Items render deferred; whether the run is live must defer with them, or a
+  // frame shows the old items as the new run (a finished run's result drops
+  // back into its work list when a follow-up is sent).
+  const recordInput = useMemo(
+    () => ({
+      items: liveItems,
+      live: liveNow,
+      turnFailed: props.turnFailed,
+      turnStopped: props.turnStatus === 'cancelled' || props.turnStatus === 'interrupted',
+      todos: todosData
+    }),
+    [liveItems, liveNow, props.turnFailed, props.turnStatus, todosData]
+  )
+  const deferred = useDeferredValue(recordInput)
+  const items = deferred.items
+  const live = deferred.live
   const turnUsage = useResolvedTurnUsage(props.metaStore, props.turnUsage)
-  const todos = useRunTodos({ workspacePath, runId, running: live, active: true })
+  const instances = useInstanceFacts()
   // The last rewind, while it can still be redone.
   const { redo, busy: redoing, onRedo } = useRewindRedo(workspacePath, runId, items.length, live)
-  const liveTodos = live ? (todos.data?.items ?? null) : null
 
   const options: BuildOptions = useMemo(
-    () => ({ running: live, failed: props.turnFailed, showThinking, liveTodos }),
-    [live, props.turnFailed, showThinking, liveTodos]
+    () => ({
+      running: deferred.live,
+      failed: deferred.turnFailed,
+      stopped: deferred.turnStopped,
+      showThinking,
+      liveTodos: deferred.todos?.items ?? null,
+      liveTodosUpdatedAt: deferred.todos?.updatedAt ?? null,
+      instances
+    }),
+    [deferred, showThinking, instances]
   )
   const model = useMemo(() => buildRecordModel(items, options), [items, options])
   const last = model.runs[model.runs.length - 1] ?? null
@@ -239,16 +283,22 @@ export function TaskPane(props: TaskPaneProps) {
 
   const [renaming, setRenaming] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const archived = props.actions.isArchived?.() ?? false
   const menuItems = [
     ...(props.actions.onRename && runId ? [{ id: 'rename', label: 'Rename', icon: 'edit' as const, onSelect: () => setRenaming(true) }] : []),
-    ...(props.actions.onTogglePin && runId
+    // An archived task is out of the way; pinning it would pull it back.
+    ...(props.actions.onTogglePin && runId && !archived
       ? [{ id: 'pin', label: props.actions.isPinned?.() ? 'Unpin' : 'Pin', icon: 'pin' as const, onSelect: props.actions.onTogglePin }]
+      : []),
+    // A live task can't be put away, as in the navigator's row menu.
+    ...(props.actions.onToggleArchive && runId && (archived || !liveNow)
+      ? [{ id: 'archive', label: archived ? 'Unarchive' : 'Archive', icon: 'archive' as const, onSelect: props.actions.onToggleArchive }]
       : []),
     ...(props.actions.onExport && runId
       ? [{ id: 'export', label: 'Export as Markdown', icon: 'download' as const, onSelect: props.actions.onExport }]
       : []),
     // Main forks only a stopped task ("Cancel run first").
-    ...(props.actions.onFork && runId && !live
+    ...(props.actions.onFork && runId && !liveNow
       ? [{ id: 'fork', label: 'Fork', icon: 'fork' as const, onSelect: props.actions.onFork }]
       : []),
     ...(props.actions.onCopyLink && runId
@@ -258,7 +308,7 @@ export function TaskPane(props: TaskPaneProps) {
       ? [{ id: 'split', label: 'Open a task beside', icon: 'columns' as const, onSelect: props.actions.onSplit }]
       : []),
     // A live run cannot be deleted (main refuses: "Cancel run first") — stop it first.
-    ...(props.actions.onDelete && runId && !live
+    ...(props.actions.onDelete && runId && !liveNow
       ? [{ id: 'delete', label: 'Delete', icon: 'trash' as const, danger: true, separatorBefore: true, onSelect: props.actions.onDelete }]
       : [])
   ]
@@ -372,16 +422,28 @@ export function TaskPane(props: TaskPaneProps) {
   }, [findOpen, scroll.scrollRef])
 
   // ── A new request for you comes into view in the focused pane ─────────
-  const { jumpTop } = scroll
+  const { jumpTop, jumpBottom, isFollowing } = scroll
   const needsKey = firstNeed ? (firstNeed.kind === 'approval' ? firstNeed.approval.requestId : firstNeed.question.requestId) : null
   const gateKey = props.instanceGates?.[0]?.runId ?? null
   const shownNeedRef = useRef<string | null>(null)
+  // Following the run when a request pulled the view up: once it is answered,
+  // follow again — the run carries on at the bottom.
+  const resumeFollowRef = useRef(false)
   useEffect(() => {
     const key = needsKey ?? gateKey
-    if (!key || key === shownNeedRef.current || !props.approvalAutoFocus) return
+    if (!key) {
+      shownNeedRef.current = null
+      if (resumeFollowRef.current) {
+        resumeFollowRef.current = false
+        if (live) jumpBottom()
+      }
+      return
+    }
+    if (key === shownNeedRef.current || !props.approvalAutoFocus) return
+    if (shownNeedRef.current == null) resumeFollowRef.current = isFollowing()
     shownNeedRef.current = key
     jumpTop()
-  }, [needsKey, gateKey, props.approvalAutoFocus, jumpTop])
+  }, [needsKey, gateKey, props.approvalAutoFocus, jumpTop, jumpBottom, isFollowing, live])
 
   // ── What the live run is doing when its work does not say ─────────────
   const activity = !live
@@ -458,7 +520,7 @@ export function TaskPane(props: TaskPaneProps) {
         facts={facts}
         actions={
           <>
-            {live ? (
+            {liveNow ? (
               <Button size="xs" variant="ghost" icon="stop" title="Stop the run (Esc)" onClick={props.onStop}>
                 Stop
               </Button>

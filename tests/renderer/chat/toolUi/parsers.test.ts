@@ -17,6 +17,10 @@ import { parseMcpIntrospectData } from '@renderer/features/chat/toolUi/parsers/m
 import { parseMcpPinData } from '@renderer/features/chat/toolUi/parsers/mcpPin'
 import { parseSkillData } from '@renderer/features/chat/toolUi/parsers/skill'
 import { parseStatusMessageData } from '@renderer/features/chat/toolUi/parsers/status'
+import {
+  ASK_QUESTION_NO_ANSWER_GUIDANCE,
+  ASK_QUESTION_SUPERSEDED_GUIDANCE
+} from '@shared/utils/agentQuestionForm'
 import { parseCodebaseSearchData } from '@renderer/features/chat/toolUi/parsers/codebaseSearch'
 import type { UiToolRow } from '@shared/transcript'
 
@@ -782,7 +786,7 @@ describe('status message parser', () => {
     expect(data.message).toContain('Expected array')
   })
 
-  it('chips Timed out for dismissed ask_question (T1)', () => {
+  it('chips No answer for the pre-2026-09-28 dismissed text (T1)', () => {
     const data = parseStatusMessageData(
       tool({
         name: 'ask_question',
@@ -791,7 +795,41 @@ describe('status message parser', () => {
           'Question timed out or was dismissed without answers. Continue with a reasonable default.'
       })
     )
-    expect(data.chip).toBe('Timed out')
+    // Nothing times out any more; never label an old skip "Timed out".
+    expect(data.chip).toBe('No answer')
+  })
+
+  it('chips Skipped for a user skip and Replied instead for Send now', () => {
+    const skipped = parseStatusMessageData(
+      tool({ name: 'ask_question', status: 'done', content: ASK_QUESTION_NO_ANSWER_GUIDANCE })
+    )
+    expect(skipped.chip).toBe('Skipped')
+    const superseded = parseStatusMessageData(
+      tool({ name: 'ask_question', status: 'done', content: ASK_QUESTION_SUPERSEDED_GUIDANCE })
+    )
+    expect(superseded.chip).toBe('Replied instead')
+  })
+
+  it('keeps a multi-line answer whole and drops the prompt of a one-question form', () => {
+    const data = parseStatusMessageData(
+      tool({
+        name: 'ask_question',
+        argsPreview: JSON.stringify({
+          questions: [{ id: 'q1', prompt: 'What   should\nchange?', type: 'text' }]
+        }),
+        content: 'User answered:\n- What should change?: Two things:\n  - the header\n  - the footer'
+      })
+    )
+    expect(data.chip).toBe('Answered')
+    expect(data.answers).toEqual(['Two things:\n- the header\n- the footer'])
+  })
+
+  it('chips Answered for an older multi-line single answer', () => {
+    const data = parseStatusMessageData(
+      tool({ name: 'ask_question', content: 'User answered: line one\nline two' })
+    )
+    expect(data.chip).toBe('Answered')
+    expect(data.answers).toEqual(['line one\nline two'])
   })
 
   it('chips Skipped for autonomous ask_question skip', () => {

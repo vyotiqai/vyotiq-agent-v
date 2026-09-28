@@ -19,8 +19,8 @@ import { Brief } from './record/Brief'
 import { ReceiptLine } from './record/Receipt'
 import { RecordRow, RunDivider } from './record/RecordLayout'
 import { Steps } from './record/Steps'
-import { NowLine, WorkList, workIsLive } from './record/WorkItems'
-import { RecordOpenContext, runOpenKey } from './recordFind'
+import { LooseWork, NowLine, workIsLive } from './record/WorkItems'
+import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
 
 export type TaskRecordProps = {
   model: RecordModel
@@ -71,7 +71,7 @@ function stepLabelFor(run: RecordRun, need: NeedsYou): string | undefined {
 
 /** What the agent said right before the gated call, in the same list. */
 function whyFor(run: RecordRun, toolId: string): string | undefined {
-  const lists: WorkItem[][] = [run.setup, ...run.steps.map((s) => s.work), run.after]
+  const lists: WorkItem[][] = [run.setup, ...run.steps.flatMap((s) => [s.work, s.between]), run.after]
   for (const list of lists) {
     const at = list.findIndex((w) => w.kind === 'card' && w.tool.id === toolId)
     if (at < 0) continue
@@ -96,9 +96,11 @@ export function TaskRecord(props: TaskRecordProps) {
   const last = runs[runs.length - 1]!
   const lastLive = options.running
   const earlier = runs.slice(0, -1)
-  const showResultOnTop = !lastLive && last.result != null
   const needs = lastLive ? last.needs : []
   const byRun = checksByRun(runs, props.checks ?? [])
+  // The cost column is kept only when some run has a cost, so durations share
+  // the right edge the work rows' durations use instead of stopping short of a gap.
+  const historyCost = earlier.some((run) => props.turnUsage?.[run.n - 1] && turnCost(props.turnUsage[run.n - 1]!))
 
   return (
     <>
@@ -121,6 +123,7 @@ export function TaskRecord(props: TaskRecordProps) {
                 question={need.question}
                 stepLabel={stepLabelFor(last, need)}
                 onSubmit={props.onQuestionSubmit}
+                captureFocus={props.approvalAutoFocus}
               />
             )
           )}
@@ -132,13 +135,11 @@ export function TaskRecord(props: TaskRecordProps) {
 
       {props.lead}
 
-      {showResultOnTop ? <ResultRow text={last.result!.text} checks={byRun.get(last.n) ?? []} /> : null}
-
       {earlier.length > 0 ? (
         <RecordRow label="History">
           <div className="-mx-2">
             {earlier.map((run) => (
-              <HistoryRun key={run.id} run={run} props={props} checks={byRun.get(run.n) ?? []} />
+              <HistoryRun key={run.id} run={run} props={props} checks={byRun.get(run.n) ?? []} costColumn={historyCost} />
             ))}
           </div>
         </RecordRow>
@@ -147,7 +148,8 @@ export function TaskRecord(props: TaskRecordProps) {
       {runs.length > 1 ? (
         <RunDivider n={last.n} at={last.at != null ? formatDisplayTime(new Date(last.at).toISOString()) : undefined} />
       ) : null}
-      <RunBody run={last} isLast props={props} resultShownAbove={showResultOnTop} checks={byRun.get(last.n) ?? []} />
+      {/* Keyed by run: a follow-up's run must not inherit the last one's open steps. */}
+      <RunBody key={last.id} run={last} isLast props={props} checks={byRun.get(last.n) ?? []} />
     </>
   )
 }
@@ -197,30 +199,32 @@ function RunBody({
   run,
   isLast,
   props,
-  resultShownAbove = false,
   checks
 }: {
   run: RecordRun
   isLast: boolean
   props: TaskRecordProps
-  resultShownAbove?: boolean
   checks: readonly DoneWhenCheck[]
 }) {
   const live = isLast && props.options.running
   const index = messageIndexOf(run)
   const canRevert =
     index != null && props.messageCount > index + 1 && !props.options.running && props.editingUserMessageIndex == null
-  // The activity line goes where the work is happening: the live step if there
-  // is one, else after the run's loose work — never beside an item that is
-  // already showing it is live.
+  // The activity line goes where the latest work is going — the setup list, a
+  // step, after a step, or the loose work at the end — never beside an item
+  // that is already showing it is live.
   const activity = live ? (props.activity ?? null) : null
-  const liveStep = run.steps.find((s) => s.state === 'running' || s.state === 'needs')
-  const looseTail = run.after.length > 0 ? run.after : run.setup
-  const showLooseActivity =
-    activity != null && !liveStep && !(looseTail.length > 0 && workIsLive(looseTail[looseTail.length - 1]!))
+  const tail = live ? run.tail : null
+  const looseActivity = (list: readonly WorkItem[]): boolean =>
+    activity != null && !(list.length > 0 && workIsLive(list[list.length - 1]!))
+  const setupActivity = tail?.kind === 'setup' && looseActivity(run.setup)
+  const state = live ? null : runStateOf(run, isLast, props.options)
+  const afterActivity = tail?.kind === 'after' && looseActivity(run.after)
+  // A settled run with an answer folds its loose work; without one, the work is the record.
+  const foldLoose = !live && run.result != null
   return (
     <>
-      {(run.text || run.images.length > 0) && !(props.omitFirstBrief && run.n === 1) ? (
+      {(run.text || run.command || run.images.length > 0) && !(props.omitFirstBrief && run.n === 1) ? (
         <Brief
           run={run}
           editing={index != null && props.editingUserMessageIndex === index}
@@ -236,23 +240,24 @@ function RunBody({
       ) : null}
       {/* Open checks sit under the brief; once there is a result they move under it. */}
       {checks.length > 0 && (live || !run.result) ? <DoneWhenRow checks={checks} live={live} /> : null}
-      {run.setup.length > 0 ? (
+      {run.setup.length > 0 || setupActivity ? (
         <RecordRow>
-          <WorkList items={run.setup} />
+          <div className="space-y-2">
+            {run.setup.length > 0 ? <LooseWork items={run.setup} fold={foldLoose} openKey={looseOpenKey(run.n, 'setup')} /> : null}
+            {setupActivity ? <NowLine text={activity!} /> : null}
+          </div>
         </RecordRow>
       ) : null}
-      <Steps steps={run.steps} runN={run.n} activity={liveStep ? activity : null} />
-      {run.after.length > 0 ? (
-        <RecordRow label={run.steps.length === 0 ? props.workLabel : undefined}>
-          <WorkList items={run.after} />
+      <Steps steps={run.steps} runN={run.n} tail={tail} activity={activity} />
+      {run.after.length > 0 || afterActivity ? (
+        <RecordRow label={run.steps.length === 0 && run.after.length > 0 ? props.workLabel : undefined}>
+          <div className="space-y-2">
+            {run.after.length > 0 ? <LooseWork items={run.after} fold={foldLoose} openKey={looseOpenKey(run.n, 'after')} /> : null}
+            {afterActivity ? <NowLine text={activity!} /> : null}
+          </div>
         </RecordRow>
       ) : null}
-      {showLooseActivity ? (
-        <RecordRow>
-          <NowLine text={activity!} />
-        </RecordRow>
-      ) : null}
-      {run.result && !resultShownAbove ? (
+      {run.result ? (
         <ResultRow text={run.result.text} streaming={run.result.streaming} checks={live ? [] : checks} />
       ) : null}
       <ReceiptLine
@@ -262,6 +267,7 @@ function RunBody({
         live={live}
         feedback={isLast && !live ? props.runFeedback : undefined}
         checks={checks}
+        outcome={state === 'stopped' || state === 'failed' ? state : undefined}
       />
     </>
   )
@@ -271,11 +277,13 @@ function RunBody({
 function HistoryRun({
   run,
   props,
-  checks
+  checks,
+  costColumn
 }: {
   run: RecordRun
   props: TaskRecordProps
   checks: readonly DoneWhenCheck[]
+  costColumn: boolean
 }) {
   const [userOpen, setOpen] = useState(false)
   // Find in record opens an earlier run that holds a match.
@@ -285,7 +293,7 @@ function HistoryRun({
   const usage = props.turnUsage?.[run.n - 1] ?? null
   const cost = usage ? turnCost(usage) : null
   const duration = runDuration(run)
-  const title = run.result?.text.split('\n').find((l) => l.trim())?.replace(/^#+\s*/, '') ?? run.text
+  const title = run.result?.text.split('\n').find((l) => l.trim())?.replace(/^#+\s*/, '') ?? (run.text || (run.command ? `/${run.command}` : ''))
   return (
     <div data-history-run={run.n}>
       <button
@@ -299,7 +307,15 @@ function HistoryRun({
       >
         <StatusGlyph state={state} size={14} label />
         <span className="shrink-0 font-mono text-caption text-tertiary">Run {run.n}</span>
-        <span className="min-w-0 flex-1 truncate text-sm text-secondary">{title}</span>
+        {open ? (
+          // Opened, the run shows its whole answer below: the row names when it
+          // ran, as the divider above the latest run does, not the answer again.
+          <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary tnum">
+            {run.at != null ? formatDisplayTime(new Date(run.at).toISOString()) : ''}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-sm text-secondary">{title}</span>
+        )}
         {run.steps.length > 0 ? (
           <span className="shrink-0 text-xs text-tertiary">
             {run.steps.length} {run.steps.length === 1 ? 'step' : 'steps'}
@@ -308,17 +324,22 @@ function HistoryRun({
         <span className="w-14 shrink-0 text-right font-mono text-caption text-tertiary tnum">
           {duration != null && duration >= 1000 ? formatElapsed(duration) : ''}
         </span>
-        <span className="w-12 shrink-0 text-right font-mono text-caption text-tertiary tnum">
-          {cost ? `${cost.estimated ? '~' : ''}${formatUsdCost(cost.cost)}` : ''}
-        </span>
+        {costColumn ? (
+          <span className="w-12 shrink-0 text-right font-mono text-caption text-tertiary tnum">
+            {cost ? `${cost.estimated ? '~' : ''}${formatUsdCost(cost.cost)}` : ''}
+          </span>
+        ) : null}
         <Icon
           name={open ? 'chevron' : 'chevronRight'}
-          size={12}
-          className={cn('shrink-0 text-tertiary', open ? '' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
+          size={11}
+          // The row's gap is wider than a work row's; this puts its duration on their right edge.
+          className={cn('-ml-0.5 shrink-0 text-tertiary', open ? '' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
         />
       </button>
       {open ? (
-        <div className="px-2 pb-2">
+        // The opened run hangs off its row: a guide under the glyph, its
+        // content on the title's edge, so it never reads as the current run.
+        <div className="mb-2 ml-[15px] border-l border-border pl-4 pr-2" data-history-body={run.n}>
           <RunBody run={run} isLast={false} props={props} checks={checks} />
         </div>
       ) : null}

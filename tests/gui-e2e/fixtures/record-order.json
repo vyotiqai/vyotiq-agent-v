@@ -1,0 +1,54 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+
+    { "type": "text_delta", "text": "Planning the check." },
+    { "type": "tool_call_delta", "toolCallId": "plan-1", "name": "todo_write", "argumentsDelta": "{\"todos\":[{\"id\":\"a\",\"content\":\"Read the config\",\"status\":\"in_progress\"},{\"id\":\"b\",\"content\":\"Read the tests\",\"status\":\"pending\"}]}" },
+    {
+      "type": "assistant_message",
+      "content": "Planning the check.",
+      "toolCalls": [{ "id": "plan-1", "name": "todo_write", "arguments": "{\"todos\":[{\"id\":\"a\",\"content\":\"Read the config\",\"status\":\"in_progress\"},{\"id\":\"b\",\"content\":\"Read the tests\",\"status\":\"pending\"}]}" }]
+    },
+    { "type": "tool_start", "toolCallId": "plan-1", "name": "todo_write", "summary": "2 tasks" },
+    { "type": "tool_result", "toolCallId": "plan-1", "name": "todo_write", "summary": "2 tasks", "ok": true, "content": "0/2 complete\n[~] (a) Read the config\n[ ] (b) Read the tests" },
+
+    { "type": "tool_call_delta", "toolCallId": "read-config", "name": "read", "argumentsDelta": "{\"path\":\"config.json\"}" },
+    { "type": "text_delta", "text": "STEP_ONE_WORDS reading the config." },
+    {
+      "type": "assistant_message",
+      "content": "STEP_ONE_WORDS reading the config.",
+      "toolCalls": [{ "id": "read-config", "name": "read", "arguments": "{\"path\":\"config.json\"}" }]
+    },
+    { "type": "tool_start", "toolCallId": "read-config", "name": "read", "summary": "config.json" },
+    { "type": "tool_result", "toolCallId": "read-config", "name": "read", "summary": "config.json", "ok": true, "content": "{}" },
+
+    { "type": "tool_call_delta", "toolCallId": "plan-2", "name": "todo_write", "argumentsDelta": "{\"merge\":true,\"todos\":[{\"id\":\"a\",\"status\":\"completed\"}]}" },
+    { "type": "assistant_message", "content": "", "toolCalls": [{ "id": "plan-2", "name": "todo_write", "arguments": "{\"merge\":true,\"todos\":[{\"id\":\"a\",\"status\":\"completed\"}]}" }] },
+    { "type": "tool_start", "toolCallId": "plan-2", "name": "todo_write", "summary": "2 tasks" },
+    { "type": "tool_result", "toolCallId": "plan-2", "name": "todo_write", "summary": "2 tasks", "ok": true, "content": "1/2 complete\n[x] (a) Read the config\n[ ] (b) Read the tests" },
+
+    { "type": "tool_call_delta", "toolCallId": "read-between", "name": "read", "argumentsDelta": "{\"path\":\"between-steps.md\"}" },
+    { "type": "assistant_message", "content": "", "toolCalls": [{ "id": "read-between", "name": "read", "arguments": "{\"path\":\"between-steps.md\"}" }] },
+    { "type": "tool_start", "toolCallId": "read-between", "name": "read", "summary": "between-steps.md" },
+    { "type": "tool_result", "toolCallId": "read-between", "name": "read", "summary": "between-steps.md", "ok": true, "content": "notes" },
+
+    { "type": "tool_call_delta", "toolCallId": "plan-3", "name": "todo_write", "argumentsDelta": "{\"merge\":true,\"todos\":[{\"id\":\"b\",\"status\":\"in_progress\"}]}" },
+    { "type": "assistant_message", "content": "", "toolCalls": [{ "id": "plan-3", "name": "todo_write", "arguments": "{\"merge\":true,\"todos\":[{\"id\":\"b\",\"status\":\"in_progress\"}]}" }] },
+    { "type": "tool_start", "toolCallId": "plan-3", "name": "todo_write", "summary": "2 tasks" },
+    { "type": "tool_result", "toolCallId": "plan-3", "name": "todo_write", "summary": "2 tasks", "ok": true, "content": "1/2 complete\n[x] (a) Read the config\n[~] (b) Read the tests" },
+
+    { "type": "tool_call_delta", "toolCallId": "read-tests", "name": "read", "argumentsDelta": "{\"path\":\"app.test.ts\"}" },
+    { "type": "assistant_message", "content": "", "toolCalls": [{ "id": "read-tests", "name": "read", "arguments": "{\"path\":\"app.test.ts\"}" }] },
+    { "type": "tool_start", "toolCallId": "read-tests", "name": "read", "summary": "app.test.ts" },
+    { "type": "tool_result", "toolCallId": "read-tests", "name": "read", "summary": "app.test.ts", "ok": true, "content": "test" },
+
+    { "type": "tool_call_delta", "toolCallId": "plan-4", "name": "todo_write", "argumentsDelta": "{\"merge\":true,\"todos\":[{\"id\":\"b\",\"status\":\"completed\"}]}" },
+    { "type": "assistant_message", "content": "", "toolCalls": [{ "id": "plan-4", "name": "todo_write", "arguments": "{\"merge\":true,\"todos\":[{\"id\":\"b\",\"status\":\"completed\"}]}" }] },
+    { "type": "tool_start", "toolCallId": "plan-4", "name": "todo_write", "summary": "2 tasks" },
+    { "type": "tool_result", "toolCallId": "plan-4", "name": "todo_write", "summary": "2 tasks", "ok": true, "content": "2/2 complete\n[x] (a) Read the config\n[x] (b) Read the tests" },
+
+    { "type": "text_delta", "text": "Both read. RECORD_ORDER_DONE." },
+    { "type": "assistant_message", "content": "Both read. RECORD_ORDER_DONE." },
+    { "type": "status", "status": "done" }
+  ]
+}

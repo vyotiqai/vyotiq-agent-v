@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ChatMessage } from '@shared/ipc'
+import type { ChatMessage, PersistedEvent } from '@shared/ipc'
 import { inferToolStatus, messagesToUiItems, applyEventTimestamps, applyCompactionItems, insertCompactionItem, applyPersistedLiveTools, finalizeHydratedTranscript, isMeaningfulThinking, shouldRenderThinking, duplicatesReasoning, mergeThinkingContent, applyThinkingSnapshot, stripToolShapedAssistantText, stripToolShapedAssistantTextForStream, stripIncompleteToolPrefix, isToolShapedTextLeak, isSerializedPayloadText, scrubStreamingAssistantToolLeak, type UiItem } from '@shared/transcript'
 
 describe('messagesToUiItems', () => {
@@ -588,6 +588,37 @@ describe('inferToolStatus', () => {
 })
 
 describe('applyEventTimestamps', () => {
+  it('dates each old answer by its own event when the loaded events start later than the messages', () => {
+    // Messages from an older transcript (no stamps of their own): three steps.
+    const items = messagesToUiItems([
+      { role: 'user', content: 'go', at: '2026-07-24T10:00:00.000Z' },
+      { role: 'assistant', content: 'Step one.' },
+      { role: 'assistant', content: 'Step two.' },
+      { role: 'assistant', content: 'Step three.' }
+    ])
+    // The event window only reaches back to step two.
+    const enriched = applyEventTimestamps(items, [
+      { at: '2026-07-24T10:00:20.000Z', event: { type: 'assistant_message', runId: 'r1', content: 'Step two.' } },
+      { at: '2026-07-24T10:00:30.000Z', event: { type: 'assistant_message', runId: 'r1', content: 'Step three.' } }
+    ] as PersistedEvent[])
+    const ats = enriched.filter((i) => i.kind === 'message' && i.role === 'assistant').map((i) => (i.kind === 'message' ? i.at : null))
+    // Step one is outside the window: no stamp, rather than step two's.
+    expect(ats).toEqual([undefined, '2026-07-24T10:00:20.000Z', '2026-07-24T10:00:30.000Z'])
+  })
+
+  it('reads an answer stamped when it was written without borrowing an event', () => {
+    const items = messagesToUiItems([
+      { role: 'user', content: 'go', at: '2026-07-24T10:00:00.000Z' },
+      { role: 'assistant', content: 'Done.', at: '2026-07-24T10:00:09.000Z' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }], at: '2026-07-24T10:00:10.000Z' },
+      { role: 'tool', toolCallId: 'c1', toolName: 'read', content: 'x', ok: true, at: '2026-07-24T10:00:12.000Z' }
+    ])
+    const done = items.find((i) => i.kind === 'message' && i.role === 'assistant')
+    expect(done?.kind === 'message' ? done.at : null).toBe('2026-07-24T10:00:09.000Z')
+    const row = items.find((i) => i.kind === 'tool')
+    expect(row?.kind === 'tool' ? row.endedAt : null).toBe('2026-07-24T10:00:12.000Z')
+  })
+
   it('attaches tool_start timestamps to tool rows in order', () => {
     const items = messagesToUiItems([
       { role: 'user', content: 'hi' },
@@ -1304,38 +1335,11 @@ describe('finalizeHydratedTranscript', () => {
     }
   })
 
-  it('cancels in-progress todo items when the run was interrupted', () => {
-    const events = [
-      {
-        at: '2026-07-24T12:00:03.000Z',
-        event: { type: 'status', runId: 'r1', status: 'cancelled' as const }
-      }
-    ]
-    const items = messagesToUiItems([
-      {
-        role: 'assistant',
-        content: '',
-        toolCalls: [{ id: 'todo1', name: 'todo_write', arguments: '{}' }]
-      },
-      {
-        role: 'tool',
-        toolCallId: 'todo1',
-        toolName: 'todo_write',
-        content: '0/5 complete\n[~] Audit core library files\n[ ] Audit API routes'
-      }
-    ])
-    const finalized = finalizeHydratedTranscript(items, events)
-    const tool = finalized.find((item) => item.kind === 'tool')
-    expect(tool?.kind).toBe('tool')
-    if (tool?.kind === 'tool') {
-      expect(tool.tool.content).toContain('[-] Audit core library files')
-      expect(tool.tool.content).not.toContain('[~]')
-    }
-  })
-
-  it('demotes in-progress todo items to pending when the run completed or errored', () => {
+  it('leaves todo_write snapshots as written, whatever the run ended as', () => {
+    // Which step was in progress when is the record's grouping; a run that is
+    // over reads as over from its status, not from rewritten snapshots.
     const content = '0/2 complete\n[~] Ship\n[ ] Docs'
-    for (const status of ['done', 'error'] as const) {
+    for (const status of ['done', 'error', 'cancelled'] as const) {
       const events = [
         {
           at: '2026-07-24T12:00:03.000Z',
@@ -1358,12 +1362,26 @@ describe('finalizeHydratedTranscript', () => {
       const finalized = finalizeHydratedTranscript(items, events)
       const tool = finalized.find((item) => item.kind === 'tool')
       expect(tool?.kind).toBe('tool')
-      if (tool?.kind === 'tool') {
-        expect(tool.tool.content).toContain('[ ] Ship')
-        expect(tool.tool.content).not.toContain('[~]')
-        expect(tool.tool.content).not.toContain('[-] Ship')
-      }
+      if (tool?.kind === 'tool') expect(tool.tool.content).toBe(content)
     }
+  })
+
+  it('restores a todo_write snapshot an older run end rewrote, from its event', () => {
+    const items = messagesToUiItems([
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'todo1', name: 'todo_write', arguments: '{}' }] },
+      // Rewritten on disk by the old run-end pass: the in-progress mark is gone.
+      { role: 'tool', toolCallId: 'todo1', toolName: 'todo_write', content: '0/2 complete\n[ ] Ship\n[ ] Docs' }
+    ])
+    const events = [
+      { at: '2026-07-24T12:00:01.000Z', event: { type: 'tool_start', runId: 'r1', toolCallId: 'todo1', name: 'todo_write', summary: '2 tasks' } },
+      {
+        at: '2026-07-24T12:00:02.000Z',
+        event: { type: 'tool_result', runId: 'r1', toolCallId: 'todo1', name: 'todo_write', summary: '2 tasks', ok: true, content: '0/2 complete\n[~] Ship\n[ ] Docs' }
+      }
+    ] as PersistedEvent[]
+    const tool = applyEventTimestamps(items, events).find((item) => item.kind === 'tool')
+    expect(tool?.kind === 'tool' ? tool.tool.content : null).toBe('0/2 complete\n[~] Ship\n[ ] Docs')
   })
 
   it('drops never-started running tools when the run completed normally', () => {

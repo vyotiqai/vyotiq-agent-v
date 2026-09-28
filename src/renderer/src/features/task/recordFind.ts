@@ -12,11 +12,17 @@ import './recordFind.css'
  * scroll to. Tool output is not searched: it loads only when a card opens.
  */
 
-/** Keys of the folds a match needs open: `run:<n>` for an earlier run, `step:<n>:<key>` for a step. */
+/**
+ * Keys of the folds a match needs open: `run:<n>` for an earlier run,
+ * `step:<n>:<key>` for a step, `loose:<n>:<list>` for a settled run's work
+ * outside its steps, `thought:<id>` for a thought shown as one line.
+ */
 export const RecordOpenContext = createContext<ReadonlySet<string>>(new Set())
 
 export const runOpenKey = (n: number): string => `run:${n}`
 export const stepOpenKey = (runN: number, stepKey: string): string => `step:${runN}:${stepKey}`
+export const looseOpenKey = (runN: number, list: 'setup' | 'after'): string => `loose:${runN}:${list}`
+export const thoughtOpenKey = (id: string): string => `thought:${id}`
 
 /** The text a work item shows once its step is open. */
 function workText(w: WorkItem): string {
@@ -61,17 +67,26 @@ export function foldsToOpen(runs: readonly RecordRun[], query: string): Set<stri
   if (!q) return open
   runs.forEach((run, i) => {
     const isLast = i === runs.length - 1
-    let inRun = has(run.text, q) || has(run.result?.text, q)
-    const lists: WorkItem[][] = [run.setup, run.after]
-    for (const list of lists) if (list.some((w) => has(workText(w), q))) inRun = true
+    let inRun = has(run.text, q) || has(run.command, q) || has(run.result?.text, q)
+    for (const [name, list] of [['setup', run.setup], ['after', run.after]] as const) {
+      if (!list.some((w) => has(workText(w), q))) continue
+      open.add(looseOpenKey(run.n, name))
+      inRun = true
+    }
     for (const step of run.steps) {
       if (has(step.title, q)) inRun = true
+      // Work between steps is never folded inside one: only its run must open.
+      if (step.between.some((w) => has(workText(w), q))) inRun = true
       if (step.work.some((w) => has(workText(w), q))) {
         open.add(stepOpenKey(run.n, step.key))
         inRun = true
       }
     }
     if (inRun && !isLast) open.add(runOpenKey(run.n))
+    // A thought shows one line until opened; one that matches opens in full.
+    for (const list of [run.setup, run.after, ...run.steps.flatMap((s) => [s.work, s.between])]) {
+      for (const w of list) if (w.kind === 'thought' && has(w.text, q)) open.add(thoughtOpenKey(w.id))
+    }
   })
   return open
 }

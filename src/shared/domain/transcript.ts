@@ -16,7 +16,6 @@ import {
 } from './reasoning'
 import { summarizeToolArgs } from '../utils/toolSummary'
 import { truncateToolArgsPreview } from '../utils/toolResultIpc'
-import { finalizeTodoContentOnRunEnd } from '../utils/todoContent'
 
 const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete'])
 
@@ -70,6 +69,8 @@ export type UiToolApproval = {
   mutating: boolean
   /** Terminal: what "Always allow" remembers, or null when it cannot be offered. See ToolApprovalRequest. */
   alwaysAllowCommand?: string | null
+  /** When the request reached the renderer (ISO) — the wait's start. */
+  requestedAt?: string
 }
 
 /** One field in a pending ask_question form. */
@@ -116,10 +117,22 @@ export type UiItem =
       reconnecting?: boolean
       /** ISO timestamp when the message was sent or received. */
       at?: string
+      /**
+       * A user follow-up applied while the agent was still mid-turn (Send now /
+       * steer): the run it opens carries on the work, and the plan, of the one
+       * before it.
+       */
+      midTurn?: true
     }
   | {
       kind: 'tool'
       id: string
+      /**
+       * The row's first id, kept when the provider's id later replaces a
+       * placeholder one — what the record keys the row's view by, so it is not
+       * torn down and rebuilt mid-stream.
+       */
+      key?: string
       tool: UiToolRow
       groupTiming?: UiGroupTiming
       at?: string
@@ -617,7 +630,8 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
         content: display,
         images: images.length ? images : undefined,
         attachments: attachments.length ? attachments : undefined,
-        ...(m.at ? { at: m.at } : {})
+        ...(m.at ? { at: m.at } : {}),
+        ...(m.midTurn ? { midTurn: true as const } : {})
       })
       continue
     }
@@ -636,7 +650,8 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
           id: messageUiId('assistant', i),
           role: 'assistant',
           content: stripToolShapedAssistantText(text),
-          thinking
+          thinking,
+          ...(m.at ? { at: m.at } : {})
         })
       }
       if (m.toolCalls?.length) {
@@ -673,6 +688,8 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
       const row: Extract<UiItem, { kind: 'tool' }> = {
         kind: 'tool',
         id,
+        // When the result settled; its start comes from the tool_start event.
+        ...(m.at ? { endedAt: m.at } : {}),
         tool: {
           id,
           name,
@@ -684,7 +701,18 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
           ...(images.length ? { images } : {})
         }
       }
-      const existingIdx = items.findIndex((item) => item.kind === 'tool' && item.id === id)
+      // The newest unsettled row with this id: a provider that reused an id in
+      // an earlier step must not have this result overwrite that step's row.
+      let existingIdx = -1
+      for (let j = items.length - 1; j >= 0; j--) {
+        const row = items[j]!
+        if (row.kind !== 'tool' || row.id !== id) continue
+        if (row.tool.status === 'running') {
+          existingIdx = j
+          break
+        }
+        if (existingIdx < 0) existingIdx = j
+      }
       if (existingIdx >= 0) {
         items[existingIdx] = row
       } else {
@@ -721,6 +749,12 @@ export function applyPersistedLiveTools(items: UiItem[], events: PersistedEvent[
     }
     if (event.type === 'tool_call_delta') {
       if (existing.has(event.toolCallId)) continue
+      // The provider named a call that streamed under a stand-in id: one row.
+      const renamed = event.replacesToolCallId ? live.get(event.replacesToolCallId) : undefined
+      if (renamed && event.replacesToolCallId) {
+        live.delete(event.replacesToolCallId)
+        live.set(event.toolCallId, renamed)
+      }
       const current = live.get(event.toolCallId)
       const name =
         event.name && event.name !== 'tool' ? event.name : current?.name ?? ''
@@ -866,12 +900,12 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
   )
   const startAtById = new Map<string, string>()
   const endAtById = new Map<string, string>()
+  const todoContentById = new Map<string, string>()
   let runStartAt: string | undefined
   let runDoneAt: string | undefined
   let lastTerminal: 'done' | 'cancelled' | 'error' | null = null
   const extraUserStartAts: string[] = []
-  const allAssistantMessageAts: string[] = []
-  const visibleAssistantMessageAts: string[] = []
+  const visibleAssistantMessages: VisibleAssistantEvent[] = []
 
   for (const row of events) {
     if (!isAgentEvent(row.event)) continue
@@ -896,15 +930,23 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
       const count = appliedUsers.length || row.event.ids.length
       for (let i = 0; i < count; i++) extraUserStartAts.push(row.at)
     }
-    if (row.event.type === 'assistant_message') {
-      allAssistantMessageAts.push(row.at)
-      if (row.event.content || row.event.thinking) {
-        visibleAssistantMessageAts.push(row.at)
-      }
+    if (row.event.type === 'assistant_message' && (row.event.content || row.event.thinking)) {
+      visibleAssistantMessages.push({
+        at: row.at,
+        content: stripToolShapedAssistantText(row.event.content ?? '').trim(),
+        thinking: (row.event.thinking ?? '').trim()
+      })
     }
     if (row.event.type === 'tool_result') {
       const resultId = row.event.toolCallId
-      if (resultId && itemIds.has(resultId)) endAtById.set(resultId, row.at)
+      if (resultId && itemIds.has(resultId)) {
+        endAtById.set(resultId, row.at)
+        // Transcripts written before run end stopped rewriting todo_write
+        // results lost their in-progress marks there; the event kept them.
+        if (row.event.name === 'todo_write' && row.event.ok && row.event.content && !row.event.contentTruncated) {
+          todoContentById.set(resultId, row.event.content)
+        }
+      }
       continue
     }
     if (row.event.type !== 'tool_start') continue
@@ -919,7 +961,12 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
     const startAt = startAtById.get(item.id)
     const endAt = endAtById.get(item.id)
     const ok = okById.get(item.id)
-    const withAt = startAt || endAt ? { ...item, ...(startAt ? { at: startAt } : {}), ...(endAt ? { endedAt: endAt } : {}) } : item
+    const todoContent = todoContentById.get(item.id)
+    const stamped = startAt || endAt ? { ...item, ...(startAt ? { at: startAt } : {}), ...(endAt ? { endedAt: endAt } : {}) } : item
+    const withAt =
+      todoContent && todoContent !== stamped.tool.content
+        ? { ...stamped, tool: { ...stamped.tool, content: todoContent } }
+        : stamped
     if (ok === undefined) return withAt
     return {
       ...withAt,
@@ -935,8 +982,7 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
     runStartAt,
     runDoneAt,
     extraUserStartAts,
-    allAssistantMessageAts,
-    visibleAssistantMessageAts
+    visibleAssistantMessages
   })
 
   const withMessages = withTools.map((item) => {
@@ -1066,22 +1112,42 @@ export function applyCompactionItems(items: UiItem[], events: PersistedEvent[]):
   return weaveCompactionItems(base, extras)
 }
 
+type VisibleAssistantEvent = { at: string; content: string; thinking: string }
+
+/** How many events back a row's own may sit behind the one tried next (skipped, invisible rows). */
+const ASSISTANT_MATCH_LOOKBACK = 12
+
+function sameAssistantTurn(item: AssistantMessageItem, event: VisibleAssistantEvent): boolean {
+  const content = item.content.trim()
+  if (content || event.content) return content === event.content
+  // Reasoning only on both sides: its opening words are enough to tell steps apart.
+  const thinking = (item.thinking ?? '').trim()
+  if (!thinking || !event.thinking) return true
+  return thinking.slice(0, 200) === event.thinking.slice(0, 200)
+}
+
+/**
+ * Stamps for message rows that carry none (transcripts written before every
+ * message was stamped on append).
+ *
+ * The loaded events are the log's tail and the loaded messages the
+ * transcript's tail, and the two windows need not start at the same step: an
+ * assistant row is matched to its own `assistant_message` by what it says,
+ * walking both back from the newest. Handing the events out in order from the
+ * oldest put step 56's time on step 1 whenever the event window was the shorter.
+ */
 function messageTimestampsFromEvents(
   items: UiItem[],
   meta: {
     runStartAt?: string
     runDoneAt?: string
     extraUserStartAts: string[]
-    allAssistantMessageAts: string[]
-    visibleAssistantMessageAts: string[]
+    visibleAssistantMessages: VisibleAssistantEvent[]
   }
 ): Map<string, string> {
   const out = new Map<string, string>()
-  let assistantEventIdx = 0
-  let visibleAssistantEventIdx = 0
   let extraUserIdx = 0
   let seenUser = false
-  let turnHasVisibleAssistant = false
 
   for (const item of items) {
     if (item.kind === 'message' && item.role === 'user') {
@@ -1096,29 +1162,6 @@ function messageTimestampsFromEvents(
         }
       }
       seenUser = true
-      turnHasVisibleAssistant = false
-      continue
-    }
-
-    if (item.kind === 'message' && item.role === 'assistant' && (item.content || item.thinking)) {
-      if (!turnHasVisibleAssistant && assistantEventIdx < meta.allAssistantMessageAts.length) {
-        assistantEventIdx += 1
-        turnHasVisibleAssistant = true
-      } else if (turnHasVisibleAssistant && assistantEventIdx < meta.allAssistantMessageAts.length) {
-        assistantEventIdx += 1
-      }
-      if (visibleAssistantEventIdx < meta.visibleAssistantMessageAts.length) {
-        out.set(item.id, meta.visibleAssistantMessageAts[visibleAssistantEventIdx]!)
-        visibleAssistantEventIdx += 1
-      }
-      continue
-    }
-
-    if (item.kind === 'tool') {
-      if (!turnHasVisibleAssistant && assistantEventIdx < meta.allAssistantMessageAts.length) {
-        assistantEventIdx += 1
-        turnHasVisibleAssistant = true
-      }
     }
   }
 
@@ -1128,19 +1171,28 @@ function messageTimestampsFromEvents(
       item.role === 'assistant' &&
       Boolean(item.content || item.thinking)
   )
+  const events = meta.visibleAssistantMessages
+  let next = events.length - 1
+  for (let i = assistantItems.length - 1; i >= 0 && next >= 0; i--) {
+    const item = assistantItems[i]!
+    const floor = Math.max(0, next - ASSISTANT_MATCH_LOOKBACK)
+    for (let k = next; k >= floor; k--) {
+      if (!sameAssistantTurn(item, events[k]!)) continue
+      // Its own event's stamp is authoritative over one a live row carried.
+      out.set(item.id, events[k]!.at)
+      next = k - 1
+      break
+    }
+  }
+
   for (let i = 0; i < assistantItems.length; i++) {
     const item = assistantItems[i]!
-    if (out.has(item.id)) continue
-    if (visibleAssistantEventIdx < meta.visibleAssistantMessageAts.length) {
-      out.set(item.id, meta.visibleAssistantMessageAts[visibleAssistantEventIdx]!)
-      visibleAssistantEventIdx += 1
-      continue
-    }
+    if (out.has(item.id) || item.at) continue
+    // Its own first call started right after it; a call further on belongs to
+    // a later step and would date this one too late.
     const itemIndex = items.findIndex((entry) => entry.id === item.id)
-    const nextTool = items
-      .slice(itemIndex + 1)
-      .find((entry): entry is Extract<UiItem, { kind: 'tool' }> => entry.kind === 'tool')
-    if (nextTool?.at) {
+    const nextTool = items[itemIndex + 1]
+    if (nextTool?.kind === 'tool' && nextTool.at) {
       out.set(item.id, nextTool.at)
       continue
     }
@@ -1290,26 +1342,17 @@ export function finalizeHydratedTranscript(
       }
     }
     if (item.kind !== 'tool') return item
-
-    let tool = item.tool
-    if (tool.status === 'running') {
-      tool = {
-        ...tool,
+    // todo_write results stay as written: which step was in progress when is
+    // what the record groups the run's work by.
+    if (item.tool.status !== 'running') return item
+    return {
+      ...item,
+      tool: {
+        ...item.tool,
         status: 'fail' as const,
-        content: tool.content ?? stub
+        content: item.tool.content ?? stub
       }
     }
-    if (
-      tool.name === 'todo_write' &&
-      tool.content &&
-      (lastStatus === 'done' || lastStatus === 'error' || lastStatus === 'cancelled')
-    ) {
-      const content = finalizeTodoContentOnRunEnd(tool.content, lastStatus)
-      if (content !== tool.content) tool = { ...tool, content }
-    }
-
-    if (tool === item.tool) return item
-    return { ...item, tool }
   })
 
   return closeOpenGroupTimingsOnHydrate(finalized, endedAt)

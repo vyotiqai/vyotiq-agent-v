@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  approvalRefusalOf,
   isInterruptedToolContent,
   toolCategory,
   toolIconName,
@@ -121,5 +122,14 @@ describe('toolUi meta', () => {
         argsPreview: '{"todos":[{"id":"1"}]}'
       })
     ).toBe(false)
+  })
+})
+
+describe('approvalRefusalOf', () => {
+  it('names a denial and a timeout, and nothing else', () => {
+    expect(approvalRefusalOf('The user denied permission to run terminal. Do not retry it.')).toBe('Denied')
+    expect(approvalRefusalOf('Tool approval for edit timed out and was auto-denied. Do not retry it.')).toBe('Timed out')
+    expect(approvalRefusalOf('ENOENT: no such file')).toBeNull()
+    expect(approvalRefusalOf(undefined)).toBeNull()
   })
 })

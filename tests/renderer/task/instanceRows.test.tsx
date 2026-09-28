@@ -87,10 +87,29 @@ describe('instance row against the child phase', () => {
   })
 })
 
+function spawnItem(status: 'running' | 'done' | 'fail', content?: string): ToolItem {
+  return {
+    kind: 'tool',
+    id: 'spawn-1',
+    at: '2026-09-28T09:49:24.000Z',
+    endedAt: '2026-09-28T09:49:32.000Z',
+    tool: {
+      id: 'spawn-1',
+      name: 'spawn_agent_instance',
+      summary: 'Map src/main',
+      status,
+      content,
+      argsPreview: JSON.stringify({ goal: 'Map src/main', outcome: 'A map', sub_tasks: ['read'], done_when: 'cited' })
+    }
+  }
+}
+
+const SPAWNED = `Agent V Instance id; ${RUN_ID} (short ${SHORT_ID})\nrun_id: ${RUN_ID}`
+
 describe('instance row controls', () => {
   it('names Open after the instance it opens, and passes the run id', () => {
     const onOpenAgentInstance = vi.fn()
-    renderRow(instanceItem('done', `Agent V Instance id; ${RUN_ID}\nphase: done`), {
+    renderRow(spawnItem('done', SPAWNED), {
       agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'done' } },
       onOpenAgentInstance
     })
@@ -99,14 +118,79 @@ describe('instance row controls', () => {
   })
 
   it('offers no Open action without a run to open', () => {
-    renderRow(instanceItem('running'))
+    renderRow(spawnItem('running'), { onOpenAgentInstance: vi.fn() })
+    expect(screen.getByText('Spawning instance')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Open instance/ })).toBeNull()
+  })
+
+  it('opens a child from its spawn only — an await of it is not a second way in', () => {
+    renderRow(instanceItem('running'), {
+      agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'started' } },
+      onOpenAgentInstance: vi.fn()
+    })
+    expect(screen.getByText(`Awaiting instance ${SHORT_ID}`)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Open instance/ })).toBeNull()
   })
 })
 
-describe('thought Show all control', () => {
-  it('exposes its expanded state, and flips it with the text', () => {
-    const text = 'First line of the reasoning.\nSecond line of the reasoning.'
+describe('a spawned child, as it runs', () => {
+  it('says it is running, which step it is on and what it is doing', () => {
+    renderRow(spawnItem('done', SPAWNED), {
+      agentInstances: {
+        [RUN_ID]: {
+          instanceRunId: RUN_ID,
+          phase: 'started',
+          startedAt: '2026-09-28T09:49:32.000Z',
+          step: 7,
+          activity: 'Reading src/main/agent/loop.ts'
+        }
+      }
+    })
+    expect(screen.getByText(`Running instance ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText('Step 7 · Reading src/main/agent/loop.ts')).toBeTruthy()
+    // The deliverable, not the background the goal carries.
+    expect(screen.getByText('A map')).toBeTruthy()
+  })
+
+  it('once finished, says so and how long the child ran — not how long the spawn took', () => {
+    renderRow(spawnItem('done', SPAWNED), {
+      agentInstances: {
+        [RUN_ID]: {
+          instanceRunId: RUN_ID,
+          phase: 'done',
+          startedAt: '2026-09-28T09:49:32.000Z',
+          endedAt: '2026-09-28T09:53:51.000Z',
+          step: 21,
+          activity: 'Reading x'
+        }
+      }
+    })
+    expect(screen.getByText(`Instance finished ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText('4m 19s')).toBeTruthy()
+    expect(screen.queryByText(/Step 21/)).toBeNull()
+  })
+})
+
+describe('a settled await', () => {
+  it('shows the report title on the line and the whole report on opening', () => {
+    renderRow(
+      instanceItem(
+        'done',
+        `Agent V Instance id; ${RUN_ID} (short ${SHORT_ID})\nphase: done\nworktree_branch: vyotiq/instance/${RUN_ID}\n\n# Electron main map\n\nThe loop lives in loop.ts.`
+      ),
+      { agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'done' } } }
+    )
+    const row = screen.getByRole('button', { name: /Electron main map/ })
+    expect(screen.queryByText('The loop lives in loop.ts.')).toBeNull()
+    fireEvent.click(row)
+    expect(screen.getByText('The loop lives in loop.ts.')).toBeTruthy()
+    expect(screen.queryByText(/worktree_branch/)).toBeNull()
+  })
+})
+
+describe('a settled thought', () => {
+  it('shows one line of where it ended up, and opens to the whole of it', () => {
+    const text = 'The user sent a request.\nI will read the config first.'
     const message: Extract<UiItem, { kind: 'message' }> = {
       kind: 'message',
       id: 'm1',
@@ -116,10 +200,11 @@ describe('thought Show all control', () => {
     }
     const work: WorkItem[] = [{ kind: 'thought', id: 'thought-1', item: message, text, streaming: false }]
     render(<WorkList items={work} />)
-    const showAll = screen.getByRole('button', { name: 'Show all' })
-    expect(showAll.getAttribute('aria-expanded')).toBe('false')
-    fireEvent.click(showAll)
-    const showLess = screen.getByRole('button', { name: 'Show less' })
-    expect(showLess.getAttribute('aria-expanded')).toBe('true')
+    const row = screen.getByRole('button', { name: /I will read the config first/ })
+    expect(row.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText(/The user sent a request/)).toBeNull()
+    fireEvent.click(row)
+    expect(row.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText(/The user sent a request/)).toBeTruthy()
   })
 })

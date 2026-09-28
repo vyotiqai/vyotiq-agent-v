@@ -15,7 +15,10 @@ export function StatusMessageBody({ tool }: ToolBodyProps) {
       {data.answers.length > 0 ? (
         <ul className={`${TOOL_BODY_INNER} m-0 list-none space-y-1 p-0`}>
           {data.answers.map((answer, i) => (
-            <li key={`${i}:${answer.slice(0, 24)}`} className="text-caption text-secondary">
+            <li
+              key={`${i}:${answer.slice(0, 24)}`}
+              className="whitespace-pre-line text-caption text-secondary [overflow-wrap:anywhere]"
+            >
               {answer}
             </li>
           ))}

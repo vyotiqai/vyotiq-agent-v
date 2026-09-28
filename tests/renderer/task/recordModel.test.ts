@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UiItem } from '@shared/transcript'
-import { buildRecordModel, runStateOf } from '@renderer/features/task/recordModel'
+import { buildRecordModel, runStateOf, type WorkItem } from '@renderer/features/task/recordModel'
 import { latestRetryableErrorId } from '@renderer/features/task/record/WorkItems'
 
 const T0 = Date.parse('2026-09-24T10:00:00.000Z')
@@ -197,16 +197,51 @@ describe('buildRecordModel', () => {
     expect(buildRecordModel(items, { running: false, failed: true }).runs[0]!.steps[0]!.state).toBe('failed')
   })
 
-  it('prefers the live todos.json for the latest run while it is in flight', () => {
+  it('prefers the live todos.json for the latest run while it is in flight, when it is newer', () => {
     const items = [user('Do it', 0), todos([['a', '~', 'One'], ['b', ' ', 'Two']], 1)]
-    const [r] = buildRecordModel(items, {
+    const liveTodos = [
+      { id: 'a', content: 'One', status: 'completed' as const },
+      { id: 'b', content: 'Two', status: 'in_progress' as const }
+    ]
+    const [r] = buildRecordModel(items, { running: true, liveTodos, liveTodosUpdatedAt: at(2) }).runs
+    expect(r!.steps.map((s) => s.state)).toEqual(['done', 'running'])
+    // Its write stamp starts the step it put in progress.
+    expect(r!.steps[1]!.startedAt).toBe(T0 + 2_000)
+  })
+
+  it('never lets a todos.json poll that lags the items roll a step back', () => {
+    const items = [
+      user('Do it', 0),
+      todos([['a', '~', 'One'], ['b', ' ', 'Two']], 1),
+      read('a.ts', 2),
+      todos([['a', 'x', 'One'], ['b', '~', 'Two']], 3),
+      read('b.ts', 4)
+    ]
+    // The poll still holds the first write.
+    const stale = [
+      { id: 'a', content: 'One', status: 'in_progress' as const },
+      { id: 'b', content: 'Two', status: 'pending' as const }
+    ]
+    for (const liveTodosUpdatedAt of [at(1), null]) {
+      const [r] = buildRecordModel(items, { running: true, liveTodos: stale, liveTodosUpdatedAt }).runs
+      expect(r!.steps.map((s) => s.state)).toEqual(['done', 'running'])
+      expect(r!.steps[1]!.work.map((w) => w.kind)).toEqual(['explore'])
+    }
+  })
+
+  it('never adds steps from todos.json that this run did not name', () => {
+    // create_plan merged into a list still holding run 1's leftovers.
+    const plan = tool('create_plan', { title: 'P', plan: '# P', todos: [{ id: 'n1', content: 'New', status: 'in_progress' }] }, 'Wrote plan.md', 11)
+    const items = [user('First', 0), todos([['old', ' ', 'Old leftover']], 1), said('Done.', 2), user('Next', 10), plan]
+    const { runs } = buildRecordModel(items, {
       running: true,
       liveTodos: [
-        { id: 'a', content: 'One', status: 'completed' },
-        { id: 'b', content: 'Two', status: 'in_progress' }
-      ]
-    }).runs
-    expect(r!.steps.map((s) => s.state)).toEqual(['done', 'running'])
+        { id: 'old', content: 'Old leftover', status: 'pending' },
+        { id: 'n1', content: 'New', status: 'in_progress' }
+      ],
+      liveTodosUpdatedAt: at(12)
+    })
+    expect(runs[1]!.steps.map((s) => s.title)).toEqual(['New'])
   })
 
   it('never gives a follow-up the last run’s plan from todos.json', () => {
@@ -267,5 +302,163 @@ describe('latestRetryableErrorId', () => {
     expect(latestRetryableErrorId([user('Go', 0), failure('e1'), user('Again', 5)], false)).toBeNull()
     expect(latestRetryableErrorId([user('Go', 0), failure('e1')], true)).toBeNull()
     expect(latestRetryableErrorId([user('Go', 0), said('Done.', 1)], false)).toBeNull()
+  })
+})
+
+describe('the record keeps work where and when it happened', () => {
+  const explored = (w: WorkItem | undefined): string[] =>
+    w?.kind === 'explore' ? w.tools.map((t) => (JSON.parse(t.tool.argsPreview ?? '{}') as { path?: string }).path ?? '') : []
+
+  it('keeps a replaced plan step, and the work done under it', () => {
+    const items = [
+      user('Go', 0),
+      todos([['a', '~', 'Old step']], 1),
+      read('a.ts', 2),
+      read('b.ts', 3),
+      todos([['n1', '~', 'New step']], 4),
+      read('c.ts', 5)
+    ]
+    const [r] = buildRecordModel(items, { running: false }).runs
+    expect(r!.steps.map((s) => [s.title, s.state, Boolean(s.superseded), s.n])).toEqual([
+      ['Old step', 'stopped', true, 0],
+      ['New step', 'stopped', false, 1]
+    ])
+    expect(explored(r!.steps[0]!.work[0])).toEqual(['a.ts', 'b.ts'])
+    expect(explored(r!.steps[1]!.work[0])).toEqual(['c.ts'])
+    // A replaced step alone does not make the run read as stopped.
+    expect(runStateOf({ ...r!, steps: [r!.steps[0]!] }, false, { running: false })).toBe('done')
+  })
+
+  it('keeps work done between two steps after the one that settled, not inside it', () => {
+    const items = [
+      user('Go', 0),
+      todos([['a', '~', 'A'], ['b', ' ', 'B']], 1),
+      read('a.ts', 2),
+      todos([['a', 'x', 'A'], ['b', ' ', 'B']], 3),
+      read('between.ts', 4),
+      todos([['a', 'x', 'A'], ['b', '~', 'B']], 5),
+      read('b.ts', 6)
+    ]
+    const live = buildRecordModel(items.slice(0, 5), { running: true }).runs[0]!
+    expect(live.tail).toEqual({ kind: 'between', key: 'a' })
+    const [r] = buildRecordModel(items, { running: false }).runs
+    expect(r!.steps[0]!.work.map(explored)).toEqual([['a.ts']])
+    expect(r!.steps[0]!.between.map(explored)).toEqual([['between.ts']])
+    expect(r!.steps[1]!.work.map(explored)).toEqual([['b.ts']])
+  })
+
+  it('files calls the loop ran after a todo_write it ran first under the step that write started', () => {
+    // The model listed read x before its todo_write; the loop ran the write first.
+    const readX = { ...(read('x.ts', 11) as Extract<UiItem, { kind: 'tool' }>) }
+    const write = todos([['a', 'x', 'A'], ['b', '~', 'B']], 10)
+    const items = [user('Go', 0), todos([['a', '~', 'A'], ['b', ' ', 'B']], 1), read('a.ts', 2), readX, write]
+    const [r] = buildRecordModel(items, { running: false }).runs
+    expect(r!.steps[0]!.work.map(explored)).toEqual([['a.ts']])
+    expect(r!.steps[1]!.work.map(explored)).toEqual([['x.ts']])
+  })
+
+  it('names the step a never-started snapshot marks done as the one the work served', () => {
+    // Every snapshot without an in-progress mark: a model that skips it, or a
+    // transcript an older run end rewrote.
+    const items = [
+      user('Go', 0),
+      read('context.ts', 1),
+      todos([['a', ' ', 'A'], ['b', ' ', 'B']], 2),
+      read('a.ts', 3),
+      todos([['a', 'x', 'A'], ['b', ' ', 'B']], 4),
+      read('b.ts', 5),
+      todos([['a', 'x', 'A'], ['b', 'x', 'B']], 6)
+    ]
+    const [r] = buildRecordModel(items, { running: false }).runs
+    expect(r!.setup.map(explored)).toEqual([['context.ts']])
+    expect(r!.steps[0]!.work.map(explored)).toEqual([['a.ts']])
+    expect(r!.steps[1]!.work.map(explored)).toEqual([['b.ts']])
+    expect(r!.steps[1]!.startedAt).toBe(T0 + 4_000)
+  })
+
+  it('reads a step started and set back to pending by a run that is over as stopped, not queued', () => {
+    const items = [user('Go', 0), todos([['a', '~', 'A']], 1), read('a.ts', 2), todos([['a', ' ', 'A']], 3)]
+    const [r] = buildRecordModel(items, { running: false }).runs
+    expect(r!.steps[0]!.state).toBe('stopped')
+    // Its time ends with its last work, not blank.
+    expect(r!.steps[0]!.endedAt).toBe(T0 + 2_000)
+  })
+
+  it('keeps the closing answer whatever reasoning followed it, with thinking shown or not', () => {
+    const items = [user('Go', 0), read('a.ts', 1), said('Here is the answer.', 2), said('', 3, { thinking: 'Nothing left to do.' })]
+    for (const showThinking of [true, false]) {
+      const [r] = buildRecordModel(items, { running: false, showThinking }).runs
+      expect(r!.result?.text).toBe('Here is the answer.')
+    }
+  })
+
+  it('carries the plan across a follow-up sent mid-turn', () => {
+    const steer: UiItem = { ...(user('Also cover the docs', 3) as Extract<UiItem, { kind: 'message' }>), midTurn: true }
+    const items = [user('Go', 0), todos([['a', 'x', 'A'], ['b', '~', 'B']], 1), read('b1.ts', 2), steer, read('b2.ts', 4)]
+    const { runs } = buildRecordModel(items, { running: true })
+    expect(runs).toHaveLength(2)
+    expect(runs[0]!.continued).toBe(true)
+    expect(runs[0]!.steps.map((s) => s.state)).toEqual(['done', 'paused'])
+    expect(runs[0]!.result).toBeNull()
+    expect(runStateOf(runs[0]!, false, { running: true })).toBe('done')
+    expect(runs[1]!.steps.map((s) => s.state)).toEqual(['done', 'running'])
+    expect(runs[1]!.steps[1]!.work.map(explored)).toEqual([['b2.ts']])
+    // The step's clock still runs from when it first started.
+    expect(runs[1]!.steps[1]!.startedAt).toBe(T0 + 1_000)
+  })
+
+  it('keys a create_plan step as todos.json does, and merges a second plan into the first', () => {
+    const plan = (todosArg: unknown[], s: number) => tool('create_plan', { title: 'P', plan: '# P', todos: todosArg }, 'Wrote plan.md', s)
+    const items = [
+      user('Go', 0),
+      plan([{ id: 'step 1', content: 'A', status: 'in_progress' }, { id: 'step 2', content: 'B', status: 'pending' }], 1),
+      read('a.ts', 2),
+      plan([{ id: 'step 3', content: 'C', status: 'pending' }], 3)
+    ]
+    const live = [
+      { id: 'step1', content: 'A', status: 'in_progress' as const },
+      { id: 'step2', content: 'B', status: 'pending' as const },
+      { id: 'step3', content: 'C', status: 'pending' as const }
+    ]
+    const [r] = buildRecordModel(items, { running: true, liveTodos: live, liveTodosUpdatedAt: at(4) }).runs
+    expect(r!.steps.map((s) => [s.key, s.title])).toEqual([
+      ['step1', 'A'],
+      ['step2', 'B'],
+      ['step3', 'C']
+    ])
+    // The second plan was written while step 1 was in progress.
+    expect(r!.steps[0]!.work.map((w) => w.kind)).toEqual(['explore', 'plan'])
+    expect(r!.steps[0]!.work.map(explored)[0]).toEqual(['a.ts'])
+  })
+
+  it('ends a run at its last call’s end, and starts a queued follow-up when it was taken up', () => {
+    const slow: UiItem = { ...(run('pnpm test', 1) as Extract<UiItem, { kind: 'tool' }>), endedAt: at(90) }
+    const items = [user('Go', 0), slow, user('Queued while it ran', 30), said('Ok.', 95)]
+    const { runs } = buildRecordModel(items, { running: false })
+    expect(runs[0]!.endedAt).toBe(T0 + 90_000)
+    expect(runs[1]!.at).toBe(T0 + 30_000)
+    expect(runs[1]!.startedAt).toBe(T0 + 90_000)
+  })
+
+  it('does not draw a command until it knows whether it changes things', () => {
+    const streaming: UiItem = {
+      kind: 'tool',
+      id: 'call_t',
+      tool: { id: 'call_t', name: 'terminal', summary: '', status: 'running', argsPreview: '{"command":"cat src/a' }
+    }
+    const [r] = buildRecordModel([user('Go', 0), streaming], { running: true }).runs
+    expect(r!.after).toEqual([])
+    const withCommand = (command: string): UiItem =>
+      ({ ...streaming, tool: { ...streaming.tool, argsPreview: JSON.stringify({ command }) } }) as UiItem
+    const kinds = (item: UiItem) => buildRecordModel([user('Go', 0), item], { running: true }).runs[0]!.after.map((w) => w.kind)
+    // Once known, it is drawn once, as what it is: a read is a lookup line, a build a card.
+    expect(kinds(withCommand('cat src/a.ts'))).toEqual(['explore'])
+    expect(kinds(withCommand('pnpm build'))).toEqual(['card'])
+  })
+
+  it('keys a row by its first id, so a provider id replacing a placeholder keeps its view', () => {
+    const renamed: UiItem = { ...(run('pnpm build', 1) as Extract<UiItem, { kind: 'tool' }>), id: 'toolu_real', key: 'pending_0' }
+    const [r] = buildRecordModel([user('Go', 0), renamed], { running: false }).runs
+    expect(r!.after.map((w) => w.id)).toEqual(['pending_0'])
   })
 })
