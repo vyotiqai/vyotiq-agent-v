@@ -1,0 +1,111 @@
+/*
+  The renderer's own stylesheet — tokens, skins, @theme, @utility helpers —
+  imported whole, so every class here resolves exactly as it does in the app.
+  Tailwind's source detection starts at this Vite root, which does not reach
+  the renderer, so the primitives' classes need an explicit @source.
+*/
+@import '../../../renderer/src/styles.css';
+
+@source '../../../renderer/src/lib';
+@source '.';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/*
+  Proposed additions — the only new CSS these mockups need. Each reads
+  existing tokens; porting means moving these into styles.css.
+*/
+
+/* The live step on the header's progress hairline breathes. */
+@keyframes ag-seg-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@utility ag-seg-live {
+  animation: ag-seg-live 1.6s var(--vy-ease) infinite;
+}
+
+/* A row or block arriving: opacity plus a 4px rise, nothing more. */
+@keyframes ag-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility ag-rise {
+  animation: ag-rise 200ms var(--vy-ease) both;
+}
+
+/* The terminal cursor. */
+@keyframes ag-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@utility ag-caret {
+  animation: ag-caret 1s steps(1) infinite;
+}
+
+/* Folding groups open by height without measuring: grid rows 0fr → 1fr. */
+@utility ag-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 180ms var(--vy-ease);
+
+  &[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+
+  & > * {
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+/* The element picker's outline in the Browser tab: the accent, dashed. */
+@utility ag-pick {
+  outline: 1.5px dashed var(--vy-accent);
+  outline-offset: 3px;
+}
+
+/* Code, commands and paths are literal: "--env" must never render as a dash. */
+.font-mono {
+  font-variant-ligatures: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-seg-live,
+  .ag-rise,
+  .ag-caret {
+    animation: none;
+  }
+
+  .ag-fold {
+    transition: none;
+  }
+}

@@ -2,6 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "redesign-agents",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--config",
+        "src/redesign/agents/vite.config.ts"
+      ],
+      "port": 5207
+    },
+    {
       "name": "redesign-voice",
       "runtimeExecutable": "node",
       "runtimeArgs": [
