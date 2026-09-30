@@ -68,6 +68,8 @@ export type TaskPaneProps = {
   pendingRun: boolean
   turnFailed: boolean
   turnStatus: TurnOutcome | null
+  /** The latest run ended at the task's spend limit, as the person chose. */
+  stoppedAtSpendLimit?: boolean
   networkWait?: { attempt: number; maxAttempts: number; retryInMs: number; code?: string; message?: string } | null
   compacting: boolean
   showThinking: boolean
@@ -196,10 +198,11 @@ export function TaskPane(props: TaskPaneProps) {
       items: liveItems,
       live: liveNow,
       turnFailed: props.turnFailed,
-      turnStopped: props.turnStatus === 'cancelled' || props.turnStatus === 'interrupted',
+      turnStopped:
+        props.turnStatus === 'cancelled' || props.turnStatus === 'interrupted' || props.stoppedAtSpendLimit === true,
       todos: todosData
     }),
-    [liveItems, liveNow, props.turnFailed, props.turnStatus, todosData]
+    [liveItems, liveNow, props.turnFailed, props.turnStatus, props.stoppedAtSpendLimit, todosData]
   )
   const deferred = useDeferredValue(recordInput)
   const items = deferred.items

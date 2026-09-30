@@ -69,6 +69,8 @@ export type UiToolApproval = {
   mutating: boolean
   /** Terminal: what "Always allow" remembers, or null when it cannot be offered. See ToolApprovalRequest. */
   alwaysAllowCommand?: string | null
+  /** Set when the command guard stopped this command; see ToolApprovalRequest.danger. */
+  danger?: string
   /** When the request reached the renderer (ISO) — the wait's start. */
   requestedAt?: string
 }

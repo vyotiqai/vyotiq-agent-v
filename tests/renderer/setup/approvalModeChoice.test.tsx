@@ -26,9 +26,9 @@ describe('approvalModes', () => {
   it('never calls approvals-off "nothing": what still asks is said', () => {
     const off = approvalModes(true).find((m) => m.mode === 'off')!
     expect(off.label).toBe('Unattended')
-    expect(off.description).toBe('For runs nobody is watching. MCP tools and tools the agent writes still ask.')
+    expect(off.description).toBe('For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask.')
     expect(approvalModes(false).find((m) => m.mode === 'off')!.description).toBe(
-      'For runs nobody is watching. Tools the agent writes still ask.'
+      'For runs nobody is watching. Tools the agent writes and risky commands still ask.'
     )
   })
 })

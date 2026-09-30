@@ -1,5 +1,8 @@
 import { randomUUID } from 'crypto'
+import { homedir } from 'os'
+import path from 'path'
 import type {
+  TerminalShell,
   ToolApprovalDecision,
   ToolApprovalMode,
   ToolApprovalRequest,
@@ -28,6 +31,8 @@ import { notifyBadgeChange } from '../app/badges'
 import { needsYouDedupeKey } from '../../shared/ipc'
 import { TOOL_APPROVAL_TIMEOUT_MS } from '../../shared/agentTimeouts'
 import { isCheckCommand } from './feedback/checkCommands'
+import { dangerousCommand, type CommandContext, type DangerousCommand } from './tools/dangerousCommand'
+import { resolveTerminalShell } from './tools/terminal'
 
 /** Browse/fetch egress — gated, but not workspace-mutating.
  * Legacy `web_fetch` / `web_search` kept for transcript approval replay only
@@ -275,6 +280,45 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
   )
 }
 
+/** Where a run's shell commands start and how its shell reads them — what the command guard needs. */
+export type CommandGuard = Pick<CommandContext, 'workspaceRoot' | 'homeDir' | 'platform' | 'syntax'>
+
+/**
+ * The guard for a run in `workspace`: PowerShell and cmd read backslashes as
+ * path separators, sh and bash (Git Bash on Windows too) as escapes.
+ */
+export function commandGuardFor(workspace: string, shell: TerminalShell | undefined): CommandGuard {
+  const resolved = resolveTerminalShell(shell ?? 'auto')
+  return {
+    workspaceRoot: workspace,
+    homeDir: homedir(),
+    platform: process.platform,
+    syntax: resolved === 'powershell' || resolved === 'cmd' ? 'windows' : 'posix'
+  }
+}
+
+/**
+ * The shell command a call runs and why it needs the user's OK whatever the
+ * approval settings say, or null. `terminal` runs in its working_directory
+ * (always inside the workspace); `run_tests` runs an explicit command from
+ * the workspace root.
+ */
+export function guardedCommand(
+  name: string,
+  argsJson: string | undefined,
+  guard: CommandGuard
+): DangerousCommand | null {
+  if (name !== 'terminal' && name !== 'run_tests') return null
+  const args = parseArgs(argsJson)
+  const command = typeof args?.command === 'string' ? args.command : ''
+  if (!command.trim()) return null
+  const lib = guard.platform === 'win32' ? path.win32 : path.posix
+  const workingDirectory =
+    name === 'terminal' && typeof args?.working_directory === 'string' ? args.working_directory.trim() : ''
+  const cwd = workingDirectory ? lib.resolve(guard.workspaceRoot, workingDirectory) : guard.workspaceRoot
+  return dangerousCommand(command, { ...guard, cwd })
+}
+
 export type AuthorizeResult = { allowed: true } | { allowed: false; reason: string }
 
 /** Internal ask result: IPC decisions plus timeout auto-deny. */
@@ -313,6 +357,12 @@ export type ApprovalGateOptions = {
   persistTask?: (toolName: string) => void
   /** Overridable so tests can drive the decision without an Electron window. */
   ask?: (request: ToolApprovalRequest) => Promise<AskDecision>
+  /**
+   * Shell commands that can destroy work beyond a rewind (see
+   * tools/dangerousCommand.ts) ask whatever `mode`, the allowlists or
+   * autonomy say. Omitted only where no shell command can run.
+   */
+  commandGuard?: CommandGuard
 }
 
 function askThroughRenderer(
@@ -409,8 +459,12 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
   return {
     async authorize(call): Promise<AuthorizeResult> {
       const name = canonicalizeAgentToolName(call.name)
+      // Checked before every way past the card: the mode, the allowlists and
+      // autonomy all answer for ordinary commands, never for these.
+      const danger = options.commandGuard ? guardedCommand(name, call.arguments, options.commandGuard) : null
       const agentBuiltAllowKey = await agentBuiltAllowKeyFor(name)
       if (
+        !danger &&
         !isToolGated(name, options.mode, sessionAllowlist, workspaceAllowlist, call.arguments, {
           mcpProtection: options.mcpProtection,
           agentBuiltAllowKey
@@ -420,6 +474,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
       }
 
       if (
+        !danger &&
         options.autonomousMode &&
         !isAutonomousHighRiskTool(name, call.arguments) &&
         !workspaceAllowlist.includes(name)
@@ -435,10 +490,12 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
 
       // The terminal's "Always allow" is scoped to the command, computed here —
       // from the full arguments, not the card's truncated preview.
-      const terminalCommand = name === 'terminal' ? terminalCommandOf(parseArgs(call.arguments)) : null
+      // A command the guard stopped is never remembered: no "Always allow".
+      const terminalCommand = name === 'terminal' && !danger ? terminalCommandOf(parseArgs(call.arguments)) : null
       const alwaysAllowCommand = terminalCommand ? commandAllowPrefix(terminalCommand) : null
       const request: ToolApprovalRequest = {
         ...(name === 'terminal' ? { alwaysAllowCommand } : {}),
+        ...(danger ? { danger: danger.reason } : {}),
         requestId: randomUUID(),
         runId: options.runId,
         toolCallId: call.id,
@@ -465,8 +522,9 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         if (isAbortError(err) || (err instanceof Error && err.name === 'AbortError')) {
           throw err
         }
-        const message =
-          err instanceof Error
+        const message = danger
+          ? `This command needs the user's OK whatever the approval settings say (${danger.reason}), and no app window is listening to ask. It did not run. Do not retry it; find another way or ask the user.`
+          : err instanceof Error
             ? err.message
             : 'Tool approval failed because no app window is listening.'
         return { __denyReason: message } as const
@@ -478,8 +536,28 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         scope: 'agent',
         correlationId: options.runId,
         tool: name,
-        decision
+        decision,
+        // `reason` survives the log field allowlist; the guard's rule goes there.
+        ...(danger ? { reason: `command-guard:${danger.kind}` } : {})
       })
+
+      if (danger) {
+        // The card offers Allow once and Deny only; a standing grant from any
+        // other path is still this one command, never remembered.
+        if (decision === 'deny') {
+          return {
+            allowed: false,
+            reason: `The user denied this command (${danger.reason}). Do not retry it; ask what to do instead or continue without it.`
+          }
+        }
+        if (decision === 'timeout') {
+          return {
+            allowed: false,
+            reason: `Approval for this command (${danger.reason}) timed out and it was not run. Do not retry it; ask what to do instead or continue without it.`
+          }
+        }
+        return { allowed: true }
+      }
 
       switch (decision) {
         case 'timeout':

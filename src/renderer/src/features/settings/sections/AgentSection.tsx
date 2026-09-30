@@ -1,5 +1,10 @@
 import type { KeyboardEvent } from 'react'
-import { DEFAULT_MAX_PARALLEL_INSTANCES, MAX_PARALLEL_INSTANCES_LIMIT, type ToolApprovalSettings } from '@shared/ipc'
+import {
+  DEFAULT_MAX_PARALLEL_INSTANCES,
+  MAX_PARALLEL_INSTANCES_LIMIT,
+  TASK_SPEND_LIMIT_MAX_USD,
+  type ToolApprovalSettings
+} from '@shared/ipc'
 import { commandFromAllowKey } from '@shared/utils/commandAllow'
 import { Icon } from '@renderer/lib/icons'
 import { Button, Input } from '@renderer/lib/ui'
@@ -262,6 +267,24 @@ export function AgentSection({
             void form.runUpdate({ maxParallelInstances })
           }}
           {...form.defaultMark('maxParallelInstances')}
+        />
+        <NumberField
+          id="task-spend-limit"
+          field="taskSpendLimit"
+          form={form}
+          title="Spend limit per task"
+          label="Spend limit per task, in US dollars"
+          hint="A task stops and asks before spending more, its instances included. 0 is off."
+          help="Counts what the provider billed, or an estimate from published prices. Custom endpoints and unpriced models add nothing."
+          unit="USD"
+          min={0}
+          max={TASK_SPEND_LIMIT_MAX_USD}
+          value={form.settings.taskSpendLimitUsd ?? 0}
+          disabled={form.formLocked}
+          onCommit={(taskSpendLimitUsd) => {
+            void form.runUpdate({ taskSpendLimitUsd })
+          }}
+          {...form.defaultMark('taskSpendLimitUsd')}
         />
       </SettingsGroup>
 

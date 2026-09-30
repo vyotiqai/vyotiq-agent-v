@@ -49,6 +49,17 @@ Some consequences:
 - **Ollama is $0.** Ollama models are priced at zero.
 - **An estimate is not a bill.** Your provider's invoice is the real figure.
 
+## Spend limit per task
+
+Settings, "Agent", "Runs" has "Spend limit per task", in whole US dollars. It is off at 0, the default.
+
+With a limit set, a task checks its spend before every model call, its [instances](/docs/instances) included. The figure is the one described above: billed where the provider reports a cost, estimated where the model has published prices, and nothing for a model with neither. When the task reaches the limit it stops at that step and asks, under "Needs you":
+
+- "Allow another $N" lets this task spend the limit again. It is kept with the task, so a follow-up keeps it.
+- "Stop here" ends the run. The receipt says "Stopped".
+
+An instance that finds its task over the limit stops by itself; the task asks. A follow-up to a stopped task asks again before it spends. Raising the limit in Settings lets a paused task go on.
+
 ## "est." and "~"
 
 An estimated cost is always marked, so you can tell it from a billed one.

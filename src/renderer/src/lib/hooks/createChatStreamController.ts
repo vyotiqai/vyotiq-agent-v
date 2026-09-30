@@ -4613,6 +4613,7 @@ export function createChatStreamController(
       argsPreview: request.argsPreview,
       mutating: request.mutating,
       ...(request.alwaysAllowCommand !== undefined ? { alwaysAllowCommand: request.alwaysAllowCommand } : {}),
+      ...(request.danger ? { danger: request.danger } : {}),
       // The wait starts now — not when the call's arguments began to stream.
       requestedAt: new Date().toISOString()
     }

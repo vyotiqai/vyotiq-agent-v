@@ -201,7 +201,9 @@ export const IncompleteReasonSchema = z.enum([
   'goal_wait',
   'goal_budget',
   'repetition',
-  'tool_burst'
+  'tool_burst',
+  // Settings → Agent → Spend limit per task; the run asked and was told to stop.
+  'spend_limit'
 ])
 export type IncompleteReason = z.infer<typeof IncompleteReasonSchema>
 
@@ -1697,7 +1699,14 @@ export const ToolApprovalRequestSchema = z.object({
    * or null when this command chains or redirects and cannot be scoped — the
    * card then offers no "Always allow". Absent for every other tool.
    */
-  alwaysAllowCommand: z.string().nullable().optional()
+  alwaysAllowCommand: z.string().nullable().optional(),
+  /**
+   * Set when the command guard stopped a shell command that can destroy work
+   * beyond a rewind (a delete outside the workspace, a force push, a download
+   * piped into a shell…): what it would do, in plain words. It asks whatever
+   * the approval mode says, and the card offers only Allow once and Deny.
+   */
+  danger: z.string().min(1).optional()
 })
 export type ToolApprovalRequest = z.infer<typeof ToolApprovalRequestSchema>
 

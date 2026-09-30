@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Read ci.yml's runs on the tagged commit (release-wait-for-ci.mjs).
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,6 +47,15 @@ jobs:
         run: |
           node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
 
+      # The tag and main are pushed together, so CI is usually still running.
+      # Wait for ci.yml to pass on this exact commit: lint, build, audit,
+      # packaging smoke and GUI e2e on all three platforms live only there.
+      - name: Wait for CI to pass on the tagged commit
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-wait-for-ci.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -52,7 +63,7 @@ jobs:
         run: pnpm typecheck
 
       # Gate the release on the unit suite so a red tree cannot be tagged.
-      # The full matrix (lint, e2e, packaging smoke, audit) runs in CI on main.
+      # The full matrix (lint, e2e, packaging smoke, audit) is required above.
       - name: Unit tests
         run: pnpm test
 

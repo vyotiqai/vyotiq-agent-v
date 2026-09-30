@@ -15,7 +15,7 @@ Setup's step 3, "Decide what needs your OK", offers three choices. Settings name
 | --- | --- | --- |
 | "Edits and commands" | "Edits and commands" | "Recommended. Reading is free; changing things asks first." |
 | "Every tool" | "Every tool" | "Even reads and searches ask." |
-| "Unattended" | "Nothing" | "For runs nobody is watching. MCP tools and tools the agent writes still ask." |
+| "Unattended" | "Nothing" | "For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask." |
 
 Setup starts on "Edits and commands". The mode can differ per workspace; setup says "You can change this per workspace."
 
@@ -62,6 +62,14 @@ An approval that waits too long is denied. The card counts down ("denied automat
 
 - **MCP tools.** "MCP tools always ask" is on by default: "Even when approvals are off." You can turn it off in the same group.
 - **Tools the agent wrote.** A tool made with `build_tool` asks before it runs, even with approvals set to "Nothing". An allow for it covers only the code you saw, so it asks again whenever that code changes. See [Agent-built tools](/docs/agent-built-tools).
+- **Risky commands.** A terminal command asks whatever the mode, Always allow rules, "Allow for this task" or Unattended mode say when it would:
+  - delete recursively outside the workspace, the whole workspace, or its `.git` folder, or delete paths it reads from its input
+  - force-push, mirror, or delete a branch or tag on a remote
+  - run `git reset --hard` or `git clean -f`
+  - partition, format or overwrite a disk
+  - pipe a download straight into a shell (`curl … | sh`, `iwr … | iex`)
+
+  A path it cannot know before the command runs, such as `$BUILD_DIR`, counts as outside the workspace. The card says what the command would do and offers only "Allow once" and "Deny": nothing about it is remembered.
 
 ## Unattended mode
 

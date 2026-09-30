@@ -1,0 +1,36 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    { "type": "assistant_message", "content": "Pushing the branch." },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "guard-1",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"git push --force origin main\"}"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "guard-1",
+      "name": "terminal",
+      "arguments": "{\"command\":\"git push --force origin main\"}",
+      "summary": "git push --force origin main",
+      "result": "forced update\nexit_code: 0"
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "guard-2",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"git push origin main\"}"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "guard-2",
+      "name": "terminal",
+      "arguments": "{\"command\":\"git push origin main\"}",
+      "summary": "git push origin main",
+      "result": "Everything up-to-date\nexit_code: 0"
+    },
+    { "type": "assistant_message", "content": "Pushed without forcing." },
+    { "type": "status", "status": "done" }
+  ]
+}

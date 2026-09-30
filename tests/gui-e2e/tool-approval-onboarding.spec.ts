@@ -69,7 +69,7 @@ test('a task started around Set up is held there for the approval choice, then s
   await expect(window.getByText('Your instruction waits here until you decide what needs your OK.', { exact: false })).toBeVisible()
   await expect(window.locator('[data-setup-step="2"]')).toHaveAttribute('data-state', 'done')
   await expect(window.getByRole('radio', { name: /Unattended/ })).toContainText(
-    'MCP tools and tools the agent writes still ask.'
+    'MCP tools, tools the agent writes and risky commands still ask.'
   )
   await expect(window.getByRole('radio', { name: /Edits and commands/ })).toHaveAttribute('aria-checked', 'true')
   const send = window.getByRole('button', { name: /Send your instruction/ })

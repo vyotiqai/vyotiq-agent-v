@@ -3,6 +3,7 @@ import type { ToolApprovalDecision } from '@shared/ipc'
 import type { UiToolApproval } from '@shared/transcript'
 import { TERMINAL_DEFAULT_TIMEOUT_MS, TOOL_APPROVAL_TIMEOUT_MS } from '@shared/agentTimeouts'
 import { parseArgsRecord, parseMcpToolDisplay } from '@shared/toolSummary'
+import { Icon } from '@renderer/lib/icons'
 import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
 import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
@@ -119,7 +120,9 @@ export const ApprovalCard = memo(function ApprovalCard({
   const isCommand = approval.toolName === 'terminal'
   // The terminal's "Always allow" is per command, as main scoped it; a command
   // that chains or redirects cannot be, so it is not offered at all.
-  const alwaysAllows = isCommand ? (approval.alwaysAllowCommand ?? null) : approval.toolName
+  // A command the guard stopped is asked one run at a time: no standing grants.
+  const guarded = Boolean(approval.danger)
+  const alwaysAllows = guarded ? null : isCommand ? (approval.alwaysAllowCommand ?? null) : approval.toolName
   const command = isCommand ? (typeof args?.command === 'string' ? args.command : approval.summary) : null
   const target = !isCommand && typeof args?.path === 'string' ? args.path : approval.summary
 
@@ -167,6 +170,12 @@ export const ApprovalCard = memo(function ApprovalCard({
             target
           )}
         </pre>
+        {approval.danger ? (
+          <p className="flex items-start gap-1.5 text-xs text-danger" data-approval-danger="">
+            <Icon name="warning" size={13} className="mt-px shrink-0" aria-hidden />
+            <span className="min-w-0">{approval.danger}. Asks whatever the approval settings say.</span>
+          </p>
+        ) : null}
         <p className="text-xs text-muted">{facts.join(' · ')}</p>
         {approval.argsPreview && !isCommand ? (
           <div>
@@ -203,9 +212,11 @@ export const ApprovalCard = memo(function ApprovalCard({
           >
             {pendingText('once', 'Allow once')}
           </Button>
-          <Button size="sm" disabled={!canDecide} onClick={() => decide('session')} title="Allowed for the rest of this task, follow-ups included">
-            {pendingText('session', 'Allow for this task')}
-          </Button>
+          {guarded ? null : (
+            <Button size="sm" disabled={!canDecide} onClick={() => decide('session')} title="Allowed for the rest of this task, follow-ups included">
+              {pendingText('session', 'Allow for this task')}
+            </Button>
+          )}
           {/* Always shown: hiding it below a width left no way to choose it in
               a normal window with the inspector open. The row wraps instead. */}
           {alwaysAllows ? (

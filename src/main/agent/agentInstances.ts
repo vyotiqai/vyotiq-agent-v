@@ -32,6 +32,13 @@ import { createRunId } from './loop'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
 import { migrateLegacyReceipt } from './receiptMigration'
 import {
+  finishInstanceSpend,
+  noteLiveInstanceSpend,
+  registerInstanceTask,
+  spendOf,
+  unregisterInstanceTask
+} from './taskSpend'
+import {
   clearRunAbort,
   cancelRun,
   getRunInvokeId,
@@ -150,6 +157,8 @@ export function registerChildInstance(
   childToParent.set(childRunId, parentRunId)
   childWorkspace.set(childRunId, workspacePath)
   registerInlineChildRun(parentRunId, childRunId)
+  // Its spend counts toward the task's spend limit (taskSpend.ts).
+  registerInstanceTask(childRunId, { runId: parentRunId, runDir: resolveRunDir(workspacePath, parentRunId) })
 }
 
 /**
@@ -167,6 +176,7 @@ export function unregisterChildInstance(childRunId: string): void {
   if (progress?.timer) clearTimeout(progress.timer)
   childProgress.delete(childRunId)
   unregisterInlineChildRun(childRunId)
+  unregisterInstanceTask(childRunId)
 }
 
 function sendLiveParentInstanceEvent(parentRunId: string, event: AgentEvent): void {
@@ -259,6 +269,7 @@ export function noteInstanceChildEvent(childRunId: string, ev: AgentEvent): void
     const usage = stepUsageFromEvent(ev)
     if (!usage) return
     progress.usage = mergeStepUsageTotals(progress.usage, usage)
+    noteLiveInstanceSpend(childRunId, spendOf(progress.usage))
   } else {
     return
   }
@@ -285,6 +296,8 @@ export function notifyChildTerminal(
     clearTimeout(progress.timer)
     progress.timer = undefined
   }
+  // Written with the task, so the spend limit still counts it after a restart.
+  if (progress) void finishInstanceSpend(childRunId, spendOf(progress.usage))
   emitAgentInstanceUpdate(workspacePath, parentRunId, {
     parentRunId,
     instanceRunId: childRunId,

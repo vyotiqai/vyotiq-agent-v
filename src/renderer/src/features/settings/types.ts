@@ -49,6 +49,7 @@ export type SettingsErrorField =
   | 'apikey'
   | 'keepTurns'
   | 'parallelInstances'
+  | 'taskSpendLimit'
   | 'autoCompactThreshold'
   | 'checkpointKeep'
   | 'checkpointAge'

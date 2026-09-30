@@ -3,6 +3,8 @@ import { z } from 'zod'
 /** Sub-agents a task may run at once: the default, and the most the setting allows. */
 export const DEFAULT_MAX_PARALLEL_INSTANCES = 16
 export const MAX_PARALLEL_INSTANCES_LIMIT = 16
+/** Upper bound for Settings → Agent → Spend limit per task, in dollars. */
+export const TASK_SPEND_LIMIT_MAX_USD = 10_000
 import {
   DEFAULT_FONT_SCALE,
   DEFAULT_SKIN_ID,
@@ -636,6 +638,12 @@ export const SettingsSchema = z.object({
    */
   maxParallelInstances: z.number().int().min(1).max(MAX_PARALLEL_INSTANCES_LIMIT).default(DEFAULT_MAX_PARALLEL_INSTANCES),
   /**
+   * Whole dollars a task may spend on models, its helper instances included,
+   * before it stops at a step and asks (main/agent/taskSpend.ts). 0 is off.
+   * Priced models only: a step with no billed or published price adds nothing.
+   */
+  taskSpendLimitUsd: z.number().int().min(0).max(TASK_SPEND_LIMIT_MAX_USD).default(0),
+  /**
    * Maximum simultaneously visible chat panes (split session view). 0 = Auto:
    * derived from the viewport (min 280px per pane, hard cap 6). 1–6 is a fixed
    * limit that may exceed what fits — the pane row scrolls horizontally.
@@ -737,6 +745,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoModeSwitch: true,
   autoResumeInterruptedRuns: true,
   maxParallelInstances: DEFAULT_MAX_PARALLEL_INSTANCES,
+  taskSpendLimitUsd: 0,
   maxChatPanes: 0,
   autoCheckUpdates: true,
   googleMcpClientId: '',

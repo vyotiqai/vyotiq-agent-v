@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import type {
   AgentEvent,
   AgentInteractionMode,
+  AgentQuestionRequest,
   ChatMessage,
   IncompleteReason,
   ModelInfo,
@@ -37,7 +38,17 @@ import { estimateStepCost, resolveModelPrice } from '../../shared/pricing/modelP
 import { resolveServiceTier } from '../../shared/domain/modelSelection'
 import { recallRunModelSelection, rememberRunModelSelection } from './runModelSelection'
 import { stripToolShapedAssistantText } from '../../shared/transcript'
-import { createApprovalGate } from './toolApproval'
+import { commandGuardFor, createApprovalGate } from './toolApproval'
+import { askQuestionThroughRenderer } from './agentQuestion'
+import {
+  addSpendAllowance,
+  formatUsd,
+  publishTaskOwnSpend,
+  spendOf,
+  taskOfInstance,
+  taskSpendState,
+  type TaskSpendState
+} from './taskSpend'
 import { persistAlwaysAllow } from './toolApprovalStore'
 import { persistTaskAllow, readTaskAllowlist } from './taskApprovalStore'
 import { createLiveEventQueue, pushLiveEvent, shiftLiveEvent } from './liveEventQueue'
@@ -323,6 +334,7 @@ const INCOMPLETE_MESSAGES: Record<Exclude<IncompleteReason, never>, string> = {
     'Goal is still active. Two finishes without tools — waiting for you to continue or mark complete.',
   goal_budget:
     'Goal paused: it used its auto-continue budget without finishing. Resume it to spend another stretch, or mark it complete.',
+  spend_limit: 'Stopped at the spend limit. A follow-up asks again; raise the limit in Settings → Agent to let it run on.',
   repetition: 'The model kept repeating the same output text; the generation was cut off.',
   tool_burst: `The model requested more than ${MAX_TOOL_CALLS_PER_STEP} tool calls in one turn; the generation was cut off and none of them ran.`
 }
@@ -1668,24 +1680,23 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
 
     const approvalSettings = settings.toolApproval ?? DEFAULT_SETTINGS.toolApproval
     const mcpProtection = approvalSettings.mcpProtection !== false
-    // Skip the gate only when nothing would park: mode off and MCP protection off.
+    // Always a gate, even with approvals and MCP protection both off: tools
+    // this run wrote and commands the guard stops still ask then.
     const taskRunDir = runDir
-    const approvalGate =
-      approvalSettings.mode === 'off' && !mcpProtection
-        ? undefined
-        : createApprovalGate({
-            runId,
-            invokeId,
-            mode: approvalSettings.mode,
-            mcpProtection,
-            workspaceAllowlist: approvalSettings.allowlist,
-            autonomousMode: settings.autonomousMode === true,
-            // Soft follow-up interrupt must cancel parked approvals, not only hard cancel.
-            signal: streamSignalFor(runId, controller.signal),
-            persistAlways: (toolName) => persistAlwaysAllow(workspace, toolName),
-            taskAllowlist: taskRunDir ? readTaskAllowlist(taskRunDir) : [],
-            persistTask: taskRunDir ? (toolName) => void persistTaskAllow(taskRunDir, toolName) : undefined
-          })
+    const approvalGate = createApprovalGate({
+      runId,
+      invokeId,
+      mode: approvalSettings.mode,
+      mcpProtection,
+      workspaceAllowlist: approvalSettings.allowlist,
+      autonomousMode: settings.autonomousMode === true,
+      // Soft follow-up interrupt must cancel parked approvals, not only hard cancel.
+      signal: streamSignalFor(runId, controller.signal),
+      persistAlways: (toolName) => persistAlwaysAllow(workspace, toolName),
+      taskAllowlist: taskRunDir ? readTaskAllowlist(taskRunDir) : [],
+      persistTask: taskRunDir ? (toolName) => void persistTaskAllow(taskRunDir, toolName) : undefined,
+      commandGuard: commandGuardFor(workspace, settings.terminalShell)
+    })
 
     /** Persist compaction; `saved` is false only when a write was required and failed. */
     const emitCompaction = (
@@ -2044,6 +2055,106 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       settings.thinkingEffort === 'xhigh' ||
       settings.thinkingEffort === 'max'
 
+    // The run dir exists by now; the closures below lose that narrowing.
+    const spendRunDir: string = runDir
+    /**
+     * Ends this run the way a finished run ends, with a spend_limit stop the
+     * record shows as Stopped. A follow-up asks again, since the task is still
+     * over its limit until the user allows more or raises it.
+     */
+    async function* endForSpendLimit(message: string): AsyncGenerator<AgentEvent, void> {
+      const ev: AgentEvent = {
+        type: 'incomplete',
+        runId,
+        invokeId,
+        reason: 'spend_limit',
+        ...(step > 0 ? { step } : {}),
+        message
+      }
+      appendEvent(spendRunDir, ev)
+      yield ev
+      yield* flushWriteCheckpoint()
+      clearLoopCheckpoint(spendRunDir)
+      yield { type: 'status', runId, invokeId, status: 'done' }
+      writeStatus({ status: 'done', error: undefined })
+      appendEvent(spendRunDir, { type: 'status', runId, invokeId, status: 'done' })
+    }
+
+    /** "Allow another $N" or "Stop here", asked the way ask_question asks. */
+    const askSpendLimit = async (state: TaskSpendState, limitUsd: number): Promise<'more' | 'stop' | 'aborted'> => {
+      const more = `Allow another ${formatUsd(limitUsd)}`
+      const request: AgentQuestionRequest = {
+        requestId: randomUUID(),
+        runId,
+        toolCallId: `spend-limit-${randomUUID()}`,
+        title: 'Spend limit reached',
+        questions: [
+          {
+            id: 'spend',
+            type: 'single',
+            prompt: `This task has spent ${formatUsd(state.spentUsd)} of its ${formatUsd(state.allowedUsd)} limit, helper instances included. Let it spend more?`,
+            options: [more, 'Stop here']
+          }
+        ]
+      }
+      try {
+        // Unattended mode's "skip questions" does not answer this one: only a
+        // person decides to spend more. The hard run signal ends the wait.
+        const answers = await askQuestionThroughRenderer(request, controller.signal, invokeId)
+        return answers.find((a) => a.questionId === 'spend')?.values[0] === more ? 'more' : 'stop'
+      } catch (err) {
+        if (isAbortError(err) || controller.signal.aborted) return 'aborted'
+        // Superseded by Send now, or no window to ask in: stop, never spend on.
+        return 'stop'
+      }
+    }
+
+    /**
+     * Settings → Agent → Spend limit per task, checked before every model
+     * call. The limit is read live, so raising it in Settings lets a paused
+     * task go on. A helper instance stops by itself once its task is over; the
+     * task asks.
+     */
+    const spendLimitGate = async function* (): AsyncGenerator<AgentEvent, 'go' | 'ended' | 'aborted'> {
+      if (!isInlineInstance) publishTaskOwnSpend(runId, spendOf(costTotals))
+      const limitUsd = getSettings().taskSpendLimitUsd ?? 0
+      if (!(limitUsd > 0)) return 'go'
+      if (isInlineInstance) {
+        const task = taskOfInstance(runId)
+        if (!task) return 'go'
+        const state = taskSpendState({ runId: task.runId, runDir: task.runDir, limitUsd })
+        if (state.spentUsd < state.allowedUsd) return 'go'
+        logger.info('Instance stopped at its task spend limit', {
+          scope: 'agent',
+          correlationId: runId,
+          reason: `spent ${state.spentUsd.toFixed(4)} of ${state.allowedUsd}`
+        })
+        yield* endForSpendLimit(
+          `Stopped: the task has spent ${formatUsd(state.spentUsd)} of its ${formatUsd(state.allowedUsd)} spend limit. The main task asks whether to spend more.`
+        )
+        return 'ended'
+      }
+      for (;;) {
+        const state = taskSpendState({ runId, runDir: spendRunDir, limitUsd })
+        if (state.spentUsd < state.allowedUsd) return 'go'
+        const answer = await askSpendLimit(state, limitUsd)
+        logger.info('Task spend limit reached', {
+          scope: 'agent',
+          correlationId: runId,
+          reason: `${answer}: spent ${state.spentUsd.toFixed(4)} of ${state.allowedUsd}`
+        })
+        if (answer === 'aborted') return 'aborted'
+        if (answer === 'more') {
+          await addSpendAllowance(spendRunDir, limitUsd)
+          continue
+        }
+        yield* endForSpendLimit(
+          `Stopped at the spend limit: this task has spent ${formatUsd(state.spentUsd)} of its ${formatUsd(state.allowedUsd)}. A follow-up asks again; raise the limit in Settings → Agent to let it run on.`
+        )
+        return 'ended'
+      }
+    }
+
     while (true) {
       // Runaway backstop. Ends the run the way a finished run ends — a notice,
       // the write checkpoint, `status: done` — so a step loop that never
@@ -2085,6 +2196,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // step so a sustained-pressure heap stays allocation-throttled.
       if (!(await waitForHeapPressureRelief(controller.signal))) break
       if (controller.signal.aborted) break
+      {
+        const spend = yield* spendLimitGate()
+        if (spend === 'ended') return
+        if (spend === 'aborted' || controller.signal.aborted) break
+      }
       // Inject promoted follow-ups (Send now) before the next model call.
       yield* applyDrainedFollowUps(runId, runDir, messages)
       const modeBeforeBoundary = agentMode
@@ -2992,6 +3108,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                   stepPartial.stepsWithCacheReport = 1
                 }
                 costTotals = mergeStepUsageTotals(costTotals, stepPartial)
+                // Running helper instances read their task's total from here.
+                if (!isInlineInstance) publishTaskOwnSpend(runId, spendOf(costTotals))
                 await persistUsageTotalsCheckpoint()
                 // Per-day usage ledger — deltas since the last record, attributed
                 // to today. Best-effort; never breaks the run loop. The raw

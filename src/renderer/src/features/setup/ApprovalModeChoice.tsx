@@ -5,8 +5,9 @@ type ModeCopy = { mode: ToolApprovalMode; label: string; description: string }
 
 /**
  * The three approval modes in the words Set up uses. "Unattended" is not "nothing asks": with approvals off,
- * tools the agent writes for itself still ask, and so do MCP server tools
- * while MCP protection is on (Settings → Agent).
+ * tools the agent writes for itself still ask, so do shell commands the
+ * command guard stops (main/agent/tools/dangerousCommand.ts), and so do MCP
+ * server tools while MCP protection is on (Settings → Agent).
  */
 export function approvalModes(mcpProtection: boolean): ModeCopy[] {
   return [
@@ -16,8 +17,8 @@ export function approvalModes(mcpProtection: boolean): ModeCopy[] {
       mode: 'off',
       label: 'Unattended',
       description: mcpProtection
-        ? 'For runs nobody is watching. MCP tools and tools the agent writes still ask.'
-        : 'For runs nobody is watching. Tools the agent writes still ask.'
+        ? 'For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask.'
+        : 'For runs nobody is watching. Tools the agent writes and risky commands still ask.'
     }
   ]
 }

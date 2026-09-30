@@ -73,6 +73,11 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     if (options.fixtureFile) {
       env.VYOTIQ_E2E_FIXTURE_FILE = options.fixtureFile
     }
+  } else if (options.e2eFixture === false) {
+    // A spec that runs the real loop against its own local model server: CI
+    // exports the flag for every spec, and inheriting it would replay instead.
+    delete env.VYOTIQ_E2E_FIXTURE
+    delete env.VYOTIQ_E2E_FIXTURE_FILE
   }
   // IDE shells export this as "1", which boots Electron as plain Node.
   delete env.ELECTRON_RUN_AS_NODE

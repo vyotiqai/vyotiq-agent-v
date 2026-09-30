@@ -4,7 +4,7 @@ import type { AgentEvent, AgentInteractionMode } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import { clearRunAbort, streamSignalFor } from '../agent/runRegistry'
-import { createApprovalGate, type ToolApprovalGate } from '../agent/toolApproval'
+import { commandGuardFor, createApprovalGate, type ToolApprovalGate } from '../agent/toolApproval'
 import { persistAlwaysAllow } from '../agent/toolApprovalStore'
 import { persistTaskAllow, readTaskAllowlist } from '../agent/taskApprovalStore'
 import { getSettings } from '../settings/settings'
@@ -97,7 +97,8 @@ function fixtureApprovalGate(input: { runId: string; invokeId: number; workspace
     signal,
     persistAlways: (toolName) => persistAlwaysAllow(input.workspacePath, toolName),
     taskAllowlist: readTaskAllowlist(runDir),
-    persistTask: (toolName) => void persistTaskAllow(runDir, toolName)
+    persistTask: (toolName) => void persistTaskAllow(runDir, toolName),
+    commandGuard: commandGuardFor(input.workspacePath, getSettings().terminalShell)
   })
 }
 

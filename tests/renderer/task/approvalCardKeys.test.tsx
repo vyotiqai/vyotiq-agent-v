@@ -103,3 +103,42 @@ describe('ApprovalCard Always allow', () => {
     expect(screen.getByRole('button', { name: 'Always allow edit' })).toBeTruthy()
   })
 })
+
+describe('ApprovalCard command guard', () => {
+  const command = {
+    requestId: 'req-g',
+    toolName: 'terminal',
+    summary: 'rm -rf ~',
+    argsPreview: '{"command":"rm -rf ~"}',
+    mutating: true,
+    alwaysAllowCommand: 'rm'
+  }
+
+  it('says what a guarded command would do, with an icon, and offers only Allow once and Deny', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const onDecide = vi.fn()
+    render(
+      <ApprovalCard
+        approval={{ ...command, alwaysAllowCommand: null, danger: 'Deletes ~, outside the workspace, recursively' }}
+        requestedAt={null}
+        onDecide={onDecide}
+      />
+    )
+    const line = document.querySelector('[data-approval-danger]')!
+    expect(line.textContent).toBe('Deletes ~, outside the workspace, recursively. Asks whatever the approval settings say.')
+    // Meaning never rides on hue alone: the warning glyph sits beside the words.
+    expect(line.querySelector('svg')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Allow for this task' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Always allow/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    expect(onDecide).toHaveBeenCalledWith('req-g', 'once')
+  })
+
+  it('keeps every choice for an ordinary command', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    render(<ApprovalCard approval={command} requestedAt={null} onDecide={vi.fn()} />)
+    expect(document.querySelector('[data-approval-danger]')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Allow for this task' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Always allow/ })).toBeTruthy()
+  })
+})

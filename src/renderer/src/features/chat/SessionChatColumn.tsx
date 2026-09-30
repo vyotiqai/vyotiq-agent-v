@@ -418,6 +418,8 @@ export function SessionChatColumn({
             pendingRun={pendingRun}
             turnFailed={turnFailed || turnStatus === 'error'}
             turnStatus={turnStatus}
+            // Told "Stop here" at the spend limit: the run stopped, it did not fail.
+            stoppedAtSpendLimit={incomplete?.reason === 'spend_limit'}
             networkWait={networkWait}
             compacting={compacting}
             showThinking={showThinking}

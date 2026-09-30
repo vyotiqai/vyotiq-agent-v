@@ -218,6 +218,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'agent'
   },
   {
+    id: 'task-spend-limit',
+    title: 'Spend limit per task',
+    keywords: ['spend', 'cost', 'budget', 'money', 'dollars', 'usd', 'limit', 'price', 'bill'],
+    section: 'agent'
+  },
+  {
     id: 'show-thinking',
     title: 'Show reasoning',
     keywords: ['thinking', 'reasoning', 'display', 'show thinking'],

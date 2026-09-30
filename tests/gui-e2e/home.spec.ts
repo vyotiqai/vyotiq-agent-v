@@ -95,8 +95,16 @@ function seedRun(userDataDir: string, run: SeedRun): void {
         unreadEditPaths: [],
         wroteFiles: run.receipt.wroteFiles ?? [],
         diagnostics: { calls: 0, ok: 0, clean: 0 },
+        // A real receipt records when the last edit landed whenever there was
+        // one; without it, "not verified after" is a read-only turn whose
+        // check failed, which Usage does not count as unchecked.
         ...(run.receipt.verifiedAfterLastMutation != null
-          ? { verification: { verifiedAfterLastMutation: run.receipt.verifiedAfterLastMutation } }
+          ? {
+              verification: {
+                lastMutationAt: writtenAt,
+                verifiedAfterLastMutation: run.receipt.verifiedAfterLastMutation
+              }
+            }
           : {}),
         contractExcerpt: ''
       }),
