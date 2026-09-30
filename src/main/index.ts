@@ -47,6 +47,7 @@ import { countPendingToolApprovals } from '@main/agent/toolApproval'
 import { countPendingAgentQuestions } from '@main/agent/agentQuestion'
 import { pruneStaleInstanceWorktreesBestEffort } from '@main/git/instanceWorktree'
 import { initMainLogging, rendererUnresponsiveForMs } from './logging/init'
+import { setFatalFlush } from './logging/fatalExit'
 import { flushEgressRunLedgers, startEgressRunLedger } from './agent/egressRunLedger'
 import { initTraceAutoCapture } from './perf/traceAutoCapture'
 import { initCrashReporter } from './logging/crashReporter'
@@ -91,6 +92,19 @@ function requestGracefulQuit(): void {
 }
 
 process.on('SIGINT', requestGracefulQuit)
+// An uncaught error exits at once (logging/init); save the queued run writes
+// on the way out, as a normal quit does.
+setFatalFlush(async () => {
+  // Every queue gets its chance even when another fails; any failure is reported.
+  const results = await Promise.allSettled([
+    flushMessageAppends(),
+    flushEventAppends(),
+    flushStatusWrites(),
+    flushEgressRunLedgers()
+  ])
+  const failed = results.find((result) => result.status === 'rejected')
+  if (failed) throw failed.reason
+})
 process.on('SIGTERM', requestGracefulQuit)
 if (process.platform === 'win32') {
   process.on('SIGBREAK', requestGracefulQuit)

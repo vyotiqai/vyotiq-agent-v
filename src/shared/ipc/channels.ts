@@ -128,6 +128,8 @@ export const IPC = {
   gitBlame: 'git:blame',
   /** Manual, user-initiated `git init` for an open workspace. */
   gitInit: 'git:init',
+  /** Let the app's git run the programs this repository's own settings name. */
+  gitAllowRepoCommands: 'git:allow-repo-commands',
   gitStatusChanged: 'git:status-changed',
   windowMinimize: 'window:minimize',
   windowMaximize: 'window:maximize',

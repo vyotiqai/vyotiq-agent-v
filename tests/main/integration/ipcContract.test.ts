@@ -138,6 +138,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   browserPipToggle: IPC.browserPipToggle,
   gitStatus: IPC.gitStatus,
   gitInit: IPC.gitInit,
+  gitAllowRepoCommands: IPC.gitAllowRepoCommands,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
   gitDiff: IPC.gitDiff,
   gitBranchDiff: IPC.gitBranchDiff,

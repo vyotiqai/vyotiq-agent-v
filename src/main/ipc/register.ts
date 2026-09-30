@@ -60,6 +60,7 @@ import {
   WorkspacesSetSettingsOverrideRequestSchema,
   GitStatusRequestSchema,
   GitInitRequestSchema,
+  GitAllowRepoCommandsRequestSchema,
   GitGenerateCommitMessageRequestSchema,
   GitCommitRequestSchema,
   GitStageAllRequestSchema,
@@ -231,6 +232,7 @@ import {
   type GitStatusResult,
   type GitCommitResult,
   type GitInitResult,
+  type GitAllowRepoCommandsResult,
   type AgentBrowserState,
   BrowserNavigateRequestSchema,
   BrowserWorkspaceScopeSchema,
@@ -473,6 +475,7 @@ import {
   checkoutBranch,
   commitAll,
   initGitRepo,
+  allowWorkspaceRepoCommands,
   listLocalBranches,
   readGitCommitFiles,
   readGitBlame,
@@ -2751,6 +2754,23 @@ export function registerIpc(): void {
       return failFrom(err, IPC.gitInit)
     }
   })
+
+  ipcMain.handle(
+    IPC.gitAllowRepoCommands,
+    async (event, raw): Promise<IpcResult<GitAllowRepoCommandsResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = GitAllowRepoCommandsRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        const result = await allowWorkspaceRepoCommands(req.workspacePath)
+        invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
+        return ok(result)
+      } catch (err) {
+        return failFrom(err, IPC.gitAllowRepoCommands)
+      }
+    }
+  )
 
   ipcMain.handle(IPC.gitCommit, async (event, raw): Promise<IpcResult<GitCommitResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')

@@ -15,6 +15,7 @@ import { mapLimit } from '../../shared/utils/mapLimit'
 import { isSafeWorkspaceRelPath } from '../../shared/utils/workspacePath'
 import { createWorkspacePathResolver, resolveInsideWorkspace } from '../workspace/safePath'
 import { sanitizedTerminalEnv } from '../agent/tools/terminal'
+import { allowRepoCommands, guardGitInvocation, readBlockedRepoCommands } from './repoCommandGuard'
 
 const execFile = promisify(execFileCb)
 
@@ -200,13 +201,14 @@ export async function readGitAheadBehind(
 async function git(args: string[], cwd: string, timeout: number): Promise<string> {
   // Use the resolved binary so installs missing from PATH still work.
   const bin = (await resolveGitBinary()) ?? 'git'
-  const { stdout } = await execFile(bin, args, {
+  const guarded = await guardGitInvocation(args, cwd, buildGitEnv(), bin)
+  const { stdout } = await execFile(bin, guarded.args, {
     cwd,
     encoding: 'utf8',
     timeout,
     maxBuffer: MAX_BUFFER,
     windowsHide: true,
-    env: buildGitEnv()
+    env: guarded.env
   })
   return stdout
 }
@@ -485,9 +487,10 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   const stagedArgs = hasCommits
     ? ['diff', '--numstat', '--no-renames', '-z', '--cached', 'HEAD']
     : ['diff', '--numstat', '--no-renames', '-z', '--cached']
-  const [stagedMap, aheadBehind] = await Promise.all([
+  const [stagedMap, aheadBehind, repoCommands] = await Promise.all([
     numstatMap(cwd, stagedArgs),
-    hasRemote && hasCommits ? readGitAheadBehind(cwd) : Promise.resolve(null)
+    hasRemote && hasCommits ? readGitAheadBehind(cwd) : Promise.resolve(null),
+    blockedRepoCommandsQuiet(cwd)
   ])
 
   const tracked = new Map<string, GitChangedFile>()
@@ -601,9 +604,26 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
     removed,
     hasRemote,
     hasCommits,
-    ...(aheadBehind ?? {})
+    ...(aheadBehind ?? {}),
+    ...(repoCommands ? { repoCommands } : {})
   }
   return { kind: 'ok', status }
+}
+
+/** What this repository's own settings would run and the app's git skips; null when nothing. */
+async function blockedRepoCommandsQuiet(cwd: string): Promise<GitStatus['repoCommands'] | null> {
+  try {
+    return await readBlockedRepoCommands(cwd, buildGitEnv(), (await resolveGitBinary()) ?? 'git')
+  } catch {
+    // The status reads above already ran through the same scan; a failure
+    // here only loses the notice, never the guard.
+    return null
+  }
+}
+
+/** Let the app's git run the programs this repository's settings name now. */
+export async function allowWorkspaceRepoCommands(cwd: string): Promise<{ allowed: number }> {
+  return allowRepoCommands(cwd, buildGitEnv(), (await resolveGitBinary()) ?? 'git')
 }
 
 export type GitDiffOptions = {

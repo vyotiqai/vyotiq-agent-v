@@ -11,6 +11,7 @@ A workspace is a folder on your computer. Every task runs in one, and the agent'
 
 - **During setup:** step 2, "Open a workspace", has "Choose a folder…". You can also drop a folder onto it.
 - **Later:** open the workspace menu at the top of the navigator and pick "Add workspace…".
+- **From a `vyotiq://` link:** a link to a task opens its folder too. For a folder you have never opened, Agent V first asks "Open a folder from a link" and shows the path.
 
 The same menu lists your open workspaces, so you can narrow the navigator to one of them or show "All workspaces". It also has "Close {workspace}" for the one you are looking at.
 

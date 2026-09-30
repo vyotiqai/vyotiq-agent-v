@@ -23,6 +23,7 @@ import { disposePtySessionsUnderPath } from '../app/ptySessions'
 import { workspaceId, workspaceMetaDir } from '../storage/paths'
 import { disposeWorkspaceLsp } from '../workspace/lspService'
 import { gitAvailable, isGitRepo } from './git'
+import { guardGitInvocation } from './repoCommandGuard'
 
 const execFile = promisify(execFileCb)
 
@@ -638,13 +639,14 @@ const GIT_ENV = {
 }
 
 async function git(args: string[], cwd: string, timeout: number): Promise<string> {
-  const { stdout } = await execFile('git', args, {
+  const guarded = await guardGitInvocation(args, cwd, GIT_ENV)
+  const { stdout } = await execFile('git', guarded.args, {
     cwd,
     encoding: 'utf8',
     timeout,
     maxBuffer: MAX_BUFFER,
     windowsHide: true,
-    env: GIT_ENV
+    env: guarded.env
   })
   return stdout
 }
@@ -923,18 +925,15 @@ async function forwardParentDirtyDiffToWorktree(
         skipped: changed.length - present.length
       })
     }
-    const patch = await execFile(
-      'git',
-      ['diff', '--binary', 'HEAD', '--', ...present],
-      {
-        cwd: workspacePath,
-        encoding: 'buffer',
-        timeout: WRITE_TIMEOUT_MS,
-        maxBuffer: MAX_BUFFER,
-        windowsHide: true,
-        env: GIT_ENV
-      }
-    )
+    const guarded = await guardGitInvocation(['diff', '--binary', 'HEAD', '--', ...present], workspacePath, GIT_ENV)
+    const patch = await execFile('git', guarded.args, {
+      cwd: workspacePath,
+      encoding: 'buffer',
+      timeout: WRITE_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      windowsHide: true,
+      env: guarded.env
+    })
     const bytes = patch.stdout as Buffer
     if (!bytes || bytes.length === 0) return
     const tmp = join(tmpdir(), `vyotiq-instance-baseline-${process.pid}-${randomUUID()}.patch`)
@@ -1727,18 +1726,15 @@ export async function gitShowToFile(
   relPath: string
 ): Promise<string | null> {
   try {
-    const out = await execFile(
-      'git',
-      ['show', `${ref}:${relPath}`],
-      {
-        cwd: workspacePath,
-        encoding: 'buffer',
-        timeout: READ_TIMEOUT_MS,
-        maxBuffer: MAX_BUFFER,
-        windowsHide: true,
-        env: GIT_ENV
-      }
-    )
+    const guarded = await guardGitInvocation(['show', `${ref}:${relPath}`], workspacePath, GIT_ENV)
+    const out = await execFile('git', guarded.args, {
+      cwd: workspacePath,
+      encoding: 'buffer',
+      timeout: READ_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      windowsHide: true,
+      env: guarded.env
+    })
     const tmp = join(tmpdir(), `vyotiq-merge-prior-${process.pid}-${randomUUID()}`)
     await writeFile(tmp, out.stdout as Buffer)
     return tmp

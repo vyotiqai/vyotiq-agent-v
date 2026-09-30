@@ -42,6 +42,7 @@ import { lineLabel } from '@renderer/features/inspector/reviewDiff'
 import { reviewSignature, useReviewViewed } from '@renderer/features/inspector/reviewViewed'
 import { sessionEditTotals, settledWriteCount } from '@renderer/features/inspector/taskCounts'
 import { FileBadge } from './FileBadge'
+import { RepoCommandsNotice } from './RepoCommandsNotice'
 import {
   collectSessionChangedFiles,
   collectSessionFileDiffs,
@@ -1089,6 +1090,16 @@ export const ChangesPanel = memo(function ChangesPanel({
     </p>
   ) : null
 
+  const repoCommandsNotice =
+    workspacePath && status?.repoCommands ? (
+      <RepoCommandsNotice
+        workspacePath={workspacePath}
+        repoCommands={status.repoCommands}
+        inset={variant === 'review' ? 'px-4' : 'px-3'}
+        onAllowed={() => chrome.refresh()}
+      />
+    ) : null
+
   const conflictBlock =
     selectedConflicted && selected ? (
       <div className="@container shrink-0 space-y-2 border-b border-border bg-warning-soft px-3 py-2 text-xs" data-changes-conflict>
@@ -1520,6 +1531,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         ) : null}
 
         {gitNotice}
+        {repoCommandsNotice}
 
         <div className="flex min-h-0 flex-1">
           <aside className="flex w-[300px] shrink-0 flex-col border-r border-border" aria-label="Files to review">
@@ -1804,6 +1816,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       ) : null}
 
       {gitNotice}
+      {repoCommandsNotice}
 
       {status?.truncated && displayScope !== 'agent' && displayScope !== 'commits' ? (
         <p className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted">

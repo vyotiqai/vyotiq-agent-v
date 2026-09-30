@@ -12,6 +12,7 @@ Agent V keeps its data on your computer. Nearly all of it lives in one app data 
 | What | Where |
 | --- | --- |
 | Settings | `userData/settings.json` |
+| Repositories allowed to run their git programs | `userData/git-command-trust.json` |
 | API keys and the GitHub sign-in | `userData/secrets.json`, each value encrypted with your system's secure storage |
 | Task records | `userData/workspaces/<id>/sessions/<runId>/`, one folder per task |
 | Undo points (checkpoints) | `checkpoints/` inside the task's folder |
@@ -29,6 +30,8 @@ Agent V keeps its data on your computer. Nearly all of it lives in one app data 
 | Workspace memory | `.vyotiq/memory/` inside your project |
 
 `<id>` is an id Agent V gives each workspace folder. Workspace memory is the one item in your project rather than in `userData`, so it travels with the folder and can be committed like any other file.
+
+If `settings.json` is damaged, Agent V starts with default settings and keeps the damaged file beside it as `settings.json.corrupt-<time>`, and the inbox says "Settings couldn't be read". If the file is there but can't be read, for example because another program holds it open, Agent V doesn't save any settings until it can read the file again. That way your saved settings are never replaced with defaults.
 
 Settings, "Diagnostics", shows the logs path and has "Open folder". Logs are "always written locally", whether or not crash reporting is on.
 

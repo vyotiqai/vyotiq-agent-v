@@ -684,6 +684,10 @@ function App() {
     }
   }, [onSelectRunInWorkspace])
 
+  // A link can name any folder on disk, and opening one runs git in it. A
+  // folder the person never opened themselves asks first.
+  const { confirm: confirmLinkFolder, dialog: linkFolderDialog } = useConfirm()
+
   /** Route a vyotiq:// payload to the right chat, adding the workspace if needed. */
   const handleDeepLinkPayload = useCallback(
     async (payload: import('@shared/ipc').DeepLinkPayload): Promise<void> => {
@@ -708,6 +712,22 @@ function App() {
       }
       const isOpen = openWorkspaces.some((open) => workspacePathsEqual(open, path))
       if (!isOpen) {
+        const opened = (registry?.recentPaths ?? []).some((recent) => workspacePathsEqual(recent, path))
+        if (!opened) {
+          const allowed = await confirmLinkFolder(
+            "A Vyotiq link wants to open a folder that isn't one of your workspaces. Open it only if you expected this link.",
+            {
+              title: 'Open a folder from a link',
+              confirmLabel: 'Open folder',
+              details: (
+                <code className="block font-mono text-xs text-fg [overflow-wrap:anywhere]" data-link-folder>
+                  {path}
+                </code>
+              )
+            }
+          )
+          if (!allowed) return
+        }
         const added = await addWorkspace(path)
         if (!added) {
           pushToast('Could not open the workspace for that link.', 'error')
@@ -716,7 +736,7 @@ function App() {
       }
       await onSelectRunInWorkspace(path, target.runId)
     },
-    [addWorkspace, contexts, onSelectRunInWorkspace, openWorkspaces]
+    [addWorkspace, confirmLinkFolder, contexts, onSelectRunInWorkspace, openWorkspaces, registry?.recentPaths]
   )
 
   // Consume a link that arrived before mount (cold start / recreate-window),
@@ -2799,6 +2819,7 @@ function App() {
       <LiveRegion />
       <ToastHost />
       {confirmDialog}
+      {linkFolderDialog}
       {rewindDialog}
     </AppShell>
   )

@@ -279,6 +279,7 @@ const api: VyotiqApi = {
   listActiveRuns: () => ipcRenderer.invoke(IPC.runsActive),
   gitStatus: (workspacePath) => ipcRenderer.invoke(IPC.gitStatus, { workspacePath }),
   gitInit: (payload) => ipcRenderer.invoke(IPC.gitInit, payload),
+  gitAllowRepoCommands: (payload) => ipcRenderer.invoke(IPC.gitAllowRepoCommands, payload),
   gitGenerateCommitMessage: (payload) =>
     ipcRenderer.invoke(IPC.gitGenerateCommitMessage, payload),
   gitCommit: (workspacePath, message, push, mode) =>

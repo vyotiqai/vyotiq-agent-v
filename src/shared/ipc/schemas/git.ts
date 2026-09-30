@@ -42,9 +42,31 @@ export const GitStatusSchema = z.object({
   /** Commits on HEAD not on the upstream — only when a tracking ref exists. */
   ahead: z.number().int().min(0).optional(),
   /** Commits on the upstream not on HEAD — only when a tracking ref exists. */
-  behind: z.number().int().min(0).optional()
+  behind: z.number().int().min(0).optional(),
+  /**
+   * Programs this repository's own git settings name (filters, diff and merge
+   * drivers, fsmonitor), which the app's git skips until the person allows
+   * this exact set. `canAllow` is false when the repository can't be told
+   * apart from its settings files, so an allowance would have nothing to key on.
+   */
+  repoCommands: z
+    .object({
+      blocked: z.array(z.object({ key: z.string(), value: z.string() })).min(1),
+      canAllow: z.boolean()
+    })
+    .optional()
 })
 export type GitStatus = z.infer<typeof GitStatusSchema>
+
+export const GitAllowRepoCommandsRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type GitAllowRepoCommandsRequest = z.infer<typeof GitAllowRepoCommandsRequestSchema>
+
+export const GitAllowRepoCommandsResultSchema = z.object({
+  allowed: z.number().int().min(0)
+})
+export type GitAllowRepoCommandsResult = z.infer<typeof GitAllowRepoCommandsResultSchema>
 
 export const GitStatusRequestSchema = z.object({
   workspacePath: z.string().min(1)

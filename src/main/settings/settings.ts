@@ -1,6 +1,6 @@
 import { app } from 'electron'
-import { readFileSync, existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, existsSync, mkdirSync, renameSync } from 'fs'
+import { basename, join } from 'path'
 import {
   CustomProviderSchema,
   DEFAULT_SETTINGS,
@@ -29,6 +29,7 @@ import {
 } from '../../shared/providers'
 import { logger } from '../../shared/logger'
 import { atomicWriteJson } from '../storage/atomicWrite'
+import { publishLifecycleNotification } from '../notifications/bus'
 import { sanitizeMcpManifestEnv } from '../marketplace/sanitizeMcpEnv'
 import { getAuthorizationHeader, getBearerToken, headersWithoutAuthorization } from '../../shared/utils/mcpAuth'
 import {
@@ -51,11 +52,67 @@ function settingsPath(): string {
 }
 
 function writeSettings(next: Settings): void {
+  if (settingsReadError && existsSync(settingsPath())) {
+    // Anything saved now would be defaults plus one change, written over the
+    // person's MCP servers, providers and every other choice in the file.
+    throw new Error(
+      `Settings were not saved: settings.json could not be read (${settingsReadError.message}). Close anything holding it open and try again.`
+    )
+  }
   atomicWriteJson(settingsPath(), next, 0o600)
   settingsCache = next
 }
 
 let settingsCache: Settings | null = null
+/**
+ * Set while settings.json exists but can't be read (locked, unreadable, or a
+ * load that threw). Reads fall back to defaults without caching them, so the
+ * next read tries the file again, and writes are refused until one succeeds.
+ */
+let settingsReadError: Error | null = null
+
+const SETTINGS_QUARANTINED_DEDUPE_KEY = 'settings_quarantined'
+
+/**
+ * Move a settings.json that is not JSON aside, stamped so an earlier one is
+ * never replaced, and tell the person where it went. Returns false when it
+ * could not be moved — then it stays where it is and is never written over.
+ */
+function quarantineCorruptSettings(p: string, err: unknown): boolean {
+  const target = `${p}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+  try {
+    renameSync(p, target)
+  } catch (renameErr) {
+    logger.warn('Could not move the unreadable settings.json aside; leaving it in place', {
+      scope: 'settings',
+      code: 'SETTINGS',
+      err: renameErr
+    })
+    return false
+  }
+  // The log allowlist drops a `path` field, so the name rides in the message.
+  logger.warn(`settings.json is not valid JSON; moved it aside as ${basename(target)} and started from defaults`, {
+    scope: 'settings',
+    code: 'SETTINGS',
+    err
+  })
+  publishLifecycleNotification({
+    source: 'system',
+    kind: 'crash',
+    title: "Settings couldn't be read",
+    body: `Vyotiq started with default settings. The damaged file is kept beside them as ${basename(target)}.`,
+    dedupeKey: SETTINGS_QUARANTINED_DEDUPE_KEY
+  })
+  return true
+}
+
+function noteSettingsReadError(err: unknown, message: string): Settings {
+  const first = settingsReadError === null
+  settingsReadError = err instanceof Error ? err : new Error(String(err))
+  // Hot paths read settings; say it once per failure, not once per read.
+  if (first) logger.warn(message, { scope: 'settings', code: 'SETTINGS', err })
+  return restoreMcpSecrets({ ...DEFAULT_SETTINGS })
+}
 
 /** Serializes async callers that must await between settings mutations (IPC handlers). */
 let settingsMutationChain: Promise<unknown> = Promise.resolve()
@@ -367,6 +424,7 @@ export function restoreRedactedMcpSecrets(
 /** Drop in-memory settings cache (tests / external file edits). */
 export function clearSettingsCacheForTests(): void {
   settingsCache = null
+  settingsReadError = null
 }
 
 function normalizeSettings(data: Settings): Settings {
@@ -577,11 +635,40 @@ export function getSettings(): Settings {
   if (settingsCache) return restoreMcpSecrets(settingsCache)
   const p = settingsPath()
   if (!existsSync(p)) {
+    settingsReadError = null
     settingsCache = { ...DEFAULT_SETTINGS }
     return restoreMcpSecrets(settingsCache)
   }
+  let text: string
   try {
-    const raw = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>
+    text = readFileSync(p, 'utf8')
+  } catch (err) {
+    return noteSettingsReadError(err, 'Could not read settings.json; using defaults and not saving over it')
+  }
+  let parsedJson: unknown = null
+  let damage: Error | null = null
+  try {
+    parsedJson = JSON.parse(text)
+  } catch (err) {
+    damage = err instanceof Error ? err : new Error(String(err))
+  }
+  if (!damage && (typeof parsedJson !== 'object' || parsedJson === null || Array.isArray(parsedJson))) {
+    damage = new Error('settings.json is not a JSON object')
+  }
+  if (damage) {
+    if (!quarantineCorruptSettings(p, damage)) {
+      return noteSettingsReadError(
+        damage,
+        'settings.json is damaged and could not be moved aside; using defaults and not saving over it'
+      )
+    }
+    settingsReadError = null
+    settingsCache = { ...DEFAULT_SETTINGS }
+    return restoreMcpSecrets(settingsCache)
+  }
+  settingsReadError = null
+  try {
+    const raw = parsedJson as Record<string, unknown>
     const migrated = migratePersistedSettingsDefaults(stripLegacyFields(raw))
     const parsed = SettingsSchema.safeParse({
       ...DEFAULT_SETTINGS,
@@ -636,9 +723,8 @@ export function getSettings(): Settings {
     settingsCache = data
     return restoreMcpSecrets(settingsCache)
   } catch (err) {
-    logger.warn('Failed to read settings', { scope: 'settings', code: 'SETTINGS', err })
-    settingsCache = { ...DEFAULT_SETTINGS }
-    return restoreMcpSecrets(settingsCache)
+    // The file parsed; loading it threw. Its contents are fine, so keep them.
+    return noteSettingsReadError(err, 'Failed to load settings; using defaults and not saving over settings.json')
   }
 }
 

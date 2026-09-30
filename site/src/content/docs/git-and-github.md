@@ -17,6 +17,14 @@ Git must be installed and on your PATH for:
 
 Without git these fail with "Git is not installed or not on PATH". If the workspace is not a repository yet, the "New task" page shows "Not a repository" beside "Branch", with a button to run `git init` there.
 
+## Programs a repository's settings name
+
+A repository's own git settings (its `.git/config`) can name programs that git runs during ordinary reads such as `git status`: `core.fsmonitor`, the `clean`, `smudge` and `process` commands of a filter, `diff.external`, a diff driver's `textconv` or `command`, and a merge driver. That file comes along with any folder someone hands you.
+
+Agent V's own git switches these off. The "Changes" tab says "This repository's git settings run programs. Vyotiq's git skips them." and lists each one. Diffs and merges fall back to git's built-in ones.
+
+If you set these up yourself, for example with `git-crypt unlock` or `git lfs install --local`, click "Allow for this repo". The allowance covers exactly the settings listed, in this repository and its worktrees. If they change, they are switched off again until you allow them again. Settings in your own global git config are never switched off. The agent's terminal commands are not affected; [Approvals](/docs/approvals) cover those.
+
 ## Committing
 
 The "Commit" button in the "Changes" tab opens a menu:

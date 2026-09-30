@@ -19,6 +19,7 @@ import {
 } from './crashDiagnostics'
 import { isAbortError } from '../../shared/errors'
 import { isIgnorablePipeError, isIgnorableUncaught } from './pipeErrors'
+import { exitAfterFatal } from './fatalExit'
 
 export { isIgnorablePipeError, isIgnorableUncaught } from './pipeErrors'
 
@@ -157,10 +158,11 @@ function installProcessHandlers(): void {
   process.stderr?.on?.('error', swallowStreamPipeError)
 
   function exitAfterFlush(): void {
-    // Give the log transport a tick to flush the fatal message, then terminate.
-    setTimeout(() => {
-      process.exit(1)
-    }, 250)
+    // Save queued run writes (bounded), give the log transport a tick for the
+    // fatal message, then terminate.
+    exitAfterFatal(undefined, (outcome) => {
+      if (outcome === 'failed') logger.warn('Could not save pending writes before exiting', { scope: 'main' })
+    })
   }
 
   process.on('uncaughtException', (err) => {

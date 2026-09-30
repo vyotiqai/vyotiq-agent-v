@@ -21,6 +21,7 @@ import {
   sanitizeRelativePaths
 } from './git'
 import { sanitizedTerminalEnv } from '../agent/tools/terminal'
+import { guardGitInvocation } from './repoCommandGuard'
 
 const execFile = promisify(execFileCb)
 
@@ -71,13 +72,14 @@ async function gh(args: string[], cwd: string, timeout = TIMEOUT_MS): Promise<st
 }
 
 async function git(args: string[], cwd: string, timeout = TIMEOUT_MS): Promise<string> {
-  const { stdout } = await execFile('git', args, {
+  const guarded = await guardGitInvocation(args, cwd, GIT_ENV)
+  const { stdout } = await execFile('git', guarded.args, {
     cwd,
     encoding: 'utf8',
     timeout,
     maxBuffer: MAX_BUFFER,
     windowsHide: true,
-    env: GIT_ENV
+    env: guarded.env
   })
   return stdout
 }

@@ -5,6 +5,7 @@ import { readdir, stat } from 'fs/promises'
 import { join } from 'path'
 import { namedGitBranch } from '../../../shared/utils/gitBranch'
 import { sanitizedTerminalEnv } from '../tools/terminal'
+import { guardGitInvocation } from '../../git/repoCommandGuard'
 import { HARNESS_SECTION_TAGS } from '../harnessSections'
 import { neutralizeXmlTags, wrapPromptSection } from '../promptSections'
 
@@ -180,13 +181,14 @@ const GIT_ENV = {
 }
 
 async function runGit(args: string[], cwd: string, timeout: number): Promise<string> {
-  const { stdout } = await execFile('git', args, {
+  const guarded = await guardGitInvocation(args, cwd, GIT_ENV)
+  const { stdout } = await execFile('git', guarded.args, {
     cwd,
     encoding: 'utf8',
     timeout,
     maxBuffer: GIT_MAX_BUFFER,
     windowsHide: true,
-    env: GIT_ENV
+    env: guarded.env
   })
   return stdout
 }

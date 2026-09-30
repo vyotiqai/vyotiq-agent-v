@@ -39,6 +39,8 @@ import type {
   GitBranchDiffResult,
   GitInitRequest,
   GitInitResult,
+  GitAllowRepoCommandsRequest,
+  GitAllowRepoCommandsResult,
   IpcResult,
   ListModelsResult,
   ListRunsResult,
@@ -425,6 +427,13 @@ export interface VyotiqApi {
    * explicit button, never on open and never for the agent.
    */
   gitInit: (payload: GitInitRequest) => Promise<IpcResult<GitInitResult>>
+  /**
+   * Allow the programs this repository's own git settings name — exactly the
+   * set there now — for the app's git in it. Only from the person's click.
+   */
+  gitAllowRepoCommands: (
+    payload: GitAllowRepoCommandsRequest
+  ) => Promise<IpcResult<GitAllowRepoCommandsResult>>
   gitGenerateCommitMessage: (payload: {
     workspacePath: string
     mode?: 'all' | 'staged'
