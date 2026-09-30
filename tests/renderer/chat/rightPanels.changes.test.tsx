@@ -482,7 +482,7 @@ describe('ChangesPanel', () => {
     await waitFor(() => {
       expect(input.value).toBe('Update 3 files')
     })
-    const notice = screen.getByText(/No agent message: No model is set up/)
+    const notice = screen.getByText(/No drafted message: No model is set up/)
     expect(notice.getAttribute('aria-live')).toBe('polite')
     expect(screen.getByRole('button', { name: /^Commit$/ }).hasAttribute('disabled')).toBe(false)
   })

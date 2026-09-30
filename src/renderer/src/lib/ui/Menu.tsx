@@ -233,7 +233,7 @@ export function Menu({
             <div className="border-b border-border p-1.5">
               <SearchInput
                 ref={searchRef}
-                compact
+                size="sm"
                 placeholder={searchPlaceholder}
                 value={query}
                 onChange={(e) => {

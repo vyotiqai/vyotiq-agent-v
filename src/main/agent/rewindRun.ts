@@ -241,7 +241,7 @@ function resolveUserMessageIndex(
  */
 function rewindAnchorMissingMessage(hadTimestampAnchor: boolean): string {
   return hadTimestampAnchor
-    ? 'Edited message no longer exists in the saved transcript — it was compacted away. Reload the chat and edit a newer message.'
+    ? 'That instruction was compacted out of the record. Reload the task and edit a newer instruction.'
     : 'editMessageIndex out of range'
 }
 

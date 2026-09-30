@@ -25,7 +25,6 @@ const settingsStub = {
   navigationMode: 'sidebar' as const,
   theme: 'system',
   fontScale: 1,
-  uiDensity: 'comfortable',
   skinId: 'default',
   customCssPath: '',
   favoriteModels: [],
@@ -86,7 +85,6 @@ const workspaceStub = {
   newChatInWorkspace: noop,
   closeRunTab: noop,
   purgeDeletedRunUi: noop,
-  setSessionQuery: noop,
   addWorkspace: noop,
   switchWorkspace: noop,
   removeWorkspace: noop,
@@ -95,7 +93,6 @@ const workspaceStub = {
   refreshActiveRuns: noop,
   refreshWorkspaceRuns: noop,
   loadOlderRuns: noop,
-  workspaceHasBackgroundRun: () => false,
   scrollRestoreToken: 0,
   setComposerDraftForPane: noop,
   setAgentMode: noop,
@@ -123,15 +120,12 @@ const workspaceStub = {
     return state.dropSessionOnPane()
   },
   isSessionOpenInPane: () => false,
-  isSessionFocusedInPane: () => false,
   getPaneChatSnapshot: () => null,
   focusedWorkspacePath: '/ws-a',
   getFocusedPane: () => null,
   getPaneById: () => null,
   openNewChatInPane: noop,
-  focusedRunId: null,
-  workspaceExpandedByPath: {},
-  setWorkspaceExpanded: noop
+  focusedRunId: null
 }
 
 vi.mock('@renderer/app/AppShell', () => ({

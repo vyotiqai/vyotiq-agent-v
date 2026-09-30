@@ -11,21 +11,9 @@ export const SearchInput = forwardRef<
     clearLabel?: string
     inputClassName?: string
     trailing?: ReactNode
-    /** Quieter frameless field for dense chrome (sidebar). */
-    tone?: 'default' | 'quiet'
     /** Its shortcut, shown at rest so the key is learnt by looking. */
     keys?: readonly string[]
-    /** Omit for the pre-redesign geometry. */
     size?: 'sm' | 'md'
-    /**
-     * The menu-header field: a menu row is `h-7` with `text-xs`, so the field
-     * inside it has to be too. Passed as a state, not as `inputClassName` —
-     * `cn()` has no tailwind-merge, so appending `min-h-7 text-xs` beside the
-     * base `min-h-[…] text-sm` left the winner to emission order in the
-     * generated sheet (CLAUDE.md, constraint 3). A ternary keeps one class per
-     * slot, whichever of the two sizes is on.
-     */
-    compact?: boolean
   }
 >(function SearchInput(
   {
@@ -35,10 +23,8 @@ export const SearchInput = forwardRef<
     onClear,
     clearLabel = 'Clear search',
     trailing,
-    tone = 'default',
     keys,
-    size,
-    compact,
+    size = 'md',
     ...props
   },
   ref
@@ -48,14 +34,9 @@ export const SearchInput = forwardRef<
   return (
     <div
       className={cn(
-        'flex items-center gap-2 rounded-md focus-within:vy-focus-ring vy-transition',
-        size === 'md' ? 'h-8 px-2.5' : size === 'sm' ? 'h-7 px-2' : 'px-2.5',
-        tone === 'quiet'
-          ? cn(!size && 'min-h-[calc(var(--vy-control-min-h)+0.25rem)]', 'bg-surface')
-          : cn(
-              !size && 'min-h-[var(--vy-control-min-h)]',
-              'border border-border bg-bg hover:border-border-strong focus-within:border-border-strong'
-            ),
+        'flex items-center gap-2 rounded-md border border-border bg-bg focus-within:vy-focus-ring vy-transition',
+        'hover:border-border-strong focus-within:border-border-strong',
+        size === 'md' ? 'h-8 px-2.5' : 'h-7 px-2',
         className
       )}
     >
@@ -65,13 +46,7 @@ export const SearchInput = forwardRef<
         data-vy-text-entry
         className={cn(
           'w-full min-w-0 border-none bg-transparent text-fg outline-none placeholder:text-tertiary',
-          compact || size === 'sm' ? 'text-xs' : 'text-sm',
-          compact || size
-            ? ''
-            : tone === 'quiet'
-              ? 'min-h-[calc(var(--vy-control-min-h)+0.25rem)] py-2'
-              : 'min-h-[var(--vy-control-min-h)]',
-          compact ? 'min-h-7' : '',
+          size === 'sm' ? 'text-xs' : 'text-sm',
           inputClassName
         )}
         value={value}
@@ -81,16 +56,11 @@ export const SearchInput = forwardRef<
         <Tooltip content={clearLabel}>
           <button
             type="button"
-            className={cn(
-              'inline-grid size-6 shrink-0 place-items-center rounded-md text-muted vy-transition',
-              tone === 'quiet'
-                ? 'hover:text-fg active:opacity-80'
-                : 'hover:bg-surface-2 hover:text-fg active:bg-surface'
-            )}
+            className="inline-grid size-5 shrink-0 place-items-center rounded-sm text-tertiary vy-transition hover:bg-surface-2 hover:text-fg focus-visible:vy-focus-ring"
             aria-label={clearLabel}
             onClick={onClear}
           >
-            <Icon name="close" size={14} />
+            <Icon name="close" size={13} />
           </button>
         </Tooltip>
       ) : null}

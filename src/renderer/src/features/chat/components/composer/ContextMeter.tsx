@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Icon } from '@renderer/lib/icons'
+import { Alert } from '@renderer/lib/ui/Alert'
 import { Button } from '@renderer/lib/ui/Button'
 import { cn } from '@renderer/lib/ui/cn'
 import { MENU_SURFACE } from '@renderer/lib/ui/menuStyles'
@@ -197,7 +197,8 @@ function BreakdownRow({
       )}
       <span
         className={cn(
-          'w-10 shrink-0 text-right text-caption tnum',
+          'w-10 shrink-0 text-right',
+          NUM,
           muted ? 'text-tertiary' : 'text-fg'
         )}
       >
@@ -205,7 +206,8 @@ function BreakdownRow({
       </span>
       <span
         className={cn(
-          'w-9 shrink-0 text-right text-caption tnum',
+          'w-9 shrink-0 text-right',
+          NUM,
           muted ? 'text-tertiary' : 'text-secondary'
         )}
       >
@@ -238,10 +240,10 @@ function McpServerRows({ groups }: { groups: ContextToolGroupDetail[] }) {
           <span className="min-w-0 flex-1 truncate text-caption text-tertiary" title={group.serverId}>
             {group.serverId}
           </span>
-          <span className="shrink-0 text-caption tnum text-tertiary">
+          <span className={cn('shrink-0 text-tertiary', NUM)}>
             {group.toolCount} {group.toolCount === 1 ? 'tool' : 'tools'}
           </span>
-          <span className="w-10 shrink-0 text-right text-caption tnum text-secondary">
+          <span className={cn('w-10 shrink-0 text-right text-secondary', NUM)}>
             {formatTokens(group.tokens)}
           </span>
           <span className="w-9 shrink-0" aria-hidden />
@@ -252,9 +254,11 @@ function McpServerRows({ groups }: { groups: ContextToolGroupDetail[] }) {
 }
 
 /**
- * Full context breakdown (Messages / System tools / MCP tools / System prompt /
+ * Full context breakdown (Record / System tools / MCP tools / System prompt /
  * Skills / Autocompact buffer / Free space + deferred tools), falling back to
- * the legacy 3-layer split when the run predates `detail` events.
+ * the legacy 3-layer split when the run predates `detail` events. Categories
+ * take the accent (the record) and then a grey ramp by weight — never a status
+ * hue, which would read as a warning or a pass.
  */
 function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   const [mcpOpen, setMcpOpen] = useState(false)
@@ -291,7 +295,7 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   return (
     <>
       <BreakdownRow
-        label="Messages"
+        label="Record"
         tokens={usage.layers.history}
         total={base}
         color="bg-accent"
@@ -300,13 +304,13 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
         label="System tools"
         tokens={detail.tools.builtin.tokens}
         total={base}
-        color="bg-warning"
+        color="bg-fg"
       />
       <BreakdownRow
         label="MCP tools"
         tokens={detail.tools.mcp.tokens}
         total={base}
-        color="bg-success"
+        color="bg-secondary"
         onToggle={hasMcpServers ? () => setMcpOpen((v) => !v) : undefined}
         expanded={hasMcpServers ? mcpOpen : undefined}
       />
@@ -352,7 +356,6 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   )
 }
 
-/** Latest-step cache hit share of provider input, or null when unknown. */
 /**
  * The meter's words: how full the context is, of what, how much was cached,
  * and whether a long-run tip waits inside. Shared by every place the meter
@@ -374,6 +377,7 @@ function contextMeterLabels(
   }
 }
 
+/** Latest-step cache hit share of provider input, or null when unknown. */
 export function cacheHitPct(totals: StepUsageTotals): number | null {
   if (totals.cachedInputTokens <= 0 || totals.inputTokens <= 0) return null
   return Math.round((totals.cachedInputTokens / totals.inputTokens) * 100)
@@ -442,14 +446,14 @@ function ContextMeterPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="shrink-0 px-3.5 pt-3.5 pb-3">
+      <header className="shrink-0 p-3">
         <div className="flex items-start gap-3">
           <UsageRing ratio={ratio} size={56} level={level}>
             <span className={levelRing[level]}>{displayPct}%</span>
           </UsageRing>
           <div className="min-w-0 flex-1 pt-0.5">
             <p className="m-0 text-sm font-medium text-fg">Context</p>
-            <p className="m-0 mt-0.5 text-caption leading-snug text-secondary">
+            <p className="m-0 mt-0.5 text-caption text-secondary">
               Current step {usage.step}
               <span className="text-tertiary"> · </span>
               {formatTokens(usage.window)} model
@@ -457,10 +461,10 @@ function ContextMeterPanel({
                 <span className="text-tertiary"> · estimated</span>
               ) : null}
             </p>
-            <p className="m-0 mt-1.5 text-xs tnum text-fg">
-              <span className="font-semibold">{formatTokens(usage.used)}</span>
+            <p className="m-0 mt-1.5 text-caption text-fg">
+              <span className={NUM}>{formatTokens(usage.used)}</span>
               <span className="text-secondary"> used of </span>
-              <span className="font-medium">{formatTokens(budget)}</span>
+              <span className={NUM}>{formatTokens(budget)}</span>
             </p>
           </div>
         </div>
@@ -489,25 +493,19 @@ function ContextMeterPanel({
         </div>
       </header>
 
-      <div className={cn('sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t px-3.5 py-3', BORDER_DIVIDER)}>
+      <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain border-t p-3 scroll-thin', BORDER_DIVIDER)}>
         {overBudget ? (
-          <p
-            className="m-0 mb-3 flex items-start gap-1.5 rounded-md bg-danger-soft px-2.5 py-2 text-caption leading-snug text-danger"
-            role="alert"
-          >
-            <Icon name="warning" size={13} className="mt-px shrink-0" />
-            <span className="min-w-0">
-              {usage.overflow
-                ? 'Context still exceeds the model window after compaction. Start a new task if the agent cannot fold further.'
-                : `${formatTokens(overage)} over budget — auto-compact will fold at the threshold, or use Compact when the run is stopped.`}
-            </span>
-          </p>
+          <Alert className="mb-3">
+            {usage.overflow
+              ? 'Context still exceeds the model window after compaction. Start a new task if the agent cannot fold further.'
+              : `${formatTokens(overage)} over budget — auto-compact will fold at the threshold, or use Compact when the run is stopped.`}
+          </Alert>
         ) : null}
 
         {effectiveAdvisoryHint ? (
-          <p className="m-0 mb-3 rounded-md bg-warning-soft px-2.5 py-2 text-caption leading-snug text-warning" role="status">
+          <Alert variant="info" className="mb-3">
             {effectiveAdvisoryHint}
-          </p>
+          </Alert>
         ) : null}
 
         {contentTotal > 0 ? (
@@ -589,7 +587,7 @@ function ContextMeterPanel({
               ) : null}
             </dl>
             {reasoningPct != null && reasoningPct >= 40 ? (
-              <p className="m-0 text-caption leading-snug text-secondary">
+              <p className="m-0 text-caption text-secondary">
                 Reasoning is a large share of output — lower Think effort for simpler work.
               </p>
             ) : null}
@@ -620,7 +618,7 @@ function ContextMeterPanel({
           {compactMessage ? (
             <p
               className={cn(
-                'm-0 mt-2 text-center text-caption leading-snug',
+                'm-0 mt-2 text-center text-caption',
                 compactFailed ? 'text-danger' : 'text-secondary'
               )}
               role={compactFailed ? 'alert' : 'status'}

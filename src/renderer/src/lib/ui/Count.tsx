@@ -7,7 +7,7 @@ export function Count({ n, tone = 'quiet' }: { n: number | string; tone?: 'quiet
       className={cn(
         'font-mono tnum',
         tone === 'accent'
-          ? 'inline-grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-2xs font-semibold text-accent-fg'
+          ? 'inline-grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-caption leading-none font-semibold text-accent-fg'
           : 'text-caption text-tertiary'
       )}
     >

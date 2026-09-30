@@ -1,4 +1,3 @@
-import type { Ref } from 'react'
 import { memo, useCallback, useMemo } from 'react'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
 import { userTurnCount } from '@shared/utils/turnUsage'
@@ -41,7 +40,6 @@ export function SessionChatColumn({
   itemsStore,
   metaStore,
   running,
-  invokeId = null,
   pendingRun = false,
   error,
   errorCode = null,
@@ -67,7 +65,6 @@ export function SessionChatColumn({
   transcriptHasEarlier,
   transcriptLoadingEarlier,
   onLoadEarlierMessages,
-  headingRef,
   onProviderModel,
   favoriteModels = [],
   recentModels = [],
@@ -102,7 +99,6 @@ export function SessionChatColumn({
   mcpServerNames,
   slashHandlers,
   onShowInspector,
-  showPageHeading = true,
   onActivate,
   approvalAutoFocus = true,
   onOpenChanges,
@@ -120,7 +116,6 @@ export function SessionChatColumn({
   itemsStore?: ChatItemsStore
   metaStore?: ChatMetaStore
   running: boolean
-  invokeId?: number | null
   pendingRun?: boolean
   error: string | null
   errorCode?: string | null
@@ -153,7 +148,6 @@ export function SessionChatColumn({
   transcriptHasEarlier?: boolean
   transcriptLoadingEarlier?: boolean
   onLoadEarlierMessages?: () => void | Promise<void>
-  headingRef?: Ref<HTMLHeadingElement>
   onProviderModel: (provider: ProviderIdAny, model: string) => void
   favoriteModels?: string[]
   recentModels?: string[]
@@ -201,7 +195,6 @@ export function SessionChatColumn({
   slashHandlers?: import('./components/composer/slashCommandExecute').SlashClientHandlers
   /** Set on the rightmost pane while the inspector is hidden. */
   onShowInspector?: () => void
-  showPageHeading?: boolean
   onActivate?: () => void
   approvalAutoFocus?: boolean
   onOpenChanges?: (path?: string) => void
@@ -243,8 +236,7 @@ export function SessionChatColumn({
     items,
     error,
     errorCode,
-    incomplete,
-    turnStatus
+    incomplete
   })
   const operationalBannerError = operationalError ?? null
   // Match ChatView: remount on workspace/epoch only — not draft→run (avoids composer wipe).
@@ -285,7 +277,6 @@ export function SessionChatColumn({
         model={model}
         running={running}
         disabled={!hasWorkspace}
-        hasTranscript
         hasWorkspace={hasWorkspace}
         workspacePath={workspacePath}
         ollamaBaseUrl={ollamaBaseUrl}
@@ -305,7 +296,6 @@ export function SessionChatColumn({
         agentMode={agentMode}
         onAgentModeChange={onAgentModeChange}
         onSend={submitPromptEdit}
-        onStop={onStop}
         activeRunId={activeRunId}
         contextUsage={metaStore ? undefined : contextUsage}
         metaStore={metaStore}
@@ -334,7 +324,6 @@ export function SessionChatColumn({
     model,
     running,
     hasWorkspace,
-    hasTranscript: hasItems,
     workspacePath,
     ollamaBaseUrl,
     customOpenAiBaseUrl,
@@ -353,7 +342,6 @@ export function SessionChatColumn({
     agentMode,
     onAgentModeChange,
     onSend: sendFromDock,
-    onStop,
     pendingFollowUps,
     onRemoveFollowUp,
     onEditFollowUp,
@@ -442,7 +430,6 @@ export function SessionChatColumn({
             scrollRestoreToken={scrollRestoreToken}
             onScrollTopChange={onScrollTopChange}
             onActivate={onActivate}
-            headingRef={showPageHeading ? headingRef : undefined}
             onStop={onStop}
             actions={runActions}
             turnUsage={turnUsage}

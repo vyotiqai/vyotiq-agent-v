@@ -9,9 +9,6 @@ const fieldChrome = cn(
   'vy-transition'
 )
 
-/** The geometry fields had before sizes existed; used when no `size` is given. */
-const legacyGeometry = 'min-h-[var(--vy-control-min-h)] px-[var(--vy-control-px)] text-sm'
-
 const sizes = {
   sm: 'h-7 px-2.5 text-xs',
   md: 'h-8 px-3 text-sm'
@@ -20,12 +17,12 @@ const sizes = {
 export const Input = forwardRef<
   HTMLInputElement,
   Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> & { size?: keyof typeof sizes; mono?: boolean }
->(function Input({ className = '', size, mono = false, ...props }, ref) {
+>(function Input({ className = '', size = 'md', mono = false, ...props }, ref) {
   return (
     <input
       ref={ref}
       data-vy-text-entry
-      className={cn('w-full', fieldChrome, size ? sizes[size] : legacyGeometry, mono && 'font-mono', className)}
+      className={cn('w-full', fieldChrome, sizes[size], mono && 'font-mono', className)}
       {...props}
     />
   )

@@ -51,7 +51,6 @@ export function CompactSummaryBlock({
   summary,
   tokenEstimate,
   expanded,
-  onToggle,
   verifyStatus,
   verifyFailures,
   verifyCoverage
@@ -59,7 +58,6 @@ export function CompactSummaryBlock({
   summary: string
   tokenEstimate?: number
   expanded?: boolean
-  onToggle?: (next: boolean) => void
   verifyStatus?: CompactionVerifyStatus
   verifyFailures?: string[]
   verifyCoverage?: number
@@ -73,12 +71,6 @@ export function CompactSummaryBlock({
   const verify = verifyLabel(verifyStatus, verifyCoverage)
   const title = headingForStatus(verifyStatus)
   const failed = verifyStatus === 'failed'
-
-  const toggle = (): void => {
-    const next = !isExpanded
-    setOverride(next)
-    onToggle?.(next)
-  }
 
   const heading = tokensLabel ? `${title} ${tokensLabel}` : title
 
@@ -95,7 +87,7 @@ export function CompactSummaryBlock({
         aria-expanded={isExpanded}
         aria-label={!isExpanded && preview ? `${heading}: ${preview}` : heading}
         title={!isExpanded && preview ? preview : tokensLabel ?? undefined}
-        onClick={toggle}
+        onClick={() => setOverride(!isExpanded)}
       >
         <Icon
           name="collapse"

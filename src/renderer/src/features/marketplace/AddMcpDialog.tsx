@@ -3,9 +3,8 @@ import type { DetectedMcpServer, McpApplyDetectedRequest, McpDetectResult, McpTr
 import type { MarketplaceOverrideKind } from '@shared/domain/marketplaceEnablement'
 import { classifyMcpInput, tokenizeCommand } from '@shared/utils/mcpClassify'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Icon } from '@renderer/lib/icons'
-import { Button, Checkbox, IconButton, Input, Segmented, StatusGlyph, type TaskState } from '@renderer/lib/ui'
-import { FIELD_GRID, FIELD_TEXTAREA } from './McpServerConfig'
+import { Button, Checkbox, Input, Segmented, StatusGlyph, Textarea, type TaskState } from '@renderer/lib/ui'
+import { FIELD_GRID } from './McpServerConfig'
 import { mcpLaunchLine } from './extensionItems'
 import type { MarketplaceController } from './useMarketplaceController'
 
@@ -304,30 +303,24 @@ export function AddMcpDialog({
     <Dialog
       open
       onClose={onClose}
-      label="Add an MCP server"
+      title={view === 'paste' ? 'Add an MCP server' : 'Import MCP servers'}
+      icon="mcp"
       useNativeDialog={false}
       padded={false}
       initialFocusRef={inputRef}
       className="vy-menu flex w-[560px] flex-col overflow-hidden"
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Icon name="mcp" size={16} className="text-muted" />
-        <h2 className="text-heading font-semibold text-fg-strong">
-          {view === 'paste' ? 'Add an MCP server' : 'Import MCP servers'}
-        </h2>
-        <span className="flex-1" />
-        <IconButton icon="close" label="Close" size="sm" tone="muted" onClick={onClose} />
-      </div>
-
       {view === 'paste' ? (
         <div className="min-h-0 space-y-4 overflow-y-auto px-4 py-4">
           <div>
             <label className="text-xs font-medium text-fg" htmlFor="mcp-src">
               Paste a URL, npm package, npx command or JSON
             </label>
-            <textarea
+            <Textarea
               ref={inputRef}
               id="mcp-src"
+              size="sm"
+              mono
               rows={2}
               value={input}
               // Only this dialog's own submit locks what you type. The JSON
@@ -335,7 +328,7 @@ export function AddMcpDialog({
               // the field mid-typing and dropped its focus.
               disabled={submitting}
               placeholder="npx -y @modelcontextprotocol/server-memory"
-              className={`mt-1.5 ${FIELD_TEXTAREA}`}
+              className="mt-1.5"
               onChange={(e) => setInput(e.target.value)}
             />
           </div>

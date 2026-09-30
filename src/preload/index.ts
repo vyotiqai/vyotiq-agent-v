@@ -114,7 +114,6 @@ const api: VyotiqApi = {
   openRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsOpenArtifact, payload),
   taskFileStats: (payload) => ipcRenderer.invoke(IPC.runsTaskFileStats, payload),
   taskFileDiff: (payload) => ipcRenderer.invoke(IPC.runsTaskFileDiff, payload),
-  runStats: (payload) => ipcRenderer.invoke(IPC.runStats, payload),
   homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),
   runFeedbackGet: (payload) => ipcRenderer.invoke(IPC.runFeedbackGet, payload),
   runFeedbackSet: (payload) => ipcRenderer.invoke(IPC.runFeedbackSet, payload),
@@ -445,8 +444,6 @@ const api: VyotiqApi = {
   getCrashDiagnostics: () => ipcRenderer.invoke(IPC.crashDiagnosticsGet),
   consumeCrashRecovery: () => ipcRenderer.invoke(IPC.crashRecoveryConsume),
   telemetryStatus: () => ipcRenderer.invoke(IPC.telemetryStatus),
-  startTrace: () => ipcRenderer.invoke(IPC.traceStart),
-  getTraceStatus: () => ipcRenderer.invoke(IPC.traceStatus),
   stopTrace: () => ipcRenderer.invoke(IPC.traceStop),
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
   updater: {

@@ -19,15 +19,6 @@ const tones = {
   inherit: 'hover:bg-surface'
 } as const
 
-/** Legacy looks, kept until their last caller is ported. */
-const legacyVariants = {
-  ghost: 'text-fg hover:bg-surface active:bg-surface-2',
-  /** No fill at rest or hover — icon-only chrome. */
-  bare: 'text-fg hover:text-fg-strong active:opacity-80',
-  primary: 'bg-accent text-accent-fg hover:bg-accent-hover active:opacity-90',
-  subtle: 'border border-border bg-bg text-fg hover:border-border-strong hover:bg-surface'
-} as const
-
 /**
  * `xs` draws at 20px but hits at 24px: the `before:` plate reaches 2px past each
  * edge, so a row action or a pair of neighbours still meets WCAG 2.5.8 without
@@ -54,8 +45,6 @@ export const IconButton = forwardRef<
     /** Pressed / current (a toggle that is on, the open panel). */
     active?: boolean
     weight?: 'regular' | 'bold' | 'fill'
-    /** @deprecated Use `tone`. Kept for surfaces not yet ported. */
-    variant?: keyof typeof legacyVariants
   }
 >(function IconButton(
   {
@@ -65,7 +54,6 @@ export const IconButton = forwardRef<
     tone = 'default',
     active = false,
     weight,
-    variant,
     className = '',
     type = 'button',
     title,
@@ -75,7 +63,7 @@ export const IconButton = forwardRef<
   ref
 ) {
   const tip = title ?? label
-  const look = active ? 'bg-surface-2 text-fg-strong' : variant ? legacyVariants[variant] : tones[tone]
+  const look = active ? 'bg-surface-2 text-fg-strong' : tones[tone]
 
   const button = (
     <button

@@ -124,7 +124,6 @@ const baseProps = {
   },
   onChatSettingsChange: vi.fn(),
   onSend: vi.fn().mockResolvedValue(true),
-  onStop: vi.fn(),
   secrets: emptySecretStatus(),
   variant: 'line' as const
 }

@@ -86,7 +86,6 @@ function renderComposer(): { shell: HTMLElement } {
       chatSettings={CHAT_SETTINGS}
       onChatSettingsChange={() => {}}
       onSend={() => true}
-      onStop={() => {}}
       workspacePath={WORKSPACE}
       activeRunId={RUN_ID}
     />

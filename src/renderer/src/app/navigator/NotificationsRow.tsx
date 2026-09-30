@@ -91,7 +91,7 @@ export function NotificationsRow({
           left: position.left
         }}
       >
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2">
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2">
           <h2 className="text-sm font-semibold text-fg-strong">Inbox</h2>
           {unreadCount > 0 ? <Badge tone="accent">{unreadCount} new</Badge> : null}
           <span className="flex-1" />
@@ -153,7 +153,7 @@ export function NotificationsRow({
             ))}
           </ul>
         )}
-        <div className="flex h-9 shrink-0 items-center border-t border-border px-3">
+        <div className="flex h-10 shrink-0 items-center border-t border-border pl-3 pr-2">
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-sm text-xs text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring"

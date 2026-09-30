@@ -6,10 +6,8 @@ export const MAX_PARALLEL_INSTANCES_LIMIT = 16
 import {
   DEFAULT_FONT_SCALE,
   DEFAULT_SKIN_ID,
-  DEFAULT_UI_DENSITY,
   FontScaleSchema,
-  SkinIdSchema,
-  UiDensitySchema
+  SkinIdSchema
 } from '../../appearance'
 import type { ThemeId } from '../../theme'
 import {
@@ -41,14 +39,7 @@ export type { ThinkingEffort }
 export const ThemeIdSchema = z.enum(['system', 'light', 'dark'])
 export type { ThemeId } from '../../theme'
 
-export {
-  FontScaleSchema,
-  SkinIdSchema,
-  UiDensitySchema,
-  type FontScale,
-  type SkinId,
-  type UiDensity
-} from '../../appearance'
+export { FontScaleSchema, SkinIdSchema, type FontScale, type SkinId } from '../../appearance'
 
 const McpServerIdSchema = z
   .string()
@@ -567,7 +558,6 @@ export const SettingsSchema = z.object({
   theme: ThemeIdSchema,
   navigationMode: NavigationModeSchema.default(DEFAULT_NAVIGATION_MODE),
   fontScale: FontScaleSchema.default(DEFAULT_FONT_SCALE),
-  uiDensity: UiDensitySchema.default(DEFAULT_UI_DENSITY),
   skinId: SkinIdSchema.catch(DEFAULT_SKIN_ID).default(DEFAULT_SKIN_ID),
   /** Local user CSS overlay path. Empty = none. */
   customCssPath: z.string().default(''),
@@ -613,7 +603,7 @@ export const SettingsSchema = z.object({
    * (exact or `*.suffix` wildcards). Empty = no extra host filter (SSRF rules still apply).
    */
   browserDomainAllowlist: z.array(z.string().min(1)).default([]),
-  /** Set after first-send tool approval onboarding modal is shown or dismissed. */
+  /** Set once an approval mode is chosen on the Set up page; until then Set up shows. */
   toolApprovalOnboardingDone: z.boolean().default(false),
   /** Shell used by the terminal tool. `auto` prefers PowerShell on Windows when available. */
   terminalShell: TerminalShellSchema.default('auto'),
@@ -719,7 +709,6 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   navigationMode: DEFAULT_NAVIGATION_MODE,
   fontScale: DEFAULT_FONT_SCALE,
-  uiDensity: DEFAULT_UI_DENSITY,
   skinId: DEFAULT_SKIN_ID,
   customCssPath: '',
   telemetryEnabled: false,
@@ -792,19 +781,6 @@ export const TelemetryStatusSchema = z.object({
   telemetryEnabled: z.boolean()
 })
 export type TelemetryStatus = z.infer<typeof TelemetryStatusSchema>
-
-export const TraceStartResultSchema = z.object({
-  categoryFilter: z.string(),
-  traceOptions: z.string()
-})
-export type TraceStartResult = z.infer<typeof TraceStartResultSchema>
-
-export const TraceStatusResultSchema = z.object({
-  recording: z.boolean(),
-  startedAt: z.string().nullable(),
-  bufferPercent: z.number().nullable()
-})
-export type TraceStatusResult = z.infer<typeof TraceStatusResultSchema>
 
 export const TraceStopResultSchema = z.object({
   path: z.string(),

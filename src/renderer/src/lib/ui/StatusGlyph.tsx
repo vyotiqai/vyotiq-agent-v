@@ -132,7 +132,7 @@ export function StatusGlyph({
 export function StepMarker({ state, n }: { state: TaskState; n: number }) {
   if (state === 'queued') {
     return (
-      <span className="inline-grid size-[18px] shrink-0 place-items-center rounded-full border border-border-strong font-mono text-2xs text-tertiary">
+      <span className="inline-grid size-[18px] shrink-0 place-items-center rounded-full border border-border-strong font-mono text-caption leading-none text-tertiary">
         {n}
       </span>
     )

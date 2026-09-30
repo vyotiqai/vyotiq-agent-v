@@ -359,6 +359,7 @@ function McpBody({
   const [retrying, setRetrying] = useState(false)
   const [locating, setLocating] = useState(false)
   const [showAllTools, setShowAllTools] = useState(false)
+  const [resettingGoogle, setResettingGoogle] = useState(false)
   // Open while a failure is one the fields can fix, until the person decides.
   // Status lands after mount, so this cannot be settled once in an initializer.
   const [configToggled, setConfigToggled] = useState<boolean | null>(null)
@@ -419,6 +420,44 @@ function McpBody({
     })
     if (ok) await controller.removeServer(server.id)
   }
+
+  /**
+   * The Google client secret the person pasted is shared by every Google
+   * server, so removing it signs them all out. Offered only while one is
+   * stored — a bundled client leaves nothing to reset.
+   */
+  const canResetGoogle = Boolean(server) && isGoogleMcpId(serverId) && controller.hasGoogleMcpClientSecret
+  const resetGoogleSignIn = async (): Promise<void> => {
+    const ok = await confirm(
+      'This removes the Google client secret you added and signs out every Google server. Each one will need signing in again.',
+      { title: 'Reset Google sign-in', confirmLabel: 'Reset', danger: true }
+    )
+    if (!ok) return
+    setResettingGoogle(true)
+    try {
+      const res = await window.vyotiq.mcpClearGoogleClientSecret?.()
+      if (!res?.ok) {
+        pushToast(res?.error ?? 'Could not reset Google sign-in.', 'error')
+        return
+      }
+      // A live session outlasts its stored sign-in, so reconnect rather than
+      // re-read: the Google servers then show that they need signing in.
+      await controller.loadMcpStatus(true)
+    } finally {
+      setResettingGoogle(false)
+    }
+  }
+  const resetGoogleButton = canResetGoogle ? (
+    <Button
+      size="sm"
+      variant="ghost"
+      pending={resettingGoogle}
+      disabled={locked}
+      onClick={() => void resetGoogleSignIn()}
+    >
+      Reset Google sign-in
+    </Button>
+  ) : null
 
   const canRemove = Boolean(item.installed) || manual
   const removeButton = canRemove ? (
@@ -558,6 +597,16 @@ function McpBody({
       break
     default:
       statusLine = controller.mcpStatusLoaded ? 'Installed.' : 'Checking the connection…'
+  }
+
+  // Last in the row, whatever the state: a repair, not the next step.
+  if (resetGoogleButton) {
+    actions = (
+      <>
+        {actions}
+        {resetGoogleButton}
+      </>
+    )
   }
 
   const nestedOverride =

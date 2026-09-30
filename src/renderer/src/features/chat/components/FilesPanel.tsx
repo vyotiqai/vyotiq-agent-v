@@ -4160,7 +4160,7 @@ export const FilesPanel = memo(function FilesPanel({
                       onKeyDown={(event) =>
                         openContextMenuFromKeyboard(event, { kind: 'tab', tabId: tab.id })
                       }
-                      title={tab.path}
+                      title={tab.dirty ? `${tab.path} · ${saveStateLabel(saveStates[tab.id] ?? 'pending')}` : tab.path}
                     >
                       <FileTypeIcon path={tab.path} size={13} className="shrink-0" />
                       <span className="min-w-0 truncate">{fileName(tab.path)}</span>

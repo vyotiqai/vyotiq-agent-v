@@ -7,7 +7,7 @@ import {
 } from '../../../src/renderer/src/features/chat/components/composer/modelReadiness'
 
 const CUSTOM_405_WARNING =
-  'Custom OpenAI-compatible does not serve a model list (HTTP 405); the host is reachable and chat can still connect. Type a model ID in the composer model picker search and press Enter to use it. Showing illustrative placeholder model IDs (not live models).'
+  'Custom OpenAI-compatible does not serve a model list (HTTP 405); the host is reachable and tasks can still run. Type a model ID in the composer model picker search and press Enter to use it. Showing illustrative placeholder model IDs (not live models).'
 
 describe('deriveModelReadiness', () => {
   it('requires an API key for cloud providers without a saved secret', () => {

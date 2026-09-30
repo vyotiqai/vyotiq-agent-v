@@ -41,7 +41,6 @@
   --vy-tracking-body: 0em;
   --vy-tracking-tight: -0.01em;
   --vy-tracking-caps: 0.07em;
-  --vy-tracking: -0.01em;
 }
 
 /* Proof — long-reading dusk: tight corners. */
@@ -66,7 +65,7 @@
   --vy-font-mono: "Cascadia Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
 }
 
-/* Gild — mineral and engraved: tight corners, hairline ring. */
+/* Gild — mineral and engraved: tight corners. */
 [data-skin="gild"] {
   --vy-radius-sm: 2px;
   --vy-radius-md: 3px;
@@ -109,25 +108,7 @@
   --vy-overlay: rgb(12 14 16 / 0.32);
   --vy-window-close: #c42b1c;
   --vy-window-close-fg: #ffffff;
-  --vy-shadow: 0 0 0 1px var(--vy-border);
   --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 12px 32px -8px rgb(12 14 16 / 0.18);
-  --vy-shadow-chrome: 0 10px 28px -14px rgb(10 10 10 / 0.12);
-  /* Legacy composer plane — goes with the composer. */
-  --vy-composer: var(--vy-card);
-
-  /* Legacy neutral ramp, kept for backward compatibility. Prefer semantic tokens. */
-  --vy-gray-base: #ffffff;
-  --vy-gray-50: #fafafa;
-  --vy-gray-100: #f5f5f5;
-  --vy-gray-200: #e5e5e5;
-  --vy-gray-300: #d4d4d4;
-  --vy-gray-400: #a3a3a3;
-  --vy-gray-500: #737373;
-  --vy-gray-600: #525252;
-  --vy-gray-700: #404040;
-  --vy-gray-800: #262626;
-  --vy-gray-900: #171717;
-  --vy-gray-950: #0a0a0a;
 
   /* Code syntax (JetBrains Light hues). */
   --vy-syntax-keyword: #0033b3;
@@ -146,9 +127,7 @@
   --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --vy-duration: 140ms;
   --vy-disabled-opacity: 0.45;
-  --leading-mono: 1.6;
 
-  --z-base: 0;
   --z-sticky: 10;
   /* Window chrome: above sticky page content, below menus, drawers and toasts,
      which must still open on top of the bar. */
@@ -161,10 +140,6 @@
   --z-tooltip: 50;
 
   --vy-font-scale: 1;
-  --vy-density-scale: 1;
-  --vy-control-min-h: calc(2rem * var(--vy-density-scale));
-  --vy-control-px: calc(0.75rem * var(--vy-density-scale));
-  --vy-control-gap: calc(0.375rem * var(--vy-density-scale));
 }
 
 [data-theme="dark"] {
@@ -195,23 +170,7 @@
   --vy-overlay: rgb(0 0 0 / 0.56);
   --vy-window-close: #c42b1c;
   --vy-window-close-fg: #ffffff;
-  --vy-shadow: 0 0 0 1px var(--vy-border);
   --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 16px 40px -8px rgb(0 0 0 / 0.6);
-  --vy-shadow-chrome: 0 10px 28px -14px rgb(0 0 0 / 0.45);
-  --vy-composer: var(--vy-card);
-
-  --vy-gray-base: #000000;
-  --vy-gray-50: #0a0a0a;
-  --vy-gray-100: #171717;
-  --vy-gray-200: #262626;
-  --vy-gray-300: #373737;
-  --vy-gray-400: #525252;
-  --vy-gray-500: #8a8a8a;
-  --vy-gray-600: #a3a3a3;
-  --vy-gray-700: #d4d4d4;
-  --vy-gray-800: #e5e5e5;
-  --vy-gray-900: #f5f5f5;
-  --vy-gray-950: #fafafa;
 
   /* Code syntax (JetBrains Dark hues). */
   --vy-syntax-keyword: #cf8e6d;
@@ -230,9 +189,7 @@
   --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --vy-duration: 140ms;
   --vy-disabled-opacity: 0.45;
-  --leading-mono: 1.6;
 
-  --z-base: 0;
   --z-sticky: 10;
   --z-titlebar: 15;
   /* Menus sit above the surface that opened them, dialogs and drawers
@@ -243,10 +200,6 @@
   --z-tooltip: 50;
 
   --vy-font-scale: 1;
-  --vy-density-scale: 1;
-  --vy-control-min-h: calc(2rem * var(--vy-density-scale));
-  --vy-control-px: calc(0.75rem * var(--vy-density-scale));
-  --vy-control-gap: calc(0.375rem * var(--vy-density-scale));
 }
 
 [data-font-scale="small"] {
@@ -255,14 +208,6 @@
 
 [data-font-scale="large"] {
   --vy-font-scale: 1.08;
-}
-
-[data-density="compact"] {
-  --vy-density-scale: 0.9;
-}
-
-[data-density="comfortable"] {
-  --vy-density-scale: 1.08;
 }
 
 /* ─── Skin palettes: 4 skins × 2 themes (Default is the base above) ─────────── */
@@ -519,27 +464,13 @@
   --color-overlay: var(--vy-overlay);
   --color-window-close: var(--vy-window-close);
   --color-window-close-fg: var(--vy-window-close-fg);
-  --color-composer: var(--vy-composer);
-
-  --color-syntax-keyword: var(--vy-syntax-keyword);
-  --color-syntax-string: var(--vy-syntax-string);
-  --color-syntax-number: var(--vy-syntax-number);
-  --color-syntax-comment: var(--vy-syntax-comment);
-  --color-syntax-func: var(--vy-syntax-func);
-  --color-syntax-type: var(--vy-syntax-type);
-  --color-syntax-property: var(--vy-syntax-property);
-  --color-syntax-punct: var(--vy-syntax-punct);
 
   --radius-sm: var(--vy-radius-sm);
   --radius-md: var(--vy-radius-md);
   --radius-lg: var(--vy-radius-lg);
-  --radius-xl: var(--vy-radius-xl);
-  --radius-pill: 999px;
 
-  --shadow-card: var(--vy-shadow);
   --shadow-menu: var(--vy-shadow-menu);
 
-  --ease-vy: var(--vy-ease);
   --default-transition-duration: var(--vy-duration);
   --default-transition-timing-function: var(--vy-ease);
 
@@ -555,7 +486,7 @@
   Seven sizes. The old scale had nine (9–17px) a pixel apart, which is the same
   as having none: nobody can tell 15 from 16 on sight.
     caption 11 · xs 12 · sm 13 (body) · md 14 · heading 15 · title 18 · display 24
-  `2xs` (10) is for keycaps and dense meta only. Tailwind's own scale is
+  `2xs` (10) is for keycaps only. Tailwind's own scale is
   reset, so `text-base` or `text-lg` emits nothing instead of an off-scale size.
 
   `inline` matters: the sizes read --vy-font-scale, which lives on the element
@@ -649,7 +580,6 @@
   border-radius: var(--vy-radius-xl);
   box-shadow: var(--vy-shadow-menu);
 }
-
 
 @utility scroll-thin {
   &::-webkit-scrollbar {
@@ -799,48 +729,6 @@
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background-color: var(--vy-muted);
-  }
-
-  /* Sidebar chat list — always-visible custom scrollbar. */
-  .sidebar-scroll {
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
-  }
-
-  .sidebar-scroll::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .sidebar-scroll-x {
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-  }
-
-  .sidebar-scroll-x::-webkit-scrollbar {
-    height: 8px;
-  }
-
-  .sidebar-scroll-x::-webkit-scrollbar-thumb {
-    background-color: var(--vy-border-strong);
-    border-radius: 4px;
-  }
-
-  .sidebar-scroll-x::-webkit-scrollbar-thumb:hover {
-    background-color: var(--vy-muted);
-  }
-
-  .sidebar-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .sidebar-scroll::-webkit-scrollbar-thumb {
-    background-color: var(--vy-border-strong);
-    border-radius: 6px;
-    min-height: 2.5rem;
-  }
-
-  .sidebar-scroll::-webkit-scrollbar-thumb:hover {
     background-color: var(--vy-muted);
   }
 

@@ -41,7 +41,7 @@ test('settings nav opens appearance section with all controls', async () => {
   }
   await expect(window.getByRole('radiogroup', { name: 'Colour mode', exact: true })).toBeVisible()
   await expect(window.getByRole('radiogroup', { name: 'Text size', exact: true })).toBeVisible()
-  await expect(window.getByRole('radiogroup', { name: 'Density', exact: true })).toBeVisible()
+  await expect(window.getByRole('radiogroup', { name: 'Density', exact: true })).toHaveCount(0)
   await expect(window.getByText('User CSS overlay')).toBeVisible()
 })
 
@@ -83,33 +83,26 @@ test('colour mode updates DOM, boot cache, and persisted settings', async () => 
   expect(onDisk.theme).toBe('dark')
 })
 
-test('text size and density update document attributes and CSS tokens', async () => {
+test('text size updates the document attribute and CSS token', async () => {
   const { window } = launched
   await openAppearanceSection(window)
 
   await chooseSettingsRadio(window, 'Text size', 'Large')
-  await chooseSettingsRadio(window, 'Density', 'Compact')
 
   await expect
     .poll(async () => readRootAppearance(window))
-    .toMatchObject({ fontScale: 'large', density: 'compact' })
+    .toMatchObject({ fontScale: 'large' })
 
-  const tokens = await window.evaluate(() => {
-    const style = getComputedStyle(document.documentElement)
-    return {
-      fontScale: style.getPropertyValue('--vy-font-scale').trim(),
-      densityScale: style.getPropertyValue('--vy-density-scale').trim()
-    }
-  })
-  expect(Number.parseFloat(tokens.fontScale)).toBeCloseTo(1.08, 2)
-  expect(Number.parseFloat(tokens.densityScale)).toBeCloseTo(0.9, 2)
+  const fontScale = await window.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--vy-font-scale').trim()
+  )
+  expect(Number.parseFloat(fontScale)).toBeCloseTo(1.08, 2)
 
   const settings = await window.evaluate(async () => {
     const res = await window.vyotiq.getSettings()
     return res.ok ? res.data : null
   })
   expect(settings?.fontScale).toBe('large')
-  expect(settings?.uiDensity).toBe('compact')
 })
 
 test('skin grid applies data-skin and persists proof', async () => {
@@ -230,7 +223,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
   await window.getByRole('button', { name: /^bench$/i }).click()
   await chooseSettingsRadio(window, 'Colour mode', 'Light')
   await chooseSettingsRadio(window, 'Text size', 'Small')
-  await chooseSettingsRadio(window, 'Density', 'Comfortable')
 
   await expect
     .poll(async () => readAppearanceBootCache(window))
@@ -238,7 +230,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
       theme: 'light',
       resolvedTheme: 'light',
       fontScale: 'small',
-      uiDensity: 'comfortable',
       skinId: 'bench'
     })
 
@@ -250,7 +241,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
     .toMatchObject({
       theme: 'light',
       fontScale: 'small',
-      density: 'comfortable',
       skin: 'bench'
     })
 
@@ -261,7 +251,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
   expect(settings).toMatchObject({
     theme: 'light',
     fontScale: 'small',
-    uiDensity: 'comfortable',
     skinId: 'bench'
   })
 })
@@ -279,6 +268,7 @@ test.describe('seeded appearance on boot', () => {
         seedAppSettings(userDataDir, {
           theme: 'dark',
           fontScale: 'large',
+          // Left over from the removed Density setting: must not block boot.
           uiDensity: 'comfortable'
         })
       }
@@ -288,16 +278,14 @@ test.describe('seeded appearance on boot', () => {
       .poll(async () => readRootAppearance(seeded.window))
       .toMatchObject({
         theme: 'dark',
-        fontScale: 'large',
-        density: 'comfortable'
+        fontScale: 'large'
       })
 
     const cache = await readAppearanceBootCache(seeded.window)
     expect(cache).toMatchObject({
       theme: 'dark',
       resolvedTheme: 'dark',
-      fontScale: 'large',
-      uiDensity: 'comfortable'
+      fontScale: 'large'
     })
 
     const onDisk = JSON.parse(readFileSync(join(seeded.userDataDir, 'settings.json'), 'utf8')) as {
@@ -307,9 +295,9 @@ test.describe('seeded appearance on boot', () => {
     }
     expect(onDisk).toMatchObject({
       theme: 'dark',
-      fontScale: 'large',
-      uiDensity: 'comfortable'
+      fontScale: 'large'
     })
+    expect(onDisk.uiDensity).toBeUndefined()
   })
 })
 
@@ -331,6 +319,5 @@ test('corrupt appearance boot cache does not break startup', async () => {
 
   const attrs = await readRootAppearance(window)
   expect(attrs.fontScale).toBe('default')
-  expect(attrs.density).toBe('default')
   expect(attrs.skin).toBe(DEFAULT_SKIN_ID)
 })

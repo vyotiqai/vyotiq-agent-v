@@ -6,7 +6,7 @@ import { formatDisplayTime, formatElapsed } from '@shared/utils/timeFormat'
 import { formatUsdCost } from '@shared/utils/costDisplay'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { Icon } from '@renderer/lib/icons'
-import { Button, MarkdownContent, StatusGlyph, cn } from '@renderer/lib/ui'
+import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
 import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { turnCost } from '@renderer/features/chat/utils/messageFooterStats'
 import { AskQuestionPanel } from '@renderer/features/chat/components/AskQuestionPanel'
@@ -18,6 +18,7 @@ import { ApprovalCard } from './record/ApprovalCard'
 import { Brief } from './record/Brief'
 import { ReceiptLine } from './record/Receipt'
 import { RecordRow, RunDivider } from './record/RecordLayout'
+import { RecordProse } from './record/RecordProse'
 import { Steps } from './record/Steps'
 import { LooseWork, NowLine, workIsLive } from './record/WorkItems'
 import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
@@ -166,7 +167,7 @@ function ResultRow({
 }) {
   return (
     <RecordRow label="Result">
-      <MarkdownContent content={text} streaming={streaming} size="md" tone="strong" />
+      <RecordProse text={text} streaming={streaming} size="md" tone="strong" />
       <CheckedBlock checks={checks} />
     </RecordRow>
   )

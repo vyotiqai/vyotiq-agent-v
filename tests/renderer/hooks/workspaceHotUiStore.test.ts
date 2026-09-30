@@ -40,17 +40,18 @@ describe('workspaceHotUiStore composer drafts', () => {
     expect(resolveHotComposerDraft(hot, null)).toBe('workspace-level')
   })
 
-  it('keeps sessionQuery when writing composer drafts', () => {
-    setWorkspaceHotUi('/ws', { sessionQuery: 'find me' })
+  it('keeps the new-chat draft when setWorkspaceHotUi replaces the run map', () => {
+    setWorkspaceHotUi('/ws', { composerDraft: 'new-chat' })
     setWorkspaceHotComposerDraft('/ws', 'run-1', 'hello')
-    expect(getWorkspaceHotUi('/ws').sessionQuery).toBe('find me')
+    const hot = getWorkspaceHotUi('/ws')
+    expect(resolveHotComposerDraft(hot, null)).toBe('new-chat')
+    expect(resolveHotComposerDraft(hot, 'run-1')).toBe('hello')
   })
 
   it('seeds per-run map from persisted ui state', () => {
     seedWorkspaceHotUi('/ws', {
       composerDraft: 'legacy',
-      composerDraftByRunId: { 'run-1': 'from-disk' },
-      sessionQuery: ''
+      composerDraftByRunId: { 'run-1': 'from-disk' }
     })
     const hot = getWorkspaceHotUi('/ws')
     expect(resolveHotComposerDraft(hot, 'run-1')).toBe('from-disk')

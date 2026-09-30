@@ -14,9 +14,7 @@ export const buttonVariants = {
   /** No chrome until hover: toolbars, dense rows. */
   ghost: 'rounded-md text-secondary hover:bg-surface hover:text-fg-strong',
   /** Destructive, quiet at rest. */
-  danger: 'rounded-md border border-border bg-bg text-danger hover:border-danger hover:bg-danger-soft',
-  /** Legacy name for `secondary`, kept until its last caller is ported. */
-  subtle: 'rounded-md border border-border bg-bg text-fg hover:border-border-strong hover:bg-surface'
+  danger: 'rounded-md border border-border bg-bg text-danger hover:border-danger hover:bg-danger-soft'
 } as const
 
 export type ButtonVariant = keyof typeof buttonVariants
@@ -31,20 +29,12 @@ export type ButtonSize = keyof typeof buttonSizes
 
 const iconSizes: Record<ButtonSize, number> = { xs: 13, sm: 14, md: 16 }
 
-/**
- * The geometry every button had before sizes existed. A caller that passes no
- * `size` gets exactly this, so its own `min-h-*`/`px-*` classes keep working
- * until that surface is ported — `cn()` cannot override a size's `h-7`.
- */
-const legacyGeometry =
-  'min-h-[var(--vy-control-min-h)] gap-[var(--vy-control-gap)] px-[var(--vy-control-px)] text-sm'
-
 const base =
   'inline-flex shrink-0 items-center justify-center whitespace-nowrap font-medium focus-visible:vy-focus-ring'
 
 export function Button({
   variant = 'secondary',
-  size,
+  size = 'md',
   icon,
   trailingIcon,
   kbd,
@@ -70,14 +60,15 @@ export function Button({
 }) {
   const isDisabled = Boolean(disabled || pending)
   const why = isDisabled && typeof props.title === 'string' ? props.title : ''
-  const glyph = iconSizes[size ?? 'md']
+  const glyph = iconSizes[size]
 
   const button = (
     <button
       ref={ref}
       className={cn(
         base,
-        size ? cn('gap-1.5', buttonSizes[size]) : legacyGeometry,
+        'gap-1.5',
+        buttonSizes[size],
         buttonVariants[variant],
         interactive,
         className

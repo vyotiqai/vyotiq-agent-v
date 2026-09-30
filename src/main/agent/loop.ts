@@ -286,7 +286,7 @@ const AUTO_COMPACT_MIN_REGROWTH_RATIO = 0.1
 
 
 const CONTEXT_OVERFLOW_VERIFY_FAILED =
-  'Context still exceeds the model window. Compaction produced a summary that failed verification and was not applied. Start a new chat or compact manually.'
+  'Context still exceeds the model window. Compaction produced a summary that failed verification and was not applied. Start a new task or compact manually.'
 
 /**
  * Cap on back-to-back empty-response retries. The retry deliberately re-sends
@@ -314,10 +314,10 @@ const INCOMPLETE_MESSAGES: Record<Exclude<IncompleteReason, never>, string> = {
   empty_response: 'The model returned an empty response.',
   filtered: 'The provider stopped the response because of a content filter.',
   context_overflow:
-    'Context still exceeds the model window after compaction. Start a new chat or compact manually.',
+    'Context still exceeds the model window after compaction. Start a new task or compact manually.',
   network_interrupted: 'Connection lost. Retry when back online.',
   circuit_open:
-    'Temporarily paused after repeated provider failures. Nothing is retried automatically — use Continue or Retry in the chat to resume once the provider is reachable.',
+    'Temporarily paused after repeated provider failures. Nothing is retried automatically — use Continue or Retry in the task to resume once the provider is reachable.',
   provider_error: 'The provider returned an error. Review the error details, then retry.',
   goal_wait:
     'Goal is still active. Two finishes without tools — waiting for you to continue or mark complete.',
@@ -683,7 +683,7 @@ function* emitMessageAppendFailureNotice(
 ): Generator<AgentEvent, boolean> {
   const err = takeMessageAppendFailureNotice(runDir)
   if (!err) return false
-  const message = `Failed to persist a chat message: ${formatError(err)}`
+  const message = `Failed to save a step to the record: ${formatError(err)}`
   logger.error(message, {
     scope: 'agent',
     code: 'PERSIST',
@@ -2123,7 +2123,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           runId,
           invokeId,
           runDir,
-          message: 'Failed to persist a chat message',
+          message: 'Failed to save a step to the record',
           emitErrorEvent: false,
           flushWriteCheckpoint,
           writeStatus
@@ -3982,7 +3982,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           runId,
           invokeId,
           runDir,
-          message: 'Failed to persist assistant message before tool execution',
+          message: 'Failed to save the agent step before running its tools',
           emitErrorEvent: false,
           flushWriteCheckpoint,
           writeStatus
@@ -4178,7 +4178,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             runId,
             invokeId,
             runDir,
-            message: 'Failed to persist a chat message',
+            message: 'Failed to save a step to the record',
             emitErrorEvent: false,
             flushWriteCheckpoint,
             writeStatus
@@ -4249,7 +4249,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             runId,
             invokeId,
             runDir,
-            message: 'Failed to persist a chat message',
+            message: 'Failed to save a step to the record',
             emitErrorEvent: false,
             flushWriteCheckpoint,
             writeStatus

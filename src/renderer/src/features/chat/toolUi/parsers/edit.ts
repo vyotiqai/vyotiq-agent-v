@@ -591,32 +591,6 @@ export type FileChange = {
   action?: 'created' | 'modified' | 'deleted'
 }
 
-function normalizeWritePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/^\.\//, '')
-}
-
-function changeFromEditArgs(
-  edit: Record<string, unknown>,
-  action?: 'created' | 'modified'
-): FileChange | null {
-  const path = typeof edit.path === 'string' ? edit.path : ''
-  if (!path) return null
-  if (typeof edit.contents === 'string') {
-    const added = countLines(edit.contents)
-    if (added > 0 || action === 'created') {
-      return { path, added, removed: 0, ...(action ? { action } : {}) }
-    }
-    return null
-  }
-  if (typeof edit.diff === 'string' && edit.diff.trim()) {
-    const { added, removed } = countDiffLines(edit.diff)
-    if (added > 0 || removed > 0) {
-      return { path, added, removed, ...(action ? { action } : {}) }
-    }
-  }
-  return null
-}
-
 /** Per-file line deltas for turn change summaries. */
 export function collectWritingChanges(tool: UiToolRow): FileChange[] {
   const { path, added, removed } = parseEditCardData(tool)

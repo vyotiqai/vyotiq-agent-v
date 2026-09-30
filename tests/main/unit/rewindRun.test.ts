@@ -217,7 +217,7 @@ describe('prepareRewindAndReplaceUserMessage', () => {
         targetUserAt: '2026-06-01T00:00:00.000Z',
         editedUserMessage: { role: 'user', content: 'edited' }
       })
-    ).rejects.toThrow(/compacted away/)
+    ).rejects.toThrow(/compacted out of the record/)
 
     expect(loadMessages(workspace, runId)).toEqual(messages)
   })

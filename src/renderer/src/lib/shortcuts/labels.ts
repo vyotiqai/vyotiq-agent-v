@@ -95,7 +95,7 @@ function extraShortcutCatalog(): ShortcutCatalogEntry[] {
 export function referenceShortcutCatalog(): ShortcutCatalogEntry[] {
   const mod = modPrefix()
   return [
-    { id: 'edit-last', title: 'Edit last prompt (empty composer)', label: '↑' },
+    { id: 'edit-last', title: 'Edit last instruction (empty instruction line)', label: '↑' },
     { id: 'steer', title: 'Send an instruction now, while a run is live', label: isDarwin() ? '⇧↵' : 'Shift+Enter' },
     { id: 'approval-allow', title: 'Allow the pending approval once', label: altChordLabel('a') },
     { id: 'approval-deny', title: 'Deny the pending approval', label: altChordLabel('d') },

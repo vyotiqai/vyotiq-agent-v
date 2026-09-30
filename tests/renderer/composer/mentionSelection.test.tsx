@@ -72,7 +72,6 @@ function Harness({ onDraftChange }: { onDraftChange: (draft: string) => void }) 
       onChatSettingsChange={vi.fn()}
       onProviderModel={vi.fn()}
       onSend={vi.fn()}
-      onStop={vi.fn()}
     />
   )
 }

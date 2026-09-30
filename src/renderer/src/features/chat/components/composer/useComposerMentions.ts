@@ -14,9 +14,6 @@ import {
   type MentionMenuView
 } from './mentionModel'
 
-export { findActiveMentionToken }
-export type ActiveMentionToken = NonNullable<ReturnType<typeof findActiveMentionToken>>
-
 const FILES_PAGE = 12
 
 const NO_FILES: readonly string[] = []

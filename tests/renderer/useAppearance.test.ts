@@ -12,7 +12,6 @@ function applyAppearanceDom(
   const root = document.documentElement
   root.setAttribute('data-theme', resolvedTheme)
   root.setAttribute('data-font-scale', appearance.fontScale)
-  root.setAttribute('data-density', appearance.uiDensity)
   root.setAttribute('data-skin', appearance.skinId)
 }
 
@@ -25,7 +24,6 @@ describe('useAppearance DOM contract', () => {
     const appearance = pickAppearanceSettings({
       theme: 'dark',
       fontScale: 'default',
-      uiDensity: 'default',
       skinId: 'bench',
       customCssPath: ''
     })
@@ -37,7 +35,6 @@ describe('useAppearance DOM contract', () => {
     const appearance = pickAppearanceSettings({
       theme: 'system',
       fontScale: 'default',
-      uiDensity: 'default',
       skinId: DEFAULT_SKIN_ID,
       customCssPath: '/tmp/custom.css'
     })

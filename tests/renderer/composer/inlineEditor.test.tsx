@@ -61,7 +61,6 @@ function renderInline(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
     onChatSettingsChange: vi.fn(),
     onProviderModel: vi.fn(),
     onSend: vi.fn(async () => true),
-    onStop: vi.fn(),
     onCancelEdit: vi.fn(),
     variant: 'inline' as const,
     draft: 'Fix the parser',

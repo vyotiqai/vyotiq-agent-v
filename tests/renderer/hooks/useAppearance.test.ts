@@ -12,7 +12,6 @@ describe('useAppearance', () => {
     localStorage.clear()
     document.documentElement.removeAttribute('data-theme')
     document.documentElement.removeAttribute('data-font-scale')
-    document.documentElement.removeAttribute('data-density')
     document.documentElement.removeAttribute('data-skin')
     // @ts-expect-error test bridge
     window.vyotiq = {
@@ -34,14 +33,13 @@ describe('useAppearance', () => {
         ...DEFAULT_SETTINGS,
         theme: 'dark',
         fontScale: 'large',
-        uiDensity: 'compact',
         skinId: 'native'
       })
     )
     const root = document.documentElement
     expect(root.getAttribute('data-theme')).toBe('dark')
     expect(root.getAttribute('data-font-scale')).toBe('large')
-    expect(root.getAttribute('data-density')).toBe('compact')
+    expect(root.hasAttribute('data-density')).toBe(false)
     expect(root.getAttribute('data-skin')).toBe('native')
   })
 
@@ -73,8 +71,7 @@ describe('useAppearance', () => {
       useAppearance({
         ...DEFAULT_SETTINGS,
         theme: 'system',
-        fontScale: 'default',
-        uiDensity: 'default',
+        fontScale: 'default'
       })
     )
     await waitFor(() => expect(handler).toBeTypeOf('function'))

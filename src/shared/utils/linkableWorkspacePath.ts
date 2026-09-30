@@ -90,14 +90,20 @@ function autolinkPathMatch(
   pattern: RegExp,
   accept: (path: string) => boolean
 ): string {
-  return source.replace(pattern, (full, prefix, path, line) => {
-    if (!accept(path)) return full
-    const ref = line ? `${path}:${line}` : path
-    if (!isLinkableWorkspacePath(ref)) return full
-    const href = line ? `${VY_FILE_HREF_PREFIX}${path}:${line}` : `${VY_FILE_HREF_PREFIX}${path}`
-    const label = line ? `${path}:${line}` : path
-    return `${prefix}[${label}](${href})`
-  })
+  return source.replace(
+    pattern,
+    (full: string, prefix: string, path: string, line: string | undefined, offset: number, whole: string) => {
+      if (!accept(path)) return full
+      const ref = line ? `${path}:${line}` : path
+      if (!isLinkableWorkspacePath(ref)) return full
+      const href = line ? `${VY_FILE_HREF_PREFIX}${path}:${line}` : `${VY_FILE_HREF_PREFIX}${path}`
+      // The target of a link the agent wrote itself — `[the watcher](src/x.ts)`:
+      // keep its label and point the target in-app instead of nesting a link.
+      if (prefix === '(' && whole[offset - 1] === ']') return `${prefix}${href}`
+      const label = line ? `${path}:${line}` : path
+      return `${prefix}[${label}](${href})`
+    }
+  )
 }
 
 /** Turn bare `src/foo.ts` / `src/foo.ts:42` mentions into markdown links (prose only). */

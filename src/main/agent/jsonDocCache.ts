@@ -1,11 +1,11 @@
 import { readFile, stat } from 'fs/promises'
 
 /**
- * Mtime-keyed raw-JSON parse cache shared by the Home aggregation paths
- * (`runStats`, `homeActivity`, `listRuns`) and the checkpoint summaries. The
- * same `receipt.json` / `status.json` / `usage.json` was being fully read +
- * parsed by up to three pipelines per Home refresh cycle; unchanged files —
- * the overwhelming majority — are now read and parsed exactly once per write.
+ * Mtime-keyed raw-JSON parse cache shared by the Home aggregation and run-list
+ * paths (`homeActivity`, `listRuns`) and the checkpoint summaries. The same
+ * `receipt.json` / `status.json` / `usage.json` was being fully read + parsed
+ * by several pipelines per Home refresh cycle; unchanged files — the
+ * overwhelming majority — are now read and parsed exactly once per write.
  * A cached document is shared by every caller that reads it: never mutate it.
  *
  * Validity triple is size + mtimeMs + ctimeMs, mirroring the transcript

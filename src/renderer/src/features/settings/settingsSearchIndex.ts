@@ -70,12 +70,6 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'appearance'
   },
   {
-    id: 'appearance-density',
-    title: 'Density',
-    keywords: ['appearance', 'density', 'compact', 'comfortable', 'spacing', 'padding'],
-    section: 'appearance'
-  },
-  {
     id: 'appearance-custom-css',
     title: 'User CSS overlay',
     keywords: ['appearance', 'css', 'stylesheet', 'custom', 'overlay', 'tokens'],

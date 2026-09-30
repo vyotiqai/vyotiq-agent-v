@@ -10,12 +10,7 @@ const BOOTSTRAP_PATH = join(process.cwd(), 'src/renderer/public/appearance-boots
 
 function resetRoot(): void {
   const root = document.documentElement
-  for (const attr of [
-    'data-theme',
-    'data-font-scale',
-    'data-density',
-    'data-skin'
-  ]) {
+  for (const attr of ['data-theme', 'data-font-scale', 'data-skin']) {
     root.removeAttribute(attr)
   }
 }
@@ -62,7 +57,7 @@ describe('appearance-bootstrap', () => {
     expect(root.getAttribute('data-skin')).toBe('native')
     expect(root.getAttribute('data-theme')).toBe('light')
     expect(root.getAttribute('data-font-scale')).toBe('default')
-    expect(root.getAttribute('data-density')).toBe('default')
+    expect(root.hasAttribute('data-density')).toBe(false)
   })
 
   it('uses prefers-color-scheme when cache is empty', () => {
@@ -84,7 +79,6 @@ describe('appearance-bootstrap', () => {
     expect(root.getAttribute('data-theme')).toBe('dark')
     expect(root.getAttribute('data-skin')).toBe('proof')
     expect(root.getAttribute('data-font-scale')).toBe('default')
-    expect(root.getAttribute('data-density')).toBe('default')
   })
 
   it('applies full valid cache without overwriting with defaults', () => {
@@ -93,6 +87,7 @@ describe('appearance-bootstrap', () => {
       JSON.stringify({
         resolvedTheme: 'light',
         fontScale: 'large',
+        // Written by builds that still had the Density setting; ignored now.
         uiDensity: 'compact',
         skinId: 'native'
       })
@@ -101,7 +96,7 @@ describe('appearance-bootstrap', () => {
     const root = document.documentElement
     expect(root.getAttribute('data-theme')).toBe('light')
     expect(root.getAttribute('data-font-scale')).toBe('large')
-    expect(root.getAttribute('data-density')).toBe('compact')
+    expect(root.hasAttribute('data-density')).toBe(false)
     expect(root.getAttribute('data-skin')).toBe('native')
   })
 
@@ -111,7 +106,6 @@ describe('appearance-bootstrap', () => {
     const root = document.documentElement
     expect(root.getAttribute('data-skin')).toBe('native')
     expect(root.getAttribute('data-font-scale')).toBe('default')
-    expect(root.getAttribute('data-density')).toBe('default')
     expect(root.getAttribute('data-theme')).toBe('light')
   })
 
@@ -121,7 +115,6 @@ describe('appearance-bootstrap', () => {
       JSON.stringify({
         resolvedTheme: 'dark',
         fontScale: 'default',
-        uiDensity: 'default',
         skinId: 'neon'
       })
     )

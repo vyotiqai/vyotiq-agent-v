@@ -31,15 +31,15 @@ describe('Button', () => {
     expect(screen.getByRole('button').className).toContain('bg-accent')
   })
 
-  it('emits one geometry: a size, or the legacy control height — never both', () => {
+  it('emits exactly one size, md when none is given', () => {
     const { rerender } = render(<Button size="xs">Go</Button>)
     const sized = screen.getByRole('button').className
-    expect(sized).toContain('h-6')
-    expect(sized).not.toContain('min-h-[var(--vy-control-min-h)]')
+    expect(sized).toMatch(/\bh-6\b/)
+    expect(sized).not.toMatch(/\bh-(7|8)\b/)
     rerender(<Button>Go</Button>)
-    const legacy = screen.getByRole('button').className
-    expect(legacy).toContain('min-h-[var(--vy-control-min-h)]')
-    expect(legacy).not.toMatch(/\bh-(6|7|8)\b/)
+    const fallback = screen.getByRole('button').className
+    expect(fallback).toMatch(/\bh-8\b/)
+    expect(fallback).not.toMatch(/\bh-(6|7)\b|min-h-/)
   })
 
   it('shows its shortcut as keycaps, except on a primary button', () => {

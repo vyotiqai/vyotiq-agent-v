@@ -30,7 +30,6 @@ import {
   TaskFileDiffRequestSchema,
   type TaskFileStatsResult,
   type TaskFileDiffResult,
-  RunStatsRequestSchema,
   HomeActivityRequestSchema,
   RunFeedbackGetRequestSchema,
   RunFeedbackSetRequestSchema,
@@ -170,8 +169,6 @@ import {
   DeepLinkPayloadSchema,
   ok,
   fail,
-  type TraceStartResult,
-  type TraceStatusResult,
   type TraceStopResult,
   MAX_ATTACHMENT_BYTES,
   WORKSPACE_FILE_BINARY_MAX_BYTES,
@@ -201,7 +198,6 @@ import {
   type CompactRunResult,
   type ResolveWritesResult,
   type ReadRunArtifactResult,
-  type RunStatsResult,
   type HomeActivityResult,
   type RunFeedbackGetResult,
   type RunFeedbackSetResult,
@@ -333,14 +329,13 @@ import {
   planRewindToUserMessage
 } from '../agent/rewindRun'
 import { invalidateAfterWorkspaceMutation } from '../agent/tools'
-import { resolveRunDir, workspaceSessionsRoot, workspaceBrowserArtifactsDir } from '@main/storage/paths'
+import { resolveRunDir, workspaceBrowserArtifactsDir } from '@main/storage/paths'
 import {
   collectStorageReport,
   previewStorageCleanup,
   runStorageCleanup,
   deleteWorkspaceStorageDir
 } from '@main/storage/retention'
-import { collectRunStats } from '../agent/runStats'
 import { collectHomeActivity } from '../agent/activityStats'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
@@ -2001,7 +1996,7 @@ export function registerIpc(): void {
         if (!result.ok) {
           if (result.error === 'Run is finishing') {
             await waitUntilRunInactive(req.runId)
-            return fail('Run ended — send your message to continue.')
+            return fail('Run ended — give a new instruction to continue.')
           }
           return fail(result.error)
         }
@@ -2324,24 +2319,6 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(
-    IPC.runStats,
-    async (event, raw): Promise<IpcResult<RunStatsResult>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = RunStatsRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-        const stats = await collectRunStats(
-          workspaceSessionsRoot(req.workspacePath),
-          req.runIds
-        )
-        return ok({ stats })
-      } catch (err) {
-        return failFrom(err, IPC.runStats)
-      }
-    }
-  )
-
-  ipcMain.handle(
     IPC.runFeedbackGet,
     async (event, raw): Promise<IpcResult<RunFeedbackGetResult>> => {
       if (!senderOk(event)) return fail('Invalid sender')
@@ -2604,7 +2581,7 @@ export function registerIpc(): void {
         if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
         const runDir = resolveRunDir(req.workspacePath, req.runId)
         if (loadStatus(runDir)?.inlineInstance) {
-          return fail('Goals are only available on the root chat.')
+          return fail('Goals are only available on the main task.')
         }
         const wc = event.sender
         if (req.action === 'pause') {
@@ -2704,7 +2681,7 @@ export function registerIpc(): void {
         if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
         const runDir = resolveRunDir(req.workspacePath, req.runId)
         if (loadStatus(runDir)?.inlineInstance) {
-          return fail('Loops are only available on the root chat.')
+          return fail('Loops are only available on the main task.')
         }
         const wc = event.sender
         if (req.action === 'stop') {
@@ -3199,25 +3176,6 @@ export function registerIpc(): void {
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.logsOpenDir)
-    }
-  })
-
-  ipcMain.handle(IPC.traceStart, async (event): Promise<IpcResult<TraceStartResult>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      // Idempotent: the flight recorder is already running; this re-asserts it.
-      return ok(await getTraceCapture().ensureRecording())
-    } catch (err) {
-      return failFrom(err, IPC.traceStart)
-    }
-  })
-
-  ipcMain.handle(IPC.traceStatus, async (event): Promise<IpcResult<TraceStatusResult>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      return ok(await getTraceCapture().status())
-    } catch (err) {
-      return failFrom(err, IPC.traceStatus)
     }
   })
 

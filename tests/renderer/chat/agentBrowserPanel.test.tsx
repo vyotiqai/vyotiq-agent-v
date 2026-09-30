@@ -369,6 +369,81 @@ describe('AgentBrowserPanel visibility', () => {
   })
 })
 
+describe('AgentBrowserPanel Type in the page', () => {
+  const page = {
+    open: true,
+    url: 'https://example.com',
+    title: 'Example',
+    navigating: false,
+    agentBusy: false,
+    userControl: false,
+    tabs: [{ id: 't1', title: 'Example', url: 'https://example.com', active: true }],
+    canGoBack: false,
+    canGoForward: false
+  }
+
+  function stub(state: Record<string, unknown>, browserFocus = vi.fn().mockResolvedValue({ ok: true, data: true })) {
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        browserGetState: vi.fn().mockResolvedValue({ ok: true, data: state }),
+        onBrowserState: vi.fn().mockReturnValue(() => {}),
+        browserSetBounds: vi.fn().mockResolvedValue({ ok: true, data: true }),
+        browserFocus
+      }
+    })
+    return browserFocus
+  }
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('hands the page keyboard focus from the address row', async () => {
+    const browserFocus = stub(page)
+    render(<AgentBrowserPanel visible={true} />)
+    const button = await screen.findByRole('button', { name: 'Type in the page' })
+    const row = document.querySelector('[data-agent-browser-panel] > .h-10')
+    expect(row?.contains(button)).toBe(true)
+    fireEvent.click(button)
+    expect(browserFocus).toHaveBeenCalledTimes(1)
+  })
+
+  it('says so when there is no page to focus', async () => {
+    stub(page, vi.fn().mockResolvedValue({ ok: true, data: false }))
+    render(<AgentBrowserPanel visible={true} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Type in the page' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('No page to focus')
+  })
+
+  it('is absent with no page, while the agent drives, and in the pop-out', async () => {
+    stub({ ...page, open: false, tabs: [], url: '' })
+    render(<AgentBrowserPanel visible={true} />)
+    await screen.findByLabelText('Search or enter URL')
+    expect(screen.queryByRole('button', { name: 'Type in the page' })).toBeNull()
+    cleanup()
+
+    stub({ ...page, agentBusy: true })
+    render(<AgentBrowserPanel visible={true} />)
+    await screen.findByText('Take control')
+    expect(screen.queryByRole('button', { name: 'Type in the page' })).toBeNull()
+    cleanup()
+
+    stub({ ...page, pip: true })
+    render(<AgentBrowserPanel visible={true} />)
+    await screen.findByLabelText('More actions')
+    await waitFor(() => expect(document.querySelector('[data-browser-address]')).not.toBeNull())
+    expect(screen.queryByRole('button', { name: 'Type in the page' })).toBeNull()
+  })
+
+  it('stays once the person has taken control', async () => {
+    stub({ ...page, agentBusy: true, userControl: true })
+    render(<AgentBrowserPanel visible={true} />)
+    expect(await screen.findByRole('button', { name: 'Type in the page' })).toBeTruthy()
+  })
+})
+
 describe('splitBrowserUrl', () => {
   it('splits an address into its host and the rest', () => {
     expect(splitBrowserUrl('https://github.com/vyotiq/agent-v?tab=readme#top')).toEqual({

@@ -1,5 +1,5 @@
 /**
- * Display-cost helpers for run-shaped data (RunStat / RunSummary).
+ * Display-cost helpers for run-shaped data (RunSummary).
  *
  * Honesty rules mirror `messageFooterStats.turnCost`: a number is only shown
  * when it is a provider bill or a priced estimate, and estimates are labeled

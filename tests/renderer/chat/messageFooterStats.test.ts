@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { emptyStepUsageTotals, type StepUsageTotals } from '@shared/utils/runTelemetry'
 import {
-  buildFooterStats,
   cacheCaptionPct,
   formatBilledUsd,
   formatTokPerSec,
   freshCaptionTokens,
   outputTokensPerSecond,
-  reportedBilledCost,
-  reportedSavedCost,
   turnCost
 } from '@renderer/features/chat/utils/messageFooterStats'
 
@@ -91,27 +88,6 @@ describe('cacheCaptionPct', () => {
   })
 })
 
-describe('reported costs', () => {
-  it('requires every step to report cost before showing $', () => {
-    expect(
-      reportedBilledCost(
-        usage({ steps: 2, stepsWithCostReport: 1, billedCost: 0.01 })
-      )
-    ).toBeNull()
-    expect(
-      reportedBilledCost(
-        usage({ steps: 2, stepsWithCostReport: 2, billedCost: 0.012 })
-      )
-    ).toBe(0.012)
-  })
-
-  it('omits saved dollars when cache_discount sums to zero or less', () => {
-    expect(reportedSavedCost(usage({ billedCostSaved: -0.002 }))).toBeNull()
-    expect(reportedSavedCost(usage({ billedCostSaved: 0 }))).toBeNull()
-    expect(reportedSavedCost(usage({ billedCostSaved: 0.004 }))).toBe(0.004)
-  })
-})
-
 describe('turnCost', () => {
   it('shows provider-reported cost as actual when every step reported', () => {
     expect(
@@ -166,118 +142,6 @@ describe('formatBilledUsd', () => {
     expect(formatBilledUsd(0.0012)).toBe('$0.0012')
     expect(formatBilledUsd(0.012)).toBe('$0.012')
     expect(formatBilledUsd(1.2)).toBe('$1.20')
-  })
-})
-
-describe('buildFooterStats', () => {
-  it('builds a compact caption and omits missing parts', () => {
-    const startedAt = Date.parse('2026-08-18T10:00:00.000Z')
-    const stats = buildFooterStats({
-      startedAt,
-      endedAt: startedAt + 9000,
-      active: false,
-      nowMs: startedAt + 9000,
-      at: '2026-08-18T10:00:09.000Z',
-      usage: usage({
-        steps: 1,
-        stepsWithCostReport: 1,
-        billedCost: 0.012,
-        billedCostSaved: 0.004,
-        billedInputTokens: 2000,
-        billedCachedInputTokens: 1700,
-        outputTokens: 80,
-        stepsWithCacheReport: 1,
-        generationMs: 2500
-      })
-    })
-    expect(stats.caption).toMatch(/9s/)
-    expect(stats.caption).toContain('$0.012')
-    expect(stats.caption).toMatch(/380 tok|0\.4k tok/)
-    expect(stats.caption).toContain('32 output tok/s')
-    expect(stats.caption).toContain('85% cache')
-    expect(stats.caption).not.toContain('cached')
-    expect(stats.tooltip).not.toMatch(/9s/)
-    expect(stats.tooltip).not.toContain('$0.012')
-    expect(stats.tooltip).toMatch(/In /)
-    expect(stats.tooltip).toMatch(/Out /)
-    expect(stats.tooltip).toMatch(/Cache read /)
-    expect(stats.tooltip).toContain('Saved $0.004')
-    expect(stats.ariaLabel).toMatch(/In /)
-  })
-
-  it('omits duration from the caption when TurnSummary already shows it', () => {
-    const startedAt = Date.parse('2026-08-18T10:00:00.000Z')
-    const stats = buildFooterStats({
-      startedAt,
-      endedAt: startedAt + 9000,
-      active: true,
-      nowMs: startedAt + 9000,
-      omitDuration: true,
-      usage: usage({
-        steps: 1,
-        billedInputTokens: 200,
-        outputTokens: 40
-      })
-    })
-    expect(stats.caption).not.toMatch(/9s/)
-    expect(stats.caption).toMatch(/tok/)
-  })
-
-  it('omits the whole receipt when the live summary already shows it', () => {
-    const startedAt = Date.parse('2026-08-18T10:00:00.000Z')
-    const stats = buildFooterStats({
-      startedAt,
-      endedAt: startedAt + 9000,
-      active: true,
-      nowMs: startedAt + 9000,
-      omitReceipt: true,
-      usage: usage({
-        steps: 1,
-        billedInputTokens: 200,
-        outputTokens: 40,
-        generationMs: 2500
-      })
-    })
-    expect(stats.caption).toBe('')
-  })
-
-  it('omits tok/s without generationMs and omits $ without a reported cost', () => {
-    const stats = buildFooterStats({
-      startedAt: null,
-      endedAt: null,
-      active: false,
-      nowMs: 0,
-      omitDuration: true,
-      usage: usage({
-        steps: 1,
-        billedInputTokens: 200,
-        outputTokens: 40
-      })
-    })
-    expect(stats.caption).toMatch(/tok/)
-    expect(stats.caption).not.toMatch(/tok\/s/)
-    expect(stats.caption).not.toContain('$')
-  })
-
-  it('labels estimated cost with est. and explains the basis in the tooltip', () => {
-    const stats = buildFooterStats({
-      startedAt: null,
-      endedAt: null,
-      active: false,
-      nowMs: 0,
-      omitDuration: true,
-      usage: usage({
-        steps: 2,
-        stepsWithCostReport: 0,
-        stepsWithEstimate: 2,
-        estimatedCost: 0.0035,
-        billedInputTokens: 2000,
-        outputTokens: 40
-      })
-    })
-    expect(stats.caption).toContain('$0.0035 est.')
-    expect(stats.tooltip).toContain('Estimate from published model rates')
-    expect(stats.caption).not.toContain('Saved')
   })
 })
 

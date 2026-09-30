@@ -44,10 +44,6 @@ vi.mock('@renderer/features/marketplace', () => ({
   MarketplaceView: () => null
 }))
 
-vi.mock('@renderer/features/chat/components/ToolApprovalOnboardingModal', () => ({
-  ToolApprovalOnboardingModal: () => null
-}))
-
 vi.mock('@renderer/features/chat/ChatView', () => ({
   ChatView: ({
     multiPane
@@ -229,7 +225,7 @@ beforeEach(() => {
   window.vyotiq = {
     getSettings: vi.fn(async () => ({
       ok: true as const,
-      data: { ...DEFAULT_SETTINGS, navigationMode: 'sidebar' as const }
+      data: { ...DEFAULT_SETTINGS, navigationMode: 'sidebar' as const, toolApprovalOnboardingDone: true }
     })),
     secretStatus: vi.fn(async () => ({
       ok: true as const,

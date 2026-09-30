@@ -243,7 +243,7 @@ export async function generateCommitMessage(
     settings = resolveChatSettings(workspacePath)
     apiKey = getSecret(settings.provider)
   } catch {
-    return fallbackResult('Could not read chat settings')
+    return fallbackResult('Could not read agent settings')
   }
 
   let baseUrl: string | undefined
@@ -326,6 +326,6 @@ export async function generateCommitMessage(
     return { message, source: 'agent' }
   }
   return fallbackResult(
-    raw.trim() ? 'The model reply was not a usable commit message' : 'The model returned no text'
+    raw.trim() ? 'The model did not return a usable commit message' : 'The model returned no text'
   )
 }

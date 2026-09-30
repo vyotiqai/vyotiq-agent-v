@@ -47,6 +47,14 @@ describe('autolinkWorkspacePathsInProse', () => {
     const out = autolinkWorkspacePathsInProse('Edit package.json before release.')
     expect(out).toContain('[package.json](#vy-file:package.json)')
   })
+
+  it('points a link the agent wrote in-app instead of nesting a second link', () => {
+    expect(autolinkWorkspacePathsInProse('See [the watcher](src/main/watch.ts:12).')).toBe(
+      'See [the watcher](#vy-file:src/main/watch.ts:12).'
+    )
+    // A path in plain parentheses is still linked with its own label.
+    expect(autolinkWorkspacePathsInProse('(src/a.ts)')).toBe('([src/a.ts](#vy-file:src/a.ts))')
+  })
 })
 
 describe('parseVyFileHref', () => {

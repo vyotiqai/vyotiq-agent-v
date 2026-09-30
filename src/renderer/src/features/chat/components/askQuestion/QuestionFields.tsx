@@ -1,6 +1,5 @@
 import { useRef, type JSX, type KeyboardEvent } from 'react'
-import { Icon } from '@renderer/lib/icons'
-import { Input, cn } from '@renderer/lib/ui'
+import { CheckMark, Input, RadioMark, Textarea, cn } from '@renderer/lib/ui'
 import { CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type { UiAgentQuestionItem } from '@shared/transcript'
 import { AGENT_QUESTION_MAX_ANSWER_CHARS } from '@shared/utils/agentQuestionForm'
@@ -20,15 +19,6 @@ const OPTION_BASE = cn(
 /** Hover stays lighter than the selected fill so hover never reads as answered. */
 const OPTION_IDLE = cn('text-secondary hover:text-fg', CONTROL_HOVER)
 const OPTION_ACTIVE = SELECTED
-
-/** Input's field chrome, for the one multi-line field (no Textarea primitive yet). */
-const TEXTAREA_CHROME = cn(
-  'rounded-md border border-border bg-bg text-fg placeholder:text-tertiary',
-  'hover:border-border-strong',
-  'focus-visible:border-border-strong focus-visible:vy-focus-ring',
-  'disabled:vy-disabled-state disabled:hover:border-border',
-  'vy-transition'
-)
 
 export type QuestionFieldProps = {
   item: UiAgentQuestionItem
@@ -51,31 +41,8 @@ function OptionMark({
   kind: 'radio' | 'check'
   active: boolean
 }): JSX.Element {
-  if (kind === 'check') {
-    // Checkbox's box, drawn inside the option row that is already the checkbox.
-    return (
-      <span
-        aria-hidden
-        className={cn(
-          'inline-grid size-3.5 shrink-0 place-items-center rounded-[3px] border vy-transition',
-          active ? 'border-accent bg-accent text-accent-fg' : 'border-border-strong bg-bg'
-        )}
-      >
-        {active ? <Icon name="check" size={10} weight="bold" /> : null}
-      </span>
-    )
-  }
-  return (
-    <span
-      className={cn(
-        'flex size-3.5 shrink-0 items-center justify-center rounded-full border',
-        active ? 'border-fg bg-fg' : 'border-border-strong'
-      )}
-      aria-hidden
-    >
-      {active ? <span className="size-1.5 rounded-full bg-bg" /> : null}
-    </span>
-  )
+  // The option row is already the radio or checkbox, so it draws only the mark.
+  return kind === 'check' ? <CheckMark on={active} /> : <RadioMark on={active} />
 }
 
 function CustomOther({
@@ -347,9 +314,8 @@ export function TextField({
   onSubmitShortcut
 }: QuestionFieldProps): JSX.Element {
   return (
-    <textarea
+    <Textarea
       id={`${promptId}-input`}
-      className={cn(TEXTAREA_CHROME, 'min-h-[64px] w-full resize-y px-3 py-1.5 text-sm')}
       placeholder="Your answer…"
       aria-labelledby={promptId}
       maxLength={AGENT_QUESTION_MAX_ANSWER_CHARS}

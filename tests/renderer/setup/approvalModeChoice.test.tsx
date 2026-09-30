@@ -69,10 +69,11 @@ describe('ApprovalModeChoice', () => {
     render(<Controlled initial="all" />)
     const on = screen.getByRole('radio', { name: /Every tool/ })
     const off = screen.getByRole('radio', { name: /Unattended/ })
-    expect(on.classList.contains('bg-surface')).toBe(true)
+    // SELECTED, the one fill for the chosen one.
+    expect(on.classList.contains('bg-surface-2')).toBe(true)
     expect(on.classList.contains('hover:bg-surface')).toBe(false)
     expect(off.classList.contains('hover:bg-surface')).toBe(true)
-    expect(off.classList.contains('bg-surface')).toBe(false)
+    expect(off.classList.contains('bg-surface-2')).toBe(false)
     expect(on.className).toContain('focus-visible:vy-focus-ring')
   })
 })

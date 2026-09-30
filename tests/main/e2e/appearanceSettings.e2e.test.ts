@@ -42,23 +42,23 @@ describe('e2e: appearance settings persistence', () => {
     setSettings({
       theme: 'dark',
       fontScale: 'large',
-      uiDensity: 'comfortable'
+      skinId: 'proof'
     })
 
     const loaded = getSettings()
     expect(loaded.theme).toBe('dark')
     expect(loaded.fontScale).toBe('large')
-    expect(loaded.uiDensity).toBe('comfortable')
+    expect(loaded.skinId).toBe('proof')
 
     const onDisk = JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as {
       theme: string
       fontScale: string
-      uiDensity: string
+      skinId: string
     }
     expect(onDisk).toMatchObject({
       theme: 'dark',
       fontScale: 'large',
-      uiDensity: 'comfortable'
+      skinId: 'proof'
     })
   })
 
@@ -69,12 +69,12 @@ describe('e2e: appearance settings persistence', () => {
     clearSettingsCacheForTests()
 
     setSettings({ theme: 'light', fontScale: 'small' })
-    setSettings({ uiDensity: 'compact' })
+    setSettings({ skinId: 'bench' })
 
     const loaded = getSettings()
     expect(loaded.theme).toBe('light')
     expect(loaded.fontScale).toBe('small')
-    expect(loaded.uiDensity).toBe('compact')
+    expect(loaded.skinId).toBe('bench')
     expect(loaded.telemetryEnabled).toBe(DEFAULT_SETTINGS.telemetryEnabled)
   })
 
@@ -82,7 +82,7 @@ describe('e2e: appearance settings persistence', () => {
     const { clearSettingsCacheForTests, getSettings } = await import('@main/settings/settings')
     clearSettingsCacheForTests()
 
-    const { fontScale: _fs, uiDensity: _ud, ...legacy } = DEFAULT_SETTINGS
+    const { fontScale: _fs, ...legacy } = DEFAULT_SETTINGS
     writeFileSync(
       join(userData, 'settings.json'),
       JSON.stringify({ ...legacy, theme: 'dark' }, null, 2),
@@ -92,8 +92,26 @@ describe('e2e: appearance settings persistence', () => {
     const loaded = getSettings()
     expect(loaded.theme).toBe('dark')
     expect(loaded.fontScale).toBe('default')
-    expect(loaded.uiDensity).toBe('default')
     expect(loaded.skinId).toBe('native')
     expect(loaded.customCssPath).toBe('')
+  })
+
+  it('loads a settings.json that still carries the removed uiDensity, and drops it', async () => {
+    const { clearSettingsCacheForTests, getSettings } = await import('@main/settings/settings')
+    clearSettingsCacheForTests()
+
+    const file = join(userData, 'settings.json')
+    writeFileSync(
+      file,
+      JSON.stringify({ ...DEFAULT_SETTINGS, theme: 'dark', uiDensity: 'compact' }, null, 2),
+      'utf8'
+    )
+
+    const loaded = getSettings()
+    expect(loaded.theme).toBe('dark')
+    expect('uiDensity' in loaded).toBe(false)
+    const onDisk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    expect(onDisk.theme).toBe('dark')
+    expect('uiDensity' in onDisk).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-import type { FontScale, UiDensity } from '@shared/appearance'
+import type { FontScale } from '@shared/appearance'
 import type {
   AutonomousSkipQuestions,
   DesktopNotificationMode,
@@ -26,12 +26,6 @@ export const FONT_SCALE_OPTIONS: SettingsOption<FontScale>[] = [
   { value: 'small', label: 'Small' },
   { value: 'default', label: 'Default' },
   { value: 'large', label: 'Large' }
-]
-
-export const DENSITY_OPTIONS: SettingsOption<UiDensity>[] = [
-  { value: 'compact', label: 'Compact' },
-  { value: 'default', label: 'Default' },
-  { value: 'comfortable', label: 'Comfortable' }
 ]
 
 /**
@@ -189,7 +183,7 @@ export const SECTION_ICONS: Record<SettingsSection, IconName> = {
  */
 export const SECTION_DESCRIPTIONS: Record<Exclude<SettingsSection, 'shortcuts'>, string> = {
   general: 'Where Agent V opens, and the workspaces it knows.',
-  appearance: 'Skin, colour mode, type size and density. Changes apply as you pick.',
+  appearance: 'Skin, colour mode and type size. Changes apply as you pick.',
   notifications: 'What reaches the inbox, and what reaches the desktop.',
   providers: 'Model providers and their keys. Keys are encrypted on this device and sent only to their provider.',
   agent: 'What the agent may do without asking, and how its record reads.',

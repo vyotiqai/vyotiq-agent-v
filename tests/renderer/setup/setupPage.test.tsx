@@ -183,6 +183,34 @@ describe('SetupPage', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('Couldn’t save your approval choice: settings.json is read-only')
   })
 
+  it('for someone with tasks already, starts a task rather than a first one', async () => {
+    renderSetup({ workspace: 'C:\\work\\site', next: 'task' })
+    expect(screen.queryByText(/first task/)).toBeNull()
+    const start = screen.getByRole('button', { name: /Start a task/ }) as HTMLButtonElement
+    await waitFor(() => expect(start.disabled).toBe(false))
+    expect(screen.getByText('Starts in site')).toBeTruthy()
+  })
+
+  it('holding a send, says it waits here and sends it in its own folder', async () => {
+    const onStart = vi.fn(async () => null)
+    renderSetup({ workspace: 'C:\\work\\site', next: 'send', onStart })
+    expect(
+      screen.getByText(
+        'Your instruction waits here until you decide what needs your OK. Everything here can change later in Settings.'
+      )
+    ).toBeTruthy()
+    // The instruction was written in this folder: there is no other to pick.
+    expect(step(2).dataset.state).toBe('done')
+    expect(screen.queryByRole('button', { name: 'Open another folder' })).toBeNull()
+    const send = screen.getByRole('button', { name: /Send your instruction/ }) as HTMLButtonElement
+    await waitFor(() => expect(send.disabled).toBe(false))
+    expect(screen.getByText('Sends in site')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('radio', { name: /Every tool/ }))
+    fireEvent.click(send)
+    expect(onStart).toHaveBeenCalledWith('C:\\work\\site', 'all')
+  })
+
   it('numbers its steps on the type scale — caption, not the keycap size', () => {
     renderSetup()
     const number = step(2).querySelector('span[aria-hidden="true"]')!

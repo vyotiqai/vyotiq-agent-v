@@ -1,8 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import type { Settings } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Icon } from '@renderer/lib/icons'
-import { Button, Checkbox, IconButton, Input, pushToast } from '@renderer/lib/ui'
+import { Button, Checkbox, Input, pushToast } from '@renderer/lib/ui'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { isValidHttpUrl } from '@renderer/features/settings/utils/settingsHelpers'
 import { FIELD_GRID } from './McpServerConfig'
@@ -118,18 +117,13 @@ export function RegistryTrustDialog({
     <Dialog
       open
       onClose={onClose}
-      label="Registry and trust"
+      title="Registry and trust"
+      icon="gear"
       useNativeDialog={false}
       padded={false}
       initialFocusRef={urlRef}
       className="vy-menu flex w-[560px] flex-col overflow-hidden"
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Icon name="gear" size={16} className="text-muted" />
-        <h2 className="text-heading font-semibold text-fg-strong">Registry and trust</h2>
-        <span className="flex-1" />
-        <IconButton icon="close" label="Close" size="sm" tone="muted" onClick={onClose} />
-      </div>
       <div className="min-h-0 space-y-6 overflow-y-auto px-4 py-4">
         <Group label="Package registry" region>
           <div className={FIELD_GRID}>

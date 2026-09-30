@@ -498,7 +498,6 @@ describe('useWorkspaceManager', () => {
 
     expect(removeWorkspace).toHaveBeenCalledWith('/ws-a', true, undefined)
     expect(confirm).not.toHaveBeenCalled()
-    expect(result.current.isRunActiveInBackground('run-bg')).toBe(false)
     confirm.mockRestore()
   })
 
@@ -527,7 +526,6 @@ describe('useWorkspaceManager', () => {
       result.current.closeRunTab('run-tab')
     })
 
-    expect(result.current.isRunActiveInBackground('run-tab')).toBe(true)
     expect(chatCancel).not.toHaveBeenCalled()
 
     const itemsBefore = result.current.getRunController('run-tab')?.items.length ?? 0
@@ -1843,52 +1841,6 @@ describe('setComposerDraftForPane hot UI', () => {
     expect(resolveComposerDraft(result.current.activeContext!.ui, 'run-hot-1')).toBe(
       'typed on run'
     )
-  })
-
-  it('persists workspace expand/collapse state through updateWorkspaceUiState', async () => {
-    const { result } = renderHook(() => useWorkspaceManager())
-
-    await waitFor(() => {
-      expect(result.current.activeWorkspace).toBe('/ws-a')
-    })
-
-    // Default: active workspace expanded, other workspaces collapsed.
-    expect(result.current.workspaceExpandedByPath['/ws-a']).toBe(true)
-    expect(result.current.workspaceExpandedByPath['/ws-b']).toBe(false)
-
-    vi.useFakeTimers()
-
-    act(() => {
-      result.current.setWorkspaceExpanded('/ws-b', true)
-    })
-
-    act(() => {
-      vi.advanceTimersByTime(300)
-    })
-
-    expect(window.vyotiq.updateWorkspaceUiState).toHaveBeenCalledWith(
-      '/ws-b',
-      expect.objectContaining({ expanded: true })
-    )
-    expect(result.current.workspaceExpandedByPath['/ws-b']).toBe(true)
-
-    ;(window.vyotiq.updateWorkspaceUiState as ReturnType<typeof vi.fn>).mockClear()
-
-    act(() => {
-      result.current.setWorkspaceExpanded('/ws-a', false)
-    })
-
-    act(() => {
-      vi.advanceTimersByTime(300)
-    })
-
-    expect(window.vyotiq.updateWorkspaceUiState).toHaveBeenCalledWith(
-      '/ws-a',
-      expect.objectContaining({ expanded: false })
-    )
-    expect(result.current.workspaceExpandedByPath['/ws-a']).toBe(false)
-
-    vi.useRealTimers()
   })
 })
 

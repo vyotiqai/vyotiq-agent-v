@@ -28,7 +28,8 @@ import {
 } from '@renderer/lib/markdown/fenceUtils'
 import {
   allocateHeadingId,
-  extractHeadingText
+  extractHeadingText,
+  slugifyHeading
 } from '@renderer/lib/markdown/headingIds'
 import {
   isSafeMarkdownHref,
@@ -38,7 +39,8 @@ import {
 import {
   autolinkWorkspacePathsInProse,
   parseLinkableWorkspacePath,
-  parseVyFileHref
+  parseVyFileHref,
+  VY_FILE_HREF_PREFIX
 } from '@shared/utils/linkableWorkspacePath'
 import { cn } from './cn'
 import { useDocumentTheme } from './useDocumentTheme'
@@ -261,15 +263,60 @@ function FencedCodePre({
   return <FencedCodeBlock text={text} className={className} unstable={unstable} />
 }
 
-function buildHeadingComponents(used: Map<string, number>) {
+/**
+ * Heading ids for one rendered document. `used` counts slugs so a repeated
+ * heading gets `-1`, `-2`…; `assigned` remembers each heading's id by where it
+ * sits, so rendering the same heading again (StrictMode's second pass, a
+ * re-render with unchanged content) returns the id it already has instead of
+ * allocating the next suffix.
+ */
+type HeadingIdState = { used: Map<string, number>; assigned: Map<string, string> }
+
+/** The DOM id a heading slug gets under `scope` — the same rule both ways. */
+function scopedHeadingId(scope: string | undefined, slug: string): string {
+  return scope ? `${scope}-${slug}` : slug
+}
+
+function buildHeadingComponents(state: HeadingIdState, scope: string | undefined, blockStart: number) {
   const make =
     (Tag: 'h1' | 'h2' | 'h3') =>
-    ({ children }: { children?: React.ReactNode }) => {
-      const text = extractHeadingText(children)
-      const id = allocateHeadingId(text, used)
-      return <Tag id={id}>{children}</Tag>
+    ({ children, node }: { children?: React.ReactNode; node?: { position?: { start?: { offset?: number } } } }) => {
+      const offset = node?.position?.start?.offset
+      const key = offset != null ? `${blockStart}:${offset}` : null
+      let slug = key ? state.assigned.get(key) : undefined
+      if (!slug) {
+        slug = allocateHeadingId(extractHeadingText(children), state.used)
+        if (key) state.assigned.set(key, slug)
+      }
+      return <Tag id={scopedHeadingId(scope, slug)}>{children}</Tag>
     }
   return { h1: make('h1'), h2: make('h2'), h3: make('h3') }
+}
+
+/**
+ * Scroll to what an in-document `#fragment` link names — looked up only inside
+ * the link's own markdown body, so the same heading in another note never
+ * answers. Tries the scoped heading id, its slug, then the raw id (a GFM
+ * footnote's `user-content-fn-1`).
+ */
+function scrollToFragment(from: Element, scope: string | undefined, fragment: string): void {
+  let raw = fragment
+  try {
+    raw = decodeURIComponent(fragment)
+  } catch {
+    /* keep the fragment as written */
+  }
+  const root = from.closest('.markdown-body')
+  if (!root) return
+  const wanted = [scopedHeadingId(scope, raw), scopedHeadingId(scope, slugifyHeading(raw)), raw]
+  const withIds = Array.from(root.querySelectorAll<HTMLElement>('[id]'))
+  for (const id of wanted) {
+    const target = withIds.find((el) => el.id === id)
+    if (target) {
+      target.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+      return
+    }
+  }
 }
 
 const CODE_CHIP =
@@ -283,13 +330,18 @@ function buildMarkdownComponents(
   openFenceBody: string | null,
   opts?: {
     headingIds?: boolean
-    headingUsed?: Map<string, number>
+    headingState?: HeadingIdState
+    headingIdScope?: string
+    blockStart?: number
     readOnlyTasks?: boolean
     onOpenWorkspaceFile?: (path: string, options?: { line?: number }) => void
   }
 ) {
+  const headingIdScope = opts?.headingIdScope
   const heading =
-    opts?.headingIds && opts.headingUsed ? buildHeadingComponents(opts.headingUsed) : null
+    opts?.headingIds && opts.headingState
+      ? buildHeadingComponents(opts.headingState, headingIdScope, opts.blockStart ?? 0)
+      : null
   const onOpenWorkspaceFile = opts?.onOpenWorkspaceFile
   return {
     ...(heading ?? {}),
@@ -328,6 +380,23 @@ function buildMarkdownComponents(
           >
             {children}
           </button>
+        )
+      }
+      if (heading && href?.startsWith('#') && href.length > 1 && !href.startsWith(VY_FILE_HREF_PREFIX)) {
+        // An in-document link (a table of contents): scroll to the heading in
+        // this body. As a new-window link it would open nothing.
+        const fragment = href.slice(1)
+        return (
+          <a
+            href={href}
+            onClick={(event) => {
+              event.preventDefault()
+              scrollToFragment(event.currentTarget, headingIdScope, fragment)
+            }}
+            className="rounded-sm text-muted underline focus-visible:vy-focus-ring"
+          >
+            {children}
+          </a>
         )
       }
       if (!isSafeMarkdownHref(href)) {
@@ -395,7 +464,9 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
   source,
   openFenceBody,
   headingIds,
-  headingUsed,
+  headingState,
+  headingIdScope,
+  blockStart,
   readOnlyTasks,
   linkWorkspacePaths,
   onOpenWorkspaceFile
@@ -403,7 +474,9 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
   source: string
   openFenceBody: string | null
   headingIds?: boolean
-  headingUsed?: Map<string, number>
+  headingState?: HeadingIdState
+  headingIdScope?: string
+  blockStart: number
   readOnlyTasks?: boolean
   linkWorkspacePaths?: boolean
   onOpenWorkspaceFile?: (path: string, options?: { line?: number }) => void
@@ -416,11 +489,13 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
     () =>
       buildMarkdownComponents(openFenceBody, {
         headingIds,
-        headingUsed,
+        headingState,
+        headingIdScope,
+        blockStart,
         readOnlyTasks,
         onOpenWorkspaceFile
       }),
-    [openFenceBody, headingIds, headingUsed, readOnlyTasks, onOpenWorkspaceFile]
+    [openFenceBody, headingIds, headingState, headingIdScope, blockStart, readOnlyTasks, onOpenWorkspaceFile]
   )
   return (
     <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
@@ -446,6 +521,7 @@ export function MarkdownContent({
   content,
   streaming = false,
   headingIds = false,
+  headingIdScope,
   wrapTables = false,
   readOnlyTasks = false,
   linkWorkspacePaths = false,
@@ -456,8 +532,14 @@ export function MarkdownContent({
 }: {
   content: string
   streaming?: boolean
-  /** Stable h1–h3 ids for in-panel outline scroll (plan docs). */
+  /** Stable h1–h3 ids for in-panel outline scroll (plan docs) and `#fragment` links. */
   headingIds?: boolean
+  /**
+   * Prefix for heading ids (`<scope>-<slug>`), so two bodies on one page with
+   * the same heading never share a DOM id. A `#slug` link inside the body still
+   * finds its own heading. Omit for bare slugs (a panel that computes them itself).
+   */
+  headingIdScope?: string
   /** Allow table cells to wrap (narrow plan/contract dock). */
   wrapTables?: boolean
   /** Disable GFM task checkboxes (display-only). */
@@ -488,10 +570,10 @@ export function MarkdownContent({
   )
   // Stable across unrelated re-renders (only reset when the rendered markdown
   // changes) so MemoMarkdownBlock's `components` memo is not defeated every tick.
-  // `markdown` is an intentional reset key: a fresh Map per content change keeps
+  // `markdown` is an intentional reset key: fresh state per content change keeps
   // heading-id counters deterministic across edits.
-  const headingUsed = useMemo(
-    () => (headingIds ? new Map<string, number>() : undefined),
+  const headingState = useMemo<HeadingIdState | undefined>(
+    () => (headingIds ? { used: new Map(), assigned: new Map() } : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [headingIds, markdown]
   )
@@ -536,7 +618,9 @@ export function MarkdownContent({
             source={block.source}
             openFenceBody={blockOpenFence}
             headingIds={headingIds}
-            headingUsed={headingUsed}
+            headingState={headingState}
+            headingIdScope={headingIdScope}
+            blockStart={block.start}
             readOnlyTasks={readOnlyTasks}
             linkWorkspacePaths={linkWorkspacePaths}
             onOpenWorkspaceFile={linkWorkspacePaths ? openWorkspaceFileStable : undefined}

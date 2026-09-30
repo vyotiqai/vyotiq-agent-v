@@ -24,6 +24,7 @@ import { ToolImageStrip } from '@renderer/features/chat/toolUi/ToolImageStrip'
 import { editStatOf } from '../editStat'
 import { RecordOpenContext, thoughtOpenKey } from '../recordFind'
 import type { WorkItem } from '../recordModel'
+import { RecordProse } from './RecordProse'
 
 type ToolItem = Extract<UiItem, { kind: 'tool' }>
 
@@ -334,7 +335,7 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
     case 'plan':
       return <PlanItem title={item.title} running={item.tool.tool.status === 'running'} />
     case 'note':
-      return <MarkdownContent content={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+      return <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
     case 'thought':
       return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought id={item.id} text={item.text} />
     case 'error':
@@ -367,10 +368,7 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
   const [open, setOpen] = useState(false)
   const { onOpenWorkspaceFile } = useRunSession()
   const { onLoadToolContent, mcpServerNames } = useContext(RecordActionsContext)
-  const group = mapToolGroupProps(
-    tools.map((t) => t.tool),
-    {}
-  )
+  const group = mapToolGroupProps(tools.map((t) => t.tool))
   const running = group.state === 'pending'
   // A lookup stopped with the run did not fail: it is not counted as one.
   const broke = (t: ToolItem): boolean => t.tool.status === 'fail' && !isInterruptedToolContent(t.tool.content)

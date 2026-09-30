@@ -7,8 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
-  type Ref
+  type ReactNode
 } from 'react'
 import type { RunFeedbackRating, RunGoal, RunLoop, RunSummary, ToolApprovalDecision } from '@shared/ipc'
 import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
@@ -82,7 +81,6 @@ export type TaskPaneProps = {
   scrollRestoreToken?: number
   onScrollTopChange?: (scrollTop: number) => void
   onActivate?: () => void
-  headingRef?: Ref<HTMLHeadingElement>
   onStop: () => void
   actions: TaskPaneRunActions
   turnUsage?: readonly StepUsageTotals[]
@@ -505,7 +503,6 @@ export function TaskPane(props: TaskPaneProps) {
         state={header?.state ?? null}
         stateLabel={header?.label}
         title={title}
-        headingRef={props.headingRef}
         editor={
           renaming ? (
             <RenameField

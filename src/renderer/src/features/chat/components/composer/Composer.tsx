@@ -26,7 +26,7 @@ import { resolveModelContextWindow } from '@shared/domain/modelContextWindows'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
 import { isRetryableTurnFailure } from '@shared/errors'
-import { Alert, Button, IconButton, cn, pushToast } from '@renderer/lib/ui'
+import { Alert, Button, IconButton, Textarea, cn, pushToast } from '@renderer/lib/ui'
 import {
   draftTitle,
   saveTaskDraftFor,
@@ -66,7 +66,7 @@ import { NewTaskBrief, type NewTaskTargets } from '@renderer/features/task/NewTa
 import { useSlashCommands } from './useSlashCommands'
 import { MentionMenu } from './MentionMenu'
 import { useComposerMentions } from './useComposerMentions'
-import { resolveComposerMentions } from './resolveMentions'
+import { draftHasImageMention, resolveComposerMentions } from './resolveMentions'
 import { mentionMarker, type MentionMenuItem } from './mentionModel'
 import {
   executeSlashResolveResult,
@@ -127,7 +127,6 @@ export function Composer({
   onAgentModeChange = () => {},
 
   onSend,
-  onStop,
   pendingFollowUps = [],
   onRemoveFollowUp,
   onEditFollowUp,
@@ -163,8 +162,6 @@ export function Composer({
   running: boolean
   disabled?: boolean
   hasWorkspace?: boolean
-  /** No longer read — every placeholder here is set by its variant. Callers still pass it. */
-  hasTranscript?: boolean
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
   modelsRefreshKey?: string | number
@@ -190,7 +187,6 @@ export function Composer({
     files?: AttachedFile[],
     extras?: import('@shared/ipc').ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onStop: () => void
   pendingFollowUps?: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[]
   onRemoveFollowUp?: (id: string) => void
   onEditFollowUp?: (id: string, text: string) => boolean | Promise<boolean>
@@ -640,8 +636,7 @@ export function Composer({
     if (!hadComposerFocus) return
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        // A dialog the send opened (the first-send approval question) took
-        // focus on purpose; taking it back would strand the keyboard behind it.
+        // A dialog the send opened took focus on purpose; taking it back would strand the keyboard behind it.
         if (document.activeElement?.closest('[aria-modal="true"]')) return
         // Own editor first — document order can point at another pane's composer.
         const own = taRef.current?.el
@@ -873,10 +868,14 @@ export function Composer({
     onProviderModel(provider, fallback)
   }, [running, catalog, model, filterOpts, onProviderModel, provider])
 
+  // An @-mentioned workspace image goes as an image at send, so it needs a
+  // vision model just as a pasted one does.
+  const imageMentioned = draftHasImageMention(text)
+
   // Cover picker, draft restore, and any setImages path — not only onPickAttachments.
   useEffect(() => {
-    if (images.length > 0) ensureVisionModel()
-  }, [images.length, ensureVisionModel])
+    if (images.length > 0 || imageMentioned) ensureVisionModel()
+  }, [images.length, imageMentioned, ensureVisionModel])
 
   useEffect(() => {
     if (audio.length > 0) ensureAudioModel()
@@ -1373,9 +1372,9 @@ export function Composer({
             {pendingFollowUps.map((entry) =>
               editingFollowUpId === entry.id ? (
                 <li key={entry.id} className="flex items-start gap-2 border-b border-border/60 py-2 pl-4 pr-3">
-                  <textarea
+                  <Textarea
                     ref={followUpEditRef}
-                    className="min-h-14 min-w-0 flex-1 resize-y rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg-strong outline-none focus-visible:vy-focus-ring"
+                    className="min-w-0 flex-1"
                     value={editingFollowUpText}
                     onChange={(e) => setEditingFollowUpText(e.target.value)}
                     onKeyDown={(e) => {

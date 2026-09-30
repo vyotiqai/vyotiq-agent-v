@@ -51,36 +51,31 @@ function SearchableMenu(): JSX.Element {
   )
 }
 
+/** The field's height lives on its wrapper: `h-8` at md, `h-7` at sm — one of them, never both. */
+const WRAPPER_H = ['h-8', 'h-7']
+
+function wrapper(): HTMLElement {
+  const el = input().parentElement
+  if (!el) throw new Error('SearchInput input has no wrapper')
+  return el
+}
+
 describe('SearchInput size classes', () => {
-  it('the default field carries one min-h and one text size', () => {
+  it('the default (md) field: one wrapper height, one text size, no min-h on the input', () => {
     render(<SearchInput aria-label="Search" value="" onChange={vi.fn()} />)
-    const field = input()
-    expect(onlyOneOf(field, MIN_H)).toBe('min-h-[var(--vy-control-min-h)]')
-    expect(onlyOneOf(field, TEXT_SIZE)).toBe('text-sm')
+    expect(onlyOneOf(wrapper(), WRAPPER_H)).toBe('h-8')
+    expect(onlyOneOf(input(), MIN_H)).toBe(null)
+    expect(onlyOneOf(input(), TEXT_SIZE)).toBe('text-sm')
   })
 
-  it('the quiet default field carries one min-h and one text size', () => {
-    render(<SearchInput aria-label="Search" tone="quiet" value="" onChange={vi.fn()} />)
-    const field = input()
-    expect(onlyOneOf(field, MIN_H)).toBe('min-h-[calc(var(--vy-control-min-h)+0.25rem)]')
-    expect(onlyOneOf(field, TEXT_SIZE)).toBe('text-sm')
-  })
-
-  it('size="sm" drops the min-h slot rather than competing with it', () => {
+  it('size="sm" is the menu-row field: h-7 and text-xs, one of each', () => {
     render(<SearchInput aria-label="Search" size="sm" value="" onChange={vi.fn()} />)
-    const field = input()
-    expect(onlyOneOf(field, MIN_H)).toBe(null)
-    expect(onlyOneOf(field, TEXT_SIZE)).toBe('text-xs')
+    expect(onlyOneOf(wrapper(), WRAPPER_H)).toBe('h-7')
+    expect(onlyOneOf(input(), MIN_H)).toBe(null)
+    expect(onlyOneOf(input(), TEXT_SIZE)).toBe('text-xs')
   })
 
-  it('the compact field is a menu row: one min-h-7, one text-xs, no base size beside it', () => {
-    render(<SearchInput aria-label="Search" compact value="" onChange={vi.fn()} />)
-    const field = input()
-    expect(onlyOneOf(field, MIN_H)).toBe('min-h-7')
-    expect(onlyOneOf(field, TEXT_SIZE)).toBe('text-xs')
-  })
-
-  it("the menu's search header takes the compact state, not an appended class", async () => {
+  it("the menu's search header takes size=\"sm\", not an appended class", async () => {
     render(<SearchableMenu />)
     fireEvent.click(screen.getByRole('button', { name: /Branch/ }))
     await screen.findByRole('option', { name: 'feat/x' })
@@ -88,8 +83,8 @@ describe('SearchInput size classes', () => {
     // The old call site appended `min-h-7 text-xs` through inputClassName
     // beside the base `min-h-[…] text-sm`; cn() has no tailwind-merge, so the
     // winner was emission order in the sheet. Exactly one of each slot survives.
-    const field = input()
-    expect(onlyOneOf(field, MIN_H)).toBe('min-h-7')
-    expect(onlyOneOf(field, TEXT_SIZE)).toBe('text-xs')
+    expect(onlyOneOf(wrapper(), WRAPPER_H)).toBe('h-7')
+    expect(onlyOneOf(input(), MIN_H)).toBe(null)
+    expect(onlyOneOf(input(), TEXT_SIZE)).toBe('text-xs')
   })
 })

@@ -801,7 +801,7 @@ export function useSettingsForm({
     return mark(!sameSetting(shown, base), { scope: 'agent', key, ...(field === undefined ? {} : { field }) })
   }
 
-  /** Skin, mode, type and density apply live through the appearance path. */
+  /** Skin, mode and type size apply live through the appearance path. */
   const appearanceMark = (key: AppearanceKey): SettingMark =>
     mark(!sameSetting(settings[key], DEFAULT_SETTINGS[key]), { scope: 'appearance', key })
 
@@ -894,7 +894,7 @@ type NestedSettingKey = 'notifications' | 'storage' | 'codeIndex' | 'dictation'
 type AgentSettingKey = keyof AgentSettingsPatch & keyof Settings
 
 /** Settings the appearance path applies live, ahead of the save. */
-type AppearanceKey = 'theme' | 'skinId' | 'fontScale' | 'uiDensity' | 'customCssPath'
+type AppearanceKey = 'theme' | 'skinId' | 'fontScale' | 'customCssPath'
 
 /**
  * What a row's Reset writes: a whole setting, or one field of an object

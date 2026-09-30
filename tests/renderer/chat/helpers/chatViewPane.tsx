@@ -69,7 +69,6 @@ export function PaneChatView({ multiPane: overrides, ...props }: PaneChatViewPro
     renderPane: (_pane, options) => (
       <SessionChatColumn
         {...column}
-        showPageHeading={false}
         approvalAutoFocus={options.focused}
         onShowInspector={options.onShowInspector}
         onOpenChanges={options.onOpenChanges}

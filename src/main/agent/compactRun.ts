@@ -84,7 +84,7 @@ const MIN_MESSAGES_TO_COMPACT = 4
 
 function compactTimeoutUserMessage(): string {
   const minutes = Math.round(COMPACT_TIMEOUT_MS / 60_000)
-  return `Compaction timed out after ${minutes} minutes. Try again, use a faster model, or /clear for a fresh chat.`
+  return `Compaction timed out after ${minutes} minutes. Try again, use a faster model, or /clear to start a new task.`
 }
 
 /** Hard provider failures surface their real cause, not a generic no-summary error. */

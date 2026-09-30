@@ -20,7 +20,6 @@ export { basename } from './pathUtils'
 export type {
   ToolBodyProps,
   ToolBodyContext,
-  ToolBodyTiming,
   ToolHeaderMeta,
   ToolPresentation,
   ToolCategory

@@ -574,6 +574,82 @@ describe('Extensions opened from elsewhere', () => {
   })
 })
 
+describe('Reset Google sign-in', () => {
+  const gmailSettings: Settings = {
+    ...baseSettings,
+    mcpServers: [
+      {
+        id: 'gmail',
+        name: 'Gmail',
+        transport: 'http',
+        url: 'https://gmailmcp.googleapis.com/mcp/v1',
+        enabled: true,
+        source: 'marketplace',
+        packageId: 'gmail'
+      }
+    ]
+  }
+  const gmailConnected: McpServerStatus = { id: 'gmail', name: 'Gmail', enabled: true, connected: true, toolCount: 3 }
+
+  function installGmail(hasGoogleMcpClientSecret: boolean, overrides: Bridge = {}): void {
+    installBridge({
+      marketplaceBrowse: vi.fn(async () =>
+        ok({ packages: [...catalog, entry({ id: 'gmail', name: 'Gmail', kind: 'mcp', auth: 'oauth' })] })
+      ),
+      marketplaceListInstalled: vi.fn(async () =>
+        ok({ schemaVersion: 1 as const, items: [installedItem({ id: 'gmail', name: 'Gmail' })] })
+      ),
+      mcpStatus: vi.fn(async () => ok({ servers: [gmailConnected], hasGoogleMcpClientSecret })),
+      mcpRefresh: vi.fn(async () => ok({ servers: [gmailConnected], hasGoogleMcpClientSecret: false })),
+      mcpClearGoogleClientSecret: vi.fn(async () => ok(true as const)),
+      ...overrides
+    })
+  }
+
+  async function openGmail(): Promise<HTMLElement> {
+    renderView({ settings: gmailSettings, focusServerId: 'gmail' })
+    await waitFor(() => expect(within(detail('Gmail')).getByText('Connected — 3 tools.')).toBeTruthy())
+    return detail('Gmail')
+  }
+
+  it('clears the stored secret after a danger confirm, then reconnects', async () => {
+    installGmail(true)
+    const aside = await openGmail()
+    fireEvent.click(within(aside).getByRole('button', { name: 'Reset Google sign-in' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Reset Google sign-in' })
+    expect(dialog.textContent).toContain('will need signing in again')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset' }))
+    await waitFor(() => expect(bridge.mcpClearGoogleClientSecret).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(bridge.mcpRefresh).toHaveBeenCalled())
+    // With the secret gone there is nothing left to reset.
+    await waitFor(() =>
+      expect(within(detail('Gmail')).queryByRole('button', { name: 'Reset Google sign-in' })).toBeNull()
+    )
+  })
+
+  it('leaves the secret alone when the confirm is cancelled', async () => {
+    installGmail(true)
+    const aside = await openGmail()
+    fireEvent.click(within(aside).getByRole('button', { name: 'Reset Google sign-in' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Reset Google sign-in' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Reset Google sign-in' })).toBeNull())
+    expect(bridge.mcpClearGoogleClientSecret).not.toHaveBeenCalled()
+  })
+
+  it('is absent when no Google client secret is stored, and on other servers', async () => {
+    installGmail(false)
+    const aside = await openGmail()
+    expect(within(aside).queryByRole('button', { name: 'Reset Google sign-in' })).toBeNull()
+    cleanup()
+
+    installBridge({ mcpStatus: vi.fn(async () => ok({ servers: [memoryConnected], hasGoogleMcpClientSecret: true })) })
+    renderView({ focusServerId: 'memory' })
+    await waitFor(() => expect(detail('Memory')).toBeTruthy())
+    expect(within(detail('Memory')).queryByRole('button', { name: 'Reset Google sign-in' })).toBeNull()
+  })
+})
+
 describe('Registry and trust', () => {
   it('holds the registry, the acknowledgement and the MCP documentation link', async () => {
     renderView()

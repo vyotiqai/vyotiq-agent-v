@@ -74,9 +74,29 @@ function connectionKey(settings: SetupProviderSettings, secrets: Record<string, 
 }
 
 /**
- * First run: three steps — a model, a folder, what needs your OK — then the
- * first task. Each step reads the real setting and writes it where Settings
- * does; nothing here is a copy of its own.
+ * What Start does once the approval choice is saved: open the first task's
+ * brief, a new task's brief, or send the instruction a send was held back for.
+ */
+export type SetupNext = 'first-task' | 'task' | 'send'
+
+const START_LABEL: Record<SetupNext, string> = {
+  'first-task': 'Start your first task',
+  task: 'Start a task',
+  send: 'Send your instruction'
+}
+
+const INTRO: Record<SetupNext, string> = {
+  'first-task': 'Three things, then hand it its first task. Everything here can change later in Settings.',
+  task: 'Decide what needs your OK before the agent runs tools. Everything here can change later in Settings.',
+  send: 'Your instruction waits here until you decide what needs your OK. Everything here can change later in Settings.'
+}
+
+/**
+ * Three steps — a model, a folder, what needs your OK — then a task. A first
+ * run lands on it; anyone else who has never made the approval choice meets it
+ * on Home or at their first send, with the steps they already have shown done.
+ * Each step reads the real setting and writes it where Settings does; nothing
+ * here is a copy of its own.
  */
 export function SetupPage({
   settings,
@@ -88,7 +108,8 @@ export function SetupPage({
   onChangeProvider,
   onChooseFolder,
   onOpenPath,
-  onStart
+  onStart,
+  next = 'first-task'
 }: {
   settings: SetupProviderSettings
   /** Which providers have a saved key. */
@@ -106,6 +127,7 @@ export function SetupPage({
   onOpenPath: (path: string) => Promise<string | null>
   /** Resolves to why the choice could not be saved, or null once the brief opens. */
   onStart: (workspacePath: string, mode: ToolApprovalMode) => Promise<string | null>
+  next?: SetupNext
 }): ReactNode {
   const [mode, setMode] = useState<ToolApprovalMode>(approvalMode)
   const [folderError, setFolderError] = useState<string | null>(null)
@@ -145,16 +167,14 @@ export function SetupPage({
         ? 'Connect a provider first'
         : workspace == null
           ? 'Open a workspace first'
-          : `Starts in ${formatWorkspaceName(workspace)}`
+          : `${next === 'send' ? 'Sends' : 'Starts'} in ${formatWorkspaceName(workspace)}`
 
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto" data-setup>
       <div className="mx-auto w-full max-w-[640px] px-8 pb-12 pt-12">
         <VyotiqMark size={26} className="text-fg-strong" decorative />
         <h1 className="mt-5 text-display font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong">Set up Agent V</h1>
-        <p className="mt-1 text-sm text-muted">
-          Three things, then hand it its first task. Everything here can change later in Settings.
-        </p>
+        <p className="mt-1 text-sm text-muted">{INTRO[next]}</p>
 
         <ol className="mt-8 divide-y divide-border/60 border-y border-border">
           <SetupStep
@@ -200,7 +220,8 @@ export function SetupPage({
                 'The folder the agent works in. Its file tools stay inside it.'
               )
             }
-            onChange={() => void run(onChooseFolder)}
+            // A held instruction belongs to the folder it was written in.
+            onChange={next === 'send' ? undefined : () => void run(onChooseFolder)}
             changeLabel="Open another folder"
           >
             <div
@@ -264,7 +285,7 @@ export function SetupPage({
           <Button
             variant="primary"
             size="md"
-            icon="play"
+            icon={next === 'send' ? 'send' : 'play'}
             disabled={!ready || starting}
             pending={starting}
             onClick={() => {
@@ -276,7 +297,7 @@ export function SetupPage({
                 .finally(() => setStarting(false))
             }}
           >
-            Start your first task
+            {START_LABEL[next]}
           </Button>
           <span className="text-xs text-tertiary">{hint}</span>
         </div>

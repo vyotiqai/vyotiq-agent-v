@@ -6,10 +6,10 @@ import {
 
 /** Real warning shape from ModelListUnsupportedError path in listProviderModels. */
 const CUSTOM_405_WARNING =
-  'Custom OpenAI-compatible does not serve a model list (HTTP 405); the host is reachable and chat can still connect. Type a model ID in the composer model picker search and press Enter to use it. Showing illustrative placeholder model IDs (not live models).'
+  'Custom OpenAI-compatible does not serve a model list (HTTP 405); the host is reachable and tasks can still run. Type a model ID in the composer model picker search and press Enter to use it. Showing illustrative placeholder model IDs (not live models).'
 
 const CUSTOM_501_WARNING =
-  'Custom OpenAI-compatible does not serve a model list (HTTP 501); the host is reachable and chat can still connect. Showing illustrative placeholder model IDs (not live models).'
+  'Custom OpenAI-compatible does not serve a model list (HTTP 501); the host is reachable and tasks can still run. Showing illustrative placeholder model IDs (not live models).'
 
 describe('isSeedFallbackWarning', () => {
   it('detects seed fallback catalog warnings', () => {

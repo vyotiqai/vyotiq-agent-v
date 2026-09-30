@@ -146,7 +146,7 @@ export function HomePage({
             </div>
           </>
         ) : (
-          <div className="mt-10 flex flex-col items-center justify-center rounded-lg border border-border px-8 py-14 text-center">
+          <div className="mt-10 flex flex-col items-center justify-center px-8 py-14 text-center">
             <span className="grid size-10 place-items-center rounded-lg bg-surface text-muted">
               <Icon name="workspace" size={18} />
             </span>

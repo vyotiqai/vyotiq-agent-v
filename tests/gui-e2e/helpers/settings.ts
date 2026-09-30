@@ -4,7 +4,6 @@ import { APPEARANCE_LOCAL_STORAGE_KEY, DEFAULT_SKIN_ID } from '../../../src/shar
 export type RootAppearanceAttrs = {
   theme: string | null
   fontScale: string | null
-  density: string | null
   skin: string | null
 }
 
@@ -65,7 +64,6 @@ export async function readRootAppearance(page: Page): Promise<RootAppearanceAttr
   return page.evaluate(() => ({
     theme: document.documentElement.getAttribute('data-theme'),
     fontScale: document.documentElement.getAttribute('data-font-scale'),
-    density: document.documentElement.getAttribute('data-density'),
     skin: document.documentElement.getAttribute('data-skin')
   }))
 }
@@ -87,7 +85,6 @@ export async function resetAppearanceSettings(page: Page): Promise<void> {
     await window.vyotiq.setSettings({
       theme: 'system',
       fontScale: 'default',
-      uiDensity: 'default',
       skinId,
       customCssPath: ''
     })
@@ -99,7 +96,6 @@ export async function resetAppearanceSettings(page: Page): Promise<void> {
     .poll(async () => readRootAppearance(page), { timeout: 15_000 })
     .toMatchObject({
       fontScale: 'default',
-      density: 'default',
       skin: DEFAULT_SKIN_ID
     })
 }

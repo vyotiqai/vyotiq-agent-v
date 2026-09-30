@@ -1,31 +1,46 @@
 /**
  * @vitest-environment jsdom
  *
- * App → Set up: shown on a first run only (no approval choice on record and no
- * task in any open workspace), never flashed at a returning user while their
- * tasks load, and "Start your first task" saves the choice where the first-send
- * question saves it, then opens the brief.
+ * App → Set up: shown until an approval choice is on record. A first run (no
+ * task in any open workspace) lands on its first-run form, which never flashes
+ * at someone whose tasks are still loading; someone with tasks gets the same
+ * page with their folder counted. A send made without a choice is held there
+ * and sent once Start saves it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { DEFAULT_SETTINGS, emptySecretStatus, type Settings, type WorkspacesState } from '@shared/ipc'
 import App from '@renderer/app/App'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
 
+type ShellProps = { children: ReactNode; loading?: boolean; firstRun?: object | null; onOpenChat?: () => void; onOpenHome?: () => void }
+type ChatProps = { onSend: (text: string) => Promise<boolean | void> | boolean | void }
+const seen = vi.hoisted(() => ({ shell: null as unknown, chat: null as unknown }))
+
 vi.mock('@renderer/app/AppShell', () => ({
-  AppShell: ({ children, loading }: { children: ReactNode; loading?: boolean }) => (
-    <div data-testid={loading ? 'shell-loading' : 'shell'}>{children}</div>
-  )
+  AppShell: (props: ShellProps) => {
+    seen.shell = props
+    return (
+      <div data-testid={props.loading ? 'shell-loading' : 'shell'} data-first-run={props.firstRun ? '' : undefined}>
+        {props.children}
+      </div>
+    )
+  }
 }))
 vi.mock('@renderer/features/settings', () => ({ SettingsView: () => <div data-testid="settings" /> }))
 vi.mock('@renderer/features/marketplace', () => ({ MarketplaceView: () => null }))
 vi.mock('@renderer/features/home/HomePage', () => ({ HomePage: () => <div data-testid="home" /> }))
-vi.mock('@renderer/features/chat/ChatView', () => ({ ChatView: () => <div data-testid="chat" /> }))
-vi.mock('@renderer/features/chat/SessionChatColumn', () => ({ SessionChatColumn: () => null }))
-vi.mock('@renderer/features/chat/components/ToolApprovalOnboardingModal', () => ({
-  ToolApprovalOnboardingModal: () => null
+vi.mock('@renderer/features/chat/ChatView', () => ({
+  ChatView: (props: ChatProps) => {
+    seen.chat = props
+    return <div data-testid="chat" />
+  }
 }))
+vi.mock('@renderer/features/chat/SessionChatColumn', () => ({ SessionChatColumn: () => null }))
+
+const shell = (): ShellProps => seen.shell as ShellProps
+const chatView = (): ChatProps => seen.chat as ChatProps
 
 const WS = '/ws-first'
 /** Main opens its own scratch folder whenever no project is open — a first run always has it. */
@@ -63,6 +78,7 @@ let settings: Settings
 let listRunsResult: () => Promise<unknown>
 const setSettings = vi.fn()
 const listModels = vi.fn()
+const chatStart = vi.fn()
 
 function install(opts: { settings?: Partial<Settings>; openPaths?: string[]; runs?: number }): void {
   settings = { ...DEFAULT_SETTINGS, ...opts.settings }
@@ -96,7 +112,8 @@ function install(opts: { settings?: Partial<Settings>; openPaths?: string[]; run
     setActiveWorkspace: vi.fn(async () => ({ ok: true as const, data: state })),
     listModels,
     onChatEvent: vi.fn(() => () => {}),
-    probeNetwork: vi.fn(async () => ({ ok: true as const, data: true }))
+    probeNetwork: vi.fn(async () => ({ ok: true as const, data: true })),
+    chatStart
   } as unknown as typeof window.vyotiq
 }
 
@@ -104,6 +121,11 @@ beforeEach(() => {
   resetWorkspaceHotUiStoreForTests()
   setSettings.mockReset()
   listModels.mockReset()
+  chatStart.mockReset()
+  // A code that is not retried: a retry would land in the next test.
+  chatStart.mockResolvedValue({ ok: false as const, error: 'not started in this test', code: 'validation' })
+  seen.shell = null
+  seen.chat = null
 })
 
 afterEach(() => {
@@ -144,7 +166,7 @@ describe('App → Set up', () => {
     expect(screen.queryByRole('heading', { name: 'Set up Agent V' })).toBeNull()
   })
 
-  it('tasks already there mean no Set up — and none flashes while they load', async () => {
+  it('tasks already there: Set up asks only what is missing, and no first-run form flashes while they load', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     install({ openPaths: [SCRATCH], runs: 2, settings: { navigationMode: 'sidebar' } })
@@ -161,8 +183,78 @@ describe('App → Set up', () => {
     expect(screen.queryByRole('heading', { name: 'Set up Agent V' })).toBeNull()
 
     release()
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
+    // Their tasks stay in the navigator, and the folder they live in counts —
+    // even main's scratch folder: nobody is sent to pick one again.
+    expect(screen.getByTestId('shell').hasAttribute('data-first-run')).toBe(false)
+    expect(document.querySelector('[data-setup-step="2"]')?.getAttribute('data-state')).toBe('done')
+    expect(document.querySelector('[data-setup-step="2"]')?.textContent).toContain(SCRATCH)
+    await waitFor(
+      () => expect((screen.getByRole('button', { name: /Start a task/ }) as HTMLButtonElement).disabled).toBe(false),
+      { timeout: 5000 }
+    )
+    expect(screen.queryByText(/first task/)).toBeNull()
+  })
+
+  it('a send made before the choice is held on Set up, then sent once Start saves it', async () => {
+    install({ openPaths: [WS], runs: 2, settings: { navigationMode: 'sidebar' } })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
+    act(() => shell().onOpenChat?.())
+    expect(await screen.findByTestId('chat')).toBeTruthy()
+
+    let held: boolean | void = true
+    await act(async () => {
+      held = await chatView().onSend('Fix the flaky test')
+    })
+    // Not sent: the composer keeps the text, and Set up asks first.
+    expect(held).toBe(false)
+    expect(chatStart).not.toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' })).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Your instruction waits here until you decide what needs your OK. Everything here can change later in Settings.'
+      )
+    ).toBeTruthy()
+    const send = screen.getByRole('button', { name: /Send your instruction/ }) as HTMLButtonElement
+    await waitFor(() => expect(send.disabled).toBe(false), { timeout: 5000 })
+    expect(screen.getByText('Sends in ws-first')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('radio', { name: /Unattended/ }))
+    fireEvent.click(send)
+
+    await waitFor(() =>
+      expect(setSettings).toHaveBeenCalledWith({
+        toolApproval: { ...DEFAULT_SETTINGS.toolApproval, mode: 'off' },
+        toolApprovalOnboardingDone: true
+      })
+    )
     expect(await screen.findByTestId('chat', {}, { timeout: 5000 })).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: 'Set up Agent V' })).toBeNull()
+    await waitFor(() => expect(chatStart).toHaveBeenCalled(), { timeout: 5000 })
+    expect(JSON.stringify(chatStart.mock.calls[0])).toContain('Fix the flaky test')
+  })
+
+  it('going back to the task without choosing lets the held send go', async () => {
+    install({ openPaths: [WS], runs: 2, settings: { navigationMode: 'sidebar' } })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
+    act(() => shell().onOpenChat?.())
+    await act(async () => {
+      await chatView().onSend('Fix the flaky test')
+    })
+    expect(await screen.findByRole('button', { name: /Send your instruction/ })).toBeTruthy()
+
+    act(() => shell().onOpenChat?.())
+    expect(await screen.findByTestId('chat')).toBeTruthy()
+    // Back on Home, Set up no longer holds it — the words are in the composer.
+    act(() => shell().onOpenHome?.())
+    const start = await screen.findByRole('button', { name: /Start a task/ })
+    await waitFor(() => expect((start as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 })
+    fireEvent.click(start)
+    await waitFor(() => expect(setSettings).toHaveBeenCalled())
+    expect(chatStart).not.toHaveBeenCalled()
   })
 
   it('Start saves the approval choice, then opens the brief in the workspace', async () => {

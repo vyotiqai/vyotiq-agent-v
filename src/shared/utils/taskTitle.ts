@@ -18,12 +18,17 @@ export function stripGoalMarkdown(goal: string): string {
   return s.replace(/\s+/g, ' ').trim()
 }
 
+/** The goal stored when an instruction had no words of its own (runGoalFromUserText). */
+export const PLACEHOLDER_GOAL = 'chat'
+export const UNTITLED_TASK = 'Untitled task'
+
 /**
  * What a task is called, from its goal: the goal's first line without its
  * markdown. The navigator names a task by this, and so does everything that
  * tells you about one — a notification, a toast.
  */
 export function taskTitleFromGoal(goal: string): string {
+  if (goal.trim().toLowerCase() === PLACEHOLDER_GOAL) return UNTITLED_TASK
   let plain = stripGoalMarkdown(goal)
   plain = plain.replace(SPAWN_PREFIX, '').trim()
   return plain || goal.trim()

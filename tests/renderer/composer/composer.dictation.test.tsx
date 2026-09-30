@@ -95,7 +95,6 @@ function renderComposer(
       onChatSettingsChange={vi.fn()}
       onProviderModel={vi.fn()}
       onSend={overrides?.onSend ?? vi.fn()}
-      onStop={vi.fn()}
       slashHandlers={overrides?.slashHandlers}
     />
   )

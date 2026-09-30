@@ -69,7 +69,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -89,7 +88,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={onProviderModel}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -116,7 +114,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -158,7 +155,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -190,7 +186,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -225,7 +220,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -264,7 +258,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -316,7 +309,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -363,7 +355,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -410,7 +401,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -450,7 +440,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -476,7 +465,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -501,7 +489,6 @@ describe('Composer', () => {
         onProviderModel={onProviderModel}
         onAgentModeChange={onAgentModeChange}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -526,7 +513,6 @@ describe('Composer', () => {
         model="qwen2.5"
         running={false}
         hasWorkspace
-        hasTranscript
         variant="inline"
         draft="Edit this prompt"
         onDraftChange={vi.fn()}
@@ -535,7 +521,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
         onCancelEdit={vi.fn()}
       />
     )
@@ -551,7 +536,6 @@ describe('Composer', () => {
         model="qwen2.5"
         running={false}
         hasWorkspace
-        hasTranscript
         variant="inline"
         draft="Edit this prompt about SessionChatColumn file open wiring"
         onDraftChange={vi.fn()}
@@ -560,7 +544,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
         onCancelEdit={onCancelEdit}
       />
     )
@@ -582,7 +565,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -611,7 +593,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
         pendingFollowUps={[
           { id: 'fu-1', itemId: 'item-1', preview: 'Steer left', text: 'Steer left' }
         ]}
@@ -650,7 +631,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
         pendingFollowUps={[
           { id: 'fu-1', itemId: 'item-1', preview: 'Steer left', text: 'Steer left' }
         ]}
@@ -678,7 +658,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
 
@@ -703,7 +682,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={onSend}
-        onStop={vi.fn()}
       />
     )
 
@@ -724,7 +702,6 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
-        onStop={vi.fn()}
       />
     )
     const shell = document.querySelector('[data-composer-shell]')

@@ -10,9 +10,9 @@ afterEach(cleanup)
 
 describe('Badge', () => {
   it('maps a tone onto theme tokens rather than a fixed colour', () => {
-    render(<Badge tone="danger">Failed</Badge>)
-    const badge = screen.getByText('Failed')
-    expect(badge.className).toContain('text-danger')
+    render(<Badge tone="success">Passed</Badge>)
+    const badge = screen.getByText('Passed')
+    expect(badge.className).toContain('text-success')
     expect(badge.className).not.toMatch(/text-(red|green|amber|zinc)-\d/)
   })
 

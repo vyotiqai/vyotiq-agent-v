@@ -3,10 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
-import {
-  ContextMeter,
-  cacheHitPct
-} from '@renderer/features/chat/components/composer/ContextMeter'
+import { ContextMeter, cacheHitPct } from '@renderer/features/chat/components/composer/ContextMeter'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
 
 const baseUsage: ContextUsageState = {
@@ -181,11 +178,23 @@ describe('ContextMeter', () => {
     expect(screen.queryByText(/990k headroom/i)).toBeNull()
   })
 
-  it('renders compact action when handler is provided', () => {
+  it('has no compact action — the instance meter is read-only', () => {
+    render(<ContextMeter usage={baseUsage} />)
+    fireEvent.click(screen.getByRole('button', { name: /context/i }))
+    expect(screen.queryByRole('button', { name: /compact history/i })).toBeNull()
+  })
+})
+
+describe('ContextMeter compact', () => {
+  it('renders compact action when handler is provided, and reports its result', async () => {
+    const calls: number[] = []
     render(
       <ContextMeter
         usage={baseUsage}
-        onCompact={async () => ({ ok: true, message: 'Done' })}
+        onCompact={async () => {
+          calls.push(1)
+          return { ok: true, message: 'Done' }
+        }}
       />
     )
     fireEvent.click(screen.getByRole('button', { name: /context/i }))
@@ -193,6 +202,18 @@ describe('ContextMeter', () => {
     // The Button primitive: its focus ring and outlined geometry.
     expect(compact.className).toContain('focus-visible:vy-focus-ring')
     expect(compact.className).toContain('border-border')
+    fireEvent.click(compact)
+    expect(calls).toEqual([1])
+    expect((await screen.findByRole('status')).textContent).toBe('Done')
+  })
+
+  it('disables compact while the agent is running', () => {
+    render(
+      <ContextMeter usage={baseUsage} onCompact={async () => ({ ok: true, message: 'Done' })} compactDisabled />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /context/i }))
+    const compact = screen.getByRole('button', { name: /compact history/i }) as HTMLButtonElement
+    expect(compact.disabled).toBe(true)
   })
 })
 
@@ -230,7 +251,7 @@ describe('ContextMeter breakdown', () => {
   it('renders every breakdown row with tokens and window shares', () => {
     render(<ContextMeter usage={detailUsage} />)
     fireEvent.click(screen.getByRole('button', { name: /context window/i }))
-    expect(screen.getByText(/^Messages$/)).toBeTruthy()
+    expect(screen.getByText(/^Record$/)).toBeTruthy()
     expect(screen.getByText(/^System tools$/)).toBeTruthy()
     expect(screen.getByText(/^MCP tools$/)).toBeTruthy()
     expect(screen.getByText(/^System prompt$/)).toBeTruthy()
@@ -249,6 +270,16 @@ describe('ContextMeter breakdown', () => {
     // Deferred rows show an em dash instead of a window share.
     expect(screen.getAllByText('—').length).toBe(2)
     expect(screen.getByText('4.2%')).toBeTruthy()
+  })
+
+  it('colours categories with the accent and greys, never a status hue', () => {
+    render(<ContextMeter usage={detailUsage} />)
+    fireEvent.click(screen.getByRole('button', { name: /context window/i }))
+    for (const label of ['Record', 'System tools', 'MCP tools', 'System prompt', 'Skills']) {
+      const row = screen.getByText(new RegExp(`^${label}$`)).parentElement!
+      const swatch = row.querySelector('[aria-hidden]')!
+      expect(swatch.className).not.toMatch(/\bbg-(warning|success|danger)\b/)
+    }
   })
 
   it('expands MCP tools into per-server rows', () => {
@@ -272,7 +303,7 @@ describe('ContextMeter breakdown', () => {
     expect(screen.getByText(/^System$/)).toBeTruthy()
     expect(screen.getByText(/^History$/)).toBeTruthy()
     expect(screen.getByText(/^Tools$/)).toBeTruthy()
-    expect(screen.queryByText(/^Messages$/)).toBeNull()
+    expect(screen.queryByText(/^Record$/)).toBeNull()
     expect(screen.queryByText(/^Skills$/)).toBeNull()
   })
 })
