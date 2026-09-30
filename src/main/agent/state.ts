@@ -4,6 +4,8 @@ import { join, basename } from 'path'
 import { atomicWriteFile, atomicWriteFileAsync, atomicWriteJson } from '../storage/atomicWrite'
 import {
   DONE_WHEN_CHECKS_FILE,
+  DoneWhenChecksFileSchema,
+  checksTally,
   contractDoneWhenBlock,
   defaultDoneWhenBlock,
   normalizeCheckText,
@@ -45,6 +47,7 @@ import {
   thinkingFromReasoningState
 } from '../../shared/reasoning'
 import { logger } from '../../shared/logger'
+import { isRetryableTurnFailure } from '../../shared/errors'
 import { RUN_INTERRUPTED_ERROR } from '../../shared/runInterrupt'
 import { workspaceIdFromPath } from '../../shared/utils/workspaceId'
 import {
@@ -1224,6 +1227,7 @@ async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promis
         ...(armedLoop ? { loopArmed: true as const, loopNextAt: armedLoop.nextAt } : {}),
         ...(status.resumable ? { resumable: true as const } : {}),
         ...(status.error ? { error: status.error } : {}),
+        ...(retryableFailure(status) ? { retryable: true as const } : {}),
         ...(status.parentRunId ? { parentRunId: status.parentRunId } : {}),
         ...(status.inlineInstance ? { inlineInstance: true as const } : {}),
         ...(status.pathScope?.length ? { pathScope: status.pathScope } : {}),
@@ -1235,6 +1239,13 @@ async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promis
       if (workspaceRoot && !status.inlineInstance) {
         const review = await pendingReviewSummary(dir, workspaceRoot)
         if (review) summary.review = review
+        // Checks for a run in review, and for one still working (its hover card
+        // says how far along they are). checks.json changes only when the plan
+        // or a check verdict is written, so the mtime-keyed read is a stat.
+        if (review || status.status === 'running' || isActive(entry.name)) {
+          const checks = await reviewChecksTally(dir)
+          if (checks) summary.checks = checks
+        }
       }
       if (status.inlineInstance && status.parentRunId) {
         instances.push(summary)
@@ -1250,6 +1261,27 @@ async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promis
     }
   }
   return { parents, instances }
+}
+
+/**
+ * A failed run Retry can get past: its error's code, by the record's own rule.
+ * The code counts only while `error` is still the message it was written with,
+ * so a later failure written without a code never inherits it.
+ */
+export function retryableFailure(status: RunStatus): boolean {
+  if (status.status !== 'error' || !status.lastError) return false
+  if (status.lastError.message !== status.error) return false
+  return isRetryableTurnFailure({ errorCode: status.lastError.code })
+}
+
+/** A run's done-when checks, met of total — "2 of 3 checks met" on its row and hover card. */
+async function reviewChecksTally(runDir: string): Promise<RunSummary['checks']> {
+  const read = await readJsonDocCached(join(runDir, DONE_WHEN_CHECKS_FILE))
+  if (!read.ok) return undefined
+  const parsed = DoneWhenChecksFileSchema.safeParse(read.doc)
+  if (!parsed.success || parsed.data.checks.length === 0) return undefined
+  const tally = checksTally(parsed.data.checks)
+  return { met: tally.met, total: tally.total }
 }
 
 export async function listRuns(workspacePath: string): Promise<ListRunsResult> {

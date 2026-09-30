@@ -30,6 +30,7 @@ import {
   handleInlineInstanceFinished,
   noteInstanceChildEvent
 } from './agentInstances'
+import { clearRunActivity, noteRunActivity } from './runActivity'
 import { notifyBadgeChange } from '../app/badges'
 import { resolveAvailableRuntime, type RunHandle, type RuntimeKind } from './runtimes'
 import {
@@ -220,6 +221,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         }
         batcher.push(ev as AgentEvent)
         noteInstanceChildEvent(runId, ev as AgentEvent)
+        noteRunActivity(runId, ev as AgentEvent)
         if (terminal) markRunTurnComplete(runId, invokeId)
       }
     } catch (err) {
@@ -264,6 +266,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         terminalStatus = 'error'
       }
     } finally {
+      clearRunActivity(runId)
       notifyBadgeChange()
       // Forward the loop finally's late events (writes_checkpoint,
       // follow_up_dropped) on EVERY exit path. Taking them only on the happy

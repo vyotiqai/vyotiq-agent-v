@@ -84,7 +84,14 @@ export const PrCreateRequestSchema = z.object({
   message: z.string().trim().min(1).max(2000).optional(),
   mode: z.enum(['all', 'staged']).optional().default('all'),
   /** Draft is the safe default for automated creation. */
-  draft: z.boolean().optional().default(true)
+  draft: z.boolean().optional().default(true),
+  /**
+   * Title and description written for the PR (the PR panel drafts them from
+   * the task's result and its done-when checks). No title: gh's `--fill`.
+   */
+  title: z.string().trim().min(1).max(256).optional(),
+  /** GitHub caps a PR body at 65,536 characters. */
+  body: z.string().max(65_536).optional()
 })
 
 export const PrCreateResultSchema = z.object({

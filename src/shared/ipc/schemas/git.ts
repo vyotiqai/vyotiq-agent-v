@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { RunIdSchema } from './agent'
+import { TaskCommitSettledSchema } from './taskOutcome'
 
 export const GitChangedFileSchema = z.object({
   path: z.string(),
@@ -119,13 +121,17 @@ export const GitCommitRequestSchema = z.object({
    * `all` stages the whole working tree then commits (Uncommitted).
    * `staged` commits the index only — no `git add -A` (Staged scope).
    */
-  mode: z.enum(['all', 'staged']).optional().default('all')
+  mode: z.enum(['all', 'staged']).optional().default('all'),
+  /** The task whose Changes this was committed from: the commit settles its edits. */
+  runId: RunIdSchema.optional()
 })
 
 export const GitCommitResultSchema = z.object({
   committed: z.boolean(),
   pushed: z.boolean(),
-  detail: z.string()
+  detail: z.string(),
+  /** Set when the commit took edits of the task named by `runId`. */
+  task: TaskCommitSettledSchema.optional()
 })
 export type GitCommitResult = z.infer<typeof GitCommitResultSchema>
 

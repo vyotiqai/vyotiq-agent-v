@@ -23,6 +23,7 @@ const canSymlink = (() => {
   }
 })()
 import {
+  clearMemoryFiles,
   ensureMemoryLayout,
   listMemoryNotes,
   readMemoryFile,
@@ -55,6 +56,44 @@ describe('memory store', () => {
     expect(readMemoryFile(dir, 'notes/arch.md')).toContain('Arch')
     const listed = listMemoryNotes(dir)
     expect(listed.notes).toContain('arch.md')
+  })
+
+  it('clearMemoryFiles deletes the notes, index.md and state.md and nothing else', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    writeMemoryFile(dir, 'notes/arch.md', '# Arch')
+    writeMemoryFile(dir, 'notes/build.md', '# Build')
+    writeMemoryFile(dir, 'state.md', 'state')
+    const root = memoryRoot(dir)
+    writeFileSync(join(root, 'mine.txt'), 'kept', 'utf8')
+    writeFileSync(join(root, 'notes', 'keep.txt'), 'kept', 'utf8')
+
+    await expect(clearMemoryFiles(dir)).resolves.toEqual({ notes: 2 })
+
+    expect(listMemoryNotes(dir)).toMatchObject({ notes: [], hasState: false })
+    expect(existsSync(join(root, 'index.md'))).toBe(false)
+    expect(existsSync(join(root, 'mine.txt'))).toBe(true)
+    expect(existsSync(join(root, 'notes', 'keep.txt'))).toBe(true)
+    await expect(clearMemoryFiles(dir)).resolves.toEqual({ notes: 0 })
+  })
+
+  it('clearMemoryFiles has nothing to do in a workspace without memory', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    await expect(clearMemoryFiles(dir)).resolves.toEqual({ notes: 0 })
+    expect(existsSync(memoryRoot(dir))).toBe(false)
+  })
+
+  it.skipIf(!canSymlink)('clearMemoryFiles refuses a notes folder that leads outside memory', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    const outside = mkdtempSync(join(tmpdir(), 'vyotiq-mem-out-'))
+    try {
+      writeFileSync(join(outside, 'victim.md'), 'x', 'utf8')
+      mkdirSync(memoryRoot(dir), { recursive: true })
+      symlinkSync(outside, join(memoryRoot(dir), 'notes'), process.platform === 'win32' ? 'junction' : 'dir')
+      await expect(clearMemoryFiles(dir)).rejects.toThrow(/escapes/)
+      expect(existsSync(join(outside, 'victim.md'))).toBe(true)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 
   it('rejects path escape', () => {

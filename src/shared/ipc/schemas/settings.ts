@@ -704,6 +704,12 @@ export const SettingsSchema = z.object({
    */
   autoResumeInterruptedRuns: z.boolean().default(true),
   /**
+   * New task opens on "New worktree" instead of "This folder" (renderer only;
+   * the page still lets each task choose, and a folder with no commit to
+   * branch from starts here either way).
+   */
+  newTaskWorktree: z.boolean().default(false),
+  /**
    * Sub-agents (inline instances) one task may run at the same time. A spawn
    * past it is refused and the agent is told to await one first. The default
    * is above what a task uses in practice, so it changes nothing until lowered.
@@ -827,6 +833,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diagnosticsCommand: '',
   autoModeSwitch: true,
   autoResumeInterruptedRuns: true,
+  newTaskWorktree: false,
   maxParallelInstances: DEFAULT_MAX_PARALLEL_INSTANCES,
   taskSpendLimitUsd: 0,
   helperModel: null,

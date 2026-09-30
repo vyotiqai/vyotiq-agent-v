@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionMode, ChatMessage, Settings } from '../../shared/ipc'
+import type { AgentEvent, AgentInteractionMode, ChatMessage, Settings, ToolApprovalGrant } from '../../shared/ipc'
 import { toolContentWithImages } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
 import { composeAbortSignal } from '../../shared/utils/errors'
@@ -407,6 +407,9 @@ async function runSingleTool(
     summary
   })
   emitToolStart(ctx, events[0]!)
+  // Who let a gated call through, saved on its result so the record can say
+  // "Allowed by you · always for this task" after a reload.
+  let approvedBy: ToolApprovalGrant | undefined
 
   try {
     // Ask before doing anything. The request goes to the renderer directly and
@@ -435,6 +438,7 @@ async function runSingleTool(
         })
         return { ok: false, events, message: toolMsg }
       }
+      approvedBy = verdict.grant
     }
 
     const toolArgs = toolArgsFromCall(call.arguments)
@@ -449,7 +453,8 @@ async function runSingleTool(
           name: call.name,
           summary: summarizeToolArgs(call.name, call.arguments) || call.name,
           ok: false,
-          content: reason
+          content: reason,
+          ...(approvedBy ? { approvedBy } : {})
         })
         return {
           ok: false,
@@ -612,7 +617,8 @@ async function runSingleTool(
       summary: resultSummary,
       ok: result.ok,
       content,
-      ...(images ? { images } : {})
+      ...(images ? { images } : {}),
+      ...(approvedBy ? { approvedBy } : {})
     })
     if (!result.ok && !result.failureLogged) {
       // The args summary (e.g. "2 tasks") is not a failure reason. The real
@@ -655,7 +661,8 @@ async function runSingleTool(
         name: call.name,
         summary,
         ok: false,
-        content
+        content,
+        ...(approvedBy ? { approvedBy } : {})
       })
       return { ok: false, events, message: toolMsg }
     }

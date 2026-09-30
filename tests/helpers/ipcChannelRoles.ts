@@ -20,6 +20,7 @@ export const PUSH_CHANNEL_NAMES = [
   'windowFocusChanged',
   'themeChanged',
   'browserState',
+  'browserElementPicked',
   'ptyData',
   'ptyExit',
   'ptySessionsChanged',

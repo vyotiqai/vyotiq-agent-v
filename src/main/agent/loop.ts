@@ -478,7 +478,12 @@ async function* yieldNetworkInterruptedTerminal(
   errorMessage: string,
   errorCode: string,
   flushWriteCheckpoint: () => Generator<AgentEvent, void, unknown>,
-  writeStatus: (patch: { status: 'error'; error: string; resumable?: true }) => void,
+  writeStatus: (patch: {
+    status: 'error'
+    error: string
+    resumable?: true
+    lastError?: { code: string; message: string } | undefined
+  }) => void,
   incompleteReason: Extract<
     IncompleteReason,
     'network_interrupted' | 'circuit_open' | 'provider_error'
@@ -776,7 +781,12 @@ function* emitTerminalRunError(opts: {
   /** Mark the run resumable so a later resume restores the loop checkpoint. */
   resumable?: boolean
   flushWriteCheckpoint: () => Generator<AgentEvent, void, unknown>
-  writeStatus: (patch: { status: 'error'; error: string; resumable?: true }) => void
+  writeStatus: (patch: {
+    status: 'error'
+    error: string
+    resumable?: true
+    lastError?: { code: string; message: string } | undefined
+  }) => void
 }): Generator<AgentEvent, void, unknown> {
   const { runId, invokeId, runDir, message, code, flushWriteCheckpoint, writeStatus } = opts
   const emitError = opts.emitErrorEvent !== false && code != null
@@ -797,7 +807,14 @@ function* emitTerminalRunError(opts: {
     yield* flushWriteCheckpoint()
   }
   yield { type: 'status', runId, invokeId, status: 'error' }
-  writeStatus({ status: 'error', error: message, ...(opts.resumable ? { resumable: true } : {}) })
+  writeStatus({
+    status: 'error',
+    error: message,
+    ...(opts.resumable ? { resumable: true } : {}),
+    // The run list gates Retry by this code, as the record does by the error
+    // event's; undefined clears one an earlier failure left.
+    lastError: code != null ? { code, message } : undefined
+  })
   if (runDir) {
     if (errorEvent) {
       appendEvent(runDir, errorEvent)

@@ -23,6 +23,8 @@ import type {
   CompactRunResult,
   DeepLinkPayload,
   ResolveWritesResult,
+  ReopenWritesResult,
+  TaskOutcome,
   ReadRunArtifactResult,
   TaskFileStatsResult,
   TaskFileDiffResult,
@@ -84,6 +86,8 @@ import type {
   WorkspaceAgentContextRequest,
   WorkspaceAgentContextResult,
   WorkspaceAgentContextChanged,
+  WorkspaceClearMemoryRequest,
+  WorkspaceClearMemoryResult,
   WorkspaceGrepRequest,
   WorkspaceGrepResult,
   GitConflictFileResult,
@@ -325,6 +329,21 @@ export interface VyotiqApi {
   }) => Promise<IpcResult<true>>
   /** Each file the task wrote, its first before-image against the file now; counts exact or absent. */
   taskFileStats: (payload: { workspacePath: string; runId: string }) => Promise<IpcResult<TaskFileStatsResult>>
+  /** How the task's edits were settled: Kept / Undone per file, and the commit that took them. */
+  taskOutcome: (payload: { workspacePath: string; runId: string }) => Promise<IpcResult<TaskOutcome>>
+  /** Take back a Keep or an Undo: the files wait on review again. */
+  reopenWrites: (payload: {
+    workspacePath: string
+    runId: string
+    checkpointId?: string
+    paths?: string[]
+  }) => Promise<IpcResult<ReopenWritesResult>>
+  /** Take back the commit made from the task's Changes (unpushed and still HEAD). */
+  undoTaskCommit: (payload: {
+    workspacePath: string
+    runId: string
+    sha: string
+  }) => Promise<IpcResult<ReopenWritesResult>>
   /** One file the task wrote, as `git diff` would print it. */
   taskFileDiff: (payload: {
     workspacePath: string
@@ -471,7 +490,9 @@ export interface VyotiqApi {
     workspacePath: string,
     message: string,
     push: boolean,
-    mode?: 'all' | 'staged'
+    mode?: 'all' | 'staged',
+    /** The task whose Changes this is committed from: the commit settles its edits. */
+    runId?: string
   ) => Promise<IpcResult<GitCommitResult>>
   gitStageAll: (workspacePath: string) => Promise<IpcResult<{ staged: boolean; detail: string }>>
   gitStagePaths: (payload: {
@@ -515,6 +536,9 @@ export interface VyotiqApi {
       message?: string
       mode?: 'all' | 'staged'
       draft?: boolean
+      /** Given, replaces gh's `--fill` (with `body` as the description). */
+      title?: string
+      body?: string
     }
   ) => Promise<IpcResult<import('./ipc').PrCreateResult>>
   prMerge: (
@@ -604,6 +628,12 @@ export interface VyotiqApi {
   }) => Promise<IpcResult<{ cleared: 'history' | 'cookies' | 'cache' | 'all' }>>
   /** Toggle the floating always-on-top PiP window hosting the live browser view. */
   browserPipToggle: () => Promise<IpcResult<{ pip: boolean }>>
+  /** Pick elements in the shown Browser tab: hover outlines, click or Enter picks, Esc stops. */
+  browserPickStart: (workspacePath?: string) => Promise<IpcResult<boolean>>
+  browserPickStop: () => Promise<IpcResult<true>>
+  onBrowserElementPicked: (
+    handler: (element: import('./ipc').BrowserPickedElement) => void
+  ) => () => void
   openLogsDir: () => Promise<IpcResult<true>>
   getLogsPath: () => Promise<IpcResult<string>>
   getCrashDiagnostics: () => Promise<IpcResult<CrashDiagnosticsSnapshot>>
@@ -826,6 +856,13 @@ export interface VyotiqApi {
   onAgentContextChanged: (
     handler: (payload: WorkspaceAgentContextChanged) => void
   ) => () => void
+  /**
+   * Delete the workspace's memory notes, index.md and state.md — nothing else
+   * under .vyotiq/memory. Irreversible: callers confirm first.
+   */
+  clearWorkspaceMemory: (
+    payload: WorkspaceClearMemoryRequest
+  ) => Promise<IpcResult<WorkspaceClearMemoryResult>>
   /** Local codebase index embedder / download status. */
   codeIndexStatus: () => Promise<
     IpcResult<CodeIndexRuntimeStatus & { settings: CodeIndexSettings }>

@@ -1,13 +1,15 @@
 import { resolveRunDir } from '../storage/paths'
 import type { ActiveRun } from '../../shared/ipc'
 import { oldestPendingAgentQuestionAt } from './agentQuestion'
+import { runActivityOf } from './runActivity'
 import { listActiveRuns } from './runRegistry'
 import { oldestPendingToolApprovalAt } from './toolApproval'
 import { readTodos } from './tools/todo'
 
 /**
  * What the navigator needs to know about a live run beyond "it is running":
- * whether it is blocked on you, and how far through its todo list it is.
+ * whether it is blocked on you, how far through its todo list it is, and
+ * what it is doing now.
  *
  * Kept out of runRegistry so the registry stays free of disk reads and of the
  * approval/question modules (runRegistry is imported by both).
@@ -24,6 +26,8 @@ export function listActiveRunsView(): ActiveRun[] {
     if (waiting) view.waiting = waiting
     const steps = todoProgress(run.workspacePath, run.runId)
     if (steps) view.steps = steps
+    const activity = runActivityOf(run.runId)
+    if (activity) view.activity = activity
     return view
   })
 }

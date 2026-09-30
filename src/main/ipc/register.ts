@@ -133,6 +133,7 @@ import {
   WorkspaceListDocsRequestSchema,
   WorkspaceListRulesRequestSchema,
   WorkspaceAgentContextRequestSchema,
+  WorkspaceClearMemoryRequestSchema,
   WorkspaceDiagnosticsRequestSchema,
   MarketplaceBrowseRequestSchema,
   MarketplaceGetContentsRequestSchema,
@@ -333,6 +334,15 @@ import {
 } from '../agent/compactRun'
 import { resolveWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
 import { taskFileDiff, taskFileStats } from '../agent/taskFileDiff'
+import { readTaskOutcome } from '../agent/taskOutcome'
+import { reopenTaskWrites, settleTaskAfterCommit, undoTaskCommit } from '../agent/taskSettle'
+import {
+  ReopenWritesRequestSchema,
+  TaskOutcomeRequestSchema,
+  UndoTaskCommitRequestSchema,
+  type ReopenWritesResult,
+  type TaskOutcome
+} from '../../shared/ipc/schemas/taskOutcome'
 import {
   prepareRewindAndReplaceUserMessage,
   prepareRewindToUserMessage,
@@ -358,7 +368,7 @@ import {
 } from '@main/settings/settingsFile'
 import { readAdcCredentials } from '@main/agent/providers/google/googleAuth'
 import type { GoogleAdcStatus, ProxyStatus } from '../../shared/domain/network'
-  import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
+  import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip, startBrowserElementPick, stopBrowserElementPick } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
   clearComposerAttachmentsForWorkspace,
@@ -400,6 +410,7 @@ import {
 import { pruneStaleInstanceWorktreesBestEffort } from '../git/instanceWorktree'
 import { listWorkspaceRulesForMention, clearRulesCache, isRuleRelatedRelPath } from '../agent/context/rules'
 import { buildWorkspaceAgentContext } from '../agent/context/agentContext'
+import { clearMemoryFiles } from '../agent/context/memory'
 import {
   armAgentContextWatch,
   stopAgentContextWatch
@@ -2450,6 +2461,62 @@ export function registerIpc(): void {
     }
   )
 
+  // How the task's edits were settled: the record's "Committed abc1234 to main".
+  ipcMain.handle(IPC.runsTaskOutcome, async (event, raw): Promise<IpcResult<TaskOutcome>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskOutcomeRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+      return ok(await readTaskOutcome(resolveRunDir(req.workspacePath, req.runId)))
+    } catch (err) {
+      return failFrom(err, IPC.runsTaskOutcome)
+    }
+  })
+
+  // Undo on a Keep or an Undo: the files wait on review again.
+  ipcMain.handle(IPC.runsReopenWrites, async (event, raw): Promise<IpcResult<ReopenWritesResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = ReopenWritesRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const result = reopenTaskWrites(req.workspacePath, req.runId, {
+        ...(req.checkpointId ? { checkpointId: req.checkpointId } : {}),
+        ...(req.paths?.length ? { paths: req.paths } : {})
+      })
+      logger.info('Reopened agent writes', {
+        scope: 'ipc',
+        correlationId: req.runId,
+        channel: IPC.runsReopenWrites,
+        reopened: result.reopened.length,
+        conflicted: result.conflicted.length
+      })
+      return ok(result)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/stop the run|run not found|checkpoint not found|invalid checkpoint|name the files/i.test(msg)) {
+        return failExpected(msg, IPC.runsReopenWrites)
+      }
+      return failFrom(err, IPC.runsReopenWrites)
+    }
+  })
+
+  // Undo on a commit made from the task's Changes: unpushed and still HEAD only.
+  ipcMain.handle(IPC.runsUndoTaskCommit, async (event, raw): Promise<IpcResult<ReopenWritesResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = UndoTaskCommitRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await undoTaskCommit(req.workspacePath, req.runId, req.sha))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/stop the run|run not found|not recorded|no longer the latest|pushed|first commit|merge commit|not a git repository/i.test(msg)) {
+        return failExpected(msg, IPC.runsUndoTaskCommit)
+      }
+      return failFrom(err, IPC.runsUndoTaskCommit)
+    }
+  })
+
   ipcMain.handle(
     IPC.runsTaskFileDiff,
     async (event, raw): Promise<IpcResult<TaskFileDiffResult>> => {
@@ -2945,7 +3012,9 @@ export function registerIpc(): void {
           req.push === true,
           req.mode ?? 'all'
         )
-        return ok(result)
+        // Committed from a task's Changes: the commit settles what it took of that task.
+        const task = req.runId ? await settleTaskAfterCommit(req.workspacePath, req.runId, result) : undefined
+        return ok(task ? { ...result, task } : result)
       } finally {
         invalidateGitStatusCache(req.workspacePath)
         emitGitStatusChanged(req.workspacePath)
@@ -3121,9 +3190,11 @@ export function registerIpc(): void {
       return ok(
         req.message
           ? await prCreateFromChanges(req.workspacePath, req.message, req.mode, {
-              draft: req.draft
+              draft: req.draft,
+              title: req.title,
+              body: req.body
             })
-          : await prCreate(req.workspacePath, { draft: req.draft })
+          : await prCreate(req.workspacePath, { draft: req.draft, title: req.title, body: req.body })
       )
     } catch (err) {
       return failFrom(err, IPC.prCreate)
@@ -4616,6 +4687,19 @@ export function registerIpc(): void {
     }
   })
 
+  // Deletes only what the memory tools keep; the context watcher then pushes
+  // the new (empty) count to every surface showing it.
+  ipcMain.handle(IPC.workspaceClearMemory, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = WorkspaceClearMemoryRequestSchema.parse(raw ?? {})
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await clearMemoryFiles(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.workspaceClearMemory)
+    }
+  })
+
   ipcMain.handle(IPC.workspaceDiagnostics, async (event, raw) => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -4895,6 +4979,28 @@ export function registerIpc(): void {
       }
     }
   )
+
+  ipcMain.handle(IPC.browserPickStart, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const scope = BrowserWorkspaceScopeSchema.optional().parse(raw)
+      if (scope?.workspacePath && !isOpenWorkspace(scope.workspacePath)) return fail('Workspace is not open')
+      const res = await startBrowserElementPick(scope?.workspacePath)
+      return 'error' in res ? fail(res.error) : ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.browserPickStart)
+    }
+  })
+
+  ipcMain.handle(IPC.browserPickStop, async (event): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      stopBrowserElementPick()
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.browserPickStop)
+    }
+  })
 
   ipcMain.handle(
     IPC.browserPipToggle,

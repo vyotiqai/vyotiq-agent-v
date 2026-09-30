@@ -67,6 +67,21 @@ export const ToolImageRefSchema = z.object({
 })
 export type ToolImageRef = z.infer<typeof ToolImageRefSchema>
 
+/**
+ * How a gated call got past the approval gate, saved on its tool_result so the
+ * record can say so after a reload. `you`: answered on the card — `once`,
+ * `task` ("Allow for this task") or `workspace` ("Always allow"). `rule`: a
+ * standing allow for the task or the workspace let it through without asking.
+ * Calls the gate never held (exempt tools, approvals off, autonomy) carry none.
+ */
+export const ToolApprovalGrantSchema = z.object({
+  by: z.enum(['you', 'rule']),
+  scope: z.enum(['once', 'task', 'workspace']),
+  /** What an "Always allow" answer remembers: the tool, or the terminal command prefix. */
+  allow: z.string().max(2000).optional()
+})
+export type ToolApprovalGrant = z.infer<typeof ToolApprovalGrantSchema>
+
 const AttachmentImagePartSchema = z.object({
   type: z.literal('image_url'),
   url: z.string().min(1).max(MAX_IMAGE_DATA_URL_CHARS),
@@ -156,6 +171,12 @@ export const RunStatusSchema = z.object({
   step: z.number().int().min(0).default(0),
   updatedAt: z.string(),
   error: z.string().optional(),
+  /**
+   * The code of the error that ended the run, with the message it was written
+   * with. Honoured only while `error` is still that message, so a later
+   * failure written without a code never inherits it.
+   */
+  lastError: z.object({ code: z.string().min(1).max(100), message: z.string() }).optional(),
   goal: z.string().optional(),
   workspacePath: z.string().optional(),
   /** Latest chatStart invocation represented by outcome fields. */
@@ -372,7 +393,9 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     /** IPC preview was capped; full output is on disk until lazy-loaded. */
     contentTruncated: z.boolean().optional(),
     /** Images the tool returned (screenshots), read via `runs:readArtifact`. */
-    images: z.array(ToolImageRefSchema).max(16).optional()
+    images: z.array(ToolImageRefSchema).max(16).optional(),
+    /** Who let a gated call run, and for how long; absent when the gate never held it. */
+    approvedBy: ToolApprovalGrantSchema.optional()
   }),
   z.object({
     /** Live progress from a long-running tool, shown under the tool row. */
@@ -867,6 +890,12 @@ export const RunSummarySchema = z.object({
   loopNextAt: z.string().min(1).optional(),
   resumable: z.literal(true).optional(),
   error: z.string().optional(),
+  /**
+   * A failed run whose error Retry can get past (`isRetryableTurnFailure` on
+   * its code) — what the task view's own Retry is gated by, so the navigator
+   * row and the Inbox offer Retry for the same failures.
+   */
+  retryable: z.literal(true).optional(),
   /** Present when this run is an inline agent instance nested under a parent chat. */
   parentRunId: z.string().min(1).optional(),
   inlineInstance: z.literal(true).optional(),
@@ -888,6 +917,17 @@ export const RunSummarySchema = z.object({
       files: z.number().int().min(1),
       add: z.number().int().min(0).optional(),
       del: z.number().int().min(0).optional()
+    })
+    .optional(),
+  /**
+   * The run's done-when checks, `met` of `total` (not met and not yet judged
+   * both count as unmet). Read only for a run in review or still working —
+   * the rows whose hover card says it.
+   */
+  checks: z
+    .object({
+      met: z.number().int().min(0),
+      total: z.number().int().min(1)
     })
     .optional()
 })
@@ -1428,6 +1468,17 @@ export const HomeActivityResultSchema = z.object({
     cancelled: z.number().int().min(0),
     running: z.number().int().min(0)
   }),
+  /**
+   * Files the window's tasks changed, by how they were settled: each file's
+   * last Kept or Undone mark in its task's write checkpoints. Files still
+   * waiting for review are left out. Absent when none was settled.
+   */
+  changes: z
+    .object({
+      kept: z.number().int().min(0),
+      undone: z.number().int().min(0)
+    })
+    .optional(),
   totals: z.object({
     runs: z.number().int().min(0),
     billedInputTokens: z.number().int().min(0),
@@ -1921,7 +1972,9 @@ export const ActiveRunSchema = z.object({
       completed: z.number().int().min(0),
       total: z.number().int().min(1)
     })
-    .optional()
+    .optional(),
+  /** What it is doing now, in one line ("Running pnpm test", "Thinking"). Absent before its first step. */
+  activity: z.string().min(1).max(200).optional()
 })
 export type ActiveRun = z.infer<typeof ActiveRunSchema>
 
@@ -2258,6 +2311,14 @@ export const WorkspaceAgentContextRequestSchema = z.object({
   workspacePath: z.string().min(1)
 })
 export type WorkspaceAgentContextRequest = z.infer<typeof WorkspaceAgentContextRequestSchema>
+
+/** Settings → Agent → Memory → Clear: the workspace whose memory notes go. */
+export const WorkspaceClearMemoryRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type WorkspaceClearMemoryRequest = z.infer<typeof WorkspaceClearMemoryRequestSchema>
+/** How many notes were removed (index.md and state.md are not counted). */
+export type WorkspaceClearMemoryResult = { notes: number }
 
 export const WorkspaceAgentContextResultSchema = z.object({
   workspaceName: z.string().min(1),

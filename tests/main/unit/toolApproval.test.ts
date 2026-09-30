@@ -180,7 +180,7 @@ describe('createApprovalGate', () => {
       ask: async () => 'session'
     })
 
-    expect(await gate.authorize(WRITE)).toEqual({ allowed: true })
+    expect(await gate.authorize(WRITE)).toEqual({ allowed: true, grant: { by: 'you', scope: 'task' } })
     expect(task).toEqual(['edit'])
     expect(always).toEqual([])
   })
@@ -199,7 +199,7 @@ describe('createApprovalGate', () => {
       }
     })
 
-    expect(await followUp.authorize(WRITE)).toEqual({ allowed: true })
+    expect(await followUp.authorize(WRITE)).toEqual({ allowed: true, grant: { by: 'rule', scope: 'task' } })
     expect(asked).toBe(0)
   })
 
@@ -234,7 +234,7 @@ describe('createApprovalGate', () => {
     })
     const terminal = (id: string, command: string) => ({ id, name: 'terminal', arguments: JSON.stringify({ command }) })
 
-    expect(await gate.authorize(terminal('t1', 'pnpm vitest run tests/a.test.ts'))).toEqual({ allowed: true })
+    expect(await gate.authorize(terminal('t1', 'pnpm vitest run tests/a.test.ts'))).toEqual({ allowed: true, grant: { by: 'you', scope: 'workspace', allow: 'pnpm vitest' } })
     // Main says on the card what Always would remember.
     expect(requests[0]!.alwaysAllowCommand).toBe('pnpm vitest')
     expect(persisted).toEqual(['terminal:pnpm vitest'])
@@ -244,6 +244,25 @@ describe('createApprovalGate', () => {
     // Another command still asks.
     await gate.authorize(terminal('t3', 'pnpm install'))
     expect(requests).toHaveLength(2)
+  })
+
+  it('says which standing allow let a call through, and nothing for a call it never held', async () => {
+    const gate = createApprovalGate({
+      runId: 'run-1',
+      mode: 'mutating',
+      workspaceAllowlist: ['edit', 'terminal:pnpm vitest'],
+      signal: new AbortController().signal,
+      ask: async () => 'deny'
+    })
+
+    expect(await gate.authorize(WRITE)).toEqual({ allowed: true, grant: { by: 'rule', scope: 'workspace' } })
+    expect(
+      await gate.authorize({ id: 't1', name: 'terminal', arguments: JSON.stringify({ command: 'pnpm vitest run' }) })
+    ).toEqual({ allowed: true, grant: { by: 'rule', scope: 'workspace' } })
+    // A read is never held: there is no decision to report.
+    expect(await gate.authorize({ id: 'r1', name: 'read', arguments: JSON.stringify({ path: 'a.ts' }) })).toEqual({
+      allowed: true
+    })
   })
 
   it('never offers or grants a standing allow for a command that chains or redirects', async () => {
@@ -262,7 +281,7 @@ describe('createApprovalGate', () => {
     })
     // An allowed prefix does not carry a chained command through.
     const chained = { id: 't1', name: 'terminal', arguments: JSON.stringify({ command: 'pnpm vitest && rm -rf dist' }) }
-    expect(await gate.authorize(chained)).toEqual({ allowed: true })
+    expect(await gate.authorize(chained)).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
     expect(requests).toHaveLength(1)
     expect(requests[0]!.alwaysAllowCommand).toBeNull()
     // Let through once; remembered for nothing.
@@ -302,7 +321,7 @@ describe('createApprovalGate', () => {
     expect(seen[0]!.mutating).toBe(true)
 
     expect(resolveToolApproval({ requestId: seen[0]!.requestId, runId: 'run-1', decision: 'once' })).toBe(true)
-    expect(await verdict).toEqual({ allowed: true })
+    expect(await verdict).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
   })
 
   it('denies when no window is listening rather than hanging', async () => {
@@ -407,7 +426,7 @@ describe('createApprovalGate', () => {
     expect(seen).toHaveLength(2)
 
     expect(resolveToolApproval({ requestId: seen[0]!.requestId, runId: 'run-1', decision: 'once' })).toBe(true)
-    await expect(verdict).resolves.toEqual({ allowed: true })
+    await expect(verdict).resolves.toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
     expect(listPendingToolApprovals('run-1')).toEqual([])
   })
 
@@ -434,7 +453,7 @@ describe('createApprovalGate', () => {
     expect(resolveToolApproval({ requestId: requests[0]!.requestId, runId: 'run-1', decision: 'once' })).toBe(
       true
     )
-    expect(await verdict).toEqual({ allowed: true })
+    expect(await verdict).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
   })
 
   it('auto-denies after the approval timeout', async () => {
@@ -480,7 +499,7 @@ describe('createApprovalGate', () => {
     const pending = gate.authorize(deleteCall)
     await Promise.resolve()
     expect(asked).toBe(1)
-    expect(await pending).toEqual({ allowed: true })
+    expect(await pending).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
   })
 
   it('flags high-risk tools for autonomous gating', () => {
@@ -540,7 +559,7 @@ describe('createApprovalGate', () => {
     })
     await Promise.resolve()
     expect(asked).toBe(1)
-    expect(await pending).toEqual({ allowed: true })
+    expect(await pending).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
   })
 
   it('asks for MCP server tools when mode is off and mcpProtection is on', async () => {
@@ -560,7 +579,7 @@ describe('createApprovalGate', () => {
     expect(asked).toBe(0)
     expect(
       await gate.authorize({ id: 'c-mcp', name: 'mcp__gmail__send', arguments: '{}' })
-    ).toEqual({ allowed: true })
+    ).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
     expect(asked).toBe(1)
     expect(
       await gate.authorize({ id: 'c-meta', name: 'mcp_list_tools', arguments: '{}' })
@@ -608,7 +627,7 @@ describe('createApprovalGate', () => {
     const pending = gate.authorize(mcpCall)
     await Promise.resolve()
     expect(asked).toBe(1)
-    expect(await pending).toEqual({ allowed: true })
+    expect(await pending).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
   })
 })
 
@@ -649,7 +668,7 @@ describe('command guard', () => {
 
   it('asks before a destructive command even with approvals off', async () => {
     const { gate, asked } = gateWith({})
-    expect(await gate.authorize(terminal('rm -rf ~'))).toEqual({ allowed: true })
+    expect(await gate.authorize(terminal('rm -rf ~'))).toEqual({ allowed: true, grant: { by: 'you', scope: 'once' } })
     expect(asked).toHaveLength(1)
     expect(asked[0]!.danger).toMatch(/outside the workspace/)
     expect(asked[0]!.alwaysAllowCommand).toBeNull()

@@ -281,6 +281,53 @@ describe('gh helpers', () => {
     )
   })
 
+  it('prCreate passes a written title and description instead of --fill, then removes only its body file', async () => {
+    const { readFile, access } = await import('fs/promises')
+    const { tmpdir } = await import('os')
+    mockGhInstalled()
+    vi.mocked(existsSync).mockImplementation((target) => {
+      const normalized = String(target).replace(/\\/g, '/')
+      return normalized === bundledGhPath || normalized.endsWith('/ws/.git')
+    })
+    let bodyFile = ''
+    let bodyText = ''
+    execFileAsync.mockImplementation(async (_executable, rawArgs) => {
+      const args = rawArgs as string[]
+      if (args[0] === '--version') return { stdout: 'gh version 2.0', stderr: '' }
+      if (args[0] === 'auth' && args[1] === 'setup-git') return { stdout: '', stderr: '' }
+      if (args[0] === 'remote') return { stdout: 'origin\n', stderr: '' }
+      if (args[0] === 'symbolic-ref') return { stdout: 'feat/panels\n', stderr: '' }
+      if (args[0] === 'repo' && args[1] === 'view') {
+        return { stdout: JSON.stringify({ defaultBranchRef: { name: 'main' } }), stderr: '' }
+      }
+      if (args[0] === 'pr' && args[1] === 'view') {
+        throw new Error('no pull requests found for branch "feat/panels"')
+      }
+      if (args[0] === 'rev-parse' && args.includes('@{upstream}')) {
+        throw new Error('no upstream configured')
+      }
+      if (args[0] === 'rev-parse') return { stdout: 'feat/panels\n', stderr: '' }
+      if (args[0] === 'push') return { stdout: '', stderr: '' }
+      if (args[0] === 'pr' && args[1] === 'create') {
+        bodyFile = args[args.indexOf('--body-file') + 1]!
+        bodyText = await readFile(bodyFile, 'utf8')
+        return { stdout: 'https://github.com/ex/repo/pull/12\n', stderr: '' }
+      }
+      throw new Error(`unexpected command: ${args.join(' ')}`)
+    })
+
+    await prCreate('/ws', { title: 'Retry failed webhooks', body: 'Retries at 1, 5, 25 minutes.\n\n## Done when\n\n- [x] tests pass' })
+    const createArgs = execFileAsync.mock.calls.find(
+      (call) => (call[1] as string[] | undefined)?.[1] === 'create'
+    )?.[1] as string[]
+    expect(createArgs).not.toContain('--fill')
+    expect(createArgs).toContain('--title=Retry failed webhooks')
+    expect(createArgs).toContain('--draft')
+    expect(bodyFile.startsWith(tmpdir())).toBe(true)
+    expect(bodyText).toBe('Retries at 1, 5, 25 minutes.\n\n## Done when\n\n- [x] tests pass\n')
+    await expect(access(bodyFile)).rejects.toThrow()
+  })
+
   it('prCreate does not create a GitHub repository when the repo has no commits', async () => {
     mockGhInstalled()
     vi.mocked(existsSync).mockImplementation((target) => {

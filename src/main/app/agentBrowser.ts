@@ -36,6 +36,7 @@ import { assertBrowserActionAllowed, resolveBrowserUploadPath } from './browserA
 import type { ToolImageRef } from '../../shared/ipc'
 import { clampSnipFrames, clampSnipInterval } from './snipLimits'
 import { applyProxyToSession } from '../net/proxy'
+import { startElementPick, type ElementPickSession } from './agentBrowserPick'
 
 export {
   DEFAULT_NAV_TIMEOUT_MS,
@@ -170,6 +171,8 @@ export type AgentBrowserState = {
   tabs?: Array<{ id: string; title: string; url: string; active: boolean }>
   canGoBack?: boolean
   canGoForward?: boolean
+  /** True while the Browser tab is picking an element for the composer. */
+  picking?: boolean
 }
 
 const tabs = new Map<string, BrowserTab>()
@@ -209,6 +212,9 @@ let pipMode = false
 let offstageWindow: BaseWindow | null = null
 /** Captures in flight; they need the offstage view painted even when idle. */
 let captureHolds = 0
+/** The Browser tab's element picker, armed on the one tab the panel shows. */
+let pickSession: { tabId: string; session: ElementPickSession } | null = null
+let pickStarting = false
 const PIP_MIN_WIDTH = 380
 const PIP_MIN_HEIGHT = 260
 
@@ -444,6 +450,12 @@ function applyActiveViewBounds(): void {
     applyGuestThrottling(tab)
   }
   if (tabs.size === 0) destroyOffstageWindow()
+  // Picking is for the page on screen: a hidden, covered, popped-out or
+  // switched-away tab ends it rather than being forced to render.
+  if (pickSession) {
+    const picked = tabs.get(pickSession.tabId)
+    if (!picked || !tabShownInPanel(picked)) stopBrowserElementPick()
+  }
 }
 
 export function setAgentBrowserBounds(bounds: (EmbedBounds & { occluded?: boolean }) | null): void {
@@ -565,6 +577,8 @@ function withBrowserLock<T>(
 }
 
 function beginAgentControl(): void {
+  // The inspect overlay swallows mouse input, the agent's synthetic clicks included.
+  stopBrowserElementPick()
   agentBusyDepth += 1
   if (!userTookControl) {
     emitCurrent({ agentBusy: true, userControl: false })
@@ -2304,6 +2318,7 @@ export function focusAgentBrowser(): boolean {
 }
 
 export function closeAgentBrowser(): void {
+  stopBrowserElementPick()
   exitAgentBrowserPip()
   for (const tab of [...tabs.values()]) {
     destroyTab(tab)
@@ -2428,6 +2443,83 @@ export function getAgentBrowserState(): AgentBrowserState {
   return lastState
 }
 
+/** True when the tab is the one the Browser panel paints — not offstage, popped out or covered. */
+function tabShownInPanel(tab: BrowserTab): boolean {
+  if (isTabDestroyed(tab) || tab.id !== visibleTabId || pipMode || embedOccluded) return false
+  if (!embedBounds || embedBounds.width < 2 || embedBounds.height < 2) return false
+  const main = getMainWindow()
+  if (!main || main.isDestroyed() || !main.contentView.children.includes(tab.view)) return false
+  return tabIsPainted(tab)
+}
+
+/**
+ * Arm the element picker on the page the Browser panel shows, and hand the
+ * page keyboard focus so the arrow keys, Enter and Esc reach it. Each pick is
+ * sent to the renderer on `browserElementPicked`; picking runs until Esc, the
+ * toolbar button, a navigation, or the page leaving the panel.
+ */
+export async function startBrowserElementPick(
+  workspacePath?: string
+): Promise<{ picking: true } | { error: string }> {
+  const tab = visibleTabId ? tabs.get(visibleTabId) : undefined
+  if (!tab || isTabDestroyed(tab) || !tabBelongsToWorkspace(tab, workspacePath)) {
+    return { error: 'No page is open in the Browser tab' }
+  }
+  if (!tabShownInPanel(tab)) return { error: 'Show the page in the Browser tab to pick from it' }
+  if (agentBusyDepth > 0) return { error: 'The agent is using the browser' }
+  if (pickSession?.tabId === tab.id) {
+    tabContents(tab).focus()
+    return { picking: true }
+  }
+  if (pickStarting) return { error: 'Already starting' }
+  stopBrowserElementPick()
+  pickStarting = true
+  const holder: { session: ElementPickSession | null } = { session: null }
+  let session: ElementPickSession
+  try {
+    session = await startElementPick({
+      wc: tabContents(tab),
+      refs: () => [...tab.lastRefs.values()].map((ref) => ({ id: ref.id, selector: ref.selector })),
+      onPick: (element) => {
+        const main = getMainWindow()
+        if (!main || main.isDestroyed()) return
+        main.webContents.send(IPC.browserElementPicked, element)
+      },
+      onEnd: (reason) => {
+        if (!pickSession || pickSession.session !== holder.session) return
+        pickSession = null
+        pushState({ picking: false })
+        // Esc was pressed in the page: give the keyboard back to the app.
+        if (reason === 'escape') {
+          const main = getMainWindow()
+          if (main && !main.isDestroyed()) main.webContents.focus()
+        }
+      }
+    })
+  } catch (err) {
+    return { error: `Could not start picking: ${err instanceof Error ? err.message : String(err)}` }
+  } finally {
+    pickStarting = false
+  }
+  holder.session = session
+  if (!session.active() || !tabShownInPanel(tab) || agentBusyDepth > 0) {
+    session.stop()
+    return { error: 'The page left the Browser tab' }
+  }
+  pickSession = { tabId: tab.id, session }
+  pushState({ picking: true })
+  tabContents(tab).focus()
+  return { picking: true }
+}
+
+export function stopBrowserElementPick(): void {
+  const current = pickSession
+  if (!current) return
+  pickSession = null
+  current.session.stop('stopped')
+  pushState({ picking: false })
+}
+
 export function selectBrowserTab(tabId: string, workspacePath?: string): boolean {
   const tab = tabs.get(tabId)
   if (!tab || isTabDestroyed(tab) || !tabBelongsToWorkspace(tab, workspacePath)) return false
@@ -2477,6 +2569,8 @@ export function resetAgentBrowserForTests(): void {
   embedOccluded = false
   offstageWindow = null
   captureHolds = 0
+  pickSession = null
+  pickStarting = false
   agentBusyDepth = 0
   userTookControl = false
   snapshotSeq = 0

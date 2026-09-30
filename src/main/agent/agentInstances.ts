@@ -14,7 +14,7 @@ import {
   stepUsageFromEvent,
   type StepUsageTotals
 } from '../../shared/utils/runTelemetry'
-import { TOOL_LABELS } from '../../shared/utils/toolSummary'
+import { activityOf } from './runActivity'
 import { logger } from '../../shared/logger'
 import { abortError } from '../../shared/errors'
 import { AWAIT_AGENT_INSTANCE_MAX_MS } from './schemas/tools'
@@ -80,7 +80,6 @@ type ChildProgress = {
 const childProgress = new Map<string, ChildProgress>()
 /** At most one live progress update per child per this many ms. */
 const PROGRESS_INTERVAL_MS = 1_000
-const ACTIVITY_MAX_CHARS = 200
 /**
  * Child-status waits are event-driven (fs.watch on the child's run dir) with
  * this as the backstop recheck — a polling timer on a long await did a sync
@@ -244,12 +243,6 @@ function scheduleChildProgress(childRunId: string, progress: ChildProgress): voi
     return
   }
   if (!progress.timer) progress.timer = setTimeout(() => sendChildProgress(childRunId), wait)
-}
-
-function activityOf(name: string, summary: string): string {
-  const verb = TOOL_LABELS[name]?.running ?? name
-  const line = `${verb} ${summary.replace(/\s+/g, ' ').trim()}`.trim()
-  return line.length <= ACTIVITY_MAX_CHARS ? line : `${line.slice(0, ACTIVITY_MAX_CHARS - 1)}…`
 }
 
 /**

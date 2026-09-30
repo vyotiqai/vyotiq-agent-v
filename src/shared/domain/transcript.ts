@@ -1,4 +1,4 @@
-import type { ChatMessage, MessageContent, PersistedEvent, ToolImageRef } from '../ipc'
+import type { ChatMessage, MessageContent, PersistedEvent, ToolApprovalGrant, ToolImageRef } from '../ipc'
 import {
   contentAudios,
   contentImageArtifacts,
@@ -40,6 +40,8 @@ export type UiToolRow = {
   presentation?: ToolPresentation
   /** Screenshots and other images the tool returned, as run-dir artifacts. */
   images?: ToolImageRef[]
+  /** Who let this gated call run (from its tool_result); absent when nothing held it. */
+  approvedBy?: ToolApprovalGrant
 }
 
 export type UiGroupTiming = {
@@ -918,6 +920,7 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
   const startAtById = new Map<string, string>()
   const endAtById = new Map<string, string>()
   const todoContentById = new Map<string, string>()
+  const approvedById = new Map<string, ToolApprovalGrant>()
   let runStartAt: string | undefined
   let runDoneAt: string | undefined
   let lastTerminal: 'done' | 'cancelled' | 'error' | null = null
@@ -963,6 +966,7 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
         if (row.event.name === 'todo_write' && row.event.ok && row.event.content && !row.event.contentTruncated) {
           todoContentById.set(resultId, row.event.content)
         }
+        if (row.event.approvedBy) approvedById.set(resultId, row.event.approvedBy)
       }
       continue
     }
@@ -979,11 +983,13 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
     const endAt = endAtById.get(item.id)
     const ok = okById.get(item.id)
     const todoContent = todoContentById.get(item.id)
+    const approvedBy = approvedById.get(item.id)
     const stamped = startAt || endAt ? { ...item, ...(startAt ? { at: startAt } : {}), ...(endAt ? { endedAt: endAt } : {}) } : item
-    const withAt =
+    const withContent =
       todoContent && todoContent !== stamped.tool.content
         ? { ...stamped, tool: { ...stamped.tool, content: todoContent } }
         : stamped
+    const withAt = approvedBy ? { ...withContent, tool: { ...withContent.tool, approvedBy } } : withContent
     if (ok === undefined) return withAt
     return {
       ...withAt,

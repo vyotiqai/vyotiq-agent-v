@@ -18,6 +18,7 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onWindowFocusChanged'
     | 'onSystemThemeChanged'
     | 'onBrowserState'
+    | 'onBrowserElementPicked'
     | 'onPtyData'
     | 'onPtyExit'
     | 'onPtySessionsChanged'
@@ -90,6 +91,9 @@ const VYOTIQ_INVOKE_MAP: Record<
   readRunArtifact: IPC.runsReadArtifact,
   openRunArtifact: IPC.runsOpenArtifact,
   taskFileStats: IPC.runsTaskFileStats,
+  taskOutcome: IPC.runsTaskOutcome,
+  reopenWrites: IPC.runsReopenWrites,
+  undoTaskCommit: IPC.runsUndoTaskCommit,
   taskFileDiff: IPC.runsTaskFileDiff,
   homeActivity: IPC.homeActivity,
   setGoalStatus: IPC.runsSetGoalStatus,
@@ -145,6 +149,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   browserTakeScreenshot: IPC.browserTakeScreenshot,
   browserClearBrowsingData: IPC.browserClearBrowsingData,
   browserPipToggle: IPC.browserPipToggle,
+  browserPickStart: IPC.browserPickStart,
+  browserPickStop: IPC.browserPickStop,
   gitStatus: IPC.gitStatus,
   gitInit: IPC.gitInit,
   gitAllowRepoCommands: IPC.gitAllowRepoCommands,
@@ -200,6 +206,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   workspaceListDocs: IPC.workspaceListDocs,
   workspaceListRules: IPC.workspaceListRules,
   agentContext: IPC.agentContext,
+  clearWorkspaceMemory: IPC.workspaceClearMemory,
   workspaceDiagnostics: IPC.workspaceDiagnostics,
   windowMinimize: IPC.windowMinimize,
   windowMaximize: IPC.windowMaximize,
@@ -286,6 +293,7 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onWindowFocusChanged'
   | 'onSystemThemeChanged'
   | 'onBrowserState'
+  | 'onBrowserElementPicked'
   | 'onPtyData'
   | 'onPtyExit'
   | 'onPtySessionsChanged'
@@ -312,6 +320,7 @@ const VYOTIQ_PUSH_MAP: Record<
   onWindowFocusChanged: IPC.windowFocusChanged,
   onSystemThemeChanged: IPC.themeChanged,
   onBrowserState: IPC.browserState,
+  onBrowserElementPicked: IPC.browserElementPicked,
   onPtyData: IPC.ptyData,
   onPtyExit: IPC.ptyExit,
   onPtySessionsChanged: IPC.ptySessionsChanged,

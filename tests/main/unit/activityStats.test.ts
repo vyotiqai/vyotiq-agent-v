@@ -88,6 +88,46 @@ afterEach(() => {
 })
 
 describe('collectHomeActivity', () => {
+  it('counts settled files as kept or undone from the write checkpoints, leaving waiting ones out', async () => {
+    const cp1 = '11111111-1111-4111-8111-111111111111'
+    const cp2 = '22222222-2222-4222-8222-222222222222'
+    const file = (path: string, resolved?: 'kept' | 'discarded') => ({
+      path,
+      action: 'modified',
+      undoable: true,
+      ...(resolved ? { resolved } : {})
+    })
+    makeRun('run-a', { 'receipt.json': receipt({ runId: 'run-a' }) })
+    const cpDir = join(sessionsRoot(), 'run-a', 'checkpoints')
+    mkdirSync(join(cpDir, cp1), { recursive: true })
+    mkdirSync(join(cpDir, cp2), { recursive: true })
+    writeFileSync(
+      join(cpDir, 'index.json'),
+      JSON.stringify({ checkpoints: [{ id: cp1, createdAt: '2026-09-09T09:00:00.000Z' }, { id: cp2, createdAt: '2026-09-09T09:30:00.000Z' }] })
+    )
+    // a.ts: kept first, undone by the newer checkpoint — its last mark counts.
+    writeFileSync(
+      join(cpDir, cp1, 'meta.json'),
+      JSON.stringify({ id: cp1, createdAt: '2026-09-09T09:00:00.000Z', files: [file('a.ts', 'kept'), file('b.ts', 'kept')] })
+    )
+    writeFileSync(
+      join(cpDir, cp2, 'meta.json'),
+      JSON.stringify({ id: cp2, createdAt: '2026-09-09T09:30:00.000Z', files: [file('a.ts', 'discarded'), file('c.ts')] })
+    )
+    // A run with no checkpoints adds nothing.
+    makeRun('run-b', { 'receipt.json': receipt({ runId: 'run-b' }) })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.changes).toEqual({ kept: 1, undone: 1 })
+  })
+
+  it('reports no changes when no file was settled', async () => {
+    makeRun('run-a', { 'receipt.json': receipt({ runId: 'run-a' }) })
+    const res = await collectHomeActivity([WS], NOW)
+    expect(res.changes).toBeUndefined()
+  })
+
   it('buckets legacy receipts into local days and sums tokens within the window', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({

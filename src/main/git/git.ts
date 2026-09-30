@@ -1205,6 +1205,51 @@ export async function commitAll(
   return commitStagedAndMaybePush(cwd, message, push)
 }
 
+const COMMIT_SHA_RE = /^[0-9a-f]{40,64}$/
+
+/** HEAD's commit and the branch it is on (null when detached), or null with no commit. */
+export async function readHeadCommit(cwd: string): Promise<{ sha: string; branch: string | null } | null> {
+  if (!isGitRepo(cwd)) return null
+  const sha = (await gitQuiet(['rev-parse', '--verify', 'HEAD'], cwd, READ_TIMEOUT_MS))?.trim()
+  if (!sha || !COMMIT_SHA_RE.test(sha)) return null
+  const branch = (await gitQuiet(['rev-parse', '--abbrev-ref', 'HEAD'], cwd, READ_TIMEOUT_MS))?.trim()
+  return { sha, branch: branch && branch !== 'HEAD' ? branch : null }
+}
+
+/** The paths a commit changed, relative to `cwd` and limited to it. */
+export async function commitChangedPaths(cwd: string, sha: string): Promise<string[]> {
+  if (!COMMIT_SHA_RE.test(sha)) throw new Error('Invalid commit')
+  const out = await git(
+    ['diff-tree', '--no-commit-id', '--name-only', '--no-renames', '-r', '-z', '--root', '--relative', sha],
+    cwd,
+    READ_TIMEOUT_MS
+  )
+  return out.split('\0').filter((p) => p.length > 0)
+}
+
+/**
+ * Take back the latest commit and keep its changes, staged — `git reset
+ * --soft HEAD~1`, but only while that is safe: the commit is still HEAD, has
+ * exactly one parent, and no remote-tracking branch holds it (it was never
+ * pushed). The move is a compare-and-swap on HEAD, so a commit made in
+ * between is never lost. Nothing in the working tree or the index changes.
+ */
+export async function undoLatestCommit(cwd: string, sha: string): Promise<{ parent: string }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  if (!COMMIT_SHA_RE.test(sha)) throw new Error('Invalid commit')
+  const head = (await gitQuiet(['rev-parse', '--verify', 'HEAD'], cwd, READ_TIMEOUT_MS))?.trim()
+  if (head !== sha) throw new Error('That commit is no longer the latest on this branch')
+  const parents = (await git(['rev-list', '--parents', '-n', '1', sha], cwd, READ_TIMEOUT_MS)).trim().split(/\s+/)
+  if (parents.length !== 2 || !COMMIT_SHA_RE.test(parents[1]!)) {
+    throw new Error(parents.length < 2 ? 'The first commit in a repository cannot be taken back here' : 'A merge commit cannot be taken back here')
+  }
+  const remote = await git(['branch', '-r', '--contains', sha], cwd, READ_TIMEOUT_MS)
+  if (remote.trim()) throw new Error('That commit has been pushed; it cannot be taken back here')
+  const parent = parents[1]!
+  await git(['update-ref', '-m', `vyotiq: undo commit ${sha.slice(0, 7)}`, 'HEAD', parent, sha], cwd, WRITE_TIMEOUT_MS)
+  return { parent }
+}
+
 /** Create a baseline commit when a newly connected repository has no history. */
 export async function commitEmpty(cwd: string, message: string): Promise<void> {
   if (!isGitRepo(cwd)) throw new Error('Not a git repository')

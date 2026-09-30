@@ -388,6 +388,19 @@ describe('executeStepToolCalls', () => {
     expect(result).toMatchObject({ type: 'tool_result', summary: 'a.ts', ok: false })
   })
 
+  it('saves who allowed a gated call on its persisted result', async () => {
+    executeTool.mockResolvedValue({ ok: true, summary: 'edit', content: 'wrote' })
+
+    const { ctx, events } = makeCtx(new AbortController().signal)
+    ctx.approval = {
+      authorize: async () => ({ allowed: true, grant: { by: 'you', scope: 'task' } })
+    }
+    await executeStepToolCalls([{ id: 'c1', name: 'edit', arguments: '{"path":"a.ts","contents":"x"}' }], ctx)
+
+    const result = events.find((ev) => ev.type === 'tool_result')
+    expect(result).toMatchObject({ type: 'tool_result', ok: true, approvedBy: { by: 'you', scope: 'task' } })
+  })
+
   it('emits tool_start live and persists ok on tool messages', async () => {
     const live: AgentEvent[] = []
     executeTool.mockResolvedValue({ ok: false, summary: 'file', content: 'permission denied' })

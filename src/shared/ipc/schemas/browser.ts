@@ -25,9 +25,49 @@ export const AgentBrowserStateSchema = z.object({
   pip: z.boolean().optional(),
   tabs: z.array(AgentBrowserTabSchema).optional(),
   canGoBack: z.boolean().optional(),
-  canGoForward: z.boolean().optional()
+  canGoForward: z.boolean().optional(),
+  /** True while the Browser tab is picking an element for the composer. */
+  picking: z.boolean().optional()
 })
 export type AgentBrowserState = z.infer<typeof AgentBrowserStateSchema>
+
+/** Caps on what a picked element carries: every string is page-supplied. */
+export const BROWSER_PICK_LIMITS = {
+  selector: 600,
+  tag: 40,
+  role: 40,
+  name: 120,
+  text: 240,
+  url: 2048
+} as const
+
+/**
+ * An element picked in the Browser tab, main → renderer and into the composer
+ * chip. `bounds` is the element's rect in CSS px relative to the page's
+ * viewport; `ref` is the `@eN` the last `browser_snapshot` gave the element.
+ */
+export const BrowserPickedElementSchema = z.object({
+  selector: z.string().min(1).max(BROWSER_PICK_LIMITS.selector),
+  tag: z
+    .string()
+    .max(BROWSER_PICK_LIMITS.tag)
+    .regex(/^[a-z][a-z0-9-]*$/),
+  role: z.string().max(BROWSER_PICK_LIMITS.role),
+  name: z.string().max(BROWSER_PICK_LIMITS.name),
+  text: z.string().max(BROWSER_PICK_LIMITS.text),
+  url: z.string().max(BROWSER_PICK_LIMITS.url),
+  bounds: z.object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    width: z.number().finite().nonnegative(),
+    height: z.number().finite().nonnegative()
+  }),
+  ref: z
+    .string()
+    .regex(/^e\d{1,6}$/)
+    .optional()
+})
+export type BrowserPickedElement = z.infer<typeof BrowserPickedElementSchema>
 export type AgentBrowserTab = z.infer<typeof AgentBrowserTabSchema>
 
 /** Preload passes a bare string; object form includes optional workspace scope. */

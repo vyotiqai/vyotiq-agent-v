@@ -89,6 +89,9 @@ export const IPC = {
   runsFork: 'runs:fork',
   runsActive: 'runs:active',
   runsResolveWrites: 'runs:resolveWrites',
+  runsReopenWrites: 'runs:reopenWrites',
+  runsTaskOutcome: 'runs:taskOutcome',
+  runsUndoTaskCommit: 'runs:undoTaskCommit',
   runsReadArtifact: 'runs:readArtifact',
   runsOpenArtifact: 'runs:openArtifact',
   runsTaskFileStats: 'runs:taskFileStats',
@@ -122,6 +125,9 @@ export const IPC = {
   browserTakeScreenshot: 'browser:takeScreenshot',
   browserClearBrowsingData: 'browser:clearBrowsingData',
   browserPipToggle: 'browser:pipToggle',
+  browserPickStart: 'browser:pickStart',
+  browserPickStop: 'browser:pickStop',
+  browserElementPicked: 'browser:elementPicked',
   gitStatus: 'git:status',
   gitGenerateCommitMessage: 'git:generate-commit-message',
   gitCommit: 'git:commit',
@@ -227,6 +233,8 @@ export const IPC = {
   agentContext: 'workspace:agentContext',
   /** Live push: a watched workspace's agent-context summary actually changed. */
   agentContextChanged: 'workspace:agent-context-changed',
+  /** Delete the workspace's memory notes, index.md and state.md (Settings → Agent). */
+  workspaceClearMemory: 'workspace:clearMemory',
   workspaceDiagnostics: 'workspace:diagnostics',
   gitDiff: 'git:diff',
   /** The branch against its base (merge base with the default branch), uncommitted work included. */

@@ -199,6 +199,41 @@ describe('solution-style tsconfig', () => {
   })
 })
 
+describe('resolveDiagnosticsCommand / lint', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = join(tmpdir(), `vyotiq-lint-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    mkdirSync(dir, { recursive: true })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  // `--if-present` is redundant (the guard already routes a script-less
+  // workspace to the exec fallback) and fatal under pnpm, which forwards it
+  // to the script: `eslint . --if-present` exits 2.
+  it('runs the lint script bare', () => {
+    writeFileSync(join(dir, 'package.json'), '{ "scripts": { "lint": "eslint ." } }')
+    const command = resolveDiagnosticsCommand(dir, 'lint', null)
+    expect(command).toBe('npm run lint')
+    expect(command).not.toContain('--if-present')
+  })
+
+  it('runs the lint script bare under pnpm', () => {
+    writeFileSync(join(dir, 'package.json'), '{ "scripts": { "lint": "eslint ." } }')
+    // `preferPnpm` keys off this lockfile — without it the command is `npm run lint`.
+    writeFileSync(join(dir, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
+    const command = resolveDiagnosticsCommand(dir, 'lint', null)
+    expect(command).toBe('pnpm run lint')
+    expect(command).not.toContain('--if-present')
+  })
+
+  it('falls back to exec eslint when there is no lint script', () => {
+    writeFileSync(join(dir, 'package.json'), '{ "scripts": { "typecheck": "tsc --noEmit" } }')
+    expect(resolveDiagnosticsCommand(dir, 'lint', null)).toBe(
+      'npm exec --no -- eslint . --format json'
+    )
+  })
+})
+
 describe('execPackageCommand', () => {
   it('inserts -- for npm so flags are not swallowed as npm config', () => {
     expect(execPackageCommand('npm', 'eslint', '. --format json')).toBe(

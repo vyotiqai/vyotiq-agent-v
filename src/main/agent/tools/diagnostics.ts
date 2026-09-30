@@ -310,7 +310,10 @@ export function resolveDiagnosticsCommand(
   const pm = preferPnpm(workspace) ? 'pnpm' : 'npm'
 
   if (kind === 'lint') {
-    if (scripts.lint) return `${pm} run lint --if-present`
+    // Bare `run lint`: pnpm forwards `--if-present` to the script instead of
+    // consuming it, so `eslint . --if-present` exits 2 — and `scripts.lint`
+    // already sends a workspace with no lint script to the exec fallback.
+    if (scripts.lint) return `${pm} run lint`
     // Prefer JSON: ESLint 10 removed the built-in `unix` formatter.
     return execPackageCommand(pm, 'eslint', '. --format json')
   }

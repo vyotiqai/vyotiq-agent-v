@@ -1,4 +1,8 @@
 import { execFile as execFileCb } from 'child_process'
+import { randomUUID } from 'crypto'
+import { unlink, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { promisify } from 'util'
 import type { PrChangeType, PrCreateResult, PrReview, PrView } from '../../shared/ipc'
 import { resolveGhTokenForCli, setupGithubGitAuth } from '@main/git/githubAuth'
@@ -453,16 +457,39 @@ async function assertPrRepository(cwd: string): Promise<GithubRemoteSetup> {
   return setup
 }
 
+/** A title and description written for the PR; without a title, gh fills both from the commits. */
+export type PrCreateText = { title?: string; body?: string }
+
+/**
+ * `gh pr create` with the given title and description, or `--fill` when no
+ * title was written. The description goes through a file of its own in the
+ * OS temp folder — an argument would hit the Windows command-line limit — and
+ * only that file is removed afterwards.
+ */
+async function ghPrCreate(args: string[], cwd: string, text: PrCreateText): Promise<string> {
+  const title = text.title?.trim()
+  const body = text.body?.trim() ?? ''
+  if (!title) return gh([...args, '--fill'], cwd, PR_CREATE_TIMEOUT_MS)
+  const bodyFile = join(tmpdir(), `vyotiq-pr-body-${randomUUID()}.md`)
+  await writeFile(bodyFile, body ? `${body}\n` : '', { encoding: 'utf8', flag: 'wx' })
+  try {
+    return await gh([...args, `--title=${title}`, '--body-file', bodyFile], cwd, PR_CREATE_TIMEOUT_MS)
+  } finally {
+    await unlink(bodyFile).catch(() => undefined)
+  }
+}
+
 async function createPrForBranch(
   cwd: string,
   branch: string,
   baseBranch: string,
   draft: boolean,
-  setup: GithubRemoteSetup
+  setup: GithubRemoteSetup,
+  text: PrCreateText = {}
 ): Promise<PrCreateResult> {
-  const args = ['pr', 'create', '--base', baseBranch, '--head', branch, '--fill']
+  const args = ['pr', 'create', '--base', baseBranch, '--head', branch]
   if (draft) args.push('--draft')
-  const output = await gh(args, cwd, PR_CREATE_TIMEOUT_MS)
+  const output = await ghPrCreate(args, cwd, text)
   const url = pullRequestUrl(output)
   const detail = draft ? 'Draft pull request created' : 'Pull request created'
   return {
@@ -479,7 +506,7 @@ async function createPrForBranch(
 /** Push the current topic branch and create a draft/ready PR without prompts. */
 export async function prCreate(
   cwd: string,
-  opts: { draft?: boolean } = {}
+  opts: { draft?: boolean } & PrCreateText = {}
 ): Promise<PrCreateResult> {
   if (!isGitRepo(cwd)) throw new Error('Not a git repository')
   if (!(await hasGitCommits(cwd))) {
@@ -502,7 +529,7 @@ export async function prCreate(
     throw new Error(`Pull request #${existing.number} already exists for branch "${branch}"`)
   }
   await pushCurrentBranch(cwd)
-  return createPrForBranch(cwd, branch, baseBranch, opts.draft !== false, setup)
+  return createPrForBranch(cwd, branch, baseBranch, opts.draft !== false, setup, opts)
 }
 
 /** Commit selected changes, create a topic branch when needed, push, and create a PR. */
@@ -510,7 +537,7 @@ export async function prCreateFromChanges(
   cwd: string,
   message: string,
   mode: 'all' | 'staged' = 'all',
-  opts: { draft?: boolean } = {}
+  opts: { draft?: boolean } & PrCreateText = {}
 ): Promise<PrCreateResult> {
   const commitMessage = message.trim()
   if (!commitMessage) throw new Error('Commit message is required')
@@ -560,7 +587,7 @@ export async function prCreateFromChanges(
       throw new Error(outcome.detail)
     }
     await pushCurrentBranch(cwd)
-    return createPrForBranch(cwd, branch, baseBranch, opts.draft !== false, setup)
+    return createPrForBranch(cwd, branch, baseBranch, opts.draft !== false, setup, opts)
   }
   if (!outcome.pushed) throw new Error(outcome.detail)
   if (existing) {
@@ -572,7 +599,7 @@ export async function prCreateFromChanges(
       detail: 'Committed and updated pull request'
     }
   }
-  return createPrForBranch(cwd, branch, baseBranch, opts.draft !== false, setup)
+  return createPrForBranch(cwd, branch, baseBranch, opts.draft !== false, setup, opts)
 }
 
 function prNumberArg(number: number): string {

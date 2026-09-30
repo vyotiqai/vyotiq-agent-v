@@ -6,7 +6,7 @@ import {
   realpathSync,
   rmSync
 } from 'fs'
-import { readFile } from 'fs/promises'
+import { lstat, readFile, readdir, unlink } from 'fs/promises'
 import { dirname, join, relative, resolve, basename } from 'path'
 import { canonicalizeWorkspacePath } from '../../../shared/utils/workspacePath'
 import { atomicWriteFile } from '../../storage/atomicWrite'
@@ -82,6 +82,42 @@ export function clearMemoryNamespace(workspacePath: string): boolean {
   if (!existsSync(root)) return false
   rmSync(root, { recursive: true, force: true })
   return true
+}
+
+/** A regular file (never a link) at `path`, removed; false when there was none. */
+async function unlinkRegularFile(path: string): Promise<boolean> {
+  try {
+    if (!(await lstat(path)).isFile()) return false
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw err
+  }
+  await unlink(path)
+  return true
+}
+
+/**
+ * Settings → Agent → Memory → Clear: delete what the memory tools keep —
+ * `notes/*.md`, `index.md`, `state.md` — and nothing else. Anything else a
+ * person put under `.vyotiq/memory` stays, and so do the folders (the
+ * context watcher is watching them). A `notes` folder that resolves outside
+ * the memory root is refused, not followed. Returns the notes removed.
+ */
+export async function clearMemoryFiles(workspacePath: string): Promise<{ notes: number }> {
+  const root = assertMemoryRootInsideWorkspace(workspacePath)
+  if (!existsSync(root)) return { notes: 0 }
+  let notes = 0
+  const notesDir = join(root, 'notes')
+  if (existsSync(notesDir)) {
+    if (!isInsideRoot(realpathSync(notesDir), root)) throw new Error('Memory notes folder escapes memory directory')
+    for (const entry of await readdir(notesDir, { withFileTypes: true, encoding: 'utf8' })) {
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue
+      if (await unlinkRegularFile(join(notesDir, entry.name))) notes += 1
+    }
+  }
+  await unlinkRegularFile(join(root, 'index.md'))
+  await unlinkRegularFile(join(root, 'state.md'))
+  return { notes }
 }
 
 function assertUnderMemory(

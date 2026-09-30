@@ -6,6 +6,7 @@ import {
   AgentQuestionRequestSchema,
   AgentQuestionRejectSchema,
   AgentBrowserStateSchema,
+  BrowserPickedElementSchema,
   CodeIndexRuntimeStatusSchema,
   WorkspaceAgentContextChangedSchema,
   UpdaterStatePayloadSchema,
@@ -117,6 +118,9 @@ const api: VyotiqApi = {
   readRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsReadArtifact, payload),
   openRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsOpenArtifact, payload),
   taskFileStats: (payload) => ipcRenderer.invoke(IPC.runsTaskFileStats, payload),
+  taskOutcome: (payload) => ipcRenderer.invoke(IPC.runsTaskOutcome, payload),
+  reopenWrites: (payload) => ipcRenderer.invoke(IPC.runsReopenWrites, payload),
+  undoTaskCommit: (payload) => ipcRenderer.invoke(IPC.runsUndoTaskCommit, payload),
   taskFileDiff: (payload) => ipcRenderer.invoke(IPC.runsTaskFileDiff, payload),
   homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),
   runFeedbackGet: (payload) => ipcRenderer.invoke(IPC.runFeedbackGet, payload),
@@ -291,8 +295,8 @@ const api: VyotiqApi = {
   gitAllowRepoCommands: (payload) => ipcRenderer.invoke(IPC.gitAllowRepoCommands, payload),
   gitGenerateCommitMessage: (payload) =>
     ipcRenderer.invoke(IPC.gitGenerateCommitMessage, payload),
-  gitCommit: (workspacePath, message, push, mode) =>
-    ipcRenderer.invoke(IPC.gitCommit, { workspacePath, message, push, mode }),
+  gitCommit: (workspacePath, message, push, mode, runId) =>
+    ipcRenderer.invoke(IPC.gitCommit, { workspacePath, message, push, mode, ...(runId ? { runId } : {}) }),
   gitStageAll: (workspacePath) => ipcRenderer.invoke(IPC.gitStageAll, { workspacePath }),
   gitStagePaths: (payload) => ipcRenderer.invoke(IPC.gitStagePaths, payload),
   gitUnstagePaths: (payload) => ipcRenderer.invoke(IPC.gitUnstagePaths, payload),
@@ -449,6 +453,23 @@ const api: VyotiqApi = {
   browserClearBrowsingData: (payload) =>
     ipcRenderer.invoke(IPC.browserClearBrowsingData, payload),
   browserPipToggle: () => ipcRenderer.invoke(IPC.browserPipToggle),
+  browserPickStart: (workspacePath?: string) =>
+    ipcRenderer.invoke(IPC.browserPickStart, workspacePath ? { workspacePath } : undefined),
+  browserPickStop: () => ipcRenderer.invoke(IPC.browserPickStop),
+  onBrowserElementPicked: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = BrowserPickedElementSchema.safeParse(raw)
+      if (!parsed.success) {
+        console.warn('[vyotiq] Invalid picked element dropped', parsed.error.issues[0]?.message)
+        return
+      }
+      handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.browserElementPicked, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.browserElementPicked, listener)
+    }
+  },
   openLogsDir: () => ipcRenderer.invoke(IPC.logsOpenDir),
   getLogsPath: () => ipcRenderer.invoke(IPC.logsGetPath),
   getCrashDiagnostics: () => ipcRenderer.invoke(IPC.crashDiagnosticsGet),
@@ -540,6 +561,7 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.agentContextChanged, listener)
     }
   },
+  clearWorkspaceMemory: (payload) => ipcRenderer.invoke(IPC.workspaceClearMemory, payload),
   codeIndexStatus: () => ipcRenderer.invoke(IPC.codeIndexStatus),
   codeIndexReindex: (payload) => ipcRenderer.invoke(IPC.codeIndexReindex, payload ?? {}),
   codeIndexPause: (workspacePath) => ipcRenderer.invoke(IPC.codeIndexPause, { workspacePath }),

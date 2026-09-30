@@ -4,6 +4,7 @@ import path from 'path'
 import type {
   TerminalShell,
   ToolApprovalDecision,
+  ToolApprovalGrant,
   ToolApprovalMode,
   ToolApprovalRequest,
   ToolApprovalResponse
@@ -319,7 +320,35 @@ export function guardedCommand(
   return dangerousCommand(command, { ...guard, cwd })
 }
 
-export type AuthorizeResult = { allowed: true } | { allowed: false; reason: string }
+/**
+ * `grant` says who let a gated call through — the user on the card, or a
+ * standing allow — and is saved on the call's result for the record. A call
+ * the gate never held (exempt, approvals off, autonomy) has none.
+ */
+export type AuthorizeResult = { allowed: true; grant?: ToolApprovalGrant } | { allowed: false; reason: string }
+
+/** A remembered allow, bounded: a terminal prefix can be a long command. */
+function grantAllow(key: string): string {
+  return key.length > 200 ? `${key.slice(0, 199)}…` : key
+}
+
+const NO_ALLOWS: ReadonlySet<string> = new Set()
+
+/**
+ * The standing allow that let an ungated call through, or undefined when the
+ * call would not have been held anyway. Pure — the same checks, minus lists.
+ */
+function ruleGrantFor(
+  name: string,
+  mode: ToolApprovalMode,
+  taskAllowlist: ReadonlySet<string>,
+  argsJson: string,
+  opts: { mcpProtection?: boolean; agentBuiltAllowKey?: string }
+): ToolApprovalGrant | undefined {
+  if (!isToolGated(name, mode, NO_ALLOWS, [], argsJson, opts)) return undefined
+  const byTask = !isToolGated(name, mode, taskAllowlist, [], argsJson, opts)
+  return { by: 'rule', scope: byTask ? 'task' : 'workspace' }
+}
 
 /** Internal ask result: IPC decisions plus timeout auto-deny. */
 type AskDecision = ToolApprovalDecision | 'timeout'
@@ -463,14 +492,13 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
       // autonomy all answer for ordinary commands, never for these.
       const danger = options.commandGuard ? guardedCommand(name, call.arguments, options.commandGuard) : null
       const agentBuiltAllowKey = await agentBuiltAllowKeyFor(name)
+      const gateOpts = { mcpProtection: options.mcpProtection, agentBuiltAllowKey }
       if (
         !danger &&
-        !isToolGated(name, options.mode, sessionAllowlist, workspaceAllowlist, call.arguments, {
-          mcpProtection: options.mcpProtection,
-          agentBuiltAllowKey
-        })
+        !isToolGated(name, options.mode, sessionAllowlist, workspaceAllowlist, call.arguments, gateOpts)
       ) {
-        return { allowed: true }
+        const grant = ruleGrantFor(name, options.mode, sessionAllowlist, call.arguments, gateOpts)
+        return grant ? { allowed: true, grant } : { allowed: true }
       }
 
       if (
@@ -556,7 +584,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
             reason: `Approval for this command (${danger.reason}) timed out and it was not run. Do not retry it; ask what to do instead or continue without it.`
           }
         }
-        return { allowed: true }
+        return { allowed: true, grant: { by: 'you', scope: 'once' } }
       }
 
       switch (decision) {
@@ -573,24 +601,24 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         case 'session':
           sessionAllowlist.add(agentBuiltAllowKey ?? name)
           options.persistTask?.(agentBuiltAllowKey ?? name)
-          return { allowed: true }
+          return { allowed: true, grant: { by: 'you', scope: 'task' } }
         case 'always': {
           if (name === 'terminal') {
             // Per command. One that cannot be scoped is let through this once
             // and remembered for nothing — the card never offers it Always.
-            if (!alwaysAllowCommand) return { allowed: true }
+            if (!alwaysAllowCommand) return { allowed: true, grant: { by: 'you', scope: 'once' } }
             const key = commandAllowKey(alwaysAllowCommand)
             workspaceAllowlist.push(key)
             options.persistAlways?.(key)
-            return { allowed: true }
+            return { allowed: true, grant: { by: 'you', scope: 'workspace', allow: grantAllow(alwaysAllowCommand) } }
           }
           // The key, not the name: rewriting the module withdraws the allow.
           workspaceAllowlist.push(agentBuiltAllowKey ?? name)
           options.persistAlways?.(agentBuiltAllowKey ?? name)
-          return { allowed: true }
+          return { allowed: true, grant: { by: 'you', scope: 'workspace', allow: grantAllow(name) } }
         }
         case 'once':
-          return { allowed: true }
+          return { allowed: true, grant: { by: 'you', scope: 'once' } }
         default: {
           const _exhaustive: never = decision
           return _exhaustive

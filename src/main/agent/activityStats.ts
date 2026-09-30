@@ -15,6 +15,8 @@ import { workspaceSessionsRoot } from '../storage/paths'
 import { migrateLegacyReceipt } from './receiptMigration'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
 import { readJsonDocCached } from './jsonDocCache'
+import { listCheckpointMetasAsync } from './checkpoints'
+import { outcomeFiles } from './taskOutcome'
 
 /** Activity window (local days) — the Home panel renders exactly this axis. */
 export const ACTIVITY_WINDOW_DAYS = 7
@@ -129,6 +131,8 @@ export async function collectHomeActivity(
   /** Runs any of whose usage carried a bill or an estimate. */
   const pricedRunIds = new Set<string>()
   const outcomes = { done: 0, error: 0, cancelled: 0, running: 0 }
+  /** Settled files of the runs whose receipt is in the window. */
+  const changes = { kept: 0, undone: 0 }
   let billedInputTokens = 0
   let outputTokens = 0
   let billedCostTotal = 0
@@ -351,6 +355,22 @@ export async function collectHomeActivity(
     /** Checkpoint cost fallbacks, read only for a receipt without a ledger. */
     interruptedBilledCost?: number
     interruptedEstimatedCost?: number
+    /** Its changed files as review settled them (the record's Kept / Undone marks). */
+    settled?: { kept: number; undone: number }
+  }
+
+  /** A run's files by their last Kept or Undone mark; waiting ones are not counted. */
+  const settledFiles = async (runDir: string): Promise<{ kept: number; undone: number }> => {
+    const settled = { kept: 0, undone: 0 }
+    try {
+      for (const file of outcomeFiles(await listCheckpointMetasAsync(runDir))) {
+        if (file.mark === 'kept') settled.kept += 1
+        else if (file.mark === 'undone') settled.undone += 1
+      }
+    } catch {
+      // Unreadable checkpoints say nothing about this run; it adds nothing.
+    }
+    return settled
   }
 
   const probeRunDir = async (
@@ -373,10 +393,11 @@ export async function collectHomeActivity(
       readReceipt(runDir),
       readUsageLedgerAsync(runDir)
     ])
+    const settled = receipt ? await settledFiles(runDir) : undefined
     // Nothing to fall back to: no receipt, or a ledger that already carries the
     // run's cost — the apply pass never reaches the checkpoint reads.
     if (!receipt || ledger) {
-      return { workspacePath, runId, runDir, status, recent, receipt, ledger }
+      return { workspacePath, runId, runDir, status, recent, receipt, ledger, settled }
     }
     // Legacy run without a ledger: the receipt's own cost fields, else the
     // interrupted-run checkpoint — read only for the field the receipt lacks,
@@ -394,7 +415,8 @@ export async function collectHomeActivity(
       receipt,
       ledger,
       interruptedBilledCost: billedCost,
-      interruptedEstimatedCost: estimatedCost
+      interruptedEstimatedCost: estimatedCost,
+      settled
     }
   }
 
@@ -463,6 +485,10 @@ export async function collectHomeActivity(
       const receiptInWindow = windowKeys.has(receiptDate)
       if (receiptInWindow) {
         outcomes[receipt.status] += 1
+        if (facts.settled) {
+          changes.kept += facts.settled.kept
+          changes.undone += facts.settled.undone
+        }
         // Prefer the gate's verdict: it is the guarded one, so it excludes
         // plan-mode and cancelled runs, and — unlike the raw receipt field —
         // a read-only turn whose check merely failed, which mutated nothing
@@ -600,6 +626,7 @@ export async function collectHomeActivity(
         }
       : {}),
     outcomes,
+    ...(changes.kept + changes.undone > 0 ? { changes } : {}),
     totals: {
       runs: activeRunIds.size,
       billedInputTokens,

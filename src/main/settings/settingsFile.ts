@@ -59,6 +59,7 @@ export const EXPORTED_KEYS: readonly Key[] = [
   'diagnosticsCommand',
   'autoModeSwitch',
   'autoResumeInterruptedRuns',
+  'newTaskWorktree',
   'maxParallelInstances',
   'taskSpendLimitUsd',
   'helperModel',

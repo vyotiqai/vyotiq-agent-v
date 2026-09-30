@@ -43,6 +43,14 @@ export type CheckpointFileEntry = {
   /** Revert was refused because the file was edited after the agent wrote it. */
   conflicted?: boolean
   /**
+   * What an Undo found where the agent's write was, so it can be brought back:
+   * `copy`, the agent's version is kept under `after/`; `absent`, the agent
+   * had deleted the file. Absent when the Undo changed nothing to bring back.
+   */
+  redo?: 'copy' | 'absent'
+  /** Settled by a rewind, not by Keep or Undo: it is never reopened for review. */
+  rewound?: boolean
+  /**
    * When this path entered the checkpoint — its first write this invoke. The
    * `writes_checkpoint` event is only flushed at invoke end, after every
    * check the turn ran, so the receipt dates the mutation by this instead.
@@ -191,6 +199,15 @@ function blobPathFor(checkpointDir: string, relPath: string): string {
     throw new Error('Invalid checkpoint path')
   }
   return join(checkpointDir, 'files', ...parts)
+}
+
+/** Where an Undo keeps the agent's version of a path, to bring it back. */
+function afterImagePathFor(checkpointDir: string, relPath: string): string {
+  const parts = normalizeRelPath(relPath).split('/').filter(Boolean)
+  if (parts.some((p) => p === '..')) {
+    throw new Error('Invalid checkpoint path')
+  }
+  return join(checkpointDir, 'after', ...parts)
 }
 
 /** Most files a directory delete snapshots for undo; past it, none of the tree is undoable. */
@@ -1358,9 +1375,14 @@ function resolveWritesInCheckpoint(
       kept.push(file.path)
       continue
     }
+    // What the restore is about to replace, so the Undo itself can be undone.
+    const redo = captureRedo(workspaceRoot, checkpointDir, file)
     const outcome = restoreOneFile(workspaceRoot, checkpointDir, file)
+    if (outcome !== 'restored' && redo === 'copy') dropAfterImage(checkpointDir, file.path)
     if (outcome === 'restored') {
       file.resolved = 'discarded'
+      if (redo) file.redo = redo
+      else delete file.redo
       discarded.push(file.path)
     } else if (outcome === 'conflict') {
       // User edited the file after the agent wrote it; leave it unresolved and
@@ -1402,6 +1424,204 @@ function resolveWritesInCheckpoint(
     conflicted,
     fullyResolved: allHandled
   }
+}
+
+/**
+ * Before an Undo restores a file, keep what the agent left there so the Undo
+ * can be taken back: a copy of its version under `after/`, or `absent` when it
+ * had deleted the file. Only while the file is exactly the agent's write — a
+ * file changed since, or already back as it was, has nothing of the agent's to
+ * bring back. Never throws: without a copy the Undo still goes ahead.
+ */
+function captureRedo(
+  workspaceRoot: string,
+  checkpointDir: string,
+  file: CheckpointFileEntry
+): 'copy' | 'absent' | null {
+  if (!file.undoable) return null
+  try {
+    const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
+    const current = hashExistingFile(resolved)
+    if (file.action === 'deleted') return current === undefined ? 'absent' : null
+    if (!current || !file.hash || current !== file.hash) return null
+    const dest = afterImagePathFor(checkpointDir, file.path)
+    mkdirSync(dirname(dest), { recursive: true })
+    copyFileSync(resolved, dest)
+    return 'copy'
+  } catch (err) {
+    logger.warn('Could not keep the agent version before an Undo; it cannot be brought back', {
+      scope: 'agent',
+      path: file.path,
+      err
+    })
+    return null
+  }
+}
+
+function dropAfterImage(checkpointDir: string, relPath: string): void {
+  try {
+    rmSync(afterImagePathFor(checkpointDir, relPath), { force: true })
+  } catch {
+    // Dead weight at worst; retention frees the checkpoint with it.
+  }
+}
+
+/**
+ * Bring back the agent's write an Undo took away — only while the file is
+ * still exactly what the Undo left (the copy from before the agent, or no file
+ * for one it created). Anything else is a change made since: it is left alone.
+ */
+function redoFile(
+  workspaceRoot: string,
+  checkpointDir: string,
+  file: CheckpointFileEntry
+): 'reopened' | 'conflict' | 'failed' {
+  try {
+    const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
+    const current = hashExistingFile(resolved)
+    if (file.action === 'created') {
+      if (current !== undefined) return 'conflict'
+    } else {
+      const blob = blobPathFor(checkpointDir, file.path)
+      const before = existsSync(blob) ? hashExistingFile(blob) : undefined
+      if (!before || current !== before) return 'conflict'
+    }
+    if (file.redo === 'absent') {
+      rmSync(resolved, { force: true })
+      return 'reopened'
+    }
+    const after = afterImagePathFor(checkpointDir, file.path)
+    const afterHash = hashExistingFile(after)
+    if (!afterHash || (file.hash && afterHash !== file.hash)) return 'failed'
+    mkdirSync(dirname(resolved), { recursive: true })
+    copyFileSync(after, resolved)
+    dropAfterImage(checkpointDir, file.path)
+    return 'reopened'
+  } catch (err) {
+    logger.warn('Could not bring back an undone agent write', { scope: 'agent', path: file.path, err })
+    return 'failed'
+  }
+}
+
+export type ReopenWritesResult = {
+  /** Back to waiting on Keep or Undo; an undone one has the agent's version again. */
+  reopened: string[]
+  /** Undone, then changed since: left as it is. */
+  conflicted: string[]
+  /** Not decided, settled by a rewind, or undone with nothing kept to bring back. */
+  skipped: string[]
+  /** Each checkpoint that changed, with its files as they are now. */
+  checkpoints: Array<{ checkpointId: string; files: CheckpointFileEntry[] }>
+}
+
+/**
+ * Take back a Keep or an Undo: the file waits on review again. A kept file
+ * only changes its mark; an undone one gets the agent's version back (see
+ * redoFile). Scoped to `checkpointId` when given — every decided file in it,
+ * or just `paths` — else each of `paths` in the newest checkpoint that wrote
+ * it, which is the decision the Changes list shows for it.
+ */
+export function reopenWrites(
+  runDir: string,
+  workspaceRoot: string,
+  opts: { checkpointId?: string; paths?: string[] }
+): ReopenWritesResult {
+  const out: ReopenWritesResult = { reopened: [], conflicted: [], skipped: [], checkpoints: [] }
+  const byCheckpoint = new Map<string, Set<string> | null>()
+  if (opts.checkpointId) {
+    assertValidCheckpointId(opts.checkpointId)
+    byCheckpoint.set(
+      opts.checkpointId,
+      opts.paths?.length ? new Set(opts.paths.map((p) => toCheckpointRelPath(workspaceRoot, p))) : null
+    )
+  } else if (opts.paths?.length) {
+    const metas = listCheckpointMetas(runDir)
+    for (const p of opts.paths) {
+      const rel = toCheckpointRelPath(workspaceRoot, p)
+      const newest = [...metas].reverse().find((m) => m.files.some((f) => f.path === rel))
+      if (!newest) {
+        out.skipped.push(rel)
+        continue
+      }
+      const set = byCheckpoint.get(newest.id) ?? new Set<string>()
+      set.add(rel)
+      byCheckpoint.set(newest.id, set)
+    }
+  } else {
+    throw new Error('Name the files or the checkpoint to reopen')
+  }
+
+  for (const [id, rels] of byCheckpoint) {
+    const meta = loadMeta(runDir, id)
+    if (!meta) throw new Error(`Checkpoint not found: ${id}`)
+    const checkpointDir = join(runDir, 'checkpoints', id)
+    let changed = false
+    for (const file of meta.files) {
+      if (rels && !rels.has(file.path)) continue
+      if (!file.resolved || file.rewound) {
+        if (rels) out.skipped.push(file.path)
+        continue
+      }
+      if (file.resolved === 'discarded') {
+        if (!file.redo) {
+          out.skipped.push(file.path)
+          continue
+        }
+        const outcome = redoFile(workspaceRoot, checkpointDir, file)
+        if (outcome === 'conflict') {
+          out.conflicted.push(file.path)
+          continue
+        }
+        if (outcome === 'failed') {
+          out.skipped.push(file.path)
+          continue
+        }
+      }
+      delete file.resolved
+      delete file.redo
+      delete file.conflicted
+      out.reopened.push(file.path)
+      changed = true
+    }
+    if (!changed) continue
+    if (meta.resolved || meta.undone) {
+      delete meta.resolved
+      delete meta.undone
+      const idx = loadIndex(runDir)
+      const entry = idx.checkpoints.find((c) => c.id === meta.id)
+      if (entry?.undone) {
+        delete entry.undone
+        saveIndex(runDir, idx)
+      }
+    }
+    saveMeta(runDir, meta)
+    out.checkpoints.push({ checkpointId: meta.id, files: meta.files })
+  }
+  return out
+}
+
+/**
+ * Keep every write of `paths` still waiting on review, in whichever turn left
+ * it waiting: a commit took them as they are. Returns what it kept, by
+ * checkpoint, so taking the commit back can reopen exactly those.
+ */
+export function keepWritesForPaths(
+  runDir: string,
+  workspaceRoot: string,
+  paths: readonly string[]
+): Array<{ checkpointId: string; path: string }> {
+  const wanted = new Set(paths.map((p) => toCheckpointRelPath(workspaceRoot, p)))
+  const kept: Array<{ checkpointId: string; path: string }> = []
+  if (wanted.size === 0) return kept
+  for (const entry of loadIndex(runDir).checkpoints) {
+    const meta = loadMeta(runDir, entry.id)
+    if (!meta || meta.undone || meta.resolved) continue
+    const rels = meta.files.filter((f) => !f.resolved && wanted.has(f.path)).map((f) => f.path)
+    if (rels.length === 0) continue
+    const result = resolveWritesInCheckpoint(runDir, workspaceRoot, meta.id, 'keep', rels)
+    for (const path of result.kept) kept.push({ checkpointId: meta.id, path })
+  }
+  return kept
 }
 
 /**
@@ -1674,6 +1894,10 @@ export function rewindWritesFromScopes(
         ) {
           stopped.add(file.path)
         }
+        // Whatever the walk decides here is the rewind's, never reopened for
+        // review, and an earlier Undo's copy of the agent's version is void.
+        file.rewound = true
+        delete file.redo
         if (stopped.has(file.path)) {
           // A newer run stopped the walk: this run's write stays under it.
           file.resolved = 'kept'
