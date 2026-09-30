@@ -461,6 +461,7 @@ function AwaitingApproval() {
 
 function TerminalCard({ item }: { item: ToolItem }) {
   const { onLoadToolContent, mcpServerNames } = useContext(RecordActionsContext)
+  const { onOpenAgentTerminal } = useRunSession()
   const args = parseArgsRecord(item.tool.argsPreview)
   const command =
     (typeof args?.command === 'string' && args.command) || (typeof args?.cmd === 'string' && args.cmd) || item.tool.summary
@@ -469,7 +470,9 @@ function TerminalCard({ item }: { item: ToolItem }) {
   const running = !awaiting && (item.tool.status === 'running' || parsed?.sessionStatus === 'running')
   const exit = parsed?.exitCode ?? null
   const refused = item.tool.status === 'fail' ? approvalRefusalOf(item.tool.content) : null
-  const failed = !refused && (item.tool.status === 'fail' || (exit != null && exit !== 0 && exit !== -1))
+  // Stopped with the run, not broken: no exit code to report and no failure colour.
+  const stopped = !running && !awaiting && isInterruptedToolContent(item.tool.content)
+  const failed = !refused && !stopped && (item.tool.status === 'fail' || (exit != null && exit !== 0 && exit !== -1))
   const hasOutput = Boolean(item.tool.content?.trim()) || (item.toolProgress?.length ?? 0) > 0
   // A running command opens once it has output to show — never onto an empty
   // box — and stays open when it finishes, unless you close it.
@@ -480,35 +483,49 @@ function TerminalCard({ item }: { item: ToolItem }) {
   }, [autoOpen])
   return (
     <div className="overflow-hidden rounded-lg border border-border" data-record-command>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="group flex h-8 w-full items-center gap-2 bg-bg px-3 text-left text-xs focus-visible:vy-focus-ring"
-      >
-        <code className="min-w-0 flex-1 truncate font-mono text-caption text-fg">
-          <span className="text-tertiary">$ </span>
-          {command}
-        </code>
-        {awaiting ? (
-          <AwaitingApproval />
-        ) : running ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-caption text-muted">
-            <AgentVSpinner size={10} />
-            running
-          </span>
-        ) : refused ? (
-          // It never ran: there is no exit code to report.
-          <span className="shrink-0 text-caption text-muted">{refused}</span>
-        ) : failed ? (
-          // Word and colour: the exit code says it failed without the red.
-          <span className="shrink-0 font-mono text-caption text-danger">exit {exit ?? '?'}</span>
-        ) : exit != null ? (
-          <span className="shrink-0 font-mono text-caption text-tertiary">exit {exit}</span>
+      <div className="flex items-center bg-bg">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            'group flex h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs focus-visible:vy-focus-ring',
+            running && onOpenAgentTerminal ? 'pl-3 pr-1' : 'px-3'
+          )}
+        >
+          <code className="min-w-0 flex-1 truncate font-mono text-caption text-fg">
+            <span className="text-tertiary">$ </span>
+            {command}
+          </code>
+          {awaiting ? (
+            <AwaitingApproval />
+          ) : running ? (
+            // The words carry the motion; the time counts up where the final one lands.
+            <span className="shrink-0 text-caption vy-text-live">Running</span>
+          ) : refused ? (
+            // It never ran: there is no exit code to report.
+            <span className="shrink-0 text-caption text-muted">{refused}</span>
+          ) : stopped ? (
+            <span className="shrink-0 text-caption text-tertiary">{item.tool.content}</span>
+          ) : failed ? (
+            // Word and colour: the exit code says it failed without the red.
+            <span className="shrink-0 font-mono text-caption text-danger">exit {exit ?? '?'}</span>
+          ) : exit != null ? (
+            <span className="shrink-0 font-mono text-caption text-tertiary">exit {exit}</span>
+          ) : null}
+          {running ? (
+            <ElapsedSince since={item.at} className="w-12 text-right" />
+          ) : (
+            <Duration ms={toolDurationMs(item)} className="w-12 text-right" />
+          )}
+          <Chevron open={open} />
+        </button>
+        {running && onOpenAgentTerminal ? (
+          // Only while it runs: the mirror lives as long as the app does, and a
+          // finished command's output is already in the card.
+          <IconButton icon="expand" label="Open in Terminal" size="xs" tone="muted" onClick={onOpenAgentTerminal} className="mr-2" />
         ) : null}
-        <Duration ms={toolDurationMs(item)} className="w-12 text-right" />
-        <Chevron open={open} />
-      </button>
+      </div>
       {open ? (
         <div className="border-t border-border bg-sunken px-1 pt-1">
           <ToolRowOutput
@@ -975,7 +992,7 @@ export function NowLine({ text, since }: { text: string; since?: string }) {
 }
 
 /** How long it has been at it, counting up each second while it shows. */
-function ElapsedSince({ since }: { since?: string }) {
+function ElapsedSince({ since, className }: { since?: string; className?: string }) {
   const [elapsed, setElapsed] = useState<number | null>(null)
   useEffect(() => {
     const start = since ? Date.parse(since) : NaN
@@ -988,5 +1005,5 @@ function ElapsedSince({ since }: { since?: string }) {
     const timer = window.setInterval(tick, 1000)
     return () => window.clearInterval(timer)
   }, [since])
-  return <Duration ms={elapsed} />
+  return <Duration ms={elapsed} className={className} />
 }

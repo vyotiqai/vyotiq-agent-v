@@ -12,7 +12,9 @@ export type SlashClientHandlers = {
   onUndoWrites?: () => void | boolean | Promise<void | boolean>
   onSetAgentMode?: (mode: AgentInteractionMode) => void | boolean | Promise<void | boolean>
   onOpenMarketplace?: (mcpServerId?: string) => void
-  onOpenSettings?: (section?: 'voice' | 'providers' | 'agent') => void
+  onOpenSettings?: (section?: 'voice' | 'providers' | 'agent' | 'tools' | 'indexing') => void
+  /** Extensions → Rules: where the rule files a task starts from are managed. */
+  onOpenRules?: () => void
   onCreateRule?: (title?: string) => void | boolean | Promise<void | boolean>
   onCreateSkill?: (title?: string) => void | boolean | Promise<void | boolean>
   onGoalPause?: () => void | boolean | Promise<void | boolean>

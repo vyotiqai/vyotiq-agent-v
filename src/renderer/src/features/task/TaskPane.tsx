@@ -14,7 +14,7 @@ import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcr
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { ActionMenu, Button, IconButton, ImageLightbox, pushToast } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, ImageLightbox, Tooltip, pushToast } from '@renderer/lib/ui'
 import { isEditableShortcutTarget, isMainComposerTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
@@ -37,7 +37,7 @@ import { RecordActionsContext, latestRetryableErrorId } from './record/WorkItems
 import { TaskRecord } from './TaskRecord'
 import { clearMatches, findRanges, foldsToOpen, paintMatches, RecordOpenContext } from './recordFind'
 import { useRecordScroll } from './useRecordScroll'
-import { useRunChecks } from './useRunChecks'
+import { checksRevisionOf, useRunChecks } from './useRunChecks'
 
 /** Palette commands that run one of the task header menu's items. */
 const TASK_COMMAND_MENU_ITEMS: Record<string, string> = {
@@ -237,17 +237,7 @@ export function TaskPane(props: TaskPaneProps) {
 
   // checks.json changes only when create_plan or check_done_when finishes (or
   // a rewind drops one): re-read it then, never on a timer.
-  const checksRevision = useMemo(() => {
-    let n = 0
-    let lastId = ''
-    for (const item of items) {
-      if (item.kind !== 'tool' || item.tool.status === 'running') continue
-      if (item.tool.name !== 'create_plan' && item.tool.name !== 'check_done_when') continue
-      n += 1
-      lastId = item.id
-    }
-    return `${n}:${lastId}:${live ? 1 : 0}`
-  }, [items, live])
+  const checksRevision = useMemo(() => checksRevisionOf(items, live), [items, live])
   const checks = useRunChecks(workspacePath, runId, checksRevision)
 
   // ── Header ────────────────────────────────────────────────────────────
@@ -557,9 +547,11 @@ export function TaskPane(props: TaskPaneProps) {
         actions={
           <>
             {liveNow ? (
-              <Button size="xs" variant="ghost" icon="stop" title="Stop the run (Esc)" onClick={props.onStop}>
-                Stop
-              </Button>
+              <Tooltip content="Stop the run (Esc)">
+                <Button size="xs" variant="ghost" icon="stop" onClick={props.onStop}>
+                  Stop
+                </Button>
+              </Tooltip>
             ) : null}
             {menuItems.length > 0 ? (
               <ActionMenu

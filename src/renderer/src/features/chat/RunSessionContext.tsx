@@ -14,6 +14,16 @@ export type RunSessionValue = {
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   /** Reveal a dock panel from a transcript card (e.g. a PR card opens `pr`). */
   onOpenPanel?: (panel: ChatRightPanelId) => void
+  /**
+   * Show the run's own commands in the Terminal tab. The inspector provides it
+   * above every pane; a pane passes it on only when it is in that workspace.
+   */
+  onOpenAgentTerminal?: () => void
+  /**
+   * The inspector's run's edits that are neither kept nor undone yet, and the
+   * one way to undo them all (it asks first). Only that run's pane gets it.
+   */
+  pendingWrites?: { runId: string; count: number; onUndo: () => void }
 }
 
 const RunSessionContext = createContext<RunSessionValue>({
@@ -23,7 +33,9 @@ const RunSessionContext = createContext<RunSessionValue>({
   agentInstances: undefined,
   onOpenAgentInstance: undefined,
   onOpenWorkspaceFile: undefined,
-  onOpenPanel: undefined
+  onOpenPanel: undefined,
+  onOpenAgentTerminal: undefined,
+  pendingWrites: undefined
 })
 
 export const RunSessionProvider = RunSessionContext.Provider

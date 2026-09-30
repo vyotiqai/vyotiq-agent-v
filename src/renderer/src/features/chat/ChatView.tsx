@@ -52,6 +52,7 @@ import { cn } from '@renderer/lib/ui/cn'
 import { focusComposerMessage, matchShortcut, shouldBlockPanelShortcut } from '@renderer/lib/shortcuts'
 import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import type { ChatItemsStore } from './chatStores'
+import { RunSessionProvider } from './RunSessionContext'
 import { ChatPaneHost, type PaneRenderOptions } from './ChatPaneHost'
 import type { PaneCapacityContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import type { ChatPane, PaneDropZone } from '@renderer/lib/chat/chatPaneLayout'
@@ -722,6 +723,30 @@ export function ChatView({
       </div>
     ) : null
 
+  // A command card's "Open in Terminal": the tab, on the run's own session.
+  const [agentTerminalRequest, setAgentTerminalRequest] = useState(0)
+  const openAgentTerminal = useCallback(() => {
+    setAgentTerminalRequest((n) => n + 1)
+    setRightPanel('terminal')
+  }, [setRightPanel])
+  // What the record's result and stopped line offer: the edits still open.
+  const unkeptWrites = writeCheckpointFiles
+    ? [...(writeFileResolutions?.values() ?? [])].filter((r) => r === undefined).length
+    : 0
+  const undoAllWrites = useCallback(() => void discardAllWrites(), [discardAllWrites])
+  const inspectorSession = useMemo(
+    () => ({
+      workspacePath,
+      runId: activeRunId ?? null,
+      onOpenAgentTerminal: openAgentTerminal,
+      pendingWrites:
+        activeRunId && unkeptWrites > 0 && onUndoWrites
+          ? { runId: activeRunId, count: unkeptWrites, onUndo: undoAllWrites }
+          : undefined
+    }),
+    [workspacePath, activeRunId, openAgentTerminal, unkeptWrites, onUndoWrites, undoAllWrites]
+  )
+
   /** With the inspector hidden, the rightmost pane's header offers it back. */
   const showInspector = useCallback(() => setRightPanel(inspectorTab), [inspectorTab, setRightPanel])
   const onShowInspector = inspectorVisible ? undefined : showInspector
@@ -742,19 +767,21 @@ export function ChatView({
         Tasks
       </h1>
       {multiPane && multiPane.panes.length >= 1 ? (
-        <ChatPaneHost
-          panes={multiPane.panes}
-          focusedPaneId={multiPane.focusedPaneId}
-          sizes={multiPane.sizes}
-          onShowInspector={onShowInspector}
-          onFocusPane={multiPane.onFocusPane}
-          onClosePane={multiPane.onClosePane}
-          onSizesChange={multiPane.onSizesChange}
-          onSessionDrop={multiPane.onSessionDrop}
-          onSplitPane={multiPane.onSplitPane}
-          getPaneTitle={multiPane.getPaneTitle}
-          renderPane={renderMultiPane}
-        />
+        <RunSessionProvider value={inspectorSession}>
+          <ChatPaneHost
+            panes={multiPane.panes}
+            focusedPaneId={multiPane.focusedPaneId}
+            sizes={multiPane.sizes}
+            onShowInspector={onShowInspector}
+            onFocusPane={multiPane.onFocusPane}
+            onClosePane={multiPane.onClosePane}
+            onSizesChange={multiPane.onSizesChange}
+            onSessionDrop={multiPane.onSessionDrop}
+            onSplitPane={multiPane.onSplitPane}
+            getPaneTitle={multiPane.getPaneTitle}
+            renderPane={renderMultiPane}
+          />
+        </RunSessionProvider>
       ) : (
         <PanePlaceholder loadError={loadError} />
       )}
@@ -849,6 +876,7 @@ export function ChatView({
                 visible={visiblePanelId === 'terminal'}
                 agentCommand={liveActivity.command}
                 agentCommandAt={liveActivity.commandAt}
+                showAgentRequest={agentTerminalRequest}
               />
             </Suspense>
           </ErrorBoundary>

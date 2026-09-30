@@ -81,6 +81,7 @@ describe('P3 surfaceKey + composer shared hooks', () => {
   it('SessionChatColumn puts onOpenWorkspaceFile on the run session', () => {
     const column = readFileSync(join(root, 'features/chat/SessionChatColumn.tsx'), 'utf8')
     expect(column).toMatch(/onOpenWorkspaceFile/)
-    expect(column).toMatch(/onOpenWorkspaceFile\s*\n\s*\}\)/)
+    // A key of the run session object, wherever it sits among the others.
+    expect(column).toMatch(/const runSession = useMemo\(\s*\(\) => \(\{[^}]*\bonOpenWorkspaceFile,/)
   })
 })

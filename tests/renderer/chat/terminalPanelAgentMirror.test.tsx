@@ -245,6 +245,45 @@ describe('TerminalPanel says what the agent is running', () => {
   })
 })
 
+describe('TerminalPanel brings the run’s session forward when a command card asks', () => {
+  it('selects the mirror over the shell that was in front', async () => {
+    installApi({ ptyList: vi.fn().mockResolvedValue({ ok: true, data: [shellSession, mirrorSession] }) })
+    const view = render(<TerminalPanel workspacePath="/ws" visible />)
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'cmd' }).getAttribute('aria-selected')).toBe('true'))
+    view.rerender(<TerminalPanel workspacePath="/ws" visible showAgentRequest={1} />)
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Agent' }).getAttribute('aria-selected')).toBe('true'))
+  })
+
+  it('still makes a shell, but leaves the mirror in front', async () => {
+    const ptyList = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, data: [mirrorSession] })
+      .mockResolvedValue({ ok: true, data: [mirrorSession, shellSession] })
+    const api = installApi({ ptyList })
+    render(<TerminalPanel workspacePath="/ws" visible showAgentRequest={1} />)
+    await waitFor(() => expect(api.ptyCreate).toHaveBeenCalled())
+    await screen.findByRole('tab', { name: 'cmd' })
+    expect(screen.getByRole('tab', { name: 'Agent' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('waits for the mirror when the run’s first command has not made it yet', async () => {
+    let changed = (): void => undefined
+    const ptyList = vi.fn().mockResolvedValue({ ok: true, data: [shellSession] })
+    installApi({
+      ptyList,
+      onPtySessionsChanged: vi.fn((cb: () => void) => {
+        changed = cb
+        return () => undefined
+      })
+    })
+    render(<TerminalPanel workspacePath="/ws" visible showAgentRequest={1} />)
+    await screen.findByRole('tab', { name: 'cmd' })
+    ptyList.mockResolvedValue({ ok: true, data: [shellSession, mirrorSession] })
+    changed()
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Agent' }).getAttribute('aria-selected')).toBe('true'))
+  })
+})
+
 describe('commandProgram', () => {
   it.each([
     ['pnpm vitest run tests/x', 'vitest'],

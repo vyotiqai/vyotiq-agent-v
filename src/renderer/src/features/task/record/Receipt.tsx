@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { RunFeedbackRating } from '@shared/ipc'
 import { checksTally, type DoneWhenCheck } from '@shared/doneWhenChecks'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
@@ -64,7 +65,8 @@ export function ReceiptLine({
   live,
   feedback,
   checks = [],
-  outcome
+  outcome,
+  actions
 }: {
   usage: StepUsageTotals | null
   startedAt: number | null
@@ -76,12 +78,14 @@ export function ReceiptLine({
   /** How a run that did not finish ended; a finished run says nothing here. */
   outcome?: 'stopped' | 'failed'
   feedback?: { value: RunFeedbackRating | null; onRate: (rating: RunFeedbackRating | null) => void }
+  /** What to do about how it ended (a stopped run: undo, resume), at the line's end. */
+  actions?: ReactNode
 }) {
   const now = useSharedNow(live && startedAt != null)
   const end = live ? now : endedAt
   const duration = startedAt != null && end != null ? end - startedAt : null
   const parts = receiptParts(usage, duration, live ? [] : checks)
-  if (parts.length === 0 && !feedback && !outcome) return null
+  if (parts.length === 0 && !feedback && !outcome && !actions) return null
   const rate = (rating: RunFeedbackRating): void => {
     if (!feedback) return
     feedback.onRate(feedback.value === rating ? null : rating)
@@ -113,6 +117,11 @@ export function ReceiptLine({
           </span>
         ))}
         <span className="flex-1" />
+        {actions ? (
+          <span className="flex items-center gap-1 font-sans" data-receipt-actions>
+            {actions}
+          </span>
+        ) : null}
         {!live && feedback ? (
           <span className="flex items-center gap-0.5">
             <IconButton

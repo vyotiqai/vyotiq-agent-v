@@ -1477,9 +1477,13 @@ function App() {
         setMarketplaceFocusServerId(mcpServerId ?? null)
         setView('marketplace')
       },
-      onOpenSettings: (section?: 'voice' | 'providers' | 'agent') => {
+      onOpenSettings: (section?: 'voice' | 'providers' | 'agent' | 'tools' | 'indexing') => {
         if (section) setSettingsSection(section)
         setView('settings')
+      },
+      onOpenRules: () => {
+        setMarketplaceFocusTab('rules')
+        setView('marketplace')
       },
       onCreateRule: async (title?: string) => {
         if (!scope.workspacePath) {

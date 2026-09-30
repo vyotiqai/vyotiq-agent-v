@@ -169,7 +169,6 @@ describe('New task brief', () => {
   it('starts the task with its checks, a half-typed one included', async () => {
     const { props } = renderBrief()
     typeBrief('Fix the updater swap')
-    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
     const check = screen.getByRole('textbox', { name: 'New check' })
     fireEvent.change(check, { target: { value: 'The updater suite passes' } })
     fireEvent.keyDown(check, { key: 'Enter' })
@@ -186,7 +185,6 @@ describe('New task brief', () => {
   it('takes Enter as a new line and starts on Ctrl+Enter, checks and all', async () => {
     const { props } = renderBrief()
     typeBrief('Fix the updater swap')
-    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
     fireEvent.change(screen.getByRole('textbox', { name: 'New check' }), { target: { value: 'Suite passes' } })
     const brief = screen.getByRole('combobox', { name: 'Brief' })
     fireEvent.keyDown(brief, { key: 'Enter' })
@@ -199,7 +197,6 @@ describe('New task brief', () => {
   it('removes a check, and sends none when there are none', async () => {
     const { props } = renderBrief()
     typeBrief('Tidy the nav')
-    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
     const check = screen.getByRole('textbox', { name: 'New check' })
     fireEvent.change(check, { target: { value: 'Lint passes' } })
     fireEvent.keyDown(check, { key: 'Enter' })
@@ -226,7 +223,6 @@ describe('New task brief', () => {
     const save = screen.getByRole('button', { name: 'Save as draft' }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
     typeBrief('Fix the updater swap')
-    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
     const check = screen.getByRole('textbox', { name: 'New check' })
     fireEvent.change(check, { target: { value: 'Suite passes' } })
     fireEvent.keyDown(check, { key: 'Enter' })
@@ -245,32 +241,39 @@ describe('New task brief', () => {
     })
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Brief' }).textContent).toBe(''))
     expect(screen.queryByRole('list', { name: 'Done when' })).toBeNull()
-    expect(screen.queryByRole('textbox', { name: 'New check' })).toBeNull()
+    expect((screen.getByRole('textbox', { name: 'New check' }) as HTMLInputElement).value).toBe('')
     expect(briefStateFor('/ws/app')).toEqual({ draftId: null, checks: [], worktree: false })
   })
 
-  it('keeps an emptied check row in place until a press on a button is over', async () => {
+  it('keeps the checks in the brief’s box, the field for the next one always there', () => {
     renderBrief()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
-    const check = screen.getByRole('textbox', { name: 'New check' })
+    const box = document.querySelector<HTMLElement>('[data-brief]')!
+    const check = within(box).getByRole('textbox', { name: 'New check' }) as HTMLInputElement
+    // Nothing to press first, and nothing folds on blur: no button moves under a press.
+    expect(screen.queryByRole('button', { name: 'Add a check' })).toBeNull()
     fireEvent.change(check, { target: { value: 'Lint passes' } })
     fireEvent.keyDown(check, { key: 'Enter' })
-    // A press on Start task: pointer down, the empty row loses focus…
-    fireEvent.pointerDown(document.body)
-    fireEvent.blur(screen.getByRole('textbox', { name: 'New check' }))
-    // …and stays put until the press is over, so the button does not move under it.
-    expect(screen.getByRole('textbox', { name: 'New check' })).toBeTruthy()
-    fireEvent.pointerUp(document.body)
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'New check' })).toBeNull())
-    // Without a press (Tab away), it folds at once.
-    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
-    fireEvent.blur(screen.getByRole('textbox', { name: 'New check' }))
-    expect(screen.queryByRole('textbox', { name: 'New check' })).toBeNull()
+    expect(within(within(box).getByRole('list', { name: 'Done when' })).getByText('Lint passes')).toBeTruthy()
+    fireEvent.blur(check)
+    expect(within(box).getByRole('textbox', { name: 'New check' })).toBe(check)
+    // The checks sit between the brief and the control row.
+    const rows = Array.from(box.querySelectorAll('[data-done-when], [data-composer-controls]'))
+    expect(rows.map((el) => (el.hasAttribute('data-done-when') ? 'checks' : 'controls'))).toEqual(['checks', 'controls'])
+
+    // Escape drops a half-typed check and is kept; on an empty field it goes on up.
+    fireEvent.change(check, { target: { value: 'Half' } })
+    const onEscape = vi.fn()
+    document.addEventListener('keydown', onEscape)
+    fireEvent.keyDown(check, { key: 'Escape' })
+    expect(check.value).toBe('')
+    expect(onEscape).not.toHaveBeenCalled()
+    fireEvent.keyDown(check, { key: 'Escape' })
+    expect(onEscape).toHaveBeenCalledTimes(1)
+    document.removeEventListener('keydown', onEscape)
   })
 
   it('keeps its checks when the page is left and opened again', () => {
     const first = renderBrief()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
     const check = screen.getByRole('textbox', { name: 'New check' })
     fireEvent.change(check, { target: { value: 'Lint passes' } })
     fireEvent.keyDown(check, { key: 'Enter' })
@@ -331,8 +334,11 @@ describe('New task brief', () => {
 
   it('offers a new worktree: says where it will run, and starts with it asked for', async () => {
     const { props } = renderBrief()
-    fireEvent.click(await screen.findByRole('button', { name: 'Where it works' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'New worktree' }))
+    const where = await screen.findByRole('radiogroup', { name: 'Where it works' })
+    // Both answers in view, in the header, on its right edge.
+    expect(where.closest('[data-task-header]')).toBeTruthy()
+    expect(within(where).getByRole('radio', { name: 'This folder' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(within(where).getByRole('radio', { name: 'New worktree' }))
     const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
     // Two uncommitted files in this folder: the worktree starts without them.
     await waitFor(() => expect(sees.textContent).toContain('New worktree'))
@@ -357,7 +363,7 @@ describe('New task brief', () => {
     })) as unknown as typeof window.vyotiq.gitStatus
     renderBrief()
     await screen.findByRole('button', { name: 'Branch' })
-    expect(screen.queryByRole('button', { name: 'Where it works' })).toBeNull()
+    expect(screen.queryByRole('radiogroup', { name: 'Where it works' })).toBeNull()
   })
 
   it('switches mode with Ctrl+. typed in the brief', () => {
@@ -373,6 +379,30 @@ describe('New task brief', () => {
     renderBrief({ agentMode: 'ask' })
     const page = document.querySelector('[data-new-task]') as HTMLElement
     expect(page.textContent).toContain('the agent reads and answers, and changes nothing')
+  })
+
+  it('makes each fact you can change a way to where you change it', async () => {
+    const onOpenSettings = vi.fn()
+    const onOpenRules = vi.fn()
+    renderBrief({ slashHandlers: { onOpenSettings, onOpenRules } })
+    const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(sees.textContent).toContain('2 built-in · 1 MCP server'))
+    fireEvent.click(within(sees).getByRole('button', { name: /^Rules:\s*CLAUDE\.md.*change in Extensions$/ }))
+    expect(onOpenRules).toHaveBeenCalledTimes(1)
+    fireEvent.click(within(sees).getByRole('button', { name: /^Index:\s*Ready.*change in Settings$/ }))
+    expect(onOpenSettings).toHaveBeenLastCalledWith('indexing')
+    fireEvent.click(within(sees).getByRole('button', { name: /^Tools:.*change in Settings$/ }))
+    expect(onOpenSettings).toHaveBeenLastCalledWith('tools')
+    // The branch is picked in the header, and memory has no page: those stay facts.
+    expect(sees.querySelector('[data-fact="Branch"] button')).toBeNull()
+    expect(sees.querySelector('[data-fact="Memory"] button')).toBeNull()
+  })
+
+  it('leaves the facts as facts with nowhere to send them', async () => {
+    renderBrief()
+    const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(sees.textContent).toContain('Ready'))
+    expect(within(sees).queryAllByRole('button')).toHaveLength(0)
   })
 
   it('opens Settings → Agent from the approvals line', () => {

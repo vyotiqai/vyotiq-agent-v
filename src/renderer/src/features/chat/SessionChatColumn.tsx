@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo } from 'react'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
 import { userTurnCount } from '@shared/utils/turnUsage'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type {
   AgentInteractionMode,
@@ -19,7 +20,7 @@ import { runTitle } from '@renderer/app/navigator/runTitle'
 import { useTaskRecentFiles } from '@renderer/features/inspector/agentFileMarks'
 import { Composer } from './components/composer'
 import { useHasChatItems } from './components/ChatStreamLeaves'
-import { RunSessionProvider } from './RunSessionContext'
+import { RunSessionProvider, useRunSession } from './RunSessionContext'
 import { AgentInstancePane } from './components/AgentInstancePane'
 import { useRunGoal } from './hooks/useRunGoal'
 import { useRunFeedback } from './hooks/useRunFeedback'
@@ -361,6 +362,15 @@ export function SessionChatColumn({
     onEditLastUserMessage
   })
 
+  const inspector = useRunSession()
+  // The Terminal tab lists the inspector's workspace; a pane pinned to another
+  // one would open onto somebody else's commands.
+  const sameWorkspace =
+    workspacePath != null && inspector.workspacePath != null && workspacePathsEqual(inspector.workspacePath, workspacePath)
+  const onOpenAgentTerminal = sameWorkspace ? inspector.onOpenAgentTerminal : undefined
+  // The inspector's edits are one run's; another pane's record must not offer them.
+  const pendingWrites =
+    sameWorkspace && activeRunId != null && inspector.pendingWrites?.runId === activeRunId ? inspector.pendingWrites : undefined
   const runSession = useMemo(
     () => ({
       workspacePath: workspacePath ?? null,
@@ -369,9 +379,20 @@ export function SessionChatColumn({
       agentInstances,
       onOpenAgentInstance:
         workspacePath != null ? (instanceRunId: string) => openInstancePane(instanceRunId) : undefined,
-      onOpenWorkspaceFile
+      onOpenWorkspaceFile,
+      onOpenAgentTerminal,
+      pendingWrites
     }),
-    [workspacePath, activeRunId, agentMode, agentInstances, openInstancePane, onOpenWorkspaceFile]
+    [
+      workspacePath,
+      activeRunId,
+      agentMode,
+      agentInstances,
+      openInstancePane,
+      onOpenWorkspaceFile,
+      onOpenAgentTerminal,
+      pendingWrites
+    ]
   )
 
   const runGoal = useRunGoal({

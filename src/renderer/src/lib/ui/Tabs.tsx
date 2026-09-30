@@ -155,7 +155,8 @@ export function Segmented<T extends string>({
             )}
           >
             {it.icon ? <Icon name={it.icon} size={14} /> : null}
-            {it.label}
+            {/* Its own element, so a narrow container can keep only the icons. */}
+            {it.label ? <span data-segmented-label>{it.label}</span> : null}
           </button>
         )
       })}

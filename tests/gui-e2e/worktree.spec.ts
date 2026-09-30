@@ -51,13 +51,13 @@ test('a task in a new worktree: started there, merged into main, then removed', 
   const brief = page.getByRole('combobox', { name: 'Brief' })
   await expect(brief).toBeVisible({ timeout: 20_000 })
 
-  await page.getByRole('button', { name: 'Where it works' }).click({ timeout: 20_000 })
-  await page.getByRole('option', { name: 'New worktree' }).click()
+  const newTaskHeader = page.locator('[data-new-task] [data-task-header]')
+  await newTaskHeader.getByRole('radio', { name: 'New worktree' }).click({ timeout: 20_000 })
   const sees = page.getByRole('complementary', { name: 'What the agent will see' })
   await expect(sees).toContainText('New worktree')
   await expect(sees).toContainText('from main · 1 uncommitted file stays here')
   // Where it works is said in the header, where it was picked.
-  await expect(page.locator('[data-new-task] [data-task-header]')).toContainText('New worktree')
+  await expect(newTaskHeader.getByRole('radio', { name: 'New worktree' })).toHaveAttribute('aria-checked', 'true')
 
   // Put aside and continued: the draft is the parent's, and starting spends it there.
   await brief.fill('Add backpressure to the chat stream')
@@ -65,9 +65,8 @@ test('a task in a new worktree: started there, merged into main, then removed', 
   await expect(brief).toHaveText('')
   await page.locator('[data-nav-section="drafts"]').getByRole('button', { name: 'Add backpressure to the chat stream' }).click()
   await expect(brief).toHaveText('Add backpressure to the chat stream', { timeout: 20_000 })
-  await expect(page.getByRole('button', { name: 'Where it works' })).toHaveText('This folder')
-  await page.getByRole('button', { name: 'Where it works' }).click()
-  await page.getByRole('option', { name: 'New worktree' }).click()
+  await expect(newTaskHeader.getByRole('radio', { name: 'This folder' })).toHaveAttribute('aria-checked', 'true')
+  await newTaskHeader.getByRole('radio', { name: 'New worktree' }).click()
   await brief.press('Control+Enter')
   await expect(page.getByText('E2E fixture response.')).toBeVisible({ timeout: 30_000 })
 
@@ -133,5 +132,5 @@ test('a task in a new worktree: started there, merged into main, then removed', 
   expect(parentDrafts).toBe(0)
   await page.keyboard.press('Control+n')
   await expect(brief).toHaveText('', { timeout: 20_000 })
-  await expect(page.getByRole('button', { name: 'Where it works' })).toHaveText('This folder')
+  await expect(newTaskHeader.getByRole('radio', { name: 'This folder' })).toHaveAttribute('aria-checked', 'true')
 })

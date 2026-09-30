@@ -20,7 +20,8 @@ import { ReceiptLine } from './record/Receipt'
 import { RecordRow, RunDivider } from './record/RecordLayout'
 import { RecordProse } from './record/RecordProse'
 import { Steps } from './record/Steps'
-import { LooseWork, NowLine, workIsLive } from './record/WorkItems'
+import { LooseWork, NowLine, RecordActionsContext, workIsLive } from './record/WorkItems'
+import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
 
 export type TaskRecordProps = {
@@ -159,16 +160,29 @@ export function TaskRecord(props: TaskRecordProps) {
 function ResultRow({
   text,
   streaming = false,
-  checks
+  checks,
+  review
 }: {
   text: string
   streaming?: boolean
   checks: readonly DoneWhenCheck[]
+  /** Its edits are still open: how many, and the way to them. */
+  review?: { count: number; open: () => void }
 }) {
   return (
     <RecordRow label="Result">
       <RecordProse text={text} streaming={streaming} size="md" tone="strong" />
       <CheckedBlock checks={checks} />
+      {review ? (
+        <div className="mt-3 flex items-center gap-2" data-result-review>
+          <span className="min-w-0 flex-1 text-xs text-tertiary">
+            {review.count} {review.count === 1 ? 'file' : 'files'} changed, not kept yet
+          </span>
+          <Button size="xs" variant="secondary" trailingIcon="arrowRight" onClick={review.open}>
+            Review changes
+          </Button>
+        </div>
+      ) : null}
     </RecordRow>
   )
 }
@@ -220,6 +234,12 @@ function RunBody({
     activity != null && !(list.length > 0 && workIsLive(list[list.length - 1]!))
   const setupActivity = tail?.kind === 'setup' && looseActivity(run.setup)
   const state = live ? null : runStateOf(run, isLast, props.options)
+  // The latest run's edits still open in the inspector, and what the record offers for them.
+  const { pendingWrites } = useRunSession()
+  const { onOpenChanges, onRetry, retryableErrorId } = useContext(RecordActionsContext)
+  const unkept = isLast && !live ? (pendingWrites?.count ?? 0) : 0
+  // An error row with Retry already says how to carry on.
+  const resume = state === 'stopped' && isLast && onRetry && !retryableErrorId ? onRetry : undefined
   const afterActivity = tail?.kind === 'after' && looseActivity(run.after)
   // A settled run with an answer folds its loose work; without one, the work is the record.
   const foldLoose = !live && run.result != null
@@ -259,7 +279,12 @@ function RunBody({
         </RecordRow>
       ) : null}
       {run.result ? (
-        <ResultRow text={run.result.text} streaming={run.result.streaming} checks={live ? [] : checks} />
+        <ResultRow
+          text={run.result.text}
+          streaming={run.result.streaming}
+          checks={live ? [] : checks}
+          review={unkept > 0 && onOpenChanges ? { count: unkept, open: () => onOpenChanges() } : undefined}
+        />
       ) : null}
       <ReceiptLine
         usage={props.turnUsage?.[run.n - 1] ?? null}
@@ -269,6 +294,22 @@ function RunBody({
         feedback={isLast && !live ? props.runFeedback : undefined}
         checks={checks}
         outcome={state === 'stopped' || state === 'failed' ? state : undefined}
+        actions={
+          state === 'stopped' && isLast && (resume || (unkept > 0 && pendingWrites)) ? (
+            <>
+              {unkept > 0 && pendingWrites ? (
+                <Button size="xs" variant="ghost" icon="undo" onClick={pendingWrites.onUndo}>
+                  Undo its changes
+                </Button>
+              ) : null}
+              {resume ? (
+                <Button size="xs" variant="secondary" icon="play" onClick={resume}>
+                  Resume
+                </Button>
+              ) : null}
+            </>
+          ) : undefined
+        }
       />
     </>
   )

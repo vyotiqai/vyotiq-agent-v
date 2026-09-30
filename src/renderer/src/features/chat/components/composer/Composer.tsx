@@ -1316,6 +1316,7 @@ export function Composer({
         }
         onStart={() => submit()}
         onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
+        onOpenRules={slashHandlers?.onOpenRules}
         headerActions={briefHeaderActions}
       />
     )

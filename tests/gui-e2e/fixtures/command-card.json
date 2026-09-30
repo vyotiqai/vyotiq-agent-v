@@ -1,0 +1,407 @@
+{
+ "events": [
+  {
+   "type": "status",
+   "status": "running"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "cmd-1",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"pnpm vitest run parser\"}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "Running the parser tests.",
+   "toolCalls": [
+    {
+     "id": "cmd-1",
+     "name": "terminal",
+     "arguments": "{\"command\":\"pnpm vitest run parser\"}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "cmd-1",
+   "name": "terminal",
+   "summary": "pnpm vitest run parser"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "hold",
+   "name": "terminal",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "cmd-1",
+   "name": "terminal",
+   "summary": "pnpm vitest run parser",
+   "ok": true,
+   "content": "1 passed\nexit_code: 0"
+  },
+  {
+   "type": "assistant_message",
+   "content": "COMMAND_CARD_DONE"
+  },
+  {
+   "type": "status",
+   "status": "done"
+  }
+ ]
+}

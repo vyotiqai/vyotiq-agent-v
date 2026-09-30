@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 import type { McpServerStatus, ToolApprovalMode, ToolApprovalSettings, ToolCatalogResult } from '@shared/ipc'
 import { relativeTimeAgo } from '@shared/utils/timeFormat'
-import { Button, IconButton, Menu, StatusGlyph, cn, type MenuOption } from '@renderer/lib/ui'
+import { Button, IconButton, Menu, Segmented, StatusGlyph, cn, type MenuOption } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
-import { SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
@@ -33,12 +33,16 @@ function startChord(): string {
   return window.vyotiq?.platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter'
 }
 
+/** Where the facts beside the brief lead: the page where each one is changed. */
+export type NewTaskFactTarget = 'agent' | 'tools' | 'indexing'
+
 /**
- * Starting a task is filling in a brief, not opening a chat: what to do and
- * how it runs (the composer's own control row, in the brief's box), the
- * checks the run is judged against, and — beside it — what the agent will
- * see. The brief itself is the composer's input, so @ context, attachments
- * and / skills work here as they do on the instruction line.
+ * Starting a task is filling in a brief, not opening a chat. The brief is one
+ * box: what to do, the checks the run is judged against, and how it runs (the
+ * composer's own control row). Where it runs is the header; beside it, what
+ * the agent will see, each fact a way to where you change it. The brief
+ * itself is the composer's input, so @ context, attachments and / skills
+ * work here as they do on the instruction line.
  */
 export function NewTaskBrief({
   workspacePath,
@@ -58,6 +62,7 @@ export function NewTaskBrief({
   onChecksChange,
   onStart,
   onOpenSettings,
+  onOpenRules,
   headerActions,
   checks,
   onChecksEdit,
@@ -90,7 +95,10 @@ export function NewTaskBrief({
   /** The checks as they stand, a half-typed one included — whatever starts the task sends them. */
   onChecksChange: (doneWhen: string[]) => void
   onStart: () => void
-  onOpenSettings?: (section: 'agent') => void
+  /** Settings → Agent from the approvals line; Tools and Indexing from their facts. */
+  onOpenSettings?: (section: NewTaskFactTarget) => void
+  /** Extensions → Rules, from the Rules fact. */
+  onOpenRules?: () => void
   /** The pane's own controls: show the inspector, close a split pane. */
   headerActions?: ReactNode
   /** The checks added so far — kept per workspace, so leaving New task keeps them. */
@@ -104,54 +112,10 @@ export function NewTaskBrief({
   worktree?: boolean
   onWorktreeChange?: (worktree: boolean) => void
 }) {
-  const [adding, setAdding] = useState(false)
   const [draftCheck, setDraftCheck] = useState('')
-  const addRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (adding) addRef.current?.focus()
-  }, [adding])
-
-  // An empty "add a check" row folds away when focus leaves it. When a press
-  // took focus (Start task, Save as draft), fold it only once that press is
-  // over: folding at blur moves those buttons up under the pointer between
-  // its down and its up, and the click is lost.
-  const pointerDownRef = useRef(false)
-  useEffect(() => {
-    const down = (): void => {
-      pointerDownRef.current = true
-    }
-    const up = (): void => {
-      pointerDownRef.current = false
-    }
-    document.addEventListener('pointerdown', down, true)
-    document.addEventListener('pointerup', up, true)
-    document.addEventListener('pointercancel', up, true)
-    return () => {
-      document.removeEventListener('pointerdown', down, true)
-      document.removeEventListener('pointerup', up, true)
-      document.removeEventListener('pointercancel', up, true)
-    }
-  }, [])
-  const collapseEmptyCheck = (): void => {
-    if (!pointerDownRef.current) {
-      setAdding(false)
-      return
-    }
-    const afterPress = (): void => {
-      window.removeEventListener('pointerup', afterPress, true)
-      window.removeEventListener('pointercancel', afterPress, true)
-      // The click comes after pointerup in the same gesture; fold after it.
-      window.setTimeout(() => setAdding(false), 0)
-    }
-    window.addEventListener('pointerup', afterPress, true)
-    window.addEventListener('pointercancel', afterPress, true)
-  }
-
-  useEffect(() => {
-    if (!clearToken) return
-    setAdding(false)
-    setDraftCheck('')
+    if (clearToken) setDraftCheck('')
   }, [clearToken])
 
   // Ctrl/Cmd+Enter in the brief starts the task too, so the composer holds
@@ -177,10 +141,10 @@ export function NewTaskBrief({
     } else if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
       event.preventDefault()
       addCheck()
-    } else if (event.key === 'Escape') {
+    } else if (event.key === 'Escape' && draftCheck) {
+      // Only a half-typed check is Escape's here; an empty field lets it through.
       event.preventDefault()
       event.stopPropagation()
-      setAdding(false)
       setDraftCheck('')
     }
   }
@@ -189,18 +153,21 @@ export function NewTaskBrief({
     // The pane around it is already the "New task" region.
     <div className="flex min-h-0 flex-1 flex-col bg-bg" data-new-task>
       <header
-        className="flex h-10 shrink-0 items-center gap-1 border-b border-border pl-4 pr-2 text-xs text-muted"
+        className="@container flex h-10 shrink-0 items-center gap-1 border-b border-border pl-4 pr-2 text-xs text-muted"
         data-task-header
       >
-        <h1 className="mr-2 text-sm font-semibold text-fg-strong">New task</h1>
+        <h1 className="mr-2 shrink-0 whitespace-nowrap text-sm font-semibold text-fg-strong">New task</h1>
         {workspacePath ? (
           <>
             {'in '}
             <WorkspaceSelect workspacePath={workspacePath} targets={targets} brief={brief} />
-            <BranchSelect workspacePath={workspacePath} worktree={worktree} onWorktreeChange={onWorktreeChange} />
+            <BranchSelect workspacePath={workspacePath} />
           </>
         ) : null}
         <span className="flex-1" />
+        {workspacePath && onWorktreeChange ? (
+          <WhereItWorks workspacePath={workspacePath} worktree={worktree} onWorktreeChange={onWorktreeChange} />
+        ) : null}
         {headerActions}
       </header>
 
@@ -221,62 +188,50 @@ export function NewTaskBrief({
               {fileInput}
               <div className="px-4 pt-3.5">{input}</div>
               {attachments ? <div className="px-4 pt-2">{attachments}</div> : null}
+              {/* The checks the run is judged against are part of the brief:
+                  the field for the next one is always there, so the first
+                  check is one click into it, not two. */}
+              <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
+                {checks.length > 0 ? (
+                  <ul className="m-0 list-none p-0" aria-label="Done when">
+                    {checks.map((text, index) => (
+                      <li key={`${index}:${text}`} className="group flex h-7 items-center gap-2.5">
+                        <StatusGlyph state="queued" size={14} />
+                        <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
+                          {text}
+                        </span>
+                        <IconButton
+                          icon="close"
+                          label={`Remove “${text}”`}
+                          size="xs"
+                          tone="muted"
+                          className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                          onClick={() => onChecksEdit(checks.filter((_, i) => i !== index))}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {checks.length < MAX_CHECKS ? (
+                  <label className="flex h-7 cursor-text items-center gap-2.5">
+                    <Icon name="plus" size={14} className="shrink-0 text-tertiary" />
+                    <input
+                      value={draftCheck}
+                      maxLength={CHECK_MAX_CHARS}
+                      onChange={(e) => setDraftCheck(e.target.value)}
+                      onKeyDown={onCheckKeyDown}
+                      placeholder="Done when… a command passes, a file exists"
+                      aria-label="New check"
+                      className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
+                    />
+                  </label>
+                ) : null}
+              </div>
               <div className="pb-1 pl-4 pr-3 @container">{controls}</div>
             </div>
             {menus}
 
-            <Block label="Done when" hint="The run is checked against these before it can finish">
-              {checks.length > 0 || adding ? (
-                <ul className="m-0 list-none divide-y divide-border/60 border-y border-border p-0" aria-label="Done when">
-                  {checks.map((text, index) => (
-                    <li key={`${index}:${text}`} className="group flex h-9 items-center gap-2.5">
-                      <StatusGlyph state="queued" size={14} />
-                      <span className="min-w-0 flex-1 truncate text-sm text-fg" title={text}>
-                        {text}
-                      </span>
-                      <IconButton
-                        icon="close"
-                        label={`Remove “${text}”`}
-                        size="xs"
-                        tone="muted"
-                        className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                        onClick={() => onChecksEdit(checks.filter((_, i) => i !== index))}
-                      />
-                    </li>
-                  ))}
-                  {adding ? (
-                    <li className="flex h-9 items-center gap-2.5">
-                      <StatusGlyph state="queued" size={14} />
-                      <input
-                        ref={addRef}
-                        value={draftCheck}
-                        maxLength={CHECK_MAX_CHARS}
-                        onChange={(e) => setDraftCheck(e.target.value)}
-                        onKeyDown={onCheckKeyDown}
-                        onBlur={() => {
-                          if (!draftCheck.trim()) collapseEmptyCheck()
-                        }}
-                        placeholder="A result you can check — a command that passes, a file that exists"
-                        aria-label="New check"
-                        className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-tertiary"
-                      />
-                    </li>
-                  ) : null}
-                </ul>
-              ) : null}
-              {checks.length < MAX_CHECKS ? (
-                <button
-                  type="button"
-                  className="mt-1 inline-flex h-7 items-center gap-1.5 rounded-sm text-xs text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring"
-                  onClick={() => (adding ? addCheck() : setAdding(true))}
-                >
-                  <Icon name="plus" size={13} />
-                  Add a check
-                </button>
-              ) : null}
-            </Block>
-
-            <div className="mt-8 flex flex-wrap items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button
                 variant="primary"
                 size="md"
@@ -302,22 +257,17 @@ export function NewTaskBrief({
             </div>
           </div>
 
-          {workspacePath ? <WhatTheAgentSees workspacePath={workspacePath} worktree={worktree} /> : null}
+          {workspacePath ? (
+            <WhatTheAgentSees
+              workspacePath={workspacePath}
+              worktree={worktree}
+              onOpenSettings={onOpenSettings}
+              onOpenRules={onOpenRules}
+            />
+          ) : null}
         </div>
       </div>
     </div>
-  )
-}
-
-function Block({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <section className="mt-8">
-      <div className="mb-2 flex items-baseline gap-3">
-        <h2 className={cn(SECTION_LABEL, 'shrink-0 whitespace-nowrap')}>{label}</h2>
-        {hint ? <span className="min-w-0 truncate text-xs text-tertiary">{hint}</span> : null}
-      </div>
-      {children}
-    </section>
   )
 }
 
@@ -353,25 +303,40 @@ function WorkspaceSelect({
   )
 }
 
-const WHERE_OPTIONS: MenuOption[] = [
-  { value: 'here', label: 'This folder' },
-  { value: 'worktree', label: 'New worktree' }
-]
+const WHERE_ITEMS = [
+  { id: 'here', label: 'This folder', icon: 'folder', title: 'Edits this folder directly' },
+  { id: 'worktree', label: 'New worktree', icon: 'fork', title: 'Its own branch and folder; merge it back when you are happy' }
+] as const
 
 /**
- * The branch the task starts on (picking another checks it out), and where it
- * works: in this folder, or in a new worktree branched from it — only offered
- * when there is a branch with a commit to branch from.
+ * Where it works, both answers in view: in this folder, or in a new worktree
+ * branched from it — only offered when there is a commit to branch from.
  */
-function BranchSelect({
+function WhereItWorks({
   workspacePath,
   worktree,
   onWorktreeChange
 }: {
   workspacePath: string
   worktree: boolean
-  onWorktreeChange?: (worktree: boolean) => void
+  onWorktreeChange: (worktree: boolean) => void
 }) {
+  const git = useGitStatus(workspacePath, 0, true, 0)
+  if (git.result?.kind !== 'ok' || !git.status?.branch || !git.status.hasCommits) return null
+  return (
+    <Segmented
+      label="Where it works"
+      value={worktree ? 'worktree' : 'here'}
+      onChange={(where) => onWorktreeChange(where === 'worktree')}
+      items={WHERE_ITEMS}
+      // In a narrow column the icons carry it; the words stay its names and tooltips.
+      className="mr-1 shrink-0 @max-[640px]:[&_[data-segmented-label]]:sr-only"
+    />
+  )
+}
+
+/** The branch the task starts on: picking another checks it out. */
+function BranchSelect({ workspacePath }: { workspacePath: string }) {
   const [revision, setRevision] = useState(0)
   const git = useGitStatus(workspacePath, revision, true, 0)
   const [branches, setBranches] = useState<string[]>([])
@@ -426,22 +391,6 @@ function BranchSelect({
         bare
         mono
       />
-      {onWorktreeChange && git.status?.hasCommits ? (
-        <>
-          <span aria-hidden="true" className="px-1 text-tertiary">
-            ·
-          </span>
-          <Menu
-            value={worktree ? 'worktree' : 'here'}
-            options={WHERE_OPTIONS}
-            onChange={(where) => onWorktreeChange(where === 'worktree')}
-            aria-label="Where it works"
-            placement="down"
-            bare
-            quiet
-          />
-        </>
-      ) : null}
       {error ? (
         <span className="ml-2 min-w-0 truncate text-danger" role="alert" title={error}>
           {error}
@@ -523,7 +472,17 @@ function useToolsSummary(workspacePath: string): {
   return { builtin, servers, problem }
 }
 
-function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; worktree: boolean }) {
+function WhatTheAgentSees({
+  workspacePath,
+  worktree,
+  onOpenSettings,
+  onOpenRules
+}: {
+  workspacePath: string
+  worktree: boolean
+  onOpenSettings?: (section: NewTaskFactTarget) => void
+  onOpenRules?: () => void
+}) {
   const { context, failed, reload } = useAgentContext(workspacePath)
   // Read again after an init: a watcher may not carry a `.git` just created.
   const gitInit = useGitInit(workspacePath, reload)
@@ -573,7 +532,7 @@ function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; 
       {failed ? (
         <p className="mt-3 text-xs text-muted">This workspace’s context could not be read.</p>
       ) : (
-        <dl className="m-0 mt-3 space-y-3">
+        <ul className="m-0 mt-1.5 list-none p-0">
           <Fact
             k="Branch"
             v={
@@ -616,6 +575,7 @@ function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; 
                 : null
             }
             d={ruleFiles.length > 0 && rules?.ruleFileCount ? `+ ${ruleFileCountLabel(rules.ruleFileCount)}` : null}
+            open={onOpenRules ? { label: 'Extensions', run: onOpenRules } : undefined}
           />
           <Fact
             k="Memory"
@@ -630,14 +590,20 @@ function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; 
             }
             d={context?.memoryNotes ? (context.memoryNoteNames?.join(', ') ?? null) : null}
           />
-          <Fact k="Index" v={context ? INDEX_LABEL[context.codeIndex.state] : null} d={context ? indexDetail(context.codeIndex) : null} />
+          <Fact
+            k="Index"
+            v={context ? INDEX_LABEL[context.codeIndex.state] : null}
+            d={context ? indexDetail(context.codeIndex) : null}
+            open={onOpenSettings ? { label: 'Settings', run: () => onOpenSettings('indexing') } : undefined}
+          />
           <Fact
             k="Tools"
             v={tools ? `${tools.builtin} built-in · ${tools.servers} MCP ${tools.servers === 1 ? 'server' : 'servers'}` : null}
             d={tools?.problem ?? null}
             warn={Boolean(tools?.problem)}
+            open={onOpenSettings ? { label: 'Settings', run: () => onOpenSettings('tools') } : undefined}
           />
-        </dl>
+        </ul>
       )}
     </aside>
   )
@@ -655,19 +621,62 @@ function indexDetail(index: { files?: number; indexedAt?: string }): string | nu
   return ago ? `${files} · updated ${ago}` : files
 }
 
-function Fact({ k, v, d, warn = false }: { k: string; v: ReactNode; d?: string | null; warn?: boolean }) {
-  return (
-    <div>
-      <dt className="text-caption text-tertiary">{k}</dt>
-      <dd className="m-0 flex min-h-5 items-center gap-1.5 text-sm text-fg">
+/**
+ * One fact the task starts from. A fact you can change is a way to where you
+ * change it: the whole row is the link, its text still on the column's edge.
+ */
+function Fact({
+  k,
+  v,
+  d,
+  warn = false,
+  open
+}: {
+  k: string
+  v: ReactNode
+  d?: string | null
+  warn?: boolean
+  /** Where it is changed: the page's name (said to screen readers) and how to get there. */
+  open?: { label: string; run: () => void }
+}) {
+  const body = (
+    <>
+      {/* The separators are heard, not seen: a link's name reads "Index: Ready, …". */}
+      <span className="block text-caption text-tertiary">{k}</span>
+      <span className="sr-only">: </span>
+      <span className="flex min-h-5 items-center gap-1.5 text-sm text-fg">
         {v === null ? (
           <span className="h-3 w-24 rounded-sm bg-surface" aria-label="Loading" />
         ) : (
           <span className="min-w-0 truncate">{v}</span>
         )}
         {warn ? <Icon name="warningCircle" size={13} className="shrink-0 text-warning" /> : null}
-      </dd>
-      {d ? <dd className={cn('m-0 truncate text-xs', warn ? 'text-warning' : 'text-muted')}>{d}</dd> : null}
-    </div>
+      </span>
+      {d ? (
+        <>
+          <span className="sr-only">, </span>
+          <span className={cn('block truncate text-xs', warn ? 'text-warning' : 'text-muted')}>{d}</span>
+        </>
+      ) : null}
+    </>
+  )
+  return (
+    <li data-fact={k}>
+      {open ? (
+        <button
+          type="button"
+          onClick={open.run}
+          className={cn(
+            '-mx-2 block w-[calc(100%+16px)] rounded-md px-2 py-1.5 text-left vy-transition focus-visible:vy-focus-ring',
+            ROW_HOVER
+          )}
+        >
+          {body}
+          <span className="sr-only">, change in {open.label}</span>
+        </button>
+      ) : (
+        <div className="py-1.5">{body}</div>
+      )}
+    </li>
   )
 }

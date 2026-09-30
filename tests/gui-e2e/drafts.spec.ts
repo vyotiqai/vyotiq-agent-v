@@ -41,7 +41,6 @@ test('a draft is saved, survives a reload, continues on New task and is spent by
   const brief = page.getByRole('combobox', { name: 'Brief' })
   await expect(brief).toBeVisible({ timeout: 20_000 })
   await brief.fill('Tidy the release notes parser')
-  await page.getByRole('button', { name: 'Add a check' }).click()
   await page.getByRole('textbox', { name: 'New check' }).fill('The parser tests pass')
   await page.getByRole('textbox', { name: 'New check' }).press('Enter')
   await page.getByRole('button', { name: 'Save as draft' }).click()

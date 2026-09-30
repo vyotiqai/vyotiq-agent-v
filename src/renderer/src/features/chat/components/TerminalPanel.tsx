@@ -289,7 +289,8 @@ export function TerminalPanel({
   workspacePath,
   visible = true,
   agentCommand = null,
-  agentCommandAt = null
+  agentCommandAt = null,
+  showAgentRequest = 0
 }: {
   className?: string
   workspacePath?: string | null
@@ -299,6 +300,8 @@ export function TerminalPanel({
   agentCommand?: string | null
   /** When that command started (ISO). */
   agentCommandAt?: string | null
+  /** Bumped to bring the run's own session forward (a command card asked). */
+  showAgentRequest?: number
 }) {
   const [sessions, setSessions] = useState<PtySessionInfo[]>([])
   const listSeqRef = useRef(0)
@@ -311,6 +314,9 @@ export function TerminalPanel({
   const autoCreateAttemptedRef = useRef(false)
   /** After the user closes the last session, do not immediately spawn another. */
   const suppressAutoCreateRef = useRef(false)
+  /** The last command-card request served, and whether one has been. */
+  const handledAgentRequestRef = useRef(0)
+  const agentAskedRef = useRef(false)
 
   const usingPipeFallback = sessions.some((s) => s.backend === 'pipe')
   /** The run's mirrored output — a view of a spawn, with no shell behind it. */
@@ -356,7 +362,7 @@ export function TerminalPanel({
     setListReady(true)
   }, [workspacePath])
 
-  const createSession = useCallback(async (): Promise<string | null> => {
+  const createSession = useCallback(async (focus = true): Promise<string | null> => {
     if (!workspacePath) {
       setError('Open a workspace to start a terminal.')
       return null
@@ -373,7 +379,7 @@ export function TerminalPanel({
       return null
     }
     await refreshList()
-    setActiveId(res.data.id)
+    if (focus) setActiveId(res.data.id)
     return res.data.id
   }, [workspacePath, refreshList])
 
@@ -422,6 +428,7 @@ export function TerminalPanel({
   useEffect(() => {
     autoCreateAttemptedRef.current = false
     suppressAutoCreateRef.current = false
+    agentAskedRef.current = false
     setListReady(false)
     setSessions([])
     setActiveId(null)
@@ -436,6 +443,18 @@ export function TerminalPanel({
     }
   }, [refreshList])
 
+  // A command card asked for the run's session. The mirror appears with the
+  // run's first command, so a request can wait for the list to catch up.
+  useEffect(() => {
+    if (showAgentRequest <= 0 || showAgentRequest === handledAgentRequestRef.current) return
+    const mirror = sessions.find((s) => s.backend === 'agent')
+    if (!mirror) return
+    handledAgentRequestRef.current = showAgentRequest
+    agentAskedRef.current = true
+    setActiveId(mirror.id)
+    setSplitId((cur) => (cur === mirror.id ? null : cur))
+  }, [showAgentRequest, sessions])
+
   // Auto-create only when the dock tab is visible (manual open / focused tab).
   // Scrollback for live sessions is restored from ptyOutputBuffers on remount.
   useEffect(() => {
@@ -448,7 +467,8 @@ export function TerminalPanel({
       return
     }
     autoCreateAttemptedRef.current = true
-    void createSession()
+    // Still make the shell, but leave the run's session in front when asked for.
+    void createSession(!agentAskedRef.current)
   }, [visible, listReady, sessions, workspacePath, createSession])
 
   // Buffering is owned by ptyOutputBuffers.ts (survives unmount). Panel

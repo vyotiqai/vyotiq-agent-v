@@ -1,13 +1,14 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import type { UiItem } from '@shared/transcript'
 import { buildRecordModel, type BuildOptions } from '@renderer/features/task/recordModel'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
-import { workSummary } from '@renderer/features/task/record/WorkItems'
+import { RecordActionsContext, workSummary, type RecordActions } from '@renderer/features/task/record/WorkItems'
 import { RecordOpenContext, foldsToOpen, looseOpenKey } from '@renderer/features/task/recordFind'
+import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
 
 /**
  * The record reads in the order the work happened — brief, work, result —
@@ -160,6 +161,113 @@ describe('a failed run', () => {
     expect(step.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('false')
     expect(step.querySelector('[data-step-errors="1"]')?.textContent).toContain('STEP_ERROR')
     expect(step.textContent).not.toContain('a.ts')
+  })
+})
+
+describe('a command while it runs', () => {
+  function runningCommand(startedSecondsAgo: number): UiItem {
+    return {
+      kind: 'tool',
+      id: id('t'),
+      at: new Date(Date.now() - startedSecondsAgo * 1000).toISOString(),
+      tool: { id: id('c'), name: 'terminal', summary: 'pnpm test', status: 'running', argsPreview: JSON.stringify({ command: 'pnpm test' }) }
+    }
+  }
+  function showWith(items: UiItem[], onOpenAgentTerminal?: () => void) {
+    const options: BuildOptions = { running: true }
+    return render(
+      <RunSessionProvider value={{ workspacePath: '/ws', runId: 'r1', onOpenAgentTerminal }}>
+        <TaskRecord model={buildRecordModel(items, options)} options={options} messageCount={items.length} />
+      </RunSessionProvider>
+    )
+  }
+
+  it('says Running and counts up in the column its final time takes', () => {
+    const { container } = showWith([user('Test it', 0), runningCommand(12)])
+    const card = container.querySelector('[data-record-command]')!
+    expect(card.querySelector('.vy-text-live')?.textContent).toBe('Running')
+    expect(card.querySelector('.w-12')?.textContent).toMatch(/^1[23]s$/)
+  })
+
+  it('offers the Terminal tab while it runs, when the inspector can show it', () => {
+    const open = vi.fn()
+    const { container, getByRole } = showWith([user('Test it', 0), runningCommand(3)], open)
+    fireEvent.click(getByRole('button', { name: 'Open in Terminal' }))
+    expect(open).toHaveBeenCalledTimes(1)
+    // Its own button, beside the header's toggle, not inside it.
+    expect(container.querySelector('button[aria-expanded] button')).toBeNull()
+  })
+
+  it('reads a command stopped with the run as stopped, not as a failed exit', () => {
+    const cut = tool('terminal', { command: 'pnpm test' }, 'Cancelled', 3, 'fail')
+    const { container } = show([user('Test it', 0), cut], { running: false, stopped: true })
+    const card = container.querySelector('[data-record-command]')!
+    expect(card.textContent).toContain('Cancelled')
+    expect(card.textContent).not.toContain('exit')
+    expect(card.querySelector('.text-danger')).toBeNull()
+  })
+
+  it('does not offer it once the command is done, or with nowhere to open it', () => {
+    const done = showWith(noPlanRun(false), vi.fn())
+    expect(done.queryByRole('button', { name: 'Open in Terminal' })).toBeNull()
+    done.unmount()
+    const orphan = showWith([user('Test it', 0), runningCommand(3)])
+    expect(orphan.queryByRole('button', { name: 'Open in Terminal' })).toBeNull()
+  })
+})
+
+describe('what the record offers for the run’s open edits', () => {
+  function showEnd(items: UiItem[], options: BuildOptions, actions: RecordActions, count = 0) {
+    const onUndo = vi.fn()
+    const view = render(
+      <RunSessionProvider
+        value={{ workspacePath: '/ws', runId: 'r1', pendingWrites: count > 0 ? { runId: 'r1', count, onUndo } : undefined }}
+      >
+        <RecordActionsContext.Provider value={actions}>
+          <TaskRecord model={buildRecordModel(items, options)} options={options} messageCount={items.length} />
+        </RecordActionsContext.Provider>
+      </RunSessionProvider>
+    )
+    return { ...view, onUndo }
+  }
+
+  it('leads from the result to Review while its edits are not kept', () => {
+    const onOpenChanges = vi.fn()
+    const { container, getByRole } = showEnd(noPlanRun(), { running: false }, { onOpenChanges }, 2)
+    expect(container.querySelector('[data-result-review]')?.textContent).toContain('2 files changed, not kept yet')
+    fireEvent.click(getByRole('button', { name: 'Review changes' }))
+    expect(onOpenChanges).toHaveBeenCalledWith()
+  })
+
+  it('says nothing more once the edits are kept or undone', () => {
+    const { container } = showEnd(noPlanRun(), { running: false }, { onOpenChanges: vi.fn() }, 0)
+    expect(container.querySelector('[data-result-review]')).toBeNull()
+  })
+
+  it('ends a stopped run with Undo its changes and Resume', () => {
+    const onRetry = vi.fn()
+    const { getByRole, onUndo, container } = showEnd(noPlanRun(false), { running: false, stopped: true }, { onRetry }, 3)
+    const line = container.querySelector('[data-receipt]')!
+    expect(line.querySelector('[data-receipt-outcome="stopped"]')).not.toBeNull()
+    fireEvent.click(getByRole('button', { name: 'Undo its changes' }))
+    expect(onUndo).toHaveBeenCalledTimes(1)
+    fireEvent.click(getByRole('button', { name: 'Resume' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers only Resume when nothing it changed is open, and neither while it runs', () => {
+    const stopped = showEnd(noPlanRun(false), { running: false, stopped: true }, { onRetry: vi.fn() })
+    expect(stopped.queryByRole('button', { name: 'Undo its changes' })).toBeNull()
+    expect(stopped.getByRole('button', { name: 'Resume' })).toBeTruthy()
+    stopped.unmount()
+    const live = showEnd(noPlanRun(false), { running: true }, { onRetry: vi.fn() }, 3)
+    expect(live.queryByRole('button', { name: 'Resume' })).toBeNull()
+    expect(live.queryByRole('button', { name: 'Undo its changes' })).toBeNull()
+  })
+
+  it('leaves carrying on to the error row when it already offers Retry', () => {
+    const { queryByRole } = showEnd(noPlanRun(false), { running: false, stopped: true }, { onRetry: vi.fn(), retryableErrorId: 'e1' })
+    expect(queryByRole('button', { name: 'Resume' })).toBeNull()
   })
 })
 

@@ -3,9 +3,10 @@ import type { ChatMessage, RunSummary } from '@shared/ipc'
 import type { UiAgentQuestionAnswer } from '@shared/transcript'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { instanceDisplayTitle, stripGoalMarkdown } from '@renderer/app/navigator/runTitle'
 import type { InlineInstanceGate } from '../hooks/useInlineInstanceUi'
-import { RunSessionProvider } from '../RunSessionContext'
+import { RunSessionProvider, useRunSession } from '../RunSessionContext'
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
 import {
   createChatStreamController,
@@ -404,13 +405,21 @@ export function AgentInstancePane({
     void controller.stop()
   }, [controller])
 
+  // A child's commands land in the same workspace mirror as its parent's; the
+  // Terminal tab lists the inspector's workspace, so only offer it for that one.
+  const inspector = useRunSession()
+  const onOpenAgentTerminal =
+    inspector.workspacePath != null && workspacePathsEqual(inspector.workspacePath, workspacePath)
+      ? inspector.onOpenAgentTerminal
+      : undefined
   const runSession = useMemo(
     () => ({
       workspacePath,
       runId: instanceRunId,
-      onOpenWorkspaceFile
+      onOpenWorkspaceFile,
+      onOpenAgentTerminal
     }),
-    [workspacePath, instanceRunId, onOpenWorkspaceFile]
+    [workspacePath, instanceRunId, onOpenWorkspaceFile, onOpenAgentTerminal]
   )
 
   const shortId = formatAgentInstanceShortId(instanceRunId)
