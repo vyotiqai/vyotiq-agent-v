@@ -47,6 +47,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # `pnpm typecheck` covers src/ only. tests/ carry a backlog of type
+      # errors; this fails when any file gains one, so the count only goes
+      # down (scripts/typecheck-tests-baseline.json, lowered with --update).
+      # Type errors don't depend on the OS, so one runner is enough.
+      - name: Typecheck tests (no new errors)
+        if: runner.os == 'Linux'
+        run: node scripts/typecheck-tests-ratchet.mjs
+
       - name: Test (with coverage)
         run: pnpm test:coverage
 

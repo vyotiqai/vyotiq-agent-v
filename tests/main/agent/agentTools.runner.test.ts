@@ -81,6 +81,21 @@ describe('createAgentToolRunner (fake spawn DI)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('hands the child the cleaned environment, never the app’s own', async () => {
+    process.env.VYOTIQ_RUNNER_SECRET_PROBE = 'do-not-leak'
+    try {
+      const fake = fakeSpawn((req, ctl) => {
+        ctl.emit({ type: 'result', ok: true, result: null, id: req.callId })
+      })
+      await createAgentToolRunner(fake.spawn)(makeDef(join(dir, 't.mjs')), {})
+      const env = fake.requests[0]!.env
+      expect(env.VYOTIQ_RUNNER_SECRET_PROBE).toBeUndefined()
+      expect(env.PATH ?? env.Path).toBeTruthy()
+    } finally {
+      delete process.env.VYOTIQ_RUNNER_SECRET_PROBE
+    }
+  })
+
   it('resolves ok results with args passed through and a unique callId', async () => {
     let ctlRef: FakeController | null = null
     const fake = fakeSpawn((req, ctl) => {

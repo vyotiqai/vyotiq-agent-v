@@ -36,8 +36,11 @@ const sharedRules = {
 export default [
   {
     // errand-main is a separate reference codebase (no node_modules of its own);
-    // linting it fails on unresolvable plugins and is out of scope.
-    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**', 'errand-main/**', 'site/**']
+    // linting it fails on unresolvable plugins and is out of scope. Packaged
+    // builds, generated output and agent worktrees (.claude/, each a full
+    // checkout) are not source either; CI has none of them, so without these
+    // a local `eslint .` failed where CI passed.
+    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**', 'errand-main/**', 'site/**', 'dist-package*/**', 'output/**', '.claude/**']
   },
   js.configs.recommended,
   {

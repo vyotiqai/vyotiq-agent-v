@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'crypto'
 import { dirname, join } from 'path'
+import { sanitizedTerminalEnv } from '../tools/terminal'
 import { RUNNER_BOOTSTRAP_FILENAME, writeRunnerBootstrap } from './paths'
 import type { AgentToolDef, AgentToolRuntimeResult } from './types'
 
@@ -34,6 +35,12 @@ export type AgentToolSpawnRequest = {
   argsJson: string
   /** Unique per-call id echoed back by the child. */
   callId: string
+  /**
+   * The child's whole environment. A module the agent wrote is arbitrary
+   * Node, so it gets the cleaned env every other child process gets — never
+   * the app's own, which carries whatever tokens the app was started with.
+   */
+  env: Record<string, string>
 }
 
 export type AgentToolSpawn = (req: AgentToolSpawnRequest) => RunnerChild
@@ -46,7 +53,7 @@ export function defaultAgentToolSpawn(): AgentToolSpawn {
     const child = utilityProcess.fork(
       req.bootstrapPath,
       [req.toolModulePath, req.argsJson, req.callId],
-      { serviceName: 'agent-tool-runner' }
+      { serviceName: 'agent-tool-runner', env: req.env }
     )
     return {
       onMessage: (cb) => child.on('message', cb),
@@ -96,7 +103,8 @@ export function createAgentToolRunner(spawn: AgentToolSpawn) {
           bootstrapPath: join(dirname(def.modulePath), RUNNER_BOOTSTRAP_FILENAME),
           toolModulePath: def.modulePath,
           argsJson: JSON.stringify(args ?? {}),
-          callId
+          callId,
+          env: sanitizedTerminalEnv()
         })
       } catch (err) {
         settle(() => reject(err instanceof Error ? err : new Error(String(err))))

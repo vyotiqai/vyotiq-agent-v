@@ -40,7 +40,7 @@ Settings, "Tools", lists them under "Agent-built tools": "Written by a run — e
 
 ## Not sandboxed
 
-Each call runs the module in a separate process with full Node.js access. It can read and write files anywhere your user account can, start other programs, and use the network. The only built-in limit is a 30-second timeout per call. A module that fails, times out or exits without answering becomes a failed tool call, not a crashed run.
+Each call runs the module in a separate process with full Node.js access. It can read and write files anywhere your user account can, start other programs, and use the network. It does not get the app's own environment variables: like the terminal, it sees only the basics such as `PATH` and your home folder, so tokens the app was started with stay out of it. The only other built-in limit is a 30-second timeout per call. A module that fails, times out or exits without answering becomes a failed tool call, not a crashed run.
 
 Approval is the control. There is no other fence around the code.
 

@@ -63,12 +63,16 @@ export default defineConfig({
         'src/renderer/src/lib/fileIcons/**'
       ],
       // CI gate: dropping a test suite or shipping untested runtime paths must
-      // fail the coverage run instead of passing silently.
+      // fail the coverage run instead of passing silently. Set about three
+      // points under what was measured (2026-09-30 local: 75.2 statements,
+      // 67.8 branches, 77.5 functions, 78.3 lines; CI on 2026-09-28 read about
+      // a point lower on all three OSes). The old 40/30/35/40 sat so far below
+      // that it could never fire. Raise these as coverage rises.
       thresholds: {
-        lines: 40,
-        statements: 40,
-        functions: 35,
-        branches: 30
+        lines: 74,
+        statements: 71,
+        functions: 73,
+        branches: 63
       }
     }
   }

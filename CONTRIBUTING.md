@@ -34,13 +34,20 @@ surfaces as a runtime failure, or not at all.
 pnpm typecheck:tests
 ```
 
-It is deliberately **not** part of `pnpm typecheck` or CI yet. As of
-2026-09-21 the suites carry **896 pre-existing type errors across 221 files**,
-none of them in production `src/` — turning it into a gate today would fail
-every build for reasons unrelated to the change being made.
+It is not part of `pnpm typecheck`: as of 2026-09-30 the suites carry **581
+pre-existing type errors across 135 files**, none of them in production `src/`.
+CI runs a ratchet instead, so the count can only go down:
 
-Treat it as a burn-down list: when you touch a test file, leave it clean. Wire
-this into `pnpm typecheck` and CI once the count reaches zero.
+```
+node scripts/typecheck-tests-ratchet.mjs            # fails if any file gained errors
+node scripts/typecheck-tests-ratchet.mjs --update   # after fixing some, lower the baseline
+```
+
+The per-file baseline is `scripts/typecheck-tests-baseline.json`. A syntax error
+fails it outright, because TypeScript 7 then skips type checking for the whole
+program. Treat the list as a burn-down: when you touch a test file, leave it
+clean and run `--update`. Fold `typecheck:tests` into `pnpm typecheck` once the
+count reaches zero.
 
 ## Dev and build
 

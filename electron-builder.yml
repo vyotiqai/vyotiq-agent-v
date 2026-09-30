@@ -12,6 +12,21 @@ directories:
   output: dist-package
 asar: true
 compression: maximum
+# Electron fuses, flipped in the packaged binary. Without them the installed
+# app could be started as plain Node (ELECTRON_RUN_AS_NODE), have code
+# injected through NODE_OPTIONS or a --inspect debugger, or run an edited
+# app.asar. Nothing here runs the app binary as Node: child processes use
+# utilityProcess or real node/npx. grantFileProtocolExtraPrivileges stays on
+# because the renderer loads from file://. resetAdHocDarwinSignature re-signs
+# an unsigned macOS arm64 build, which flipping a fuse would otherwise leave
+# unlaunchable.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  resetAdHocDarwinSignature: true
 files:
   # Every matcher that copies app files must carry the FULL exclusion list:
   # a matcher left ignore-only gets `**/*` prepended by AppFileWalker and its
