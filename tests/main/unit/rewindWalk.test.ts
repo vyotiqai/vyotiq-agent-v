@@ -62,7 +62,7 @@ describe('how far a rewind takes a file back', () => {
     write('a.txt', 'a1\n')
     resetWriteCheckpointsForTests()
     expect(getWriteCheckpointMeta(runDir, crashed.id)?.files).toEqual([
-      { path: 'a.txt', action: 'modified', undoable: true }
+      { path: 'a.txt', action: 'modified', undoable: true, recordedAt: expect.any(String) }
     ])
     const later = beginWriteCheckpoint(runDir, workspace, 2)
     await later.recordPrior('a.txt', 'write')
@@ -81,7 +81,9 @@ describe('how far a rewind takes a file back', () => {
     expect(done).toEqual({ restored: [], skipped: [], edited: ['a.txt'] })
     expect(done).toEqual(foreseen(plan))
     const meta = getWriteCheckpointMeta(runDir, crashed.id)
-    expect(meta?.resolved).toBe(true)
+    // Not resolved: the run's copy has to survive retention, because that
+    // write is still in a.txt and a later rewind over the turn needs it.
+    expect(meta?.resolved).toBeFalsy()
     expect(meta?.files[0]?.resolved).toBe('kept')
   })
 

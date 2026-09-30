@@ -10,7 +10,7 @@ import {
 import { resolveRunDirInRoot } from '../storage/paths'
 import { listMessageArchives } from './messageAppendQueue'
 import { listEventArchives } from './eventAppendQueue'
-import { migrateLegacyReceipt } from './harnessReview'
+import { migrateLegacyReceipt } from './receiptMigration'
 import { readJsonDocCached } from './jsonDocCache'
 
 const READ_CHUNK_BYTES = 64 * 1024

@@ -184,13 +184,15 @@ export const GitDiffRequestSchema = z.object({
 export type GitDiffRequest = z.infer<typeof GitDiffRequestSchema>
 
 export const GitBranchDiffRequestSchema = z.object({ workspacePath: z.string().min(1) })
-export type GitBranchDiffResult = {
-  content: string
-  branch: string | null
+
+export const GitBranchDiffResultSchema = z.object({
+  content: z.string(),
+  branch: z.string().nullable(),
   /** The branch it is compared with; null means uncommitted changes only. */
-  base: string | null
-  commits: number
-}
+  base: z.string().nullable(),
+  commits: z.number().int().min(0)
+})
+export type GitBranchDiffResult = z.infer<typeof GitBranchDiffResultSchema>
 
 export const GitDiffResultSchema = z.object({
   content: z.string()

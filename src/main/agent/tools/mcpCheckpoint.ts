@@ -36,8 +36,8 @@ export async function recordMcpFilesystemPriors(
   if (toolName === 'move_file') {
     const source = asString(args.source)
     const destination = asString(args.destination)
-    if (source) await cp.recordPrior(source, 'delete')
-    if (destination) await cp.recordPrior(destination, 'write')
+    if (source) await cp.recordPrior(source, 'delete', { nonEditTool: true })
+    if (destination) await cp.recordPrior(destination, 'write', { nonEditTool: true })
     return
   }
 
@@ -45,7 +45,7 @@ export async function recordMcpFilesystemPriors(
 
   const path = asString(args.path)
   if (!path) return
-  await cp.recordPrior(path, 'write')
+  await cp.recordPrior(path, 'write', { nonEditTool: true })
 }
 
 /**

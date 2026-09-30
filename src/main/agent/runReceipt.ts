@@ -17,12 +17,14 @@ import {
   toolArgsFromCall,
   unreadExistingEditPaths
 } from './loopPolicy'
+import { isFileMutationToolName, isRunArtifactEditPath } from './loopPolicy'
 import { looksLikeWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 import { parseDiagnosticLines } from './tools/diagnostics'
-import { parseTestResultHeader } from './tools/runTests'
+import { parseTestResultHeader, parseTestSummary } from './tools/runTests'
+import { isCheckCommand } from './feedback/checkCommands'
 import { logger } from '../../shared/logger'
 import { stepUsageTotalsFromPersistedEvents } from '../../shared/utils/runTelemetry'
-import { parseTerminalOutput } from '../../shared/utils/terminalFormat'
+import { isTerminalSessionInProgress, parseTerminalOutput } from '../../shared/utils/terminalFormat'
 
 export { RUN_RECEIPT_VERSION }
 export const RUN_RECEIPT_FILENAME = 'receipt.json'
@@ -131,30 +133,33 @@ function unreadEditPathsFromMessages(
   return [...unread].sort()
 }
 
-/** Paths from the latest writes_checkpoint event (object entries or legacy strings). */
+/** Every path written by any writes_checkpoint in the run (object entries or legacy strings). */
 export function wroteFilesFromEvents(events: readonly PersistedEvent[]): string[] {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const ev = events[i]?.event as { type?: string; files?: unknown } | undefined
+  // Cumulative across the whole run, like toolStats and failureClusters: a
+  // resumed run flushes one writes_checkpoint per invoke, and returning on
+  // the newest one reported only the last invoke's files as if the earlier
+  // work had never happened. First-seen order, deduplicated.
+  const paths: string[] = []
+  const seen = new Set<string>()
+  for (const row of events) {
+    const ev = row.event as { type?: string; files?: unknown } | undefined
     if (ev?.type !== 'writes_checkpoint' || !Array.isArray(ev.files)) continue
-    const paths: string[] = []
     for (const entry of ev.files) {
-      if (typeof entry === 'string') {
-        const path = normalizeWorkspaceRelPath(entry)
-        if (path && looksLikeWorkspacePath(path) && !isBuildOutputRelPath(path)) {
-          paths.push(path)
-        }
-        continue
-      }
-      if (entry && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string') {
-        const path = normalizeWorkspaceRelPath((entry as { path: string }).path)
-        if (path && looksLikeWorkspacePath(path) && !isBuildOutputRelPath(path)) {
-          paths.push(path)
-        }
+      const raw =
+        typeof entry === 'string'
+          ? entry
+          : entry && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string'
+            ? (entry as { path: string }).path
+            : null
+      if (raw == null) continue
+      const path = normalizeWorkspaceRelPath(raw)
+      if (path && looksLikeWorkspacePath(path) && !isBuildOutputRelPath(path) && !seen.has(path)) {
+        seen.add(path)
+        paths.push(path)
       }
     }
-    return paths
   }
-  return []
+  return paths
 }
 
 function lastIncompleteFromEvents(
@@ -236,10 +241,91 @@ function contractExcerpt(contract: string, cap = 600): string {
  * it verified nothing). Skipped checks and checks that reported errors must
  * not stamp the verified state.
  */
-export const SKIPPED_CHECK_RE = /^No test runner detected/
+export const SKIPPED_CHECK_RE =
+  /^(?:No test runner detected|No TypeScript project \(|No JavaScript project \()/
 
+/** `diagnostics` and `run_tests` — the dedicated check tools (receipt stats key off these). */
 export function isCheckResult(name: string | undefined): boolean {
   return name === 'diagnostics' || name === 'run_tests'
+}
+
+/**
+ * Tools whose result may be a check: the two check tools, and `terminal`,
+ * whose recognised test/typecheck/lint commands count too (see
+ * feedback/checkCommands.ts). Which results actually count is
+ * {@link checkVerdict}'s call.
+ */
+export function isCheckCandidateTool(name: string | undefined): boolean {
+  return isCheckResult(name) || name === 'terminal'
+}
+
+/**
+ * What one check-candidate result proved. `skip`: no check ran — no runner,
+ * a denied or refused call, a command that failed to parse or spawn, a
+ * command that is not a test/typecheck/lint runner, a terminal session still
+ * running, or a result with an empty body. `failed`: it ran and reported
+ * errors, exited non-zero, or timed out. A failing test run is `ok: false`, so
+ * dropping every `ok: false` result (as this once did) let edit → clean
+ * diagnostics → failing tests read verified.
+ *
+ * An empty body is a skip, never a clean. A slim persisted event whose body
+ * was dropped once read `unknown`, and every consumer treated an `unknown` on
+ * an `ok !== false` result as a pass — so a check that had produced no
+ * evidence at all was recorded as a successful verification.
+ */
+export type CheckVerdict = 'skip' | 'clean' | 'failed'
+
+const CHECK_RAN_AND_FAILED_RE = /^exit: |was killed \(timeout\)/m
+const TERMINAL_EXIT_CODE_RE = /^exit_code:\s*(-?\d+)\s*$/gm
+
+/**
+ * @param command The command the call ran, from its arguments — `terminal`
+ *   results carry it in a `command:` header only for session output.
+ */
+export function checkVerdict(
+  name: string | undefined,
+  ok: boolean | undefined,
+  content: string,
+  command?: string
+): CheckVerdict {
+  const text = content.trim()
+  if (name === 'terminal') return terminalCheckVerdict(text, command)
+  if (!text) return 'skip'
+  if (ok === false) return CHECK_RAN_AND_FAILED_RE.test(text) ? 'failed' : 'skip'
+  if (SKIPPED_CHECK_RE.test(text)) return 'skip'
+  // A non-zero `exit:` line is decisive whatever the tool reported as `ok`:
+  // `diagnostics` returns ok:true as soon as the command printed parseable
+  // diagnostics, so a lint that exits 1 on a single warning
+  // (`eslint . --max-warnings 0`) carried a warning-severity body that read
+  // clean and stamped the run verified on a failed check.
+  if (name === 'diagnostics' && CHECK_RAN_AND_FAILED_RE.test(text)) return 'failed'
+  if (name === 'run_tests') {
+    // run_tests runs whatever command it is handed; only a test, typecheck
+    // or lint runner verified anything.
+    const ran = /^command: (.*)$/m.exec(text)?.[1]
+    if (ran != null && !isCheckCommand(ran)) return 'skip'
+  }
+  const clean = name === 'run_tests' ? runTestsCheckClean(text) : diagnosticsCheckClean(text)
+  return clean ? 'clean' : 'failed'
+}
+
+/**
+ * A terminal result is a check when its command is a recognised runner and
+ * it finished: judged by its exit code, and by the runner's own failure
+ * count when one is printed. A session still running, or a slim event with
+ * no body, proves nothing yet.
+ */
+function terminalCheckVerdict(text: string, command: string | undefined): CheckVerdict {
+  if (!text) return 'skip'
+  const parsed = parseTerminalOutput(text)
+  if (!isCheckCommand(parsed.command ?? command)) return 'skip'
+  if (isTerminalSessionInProgress(parsed.sessionStatus)) return 'skip'
+  let exitCode: number | null = null
+  for (const match of text.matchAll(TERMINAL_EXIT_CODE_RE)) exitCode = Number(match[1])
+  if (exitCode == null) return 'skip'
+  if (exitCode !== 0) return 'failed'
+  const summary = parseTestSummary(text)
+  return summary && summary.failed > 0 ? 'failed' : 'clean'
 }
 
 /** run_tests cleanliness: parsed failed-count; header absent + ok → exit 0. */
@@ -254,35 +340,112 @@ export function diagnosticsCheckClean(content: string): boolean {
 }
 
 /**
- * Message-side check cleanliness (full tool content) in message order. Zips
- * by order with the event-side list when counts align (tool messages and
+ * Message-side check verdicts (full tool content) in message order. Zips by
+ * order with the event-side list when counts align (tool messages and
  * tool_result events append 1:1 and both stitch their archives), so a slim
  * persisted event — content dropped past 200 chars — still carries the full
- * result's verdict. Both sides skip the same never-ran checks, keeping the
- * zip aligned.
+ * result's verdict. Both sides list every check result, skips included, so
+ * a skip only one side can recognise never shifts the zip.
  */
-function checkCleanlinessFromMessages(messages: readonly SeedToolMessage[]): boolean[] {
-  const out: boolean[] = []
+function checkVerdictsFromMessages(messages: readonly SeedToolMessage[]): CheckVerdict[] {
+  const out: CheckVerdict[] = []
+  const commandByCallId = new Map<string, string>()
   for (const msg of messages) {
-    if (msg.role !== 'tool' || !msg.toolName || !isCheckResult(msg.toolName)) continue
-    if (msg.ok === false) continue
-    const content = contentToText(msg.content ?? '')
-    if (SKIPPED_CHECK_RE.test(content.trim())) continue
-    out.push(
-      msg.toolName === 'run_tests'
-        ? runTestsCheckClean(content)
-        : diagnosticsCheckClean(content)
-    )
+    if (msg.role === 'assistant') {
+      for (const call of msg.toolCalls ?? []) {
+        if (call.name !== 'terminal') continue
+        const command = toolArgsFromCall(call.arguments).command
+        if (typeof command === 'string') commandByCallId.set(call.id, command)
+      }
+      continue
+    }
+    if (msg.role !== 'tool' || !msg.toolName || !isCheckCandidateTool(msg.toolName)) continue
+    const command = msg.toolCallId ? commandByCallId.get(msg.toolCallId) : undefined
+    out.push(checkVerdict(msg.toolName, msg.ok, contentToText(msg.content ?? ''), command))
   }
   return out
 }
 
 /**
+ * When a writes_checkpoint's mutations happened. The event is flushed at
+ * invoke end — after every check that invoke ran — so its own `at` would date
+ * every write after its checks and no writing run could ever read verified.
+ * Each file is dated by its last observed write (`lastMutatedAt`, set when a
+ * terminal, MCP, lsp, merge or git_apply write touches a path already in the
+ * checkpoint), else its first (`recordedAt`); re-edits through edit tools are
+ * dated by their tool_result instead. Build output (`obj/`, `bin/Debug`) is
+ * skipped, as it is for `wroteFiles`. A file the user discarded was reverted
+ * when this event was written, so it dates to the event. An unstamped file (a
+ * checkpoint written before the stamps existed) contributes nothing — dating
+ * the whole checkpoint by it would push every stamped write forward to the
+ * flush time — so the flush time is the fallback for a checkpoint where no
+ * file carries a stamp.
+ */
+function checkpointMutationAt(
+  files: unknown,
+  flushedAt: string,
+  undone: boolean
+): string | undefined {
+  if (!Array.isArray(files) || files.length === 0) return flushedAt
+  let latest: string | undefined
+  for (const file of files as Array<{
+    path?: unknown
+    recordedAt?: unknown
+    lastMutatedAt?: unknown
+    resolved?: unknown
+  }>) {
+    if (typeof file?.path === 'string') {
+      const path = normalizeWorkspaceRelPath(file.path)
+      if (!path || isBuildOutputRelPath(path)) continue
+    }
+    let at: string | undefined
+    if (undone && file?.resolved === 'discarded') at = flushedAt
+    else if (typeof file?.lastMutatedAt === 'string') at = file.lastMutatedAt
+    else if (typeof file?.recordedAt === 'string') at = file.recordedAt
+    if (at == null) continue
+    latest = laterIso(latest, at)
+  }
+  return latest ?? flushedAt
+}
+
+/** Epoch ms for an ISO stamp, or null when it does not parse. */
+function instantOf(iso: string): number | null {
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? null : ms
+}
+
+/**
+ * Later of two stamps, by INSTANT. A stored stamp need not be a
+ * `toISOString` value — an offset-bearing `+05:30` one orders after a Z stamp
+ * that is later in wall-clock text — so string compare alone could date a
+ * mutation backwards. Well-formed `toISOString` stamps are all UTC, where
+ * instant order and string order agree, so their behaviour is unchanged.
+ * An unparseable stamp falls back to the string compare.
+ */
+function laterIso(a: string | undefined, b: string): string {
+  if (a == null) return b
+  const ta = instantOf(a)
+  const tb = instantOf(b)
+  if (ta == null || tb == null) return b > a ? b : a
+  return tb > ta ? b : a
+}
+
+/** Is `a` at or after `b`? Same instant rule as {@link laterIso}. */
+function atOrAfter(a: string, b: string): boolean {
+  const ta = instantOf(a)
+  const tb = instantOf(b)
+  if (ta == null || tb == null) return a >= b
+  return ta >= tb
+}
+
+/**
  * Was the work verified? Compares diagnostics/run_tests checks against the
- * last writes_checkpoint. The verified state requires the newest check after
- * the last mutation to have run AND passed clean — an errored check is a
- * failed verification, and a skipped runner verified nothing. Informational
- * only — the loop never blocks on it.
+ * last mutation — a successful edit-family tool call on a workspace file, or
+ * a file in a writes_checkpoint (which also catches terminal and MCP
+ * writes). The verified state requires the newest check after the last
+ * mutation to have run AND passed clean — a failing or errored check is a
+ * failed verification, and a check that never ran verified nothing.
+ * Informational only — the loop never blocks on it.
  */
 function verificationFromEvents(
   events: readonly PersistedEvent[],
@@ -293,50 +456,70 @@ function verificationFromEvents(
   verifiedAfterLastMutation: boolean
 } | undefined {
   let lastMutationAt: string | undefined
-  const eventChecks: Array<{ at: string; clean: boolean | null }> = []
+  const eventChecks: Array<{ at: string | undefined; verdict: CheckVerdict }> = []
   for (const row of events) {
     const ev = row.event as {
       type?: string
       name?: string
       ok?: boolean
+      summary?: unknown
       content?: unknown
+      files?: unknown
+      undone?: unknown
     } | undefined
-    if (ev?.type === 'writes_checkpoint' && row.at) lastMutationAt = row.at
-    if (ev?.type !== 'tool_result' || !isCheckResult(ev.name) || ev.ok !== true || !row.at) {
-      continue
+    if (ev?.type === 'writes_checkpoint' && row.at) {
+      const at = checkpointMutationAt(ev.files, row.at, ev.undone === true)
+      if (at) lastMutationAt = laterIso(lastMutationAt, at)
     }
-    // Slim events drop bodies past 200 chars; the 149-char skip message
-    // always persists, so the skip can never masquerade as a real check.
+    if (
+      ev?.type === 'tool_result' &&
+      ev.ok === true &&
+      ev.name &&
+      isFileMutationToolName(ev.name) &&
+      !isRunArtifactEditPath(typeof ev.summary === 'string' ? ev.summary : undefined) &&
+      row.at
+    ) {
+      lastMutationAt = laterIso(lastMutationAt, row.at)
+    }
+    if (ev?.type !== 'tool_result' || !isCheckCandidateTool(ev.name)) continue
+    // Slim events drop bodies past 200 chars; such a body reads as an absent
+    // check here (`skip`, like a denied call) and takes the message side's
+    // verdict when the two lists align. A terminal event's summary is its
+    // command, cut to 80.
     const content = typeof ev.content === 'string' ? ev.content : ''
-    if (SKIPPED_CHECK_RE.test(content.trim())) continue
-    eventChecks.push({
-      at: row.at,
-      clean: content
-        ? ev.name === 'run_tests'
-          ? runTestsCheckClean(content)
-          : diagnosticsCheckClean(content)
-        : null
-    })
+    const command = ev.name === 'terminal' && typeof ev.summary === 'string' ? ev.summary : undefined
+    eventChecks.push({ at: row.at, verdict: checkVerdict(ev.name, ev.ok, content, command) })
   }
   // Full-content message verdicts win when the two sides stayed aligned.
-  const messageClean = checkCleanlinessFromMessages(messages)
-  const checks =
-    eventChecks.length > 0 && messageClean.length === eventChecks.length
-      ? eventChecks.map((check, i) => ({ ...check, clean: messageClean[i] ?? check.clean }))
-      : eventChecks
+  const messageVerdicts = checkVerdictsFromMessages(messages)
+  const aligned = eventChecks.length > 0 && messageVerdicts.length === eventChecks.length
+  // A zip that does not line up is not a pass. Dropping the message side
+  // wholesale left each check on the slimmed event-side verdict, so a check
+  // whose real result was truncated away could reappear as `clean` purely
+  // because one message never reached the event file (a repaired orphan stub,
+  // a rewind). Downgrade the `clean`s to `skip` — no result to line up with
+  // is no evidence — and keep `failed`, which is evidence on its own.
+  const untrusted = !aligned && messageVerdicts.length > 0
+  const checks = eventChecks
+    .map((check, i) => {
+      const verdict = (aligned ? messageVerdicts[i] : undefined) ?? check.verdict
+      if (!untrusted || verdict !== 'clean') return { ...check, verdict }
+      return { ...check, verdict: 'skip' as const }
+    })
+    .filter((check): check is typeof check & { at: string } => check.verdict !== 'skip' && !!check.at)
   const lastCheck = checks[checks.length - 1]
   if (lastMutationAt == null && lastCheck == null) return undefined
+  // Only a verdict the check actually earned counts as a pass. An absent
+  // verdict is evidence of nothing passing.
+  const lastCheckClean = lastCheck != null && lastCheck.verdict === 'clean'
   return {
     ...(lastMutationAt ? { lastMutationAt } : {}),
     ...(lastCheck ? { lastCheckAt: lastCheck.at } : {}),
     verifiedAfterLastMutation:
-      lastCheck != null &&
-      // Proven-unclean demotes; an unknown verdict (misaligned archives) keeps
-      // today's behavior rather than fabricating a fresh warning.
-      lastCheck.clean !== false &&
-      (lastMutationAt == null || lastCheck.at >= lastMutationAt)
+      lastCheckClean && (lastMutationAt == null || atOrAfter(lastCheck.at, lastMutationAt))
   }
 }
+
 
 type ToolMessageScan = {
   toolStats: RunReceipt['toolStats']
@@ -449,13 +632,66 @@ function scanToolMessages(messages: readonly SeedToolMessage[]): ToolMessageScan
   }
 }
 
+/** Every field the schema requires, with a value that claims nothing. */
+const MINIMAL_RECEIPT: Omit<RunReceipt, 'writtenAt'> = {
+  version: RUN_RECEIPT_VERSION,
+  runId: 'unknown',
+  // Placeholder: the caller keeps the run's real outcome, but a fallback has
+  // no verified state, no per-tool metrics and no files to speak of.
+  status: 'error',
+  step: 0,
+  compactionCount: 0,
+  toolStats: { totalCalls: 0, ok: 0, failed: 0, byName: {} },
+  failureClusters: [],
+  unreadEditPaths: [],
+  wroteFiles: [],
+  diagnostics: { calls: 0, ok: 0, clean: 0 },
+  contractExcerpt: ''
+}
+
+/**
+ * A receipt must survive its own schema. Every field it carries is derived, so
+ * one malformed value used to throw out of `buildRunReceipt` — and on the
+ * best-effort path that cost the run its receipt entirely. Drop the fields the
+ * schema objects to and parse again; if a required field is itself the
+ * offender, fall back to a bare record that asserts nothing. Verification is
+ * absent in both fallbacks, which reads as unchecked, never as verified.
+ */
+function parseRunReceipt(receipt: RunReceipt): RunReceipt {
+  const parsed = RunReceiptSchema.safeParse(receipt)
+  if (parsed.success) return parsed.data
+  const trimmed: Record<string, unknown> = { ...receipt }
+  for (const issue of parsed.error.issues) {
+    const key = issue.path[0]
+    if (typeof key === 'string') delete trimmed[key]
+  }
+  const retried = RunReceiptSchema.safeParse(trimmed)
+  if (retried.success) return retried.data
+  const identity: Record<string, unknown> = { ...MINIMAL_RECEIPT }
+  if (typeof trimmed.runId === 'string' && trimmed.runId) identity.runId = trimmed.runId
+  if (
+    trimmed.status === 'running' ||
+    trimmed.status === 'cancelled' ||
+    trimmed.status === 'error' ||
+    trimmed.status === 'done'
+  ) {
+    identity.status = trimmed.status
+  }
+  if (typeof trimmed.step === 'number' && Number.isInteger(trimmed.step) && trimmed.step >= 0) {
+    identity.step = trimmed.step
+  }
+  if (typeof trimmed.writtenAt === 'string' && trimmed.writtenAt) {
+    identity.writtenAt = trimmed.writtenAt
+  }
+  return RunReceiptSchema.parse(identity)
+}
+
 export function buildRunReceipt(input: {
   runId: string
   status: RunStatus
   messages: readonly ChatMessage[]
   events: readonly PersistedEvent[]
   contract: string
-  runDir?: string
   /** Serving provider — tagged into the receipt for forward-looking usage splits. */
   provider?: string
   /** Serving model — tagged into the receipt for forward-looking usage splits. */
@@ -518,7 +754,7 @@ export function buildRunReceipt(input: {
     ...(input.verificationGate ? { verificationGate: input.verificationGate } : {}),
     contractExcerpt: contractExcerpt(input.contract)
   }
-  return RunReceiptSchema.parse(receipt)
+  return parseRunReceipt(receipt)
 }
 
 export function writeRunReceipt(runDir: string, receipt: RunReceipt): void {
@@ -570,7 +806,6 @@ export async function writeRunReceiptBestEffort(input: {
       messages: await input.loadMessages(),
       events: input.loadEvents(input.runDir),
       contract: input.readContract(input.runDir),
-      runDir: input.runDir,
       provider: input.provider,
       model: input.model,
       billedCost: input.billedCost,

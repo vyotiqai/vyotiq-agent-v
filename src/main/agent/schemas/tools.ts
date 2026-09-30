@@ -1435,7 +1435,7 @@ export const TOOL_REGISTRY = {
   },
   run_tests: {
     description:
-      'Run the workspace test suite and return pass/fail output. Accepts an optional sandboxed command or a named package script; otherwise runs the workspace test script (pnpm/npm test). Capped at 5 minutes.',
+      'Run the workspace test suite and return pass/fail output. Accepts an optional sandboxed command or a named package script; otherwise runs the workspace test script (pnpm/npm test). Only a test, typecheck or lint runner (vitest, jest, pytest, tsc, eslint, cargo test, go test, a test/typecheck/lint/build script…) counts as verifying your work; use terminal for other commands. Capped at 5 minutes.',
     schema: runTestsArgs
   },
   edit_notebook: {

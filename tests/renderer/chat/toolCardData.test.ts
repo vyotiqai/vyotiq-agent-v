@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   collectWritingChanges,
+  countDiffLines,
+  firstChangedLineInDiff,
   parseDiffPreview,
   parseEditCardData,
   parseTerminalCardData,
@@ -263,14 +265,102 @@ describe('parseDiffPreview', () => {
     ])
   })
 
-  it('treats whole-file contents as an addition from line one', () => {
+  it('keeps a hunk body line that starts with --- or +++ as content (D1)', () => {
+    // A removed `-- legacy note` renders as `--- legacy note` and an added
+    // `++ new note` as `+++ new note`; both are change rows, not file headers.
+    const diff = [
+      '--- a/q.sql',
+      '+++ b/q.sql',
+      '@@ -1,4 +1,4 @@',
+      ' select 1;',
+      '--- legacy note',
+      '+++ new note',
+      ' select 2;'
+    ].join('\n')
+    const lines = parseUnifiedDiff(diff)
+
+    expect(lines.map((line) => [line.kind, line.text, line.lineNumber])).toEqual([
+      ['context', 'select 1;', 1],
+      ['del', '-- legacy note', null],
+      ['add', '++ new note', 2],
+      ['context', 'select 2;', 3]
+    ])
+    expect(firstChangedLineInDiff(diff)).toBe(2)
+  })
+
+  it('counts a --- / +++ hunk body line in the +N -M chip (D2)', () => {
+    const diff = [
+      '--- a/q.sql',
+      '+++ b/q.sql',
+      '@@ -1,4 +1,4 @@',
+      ' select 1;',
+      '--- legacy note',
+      '+++ new note',
+      ' select 2;'
+    ].join('\n')
+
+    expect(countDiffLines(diff)).toEqual({ added: 1, removed: 1 })
+  })
+
+  it('numbers a peek tail slice from the file, not from the cut (D4)', () => {
+    // 3000 context lines push the diff past the 16k peek budget, so the cut
+    // lands mid-hunk with the @@ header already sliced off. Rows must then
+    // resume on the file's numbering; before the fix they counted from zero.
+    const context = Array.from({ length: 3000 }, (_, i) => ` select ${i + 1};`)
+    const peek = (diff: string) =>
+      parseDiffPreview(
+        tool({
+          name: 'edit',
+          status: 'running',
+          argsPreview: JSON.stringify({ path: 'q.sql', diff })
+        }),
+        { maxLines: 14, fromEnd: true }
+      )
+
+    const diff = ['--- a/q.sql', '+++ b/q.sql', '@@ -1,3000 +1,3000 @@', ...context].join('\n')
+    expect(diff.length).toBeGreaterThan(16_000)
+    const lines = peek(diff)
+
+    expect(lines).toHaveLength(14)
+    expect(lines[0]?.lineNumber).toBe(2987)
+    expect(lines[13]?.lineNumber).toBe(3000)
+
+    // Same shape with two trailing additions: the 14-row window is then
+    // 2989..3002, and the first row still carries the file's own line.
+    const withAdds = [
+      '--- a/q.sql',
+      '+++ b/q.sql',
+      '@@ -1,3000 +1,3002 @@',
+      ...context,
+      '+extra one',
+      '+extra two'
+    ].join('\n')
+    const added = peek(withAdds)
+
+    expect(added).toHaveLength(14)
+    expect(added[0]?.lineNumber).toBe(2989)
+    expect(added[13]?.lineNumber).toBe(3002)
+  })
+
+  it('leaves a headerless diff body unnumbered rather than counting from 0 (D4)', () => {
+    const diff = ['+added line', '-removed line', ' context line'].join('\n')
+    const lines = parseUnifiedDiff(diff)
+
+    expect(lines.map((line) => [line.kind, line.text, line.lineNumber])).toEqual([
+      ['add', 'added line', null],
+      ['del', 'removed line', null],
+      ['context', 'context line', null]
+    ])
+  })
+
+  it('leaves whole-file contents writes unnumbered (no real location)', () => {
     const lines = parseDiffPreview(
       tool({ name: 'edit', argsPreview: JSON.stringify({ path: 'n.ts', contents: 'a\nb\n' }) })
     )
 
     expect(lines).toEqual([
-      { kind: 'add', text: 'a', lineNumber: 1 },
-      { kind: 'add', text: 'b', lineNumber: 2 }
+      { kind: 'add', text: 'a', lineNumber: null },
+      { kind: 'add', text: 'b', lineNumber: null }
     ])
   })
 

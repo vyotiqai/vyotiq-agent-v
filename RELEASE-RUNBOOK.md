@@ -101,8 +101,8 @@ jobs rather than re-tagging.
    published (non-draft) release with a body.
 2. Assets include all three manifests — `latest.yml`, `latest-linux.yml`,
    `latest-mac.yml` — plus blockmaps (mandatory; a missing one silently
-   kills that OS's auto-update, the v1.1.0 incident; enforced by
-   finalize-release, release.yml:289-294).
+   kills that OS's auto-update, with no error in the release or the updater
+   log; enforced by finalize-release, release.yml:289-294).
 3. Installers present: `Vyotiq-X.Y.Z-setup.exe`, `.AppImage`, `.deb`,
    `.rpm`, both `-arm64`/`-x64` `.dmg`, both `mac.zip` (release.yml:295-300).
 4. Updater version bump: the manifest's version field equals `X.Y.Z` and a
@@ -129,7 +129,8 @@ re-introduce it.
 ## 8. Troubleshooting
 
 - **Auto-update silently dead on one OS**: that OS's `latest*.yml` is
-  missing from the release (the v1.1.0 incident, release.yml:240-241, 291).
+  missing from the release (release.yml:240-241, 291). The release looks
+  healthy and the updater says nothing — only that OS stops updating.
   Never fix by re-tagging; ship the next version.
 - **Re-tagging a published tag**: electron-updater compares versions, not
   commits. A same-version tag produces no user update, and the re-push

@@ -1,4 +1,3 @@
-import { existsSync } from 'fs'
 import type { AgentEvent, AgentInteractionMode, ChatMessage, Settings } from '../../shared/ipc'
 import { toolContentWithImages } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
@@ -18,7 +17,7 @@ import {
 } from './tools/classify'
 import type { ToolApprovalGate } from './toolApproval'
 import type { TerminalShell } from '../../shared/ipc'
-import { resolveInsideWorkspace } from '../workspace/safePath'
+import { createWorkspacePathResolver } from '../workspace/safePath'
 import {
   applyToolCallToKnownPaths,
   applyToolCallToMutationPaths,
@@ -26,6 +25,7 @@ import {
   editPathsFromToolCall,
   isFileMutationToolName,
   isInspectToolName,
+  isRunArtifactEditPath,
   toolArgsFromCall,
   unreadExistingEditPaths
 } from './loopPolicy'
@@ -38,8 +38,25 @@ import { ensureToolCallIds } from './dedupeToolCalls'
 import { parseTerminalOutput } from '../../shared/utils/terminalFormat'
 import { yieldToEventLoop } from './tools/walk'
 import type { VerificationTracker } from './feedback/verification'
+import { getWriteCheckpoint } from './checkpoints'
 export const SOFT_WARN_MUTATION_WITHOUT_DIAGNOSTICS =
   '[Soft warning: this step mutated file(s) without calling diagnostics. Run diagnostics (typecheck/lint) before treating the change as done.]'
+
+/** The path an edit-family call writes (`edit_notebook` names it `target_notebook`). */
+function editTargetPath(name: string, args: Record<string, unknown>): string | undefined {
+  if (name === 'edit_notebook' && typeof args.target_notebook === 'string') return args.target_notebook
+  return readPathArg(args)
+}
+
+/**
+ * An edit-family call that writes workspace code. `plan.md` / `contract.md`
+ * are remapped into the run directory, so editing them changes no code and
+ * neither needs a check nor makes one stale.
+ */
+function isWorkspaceCodeEdit(call: ToolCall): boolean {
+  if (!isFileMutationToolName(call.name)) return false
+  return !isRunArtifactEditPath(editTargetPath(call.name, toolArgsFromCall(call.arguments)))
+}
 
 /**
  * A read is "recent" if the same path was returned within this many agent
@@ -313,10 +330,65 @@ async function raceToolDeadline(
   }
 }
 
+/**
+ * Does this workspace have any diagnostics surface worth nudging about?
+ *
+ * `hasJavaScriptProject` / `hasTypeScriptProject` stat and read the workspace
+ * (a directory read for the tsconfig scan) and the verdict cannot change over
+ * the life of a run, so probing it on every step was a per-step sync fs cost
+ * on the main thread for a constant. Memoised per workspace: one probe per
+ * workspace per process, then a map read. Only soft-warn text depends on it,
+ * never control flow.
+ */
+const diagnosticsSurfaceByWorkspace = new Map<string, boolean>()
+
+function workspaceHasDiagnosticsSurface(workspace: string): boolean {
+  const cached = diagnosticsSurfaceByWorkspace.get(workspace)
+  if (cached !== undefined) return cached
+  const hasSurface = hasJavaScriptProject(workspace) || hasTypeScriptProject(workspace)
+  diagnosticsSurfaceByWorkspace.set(workspace, hasSurface)
+  return hasSurface
+}
+
+/** Per-step path resolver: async containment + symlink checks, directory memoised. */
+type StepPathResolver = ReturnType<typeof createWorkspacePathResolver>
+
+/** Per-step flags handed to every tool call in the step. */
+type StepFlags = {
+  softDiagnosticsNudge?: boolean
+  /** Present when this step tracks known paths (read-before-edit probe). */
+  resolvePaths?: StepPathResolver
+}
+
+/**
+ * Read-before-edit probe for one call. `unreadExistingEditPaths` still owns the
+ * rule (write tools only, minus paths already inspected); existence is resolved
+ * through the async workspace resolver and handed back as a settled map, so the
+ * predicate it runs is a lookup instead of a blocking `existsSync` on the main
+ * thread (performance.mdc: never block main). Same result as the sync probe.
+ */
+async function unreadExistingEditPathsForStep(
+  known: ReadonlySet<string>,
+  name: string,
+  toolArgs: Record<string, unknown>,
+  resolve: StepPathResolver
+): Promise<string[]> {
+  const candidates = editPathsFromToolCall(name, toolArgs).filter((path) => !known.has(path))
+  if (candidates.length === 0) return []
+  const resolved = await Promise.all(candidates.map((path) => resolve(path)))
+  const exists = new Map<string, boolean>()
+  candidates.forEach((path, i) => {
+    // null = escapes the workspace or is unreadable → same answer the sync
+    // probe gave, which caught the resolve throw and answered false.
+    exists.set(path, resolved[i]?.exists === true)
+  })
+  return unreadExistingEditPaths(known, name, toolArgs, (rel) => exists.get(rel) === true)
+}
+
 async function runSingleTool(
   call: ToolCall,
   ctx: ToolStepContext,
-  stepFlags?: { softDiagnosticsNudge?: boolean }
+  stepFlags?: StepFlags
 ): Promise<ToolOutcome> {
   const events: AgentEvent[] = []
   const summary = summarizeToolArgs(call.name, call.arguments)
@@ -367,13 +439,12 @@ async function runSingleTool(
     )
     const unreadPaths =
       ctx.knownPaths != null
-        ? unreadExistingEditPaths(ctx.knownPaths, call.name, toolArgs, (rel) => {
-            try {
-              return existsSync(resolveInsideWorkspace(ctx.workspace, rel))
-            } catch {
-              return false
-            }
-          })
+        ? await unreadExistingEditPathsForStep(
+            ctx.knownPaths,
+            call.name,
+            toolArgs,
+            stepFlags?.resolvePaths ?? createWorkspacePathResolver(ctx.workspace)
+          )
         : []
 
     // Per-call signal: the run signal plus a deadline-only abort. The deadline
@@ -437,7 +508,7 @@ async function runSingleTool(
     if (
       result.ok &&
       stepFlags?.softDiagnosticsNudge &&
-      isFileMutationToolName(call.name)
+      isWorkspaceCodeEdit(call)
     ) {
       content = `${content}\n\n${SOFT_WARN_MUTATION_WITHOUT_DIAGNOSTICS}`
     }
@@ -464,10 +535,21 @@ async function runSingleTool(
     if (ctx.verification) {
       // `content`, not `result.content`: this is the text that gets persisted,
       // so the live verdict reads exactly what the receipt will re-read later.
-      if (isFileMutationToolName(call.name)) {
-        ctx.verification.noteMutation(readPathArg(toolArgs), result.ok)
+      const editPath = editTargetPath(call.name, toolArgs)
+      if (isFileMutationToolName(call.name) && !isRunArtifactEditPath(editPath)) {
+        ctx.verification.noteMutation(editPath, result.ok)
       }
-      ctx.verification.noteToolResult(call.name, content, result.ok)
+      // Writes this call made through anything but an edit tool — a terminal
+      // command, an MCP writer, an lsp rename, a merge, git_apply — noted here,
+      // in call order, so one that follows a check makes it stale.
+      const cp = getWriteCheckpoint(ctx.runDir)
+      ctx.verification.noteOtherWriteCount(cp?.otherWriteCount, cp?.id)
+      ctx.verification.noteToolResult(
+        call.name,
+        content,
+        result.ok,
+        typeof toolArgs.command === 'string' ? toolArgs.command : undefined
+      )
     }
     const resultSummary = result.summary || summary
     const images = result.images?.length ? result.images : undefined
@@ -619,13 +701,26 @@ function abortedToolResult(
   return { ok: false, events: [ev], message: toolMsg }
 }
 
+/**
+ * Settled outcomes for a parallel batch plus the first tool that threw, if any.
+ *
+ * The error travels back as a value instead of being thrown from here: the
+ * siblings that already finished wrote to disk, and throwing first would drop
+ * their results on the floor. The caller persists everything that settled and
+ * only then rethrows, so a failing step still ends exactly as it did before.
+ */
+type ParallelBatchResult = {
+  results: Map<string, ToolOutcome>
+  error?: unknown
+}
+
 async function runParallelBatch(
   calls: ToolCall[],
   ctx: ToolStepContext,
   parallelLimit: number,
-  stepFlags?: { softDiagnosticsNudge?: boolean },
+  stepFlags?: StepFlags,
   onSettled?: (call: ToolCall, outcome: ToolOutcome) => void
-): Promise<Map<string, ToolOutcome>> {
+): Promise<ParallelBatchResult> {
   const results = new Map<string, ToolOutcome>()
   const startedIds = new Set<string>()
   let index = 0
@@ -650,7 +745,7 @@ async function runParallelBatch(
     }
   })
   await Promise.all(workers)
-  if (firstError !== undefined) throw firstError
+  if (firstError !== undefined) return { results, error: firstError }
   // After abort, keep settled outcomes; only synthesize abort results for tools
   // that never produced a ToolOutcome. Never re-emit tool_start for started ids.
   if (ctx.signal.aborted) {
@@ -663,7 +758,7 @@ async function runParallelBatch(
       )
     }
   }
-  return results
+  return { results }
 }
 
 function chunkSizeForClass(cls: StepToolBatchClass, batchLength: number): number {
@@ -765,13 +860,22 @@ export async function executeStepToolCalls(
   const events: AgentEvent[] = []
   const hasDiagnosticsSurface =
     Boolean(ctx.diagnosticsCommand?.trim()) ||
-    hasJavaScriptProject(ctx.workspace) ||
-    hasTypeScriptProject(ctx.workspace)
+    workspaceHasDiagnosticsSurface(ctx.workspace)
   const softDiagnosticsNudge =
     hasDiagnosticsSurface &&
-    calls.some((c) => isFileMutationToolName(c.name)) &&
+    calls.some(isWorkspaceCodeEdit) &&
     !calls.some((c) => c.name === 'diagnostics')
-  const stepFlags = softDiagnosticsNudge ? { softDiagnosticsNudge } : undefined
+  // One path resolver for the whole step: the read-before-edit probe repeats
+  // per call, and the resolver memoises each directory it walks.
+  const stepFlags: StepFlags | undefined =
+    softDiagnosticsNudge || ctx.knownPaths != null
+      ? {
+          ...(softDiagnosticsNudge ? { softDiagnosticsNudge } : {}),
+          ...(ctx.knownPaths != null
+            ? { resolvePaths: createWorkspacePathResolver(ctx.workspace) }
+            : {})
+        }
+      : undefined
 
   // Approval authorize() is awaited per call; consecutive same-class groups may still batch.
   const groups = groupStepToolCalls(orderedCalls)
@@ -829,9 +933,16 @@ export async function executeStepToolCalls(
       // Persist and report in call order — settle order is not reproducible —
       // each with the moment it settled.
       for (const call of group) {
-        const outcome = batch.get(call.id) ?? abortedToolResult(call, ctx)
+        const settled = batch.results.get(call.id)
+        // On the error path a call that never settled has no result and no
+        // abort reason of its own, so it stays absent, exactly as before;
+        // every sibling that did settle is written first, so a sibling's work
+        // is recorded even though this batch is about to fail.
+        if (!settled && batch.error !== undefined) continue
+        const outcome = settled ?? abortedToolResult(call, ctx)
         await collect(outcome, liveEmitted.has(call.id), settledAt.get(call.id))
       }
+      if (batch.error !== undefined) throw batch.error
       await yieldToEventLoop()
     } else {
       for (const call of group) {

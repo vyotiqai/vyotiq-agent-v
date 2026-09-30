@@ -16,6 +16,7 @@ export type DiagnosticsKind = 'typecheck' | 'lint'
 
 export type ComposerMention =
   | { kind: 'file'; path: string }
+  | { kind: 'folder'; path: string }
   | { kind: 'docs'; path: string }
   | { kind: 'rule'; path: string }
   | { kind: 'lints'; diagnosticsKind: DiagnosticsKind }
@@ -77,6 +78,13 @@ export type MentionMenuItem =
   | {
       id: string
       kind: 'file'
+      path: string
+      label: string
+      subtitle: string
+    }
+  | {
+      id: string
+      kind: 'folder'
       path: string
       label: string
       subtitle: string
@@ -148,9 +156,57 @@ export function pathSegments(path: string): string[] {
     .filter(Boolean)
 }
 
+/**
+ * True when `path` is a strict parent directory of another path in the set.
+ *
+ * The suggest result only carries relative paths, so a directory is the one
+ * entry that some other returned entry lives under. A directory with nothing
+ * beneath it in the page cannot be told apart from a file this way.
+ */
+export function isFolderPathInSet(paths: readonly string[], path: string): boolean {
+  const norm = path.replace(/\\/g, '/')
+  const prefix = `${norm}/`
+  return paths.some((other) => {
+    const cand = other.replace(/\\/g, '/')
+    return cand !== norm && cand.startsWith(prefix)
+  })
+}
+
+/**
+ * The row kind a returned workspace path gets. `folders` is main's own list of
+ * matching directories; the inference covers a path that reached the menu some
+ * other way (a recent, a task file) with something of its below it.
+ */
+export function classifyWorkspacePath(
+  norm: string,
+  all: readonly string[],
+  folders?: ReadonlySet<string>
+): 'file' | 'folder' {
+  if (folders?.has(norm)) return 'folder'
+  return isFolderPathInSet(all, norm) ? 'folder' : 'file'
+}
+
+/**
+ * One list out of main's two ranked ones. Main ranks files and folders apart so
+ * folders cannot reorder file rows — but typing a folder's name would then bury
+ * it under every file inside it. So a folder whose own name starts with the
+ * query leads, the files keep their order, and the other folders follow.
+ */
+export function mergeSuggestedPaths(
+  files: readonly string[],
+  folders: readonly string[],
+  query: string
+): string[] {
+  const q = query.trim().toLowerCase()
+  const named = q ? folders.filter((dir) => basenamePath(dir).toLowerCase().startsWith(q)) : []
+  const rest = folders.filter((dir) => !named.includes(dir))
+  return [...named, ...files, ...rest]
+}
+
 export function mentionLabel(mention: ComposerMention): string {
   switch (mention.kind) {
     case 'file':
+    case 'folder':
     case 'docs':
       return basenamePath(mention.path)
     case 'rule':
@@ -176,6 +232,8 @@ function encodePayload(mention: ComposerMention): string {
   switch (mention.kind) {
     case 'file':
       return `file:${mention.path.replace(/\\/g, '/')}`
+    case 'folder':
+      return `folder:${mention.path.replace(/\\/g, '/')}`
     case 'docs':
       return `docs:${mention.path.replace(/\\/g, '/')}`
     case 'rule':
@@ -271,6 +329,11 @@ export function decodeMentionPayload(payload: string): ComposerMention | null {
     const path = raw.slice('file:'.length).trim().replace(/\\/g, '/')
     if (!isSafeWorkspaceRelPath(path)) return null
     return { kind: 'file', path }
+  }
+  if (raw.startsWith('folder:')) {
+    const path = raw.slice('folder:'.length).trim().replace(/\\/g, '/')
+    if (!isSafeWorkspaceRelPath(path)) return null
+    return { kind: 'folder', path }
   }
   if (raw.startsWith('docs:')) {
     const path = raw.slice('docs:'.length).trim().replace(/\\/g, '/')
@@ -466,8 +529,8 @@ export function findActiveMentionToken(
 }
 
 /**
- * The @ menu before a subview: what can be attached (Context), files (the
- * recent ones, or matches once something is typed), and the lists to browse.
+ * The @ menu before a subview: what can be attached (Context), files and folders
+ * (the recent ones first, then matches), and the lists to browse.
  */
 export function buildRootMentionItems(opts: {
   query: string
@@ -475,6 +538,8 @@ export function buildRootMentionItems(opts: {
   recentFiles: readonly string[]
   /** Workspace search results for the query. */
   matchingFiles: readonly string[]
+  /** Directories the same search matched (main ranks them apart from files). */
+  matchingFolders?: readonly string[]
   /** When false, omit codebase file rows and Files and folders (no selected workspace). */
   includeCodebase?: boolean
   branchName?: string | null
@@ -537,11 +602,17 @@ export function buildRootMentionItems(opts: {
   }
 
   if (includeCodebase) {
-    // With nothing typed only recent files are worth a row; a search result
-    // for an empty query is just the first files alphabetically.
-    const filePool = q ? [...opts.recentFiles, ...opts.matchingFiles] : opts.recentFiles
+    // Recents first, then whatever the search returned. With nothing typed the
+    // search still runs (an empty query is the top of the tree), so a cold
+    // composer lists real rows instead of only the browse lists.
+    const folders = (opts.matchingFolders ?? []).map((dir) => dir.replace(/\\/g, '/'))
+    const folderSet = new Set(folders)
+    const pool = [
+      ...opts.recentFiles,
+      ...mergeSuggestedPaths(opts.matchingFiles, folders, opts.query)
+    ]
     const seen = new Set<string>()
-    for (const path of filePool) {
+    for (const path of pool) {
       const norm = path.replace(/\\/g, '/')
       if (!isSafeWorkspaceRelPath(norm)) continue
       if (seen.has(norm)) continue
@@ -550,9 +621,10 @@ export function buildRootMentionItems(opts: {
       }
       seen.add(norm)
       const parent = parentPath(norm)
+      const kind = classifyWorkspacePath(norm, pool, folderSet)
       items.push({
-        id: `file:${norm}`,
-        kind: 'file',
+        id: `${kind}:${norm}`,
+        kind,
         path: norm,
         label: basenamePath(norm),
         subtitle: parent || 'Workspace root'
@@ -580,16 +652,23 @@ export function buildRootMentionItems(opts: {
 export function buildFileMentionItems(
   paths: string[],
   total: number,
-  shown: number
+  shown: number,
+  /** Matching directories, and the query that ranked them (for mergeSuggestedPaths). */
+  folders: { paths: readonly string[]; query: string } = { paths: [], query: '' }
 ): MentionMenuItem[] {
-  const safe = paths
-    .map((path) => path.replace(/\\/g, '/'))
-    .filter(isSafeWorkspaceRelPath)
+  const folderPaths = folders.paths.map((dir) => dir.replace(/\\/g, '/'))
+  const folderSet = new Set(folderPaths)
+  const safe = mergeSuggestedPaths(
+    paths.map((path) => path.replace(/\\/g, '/')),
+    folderPaths,
+    folders.query
+  ).filter(isSafeWorkspaceRelPath)
   const items: MentionMenuItem[] = safe.map((norm) => {
     const parent = parentPath(norm)
+    const kind = classifyWorkspacePath(norm, safe, folderSet)
     return {
-      id: `file:${norm}`,
-      kind: 'file' as const,
+      id: `${kind}:${norm}`,
+      kind,
       path: norm,
       label: basenamePath(norm),
       subtitle: parent || 'Workspace root'

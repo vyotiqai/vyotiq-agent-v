@@ -5,6 +5,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { resolveComposerMentions } from '@renderer/features/chat/components/composer/resolveMentions'
 import { mentionMarker } from '@renderer/features/chat/components/composer/mentionModel'
 
+function fileListEntry(path: string, kind: 'file' | 'directory' = 'file') {
+  return {
+    name: path.split('/').pop() ?? path,
+    path,
+    kind,
+    size: 1,
+    mtimeMs: 0,
+    hidden: false,
+    symlinkTargetInsideWorkspace: null
+  }
+}
+
 describe('resolveComposerMentions', () => {
   beforeEach(() => {
     window.vyotiq = {
@@ -72,6 +84,19 @@ describe('resolveComposerMentions', () => {
       readRunArtifact: vi.fn(async () => ({
         ok: false as const,
         error: 'missing'
+      })),
+      workspaceFileList: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          path: 'src/components',
+          entries: [
+            fileListEntry('src/components/a.tsx'),
+            fileListEntry('src/components/composer', 'directory')
+          ],
+          total: 2,
+          nextOffset: null,
+          truncated: false
+        }
       }))
     }
   })
@@ -93,6 +118,31 @@ describe('resolveComposerMentions', () => {
         text: 'content of src/a.ts'
       }
     ])
+    expect(result.error).toBeNull()
+  })
+
+  it('resolves a folder mention to a listing, attaching no file', async () => {
+    const draft = `Clean up ${mentionMarker({ kind: 'folder', path: 'src/components' })} please`
+    const result = await resolveComposerMentions({
+      workspacePath: '/ws',
+      draft,
+      existingFiles: []
+    })
+    expect(window.vyotiq.workspaceFileList).toHaveBeenCalledWith({
+      workspacePath: '/ws',
+      path: 'src/components',
+      offset: 0,
+      limit: 200
+    })
+    expect(result.text).toContain('## Referenced folder')
+    expect(result.text).toContain('Path: src/components')
+    expect(result.text).toContain('Entries: 2 shown of 2')
+    expect(result.text).toContain('- src/components/a.tsx')
+    expect(result.text).toContain('- src/components/composer/')
+    expect(result.text).toContain('Clean up')
+    expect(result.text).not.toContain('\uFFF9')
+    // A folder is context, not an attachment.
+    expect(result.files).toEqual([])
     expect(result.error).toBeNull()
   })
 

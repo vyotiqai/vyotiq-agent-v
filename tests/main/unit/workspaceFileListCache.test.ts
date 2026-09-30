@@ -2,19 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import type { WalkedFile } from '@main/agent/tools/walk'
 
-// A real walk of a real directory, counted.
+// A real walk of a real directory, counted. The cache walks through
+// collectWorkspaceEntries (files and folders come out of the same pass), so
+// that is the call this counts.
 vi.mock('@main/agent/tools/walk', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@main/agent/tools/walk')>()
-  return { ...actual, collectWorkspaceFiles: vi.fn(actual.collectWorkspaceFiles) }
+  return { ...actual, collectWorkspaceEntries: vi.fn(actual.collectWorkspaceEntries) }
 })
 
 vi.mock('@main/git/git', () => ({
   readGitStatus: vi.fn()
 }))
 
-import { collectWorkspaceFiles } from '@main/agent/tools/walk'
+import { collectWorkspaceEntries, type WalkedFile } from '@main/agent/tools/walk'
 import { invalidateGitStatusCache } from '@main/git/gitStatusCache'
 import {
   FILE_LIST_MAX_WORKSPACES,
@@ -23,7 +24,7 @@ import {
   readWorkspaceFileListCached
 } from '@main/workspace/fileListCache'
 
-const walk = vi.mocked(collectWorkspaceFiles)
+const walk = vi.mocked(collectWorkspaceEntries)
 
 /** readdir order is the platform's; the pickers sort after filtering. */
 function sorted(files: readonly string[]): string[] {
@@ -74,8 +75,8 @@ describe('workspace file list cache', () => {
     let finishStaleWalk!: (files: WalkedFile[]) => void
     walk.mockImplementationOnce(
       () =>
-        new Promise<WalkedFile[]>((resolve) => {
-          finishStaleWalk = resolve
+        new Promise<{ files: WalkedFile[]; dirs: string[] }>((resolve) => {
+          finishStaleWalk = (files) => resolve({ files, dirs: [] })
         })
     )
     const stale = readWorkspaceFileListCached(root)

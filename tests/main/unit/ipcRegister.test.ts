@@ -45,11 +45,6 @@ const isActiveMock = vi.hoisted(() => vi.fn(() => false))
 const resolveWritesMock = vi.hoisted(() => vi.fn())
 const planRewindPreviewMock = vi.hoisted(() => vi.fn(async () => ({ checkpointIds: [], files: [] })))
 const renameRunMock = vi.hoisted(() => vi.fn())
-const previewHarnessApplyMock = vi.hoisted(() =>
-  vi.fn(() => {
-    throw new Error('No harness proposal found. Run `/harness-review` first.')
-  })
-)
 const prepareRewindMock = vi.hoisted(() =>
   vi.fn(async () => ({
     messages: [{ role: 'user' as const, content: 'edited' }],
@@ -160,16 +155,6 @@ vi.mock('@main/agent/tools', async (importOriginal) => {
       invalidateAfterWorkspaceMutationSpy(...args)
       actual.invalidateAfterWorkspaceMutation(...args)
     }
-  }
-})
-
-vi.mock('@main/agent/harnessApply', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/agent/harnessApply')>()
-  return {
-    ...actual,
-    workspaceHasEditableHarness: (path: string) =>
-      !String(path).replace(/\\/g, '/').includes('plain-ws'),
-    previewHarnessApply: (...args: unknown[]) => previewHarnessApplyMock(...args)
   }
 })
 
@@ -321,10 +306,6 @@ describe('registerIpc', () => {
     planRewindPreviewMock.mockReset()
     planRewindPreviewMock.mockResolvedValue({ checkpointIds: [], files: [] })
     renameRunMock.mockReset()
-    previewHarnessApplyMock.mockReset()
-    previewHarnessApplyMock.mockImplementation(() => {
-      throw new Error('No harness proposal found. Run `/harness-review` first.')
-    })
     prepareRewindMock.mockReset()
     prepareRewindMock.mockResolvedValue({
       messages: [{ role: 'user' as const, content: 'edited' }],
@@ -1075,54 +1056,6 @@ describe('registerIpc', () => {
       expect(result.ok).toBe(false)
       if (!result.ok) {
         expect(result.error).toMatch(/run not found/i)
-        expect(result.code).not.toBe('IPC_HANDLER')
-      }
-    })
-  })
-
-  describe('harness preview/apply', () => {
-    it('returns user-facing fail for preview when workspace has no editable harness', async () => {
-      const handler = handlers.get(IPC.harnessPreviewApply)
-      const result = await handler!(
-        { sender: mockWc, senderFrame: mockMainFrame },
-        {
-          workspacePath: '/plain-ws',
-          proposalPath: 'resources/harness/proposals/test.md'
-        }
-      )
-
-      expect(result.ok).toBe(false)
-      if (!result.ok) {
-        expect(result.error).toMatch(/no editable harness/i)
-        expect(result.code).not.toBe('IPC_HANDLER')
-      }
-    })
-
-    it('returns user-facing fail for apply when workspace has no editable harness', async () => {
-      const handler = handlers.get(IPC.harnessApply)
-      const result = await handler!(
-        { sender: mockWc, senderFrame: mockMainFrame },
-        {
-          workspacePath: '/plain-ws',
-          proposalPath: 'resources/harness/proposals/test.md',
-          confirm: true
-        }
-      )
-
-      expect(result.ok).toBe(false)
-      if (!result.ok) {
-        expect(result.error).toMatch(/no editable harness/i)
-        expect(result.code).not.toBe('IPC_HANDLER')
-      }
-    })
-
-    it('returns user-facing fail for preview when harness proposal is missing', async () => {
-      const handler = handlers.get(IPC.harnessPreviewApply)
-      const result = await handler!({ sender: mockWc, senderFrame: mockMainFrame }, { workspacePath: '/ws' })
-
-      expect(result.ok).toBe(false)
-      if (!result.ok) {
-        expect(result.error).toMatch(/no harness proposal/i)
         expect(result.code).not.toBe('IPC_HANDLER')
       }
     })

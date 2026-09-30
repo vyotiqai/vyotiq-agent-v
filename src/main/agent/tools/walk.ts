@@ -473,6 +473,16 @@ export type WorkspaceFilesPage = {
   cursorMissing: boolean
 }
 
+export type WorkspaceEntriesPage = WorkspaceFilesPage & {
+  /**
+   * Workspace-relative directories the walk descended into, forward slashes, in
+   * walk order. Collected only for callers that ask for them; the file walks
+   * (grep, glob, search, the code index) leave this empty instead of allocating
+   * one string per directory they pass through.
+   */
+  dirs: string[]
+}
+
 /** Notice when a live grep/glob/search walk hit its file cap. */
 export function formatLiveScanCapNotice(cap: number): string {
   return `scan cap ${cap}; narrow the query or wait for index=`
@@ -500,7 +510,35 @@ export async function collectWorkspaceFilesPage(
   skipDirNames?: ReadonlySet<string>,
   keepRel?: (rel: string, full: string) => boolean
 ): Promise<WorkspaceFilesPage> {
+  return collectWorkspacePage(
+    workspaceRoot,
+    cap,
+    startAfter,
+    signal,
+    exts,
+    skipDirNames,
+    keepRel,
+    false
+  )
+}
+
+/**
+ * The walk itself. `includeDirs` records each directory the walk descends into,
+ * so the path pickers can offer folders from the same pass; with it off, the
+ * walk is byte-for-byte the one that ran before.
+ */
+async function collectWorkspacePage(
+  workspaceRoot: string,
+  cap: number | undefined,
+  startAfter: string | undefined,
+  signal: AbortSignal | undefined,
+  exts: ReadonlySet<string> | undefined,
+  skipDirNames: ReadonlySet<string> | undefined,
+  keepRel: ((rel: string, full: string) => boolean) | undefined,
+  includeDirs: boolean
+): Promise<WorkspaceEntriesPage> {
   const files: WalkedFile[] = []
+  const dirs: string[] = []
   let lastRel: string | null = null
   const realRoot = realpathSync(canonicalizeWorkspacePath(workspaceRoot))
   const queue: Array<{ dir: string; relDir: string }> = [{ dir: realRoot, relDir: '' }]
@@ -512,7 +550,7 @@ export async function collectWorkspaceFilesPage(
   while (queue.length > 0) {
     throwIfAborted(signal)
     if (walkHitCap(files.length, cap)) {
-      return { files, lastRel, exhausted: false, cursorMissing: Boolean(cursor) && !sawCursor }
+      return { files, dirs, lastRel, exhausted: false, cursorMissing: Boolean(cursor) && !sawCursor }
     }
 
     const next = queue.shift()!
@@ -523,7 +561,12 @@ export async function collectWorkspaceFilesPage(
     }
 
     // Root is always walked; any nested checkout below it is a separate repo.
-    if (next.relDir && (await isNestedCheckout(next.dir))) continue
+    if (next.relDir) {
+      if (await isNestedCheckout(next.dir)) continue
+      // Recorded on dequeue, not on push: a queued directory can still turn out
+      // to be a nested checkout and never be walked.
+      if (includeDirs) dirs.push(next.relDir)
+    }
 
     const dirMatcher = gitignoreMatcherForDir(workspaceRoot, next.relDir)
     let entries
@@ -535,7 +578,7 @@ export async function collectWorkspaceFilesPage(
     for (const entry of entries) {
       throwIfAborted(signal)
       if (walkHitCap(files.length, cap)) {
-        return { files, lastRel, exhausted: false, cursorMissing: Boolean(cursor) && !sawCursor }
+        return { files, dirs, lastRel, exhausted: false, cursorMissing: Boolean(cursor) && !sawCursor }
       }
       if (IGNORED_DIRS.has(entry.name)) continue
       // Never follow symlinks — a link inside the tree can point outside.
@@ -574,7 +617,13 @@ export async function collectWorkspaceFilesPage(
     }
   }
 
-  return { files, lastRel, exhausted: true, cursorMissing: Boolean(cursor) && !sawCursor }
+  return {
+    files,
+    dirs,
+    lastRel,
+    exhausted: true,
+    cursorMissing: Boolean(cursor) && !sawCursor
+  }
 }
 
 export async function collectWorkspaceFiles(
@@ -595,6 +644,29 @@ export async function collectWorkspaceFiles(
     keepRel
   )
   return page.files
+}
+
+/**
+ * The same walk, returning the directories it descended into next to the files
+ * it found. One pass serves both lists, so a picker that shows folders never
+ * pays for a second walk of a workspace that was already listed.
+ */
+export async function collectWorkspaceEntries(
+  workspaceRoot: string,
+  cap?: number,
+  signal?: AbortSignal
+): Promise<{ files: WalkedFile[]; dirs: string[] }> {
+  const page = await collectWorkspacePage(
+    workspaceRoot,
+    cap,
+    undefined,
+    signal,
+    undefined,
+    undefined,
+    undefined,
+    true
+  )
+  return { files: page.files, dirs: page.dirs }
 }
 
 /**

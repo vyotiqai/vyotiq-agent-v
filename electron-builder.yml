@@ -25,6 +25,13 @@ files:
   # from 76 MB to 1.2 GB and a `--win dir` build past 40 min. Nothing under
   # .claude/ is read at runtime — launch.json and settings.local.json are dev-only.
   - '!.claude/**'
+  # Repo-root scratch from prior sessions: '**/*' swept it into app.asar the
+  # same way it swept .claude/. Nothing here is read at runtime — output/ holds
+  # ~1,850 generated frames/assets/videos, .playwright-mcp/ holds page snapshots,
+  # and file-list-all.txt / replay-report.json are one-off verification dumps.
+  # Excluded (not deleted): the data stays on disk, out of git and out of the pack.
+  - '!{output,.playwright-mcp}/**'
+  - '!{file-list-all.txt,replay-report.json}'
   - '!src/**'
   - '!tests/**'
   - '!docs/**'
@@ -34,7 +41,6 @@ files:
   - '!remediation/**'
   - '!tmp-os-evidence/**'
   - '!dist-*/**'
-  - '!resources/harness/proposals/**'
   - '!resources/branding/**'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
@@ -53,8 +59,8 @@ files:
   # gpt-tokenizer: only TypeScript src/ and tests are dead weight. Every other
   # tree ships — modelParams.js statically requires ALL encodingParams/*.js
   # (including o200k_harmony), and each encoding module pulls its bpeRanks data,
-  # so trimming "unused" encodings breaks startup with "Cannot find module
-  # ./encodingParams/o200k_harmony.js" (the v1.2.0 installer crash).
+  # so trimming "unused" encodings breaks startup in an installed build with
+  # "Cannot find module ./encodingParams/o200k_harmony.js".
   - '!**/node_modules/gpt-tokenizer/{src,tests}/**'
   # node-pty build-only sources (winpty/conpty sources; runtime loads
   # prebuilds/* via lib/utils.js, prebuild.js short-circuits node-gyp).
@@ -71,7 +77,6 @@ extraResources:
     to: harness
     filter:
       - '**/*'
-      - '!proposals/**'
   - from: resources/marketplace
     to: marketplace
 asarUnpack:
@@ -103,6 +108,9 @@ win:
       filter:
         - '!**/.vscode/*'
         - '!.claude/**'
+        # Repo-root scratch: same reason as the top-level `files:` list.
+        - '!{output,.playwright-mcp}/**'
+        - '!{file-list-all.txt,replay-report.json}'
         - '!src/**'
         - '!tests/**'
         - '!docs/**'
@@ -112,7 +120,6 @@ win:
         - '!remediation/**'
         - '!tmp-os-evidence/**'
         - '!dist-*/**'
-        - '!resources/harness/proposals/**'
         - '!resources/branding/**'
         - '!electron.vite.config.{js,ts,mjs,cjs}'
         - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
@@ -161,6 +168,9 @@ mac:
       filter:
         - '!**/.vscode/*'
         - '!.claude/**'
+        # Repo-root scratch: same reason as the top-level `files:` list.
+        - '!{output,.playwright-mcp}/**'
+        - '!{file-list-all.txt,replay-report.json}'
         - '!src/**'
         - '!tests/**'
         - '!docs/**'
@@ -170,7 +180,6 @@ mac:
         - '!remediation/**'
         - '!tmp-os-evidence/**'
         - '!dist-*/**'
-        - '!resources/harness/proposals/**'
         - '!resources/branding/**'
         - '!electron.vite.config.{js,ts,mjs,cjs}'
         - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
@@ -214,6 +223,9 @@ linux:
       filter:
         - '!**/.vscode/*'
         - '!.claude/**'
+        # Repo-root scratch: same reason as the top-level `files:` list.
+        - '!{output,.playwright-mcp}/**'
+        - '!{file-list-all.txt,replay-report.json}'
         - '!src/**'
         - '!tests/**'
         - '!docs/**'
@@ -223,7 +235,6 @@ linux:
         - '!remediation/**'
         - '!tmp-os-evidence/**'
         - '!dist-*/**'
-        - '!resources/harness/proposals/**'
         - '!resources/branding/**'
         - '!electron.vite.config.{js,ts,mjs,cjs}'
         - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'

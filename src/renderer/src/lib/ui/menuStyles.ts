@@ -17,9 +17,14 @@ export const MENU_SURFACE = 'vy-menu z-dropdown overflow-hidden animate-menu-in'
  */
 export const MENU_SURFACE_SCROLL = 'vy-menu z-dropdown overflow-auto animate-menu-in'
 
+/**
+ * The focus ring rides on the row itself: `focus-visible:outline-none` with no
+ * ring left keyboard users with the fill alone, and a fill is not a focus
+ * indicator. It is the one treatment everywhere else in lib/ui.
+ */
 export const MENU_ROW = cn(
   'flex h-7 w-full cursor-default items-center gap-2 rounded-md px-2 text-left text-sm vy-transition',
-  'focus-visible:outline-none'
+  'focus-visible:vy-focus-ring'
 )
 
 /** Row fill: pointer or keyboard on it. Only one of these is ever applied. */

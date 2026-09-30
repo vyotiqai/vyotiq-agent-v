@@ -37,7 +37,12 @@ export type TaskFileDiff = {
   diff: string | null
   add?: number
   del?: number
-  /** Too far apart to diff line by line: shown as one full replacement. */
+  /**
+   * Too far apart to diff line by line: shown as one full replacement. Not a
+   * claim about the numbers — when `add`/`del` are there they are exact, counted
+   * by {@link lineDiffStat} at its own (higher) edit budget, so this view and
+   * the list agree.
+   */
   full?: boolean
   reason?: TaskFileDiffReason
 }
@@ -245,6 +250,17 @@ export function taskFileDiff(runDir: string, workspaceRoot: string, relPath: str
     path,
     action,
     diff: formatUnifiedDiff(path, diff, action),
-    ...(diff.full ? { full: true } : { add: diff.add, del: diff.del })
+    // Past `lineDiff`'s own budget the hunk is a whole-file replacement, so its
+    // counts are the replacement's, not the change's. The list counted this
+    // file with `lineDiffStat`, which has the higher budget: count it the same
+    // way here, so the two views report one number. Beyond *that* budget there
+    // is no exact count, and none is invented.
+    ...(diff.full ? { full: true, ...exactCounts(before, after) } : { add: diff.add, del: diff.del })
   }
+}
+
+/** `add`/`del` for two texts, or nothing when even the counting budget is passed. */
+function exactCounts(before: string, after: string): { add?: number; del?: number } {
+  const counts = lineDiffStat(before, after)
+  return counts ? { add: counts.add, del: counts.del } : {}
 }

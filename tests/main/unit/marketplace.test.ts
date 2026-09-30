@@ -474,43 +474,29 @@ describe('remote MCP install request', () => {
 })
 
 describe('bundled marketplace catalog', () => {
-  it('has the workflow pack plus UI/API skills and on-disk manifests', async () => {
+  it('has the shipped skills and on-disk manifests', async () => {
     const { MarketplaceCatalogSchema } = await import('@shared/ipc')
     const root = join(process.cwd(), 'resources', 'marketplace')
     const catalog = MarketplaceCatalogSchema.parse(
       JSON.parse(readFileSync(join(root, 'catalog.json'), 'utf8'))
     )
 
-    // Ours only. Vendored third-party skills have their own inventory in
-    // tests/main/unit/skillsSmoke.test.ts, keyed by publisher so a re-sync
-    // shows up there rather than churning this list.
+    // Ours only. skillsSmoke.test.ts keys its own inventory by publisher, so
+    // this list stays about what we ship rather than churning on a re-sync.
     const skills = catalog.packages.filter((p) => p.kind === 'skill' && p.publisher === 'Agent V')
     const plugins = catalog.packages.filter((p) => p.kind === 'plugin')
     expect(skills.map((p) => p.id).sort()).toEqual([
-      'accessibility',
-      'analyze-api',
-      'api-design',
-      'create-skill',
       // Recurring-loop skills: each spans two connected tools on a cadence,
       // rather than restating what the agent already does on request.
       'dependency-upgrade',
       'design-level-up',
       'docs',
-      'explain-code',
-      'fix-bug',
       'flake-hunter',
-      'frontend-design',
-      'goal',
-      'implement-feature',
       'incident-triage',
-      'persona-builder',
       'pr-review-reply',
-      'refactor',
       'release-notes',
       'repo-onboarding',
-      'review-code',
-      'standup-digest',
-      'write-tests'
+      'standup-digest'
     ])
     expect(plugins.map((p) => p.id).sort()).toEqual([
       'devtools',

@@ -677,6 +677,30 @@ describe('collectHomeActivity', () => {
     expect(res.attention?.unverifiedRuns).toBe(1)
   })
 
+  // Interim receipts are written every few steps without the turn-end
+  // verdict; a run mid-edit has not had its chance to check yet. And a
+  // read-only run whose check failed wrote nothing to leave unchecked.
+  it('does not list a still-running or read-only run as unchecked', async () => {
+    makeRun('run-live', {
+      'receipt.json': receipt({
+        runId: 'run-live',
+        status: 'running',
+        verification: { lastMutationAt: '2026-09-09T09:00:00.000Z', verifiedAfterLastMutation: false }
+      })
+    })
+    makeRun('run-readonly', {
+      'receipt.json': receipt({
+        runId: 'run-readonly',
+        verification: { lastCheckAt: '2026-09-09T09:00:00.000Z', verifiedAfterLastMutation: false }
+      })
+    })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.attention?.unverifiedRuns ?? 0).toBe(0)
+    expect(res.attention?.uncheckedRuns ?? []).toEqual([])
+  })
+
   it('omits the attention block when no receipt reports verification or tools', async () => {
     makeRun('run-a', { 'receipt.json': receipt({ runId: 'run-a' }) })
 

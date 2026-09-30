@@ -28,7 +28,7 @@ Use when handed an error, incident, alert, crash, or issue link and asked to inv
 
 ## When not to use
 
-The failure is local and has no tracked incident: use fix-bug.
+The failure is local and has no tracked incident: debug it directly, without the incident write-up.
 
 The user wants triage across many incidents rather than one: summarise and ask which to take first.
 

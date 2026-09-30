@@ -40,6 +40,23 @@ describe('mentionPresentation', () => {
     expect(buildMentionRootSections(items, 'a').find((s) => s.id === 'files')?.label).toBe('Files')
   })
 
+  it('bands a folder row with the file rows and keeps flat indices contiguous', () => {
+    const items = buildRootMentionItems({
+      query: '',
+      recentFiles: [],
+      matchingFiles: ['src/components', 'src/components/composer/a.ts'],
+      includeCodebase: true,
+      branchName: 'main'
+    })
+    expect(items.some((i) => i.kind === 'folder')).toBe(true)
+    const sections = buildMentionRootSections(items)
+    const fileSection = sections.find((s) => s.id === 'files')
+    expect(fileSection?.entries.map((e) => e.item.kind)).toEqual(['folder', 'file'])
+    expect(
+      sections.flatMap((s) => s.entries.map((e) => e.flatIndex))
+    ).toEqual([...Array(items.length).keys()])
+  })
+
   it('omits empty sections when filtered', () => {
     const items = buildRootMentionItems({
       query: 'branch',

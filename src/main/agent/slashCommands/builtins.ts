@@ -93,24 +93,6 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     availability: 'ready'
   },
   {
-    id: 'builtin:harness-review',
-    trigger: 'harness-review',
-    label: 'Harness review',
-    description: 'Mine recent run receipts into a resources/harness/proposals/ draft',
-    kind: 'builtin',
-    group: 'App',
-    availability: 'ready'
-  },
-  {
-    id: 'builtin:harness-apply',
-    trigger: 'harness-apply',
-    label: 'Apply harness proposal',
-    description: 'Confirm-apply latest (or named) proposal to resources/harness/default.md',
-    kind: 'builtin',
-    group: 'App',
-    availability: 'ready'
-  },
-  {
     id: 'builtin:goal',
     trigger: 'goal',
     label: 'Set goal',
@@ -168,15 +150,6 @@ export function resolveBuiltin(
       return { action: 'client', clientAction: 'set_mode_ask' }
     case 'builtin:agent':
       return { action: 'client', clientAction: 'set_mode_agent' }
-    case 'builtin:harness-review':
-      // Resolved in resolveSlashCommand (needs workspace + main-process mining).
-      return null
-    case 'builtin:harness-apply':
-      return {
-        action: 'client',
-        clientAction: 'harness_apply',
-        ...(trailingText.trim() ? { trailingText: trailingText.trim() } : {})
-      }
     case 'builtin:goal': {
       const text = trailingText.trim()
       if (!text) return { action: 'client', clientAction: 'goal_usage' }

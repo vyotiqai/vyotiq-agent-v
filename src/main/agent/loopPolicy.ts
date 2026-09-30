@@ -39,7 +39,8 @@ const EFFORT_LADDER: readonly ThinkingEffort[] = [
  * Read-only lookups. A step that does nothing but these is navigating, not
  * deciding: the thinking it emits is choosing the next path to open.
  * Deliberately excludes `terminal`, `diagnostics`, `run_tests`, every mutation,
- * and the interactive/delegation tools — those carry real consequences.
+ * `todo_write` (it writes the run's todos.json), and the
+ * interactive/delegation tools — those carry real consequences.
  */
 const MECHANICAL_TOOLS = new Set([
   'read',
@@ -52,8 +53,7 @@ const MECHANICAL_TOOLS = new Set([
   'memory_read',
   'memory_list',
   'git_status',
-  'git_diff',
-  'todo_write'
+  'git_diff'
 ])
 
 /** Consecutive mechanical steps before effort steps down at all. */
@@ -125,11 +125,6 @@ export function adaptiveThinkingEffort(
 }
 
 const MCP_NOT_IN_CATALOG_MARKER = "is not in this step's tool catalog"
-
-/** True when a tool result describes an MCP not-in-catalog rejection. */
-export function isMcpNotInCatalogError(content: string): boolean {
-  return content.includes(MCP_NOT_IN_CATALOG_MARKER)
-}
 
 /**
  * Increment the run-scoped not-in-catalog counter for `toolName`.
@@ -332,9 +327,12 @@ export function isGateRefusalToolResult(content: string): boolean {
  * Failures that never mutated the file. Counting them as unread-before-edit
  * poisoned harness review (Plan-mode memory-path edits on run 75135925).
  * The Plan-mode pattern is historical — see isGateRefusalToolResult.
+ *
+ * Abort stubs are deliberately NOT here: `Cancelled` / `Interrupted` only say
+ * no result came back, not that nothing was written, so an edit aborted after
+ * it landed must still count as a possible mutation.
  */
 export function isNonMutatingWriteFailure(content: string): boolean {
-  if (isAbortStubToolResult(content)) return true
   if (/Plan mode may only edit plan\.md or contract\.md/i.test(content)) return true
   if (/Ask mode does not allow tool "/i.test(content)) return true
   if (/Path escapes workspace/i.test(content)) return true
@@ -357,6 +355,18 @@ export function isInspectToolName(name: string): boolean {
 /** Tools whose successful results can make earlier diagnostics stale. */
 export function isFileMutationToolName(name: string): boolean {
   return FILE_MUTATION_TOOLS.has(name)
+}
+
+/**
+ * `plan.md` / `contract.md` as an edit tool names them. Those edits are
+ * remapped into the run directory (tools/index.ts, same rule as modePolicy's
+ * isRunPlanPath / isRunContractPath), so they change no workspace code and
+ * must not make a check stale.
+ */
+export function isRunArtifactEditPath(pathArg: string | undefined): boolean {
+  if (!pathArg) return false
+  const rel = pathArg.replace(/\\/g, '/').replace(/^\.\//, '').trim()
+  return rel === 'plan.md' || rel === 'contract.md'
 }
 
 /**

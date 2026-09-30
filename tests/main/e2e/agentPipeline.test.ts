@@ -9,7 +9,6 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import type { StreamChunk } from '@main/agent/providers/types'
 import { resolveRunDir } from '@main/storage/paths'
-import { workspaceHasEditableHarness } from '@main/agent/harnessApply'
 import { SOFT_WARN_MUTATION_WITHOUT_DIAGNOSTICS } from '@main/agent/executeStepTools'
 
 const userData = join(tmpdir(), `vyotiq-e2e-adw-${process.pid}-${Date.now()}`)
@@ -252,11 +251,6 @@ describe('e2e agent ADW pipeline (no Electron GUI)', () => {
     expect(ask.ok).toBe(false)
     const agent = assertToolAllowedInMode('agent', 'edit', { path: 'a.ts' }, { autoModeSwitch: false })
     expect(agent.ok).toBe(true)
-  })
-
-  it('rejects harness apply path when workspace has no editable harness', () => {
-    expect(workspaceHasEditableHarness(workspace)).toBe(false)
-    expect(workspaceHasEditableHarness(join(workspace, 'missing-root'))).toBe(false)
   })
 
   it('mutation step without diagnostics soft-nudges the build agent', async () => {

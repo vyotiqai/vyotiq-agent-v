@@ -1452,60 +1452,6 @@ function App() {
         setView('marketplace')
         return true
       },
-      onHarnessApply: async (proposalPath?: string) => {
-        if (!scope.workspacePath) {
-          setSettingsError('Open a workspace to apply a harness proposal.')
-          return false
-        }
-        const preview = await window.vyotiq.harnessPreviewApply({
-          workspacePath: scope.workspacePath,
-          ...(proposalPath?.trim() ? { proposalPath: proposalPath.trim() } : {})
-        })
-        if (!preview.ok) {
-          setSettingsError(preview.error)
-          return false
-        }
-        if (!preview.data.changed) {
-          setSettingsError('Harness already matches the proposal — nothing to apply.')
-          return true
-        }
-        const confirmed = await confirm(
-          'Only resources/harness/default.md changes. The fixed harness test subset runs, and the file is reverted if it fails. Evaluator or gate-test changes need a normal PR.',
-          {
-            title: 'Apply harness proposal',
-            confirmLabel: 'Apply',
-            details: (
-              <p className="m-0 font-mono text-caption text-secondary [overflow-wrap:anywhere]">
-                {preview.data.relativePath}
-              </p>
-            )
-          }
-        )
-        if (!confirmed) return false
-        const res = await window.vyotiq.harnessApply({
-          workspacePath: scope.workspacePath,
-          ...(proposalPath?.trim() ? { proposalPath: proposalPath.trim() } : {}),
-          confirm: true
-        })
-        if (!res.ok) {
-          setSettingsError(res.error)
-          return false
-        }
-        if (!res.data.applied) {
-          setSettingsError(
-            res.data.reverted
-              ? `Harness apply reverted — tests failed.\n${res.data.validationOutput.slice(0, 800)}`
-              : res.data.validationOutput
-          )
-          return false
-        }
-        setSettingsError(null)
-        logger.info('Applied harness proposal', {
-          scope: 'slash',
-          path: res.data.relativePath
-        })
-        return true
-      },
       onGoalPause: async () => {
         const run = requireRun()
         if (!run) return false
@@ -1678,7 +1624,7 @@ function App() {
       }
     }
     },
-    [confirm, refresh, setSettingsError, settings.marketplace]
+    [refresh, setSettingsError, settings.marketplace]
   )
 
   const operationalError = settingsError ?? workspaceError

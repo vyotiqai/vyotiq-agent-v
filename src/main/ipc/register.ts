@@ -14,6 +14,7 @@ import {
   ComposerAttachmentsSetRequestSchema,
   ChatRewindAndStartRequestSchema,
   ChatRewindRequestSchema,
+  ChatRewindPreviewResultSchema,
   CancelRunRequestSchema,
   ChatFollowUpRequestSchema,
   ChatFollowUpRemoveRequestSchema,
@@ -31,11 +32,8 @@ import {
   type TaskFileDiffResult,
   RunStatsRequestSchema,
   HomeActivityRequestSchema,
-  HarnessReviewRequestSchema,
   RunFeedbackGetRequestSchema,
   RunFeedbackSetRequestSchema,
-  HarnessPreviewApplyRequestSchema,
-  HarnessApplyRequestSchema,
   SetSettingsRequestSchema,
   ToolCatalogRequestSchema,
   type ToolCatalogResult,
@@ -72,6 +70,7 @@ import {
   GitCheckoutRequestSchema,
   GitDiffRequestSchema,
   GitBranchDiffRequestSchema,
+  GitBranchDiffResultSchema,
   type GitBranchDiffResult,
   GitBlameRequestSchema,
   GitLogRequestSchema,
@@ -168,6 +167,7 @@ import {
   StorageSurfaceAckRequestSchema,
   DictationInstallRequestSchema,
   DictationDeleteCacheRequestSchema,
+  DeepLinkPayloadSchema,
   ok,
   fail,
   type TraceStartResult,
@@ -180,6 +180,7 @@ import {
   type DictationTranscribeResult,
   type DictationMicAccess,
   dictationIpcCode,
+  type DeepLinkPayload,
   type IpcResult,
   type Settings,
   type StorageCleanupPreviewResult,
@@ -202,11 +203,8 @@ import {
   type ReadRunArtifactResult,
   type RunStatsResult,
   type HomeActivityResult,
-  type HarnessReviewResult,
   type RunFeedbackGetResult,
   type RunFeedbackSetResult,
-  type HarnessPreviewApplyResult,
-  type HarnessApplyResult,
   type ListRunsResult,
   type ListOlderRunsResult,
   type RunSummary,
@@ -293,7 +291,6 @@ import {
   createWorkspaceSkill,
   openSlashFile
 } from '@main/agent/slashCommands'
-import { runHarnessReviewWithSettings } from '@main/agent/harnessReviewRun'
 import { getRunFeedbackEntry, setRunFeedbackRating } from '@main/agent/feedback/runFeedbackStore'
 import {
   isAllowedLocalSkillPath,
@@ -304,12 +301,6 @@ import {
   deleteLocalSkillFile
 } from '@main/agent/skills/local'
 import { notifySkillsChanged } from '@main/agent/skills/notify'
-import { WORKSPACE_HARNESS_REL } from '@main/agent/harness'
-import {
-  applyHarnessProposal,
-  previewHarnessApply,
-  workspaceHasEditableHarness
-} from '@main/agent/harnessApply'
 import {
   setSecret,
   clearSecret,
@@ -578,8 +569,10 @@ import {
 import {
   invalidateWorkspaceFileListCache,
   peekWorkspaceFileListCached,
+  readWorkspaceEntriesCached,
   readWorkspaceFileListCached
 } from '@main/workspace/fileListCache'
+import { rankSuggestPaths } from '@main/workspace/suggestPaths'
 import {
   formatWorkspaceFile,
   workspaceFormatterStatus
@@ -937,9 +930,17 @@ export function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.deepLinkConsume, (event): IpcResult<unknown> => {
+  ipcMain.handle(IPC.deepLinkConsume, (event): IpcResult<DeepLinkPayload | null> => {
     if (!senderOk(event)) return fail('Invalid sender')
-    return ok(consumePendingDeepLink())
+    const pending = consumePendingDeepLink()
+    // Empty slot: nothing to deliver. Anything else must match the schema the
+    // renderer parses on push, so both delivery paths hand the same shape over.
+    if (pending === null) return ok(null)
+    const parsed = DeepLinkPayloadSchema.safeParse(pending)
+    if (!parsed.success) {
+      return failExpected('Invalid deep link payload', IPC.deepLinkConsume)
+    }
+    return ok(parsed.data)
   })
 
   ipcMain.handle(IPC.workspacesGet, async (event): Promise<IpcResult<WorkspacesState>> => {
@@ -2180,13 +2181,17 @@ export function registerIpc(): void {
         if (isActive(req.runId)) {
           return failExpected('Stop the run before reverting.', IPC.chatRewindPreview, req.runId)
         }
+        // Both sides of the channel agree on the shape: nothing leaves main that
+        // the renderer's `ChatRewindPreviewResult` consumer could not read.
         return ok(
-          await planRewindToUserMessage({
-            workspacePath: req.workspacePath,
-            runId: req.runId,
-            userMessageIndex: req.userMessageIndex,
-            targetUserAt: req.targetUserAt
-          })
+          ChatRewindPreviewResultSchema.parse(
+            await planRewindToUserMessage({
+              workspacePath: req.workspacePath,
+              runId: req.runId,
+              userMessageIndex: req.userMessageIndex,
+              targetUserAt: req.targetUserAt
+            })
+          )
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -2372,22 +2377,6 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(
-    IPC.harnessReview,
-    async (event, raw): Promise<IpcResult<HarnessReviewResult>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = HarnessReviewRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-        return ok(
-          await runHarnessReviewWithSettings(req.workspacePath, { limit: req.limit })
-        )
-      } catch (err) {
-        return failFrom(err, IPC.harnessReview)
-      }
-    }
-  )
-
-  ipcMain.handle(
     IPC.homeActivity,
     async (event, raw): Promise<IpcResult<HomeActivityResult>> => {
       if (!senderOk(event)) return fail('Invalid sender')
@@ -2401,65 +2390,6 @@ export function registerIpc(): void {
         )
       } catch (err) {
         return failFrom(err, IPC.homeActivity)
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC.harnessPreviewApply,
-    async (event, raw): Promise<IpcResult<HarnessPreviewApplyResult>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = HarnessPreviewApplyRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-        if (!workspaceHasEditableHarness(req.workspacePath)) {
-          return fail(
-            `This workspace has no editable harness at ${WORKSPACE_HARNESS_REL}. Open the Agent V repo (or a fork) to apply harness changes.`
-          )
-        }
-        return ok(previewHarnessApply(req.workspacePath, req.proposalPath))
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (
-          /no harness proposal found|missing a ## Proposed harness body|no editable harness/i.test(
-            msg
-          )
-        ) {
-          return fail(msg)
-        }
-        return failFrom(err, IPC.harnessPreviewApply)
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC.harnessApply,
-    async (event, raw): Promise<IpcResult<HarnessApplyResult>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = HarnessApplyRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-        if (!workspaceHasEditableHarness(req.workspacePath)) {
-          return fail(
-            `This workspace has no editable harness at ${WORKSPACE_HARNESS_REL}. Open the Agent V repo (or a fork) to apply harness changes.`
-          )
-        }
-        return ok(
-          await applyHarnessProposal(req.workspacePath, {
-            proposalPath: req.proposalPath,
-            confirm: req.confirm
-          })
-        )
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (
-          /no harness proposal found|missing a ## Proposed harness body|requires confirm|no editable harness/i.test(
-            msg
-          )
-        ) {
-          return fail(msg)
-        }
-        return failFrom(err, IPC.harnessApply)
       }
     }
   )
@@ -2973,7 +2903,10 @@ export function registerIpc(): void {
       const req = GitBranchDiffRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await readBranchDiff(req.workspacePath)
-      return result.ok ? ok(result.data) : fail(result.error)
+      if (!result.ok) return fail(result.error)
+      // Both sides of the channel agree on the shape: nothing leaves main that
+      // the renderer's `GitBranchDiffResult` consumer could not read.
+      return ok(GitBranchDiffResultSchema.parse(result.data))
     } catch (err) {
       return failFrom(err, IPC.gitBranchDiff)
     }
@@ -4226,22 +4159,8 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) {
         return fail('Workspace is not open')
       }
-      const maxResults = req.maxResults ?? 24
-      const query = (req.query ?? '').trim().toLowerCase().replace(/\\/g, '/')
-      const files = await readWorkspaceFileListCached(req.workspacePath)
-      const matched = files
-        .filter((rel) => {
-          if (!isSafeWorkspaceRelPath(rel)) return false
-          return query ? rel.toLowerCase().includes(query) : true
-        })
-        .sort((a, b) => {
-          if (!query) return a.localeCompare(b)
-          const aBase = a.toLowerCase().includes(`/${query}`) || a.toLowerCase().startsWith(query)
-          const bBase = b.toLowerCase().includes(`/${query}`) || b.toLowerCase().startsWith(query)
-          if (aBase !== bBase) return aBase ? -1 : 1
-          return a.localeCompare(b)
-        })
-      return ok({ paths: matched.slice(0, maxResults), total: matched.length })
+      const { files, dirs } = await readWorkspaceEntriesCached(req.workspacePath)
+      return ok(rankSuggestPaths(files, dirs, req.query, req.maxResults ?? 24))
     } catch (err) {
       return failFrom(err, IPC.workspaceSuggestPaths)
     }

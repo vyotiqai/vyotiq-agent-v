@@ -28,7 +28,7 @@ Use when opening an unfamiliar repository or asked how a codebase is organised a
 
 ## When not to use
 
-The user asks how one specific mechanism works: use explain-code.
+The user asks how one specific mechanism works: trace and explain that mechanism instead of mapping the whole repository.
 
 The user already knows the project and wants a change made: do that instead.
 

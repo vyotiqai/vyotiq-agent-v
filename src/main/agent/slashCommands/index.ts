@@ -19,7 +19,6 @@ import { listWorkspaceCommands, resolveWorkspaceCommand } from './workspaceComma
 import { listRuleCommands, resolveRuleCommand } from './ruleCommands'
 import { listMcpCommands, resolveMcpCommand } from './mcp'
 import { listSlashMcpServers } from './mcpServers'
-import { runHarnessReviewWithSettings } from '../harnessReviewRun'
 import { createLocalSkill } from '../skills/local'
 import { clearRulesCache } from '../context/rules'
 import { notifySkillsChanged } from '../skills/notify'
@@ -170,22 +169,6 @@ export async function resolveSlashCommand(
     buildHelpMessage(await listSlashCommands(workspacePath))
   )
   if (builtin) return builtin
-
-  if (id === 'builtin:harness-review') {
-    if (!workspacePath) {
-      return {
-        action: 'send',
-        message: 'Open a workspace before running `/harness-review`.'
-      }
-    }
-    try {
-      const result = await runHarnessReviewWithSettings(workspacePath)
-      return { action: 'open_file', path: result.proposalPath }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return { action: 'send', message: `Harness review failed: ${msg}` }
-    }
-  }
 
   if (id.startsWith('skill:')) {
     const result = resolveSkillCommand(id, trailingText, overrides, workspacePath)

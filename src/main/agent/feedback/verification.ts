@@ -11,18 +11,13 @@
  * must only speak about work the current turn actually did.
  */
 
-import {
-  SKIPPED_CHECK_RE,
-  diagnosticsCheckClean,
-  isCheckResult,
-  runTestsCheckClean
-} from '../runReceipt'
+import { checkVerdict, isCheckCandidateTool } from '../runReceipt'
 
 /**
  * Cap on the witnessed-path list. It is a sample for the gate message, not the
  * mutation set: only edit-family tool calls carry a path argument, so a
- * checkpoint-detected mutation (terminal write, MCP writer, merge, watcher)
- * sets `mutated` while contributing nothing here.
+ * checkpoint-detected mutation (terminal write, MCP writer, lsp rename, merge,
+ * git_apply, watcher) sets `mutated` while contributing nothing here.
  */
 const WITNESSED_PATH_CAP = 12
 
@@ -44,22 +39,26 @@ export type VerificationState = {
 
 export type VerificationTracker = {
   noteMutation(path: string | undefined, ok: boolean): void
-  noteToolResult(toolName: string | undefined, content: string, ok: boolean): void
+  /** `command`: the call's command argument — how a `terminal` test run is recognised. */
+  noteToolResult(toolName: string | undefined, content: string, ok: boolean, command?: string): void
   /**
-   * End-of-step reconciliation against the invoke write checkpoint — the
-   * authoritative mutation signal. The edit-family tool names above miss
-   * terminal writes (`sed -i`, redirects, `rm`), MCP writers, merges and
-   * watched out-of-band changes, all of which do reach the checkpoint.
+   * Reconciliation against the invoke write checkpoint's
+   * `otherWriteCount` — every write it recorded for a tool other than the
+   * edit family: terminal writes (`sed -i`, redirects, `rm`), MCP writers,
+   * lsp renames, merges, git_apply and watched out-of-band changes, re-writes
+   * of a path already recorded included. Called after every tool call, so a
+   * write lands in the order it happened relative to the checks around it,
+   * and once more at step end.
    *
    * Pass `undefined` when no checkpoint session is open; the observation is
    * then skipped rather than read as the count shrinking to zero.
    *
    * `checkpointId` matters: `flushWriteCheckpoint({reopen})` finalizes the
-   * session and starts a fresh one with an empty file set at every follow-up
-   * and goal-continue boundary. Without re-baselining on a new id, the old
+   * session and starts a fresh one with a zero count at every follow-up and
+   * goal-continue boundary. Without re-baselining on a new id, the old
    * high-water mark would swallow every later mutation in the run.
    */
-  noteCheckpointFileCount(count: number | undefined, checkpointId?: string): void
+  noteOtherWriteCount(count: number | undefined, checkpointId?: string): void
   state(): VerificationState
 }
 
@@ -68,10 +67,8 @@ export function createVerificationTracker(): VerificationTracker {
   let lastMutationSeq: number | null = null
   let lastCheckSeq: number | null = null
   let lastCheckClean: boolean | null = null
-  let lastCheckpointFileCount = 0
+  let lastOtherWriteCount = 0
   let lastCheckpointId: string | undefined
-  /** Reset each step; guards the end-of-step stamp below. */
-  let mutatedThisStep = false
   const paths: string[] = []
 
   return {
@@ -81,45 +78,39 @@ export function createVerificationTracker(): VerificationTracker {
       if (!ok) return
       seq += 1
       lastMutationSeq = seq
-      mutatedThisStep = true
       if (path && paths.length < WITNESSED_PATH_CAP && !paths.includes(path)) {
         paths.push(path)
       }
     },
 
-    noteCheckpointFileCount(count, checkpointId) {
-      // Reset first and unconditionally: an absent session must still close
-      // the step, or the flag leaks forward and suppresses the next step's
-      // checkpoint stamp.
-      const toolStamped = mutatedThisStep
-      mutatedThisStep = false
+    noteOtherWriteCount(count, checkpointId) {
       if (count == null) return
       if (checkpointId !== undefined && checkpointId !== lastCheckpointId) {
-        // Re-anchored session: its file set restarts empty, so the previous
+        // Re-anchored session: its count restarts at zero, so the previous
         // high-water mark is meaningless against it.
         lastCheckpointId = checkpointId
-        lastCheckpointFileCount = 0
+        lastOtherWriteCount = 0
       }
-      const grew = count > lastCheckpointFileCount
-      lastCheckpointFileCount = Math.max(lastCheckpointFileCount, count)
-      // Only stamp when no tool call already did. Otherwise an edit and a
-      // clean diagnostics in the SAME step would be re-ordered into
-      // "mutated after the check" and wrongly read as unverified.
-      if (grew && !toolStamped) {
+      const grew = count > lastOtherWriteCount
+      lastOtherWriteCount = Math.max(lastOtherWriteCount, count)
+      if (grew) {
         seq += 1
         lastMutationSeq = seq
       }
     },
 
-    noteToolResult(toolName, content, ok) {
-      if (!isCheckResult(toolName) || ok === false) return
-      // The run_tests skip result reports ok=true with no runner — it verified
-      // nothing, so it must not stamp the verified state.
-      if (SKIPPED_CHECK_RE.test(content.trim())) return
+    noteToolResult(toolName, content, ok, command) {
+      if (!isCheckCandidateTool(toolName)) return
+      // Same verdict the receipt reads: a check that never ran (no runner, a
+      // denied or unparseable call, a typecheck skipped for want of a
+      // project, an empty result body) verified nothing; one that ran and
+      // failed — a failing test run is `ok: false` — is a failed check, not
+      // an absent one.
+      const verdict = checkVerdict(toolName, ok, content, command)
+      if (verdict === 'skip') return
       seq += 1
       lastCheckSeq = seq
-      lastCheckClean =
-        toolName === 'run_tests' ? runTestsCheckClean(content) : diagnosticsCheckClean(content)
+      lastCheckClean = verdict === 'clean'
     },
 
     state() {
@@ -144,6 +135,32 @@ export type VerificationGateVerdict = {
   reason?: 'never_checked' | 'check_failed'
   /** Sample of mutated paths for the corrective message; may be empty. */
   paths?: string[]
+  /** The gate fired at an earlier turn end this invoke and injected its nudge. */
+  nudged?: boolean
+}
+
+const NUDGE_PATH_SAMPLE = 5
+
+/**
+ * The one corrective turn an armed gate injects. It asks for a check or an
+ * honest statement of what is unverified — never blocks, never repeats: the
+ * loop sends it at most once per invoke.
+ */
+export function verificationNudgeText(verdict: VerificationGateVerdict): string {
+  const paths = (verdict.paths ?? []).slice(0, NUDGE_PATH_SAMPLE)
+  const more = (verdict.paths?.length ?? 0) - paths.length
+  const named = paths.length > 0 ? ` (${paths.join(', ')}${more > 0 ? `, +${more} more` : ''})` : ''
+  if (verdict.reason === 'check_failed') {
+    return (
+      `Verification: the last check after your code changes${named} did not pass. ` +
+      'Fix the failure and run the check again. If the failure is outside this task, say so in your answer and quote the failing output.'
+    )
+  }
+  return (
+    `Verification: you changed code${named} and no test, typecheck or lint run has passed since the last change. ` +
+    "Before you finish, run the narrowest check that proves it — run_tests, diagnostics, or the project's test command in the terminal. " +
+    'If no check can run here, say in your answer exactly what is unverified and why.'
+  )
 }
 
 /**

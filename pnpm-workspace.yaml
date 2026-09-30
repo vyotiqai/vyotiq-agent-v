@@ -57,3 +57,9 @@ overrides:
   # keys, but the audit gate is high. 4.18.1 (2026-04-01) is a minor within
   # 4.x, so the same API.
   lodash-es: '>=4.18.1'
+  # GHSA-rfgv-xxqx-mfg5 (high, 2026-09-29): DoS via an unrequested WebSocket
+  # subprotocol in undici 6.7.0-6.28.0. Build-time only - node-gyp under
+  # electron-builder's @electron/rebuild, which never opens a WebSocket. Scoped
+  # to the 6.x line so the 7.x and 8.x copies (already patched) stay put;
+  # 6.28.1 (2026-09-04) is past minimumReleaseAge.
+  'undici@>=6.7.0 <6.28.1': '^6.28.1'

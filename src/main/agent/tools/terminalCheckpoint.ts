@@ -92,7 +92,10 @@ export async function recordTerminalCommandPriors(
     }
     // Prefer delete semantics for rm/del; otherwise write (covers create + modify).
     const kind = isLikelyDeleteCommand(command, pathArg) ? 'delete' : 'write'
-    await cp.recordPrior(pathArg, kind, kind === 'delete' ? { recursiveDir: true } : undefined)
+    await cp.recordPrior(pathArg, kind, {
+      nonEditTool: true,
+      ...(kind === 'delete' ? { recursiveDir: true } : {})
+    })
   }
 }
 

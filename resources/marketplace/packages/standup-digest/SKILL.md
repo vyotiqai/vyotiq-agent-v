@@ -30,7 +30,7 @@ Use when asked for a standup, daily update, status summary, or what changed rece
 
 The user wants release notes for users rather than a team update: use release-notes.
 
-The user wants a deep review of one change: use review-code or explain-code.
+The user wants a deep review of one change: review that change directly rather than summarising it.
 
 ## Output
 

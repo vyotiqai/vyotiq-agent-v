@@ -1149,6 +1149,7 @@ export function Composer({
         anchorRef={mentionAnchorRef}
         listId={mentionListId}
         loading={mentions.loading}
+        error={mentions.error}
       />
     </>
   )

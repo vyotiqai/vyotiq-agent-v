@@ -10,7 +10,7 @@ import {
   type FormEvent,
   type KeyboardEvent
 } from 'react'
-import { fileIconUrl } from '@renderer/lib/fileIcons'
+import { fileIconUrl, folderIconUrl } from '@renderer/lib/fileIcons'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui/cn'
 import { COMPOSER_TEXTAREA_MAX_CLASS } from '@renderer/lib/utils/layout'
@@ -58,6 +58,7 @@ function chipClassName(kind: ComposerMention['kind']): string {
 function mentionChipIcon(mention: ComposerMention): IconName | null {
   switch (mention.kind) {
     case 'file':
+    case 'folder':
     case 'docs':
       return null
     case 'rule':
@@ -89,9 +90,9 @@ function buildChipElement(mention: ComposerMention, glyphs: ChipGlyphs): HTMLSpa
   span.className = chipClassName(mention.kind)
   span.setAttribute('data-mention-kind', mention.kind)
 
-  if (mention.kind === 'file' || mention.kind === 'docs') {
+  if (mention.kind === 'file' || mention.kind === 'docs' || mention.kind === 'folder') {
     const img = document.createElement('img')
-    img.src = fileIconUrl(mention.path)
+    img.src = mention.kind === 'folder' ? folderIconUrl(mention.path) : fileIconUrl(mention.path)
     img.alt = ''
     img.setAttribute('aria-hidden', 'true')
     img.width = 14

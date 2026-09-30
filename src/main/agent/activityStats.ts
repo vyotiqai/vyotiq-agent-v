@@ -9,14 +9,22 @@ import {
 } from '@shared/ipc'
 import type { RunReceipt } from '@shared/ipc'
 import { lastDayKeys, localDayKeyOf } from '../../shared/utils/localDay'
+import { mapLimit } from '../../shared/utils/mapLimit'
 import { readUsageLedgerAsync } from './usageLedger'
 import { workspaceSessionsRoot } from '../storage/paths'
-import { migrateLegacyReceipt } from './harnessReview'
+import { migrateLegacyReceipt } from './receiptMigration'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
 import { readJsonDocCached } from './jsonDocCache'
 
 /** Activity window (local days) — the Home panel renders exactly this axis. */
 export const ACTIVITY_WINDOW_DAYS = 7
+
+/**
+ * Run dirs probed at once by a Home refresh. Enough to keep the disk busy,
+ * few enough that hundreds of run dirs do not queue ahead of every other read
+ * in the thread pool (same budget the stat fan-outs elsewhere use).
+ */
+const RUN_DIR_PROBE_CONCURRENCY = 8
 
 /** Read one receipt best-effort — corrupt or foreign files are skipped. */
 async function readReceipt(runDir: string): Promise<RunReceipt | null> {
@@ -306,53 +314,118 @@ export async function collectHomeActivity(
   }
 
   /**
-   * True when any aggregate-relevant file in the run dir was written on or
-   * after the cutoff. Everything older can only matter through the
-   * receiptless-running rule, which the caller evaluates explicitly.
+   * mtimes of the aggregate-relevant files in one run dir, in a single batch.
+   * A missing file is NaN — it cannot make the dir recent by itself, and an
+   * unparseable cutoff disables pruning rather than guessing.
    */
-  const hasRecentDoc = async (runDir: string): Promise<boolean> => {
-    if (!Number.isFinite(cutoffMs)) return true
-    for (const name of ['status.json', RUN_RECEIPT_FILENAME, 'usage.json']) {
-      try {
-        if ((await stat(join(runDir, name))).mtimeMs >= cutoffMs) return true
-      } catch {
-        // Missing file — it cannot make the dir recent by itself.
-      }
-    }
-    return false
+  const docMtimes = async (runDir: string): Promise<number[]> => {
+    if (!Number.isFinite(cutoffMs)) return []
+    return Promise.all(
+      ['status.json', RUN_RECEIPT_FILENAME, 'usage.json'].map((name) =>
+        stat(join(runDir, name)).then(
+          (st) => st.mtimeMs,
+          () => Number.NaN
+        )
+      )
+    )
   }
 
+  /**
+   * One run dir's facts, gathered in a bounded-concurrency probe pass. The
+   * per-dir reads (three mtime stats, the status, the receipt, the ledger, the
+   * legacy checkpoint fallbacks) used to run one after another, and every dir
+   * ran after the previous one finished, so one Home refresh was hundreds of
+   * serialized fs round-trips. A probe touches no aggregation state: the apply
+   * pass below still walks the dirs in readdir order, so every returned number
+   * is the same.
+   */
+  type RunDirFacts = {
+    workspacePath: string
+    runId: string
+    runDir: string
+    status: Awaited<ReturnType<typeof readRunStatus>>
+    /** Any aggregate file written on or after the previous window's start. */
+    recent: boolean
+    receipt: RunReceipt | null
+    ledger: Awaited<ReturnType<typeof readUsageLedgerAsync>>
+    /** Checkpoint cost fallbacks, read only for a receipt without a ledger. */
+    interruptedBilledCost?: number
+    interruptedEstimatedCost?: number
+  }
+
+  const probeRunDir = async (
+    workspacePath: string,
+    runId: string
+  ): Promise<RunDirFacts | null> => {
+    const runDir = join(workspaceSessionsRoot(workspacePath), runId)
+    const [status, mtimes] = await Promise.all([readRunStatus(runDir), docMtimes(runDir)])
+    if (status?.inlineInstance === true) return null
+    const recent =
+      !Number.isFinite(cutoffMs) || mtimes.some((mtime) => mtime >= cutoffMs)
+    // Window pruning: a dir whose aggregate files all predate the previous
+    // window's start contributes nothing except a receiptless `running`
+    // status (which counts regardless of window) — evaluate just that.
+    if (!recent) {
+      const receipt = status?.status === 'running' ? await readReceipt(runDir) : null
+      return { workspacePath, runId, runDir, status, recent, receipt, ledger: null }
+    }
+    const [receipt, ledger] = await Promise.all([
+      readReceipt(runDir),
+      readUsageLedgerAsync(runDir)
+    ])
+    // Nothing to fall back to: no receipt, or a ledger that already carries the
+    // run's cost — the apply pass never reaches the checkpoint reads.
+    if (!receipt || ledger) {
+      return { workspacePath, runId, runDir, status, recent, receipt, ledger }
+    }
+    // Legacy run without a ledger: the receipt's own cost fields, else the
+    // interrupted-run checkpoint — read only for the field the receipt lacks,
+    // as before.
+    const [billedCost, estimatedCost] = await Promise.all([
+      receipt?.billedCost == null ? readInterruptedCost(runDir) : undefined,
+      receipt?.estimatedCost == null ? readInterruptedEstimatedCost(runDir) : undefined
+    ])
+    return {
+      workspacePath,
+      runId,
+      runDir,
+      status,
+      recent,
+      receipt,
+      ledger,
+      interruptedBilledCost: billedCost,
+      interruptedEstimatedCost: estimatedCost
+    }
+  }
+
+  /** Run dirs to probe, in the order the apply pass consumes them. */
+  const candidates: Array<{ workspacePath: string; runId: string }> = []
   for (const workspacePath of workspacePaths) {
     const root = workspaceSessionsRoot(workspacePath)
-    let dirs: string[]
     try {
-      dirs = (await readdir(root, { withFileTypes: true }))
+      const dirs = (await readdir(root, { withFileTypes: true }))
         .filter((d) => d.isDirectory())
         .map((d) => d.name)
+      for (const runId of dirs) candidates.push({ workspacePath, runId })
     } catch {
       continue
     }
-    for (const runId of dirs) {
-      const runDir = join(root, runId)
-      const status = await readRunStatus(runDir)
-      if (status?.inlineInstance === true) continue
+  }
+  const probed = await mapLimit(candidates, RUN_DIR_PROBE_CONCURRENCY, (candidate) =>
+    probeRunDir(candidate.workspacePath, candidate.runId)
+  )
 
-      // Window pruning: a dir whose aggregate files all predate the previous
-      // window's start contributes nothing except a receiptless `running`
-      // status (which counts regardless of window) — evaluate just that.
-      if (!(await hasRecentDoc(runDir))) {
-        if (status?.status === 'running' && !(await readReceipt(runDir))) {
-          outcomes.running += 1
-        }
+  for (const facts of probed) {
+    if (facts) {
+      const { workspacePath, runId, status, receipt, ledger } = facts
+      if (!facts.recent) {
+        if (status?.status === 'running' && !receipt) outcomes.running += 1
         continue
       }
-
-      const receipt = await readReceipt(runDir)
       const slice = workspacePaths.length > 1 ? sliceFor(workspacePath) : undefined
 
       // Ledger-first attribution: per-day deltas recorded while the run
       // executed (live runs update this every step — the panel stays live).
-      const ledger = await readUsageLedgerAsync(runDir)
       if (ledger) {
         for (const [date, entry] of Object.entries(ledger.days)) {
           if (previousKeys.has(date)) {
@@ -395,9 +468,14 @@ export async function collectHomeActivity(
         // a read-only turn whose check merely failed, which mutated nothing
         // and so has nothing to verify. Older receipts predate the field and
         // keep the legacy reading rather than being back-inferred.
+        // A `running` receipt is an interim snapshot (written every few steps,
+        // without the turn-end verdict) — the run has not had its chance to
+        // check yet.
         const unverified = receipt.verificationGate
           ? receipt.verificationGate.wouldFire
-          : receipt.verification?.verifiedAfterLastMutation === false
+          : receipt.status !== 'running' &&
+            receipt.verification?.lastMutationAt != null &&
+            receipt.verification.verifiedAfterLastMutation === false
         if (unverified) {
           unverifiedRuns += 1
           uncheckedRuns.push({
@@ -445,9 +523,8 @@ export async function collectHomeActivity(
       // to the receipt field, then the interrupted-run checkpoint.
       const day = receiptDate ? bucketFor(receiptDate) : null
       const usage = receipt.tokenUsage
-      const billedCost = receipt.billedCost ?? (await readInterruptedCost(runDir))
-      const estimatedCost =
-        receipt.estimatedCost ?? (await readInterruptedEstimatedCost(runDir))
+      const billedCost = receipt.billedCost ?? facts.interruptedBilledCost
+      const estimatedCost = receipt.estimatedCost ?? facts.interruptedEstimatedCost
       if (day) {
         addUsage(
           day,

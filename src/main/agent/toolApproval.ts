@@ -27,6 +27,7 @@ import { dismissLifecycleNotification } from '../notifications/bus'
 import { notifyBadgeChange } from '../app/badges'
 import { needsYouDedupeKey } from '../../shared/ipc'
 import { TOOL_APPROVAL_TIMEOUT_MS } from '../../shared/agentTimeouts'
+import { isCheckCommand } from './feedback/checkCommands'
 
 /** Browse/fetch egress — gated, but not workspace-mutating.
  * Legacy `web_fetch` / `web_search` kept for transcript approval replay only
@@ -224,6 +225,27 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
       }
     }
     return action === 'rename'
+  }
+  if (canonical === 'run_tests') {
+    // run_tests runs any sandboxed binary it is handed — `python -c …`, a
+    // fetch script — while `terminal` stays gated here. Autonomy answers for
+    // the project's own test runs only; anything else is asked like terminal.
+    let args: Record<string, unknown> = {}
+    if (argsJson) {
+      try {
+        const parsed: unknown = JSON.parse(argsJson)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          args = parsed as Record<string, unknown>
+        }
+      } catch {
+        args = {}
+      }
+    }
+    const command = typeof args.command === 'string' ? args.command.trim() : ''
+    const script = typeof args.script === 'string' ? args.script.trim() : ''
+    if (command) return !isCheckCommand(command)
+    if (script) return !isCheckCommand(`npm run ${script}`)
+    return false
   }
   return (
     canonical === 'delete' ||

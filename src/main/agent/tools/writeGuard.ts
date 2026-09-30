@@ -100,6 +100,19 @@ function loadInlineInstanceStatus(
 }
 
 /**
+ * The `path_scope` in force for an inline instance, or undefined when the run
+ * is not a scoped inline instance. Lets a caller decide what to do before it has
+ * any paths to test (e.g. refusing a patch whose paths cannot be extracted).
+ */
+export function inlineInstancePathScope(
+  runDir: string | undefined,
+  opts?: InlineInstanceGuardOpts
+): string[] | undefined {
+  const scope = loadInlineInstanceStatus(runDir, opts)?.pathScope
+  return scope?.length ? scope : undefined
+}
+
+/**
  * Deny workspace writes outside an inline instance's path_scope when set.
  * Call for product-file writers (edit / str_replace / delete) and git_commit paths.
  */
@@ -109,10 +122,8 @@ export function assertInlineInstancePathScope(
   opts?: InlineInstanceGuardOpts
 ): void {
   if (!runDir || relPaths.length === 0) return
-  const status = loadInlineInstanceStatus(runDir, opts)
-  if (!status) return
-  const scope = status.pathScope
-  if (!scope?.length) return
+  const scope = inlineInstancePathScope(runDir, opts)
+  if (!scope) return
   for (const rel of relPaths) {
     const trimmed = rel.trim()
     if (!trimmed) continue
@@ -126,7 +137,7 @@ export function assertInlineInstancePathScope(
 
 /**
  * Shared path_scope instances (no worktree) cannot use tools that escape the
- * parent tree (terminal, diagnostics, git_commit, MCP). Worktree instances keep them.
+ * parent tree (terminal, git_commit, MCP, agent-built tools). Worktree instances keep them.
  */
 export function assertInlineInstanceUnscopedToolAllowed(
   runDir: string | undefined,

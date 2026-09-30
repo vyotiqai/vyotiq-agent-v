@@ -1,6 +1,7 @@
 import type { AgentToolName } from '../schemas/tools'
 import { toolGitStatusAsync, toolGitDiffAsync } from './gitHelpers'
-import { toolApplyPatchAsync } from './applyPatch'
+import { patchTouchedPaths, toolApplyPatchAsync } from './applyPatch'
+import { getWriteCheckpoint } from '../checkpoints'
 import { commitPaths } from '@main/git/git'
 import { prCreate, reviewPullRequest, listGithubIssues, createGithubIssue } from '@main/git/gh'
 import { readTrimmed } from './argAccess'
@@ -74,8 +75,23 @@ export const gitGithubHandlers = {
       return toolFail('git_commit', 'git commit', msg)
     }
   },
-  git_apply: async (workspace, args, signal) => {
+  git_apply: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
+    // Snapshot every file the patch names first, like the edit tools do, so
+    // the write shows in Changes, can be undone, and dates the run's checks.
+    const cp = args.check === true || context.skipWriteCheckpoint ? undefined : getWriteCheckpoint(context.runDir)
+    if (cp) {
+      // Same extraction the dispatch guard reads (index.ts): one parser, so the
+      // undo record covers exactly the writes the path_scope check approved.
+      const patchText = typeof args.patch === 'string' ? args.patch : ''
+      for (const touched of patchTouchedPaths(patchText)) {
+        try {
+          await cp.recordPrior(touched.path, touched.kind, { nonEditTool: true })
+        } catch {
+          // A path outside the workspace: git apply refuses it too.
+        }
+      }
+    }
     const result = await toolApplyPatchAsync(workspace, args, signal)
     throwIfAborted(signal)
     if (!result.ok) return toolFail('git_apply', result.summary, result.content)

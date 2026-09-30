@@ -115,6 +115,53 @@ describe('agentInstances', () => {
   let parentRunId: string
   const wc = mockWebContents()
   const root = join(tmpdir(), `vyotiq-inst-root-${process.pid}`)
+  let receiptSeq = 0
+
+  /** A minimal receipt a child's teardown would have written, plus the fields under test. */
+  function receiptFixture(runId: string, extra: Record<string, unknown>): Record<string, unknown> {
+    return {
+      version: RUN_RECEIPT_VERSION,
+      writtenAt: new Date().toISOString(),
+      runId,
+      status: 'done',
+      step: 1,
+      compactionCount: 0,
+      toolStats: { totalCalls: 0, ok: 0, failed: 0, byName: {} },
+      failureClusters: [],
+      unreadEditPaths: [],
+      wroteFiles: [],
+      diagnostics: { calls: 0, ok: 0, clean: 0 },
+      contractExcerpt: 'verified child',
+      ...extra
+    }
+  }
+
+  /**
+   * Write a child's receipt and read back the two texts the parent is given:
+   * the await/summary and the outline pull. Both carry the verification line.
+   */
+  async function readChildVerification(extra: Record<string, unknown>): Promise<{
+    summary: string
+    outline: string
+  }> {
+    receiptSeq += 1
+    const childRunId = `verify-${receiptSeq}-${Date.now()}`
+    createRun(workspacePath, childRunId, 'verify', {
+      mode: 'agent',
+      parentRunId,
+      inlineInstance: true
+    })
+    const runDir = resolveRunDir(workspacePath, childRunId)
+    writeFileSync(
+      join(runDir, 'messages.jsonl'),
+      `${JSON.stringify({ role: 'user', content: 'go' })}\n${JSON.stringify({ role: 'assistant', content: 'child report' })}\n`
+    )
+    writeFileSync(join(runDir, 'receipt.json'), JSON.stringify(receiptFixture(childRunId, extra)))
+    return {
+      summary: await summarizeChildRunAsync(workspacePath, childRunId),
+      outline: await pullChildRun(workspacePath, childRunId, 'outline')
+    }
+  }
 
   beforeEach(() => {
     resetAgentInstancesForTests()
@@ -485,6 +532,76 @@ describe('agentInstances', () => {
     expect(status?.pathScope).toEqual(['src/'])
   })
 
+  it('reports FAILED when the child’s verification gate fired on a failed check', async () => {
+    const { summary, outline } = await readChildVerification({
+      wroteFiles: ['src/a.ts'],
+      verificationGate: { wouldFire: true, reason: 'check_failed', paths: ['src/a.ts'] }
+    })
+    expect(summary).toContain('verification: FAILED')
+    expect(summary).toContain('the last check after its code changes did not pass')
+    expect(outline).toContain('verification: FAILED')
+  })
+
+  it('reports UNCHECKED when the gate fired because nothing was ever checked', async () => {
+    const { summary, outline } = await readChildVerification({
+      wroteFiles: ['src/a.ts'],
+      verificationGate: { wouldFire: true, reason: 'never_checked', paths: ['src/a.ts'] }
+    })
+    expect(summary).toContain('verification: UNCHECKED')
+    expect(outline).toContain('verification: UNCHECKED')
+  })
+
+  it('reports checked when a check passed after the child’s last mutation, and silent without a mutation', async () => {
+    const checked = await readChildVerification({
+      wroteFiles: ['src/a.ts'],
+      verification: {
+        lastMutationAt: '2026-09-29T05:00:00.000Z',
+        lastCheckAt: '2026-09-29T05:00:05.000Z',
+        verifiedAfterLastMutation: true
+      }
+    })
+    expect(checked.summary).toContain('verification: checked')
+    expect(checked.summary).toContain('a check passed after its last code change')
+    expect(checked.outline).toContain('verification: checked')
+
+    // A check passed, but the child mutated nothing: no line is claimed.
+    const noMutation = await readChildVerification({
+      verification: { lastCheckAt: '2026-09-29T05:00:05.000Z', verifiedAfterLastMutation: true }
+    })
+    expect(noMutation.summary).not.toContain('verification:')
+    expect(noMutation.outline).not.toContain('verification:')
+  })
+
+  it('reports UNCHECKED when a mutation happened but no check passed after it', async () => {
+    const { summary } = await readChildVerification({
+      wroteFiles: ['src/a.ts'],
+      verification: {
+        lastMutationAt: '2026-09-29T05:00:05.000Z',
+        lastCheckAt: '2026-09-29T05:00:00.000Z',
+        verifiedAfterLastMutation: false
+      }
+    })
+    expect(summary).toContain('verification: UNCHECKED')
+  })
+
+  it('lets a firing gate outrank a passing receipt verdict', async () => {
+    // Both a clean check after the mutation and a live gate that would fire:
+    // the gate is the later judgement and the one that must reach the parent.
+    const { summary, outline } = await readChildVerification({
+      wroteFiles: ['src/a.ts'],
+      verification: {
+        lastMutationAt: '2026-09-29T05:00:00.000Z',
+        lastCheckAt: '2026-09-29T05:00:05.000Z',
+        verifiedAfterLastMutation: true
+      },
+      verificationGate: { wouldFire: true, reason: 'check_failed', paths: ['src/a.ts'] }
+    })
+    expect(summary).toContain('verification: FAILED')
+    expect(summary).not.toContain('verification: checked')
+    expect(outline).toContain('verification: FAILED')
+    expect(outline).not.toContain('verification: checked')
+  })
+
   it('await resolves with terminal summary including wroteFiles', async () => {
     const child = await spawnAgentInstance({
       parentRunId,
@@ -749,6 +866,37 @@ describe('agentInstances', () => {
     registerChildInstance(parentRunId, 'ghost', workspacePath)
     unregisterChildInstance('ghost')
     unregisterChildInstance('ghost')
+  })
+
+  it('unregisters a child whose run dir vanished instead of leaking its maps entry', async () => {
+    // loadStatus answers null for a deleted run dir, and the inline finish
+    // path that normally unregisters a child needs a parent link plus a
+    // startAgentRun finally — neither exists here, so the old code left the
+    // maps entry (and the inline-child set) behind for the app's lifetime.
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'vanishing child',
+      outcome: 'vanishing child outcome',
+      subTasks: ['vanishing child step'],
+      doneWhen: 'child dir removed',
+      pathScope: ['src']
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    expect(getActiveInlineChildRunIds(parentRunId)).toContain(child.runId)
+
+    rmSync(resolveRunDir(workspacePath, child.runId), { recursive: true, force: true })
+    expect(loadStatus(resolveRunDir(workspacePath, child.runId))).toBeNull()
+    // The wait's first recheck sees the null status and drops the child. It
+    // still ends on the caller's own timeout (unchanged bound) — this test only
+    // asserts the registry no longer counts the vanished child.
+    await waitForChildTerminal(child.runId, workspacePath, 200).then(
+      () => null,
+      (err: unknown) => err as Error
+    )
+    clearRunAbort(child.runId)
+    expect(getActiveInlineChildRunIds(parentRunId)).not.toContain(child.runId)
   })
 
   it('force-finishes a cancelled run whose loop never unwound', async () => {

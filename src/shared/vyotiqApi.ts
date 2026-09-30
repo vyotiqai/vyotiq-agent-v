@@ -29,12 +29,9 @@ import type {
   RunArtifactName,
   RunStatsResult,
   HomeActivityResult,
-  HarnessReviewResult,
   RunFeedbackGetResult,
   RunFeedbackSetResult,
   RunFeedbackRating,
-  HarnessPreviewApplyResult,
-  HarnessApplyResult,
   GitCommitResult,
   GitBlameResult,
   GitGenerateCommitMessageResult,
@@ -330,10 +327,6 @@ export interface VyotiqApi {
     workspacePaths: string[]
     windowDays?: number
   }) => Promise<IpcResult<HomeActivityResult>>
-  harnessReview: (payload: {
-    workspacePath: string
-    limit?: number
-  }) => Promise<IpcResult<HarnessReviewResult>>
   runFeedbackGet: (payload: {
     workspacePath: string
     runId: string
@@ -344,15 +337,6 @@ export interface VyotiqApi {
     rating: RunFeedbackRating | null
     note?: string
   }) => Promise<IpcResult<RunFeedbackSetResult>>
-  harnessPreviewApply: (payload: {
-    workspacePath: string
-    proposalPath?: string
-  }) => Promise<IpcResult<HarnessPreviewApplyResult>>
-  harnessApply: (payload: {
-    workspacePath: string
-    proposalPath?: string
-    confirm: true
-  }) => Promise<IpcResult<HarnessApplyResult>>
   onChatEvent: (handler: (event: AgentEvent) => void) => () => void
   onToolApprovalRequest: (handler: (request: ToolApprovalRequest) => void) => () => void
   respondToolApproval: (
@@ -727,7 +711,7 @@ export interface VyotiqApi {
     workspacePath: string
     query?: string
     maxResults?: number
-  }) => Promise<IpcResult<{ paths: string[]; total: number }>>
+  }) => Promise<IpcResult<{ paths: string[]; dirs: string[]; total: number }>>
   workspaceReadText: (payload: {
     workspacePath: string
     path: string

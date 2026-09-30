@@ -66,7 +66,11 @@ import {
   proactiveCompactThresholdTokens
 } from '../../shared/domain/contextBudget'
 import { executeStepToolCalls } from './executeStepTools'
-import { createVerificationTracker, evaluateVerificationGate } from './feedback/verification'
+import {
+  createVerificationTracker,
+  evaluateVerificationGate,
+  verificationNudgeText
+} from './feedback/verification'
 import type { VerificationGateVerdict } from './feedback/verification'
 import { recordRunFeedbackBestEffort } from './feedback/runFeedbackStore'
 import { GenerationRepetitionMonitor } from './generationRepetition'
@@ -125,7 +129,7 @@ import {
 } from './runRegistry'
 import { doneWhenNudgeText, readChecks } from './doneWhenChecks'
 import { saveFollowUps, syncFollowUpsToDisk } from './followUpStore'
-import { clearLoopCheckpoint, loadLoopCheckpoint, saveLoopCheckpoint } from './loopCheckpoint'
+import { clearLoopCheckpoint, loadLoopCheckpoint, LOOP_CHECKPOINT_FILENAME } from './loopCheckpoint'
 import { LOOP_CHECKPOINT_VERSION, type LoopCheckpoint } from '../../shared/ipc/schemas/agent'
 import {
   appendEvent,
@@ -157,7 +161,7 @@ import {
   GOAL_SECTION_RE
 } from './state'
 import { enqueueMessageRewrite } from './messageAppendQueue'
-import { atomicWriteFile } from '../storage/atomicWrite'
+import { atomicWriteFile, atomicWriteJsonAsync } from '../storage/atomicWrite'
 import { writeRunReceiptBestEffort } from './runReceipt'
 import { recordUsageDeltas } from './usageLedger'
 import { writeTrajectoryArtifactsBestEffort } from './runTrajectory'
@@ -291,6 +295,19 @@ const CONTEXT_OVERFLOW_VERIFY_FAILED =
  * many, surface `empty_response` to the user instead of looping.
  */
 const MAX_CONSECUTIVE_EMPTY_RESPONSES = 3
+
+/**
+ * Ceiling on agent steps in one invoke. Each per-step guard (empty responses,
+ * repetition, tool bursts, the goal budget) stops its own degenerate shape, but
+ * a run whose every step takes an ordinary step forever — real work each time,
+ * never a larger piece finished — has no bound at all. This is the last
+ * backstop for that, so it sits far above any real run and ends through the
+ * normal `incomplete` notice + done path, never an abort.
+ */
+const MAX_STEPS_PER_RUN = 500
+
+/** Notice shown when that backstop ends a run. */
+const STEP_CEILING_NOTICE = `Stopped after ${MAX_STEPS_PER_RUN} steps without finishing. The transcript and task list are saved — continue from there.`
 
 const INCOMPLETE_MESSAGES: Record<Exclude<IncompleteReason, never>, string> = {
   truncated: 'The model hit its output token limit before finishing this turn.',
@@ -1082,6 +1099,14 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   let abortOnStorageLost: (() => void) | null = null
   let checkpointFlushed = false
   let runExitedNormally = false
+  /**
+   * A resumable stop (network/provider interruption) deliberately KEEPS the loop
+   * checkpoint so Continue restores overflow-retry and goal-streak state. Every
+   * other terminal exit is a run that is over, so it must clear it like the
+   * done path does — a stale checkpoint on a finished run is restored by the
+   * next resume and re-counts steps the run already spent.
+   */
+  let runStoppedResumable = false
   /** Mirrors the in-try `isInlineInstance` so teardown can read it too. */
   let runIsInlineInstance = false
   let messages: ChatMessage[] = []
@@ -1102,18 +1127,45 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
    */
   const verification = createVerificationTracker()
   /**
-   * What the armed gate would have done this invoke, recorded for the receipt.
-   *
-   * Sticky: set at the turn-end branch, which is the only place an armed gate
-   * could fire, and never cleared by a later verified turn — the measurement
-   * being taken is "would arming this have cost a turn", and a nudge at turn 1
-   * costs one even if turn 2 then checks. Runs that never reach that branch
-   * (cancelled, errored, mid-stream failures) keep the default: the armed gate
-   * would not have fired on them either.
+   * The gate's verdict at the invoke's last turn end, recorded for the
+   * receipt — the state the run was left in, so a turn that checks after the
+   * nudge reads checked. `nudged` records that the gate fired earlier and
+   * cost a turn. Runs that never reach that branch (cancelled, errored,
+   * mid-stream failures) keep the default.
    */
   let verificationVerdict: VerificationGateVerdict = { wouldFire: false }
+  /**
+   * True once the turn-end gate branch produced a verdict under its own mode
+   * and incomplete guards. False means the run ended before that branch, so
+   * the default `{ wouldFire: false }` above is an "unchecked" placeholder, not
+   * a clean pass — the receipt must judge the tracker itself in that case.
+   */
+  let verificationGateEvaluated = false
+  /**
+   * The verdict both receipt writes record. The guarded turn-end verdict is the
+   * run's own judgment, so a run that ended right after it keeps it — but that
+   * verdict is a snapshot, and the exits which never re-judge (cancel, the step
+   * ceiling, a persist failure) can leave the tracker knowing the work is
+   * unverified again: a `sed -i` after a clean `diagnostics` bumps the write
+   * checkpoint's `otherWriteCount`, and the step-end reconciliation feeds that
+   * to the tracker while the latch still claims the old pass. A verdict the
+   * tracker no longer agrees with is stale, so the tracker's reading wins; an
+   * unchanged state keeps the recorded verdict and its `nudged` flag.
+   */
+  const receiptVerificationGate = (): VerificationGateVerdict => {
+    const current = evaluateVerificationGate(verification.state())
+    if (verificationGateEvaluated && current.wouldFire === verificationVerdict.wouldFire) {
+      return verificationVerdict
+    }
+    return current
+  }
+  /** Verification nudges injected this invoke (cap 1). */
+  let verificationNudges = 0
   /** Agent step counter — declared early so interim receipt can close over it. */
   let step = 0
+  /** Steps taken by THIS invoke — the runaway backstop counts these, not the
+   * durable step number a resume carries over. */
+  let stepsThisInvoke = 0
   /** Last step that flushed an interim receipt.json (start writes at step 0). */
   let lastReceiptPersistedStep = 0
   const RECEIPT_PERSIST_EVERY_STEPS = 5
@@ -1140,17 +1192,27 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     if (!runDir || !isCurrentInvoke(runId, invokeId)) return
     await flushStepArtifacts()
     if (!force && step - lastReceiptPersistedStep < RECEIPT_PERSIST_EVERY_STEPS) return
-    // Interim receipts use the in-memory working set + a bounded event tail to
-    // avoid re-parsing the full messages.jsonl every few steps. Final receipt in
-    // `finally` still loads durable disk state.
-    const events = await loadEventsAsync(runDir, runId, { limit: INTERIM_RECEIPT_EVENT_TAIL })
+    // The interim receipt is the same record the `finally` write produces, so it
+    // reads the same durable event history — a bounded tail dropped the early
+    // writes_checkpoints and step_usage rows, so tokenUsage, wroteFiles,
+    // compactionCount and the verification signal were computed from a window
+    // the reloaded receipt never saw. Only the flight recorder below keeps the
+    // tail: trajectory rows are a fixed 2000-row cap anyway.
+    const events = await loadEventsAsync(runDir, runId)
     await writeRunReceiptBestEffort({
       runDir,
       runId,
       loadStatus,
       loadMessages: () => messages,
       loadEvents: () => events,
-      readContract
+      readContract,
+      // Same expression as the terminal write (see the `finally` block), via
+      // `receiptVerificationGate`: the guarded turn-end verdict while the
+      // tracker still agrees with it, the tracker's own state otherwise.
+      // Omitting it left every interim receipt without a gate, so a live
+      // receipt and the reloaded one disagreed on the verdict for the
+      // identical run.
+      verificationGate: receiptVerificationGate()
     })
     // Keep the observational flight recorder current on long runs — the final
     // write only happens in the terminal `finally`, so a multi-hour run would
@@ -1158,8 +1220,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     writeTrajectoryArtifactsBestEffort({
       runDir,
       runId,
-      loadEvents: () => events,
-      receipt: null
+      loadEvents: () => events.slice(-INTERIM_RECEIPT_EVENT_TAIL)
     })
     lastReceiptPersistedStep = step
   }
@@ -1539,18 +1600,28 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
     }
     /**
+     * Async twin of `saveLoopCheckpoint`, inlined because the loop must not do
+     * sync fs on a per-step path. Same temp+rename semantics as the sync writer
+     * (`atomicWriteJsonAsync`), so a crash mid-write still leaves either the
+     * old file or the new one.
+     */
+    const saveLoopCheckpointAsync = async (checkpoint: LoopCheckpoint): Promise<void> => {
+      if (!runDir) return
+      await atomicWriteJsonAsync(join(runDir, LOOP_CHECKPOINT_FILENAME), checkpoint)
+    }
+    /**
      * Merge cumulative usage into loopCheckpoint.json. events.jsonl archives
      * rotate (oldest deleted, MAX_EVENT_ARCHIVES=5), so re-summing step_usage
      * rows on resume silently loses billed tokens once history rotates — the
-     * durable checkpoint is the only monotonic source. Cheap (single atomic
-     * JSON write) and called once per agent step.
+     * durable checkpoint is the only monotonic source. One small async write
+     * per agent step.
      */
-    const persistUsageTotalsCheckpoint = (): void => {
+    const persistUsageTotalsCheckpoint = async (): Promise<void> => {
       if (!runDir || !isCurrentInvoke(runId, invokeId)) return
       const usageTotals = persistUsageTotalsCheckpointPayload()
       if (!usageTotals) return
       try {
-        saveLoopCheckpoint(runDir, {
+        await saveLoopCheckpointAsync({
           version: LOOP_CHECKPOINT_VERSION,
           step,
           invokeId,
@@ -1569,10 +1640,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         })
       }
     }
-    const persistLoopCheckpoint = (): void => {
+    const persistLoopCheckpoint = async (): Promise<void> => {
       if (!runDir || !isCurrentInvoke(runId, invokeId)) return
       try {
-        saveLoopCheckpoint(runDir, {
+        await saveLoopCheckpointAsync({
           version: LOOP_CHECKPOINT_VERSION,
           step,
           invokeId,
@@ -1974,6 +2045,35 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       settings.thinkingEffort === 'max'
 
     while (true) {
+      // Runaway backstop. Ends the run the way a finished run ends — a notice,
+      // the write checkpoint, `status: done` — so a step loop that never
+      // converges still leaves a resumable transcript instead of a bill with
+      // no end. Not an abort and not an error: nothing below is thrown, and no
+      // run that finishes ordinary work ever reaches this.
+      if (stepsThisInvoke >= MAX_STEPS_PER_RUN) {
+        logger.error('Agent run hit the step ceiling', {
+          scope: 'agent',
+          code: 'AGENT_LOOP',
+          correlationId: runId,
+          provider: runProviderId,
+          step
+        })
+        const ceilingEv: AgentEvent = {
+          type: 'token_cost_hint',
+          runId,
+          invokeId,
+          kind: 'long_run_task_boundary',
+          message: STEP_CEILING_NOTICE
+        }
+        appendEvent(runDir, ceilingEv)
+        yield ceilingEv
+        yield* flushWriteCheckpoint()
+        clearLoopCheckpoint(runDir)
+        yield { type: 'status', runId, invokeId, status: 'done' }
+        writeStatus({ status: 'done', error: undefined })
+        appendEvent(runDir, { type: 'status', runId, invokeId, status: 'done' })
+        return
+      }
       if (controller.signal.aborted) break
       // Fairness under many concurrent runs — yield before sync-heavy step work.
       await new Promise<void>((resolve) => setImmediate(resolve))
@@ -2043,6 +2143,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         return
       }
       step++
+      stepsThisInvoke += 1
       const stepSoftAbort = new AbortController()
       setStreamInterrupt(runId, stepSoftAbort)
       try {
@@ -2149,6 +2250,14 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         effectiveContentWindow,
         compactThresholdRatio
       )
+      // Task list and goal, read ONCE per step and reused for the rest of it.
+      // Both are only ever written by tools (todo_write, the goal tools), which
+      // run in the tool branch at the end of a step — so the turn-end reads
+      // below (plan-quality nudge, goal auto-continue) sit in the no-tools
+      // branch and would see exactly these bytes. Reading once keeps the same
+      // values without a second sync read per step.
+      const stepTodos = readTodos(runDir)
+      const stepGoal = isInlineInstance ? null : readGoal(runDir)
       const assembleBase = {
         harness,
         messages,
@@ -2183,8 +2292,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             inlineInstance: isInlineInstance
           }) ?? undefined,
         loopHint: assembleLoopHint,
-        taskList: formatTodosContextSection(readTodos(runDir)),
-        activeGoal: isInlineInstance ? undefined : formatActiveGoalSection(readGoal(runDir)),
+        taskList: formatTodosContextSection(stepTodos),
+        activeGoal: isInlineInstance ? undefined : formatActiveGoalSection(stepGoal),
         providerId,
         countReasoningReplay,
         runDir
@@ -2356,7 +2465,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // the overflow stop below reports context_overflow.
         if (!overflowRetryUsed) {
           overflowRetryUsed = true
-          persistLoopCheckpoint()
+          await persistLoopCheckpoint()
           logger.warn('Context overflow after auto compact — retrying with same keep-recent', {
             scope: 'agent',
             code: 'CONTEXT_OVERFLOW_RETRY',
@@ -2519,9 +2628,19 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       /**
        * The repetition monitor sees text and thinking only, so a generation
        * that degenerates into tool calls (run 50f7b80d) streams past it. Cut
-       * off at MAX_TOOL_CALLS_PER_STEP distinct calls; reset per attempt.
+       * off at MAX_TOOL_CALLS_PER_STEP streamed calls; reset per attempt.
        */
       let toolBurstAborted = false
+      /**
+       * Tool calls streamed this attempt, counted as they arrive rather than
+       * read off `streamedToolCalls.size`. The map holds one entry per DISTINCT
+       * id, so a generation that re-emits the same call id — the shape run
+       * 50f7b80d took, 33 minutes on one id — never grew it and sailed past
+       * the guard. A call is counted when it is first streamed (a delta that
+       * opens an id) and again on every complete `tool_call` chunk it emits,
+       * so repeats trip the cutoff like any other burst.
+       */
+      let streamedToolCallCount = 0
       let lastStreamSnapshotAt = 0
       /** Text content of the last durable snapshot — unchanged text is not re-persisted. */
       let lastSnapshotText = ''
@@ -2583,6 +2702,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           repetitionMonitor = new GenerationRepetitionMonitor()
           repetitionAborted = false
           toolBurstAborted = false
+          streamedToolCallCount = 0
         },
         waitBeforeRetry: async function* (attempt) {
           yield* yieldStreamRetryWait(
@@ -2765,6 +2885,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             }
             liveForwardedToolIds.add(toolCallId)
             const argumentsDelta = delta.arguments ?? ''
+            // Count the CALL, not the id: a re-keyed stand-in above is the same
+            // call (already counted, and still in the map under its new id), so
+            // only a delta that opens a genuinely new id adds one.
+            if (!streamedToolCalls.has(toolCallId)) streamedToolCallCount += 1
             accumulateStreamedToolDelta(streamedToolCalls, toolCallId, {
               name: delta.name,
               arguments: argumentsDelta
@@ -2786,6 +2910,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             })
             const tc = ensured ?? chunk.toolCall
             const prevArgs = streamedToolCalls.get(tc.id)?.arguments ?? ''
+            // Every complete `tool_call` chunk is one more call the generation
+            // asked for, whatever id it reuses. The burst guard below counts
+            // these: a host re-emitting ONE id (run 50f7b80d) is still asking
+            // for work it will not finish describing.
+            streamedToolCallCount += 1
             accumulateStreamedToolDelta(streamedToolCalls, tc.id, {
               name: tc.name,
               arguments: tc.arguments
@@ -2863,7 +2992,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                   stepPartial.stepsWithCacheReport = 1
                 }
                 costTotals = mergeStepUsageTotals(costTotals, stepPartial)
-                persistUsageTotalsCheckpoint()
+                await persistUsageTotalsCheckpoint()
                 // Per-day usage ledger — deltas since the last record, attributed
                 // to today. Best-effort; never breaks the run loop. The raw
                 // context window feeds the per-day context-pressure signal.
@@ -3074,6 +3203,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               errorCode === 'PROVIDER_TIMEOUT' ||
               (errorCode === 'PROVIDER_HTTP' && isTransientHttpFailure(errorCode, chunk.httpStatus))
             ) {
+              // Stops resumable — the loop checkpoint must survive for Continue.
+              runStoppedResumable = true
               yield* yieldNetworkInterruptedTerminal(
                 runId,
                 invokeId,
@@ -3119,9 +3250,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             })
             return 'terminal'
           }
-          if (!toolBurstAborted && streamedToolCalls.size > MAX_TOOL_CALLS_PER_STEP) {
+          if (!toolBurstAborted && streamedToolCallCount > MAX_TOOL_CALLS_PER_STEP) {
             // Stop the generation here rather than after it ends: run 50f7b80d
-            // kept streaming calls for 33 minutes before any of them ran.
+            // kept streaming calls for 33 minutes before any of them ran. Counts
+            // CALLS, not distinct ids — the map never grew past one entry for a
+            // generation that re-emitted the same id, so the size check read
+            // zero forever and let that 33-minute turn through untouched.
             toolBurstAborted = true
             streamSteered = true
             stepSoftAbort.abort()
@@ -3188,7 +3322,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         }
       })
 
-      if (streamRetryResult.status === 'terminal') return
+      if (streamRetryResult.status === 'terminal') {
+        // A non-resumable terminal stop (hard provider error) is a finished
+        // run: drop the checkpoint the done path drops, or the next resume
+        // restores step/overflow-retry state this run already spent.
+        if (!runStoppedResumable) clearLoopCheckpoint(runDir)
+        return
+      }
       streamFinished = streamRetryResult.status === 'complete'
 
       // Soft-steer may end the provider generator cleanly (return after abort)
@@ -3224,6 +3364,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           networkRelated
         })
         if (networkRelated) {
+          // Stops resumable — the loop checkpoint must survive for Continue.
+          runStoppedResumable = true
           yield* yieldNetworkInterruptedTerminal(
             runId,
             invokeId,
@@ -3549,7 +3691,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // back to add a diagram to the plan, and its "Plan refined" reply took
         // the answer's place as the task's result.
         const checksNow = readChecks(runDir)
-        const todosNow = readTodos(runDir)
+        // Already read once this step (see stepTodos above) — same bytes, since
+        // this branch is only reachable on a step that ran no tools.
+        const todosNow = stepTodos
         const workSettled =
           (checksNow.length > 0 && checksNow.every((check) => check.verdict !== null)) ||
           (todosNow.length > 0 && todosNow.every((todo) => todo.status === 'completed' || todo.status === 'cancelled'))
@@ -3570,23 +3714,47 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           }
         }
 
-        // Verification gate — OBSERVE ONLY. The receipt has always computed
-        // "was the work checked after the last mutation" at teardown, too late
-        // for the turn to act on it. This is the same judgment taken while the
-        // turn can still be steered; it records the verdict and changes
-        // nothing, so the real fire rate is known before the gate is armed.
-        if (!incomplete && agentMode === 'agent' && !isInlineInstance) {
+        // Verification gate — ARMED (2026-09-28). The receipt computes "was
+        // the work checked after the last mutation" at teardown, too late for
+        // the turn to act on it; this is the same judgment while the turn can
+        // still be steered. When code changed after the last passing check,
+        // it injects one nudge per invoke — check, or say what is unverified —
+        // and never blocks. Inline instances included: they write most of the
+        // code (45 of 50 code-writing runs measured), and a parent only sees
+        // their summary.
+        if (!incomplete && agentMode === 'agent') {
           const verdict = evaluateVerificationGate(verification.state())
+          verificationVerdict = verificationNudges > 0 ? { ...verdict, nudged: true } : verdict
+          // Only this branch records a verdict the gate's own guards produced.
+          // Anything else (cancelled, errored, ceiling) leaves the default, and
+          // the receipt recomputes from the tracker instead of reporting that
+          // default as a clean pass.
+          verificationGateEvaluated = true
           if (verdict.wouldFire) {
-            verificationVerdict = verdict
-            logger.info('Verification gate would fire', {
+            logger.info('Verification gate fired', {
               scope: 'agent',
               code: 'VERIFY_GATE',
               correlationId: runId,
               step,
               reason: verdict.reason,
+              nudged: verificationNudges > 0,
+              inlineInstance: isInlineInstance,
               paths: verdict.paths?.slice(0, 5)
             })
+          }
+          // A queued follow-up continues the run anyway; the gate re-judges at
+          // the turn end after it.
+          if (verdict.wouldFire && verificationNudges < 1 && !hasPendingFollowUps(runId)) {
+            verificationNudges += 1
+            const nudge: ChatMessage = {
+              role: 'user',
+              content: verificationNudgeText(verdict),
+              // Loop-injected protocol turn — must never render as a user bubble.
+              synthetic: true
+            }
+            messages.push(nudge)
+            appendMessage(runDir, nudge)
+            continue
           }
         }
 
@@ -3659,7 +3827,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           markRunTurnComplete(runId, invokeId)
         }
         if (!incomplete && !isInlineInstance && closeTurn === 'closed') {
-          const activeGoal = readGoal(runDir)
+          // Same per-step read as the prompt section (see stepGoal).
+          const activeGoal = stepGoal
           const nextStreak = goalNoToolFinishes + 1
           const decision = shouldAutoContinueActiveGoal({
             goalStatus: activeGoal?.status,
@@ -3762,6 +3931,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             flushWriteCheckpoint,
             writeStatus
           })
+          // Same as the done path: this run is over, so its checkpoint must
+          // not be restored by the next resume.
+          clearLoopCheckpoint(runDir)
           return
         }
         runExitedNormally = true
@@ -4027,12 +4199,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         }
         throw err
       }
-      // Reconcile against the authoritative mutation signal — catches terminal
-      // writes, MCP writers and watched out-of-band edits that never pass
-      // through an edit-family tool call.
+      // Step-end reconciliation with the checkpoint (each tool call already
+      // reconciled in executeStepTools) — catches terminal writes, MCP
+      // writers and watched out-of-band edits that never pass through an
+      // edit-family tool call.
       {
         const cp = getWriteCheckpoint(runDir)
-        verification.noteCheckpointFileCount(cp?.writtenFileCount, cp?.id)
+        verification.noteOtherWriteCount(cp?.otherWriteCount, cp?.id)
       }
       for (const ev of toolOutcome.events) {
         if (ev.type === 'tool_result') {
@@ -4099,7 +4272,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
 
       await persistInterimReceipt()
-      persistLoopCheckpoint()
+      // Awaited: an un-awaited write can land AFTER a terminal path clears the
+      // checkpoint, resurrecting a file for a run that is already over.
+      await persistLoopCheckpoint()
 
       if (controller.signal.aborted) break
       } finally {
@@ -4187,22 +4362,27 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           estimatedCost:
             costTotals.stepsWithEstimate > 0 ? costTotals.estimatedCost : undefined,
           contextWindow: costLogContextWindow,
-          // The verdict captured at the turn-end branch, NOT a fresh read of
-          // the tracker: only that branch applies the mode / inline-instance /
-          // incomplete guards an armed gate obeys. Recomputing here would
-          // report `wouldFire` for plan-mode and cancelled runs the gate can
-          // never fire on, inflating the rate this phase exists to measure.
-          verificationGate: verificationVerdict
+          // The verdict captured at the last turn-end branch, NOT a fresh read
+          // of the tracker: only that branch applies the mode and incomplete
+          // guards the gate obeys. Recomputing unconditionally here would
+          // report `wouldFire` for Ask-mode and cancelled runs the gate never
+          // fires on.
+          // Two exceptions, both in `receiptVerificationGate` (see its comment):
+          // a run that ended BEFORE that branch (cancelled, a hard provider
+          // error, a persist failure, the step ceiling) has no guarded verdict
+          // at all, and the default `wouldFire: false` would be persisted as a
+          // clean pass it never earned; and a run that ended after it, whose
+          // tracker has since moved on, must not replay the stale pass.
+          verificationGate: receiptVerificationGate()
         })
         // Final ledger record — bills the tail delta accumulated since the last
         // step write so the day buckets end complete after teardown.
         recordUsageDeltas(runDir, costTotals)
-        // Observational AHE sidecars — best-effort; must not block receipt success.
+        // Observational flight recorder — best-effort; must not block receipt success.
         writeTrajectoryArtifactsBestEffort({
           runDir,
           runId,
-          loadEvents: () => finalEvents,
-          receipt
+          loadEvents: () => finalEvents
         })
         // Durable per-workspace memory of how runs went. Folded from the
         // in-memory final receipt, never a re-read: `receipt.json` is

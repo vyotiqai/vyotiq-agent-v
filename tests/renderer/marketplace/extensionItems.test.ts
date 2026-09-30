@@ -389,7 +389,7 @@ describe('sections, tabs and search', () => {
       entry({ id: 'gmail', kind: 'mcp', name: 'Gmail', featuredRank: 2 }),
       entry({ id: 'github', kind: 'mcp', name: 'GitHub', featuredRank: 1 }),
       entry({ id: 'fetch', kind: 'mcp', name: 'Fetch' }),
-      entry({ id: 'grill-me', kind: 'skill', name: 'Grill me', publisher: 'Matt Pocock' }),
+      entry({ id: 'incident-triage', kind: 'skill', name: 'Incident triage', publisher: 'Agent V' }),
       entry({ id: 'memory', kind: 'mcp', name: 'Memory' }),
       entry({ id: 'linear', kind: 'mcp', name: 'Linear', auth: 'oauth' })
     ],
@@ -413,7 +413,7 @@ describe('sections, tabs and search', () => {
     // Installed runs MCP, skills, rules, packages.
     expect(sections[1]!.items.map((i) => i.name)).toEqual(['Memory', 'Docs', 'Answer tersely'])
     // Discover keeps the catalog's featured order, then the rest by name.
-    expect(sections[2]!.items.map((i) => i.name)).toEqual(['GitHub', 'Gmail', 'Fetch', 'Grill me'])
+    expect(sections[2]!.items.map((i) => i.name)).toEqual(['GitHub', 'Gmail', 'Fetch', 'Incident triage'])
   })
 
   it('lists each package once', () => {
@@ -431,17 +431,17 @@ describe('sections, tabs and search', () => {
   it('counts every kind for its tab and All', () => {
     expect(extensionTabCounts(items)).toEqual({ all: 8, mcp: 5, skills: 2, rules: 1, packages: 0 })
     const skills = items.filter((i) => extensionInTab(i, 'skills')).map((i) => i.name)
-    expect(skills.sort()).toEqual(['Docs', 'Grill me'])
+    expect(skills.sort()).toEqual(['Docs', 'Incident triage'])
     expect(items.every((i) => extensionInTab(i, 'all'))).toBe(true)
   })
 
   it('searches the name, id, maker and line, ignoring case', () => {
-    const grill = items.find((i) => i.id === 'grill-me')!
-    expect(extensionMatchesQuery(grill, 'GRILL')).toBe(true)
-    expect(extensionMatchesQuery(grill, 'grill-me')).toBe(true)
-    expect(extensionMatchesQuery(grill, 'pocock')).toBe(true)
-    expect(extensionMatchesQuery(grill, 'nothing-like-it')).toBe(false)
-    expect(extensionMatchesQuery(grill, '   ')).toBe(true)
+    const triage = items.find((i) => i.id === 'incident-triage')!
+    expect(extensionMatchesQuery(triage, 'TRIAGE')).toBe(true)
+    expect(extensionMatchesQuery(triage, 'incident-triage')).toBe(true)
+    expect(extensionMatchesQuery(triage, 'agent v')).toBe(true)
+    expect(extensionMatchesQuery(triage, 'nothing-like-it')).toBe(false)
+    expect(extensionMatchesQuery(triage, '   ')).toBe(true)
   })
 
   it('treats only the states with a way forward as needing you', () => {

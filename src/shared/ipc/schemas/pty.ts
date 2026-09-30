@@ -37,13 +37,3 @@ export const PtyResizeRequestSchema = z.object({
   cols: z.number().int().positive(),
   rows: z.number().int().positive()
 })
-
-export const PtyDataEventSchema = z.object({
-  id: z.string().min(1),
-  data: z.string()
-})
-
-export const PtyExitEventSchema = z.object({
-  id: z.string().min(1),
-  exitCode: z.number().nullable()
-})

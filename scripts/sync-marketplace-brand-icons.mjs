@@ -97,10 +97,6 @@ export const VENDORED = {
 
 /** Catalog id -> Phosphor regular glyph, for first-party (non-brand) entries. */
 export const GLYPHS = {
-  'implement-feature': 'hammer',
-  'create-skill': 'magic-wand',
-  goal: 'target',
-  'persona-builder': 'user-circle-gear',
   'incident-triage': 'siren',
   'pr-review-reply': 'chat-centered-text',
   'standup-digest': 'newspaper',
@@ -108,37 +104,7 @@ export const GLYPHS = {
   'release-notes': 'rocket-launch',
   'repo-onboarding': 'compass',
   'flake-hunter': 'bug-beetle',
-  'analyze-api': 'list-magnifying-glass',
   'design-level-up': 'palette',
-  // Vendored from github.com/mattpocock/skills (MIT) — see NOTICE. Third-party
-  // authorship shows as the catalog entry's publisher; the art is ours, drawn
-  // from the same Phosphor set as everything above so the grid stays one kit.
-  'ask-matt': 'signpost',
-  'review-changes': 'git-diff',
-  'codebase-design': 'blueprint',
-  'diagnosing-bugs': 'stethoscope',
-  'domain-modeling': 'graph',
-  'grill-with-docs': 'book-open-text',
-  implement: 'wrench',
-  'improve-codebase-architecture': 'buildings',
-  prototype: 'flask',
-  research: 'books',
-  'resolving-merge-conflicts': 'git-merge',
-  'setup-matt-pocock-skills': 'gear-six',
-  tdd: 'test-tube',
-  'to-spec': 'file-text',
-  'to-tickets': 'ticket',
-  triage: 'first-aid-kit',
-  wayfinder: 'map-trifold',
-  wizard: 'terminal-window',
-  'grill-me': 'chat-teardrop-dots',
-  grilling: 'fire',
-  handoff: 'handshake',
-  teach: 'chalkboard-teacher',
-  'to-questionnaire': 'clipboard-text',
-  'wait-what': 'question',
-  'writing-for-agents': 'pen-nib',
-  'setup-pre-commit': 'shield-check'
 }
 
 /** The only colour in the kit. Consumers invert it for their dark theme. */

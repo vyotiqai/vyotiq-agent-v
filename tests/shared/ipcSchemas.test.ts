@@ -3,6 +3,7 @@ import {
   ChatMessageSchema,
   ChatStartRequestSchema,
   ChatRewindAndStartRequestSchema,
+  ChatRewindPreviewResultSchema,
   ChatStartResultSchema,
   ChatFollowUpRequestSchema,
   ChatFollowUpResultSchema,
@@ -49,6 +50,10 @@ import {
   ActiveRunSchema,
   GitStatusResultSchema,
   GitStatusSchema,
+  GitBranchDiffResultSchema,
+  DeepLinkPayloadSchema,
+  ListRunsResultSchema,
+  parseRendererChatEvent,
   WorkspaceEditorRecoverySaveRequestSchema,
   WorkspaceEditorRecoverySnapshotSchema,
   StorageSettingsSchema,
@@ -223,6 +228,56 @@ describe('ipc schemas', () => {
         model: 'claude-session'
       }).success
     ).toBe(true)
+  })
+
+  it('parses the rewind preview a plan actually returns, and rejects a malformed one', () => {
+    // What main's planRewindToUserMessage returns: checkpointIds plus one entry
+    // per file, with the edited/partway stops the Rewind dialog reads.
+    const plan = {
+      checkpointIds: ['cp-1', 'cp-2'],
+      files: [
+        { path: 'src/a.ts', action: 'modified', undoable: true },
+        { path: 'src/new.ts', action: 'created', undoable: true },
+        { path: 'src/gone.ts', action: 'deleted', undoable: false, edited: true, partway: true }
+      ]
+    }
+    const parsed = ChatRewindPreviewResultSchema.parse(plan)
+    expect(parsed.checkpointIds).toEqual(['cp-1', 'cp-2'])
+    expect(parsed.files).toHaveLength(3)
+    expect(parsed.files[2]?.edited).toBe(true)
+    expect(parsed.files[2]?.partway).toBe(true)
+
+    // A plan with no writes is still a plan, not a failure.
+    expect(ChatRewindPreviewResultSchema.safeParse({ checkpointIds: [], files: [] }).success).toBe(true)
+
+    // No checkpointIds is not a payload main can produce — reject it.
+    expect(ChatRewindPreviewResultSchema.safeParse({ files: [] }).success).toBe(false)
+    // An action outside the three git letters, an empty path, and a missing
+    // undoable flag are all unreadable by the dialog.
+    expect(
+      ChatRewindPreviewResultSchema.safeParse({
+        checkpointIds: [],
+        files: [{ path: 'a.ts', action: 'renamed', undoable: true }]
+      }).success
+    ).toBe(false)
+    expect(
+      ChatRewindPreviewResultSchema.safeParse({
+        checkpointIds: [],
+        files: [{ path: '', action: 'modified', undoable: true }]
+      }).success
+    ).toBe(false)
+    expect(
+      ChatRewindPreviewResultSchema.safeParse({
+        checkpointIds: [],
+        files: [{ path: 'a.ts', action: 'modified' }]
+      }).success
+    ).toBe(false)
+    expect(
+      ChatRewindPreviewResultSchema.safeParse({
+        checkpointIds: 'cp-1',
+        files: []
+      }).success
+    ).toBe(false)
   })
 
   it('rejects empty model in settings patch', () => {
@@ -1216,5 +1271,178 @@ describe('ipc schemas', () => {
     expect(
       BrowserCloseTabRequestSchema.parse({ tabId: 't1', workspacePath: '/ws' })
     ).toEqual({ tabId: 't1', workspacePath: '/ws' })
+  })
+
+  it('validates every live chat delta main can emit instead of casting it', () => {
+    // Shapes below are the ones the producers build: src/main/agent/loop.ts
+    // (text/thinking/tool_call_delta) and src/main/agent/executeStepTools.ts
+    // (terminal_output_delta), each sent through streamBatch's coalescer and
+    // stamped with seq + invokeId.
+    const live = [
+      { type: 'text_delta', runId: 'r1', text: 'hi', invokeId: 3, seq: 1700000000000000 },
+      { type: 'thinking_delta', runId: 'r1', text: 'why', step: 2, invokeId: 3, seq: 1700000000000001 },
+      {
+        type: 'tool_call_delta',
+        runId: 'r1',
+        toolCallId: 't1',
+        name: 'read',
+        argumentsDelta: '{"path":',
+        invokeId: 3,
+        seq: 1700000000000002
+      },
+      {
+        type: 'tool_call_delta',
+        runId: 'r1',
+        toolCallId: 't1',
+        argumentsDelta: '',
+        replacesToolCallId: 'provider-t1',
+        invokeId: 3,
+        seq: 1700000000000003
+      },
+      {
+        type: 'tool_call_delta',
+        runId: 'r1',
+        toolCallId: 't2',
+        argumentsDelta: '{}',
+        invokeId: 3,
+        seq: 1700000000000004
+      },
+      {
+        type: 'terminal_output_delta',
+        runId: 'r1',
+        toolCallId: 't2',
+        text: 'hello\n',
+        stream: 'stderr',
+        invokeId: 3,
+        seq: 1700000000000005
+      },
+      {
+        type: 'terminal_output_delta',
+        runId: 'r1',
+        toolCallId: 't2',
+        text: 'hello\n',
+        invokeId: 3,
+        seq: 1700000000000006
+      }
+    ]
+    for (const event of live) {
+      const parsed = parseRendererChatEvent(event)
+      expect(parsed, `dropped a live ${event.type}`).not.toBeNull()
+      expect(parsed).toMatchObject(event)
+    }
+    // Fields the transcript reads survive validation rather than being stripped.
+    expect(parseRendererChatEvent(live[0])).toMatchObject({ seq: 1700000000000000, invokeId: 3 })
+    expect(parseRendererChatEvent(live[3])).toMatchObject({ replacesToolCallId: 'provider-t1' })
+    expect(parseRendererChatEvent(live[5])).toMatchObject({ stream: 'stderr' })
+    expect(
+      (parseRendererChatEvent(live[6]) as { stream?: string }).stream
+    ).toBeUndefined()
+
+    // Malformed deltas are rejected, not cast through.
+    const malformed = [
+      { type: 'text_delta', runId: 'r1' },
+      { type: 'text_delta', runId: 'r1', text: 42 },
+      { type: 'thinking_delta', runId: 'r1', text: 'x', step: 0 },
+      { type: 'thinking_delta', runId: 'r1', text: 'x', step: 'two' },
+      { type: 'tool_call_delta', runId: 'r1', toolCallId: 't1' },
+      { type: 'tool_call_delta', runId: 'r1', argumentsDelta: '{' },
+      { type: 'terminal_output_delta', runId: 'r1', text: 'x' },
+      { type: 'terminal_output_delta', runId: 'r1', toolCallId: 't1', text: 'x', stream: 'std' },
+      { type: 'text_delta', runId: '', text: 'hi' },
+      { type: 'text_delta', runId: 'r1', text: 'hi', seq: '1' },
+      { type: 'text_delta', runId: 'r1', text: 'hi', invokeId: 0 },
+      { type: 'text_delta', text: 'hi' }
+    ]
+    for (const event of malformed) {
+      expect(parseRendererChatEvent(event), `cast through ${JSON.stringify(event)}`).toBeNull()
+    }
+    // An unknown key survives rather than being stripped or rejected: main may
+    // add a field, and a live chunk must not vanish because of it.
+    expect(
+      parseRendererChatEvent({ type: 'text_delta', runId: 'r1', text: 'hi', future: 1 })
+    ).toMatchObject({ type: 'text_delta', text: 'hi', future: 1 })
+    expect(parseRendererChatEvent(null)).toBeNull()
+    expect(parseRendererChatEvent('text_delta')).toBeNull()
+    expect(parseRendererChatEvent([{ type: 'text_delta', runId: 'r1', text: 'hi' }])).toBeNull()
+
+    // Non-delta types keep going through the full union.
+    expect(parseRendererChatEvent({ type: 'status', runId: 'r1', status: 'done' })).toEqual({
+      type: 'status',
+      runId: 'r1',
+      status: 'done'
+    })
+  })
+
+  it('parses deep-link payloads on consume and rejects a junk payload', () => {
+    expect(
+      DeepLinkPayloadSchema.parse({
+        rawUrl: 'vyotiq://run/r1?ws=%2Fws',
+        target: { type: 'open_run', workspacePath: '/ws', runId: 'r1' }
+      }).target
+    ).toEqual({ type: 'open_run', workspacePath: '/ws', runId: 'r1' })
+    // A recognized scheme main could not interpret: target is null, not absent.
+    expect(
+      DeepLinkPayloadSchema.parse({ rawUrl: 'vyotiq://nope', target: null })
+    ).toEqual({ rawUrl: 'vyotiq://nope', target: null })
+    // Workspace resolved from the open set, so it is explicitly null.
+    expect(
+      DeepLinkPayloadSchema.parse({
+        rawUrl: 'vyotiq://run/r1',
+        target: { type: 'open_run', workspacePath: null, runId: 'r1' }
+      }).target
+    ).toEqual({ type: 'open_run', workspacePath: null, runId: 'r1' })
+
+    for (const junk of [
+      null,
+      {},
+      { rawUrl: '', target: null },
+      { rawUrl: 'vyotiq://run/r1' },
+      { rawUrl: 'vyotiq://run/r1', target: { type: 'open_run', workspacePath: '/ws' } },
+      { rawUrl: 'vyotiq://run/r1', target: { type: 'open_run', workspacePath: '/ws', runId: '../..' } },
+      { rawUrl: 'vyotiq://run/r1', target: { type: 'open_file', workspacePath: '/ws', runId: 'r1' } },
+      { rawUrl: 'vyotiq://run/r1', target: 'r1' }
+    ]) {
+      expect(
+        DeepLinkPayloadSchema.safeParse(junk).success,
+        `accepted junk payload ${JSON.stringify(junk)}`
+      ).toBe(false)
+    }
+  })
+
+  it('parses branch-diff results and the empty listRuns result the preload returns', () => {
+    expect(
+      GitBranchDiffResultSchema.parse({
+        content: 'diff --git a/a.ts b/a.ts',
+        branch: 'feature',
+        base: 'origin/main',
+        commits: 3
+      })
+    ).toEqual({
+      content: 'diff --git a/a.ts b/a.ts',
+      branch: 'feature',
+      base: 'origin/main',
+      commits: 3
+    })
+    // Uncommitted-only: base is null, not missing, and commits is 0.
+    expect(
+      GitBranchDiffResultSchema.parse({ content: '', branch: null, base: null, commits: 0 })
+    ).toEqual({ content: '', branch: null, base: null, commits: 0 })
+    for (const junk of [
+      {},
+      { content: 'x', branch: 'main', base: null },
+      { content: 'x', branch: 'main', base: null, commits: -1 },
+      { content: 'x', branch: 0, base: null, commits: 0 },
+      { content: 'x', branch: 'main', base: null, commits: '3' }
+    ]) {
+      expect(GitBranchDiffResultSchema.safeParse(junk).success).toBe(false)
+    }
+
+    // The literal src/preload/index.ts resolves when no workspace is given must
+    // satisfy ListRunsResultSchema — including instanceRuns.
+    const emptyListRuns = { runs: [], instanceRuns: [], capped: false }
+    expect(ListRunsResultSchema.parse(emptyListRuns)).toEqual(emptyListRuns)
+    expect(ListRunsResultSchema.parse(emptyListRuns).instanceRuns).toEqual([])
+    expect(ListRunsResultSchema.shape.instanceRuns.safeParse(undefined).success).toBe(true)
+    expect(ListRunsResultSchema.shape.instanceRuns.safeParse(undefined).data).toEqual([])
   })
 })

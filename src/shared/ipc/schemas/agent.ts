@@ -179,17 +179,6 @@ export const RunStatusSchema = z.object({
 })
 export type RunStatus = z.infer<typeof RunStatusSchema>
 
-export function IpcResultSchema<T extends z.ZodTypeAny>(data: T) {
-  return z.discriminatedUnion('ok', [
-    z.object({ ok: z.literal(true), data }),
-    z.object({
-      ok: z.literal(false),
-      error: z.string(),
-      code: z.string().optional()
-    })
-  ])
-}
-
 export type IpcResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; code?: string }
@@ -701,7 +690,11 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
         hash: z
           .string()
           .regex(/^[a-f0-9]{64}$/)
-          .optional()
+          .optional(),
+        /** First write of this path in the invoke; the event itself is flushed at invoke end. */
+        recordedAt: z.string().optional(),
+        /** Latest non-edit-tool write to a path already recorded (terminal, MCP, lsp, merge, git_apply). */
+        lastMutatedAt: z.string().optional()
       })
     )
   }),
@@ -776,6 +769,11 @@ export const ChatUiSubscribeAddRequestSchema = z.object({
 })
 export type ChatUiSubscribeAddRequest = z.infer<typeof ChatUiSubscribeAddRequestSchema>
 
+/**
+ * The four high-frequency types main coalesces on the way to the renderer
+ * (`ChatEventDispatcher`). Checked before the full union so a token chunk does
+ * not pay for every non-delta member's schema.
+ */
 const LIVE_DELTA_TYPES = new Set([
   'text_delta',
   'thinking_delta',
@@ -784,30 +782,70 @@ const LIVE_DELTA_TYPES = new Set([
 ])
 
 /**
+ * `eventBase` with a non-empty `runId`: the old typeof guard rejected `''`, and
+ * main always sends a real run id, so tightening here drops nothing live.
+ */
+const liveEventBase = { ...eventBase, runId: z.string().min(1) }
+
+/**
+ * Real validation for the live deltas: the same members as
+ * `AgentEventUnionSchema` keeps for these four types (shared `eventBase` plus
+ * the per-type payload), so a live chunk that main can actually emit — with its
+ * `seq`, `invokeId`, `step`, `name`, `replacesToolCallId` and `stream` — still
+ * parses. `catchall` keeps any other main-side key the transcript reads rather
+ * than stripping it.
+ */
+const LiveDeltaEventSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('text_delta'),
+      ...liveEventBase,
+      text: z.string()
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      type: z.literal('thinking_delta'),
+      ...liveEventBase,
+      text: z.string(),
+      step: z.number().int().min(1).optional()
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      type: z.literal('tool_call_delta'),
+      ...liveEventBase,
+      toolCallId: z.string(),
+      name: z.string().optional(),
+      argumentsDelta: z.string(),
+      replacesToolCallId: z.string().optional()
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      type: z.literal('terminal_output_delta'),
+      ...liveEventBase,
+      toolCallId: z.string(),
+      text: z.string(),
+      stream: z.enum(['stdout', 'stderr']).optional()
+    })
+    .catchall(z.unknown())
+])
+
+/**
  * Fast-path live deltas (main already built them). Other types still use Zod.
  * Returns null when the payload is not a chat event.
  */
 export function parseRendererChatEvent(raw: unknown): AgentEvent | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const rec = raw as Record<string, unknown>
-  const type = rec.type
-  const runId = rec.runId
-  if (typeof type !== 'string' || typeof runId !== 'string' || !runId) return null
+  const type = (raw as Record<string, unknown>).type
+  if (typeof type !== 'string') return null
   if (LIVE_DELTA_TYPES.has(type)) {
-    if (type === 'text_delta') {
-      if (typeof rec.text !== 'string') return null
-      return rec as AgentEvent
-    }
-    if (type === 'thinking_delta') {
-      if (typeof rec.text !== 'string') return null
-      return rec as AgentEvent
-    }
-    if (type === 'tool_call_delta') {
-      if (typeof rec.toolCallId !== 'string' || typeof rec.argumentsDelta !== 'string') return null
-      return rec as AgentEvent
-    }
-    if (typeof rec.toolCallId !== 'string' || typeof rec.text !== 'string') return null
-    return rec as AgentEvent
+    const parsed = LiveDeltaEventSchema.safeParse(raw)
+    // The four members above are the same objects as the matching arms of
+    // AgentEventUnionSchema, so a success is one of those arms; TS cannot see
+    // that across the two schemas.
+    return parsed.success ? (parsed.data as AgentEvent) : null
   }
   const parsed = AgentEventSchema.safeParse(raw)
   return parsed.success ? parsed.data : null
@@ -1004,6 +1042,8 @@ export type ChatRewindResult = z.infer<typeof ChatRewindResultSchema>
 
 /** Read-only preview of where chatRewind to userMessageIndex would leave each file. */
 export const ChatRewindPreviewResultSchema = z.object({
+  /** The write checkpoints the rewind would take off, newest turn last. */
+  checkpointIds: z.array(z.string()),
   files: z.array(
     z.object({
       path: z.string().min(1),
@@ -1144,8 +1184,7 @@ export const RunArtifactFixedNameSchema = z.enum([
   'checks.json',
   'goal.json',
   'loop.json',
-  'trajectory.jsonl',
-  'prediction.json'
+  'trajectory.jsonl'
 ])
 
 /** Screenshot artifacts: latest alias or unique `browser/snapshot-<id>.jpg`. */
@@ -1180,8 +1219,6 @@ export function runArtifactImageMime(name: string): string | null {
 export type RunArtifactName = z.infer<typeof RunArtifactNameSchema>
 
 export const TRAJECTORY_FILENAME = 'trajectory.jsonl' as const
-export const PREDICTION_FILENAME = 'prediction.json' as const
-export const PREDICTION_MANIFEST_VERSION = 1 as const
 
 /** One observational row in trajectory.jsonl (derived from events.jsonl). */
 export const TrajectoryRowSchema = z.object({
@@ -1204,30 +1241,6 @@ export const TrajectoryRowSchema = z.object({
   fileCount: z.number().int().min(0).optional()
 })
 export type TrajectoryRow = z.infer<typeof TrajectoryRowSchema>
-
-/** Observational prediction manifest — never auto-applied to harness sections. */
-export const PredictionEntrySchema = z.object({
-  at: z.string().min(1),
-  step: z.number().int().min(0).optional(),
-  type: z.literal('harness_section'),
-  target: z.enum(['context', 'tool_policy', 'memory', 'work_style']),
-  bucket: z
-    .enum(['system_prompt', 'tool_policy', 'loop_notices', 'memory'])
-    .optional(),
-  confidence: z.number().min(0).max(1),
-  observed_only: z.literal(true),
-  reason: z.string().optional()
-})
-export type PredictionEntry = z.infer<typeof PredictionEntrySchema>
-
-export const PredictionManifestSchema = z.object({
-  version: z.literal(PREDICTION_MANIFEST_VERSION),
-  runId: z.string().min(1),
-  writtenAt: z.string().min(1),
-  observed_only: z.literal(true),
-  predictions: z.array(PredictionEntrySchema)
-})
-export type PredictionManifest = z.infer<typeof PredictionManifestSchema>
 
 /** Per-run loop checkpoint for survive-restart (step-boundary loop invariants). */
 export const LOOP_CHECKPOINT_VERSION = 3 as const
@@ -1575,10 +1588,12 @@ export const RunReceiptSchema = z.object({
     })
     .optional(),
   /**
-   * Turn-end verification gate verdict. Observe-only for now: recorded so the
-   * real fire rate is known before the gate is armed. Unlike `verification`
-   * above, this is judged live from what THIS invoke did, so a resumed run
-   * never inherits an earlier turn's mutations.
+   * Turn-end verification gate verdict at the invoke's LAST turn end — the
+   * state the run was left in. Unlike `verification` above, this is judged
+   * live from what THIS invoke did, so a resumed run never inherits an
+   * earlier turn's mutations. Armed since 2026-09-28: when it fires it nudges
+   * the turn once (`nudged`) and re-judges at the next turn end; before that
+   * it only observed, and `wouldFire` stuck at its first firing.
    *
    * Additive and optional, so it carries no version bump — older receipts
    * read as `undefined`, which is the truth: the gate never ran for them.
@@ -1590,60 +1605,14 @@ export const RunReceiptSchema = z.object({
       wouldFire: z.boolean(),
       reason: z.enum(['never_checked', 'check_failed']).optional(),
       /** Paths this invoke mutated, capped by the tracker. */
-      paths: z.array(z.string()).optional()
+      paths: z.array(z.string()).optional(),
+      /** The gate fired at an earlier turn end this invoke and injected its nudge. */
+      nudged: z.boolean().optional()
     })
     .optional(),
   contractExcerpt: z.string()
 })
 export type RunReceipt = z.infer<typeof RunReceiptSchema>
-
-export const HarnessReviewRequestSchema = z.object({
-  workspacePath: z.string().min(1),
-  limit: z.number().int().min(1).max(100).optional()
-})
-export type HarnessReviewRequest = z.infer<typeof HarnessReviewRequestSchema>
-
-export const HarnessReviewResultSchema = z.object({
-  proposalPath: z.string().min(1),
-  relativePath: z.string().min(1),
-  receiptCount: z.number().int().min(0),
-  summary: z.string()
-})
-export type HarnessReviewResult = z.infer<typeof HarnessReviewResultSchema>
-
-export const HarnessPreviewApplyRequestSchema = z.object({
-  workspacePath: z.string().min(1),
-  proposalPath: z.string().min(1).optional()
-})
-export type HarnessPreviewApplyRequest = z.infer<typeof HarnessPreviewApplyRequestSchema>
-
-export const HarnessPreviewApplyResultSchema = z.object({
-  proposalPath: z.string().min(1),
-  relativePath: z.string().min(1),
-  current: z.string(),
-  proposed: z.string(),
-  changed: z.boolean()
-})
-export type HarnessPreviewApplyResult = z.infer<typeof HarnessPreviewApplyResultSchema>
-
-export const HarnessApplyRequestSchema = z.object({
-  workspacePath: z.string().min(1),
-  proposalPath: z.string().min(1).optional(),
-  /** Must be true — accidental applies are rejected. */
-  confirm: z.literal(true)
-})
-export type HarnessApplyRequest = z.infer<typeof HarnessApplyRequestSchema>
-
-export const HarnessApplyResultSchema = z.object({
-  applied: z.boolean(),
-  proposalPath: z.string().min(1),
-  relativePath: z.string().min(1),
-  harnessPath: z.string().min(1),
-  validationOk: z.boolean(),
-  validationOutput: z.string(),
-  reverted: z.boolean()
-})
-export type HarnessApplyResult = z.infer<typeof HarnessApplyResultSchema>
 
 export const ReadRunArtifactRequestSchema = z.object({
   workspacePath: z.string().min(1),
@@ -2275,7 +2244,9 @@ export type WorkspaceSuggestPathsRequest = z.infer<typeof WorkspaceSuggestPathsR
 
 export const WorkspaceSuggestPathsResultSchema = z.object({
   paths: z.array(z.string()),
-  /** Total matches before slicing to maxResults. */
+  /** Matching directories, from the same walk as `paths`. */
+  dirs: z.array(z.string()),
+  /** Total file matches before slicing to maxResults. */
   total: z.number().int().min(0)
 })
 export type WorkspaceSuggestPathsResult = z.infer<typeof WorkspaceSuggestPathsResultSchema>

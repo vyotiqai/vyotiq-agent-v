@@ -1,19 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { atomicWriteJson } from '../storage/atomicWrite'
-import type { PersistedEvent, RunReceipt } from '../../shared/ipc'
-import {
-  PredictionManifestSchema,
-  TRAJECTORY_FILENAME,
-  PREDICTION_FILENAME,
-  PREDICTION_MANIFEST_VERSION,
-  type PredictionManifest,
-  type TrajectoryRow
-} from '../../shared/ipc'
+import type { PersistedEvent } from '../../shared/ipc'
+import { TRAJECTORY_FILENAME, type TrajectoryRow } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
 
-export { TRAJECTORY_FILENAME, PREDICTION_FILENAME, PREDICTION_MANIFEST_VERSION }
-export type { TrajectoryRow, PredictionManifest }
+export { TRAJECTORY_FILENAME }
+export type { TrajectoryRow }
 
 const TRAJECTORY_SUMMARY_CAP = 160
 const TRAJECTORY_ROW_CAP = 2000
@@ -214,91 +206,11 @@ export function writeTrajectoryJsonl(runDir: string, rows: readonly TrajectoryRo
   writeFileSync(join(runDir, TRAJECTORY_FILENAME), body ? `${body}\n` : '', 'utf8')
 }
 
-/**
- * Observational prediction manifest from receipt heuristics.
- * Never applied to harness sections — `observed_only` always true.
- */
-export function buildPredictionManifest(
-  runId: string,
-  receipt: Pick<
-    RunReceipt,
-    | 'unreadEditPaths'
-    | 'failureClusters'
-    | 'compactionCount'
-    | 'toolStats'
-  >,
-  writtenAt = new Date().toISOString()
-): PredictionManifest {
-  const predictions: PredictionManifest['predictions'] = []
-
-  if (receipt.unreadEditPaths.length > 0) {
-    predictions.push({
-      at: writtenAt,
-      type: 'harness_section',
-      target: 'work_style',
-      bucket: 'loop_notices',
-      confidence: 0,
-      observed_only: true,
-      reason: `${receipt.unreadEditPaths.length} unread-before-edit path(s)`
-    })
-  }
-  if (receipt.failureClusters.length > 0) {
-    predictions.push({
-      at: writtenAt,
-      type: 'harness_section',
-      target: 'tool_policy',
-      bucket: 'tool_policy',
-      confidence: 0,
-      observed_only: true,
-      reason: receipt.failureClusters[0]
-        ? `Top failure: ${receipt.failureClusters[0].key}`
-        : 'Consecutive tool-failure streak ≥ 3'
-    })
-  }
-  if (receipt.compactionCount >= 2) {
-    predictions.push({
-      at: writtenAt,
-      type: 'harness_section',
-      target: 'memory',
-      bucket: 'memory',
-      confidence: 0,
-      observed_only: true,
-      reason: `compactionCount=${receipt.compactionCount}`
-    })
-  }
-  const memoryFails = receipt.toolStats.byName['memory_write']?.failed ?? 0
-  if (memoryFails > 0) {
-    predictions.push({
-      at: writtenAt,
-      type: 'harness_section',
-      target: 'memory',
-      bucket: 'memory',
-      confidence: 0,
-      observed_only: true,
-      reason: `memory_write failed ${memoryFails}×`
-    })
-  }
-
-  return PredictionManifestSchema.parse({
-    version: PREDICTION_MANIFEST_VERSION,
-    runId,
-    writtenAt,
-    observed_only: true,
-    predictions
-  })
-}
-
-export function writePredictionManifest(runDir: string, manifest: PredictionManifest): void {
-  atomicWriteJson(join(runDir, PREDICTION_FILENAME), manifest)
-}
-
-/** Best-effort: write trajectory.jsonl + prediction.json beside receipt. Never throws. */
+/** Best-effort: write trajectory.jsonl. Never throws. */
 export function writeTrajectoryArtifactsBestEffort(input: {
   runDir: string
   runId: string
   loadEvents: (dir: string) => PersistedEvent[]
-  /** When provided, also write prediction.json from receipt heuristics. */
-  receipt?: RunReceipt | null
 }): void {
   try {
     const events = input.loadEvents(input.runDir)
@@ -311,24 +223,8 @@ export function writeTrajectoryArtifactsBestEffort(input: {
       err
     })
   }
-
-  if (!input.receipt) return
-  try {
-    const manifest = buildPredictionManifest(input.runId, input.receipt)
-    writePredictionManifest(input.runDir, manifest)
-  } catch (err) {
-    logger.warn('Failed to write prediction.json', {
-      scope: 'agent',
-      correlationId: input.runId,
-      err
-    })
-  }
 }
 
 export function trajectoryArtifactExists(runDir: string): boolean {
   return existsSync(join(runDir, TRAJECTORY_FILENAME))
-}
-
-export function predictionArtifactExists(runDir: string): boolean {
-  return existsSync(join(runDir, PREDICTION_FILENAME))
 }

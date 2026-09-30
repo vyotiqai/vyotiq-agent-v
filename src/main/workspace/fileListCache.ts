@@ -1,4 +1,4 @@
-import { collectWorkspaceFiles } from '../agent/tools/walk'
+import { collectWorkspaceEntries } from '../agent/tools/walk'
 import { canonicalizeWorkspacePath, isWindowsStylePath } from '../../shared/utils/workspacePath'
 
 /**
@@ -25,13 +25,20 @@ export const FILE_LIST_MAX_WORKSPACES = 8
 /** A list this old still answers, but the query that finds it starts a walk behind it. */
 export const FILE_LIST_REVALIDATE_AFTER_MS = 10_000
 
+export type WorkspaceEntryLists = {
+  /** Workspace-relative, forward slashes, in walk order. */
+  files: readonly string[]
+  /** The directories that same walk descended into, same spelling. */
+  dirs: readonly string[]
+}
+
 type Entry = {
-  /** Workspace-relative, forward slashes, in walk order; null until the first walk lands. */
-  files: readonly string[] | null
-  /** When the walk behind `files` started. */
+  /** The walked lists; null until the first walk lands. */
+  lists: WorkspaceEntryLists | null
+  /** When the walk behind `lists` started. */
   walkedAt: number
   /** The walk in flight: every query that arrives meanwhile shares it. */
-  walk: Promise<readonly string[]> | null
+  walk: Promise<WorkspaceEntryLists> | null
 }
 
 /** Map order is recency: the first key is the workspace searched longest ago. */
@@ -42,16 +49,23 @@ function cacheKey(workspacePath: string): string {
   return isWindowsStylePath(canonical) ? canonical.toLowerCase() : canonical
 }
 
-function startWalk(key: string, entry: Entry, workspacePath: string): Promise<readonly string[]> {
+function startWalk(
+  key: string,
+  entry: Entry,
+  workspacePath: string
+): Promise<WorkspaceEntryLists> {
   const startedAt = Date.now()
-  const walk = collectWorkspaceFiles(workspacePath, WALK_CAP).then((files) =>
-    files.map((file) => file.rel.replace(/\\/g, '/'))
-  )
+  // One walk serves both lists: the folders the @ picker offers come out of the
+  // same pass as the files, not a second walk of a workspace already listed.
+  const walk = collectWorkspaceEntries(workspacePath, WALK_CAP).then(({ files, dirs }) => ({
+    files: files.map((file) => file.rel.replace(/\\/g, '/')),
+    dirs: dirs.map((dir) => dir.replace(/\\/g, '/'))
+  }))
   entry.walk = walk
   walk.then(
-    (files) => {
+    (lists) => {
       entry.walk = null
-      entry.files = files
+      entry.lists = lists
       entry.walkedAt = startedAt
     },
     () => {
@@ -64,25 +78,33 @@ function startWalk(key: string, entry: Entry, workspacePath: string): Promise<re
 }
 
 /**
- * The workspace's files as the pickers list them. Walks only when there is no
- * list yet; the result is shared, so callers must not mutate it.
+ * The workspace's files and directories as the pickers list them, from one
+ * walk. Walks only when there is no list yet; the result is shared, so callers
+ * must not mutate it.
  */
-export async function readWorkspaceFileListCached(
+export async function readWorkspaceEntriesCached(
   workspacePath: string
-): Promise<readonly string[]> {
+): Promise<WorkspaceEntryLists> {
   const key = cacheKey(workspacePath)
-  const entry = entries.get(key) ?? { files: null, walkedAt: 0, walk: null }
+  const entry = entries.get(key) ?? { lists: null, walkedAt: 0, walk: null }
   entries.delete(key)
   entries.set(key, entry)
   if (entries.size > FILE_LIST_MAX_WORKSPACES) {
     const oldest = entries.keys().next().value
     if (oldest !== undefined) entries.delete(oldest)
   }
-  if (!entry.files) return entry.walk ?? startWalk(key, entry, workspacePath)
+  if (!entry.lists) return entry.walk ?? startWalk(key, entry, workspacePath)
   if (!entry.walk && Date.now() - entry.walkedAt >= FILE_LIST_REVALIDATE_AFTER_MS) {
     void startWalk(key, entry, workspacePath)
   }
-  return entry.files
+  return entry.lists
+}
+
+/** The same walk, files only — for callers that have no use for the folders. */
+export async function readWorkspaceFileListCached(
+  workspacePath: string
+): Promise<readonly string[]> {
+  return (await readWorkspaceEntriesCached(workspacePath)).files
 }
 
 /**
@@ -93,13 +115,13 @@ export async function readWorkspaceFileListCached(
 export function peekWorkspaceFileListCached(workspacePath: string): readonly string[] | null {
   const key = cacheKey(workspacePath)
   const entry = entries.get(key)
-  if (entry?.files) {
+  if (entry?.lists) {
     if (!entry.walk && Date.now() - entry.walkedAt >= FILE_LIST_REVALIDATE_AFTER_MS) {
       void startWalk(key, entry, workspacePath).catch(() => undefined)
     }
-    return entry.files
+    return entry.lists.files
   }
-  void readWorkspaceFileListCached(workspacePath).catch(() => undefined)
+  void readWorkspaceEntriesCached(workspacePath).catch(() => undefined)
   return null
 }
 

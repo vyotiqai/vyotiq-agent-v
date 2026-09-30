@@ -17,7 +17,7 @@ Extensions add tools and know-how to the agent. Open "Extensions" from the top o
 | "Rules" | Instructions added to the agent's context |
 | "Packages" | Bundles of skills and rules |
 
-The app ships with a catalog of 29 MCP servers, 48 skills and 4 packages. Skills and rules are covered in [Rules and skills](/docs/rules-and-skills).
+The app ships with a catalog of 29 MCP servers, 9 skills and 4 packages. Skills and rules are covered in [Rules and skills](/docs/rules-and-skills).
 
 ## Adding an MCP server
 

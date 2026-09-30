@@ -51,8 +51,6 @@ export const WORKSPACE_HARNESS_APPENDIX_CAP = 24_000
 
 /** Editable harness in the Agent V source tree (never under `.vyotiq/`). */
 export const WORKSPACE_HARNESS_REL = 'resources/harness/default.md'
-export const HARNESS_PROPOSALS_REL = 'resources/harness/proposals'
-export const HARNESS_BACKUP_REL = 'resources/harness/default.md.bak'
 /** Legacy mistaken location — purged on workspace open. */
 export const LEGACY_VYOTIQ_HARNESS_DIR_REL = '.vyotiq/harness'
 

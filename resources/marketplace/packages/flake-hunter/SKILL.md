@@ -28,7 +28,7 @@ Use when a test fails inconsistently, passes on rerun, or is suspected of being 
 
 ## When not to use
 
-The test fails every time: use fix-bug.
+The test fails every time: it is not a flake, so debug the failure directly.
 
 The whole suite is failing: diagnose the environment or build first.
 

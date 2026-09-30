@@ -19,6 +19,7 @@ import {
 import { executeTool } from '@main/agent/tools'
 import { toolTodoWrite } from '@main/agent/tools/todo'
 import { pendingReviewSummary, resetPendingReviewCacheForTests } from '@main/agent/reviewSummary'
+import { lineDiffStat } from '@shared/utils/lineDiffStat'
 import { resetTaskFileStatsCacheForTests, taskFileDiff, taskFileStats } from '@main/agent/taskFileDiff'
 
 let workspace: string
@@ -215,6 +216,25 @@ describe('taskFileDiff', () => {
       ['one.ts', 1],
       ['two.ts', 3]
     ])
+  })
+
+  // `lineDiff` gives up at 1500 edits and prints the whole file as a
+  // replacement, whose counts are the file's, not the change's. The list
+  // counted this same file exactly, so the detail view has to as well.
+  it('counts a file too far apart to diff line by line, as the list does', async () => {
+    const before = Array.from({ length: 1000 }, (_, i) => `old ${i}`).join('\n') + '\n'
+    const after = Array.from({ length: 1000 }, (_, i) => `new ${i}`).join('\n') + '\n'
+    writeFileSync(join(workspace, 'big.ts'), before, 'utf8')
+    await turn(() => run('edit', { path: 'big.ts', contents: after }))
+
+    // 2000 edits apart: past `lineDiff`'s 1500, inside `lineDiffStat`'s 4000.
+    const exact = lineDiffStat(before, after)
+    expect(exact).toEqual({ add: 1000, del: 1000 })
+    const detail = taskFileDiff(runDir, workspace, 'big.ts')
+    expect(detail.full).toBe(true)
+    expect({ add: detail.add, del: detail.del }).toEqual(exact)
+    const [listed] = await taskFileStats(runDir, workspace)
+    expect({ add: listed.add, del: listed.del }).toEqual(exact)
   })
 
   it('says when a path is not one the task wrote', () => {

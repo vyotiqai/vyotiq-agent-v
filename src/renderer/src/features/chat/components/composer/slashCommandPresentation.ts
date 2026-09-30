@@ -59,9 +59,7 @@ const BUILTIN_ICON: Record<string, IconName> = {
   undo: 'undo',
   ask: 'question',
   plan: 'plan',
-  agent: 'edit',
-  'harness-review': 'checklist',
-  'harness-apply': 'check'
+  agent: 'edit'
 }
 
 /** The glyph in a row's icon slot. An MCP row shows its package's mark over this when it has one. */

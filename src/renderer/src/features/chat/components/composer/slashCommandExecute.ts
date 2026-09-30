@@ -15,7 +15,6 @@ export type SlashClientHandlers = {
   onOpenSettings?: (section?: 'voice' | 'providers' | 'agent') => void
   onCreateRule?: (title?: string) => void | boolean | Promise<void | boolean>
   onCreateSkill?: (title?: string) => void | boolean | Promise<void | boolean>
-  onHarnessApply?: (proposalPath?: string) => void | boolean | Promise<void | boolean>
   onGoalPause?: () => void | boolean | Promise<void | boolean>
   onGoalResume?: () => void | boolean | Promise<void | boolean>
   onGoalComplete?: () => void | boolean | Promise<void | boolean>
@@ -98,10 +97,6 @@ async function runClientAction(
     }
     case 'create_skill': {
       const r = await handlers.onCreateSkill?.(opts.trailingText)
-      return r !== false
-    }
-    case 'harness_apply': {
-      const r = await handlers.onHarnessApply?.(opts.trailingText)
       return r !== false
     }
     case 'goal_pause': {

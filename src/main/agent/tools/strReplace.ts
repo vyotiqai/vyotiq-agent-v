@@ -121,8 +121,11 @@ export function toolStrReplace(
   mkdirSync(dirname(resolved), { recursive: true })
   assertResolvedInsideWorkspace(workspaceRoot, resolved)
   atomicWriteFile(resolved, next)
+  // 1-based line of the first match, counted on the newline-normalized text so
+  // the CRLF branch above cannot shift it; replace_all reports the first match.
+  const line = normalizedOriginal.slice(0, normalizedOriginal.indexOf(normalizedOld)).split('\n').length
   const label = replaceAll && matches > 1 ? `${matches} occurrences` : '1 occurrence'
-  return `Replaced ${label} in ${path}`
+  return `Replaced ${label} in ${path} (line ${line})`
 }
 
 export async function toolStrReplaceAsync(

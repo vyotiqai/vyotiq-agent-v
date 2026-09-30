@@ -25,6 +25,7 @@ export function mentionItemSection(item: MentionMenuItem): MentionSectionId | nu
     case 'lints':
       return 'context'
     case 'file':
+    case 'folder':
       return 'files'
     case 'nav':
       return 'browse'

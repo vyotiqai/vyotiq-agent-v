@@ -413,7 +413,7 @@ export async function syncMarketplaceMcpIntoSettings(): Promise<void> {
 
 /**
  * Overwrite installed bundled skill SKILL.md from app resources when it drifts
- * (so create-skill instructions stay current after an app update).
+ * (so incident-triage instructions stay current after an app update).
  */
 function repairBundledSkillPackagesFromResources(): void {
   const index = readMarketplaceIndex()
@@ -597,10 +597,11 @@ async function installBundledDependencies(
  * Install declared dependencies that installed packages are missing.
  *
  * Packages installed before the catalog recorded its edges are simply broken —
- * `grill-me` sitting there alone does nothing but instruct the agent to load a
- * skill that was never copied in. Startup heals that the same way
- * `repairBundledSkillPackagesFromResources` heals drifted markdown: bundled
- * content is restored to a state that works, from resources, without asking.
+ * a skill sitting there alone whose dependency was never installed does nothing
+ * but instruct the agent to load a skill that was never copied in. Startup
+ * heals that the same way `repairBundledSkillPackagesFromResources` heals
+ * drifted markdown: bundled content is restored to a state that works, from
+ * resources, without asking.
  *
  * Removing a dependency on its own is therefore not a supported way to trim the
  * set — uninstall the package that needs it instead.

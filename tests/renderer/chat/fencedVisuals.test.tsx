@@ -18,6 +18,8 @@ afterEach(() => {
   cleanup()
   document.documentElement.style.removeProperty('--vy-surface')
   document.documentElement.style.removeProperty('--vy-muted')
+  document.documentElement.style.removeProperty('--vy-tertiary')
+  document.documentElement.style.removeProperty('--vy-fg')
 })
 
 describe('ChartBlock', () => {
@@ -80,8 +82,16 @@ describe('MermaidDiagram theme', () => {
   })
 
   it('falls back when a token is not a colour mermaid can parse', () => {
-    document.documentElement.style.setProperty('--vy-muted', 'color-mix(in srgb, red 50%, blue)')
+    // `lineColor` reads the --vy-muted -> --vy-tertiary -> --vy-fg ladder.
+    // A `color-mix` is not a colour mermaid can take, so the read skips that
+    // name for the next one on the ladder instead of handing the theme a value
+    // it cannot parse. Nothing here invents a colour either: every value in
+    // the theme came from a token that is set.
+    const unusable = 'color-mix(in srgb, red 50%, blue)'
+    document.documentElement.style.setProperty('--vy-muted', unusable)
+    document.documentElement.style.setProperty('--vy-tertiary', '#0b0b0b')
     const vars = readMermaidThemeVariables(false)
-    expect(String(vars.lineColor)).toMatch(/^#/)
+    expect(vars.lineColor).toBe('#0b0b0b')
+    expect(JSON.stringify(vars)).not.toContain(unusable)
   })
 })

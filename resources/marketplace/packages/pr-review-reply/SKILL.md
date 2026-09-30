@@ -26,7 +26,7 @@ Use when asked to address, respond to, or work through review comments on a pull
 
 ## When not to use
 
-The user wants you to review someone else's code: use review-code.
+The user wants you to review someone else's code: that is a review of your own, not replies to one.
 
 The pull request has no review feedback yet: there is nothing to answer.
 

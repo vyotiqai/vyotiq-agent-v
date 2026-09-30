@@ -3,35 +3,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  buildPredictionManifest,
   buildTrajectoryFromEvents,
   writeTrajectoryArtifactsBestEffort,
   writeTrajectoryJsonl,
-  TRAJECTORY_FILENAME,
-  PREDICTION_FILENAME,
-  PREDICTION_MANIFEST_VERSION
+  TRAJECTORY_FILENAME
 } from '@main/agent/runTrajectory'
-import { PredictionManifestSchema } from '@shared/ipc'
-import type { PersistedEvent, RunReceipt } from '@shared/ipc'
-import { RUN_RECEIPT_VERSION } from '@shared/ipc'
-
-function minimalReceipt(over: Partial<RunReceipt> = {}): RunReceipt {
-  return {
-    version: RUN_RECEIPT_VERSION,
-    writtenAt: '2026-07-30T00:00:00.000Z',
-    runId: 'run-1',
-    status: 'done',
-    step: 2,
-    compactionCount: 0,
-    toolStats: { totalCalls: 0, ok: 0, failed: 0, byName: {} },
-    failureClusters: [],
-    unreadEditPaths: [],
-    wroteFiles: [],
-    diagnostics: { calls: 0, ok: 0, clean: 0 },
-    contractExcerpt: '',
-    ...over
-  }
-}
+import type { PersistedEvent } from '@shared/ipc'
 
 describe('runTrajectory', () => {
   it('builds trajectory rows from tool and step events', () => {
@@ -118,26 +95,7 @@ describe('runTrajectory', () => {
     expect(rows.some((r) => r.kind === 'status' && r.status === 'done')).toBe(true)
   })
 
-  it('builds observed_only prediction manifest from receipt heuristics', () => {
-    const manifest = buildPredictionManifest(
-      'run-1',
-      minimalReceipt({
-        unreadEditPaths: ['a.ts'],
-        failureClusters: [{ key: 'edit: boom', count: 2 }],
-        compactionCount: 2
-      })
-    )
-    expect(manifest.version).toBe(PREDICTION_MANIFEST_VERSION)
-    expect(manifest.observed_only).toBe(true)
-    expect(manifest.predictions.every((p) => p.observed_only === true)).toBe(true)
-    expect(manifest.predictions.some((p) => p.target === 'work_style')).toBe(true)
-    expect(manifest.predictions.some((p) => p.target === 'tool_policy')).toBe(true)
-    expect(manifest.predictions.some((p) => p.bucket === 'verify')).toBe(false)
-    expect(manifest.predictions.some((p) => p.target === 'memory')).toBe(true)
-    expect(PredictionManifestSchema.safeParse(manifest).success).toBe(true)
-  })
-
-  it('writes trajectory.jsonl and prediction.json best-effort', () => {
+  it('writes trajectory.jsonl best-effort', () => {
     const dir = mkdtempSync(join(tmpdir(), 'vyotiq-traj-'))
     try {
       const events: PersistedEvent[] = [
@@ -156,22 +114,18 @@ describe('runTrajectory', () => {
       writeTrajectoryArtifactsBestEffort({
         runDir: dir,
         runId: 'run-1',
-        loadEvents: () => events,
-        receipt: minimalReceipt({ unreadEditPaths: ['x.ts'] })
+        loadEvents: () => events
       })
       const traj = readFileSync(join(dir, TRAJECTORY_FILENAME), 'utf8').trim()
       expect(traj.length).toBeGreaterThan(0)
       expect(JSON.parse(traj).kind).toBe('tool')
-      const pred = JSON.parse(readFileSync(join(dir, PREDICTION_FILENAME), 'utf8'))
-      expect(pred.observed_only).toBe(true)
-      expect(pred.predictions.length).toBeGreaterThan(0)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('still writes trajectory when prediction receipt is missing', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-traj-norec-'))
+  it('writes trajectory.jsonl from a minimal event set', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-traj-minimal-'))
     try {
       writeTrajectoryArtifactsBestEffort({
         runDir: dir,
@@ -181,11 +135,9 @@ describe('runTrajectory', () => {
             at: 't',
             event: { type: 'status', runId: 'run-1', status: 'done' }
           }
-        ],
-        receipt: null
+        ]
       })
       expect(readFileSync(join(dir, TRAJECTORY_FILENAME), 'utf8')).toContain('status')
-      expect(() => readFileSync(join(dir, PREDICTION_FILENAME), 'utf8')).toThrow()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -5,14 +5,18 @@ import { describe, expect, it } from 'vitest'
 import {
   buildFileMentionItems,
   buildRootMentionItems,
+  classifyWorkspacePath,
   decodeMentionPayload,
   extractMentions,
   findActiveMentionToken,
   findSlashChipSubmit,
   insertMentionAtToken,
+  isFolderPathInSet,
   isSafeWorkspaceRelPath,
   isAutoInjectedWorkspaceRule,
+  mentionLabel,
   mentionMarker,
+  mergeSuggestedPaths,
   parseComposerDocument,
   serializeComposerDocument,
   composerDocumentPlainText,
@@ -222,15 +226,117 @@ describe('mentionModel', () => {
     expect(detached.find((i) => i.kind === 'branch')).toMatchObject({ subtitle: 'uncommitted changes' })
   })
 
-  it('lists only recent files until something is typed, then recent matches before search results', () => {
+  it('lists search rows on a bare @ too, with recents before matches', () => {
+    // A bare @ used to list no file rows at all: the search did not run for an
+    // empty query, so a cold composer showed only Context and Browse. It now
+    // shows what the search returned for the empty query.
     const idle = buildRootMentionItems({
       query: '',
       recentFiles: [],
       matchingFiles: ['.eslintrc.cjs', '.github/ci.yml'],
       includeCodebase: true
     })
-    expect(idle.some((i) => i.kind === 'file')).toBe(false)
+    expect(idle.filter((i) => i.kind === 'file').map((i) => i.label)).toEqual([
+      '.eslintrc.cjs',
+      'ci.yml'
+    ])
 
+    const recentsFirst = buildRootMentionItems({
+      query: 'sse',
+      recentFiles: ['src/main/net/sseReader.ts', 'src/other.ts'],
+      matchingFiles: ['src/main/net/sseReader.ts', 'tests/main/unit/sseBackpressure.test.ts'],
+      includeCodebase: true
+    })
+    expect(recentsFirst.filter((i) => i.kind === 'file').map((i) => i.label)).toEqual([
+      'sseReader.ts',
+      'sseBackpressure.test.ts'
+    ])
+  })
+
+  it('round-trips folder markers and rejects unsafe folder payloads', () => {
+    const segments = [
+      { type: 'text' as const, value: 'Fix ' },
+      {
+        type: 'mention' as const,
+        mention: { kind: 'folder' as const, path: 'src/components/composer' }
+      }
+    ]
+    const raw = serializeComposerDocument(segments)
+    expect(parseComposerDocument(raw)).toEqual(segments)
+    expect(extractMentions(raw)).toEqual([
+      { kind: 'folder', path: 'src/components/composer' }
+    ])
+    expect(composerDocumentPlainText(raw)).toBe('Fix @composer')
+    expect(mentionLabel({ kind: 'folder', path: 'src/components/composer' })).toBe('composer')
+    expect(decodeMentionPayload('folder:../x')).toBeNull()
+    expect(decodeMentionPayload('folder:/etc')).toBeNull()
+    expect(decodeMentionPayload('folder:C:/Windows/x')).toBeNull()
+  })
+
+  it('classifies a path as a folder when another returned path lives under it', () => {
+    const paths = ['src', 'src/a.ts', 'src/deep/b.ts', 'README.md']
+    expect(isFolderPathInSet(paths, 'src')).toBe(true)
+    expect(isFolderPathInSet(paths, 'src/deep')).toBe(true)
+    expect(isFolderPathInSet(paths, 'src/a.ts')).toBe(false)
+    expect(isFolderPathInSet(paths, 'README.md')).toBe(false)
+    // A directory with nothing beneath it in the page reads as a file.
+    expect(isFolderPathInSet(['src'], 'src')).toBe(false)
+    expect(classifyWorkspacePath('src/deep', paths)).toBe('folder')
+    expect(classifyWorkspacePath('README.md', paths)).toBe('file')
+  })
+
+  it('takes a folder from the list main sent even with nothing under it in the page', () => {
+    // The inference above cannot see an empty page under a folder; main can.
+    expect(classifyWorkspacePath('src', ['src'], new Set(['src']))).toBe('folder')
+    const items = buildFileMentionItems(['README.md'], 1, 1, { paths: ['src'], query: '' })
+    expect(items.map((i) => i.id)).toEqual(['file:README.md', 'folder:src'])
+  })
+
+  it('leads with a folder named like the query, then files, then other folders', () => {
+    expect(
+      mergeSuggestedPaths(['src/comp.ts', 'lib/a.ts'], ['src/composer', 'old/xcomp'], 'comp')
+    ).toEqual(['src/composer', 'src/comp.ts', 'lib/a.ts', 'old/xcomp'])
+    // With nothing typed there is no name to match: files keep the top.
+    expect(mergeSuggestedPaths(['a.ts'], ['src'], '')).toEqual(['a.ts', 'src'])
+  })
+
+  it('builds a folder row for a directory in the files view', () => {
+    const items = buildFileMentionItems(['src/components', 'src/components/composer/a.ts'], 2, 2)
+    expect(items).toEqual([
+      {
+        id: 'folder:src/components',
+        kind: 'folder',
+        path: 'src/components',
+        label: 'components',
+        subtitle: 'src'
+      },
+      {
+        id: 'file:src/components/composer/a.ts',
+        kind: 'file',
+        path: 'src/components/composer/a.ts',
+        label: 'a.ts',
+        subtitle: 'src/components/composer'
+      }
+    ])
+  })
+
+  it('lists a folder row at the root from a bare @ search', () => {
+    const items = buildRootMentionItems({
+      query: '',
+      recentFiles: [],
+      matchingFiles: ['src/components', 'src/components/composer/a.ts'],
+      includeCodebase: true
+    })
+    const folderRow = items.find((i) => i.kind === 'folder')
+    expect(folderRow).toMatchObject({
+      id: 'folder:src/components',
+      path: 'src/components',
+      label: 'components',
+      subtitle: 'src'
+    })
+  })
+
+  it('lists recent matches before search results once something is typed', () => {
     const typed = buildRootMentionItems({
       query: 'sse',
       recentFiles: ['src/main/net/sseReader.ts', 'src/other.ts'],

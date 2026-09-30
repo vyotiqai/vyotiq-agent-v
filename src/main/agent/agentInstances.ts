@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from 'fs'
-import { join, resolve } from 'path'
+import { existsSync, readFileSync, watch, type FSWatcher } from 'fs'
+import { dirname, join, resolve } from 'path'
 import type { WebContents } from 'electron'
-import type { AgentEvent, AgentInteractionMode, ChatMessage } from '../../shared/ipc'
+import type { AgentEvent, AgentInteractionMode, ChatMessage, RunReceipt } from '../../shared/ipc'
 import { contentDisplayText, DEFAULT_MAX_PARALLEL_INSTANCES, RunReceiptSchema } from '../../shared/ipc'
 import { getSettings } from '@main/settings/settings'
 import { IPC } from '../../shared/channels'
@@ -30,6 +30,7 @@ import { appendEvent, createRun, loadMessagesAsync, loadStatus } from './state'
 import { resolveRunDir } from '@main/storage/paths'
 import { createRunId } from './loop'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
+import { migrateLegacyReceipt } from './receiptMigration'
 import {
   clearRunAbort,
   cancelRun,
@@ -72,6 +73,13 @@ const childProgress = new Map<string, ChildProgress>()
 /** At most one live progress update per child per this many ms. */
 const PROGRESS_INTERVAL_MS = 1_000
 const ACTIVITY_MAX_CHARS = 200
+/**
+ * Child-status waits are event-driven (fs.watch on the child's run dir) with
+ * this as the backstop recheck — a polling timer on a long await did a sync
+ * `status.json` read twice a second for the whole wait.
+ */
+const CHILD_WATCH_DEBOUNCE_MS = 150
+const CHILD_WATCH_BACKSTOP_MS = 5_000
 
 export { formatAgentInstanceLabel }
 
@@ -144,14 +152,20 @@ export function registerChildInstance(
   registerInlineChildRun(parentRunId, childRunId)
 }
 
+/**
+ * Drop every in-memory trace of a child. Always purges all four registries:
+ * a child whose run dir vanished (deleted, or a `status.json` too corrupt for
+ * `loadStatus` to parse) has no parent link left to read, and the old early
+ * return on a missing parent left `childWorkspace`/`childProgress` entries (and
+ * the inline-child set in the run registry) behind for the rest of the app's
+ * life — a leak, not a no-op. Safe to call repeatedly for an unknown child.
+ */
 export function unregisterChildInstance(childRunId: string): void {
-  const parentRunId = childToParent.get(childRunId)
+  childToParent.delete(childRunId)
   childWorkspace.delete(childRunId)
   const progress = childProgress.get(childRunId)
   if (progress?.timer) clearTimeout(progress.timer)
   childProgress.delete(childRunId)
-  if (!parentRunId) return
-  childToParent.delete(childRunId)
   unregisterInlineChildRun(childRunId)
 }
 
@@ -301,16 +315,39 @@ export function notifyChildTerminal(
 
 export type PullAgentInstanceView = 'summary' | 'outline' | 'tail'
 
-function wroteFilesFromReceipt(runDir: string): string[] {
+function readChildReceipt(runDir: string): RunReceipt | null {
   const receiptPath = join(runDir, RUN_RECEIPT_FILENAME)
-  if (!existsSync(receiptPath)) return []
+  if (!existsSync(receiptPath)) return null
   try {
     const raw = JSON.parse(readFileSync(receiptPath, 'utf8')) as unknown
-    const parsed = RunReceiptSchema.safeParse(raw)
-    return parsed.success ? parsed.data.wroteFiles : []
+    // Migrate before the parse: `version` is a `z.literal(RUN_RECEIPT_VERSION)`,
+    // so a receipt from an older build (v2/3/4) otherwise parses to null and the
+    // parent silently loses this child's verification line and wroteFiles block.
+    const parsed = RunReceiptSchema.safeParse(migrateLegacyReceipt(raw))
+    return parsed.success ? parsed.data : null
   } catch {
-    return []
+    return null
   }
+}
+
+/**
+ * Whether the child's own code passed a check after its last change, as its
+ * receipt judged it — so the parent verifies from evidence, not only from the
+ * child's prose. Nothing when the child wrote no code.
+ */
+function formatChildVerificationLine(receipt: RunReceipt | null): string | null {
+  if (!receipt) return null
+  const gate = receipt.verificationGate
+  if (gate?.wouldFire) {
+    return gate.reason === 'check_failed'
+      ? 'verification: FAILED — the last check after its code changes did not pass'
+      : 'verification: UNCHECKED — no test, typecheck or lint run passed after its last code change'
+  }
+  const v = receipt.verification
+  if (!v?.lastMutationAt) return null
+  return v.verifiedAfterLastMutation
+    ? 'verification: checked — a check passed after its last code change'
+    : 'verification: UNCHECKED — no test, typecheck or lint run passed after its last code change'
 }
 
 function formatWroteFilesBlock(wroteFiles: string[]): string | null {
@@ -358,8 +395,11 @@ function formatChildSummary(
       if (text) parts.push(text)
     }
   }
-  const wroteBlock = formatWroteFilesBlock(wroteFilesFromReceipt(runDir))
+  const receipt = readChildReceipt(runDir)
+  const wroteBlock = formatWroteFilesBlock(receipt?.wroteFiles ?? [])
   if (wroteBlock) parts.push(wroteBlock)
+  const verificationLine = formatChildVerificationLine(receipt)
+  if (verificationLine) parts.push(verificationLine)
   if (parts.length > 0) return parts.join('\n\n')
   if (status?.status === 'cancelled') return 'Instance cancelled.'
   if (status?.status === 'error') return status.error ?? 'Instance failed.'
@@ -398,11 +438,14 @@ function formatChildOutline(
         : `${text.slice(0, CHILD_OUTLINE_LINE_MAX_CHARS)}…[truncated]`
     lines.push(`${i + 1}. ${msg.role}: ${capped || '(empty)'}`)
   }
-  const wroteBlock = formatWroteFilesBlock(wroteFilesFromReceipt(runDir))
+  const receipt = readChildReceipt(runDir)
+  const wroteBlock = formatWroteFilesBlock(receipt?.wroteFiles ?? [])
   if (wroteBlock) {
     lines.push('')
     lines.push(wroteBlock)
   }
+  const verificationLine = formatChildVerificationLine(receipt)
+  if (verificationLine) lines.push(verificationLine)
   return capChildText(lines.join('\n'), CHILD_OUTLINE_MAX_CHARS)
 }
 
@@ -471,11 +514,22 @@ export function waitForChildTerminal(
   }
   return new Promise((resolve, reject) => {
     let settled = false
-    let pollTimer: ReturnType<typeof setInterval> | undefined
+    const watchers: FSWatcher[] = []
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined
+    let backstopTimer: ReturnType<typeof setTimeout> | undefined
     const cleanup = (): void => {
       settled = true
       clearTimeout(timer)
-      if (pollTimer) clearInterval(pollTimer)
+      if (debounceTimer) clearTimeout(debounceTimer)
+      if (backstopTimer) clearTimeout(backstopTimer)
+      for (const watcher of watchers) {
+        try {
+          watcher.close()
+        } catch {
+          // already closed
+        }
+      }
+      watchers.length = 0
       signal?.removeEventListener('abort', onAbort)
       const waiters = childWaiters.get(childRunId)
       waiters?.delete(onResolve)
@@ -517,6 +571,17 @@ export function waitForChildTerminal(
     const recheck = (): void => {
       if (settled) return
       const status = loadStatus(resolveRunDir(workspacePath, childRunId))
+      if (!status) {
+        // `loadStatus` answers null for a run dir that vanished and for a
+        // `status.json` too corrupt to parse. Either way the child has no
+        // status left to wait on, and the inline finish path that normally
+        // unregisters it needs a parent link plus a startAgentRun finally that
+        // saw the status — neither exists for a child whose dir is gone, so
+        // its maps entry outlived the run. Memory-only: the run's abort entry
+        // and its disk state are untouched, so this cannot end a run.
+        unregisterChildInstance(childRunId)
+        return
+      }
       const phase = terminalPhaseFromStatus(status)
       if (phase) {
         void summarizeChildRunAsync(workspacePath, childRunId).then(
@@ -539,10 +604,47 @@ export function waitForChildTerminal(
     recheck()
     if (settled) return
 
-    // After app restart maps are empty — poll disk until terminal/timeout.
+    // After app restart the maps are empty, so nothing will resolve the waiter
+    // in memory: follow the child's run dir on the filesystem instead of
+    // re-reading `status.json` on a 500 ms timer. The run dir's parent is
+    // watched too, so a child whose dir is still being created is picked up.
+    // The backstop timer only re-reads; it can never end this wait early —
+    // only the caller's own timeoutMs (unchanged) rejects.
     const hasRegistration = childToParent.has(childRunId) || childWorkspace.has(childRunId)
     if (!hasRegistration) {
-      pollTimer = setInterval(recheck, 500)
+      const onFsEvent = (): void => {
+        if (settled) return
+        if (debounceTimer) clearTimeout(debounceTimer)
+        // status.json is replaced atomically — collapse the burst of events a
+        // single write produces into one read.
+        debounceTimer = setTimeout(recheck, CHILD_WATCH_DEBOUNCE_MS)
+      }
+      const armBackstop = (): void => {
+        if (settled) return
+        backstopTimer = setTimeout(() => {
+          recheck()
+          armBackstop()
+        }, CHILD_WATCH_BACKSTOP_MS)
+        backstopTimer.unref?.()
+      }
+      const runDir = resolveRunDir(workspacePath, childRunId)
+      for (const target of [runDir, dirname(runDir)]) {
+        try {
+          const watcher = watch(target, { persistent: false }, onFsEvent)
+          watcher.on('error', () => {
+            try {
+              watcher.close()
+            } catch {
+              // already closed
+            }
+          })
+          watchers.push(watcher)
+        } catch {
+          // Not watchable here (missing dir, platform without fs events) —
+          // the backstop recheck still covers it.
+        }
+      }
+      armBackstop()
     }
   })
 }

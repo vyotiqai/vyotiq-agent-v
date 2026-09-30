@@ -4,6 +4,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import {
   buildRunReceipt,
+  checkVerdict,
   writeRunReceipt,
   wroteFilesFromEvents,
   RUN_RECEIPT_FILENAME,
@@ -287,6 +288,184 @@ describe('runReceipt', () => {
         }
       ])
     ).toEqual(['src/App.cs'])
+  })
+
+  // A resumed run flushes one writes_checkpoint per invoke. Reading only the
+  // newest reported the last invoke's files as the run's whole output, while
+  // toolStats and failureClusters stayed cumulative.
+  it('accumulates wroteFiles across resumed invokes', () => {
+    const receipt = buildRunReceipt({
+      runId: 'resume-wrote',
+      status: { status: 'done', step: 6, updatedAt: new Date().toISOString(), invokeId: 2 },
+      messages: [],
+      events: [
+        {
+          at: '2026-09-03T10:00:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'resume-wrote',
+            invokeId: 1,
+            checkpointId: 'c1',
+            files: [
+              { path: 'src\\first.ts', action: 'created', undoable: true },
+              'src/legacy-string.ts',
+              { path: 'obj/Debug/a.dll', action: 'created', undoable: false },
+              { path: 'Directory', action: 'created', undoable: true }
+            ]
+          }
+        },
+        {
+          at: '2026-09-03T10:05:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'resume-wrote',
+            invokeId: 2,
+            checkpointId: 'c2',
+            // A re-write of an earlier path must not double up.
+            files: [
+              { path: 'src/first.ts', action: 'modified', undoable: true },
+              { path: 'src/second.ts', action: 'created', undoable: true }
+            ]
+          }
+        }
+      ],
+      contract: ''
+    })
+    expect(receipt.wroteFiles).toEqual([
+      'src/first.ts',
+      'src/legacy-string.ts',
+      'src/second.ts'
+    ])
+  })
+
+  // An ok:true result with no body proves nothing. It read `unknown`, which
+  // every consumer counted as a pass, so a dropped event body stamped the run
+  // verified.
+  it('does not let an empty-bodied check read as verified', () => {
+    const base = { status: 'done' as const, step: 2, updatedAt: new Date().toISOString() }
+    const empty = buildRunReceipt({
+      runId: 'empty-check',
+      status: base,
+      messages: [],
+      events: [
+        {
+          at: '2026-09-03T10:00:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'empty-check',
+            files: [{ path: 'a.ts', action: 'modified', undoable: true }]
+          }
+        },
+        {
+          at: '2026-09-03T10:01:00.000Z',
+          event: {
+            type: 'tool_result',
+            runId: 'empty-check',
+            toolCallId: 'd1',
+            name: 'diagnostics',
+            summary: 'typecheck',
+            ok: true,
+            content: ''
+          }
+        }
+      ],
+      contract: ''
+    })
+    expect(empty.verification?.lastCheckAt).toBeUndefined()
+    expect(empty.verification?.verifiedAfterLastMutation).toBe(false)
+
+    // An earlier real check must not be erased by a later empty body either.
+    const followedByEmpty = buildRunReceipt({
+      runId: 'empty-after-clean',
+      status: base,
+      messages: [],
+      events: [
+        {
+          at: '2026-09-03T10:00:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'empty-after-clean',
+            files: [{ path: 'a.ts', action: 'modified', undoable: true }]
+          }
+        },
+        {
+          at: '2026-09-03T10:01:00.000Z',
+          event: {
+            type: 'tool_result',
+            runId: 'empty-after-clean',
+            toolCallId: 'd1',
+            name: 'diagnostics',
+            summary: 'typecheck',
+            ok: true,
+            content: 'No diagnostics found.'
+          }
+        },
+        {
+          at: '2026-09-03T10:02:00.000Z',
+          event: {
+            type: 'tool_result',
+            runId: 'empty-after-clean',
+            toolCallId: 'd2',
+            name: 'diagnostics',
+            summary: 'typecheck',
+            ok: true,
+            content: '   '
+          }
+        }
+      ],
+      contract: ''
+    })
+    expect(followedByEmpty.verification).toEqual({
+      lastMutationAt: '2026-09-03T10:00:00.000Z',
+      lastCheckAt: '2026-09-03T10:01:00.000Z',
+      verifiedAfterLastMutation: true
+    })
+  })
+
+  it('keeps a receipt when one field fails the schema', () => {
+    // billedCost is finite-checked; a non-finite value used to throw out of
+    // buildRunReceipt and, on the best-effort path, cost the run its receipt.
+    const receipt = buildRunReceipt({
+      runId: 'bad-cost',
+      status: { status: 'done', step: 2, updatedAt: new Date().toISOString() },
+      messages: [{ role: 'assistant', content: 'done' }],
+      events: [
+        {
+          at: '2026-09-03T10:00:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'bad-cost',
+            files: [{ path: 'src/a.ts', action: 'modified', undoable: true }]
+          }
+        }
+      ],
+      contract: '## Goal\n\nx\n',
+      billedCost: Number.POSITIVE_INFINITY
+    })
+    // The offending field goes; everything the run actually proved stays.
+    expect(receipt.billedCost).toBeUndefined()
+    expect(receipt.runId).toBe('bad-cost')
+    expect(receipt.status).toBe('done')
+    expect(receipt.wroteFiles).toEqual(['src/a.ts'])
+    expect(receipt.verification?.lastMutationAt).toBe('2026-09-03T10:00:00.000Z')
+    expect(RunReceiptSchema.safeParse(receipt).success).toBe(true)
+  })
+
+  it('still yields a receipt when a required field is itself malformed', () => {
+    // A status outside the enum takes the fallback: a bare record that claims
+    // nothing, rather than no record at all.
+    const receipt = buildRunReceipt({
+      runId: 'bad-status',
+      status: { status: 'finished' as never, step: 3, updatedAt: new Date().toISOString() },
+      messages: [],
+      events: [],
+      contract: ''
+    })
+    expect(RunReceiptSchema.safeParse(receipt).success).toBe(true)
+    expect(receipt.runId).toBe('bad-status')
+    expect(receipt.status).not.toBe('done')
+    expect(receipt.verification).toBeUndefined()
+    expect(receipt.wroteFiles).toEqual([])
   })
 
   it('keeps cumulative metrics but scopes outcome fields to the latest invocation', () => {
@@ -808,7 +987,8 @@ describe('runReceipt', () => {
             toolCallId: 'd1',
             name: 'diagnostics',
             summary: '0 problems',
-            ok: true
+            ok: true,
+            content: 'No diagnostics found.'
           }
         }
       ],
@@ -859,6 +1039,227 @@ describe('runReceipt', () => {
       contract: ''
     })
     expect(none.verification).toBeUndefined()
+  })
+
+  // The order a real run persists: edits and checks during the turn, the
+  // writes_checkpoint flushed at invoke end. Dating the mutation by the flush
+  // left 51 of 51 writing runs in real userData reading unverified.
+  it('dates mutations by the write, not the end-of-invoke checkpoint flush', () => {
+    const base = { status: 'done' as const, step: 3, updatedAt: new Date().toISOString() }
+    const edit = {
+      at: '2026-09-03T10:00:00.000Z',
+      event: { type: 'tool_result', runId: 'r', toolCallId: 'e1', name: 'str_replace', summary: 'a.ts', ok: true }
+    }
+    const check = {
+      at: '2026-09-03T10:01:00.000Z',
+      event: {
+        type: 'tool_result',
+        runId: 'r',
+        toolCallId: 'd1',
+        name: 'diagnostics',
+        summary: '0 problems',
+        ok: true,
+        content: 'No diagnostics found.'
+      }
+    }
+    const flush = (files: Array<Record<string, unknown>>) => ({
+      at: '2026-09-03T10:05:00.000Z',
+      event: { type: 'writes_checkpoint', runId: 'r', checkpointId: 'cp', files }
+    })
+    const receipt = (events: unknown[]) =>
+      buildRunReceipt({ runId: 'r', status: base, messages: [], events: events as never, contract: '' })
+
+    const checked = receipt([
+      edit,
+      check,
+      flush([{ path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T09:59:59.900Z' }])
+    ])
+    expect(checked.verification).toEqual({
+      lastMutationAt: '2026-09-03T10:00:00.000Z',
+      lastCheckAt: '2026-09-03T10:01:00.000Z',
+      verifiedAfterLastMutation: true
+    })
+
+    // A terminal write after the check reaches only the checkpoint: its
+    // recordedAt is what makes the earlier check stale.
+    const terminalWriteAfter = receipt([
+      edit,
+      check,
+      flush([
+        { path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T09:59:59.900Z' },
+        { path: 'out.js', action: 'created', undoable: true, recordedAt: '2026-09-03T10:02:00.000Z' }
+      ])
+    ])
+    expect(terminalWriteAfter.verification?.lastMutationAt).toBe('2026-09-03T10:02:00.000Z')
+    expect(terminalWriteAfter.verification?.verifiedAfterLastMutation).toBe(false)
+
+    // A re-edit after the check is caught by its tool_result even though the
+    // path's recordedAt is its first write.
+    const reEdit = receipt([
+      edit,
+      check,
+      { ...edit, at: '2026-09-03T10:03:00.000Z', event: { ...edit.event, toolCallId: 'e2' } },
+      flush([{ path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T09:59:59.900Z' }])
+    ])
+    expect(reEdit.verification?.verifiedAfterLastMutation).toBe(false)
+
+    // A failed edit changed nothing.
+    const failedEdit = receipt([
+      edit,
+      check,
+      { at: '2026-09-03T10:03:00.000Z', event: { ...edit.event, toolCallId: 'e3', ok: false } },
+      flush([{ path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T09:59:59.900Z' }])
+    ])
+    expect(failedEdit.verification?.verifiedAfterLastMutation).toBe(true)
+
+    // Checkpoints from before recordedAt existed keep the flush time.
+    const legacy = receipt([edit, check, flush([{ path: 'a.ts', action: 'modified', undoable: true }])])
+    expect(legacy.verification?.lastMutationAt).toBe('2026-09-03T10:05:00.000Z')
+    expect(legacy.verification?.verifiedAfterLastMutation).toBe(false)
+
+    // One unstamped file must not date the whole checkpoint at the flush: the
+    // stamped file carries its own time and that is what the run is judged on.
+    const mixed = receipt([
+      edit,
+      check,
+      flush([
+        { path: 'legacy.ts', action: 'modified', undoable: true },
+        { path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T09:59:59.900Z' }
+      ])
+    ])
+    expect(mixed.verification).toEqual({
+      lastMutationAt: '2026-09-03T10:00:00.000Z',
+      lastCheckAt: '2026-09-03T10:01:00.000Z',
+      verifiedAfterLastMutation: true
+    })
+
+    // Unstamped first, stamped later still wins; the flush time only returns
+    // when no file in the checkpoint carries a stamp.
+    const unstampedFirst = receipt([
+      edit,
+      check,
+      flush([
+        { path: 'a.ts', action: 'modified', undoable: true },
+        { path: 'legacy.ts', action: 'modified', undoable: true }
+      ])
+    ])
+    expect(unstampedFirst.verification?.lastMutationAt).toBe('2026-09-03T10:05:00.000Z')
+  })
+
+  describe('which check results count, and how', () => {
+    const base = { status: 'done' as const, step: 3, updatedAt: new Date().toISOString() }
+    const at = (min: number): string => `2026-09-03T10:${String(min).padStart(2, '0')}:00.000Z`
+    const result = (min: number, name: string, ok: boolean, content: string, summary = name) => ({
+      at: at(min),
+      event: { type: 'tool_result', runId: 'r', toolCallId: `c${min}`, name, summary, ok, content }
+    })
+    const edit = (min: number, path = 'src/a.ts') => result(min, 'str_replace', true, `Replaced 1 occurrence in ${path}`, path)
+    const receipt = (events: unknown[]) =>
+      buildRunReceipt({ runId: 'r', status: base, messages: [], events: events as never, contract: '' })
+
+    // The shape tools/runTests.ts returns for a failing run: exit 1, ok false.
+    const failingTests = 'command: pnpm run test\nexit: 1\nTests: 9 passed, 3 failed (exit 1)'
+
+    it('reads a failing test run after a clean check as unverified', () => {
+      const r = receipt([edit(0), result(1, 'diagnostics', true, 'command: tsc\n\n(no output)'), result(2, 'run_tests', false, failingTests)])
+      expect(r.verification).toMatchObject({ lastCheckAt: at(2), verifiedAfterLastMutation: false })
+    })
+
+    it('ignores a check that never ran: denied, unparseable, or a skipped typecheck', () => {
+      const r = receipt([
+        edit(0),
+        result(1, 'run_tests', true, 'command: pnpm run test\nTests: 4 passed, 0 failed (exit 0)'),
+        result(2, 'diagnostics', false, 'diagnostics is denied for path_scope-shared inline instances without a worktree.'),
+        result(3, 'run_tests', false, 'command: node -e x(1)\nDisallowed character in diagnostics command: (')
+      ])
+      expect(r.verification).toMatchObject({ lastCheckAt: at(1), verifiedAfterLastMutation: true })
+
+      const skipped = receipt([
+        edit(0),
+        result(1, 'diagnostics', true, 'No TypeScript project (no tsconfig / typecheck script); typecheck skipped.')
+      ])
+      expect(skipped.verification?.lastCheckAt).toBeUndefined()
+      expect(skipped.verification?.verifiedAfterLastMutation).toBe(false)
+    })
+
+    it('reads a timed-out check as failed', () => {
+      const r = receipt([edit(0), result(1, 'run_tests', false, 'command: pnpm run test\nTest command was killed (timeout)')])
+      expect(r.verification?.verifiedAfterLastMutation).toBe(false)
+    })
+
+    // What tools/diagnostics.ts returns for `eslint . --max-warnings 0` with
+    // one warning: parseable diagnostics, so ok:true, and the exit code
+    // written into the body. The verdict must follow the exit code, not the
+    // severities — before, the warning-only body read clean and stamped a
+    // failed lint verified.
+    const warningLint = (exitLine: string) =>
+      [
+        'command: eslint . --format json --max-warnings 0',
+        ...(exitLine ? [exitLine] : []),
+        'diagnostics: 1',
+        '',
+        'src/a.ts:1:7: warning: \'x\' is assigned a value but never used (no-unused-vars)'
+      ].join('\n')
+
+    it('reads a diagnostics result that exited non-zero as failed, whatever the severities say', () => {
+      expect(checkVerdict('diagnostics', true, warningLint('exit: 1'))).toBe('failed')
+      // Exit 0 with the same warnings is still a pass: eslint and
+      // tsc --noEmit exit 0 on warnings.
+      expect(checkVerdict('diagnostics', true, warningLint(''))).toBe('clean')
+      // run_tests already returns ok:false on a non-zero exit, and terminal
+      // reads its own exit_code: — neither verdict changes.
+      expect(checkVerdict('run_tests', false, 'command: pnpm run test\nexit: 1\nTests: 9 passed, 1 failed (exit 1)')).toBe('failed')
+      expect(
+        checkVerdict('terminal', true, 'cwd: /ws\ncommand: pnpm run test\nexit_code: 0\nTests: 4 passed, 0 failed (exit 0)', 'pnpm run test')
+      ).toBe('clean')
+    })
+
+    it('does not let a plan.md or contract.md edit make a check stale', () => {
+      const r = receipt([
+        edit(0),
+        result(1, 'diagnostics', true, 'command: tsc\n\n(no output)'),
+        edit(2, 'plan.md'),
+        edit(3, './contract.md')
+      ])
+      expect(r.verification).toMatchObject({ lastMutationAt: at(0), verifiedAfterLastMutation: true })
+    })
+
+    const flush = (min: number, files: Array<Record<string, unknown>>, undone = false) => ({
+      at: at(min),
+      event: { type: 'writes_checkpoint', runId: 'r', checkpointId: 'cp', files, ...(undone ? { undone: true } : {}) }
+    })
+
+    it('dates a non-edit re-write of an already-written path by lastMutatedAt', () => {
+      const r = receipt([
+        edit(0),
+        result(1, 'run_tests', true, 'command: pnpm run test\nTests: 4 passed, 0 failed (exit 0)'),
+        flush(5, [{ path: 'src/a.ts', action: 'modified', undoable: true, recordedAt: at(0), lastMutatedAt: at(2) }])
+      ])
+      expect(r.verification).toMatchObject({ lastMutationAt: at(2), verifiedAfterLastMutation: false })
+    })
+
+    it('skips build output a check itself leaves behind', () => {
+      const r = receipt([
+        edit(0),
+        result(1, 'run_tests', true, 'command: dotnet test\nTests: 4 passed, 0 failed (exit 0)'),
+        flush(5, [
+          { path: 'src/a.cs', action: 'modified', undoable: true, recordedAt: at(0) },
+          { path: 'obj/Debug/a.dll', action: 'created', undoable: true, recordedAt: at(2) }
+        ])
+      ])
+      expect(r.verification).toMatchObject({ lastMutationAt: at(0), verifiedAfterLastMutation: true })
+    })
+
+    it('dates a discarded file by the undo, a kept one by its write', () => {
+      const files = (resolved: string) => [
+        { path: 'src/a.ts', action: 'modified', undoable: true, recordedAt: at(0), resolved }
+      ]
+      const check = result(1, 'run_tests', true, 'command: pnpm run test\nTests: 4 passed, 0 failed (exit 0)')
+      const kept = receipt([edit(0), check, flush(4, files('kept'), true)])
+      expect(kept.verification?.verifiedAfterLastMutation).toBe(true)
+      const discarded = receipt([edit(0), check, flush(4, files('discarded'), true)])
+      expect(discarded.verification).toMatchObject({ lastMutationAt: at(4), verifiedAfterLastMutation: false })
+    })
   })
 
   it('writes receipt.json atomically', () => {
@@ -1030,4 +1431,184 @@ describe('runReceipt', () => {
     expect(parsed.success && parsed.data.verificationGate).toBeUndefined()
   })
 
+  // The zip is positional, so it only means anything when the two lists are the
+  // same length. When they are not, dropping the message side left every check on
+  // the slimmed event-side verdict — and a check whose result never reached the
+  // event file could then read as a pass it never earned.
+  it('does not read clean when the message and event check lists cannot be zipped', () => {
+    const base = { status: 'done' as const, step: 2, updatedAt: '2026-09-19T00:00:00.000Z' }
+    const events: PersistedEvent[] = [
+      {
+        at: '2026-09-03T10:00:00.000Z',
+        event: {
+          type: 'writes_checkpoint',
+          runId: 'zip',
+          files: [{ path: 'a.ts', action: 'modified', undoable: true }]
+        }
+      },
+      {
+        at: '2026-09-03T10:01:00.000Z',
+        event: {
+          type: 'tool_result',
+          runId: 'zip',
+          toolCallId: 'd1',
+          name: 'diagnostics',
+          summary: 'typecheck',
+          ok: true,
+          content: 'No diagnostics found.'
+        }
+      }
+    ]
+    const oneCheck: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'd1', name: 'diagnostics', arguments: '{"kind":"typecheck"}' }]
+      },
+      { role: 'tool', toolCallId: 'd1', toolName: 'diagnostics', ok: true, content: 'No diagnostics found.' }
+    ]
+    // Control: one message-side verdict against one event-side check — aligned,
+    // so the full-content verdict applies and the run is verified.
+    const aligned = buildRunReceipt({
+      runId: 'zip-aligned',
+      status: base,
+      messages: oneCheck,
+      events,
+      contract: ''
+    })
+    expect(aligned.verification?.verifiedAfterLastMutation).toBe(true)
+
+    // One extra message-side check the event file never recorded: the two lists
+    // cannot be lined up, so the event-side `clean` is a result with no partner.
+    const misaligned = buildRunReceipt({
+      runId: 'zip-misaligned',
+      status: base,
+      messages: [
+        ...oneCheck,
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 't1', name: 'run_tests', arguments: '{}' }]
+        },
+        {
+          role: 'tool',
+          toolCallId: 't1',
+          toolName: 'run_tests',
+          ok: true,
+          content: 'command: npx vitest run\nexit: 0\n'
+        }
+      ],
+      events,
+      contract: ''
+    })
+    expect(misaligned.verification?.verifiedAfterLastMutation).toBe(false)
+    expect(misaligned.verification?.lastCheckAt).toBeUndefined()
+
+    // A failing check keeps its `failed` verdict even when the zip misaligns —
+    // evidence of a failure does not need a partner to count.
+    const misalignedFailure = buildRunReceipt({
+      runId: 'zip-misaligned-failed',
+      status: base,
+      messages: [
+        ...oneCheck,
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'd2', name: 'diagnostics', arguments: '{"kind":"lint"}' }]
+        },
+        {
+          role: 'tool',
+          toolCallId: 'd2',
+          toolName: 'diagnostics',
+          ok: true,
+          content: 'src/a.ts(1,1): error TS2304: Cannot find name x'
+        }
+      ],
+      events: [
+        events[0],
+        {
+          at: '2026-09-03T10:01:00.000Z',
+          event: {
+            type: 'tool_result',
+            runId: 'zip-misaligned-failed',
+            toolCallId: 'd1',
+            name: 'diagnostics',
+            summary: 'typecheck',
+            ok: true,
+            content: 'src/a.ts(1,1): error TS2304: Cannot find name x'
+          }
+        }
+      ],
+      contract: ''
+    })
+    expect(misalignedFailure.verification?.lastCheckAt).toBe('2026-09-03T10:01:00.000Z')
+    expect(misalignedFailure.verification?.verifiedAfterLastMutation).toBe(false)
+  })
+
+  // `Date.parse` order, not string order: a stored stamp need not be a
+  // `toISOString` value, and an offset-bearing one sorts before a Z stamp that
+  // is later in real time ('T15:00+05:30' < 'T10:00Z' as text, but 09:30Z).
+  it('orders an offset-bearing timestamp by instant, not by string', () => {
+    const base = { status: 'done' as const, step: 3, updatedAt: '2026-09-19T00:00:00.000Z' }
+    const receipt = (files: Array<Record<string, unknown>>, checkAt?: string) =>
+      buildRunReceipt({
+        runId: 'offset',
+        status: base,
+        messages: [],
+        events: [
+          {
+            at: '2026-09-03T10:10:00.000Z',
+            event: {
+              type: 'writes_checkpoint',
+              runId: 'offset',
+              files
+            }
+          },
+          ...(checkAt
+            ? [
+                {
+                  at: checkAt,
+                  event: {
+                    type: 'tool_result',
+                    runId: 'offset',
+                    toolCallId: 'd1',
+                    name: 'diagnostics',
+                    summary: 'typecheck',
+                    ok: true,
+                    content: 'No diagnostics found.'
+                  }
+                }
+              ]
+            : [])
+        ],
+        contract: ''
+      })
+
+    // Two writes: 15:00+05:30 is 09:30Z, so the 10:00Z stamp is the later
+    // mutation. String order would have picked the offset stamp.
+    const later = receipt([
+      { path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T15:00:00+05:30' },
+      { path: 'b.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T10:00:00.000Z' }
+    ])
+    expect(later.verification?.lastMutationAt).toBe('2026-09-03T10:00:00.000Z')
+
+    // Check at 10:01Z is after a 15:00+05:30 (=09:30Z) write — verified, which
+    // the string compare ('...T10:01Z' >= '...T15:00+05:30' → false) denied.
+    const after = receipt(
+      [{ path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T15:00:00+05:30' }],
+      '2026-09-03T10:01:00.000Z'
+    )
+    expect(after.verification).toEqual({
+      lastMutationAt: '2026-09-03T15:00:00+05:30',
+      lastCheckAt: '2026-09-03T10:01:00.000Z',
+      verifiedAfterLastMutation: true
+    })
+
+    // And the genuinely older check stays stale.
+    const before = receipt(
+      [{ path: 'a.ts', action: 'modified', undoable: true, recordedAt: '2026-09-03T15:00:00+05:30' }],
+      '2026-09-03T09:00:00.000Z'
+    )
+    expect(before.verification?.verifiedAfterLastMutation).toBe(false)
+  })
 })

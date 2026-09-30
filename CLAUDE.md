@@ -12,7 +12,7 @@ resolve it by restyling.
 | What | Where |
 | --- | --- |
 | Tokens, `@theme` mapping, `@utility` helpers | `src/renderer/src/styles.css` |
-| Shared primitives (Button, IconButton, Badge, Tabs, Segmented, StatusGlyph, Keys, ProgressBar/Ring, Menu, Tooltip, FormRow…) | `src/renderer/src/lib/ui/` |
+| Shared primitives (Button, IconButton, Badge, Tabs, Segmented, StatusGlyph, Keys, ProgressBar, Pie, Sparkbars, Menu, Tooltip, FormRow…) | `src/renderer/src/lib/ui/` |
 | Icon allowlist | `src/renderer/src/lib/icons/index.tsx` |
 | Feature surfaces | `src/renderer/src/features/` |
 

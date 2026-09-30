@@ -114,6 +114,19 @@ function receiptStatusGlyph(status: RunReceipt['status']): TaskState {
   }
 }
 
+/**
+ * Why a receipt reads verified or not. Unverified has two causes that need
+ * different follow-ups: the newest check failed, or files changed after it.
+ * A read-only run has no mutation at all, so only the first can apply.
+ */
+function verificationLine(v: NonNullable<RunReceipt['verification']>): string {
+  if (v.verifiedAfterLastMutation) return 'Verified after last file mutation'
+  const checkIsNewer = v.lastCheckAt != null && (v.lastMutationAt == null || v.lastCheckAt >= v.lastMutationAt)
+  if (checkIsNewer) return 'Last check did not pass (unverified)'
+  if (v.lastCheckAt == null) return 'No check after file mutations (unverified)'
+  return 'File mutations after last successful check (unverified)'
+}
+
 function PathList({
   paths,
   onOpenFile,
@@ -289,9 +302,7 @@ function ReceiptSummary({
             )}
             data-receipt-verification={String(receipt.verification.verifiedAfterLastMutation)}
           >
-            {receipt.verification.verifiedAfterLastMutation
-              ? 'Verified after last file mutation'
-              : 'File mutations after last successful check (unverified)'}
+            {verificationLine(receipt.verification)}
           </p>
         ) : null}
       </section>

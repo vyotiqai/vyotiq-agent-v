@@ -39,6 +39,8 @@ export function useComposerMentions({
 }) {
   const [view, setView] = useState<MentionMenuView>('root')
   const [paths, setPaths] = useState<string[]>([])
+  /** Matching directories from the same search, ranked apart by main. */
+  const [dirs, setDirs] = useState<string[]>([])
   const [pathsTotal, setPathsTotal] = useState(0)
   const [filesLimit, setFilesLimit] = useState(FILES_PAGE)
   const [docPaths, setDocPaths] = useState<string[]>([])
@@ -46,6 +48,8 @@ export function useComposerMentions({
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [recentFiles, setRecentFiles] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  /** Why the last suggest failed — null while it is fine. Never shown as "no matches". */
+  const [suggestError, setSuggestError] = useState<string | null>(null)
   const [chatsLoading, setChatsLoading] = useState(false)
   const [docsLoading, setDocsLoading] = useState(false)
   const [rulesLoading, setRulesLoading] = useState(false)
@@ -64,11 +68,14 @@ export function useComposerMentions({
   useEffect(() => {
     setRecentFiles([])
     setPaths([])
+
+    setDirs([])
     setPathsTotal(0)
     setDocPaths([])
     setRules([])
     setRuns([])
     setBranchName(null)
+    setSuggestError(null)
     setView('root')
     setFilesLimit(FILES_PAGE)
     setActiveIndex(0)
@@ -78,6 +85,7 @@ export function useComposerMentions({
   // New @-token only — do not reset view when the query edits (allows Files/Chats filter).
   useEffect(() => {
     setDismissed(false)
+    setSuggestError(null)
     setView('root')
     setFilesLimit(FILES_PAGE)
   }, [token?.start])
@@ -86,19 +94,13 @@ export function useComposerMentions({
   useEffect(() => {
     if (!token || !workspacePath || !window.vyotiq?.workspaceSuggestPaths) {
       setPaths([])
+
+      setDirs([])
       setPathsTotal(0)
       setLoading(false)
       return
     }
     if (view !== 'root' && view !== 'files') return
-    // The root lists recent files until something is typed: no search to run.
-    if (view === 'root' && !token.query.trim()) {
-      ++reqIdRef.current
-      setPaths([])
-      setPathsTotal(0)
-      setLoading(false)
-      return
-    }
     const reqId = ++reqIdRef.current
     setLoading(true)
     const maxResults = view === 'files' ? filesLimit : 8
@@ -113,17 +115,29 @@ export function useComposerMentions({
           if (reqId !== reqIdRef.current) return
           if (res.ok) {
             setPaths(res.data.paths)
+
+            setDirs(res.data.dirs)
             setPathsTotal(res.data.total)
+            setSuggestError(null)
           } else {
+            // A failed search must not read as "nothing matches" — the menu
+            // shows the reason instead of an empty Files list.
             setPaths([])
+
+            setDirs([])
             setPathsTotal(0)
+            setSuggestError(res.error)
           }
         })
-        .catch(() => {
-          if (reqId === reqIdRef.current) {
-            setPaths([])
-            setPathsTotal(0)
-          }
+        .catch((err: unknown) => {
+          if (reqId !== reqIdRef.current) return
+          setPaths([])
+
+          setDirs([])
+          setPathsTotal(0)
+          setSuggestError(
+            err instanceof Error ? err.message : 'Workspace file search failed'
+          )
         })
         .finally(() => {
           if (reqId === reqIdRef.current) setLoading(false)
@@ -232,7 +246,10 @@ export function useComposerMentions({
     if (!token) return []
     if (view === 'files') {
       if (!hasWorkspace) return []
-      return buildFileMentionItems(paths, pathsTotal, paths.length)
+      return buildFileMentionItems(paths, pathsTotal, paths.length, {
+        paths: dirs,
+        query: token.query
+      })
     }
     if (view === 'docs') {
       if (!hasWorkspace) return []
@@ -273,6 +290,7 @@ export function useComposerMentions({
       query: token.query,
       recentFiles: hasWorkspace ? [...recentFiles, ...taskFiles] : [],
       matchingFiles: hasWorkspace ? paths : [],
+      matchingFolders: hasWorkspace ? dirs : [],
       includeCodebase: hasWorkspace,
       branchName
     })
@@ -280,6 +298,7 @@ export function useComposerMentions({
     token,
     view,
     paths,
+    dirs,
     pathsTotal,
     docPaths,
     rules,
@@ -355,6 +374,12 @@ export function useComposerMentions({
           rememberFile(mention.path)
           break
         }
+        case 'folder': {
+          if (!workspacePath || !isSafeWorkspaceRelPath(item.path)) return null
+          mention = { kind: 'folder', path: item.path.replace(/\\/g, '/') }
+          rememberFile(mention.path)
+          break
+        }
         case 'docs': {
           if (!workspacePath || !isSafeWorkspaceRelPath(item.path)) return null
           mention = { kind: 'docs', path: item.path.replace(/\\/g, '/') }
@@ -397,6 +422,8 @@ export function useComposerMentions({
     setView,
     items,
     loading: menuLoading,
+    /** Set when the workspace file search failed, so it is not shown as "no matches". */
+    error: suggestError,
     activeIndex,
     setActiveIndex,
     activeItem,

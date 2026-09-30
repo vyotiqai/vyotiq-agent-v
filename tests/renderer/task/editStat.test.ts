@@ -29,6 +29,22 @@ describe('editStatOf', () => {
     expect(editStatOf(row('edit', { path: 'x.ts', diff }))).toEqual({ path: 'x.ts', exact: true, add: 2, del: 1 })
   })
 
+  it('counts a hunk body row that looks like a file header', () => {
+    // The .sql note is a removed/added line whose own text starts with -/+,
+    // so the rows read `--- ` and `+++ ` — content, not the two headers.
+    const diff = ['--- a/q.sql', '+++ b/q.sql', '@@ -1,4 +1,4 @@', ' select 1;', '--- legacy note', '+++ new note', ' select 2;'].join('\n')
+    expect(editStatOf(row('edit', { path: 'x.ts', diff }))).toEqual({ path: 'x.ts', exact: true, add: 1, del: 1 })
+  })
+
+  it('counts a diff that carries no hunk header as a body', () => {
+    expect(editStatOf(row('edit', { path: 'x.ts', diff: '-b\n+c' }))).toEqual({ path: 'x.ts', exact: true, add: 1, del: 1 })
+  })
+
+  it('cannot count a hunk body row that carries no sign', () => {
+    const diff = ['--- a/x.ts', '+++ b/x.ts', '@@ -1,1 +1,1 @@', 'a', 'this row is malformed'].join('\n')
+    expect(editStatOf(row('edit', { path: 'x.ts', diff }))).toEqual({ path: 'x.ts', exact: false })
+  })
+
   it('counts every line of a created file, and nothing of an overwrite', () => {
     expect(editStatOf(row('edit', { path: 'new.ts', contents: 'one\ntwo\n' }, 'Created new.ts (8 chars)'))).toEqual({
       path: 'new.ts',

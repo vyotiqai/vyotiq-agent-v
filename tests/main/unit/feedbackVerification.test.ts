@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   createVerificationTracker,
-  evaluateVerificationGate
+  evaluateVerificationGate,
+  verificationNudgeText
 } from '@main/agent/feedback/verification'
 
 /** Real tsc-shaped diagnostic line — parseDiagnosticLines treats this as an error. */
@@ -10,6 +11,15 @@ const CLEAN_DIAGNOSTICS = 'No diagnostics found.'
 const SKIPPED_TESTS = 'No test runner detected in this workspace; skipping.'
 const PASSING_TESTS = 'Tests: 12 passed, 0 failed'
 const FAILING_TESTS = 'Tests: 9 passed, 3 failed'
+// The shapes the real tools return (tools/runTests.ts, tools/diagnostics.ts):
+// a failing test run exits non-zero, so it arrives `ok: false`.
+const FAILING_TESTS_RESULT =
+  'command: pnpm run test\nexit: 1\nTests: 9 passed, 3 failed (exit 1)\n✖ adds two numbers'
+const TESTS_TIMED_OUT = 'command: pnpm run test\nTest command was killed (timeout)\nRUN v4'
+const SKIPPED_TYPECHECK = 'No TypeScript project (no tsconfig / typecheck script); typecheck skipped.'
+const DENIED_DIAGNOSTICS =
+  'diagnostics is denied for path_scope-shared inline instances without a worktree. Use edit/str_replace within path_scope.'
+const UNPARSEABLE_COMMAND = 'command: node -e console.log(1)\nDisallowed character in diagnostics command: ('
 
 describe('verification tracker', () => {
   it('treats a clean check after a mutation as verified', () => {
@@ -55,6 +65,29 @@ describe('verification tracker', () => {
     expect(evaluateVerificationGate(passing.state()).wouldFire).toBe(false)
   })
 
+  // A failing test run is `ok: false`. Dropping it as if it never ran let the
+  // earlier clean diagnostics stand, and the turn read verified.
+  it('reads a failing test run after a clean check as a failed check', () => {
+    const t = createVerificationTracker()
+    t.noteMutation('src/a.ts', true)
+    t.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, true)
+    t.noteToolResult('run_tests', FAILING_TESTS_RESULT, false)
+
+    expect(t.state().verifiedAfterLastMutation).toBe(false)
+    expect(evaluateVerificationGate(t.state())).toMatchObject({
+      wouldFire: true,
+      reason: 'check_failed'
+    })
+  })
+
+  it('reads a timed-out test run as a failed check', () => {
+    const t = createVerificationTracker()
+    t.noteMutation('src/a.ts', true)
+    t.noteToolResult('run_tests', TESTS_TIMED_OUT, false)
+
+    expect(evaluateVerificationGate(t.state()).reason).toBe('check_failed')
+  })
+
   it('does not let a skipped test runner stamp the verified state', () => {
     const t = createVerificationTracker()
     t.noteMutation('src/a.ts', true)
@@ -67,12 +100,63 @@ describe('verification tracker', () => {
     })
   })
 
-  it('ignores a failed check result', () => {
+  it('does not let a skipped typecheck stamp the verified state', () => {
+    const t = createVerificationTracker()
+    t.noteMutation('src/main.py', true)
+    t.noteToolResult('diagnostics', SKIPPED_TYPECHECK, true)
+
+    expect(evaluateVerificationGate(t.state())).toMatchObject({
+      wouldFire: true,
+      reason: 'never_checked'
+    })
+  })
+
+  // The same empty result the receipt refuses to read as a pass: `ok: true`
+  // with no body proved nothing, and the gate said verified.
+  it('does not let an empty-bodied check stamp the verified state', () => {
+    const t = createVerificationTracker()
+    t.noteMutation('src/a.ts', true)
+    t.noteToolResult('diagnostics', '', true)
+
+    expect(t.state().verifiedAfterLastMutation).toBe(false)
+    expect(evaluateVerificationGate(t.state())).toMatchObject({
+      wouldFire: true,
+      reason: 'never_checked'
+    })
+
+    // Whitespace-only is the same: nothing ran, nothing was proven.
+    const blank = createVerificationTracker()
+    blank.noteMutation('src/a.ts', true)
+    blank.noteToolResult('run_tests', '   \n ', true)
+    expect(evaluateVerificationGate(blank.state()).reason).toBe('never_checked')
+
+    // An earlier clean check still stands; the empty body adds no failure to it.
+    const earlier = createVerificationTracker()
+    earlier.noteMutation('src/a.ts', true)
+    earlier.noteToolResult('run_tests', PASSING_TESTS, true)
+    earlier.noteToolResult('diagnostics', '', true)
+    expect(earlier.state().verifiedAfterLastMutation).toBe(true)
+    expect(evaluateVerificationGate(earlier.state()).wouldFire).toBe(false)
+  })
+
+  it('treats a check that never started as absent, not failed', () => {
     const t = createVerificationTracker()
     t.noteMutation('src/a.ts', true)
     t.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, false)
+    t.noteToolResult('diagnostics', DENIED_DIAGNOSTICS, false)
+    t.noteToolResult('run_tests', UNPARSEABLE_COMMAND, false)
 
-    expect(evaluateVerificationGate(t.state()).wouldFire).toBe(true)
+    expect(evaluateVerificationGate(t.state())).toMatchObject({
+      wouldFire: true,
+      reason: 'never_checked'
+    })
+
+    // …and a clean check before it still stands.
+    const earlier = createVerificationTracker()
+    earlier.noteMutation('src/a.ts', true)
+    earlier.noteToolResult('run_tests', PASSING_TESTS, true)
+    earlier.noteToolResult('diagnostics', DENIED_DIAGNOSTICS, false)
+    expect(earlier.state().verifiedAfterLastMutation).toBe(true)
   })
 
   it('does not count a mutation whose tool call failed', () => {
@@ -86,7 +170,7 @@ describe('verification tracker', () => {
   it('never fires on a read-only turn', () => {
     const t = createVerificationTracker()
     t.noteToolResult('read', 'file contents', true)
-    t.noteCheckpointFileCount(0)
+    t.noteOtherWriteCount(0)
 
     expect(t.state().mutated).toBe(false)
     expect(evaluateVerificationGate(t.state()).wouldFire).toBe(false)
@@ -96,8 +180,8 @@ describe('verification tracker', () => {
     // A terminal `sed -i`, an MCP writer or a watched out-of-band change
     // reaches the write checkpoint without any edit tool call.
     const t = createVerificationTracker()
+    t.noteOtherWriteCount(2)
     t.noteToolResult('terminal', 'exit 0', true)
-    t.noteCheckpointFileCount(2)
 
     expect(t.state().mutated).toBe(true)
     expect(evaluateVerificationGate(t.state())).toMatchObject({
@@ -107,24 +191,46 @@ describe('verification tracker', () => {
   })
 
   it('keeps an edit and a clean check in the same step verified', () => {
-    // Regression guard: the end-of-step checkpoint stamp must not re-order
-    // itself after a same-step check and flip a verified turn to unverified.
+    // Edit tools never move the other-write count, so the step-end
+    // reconciliation after a same-step check stamps nothing.
     const t = createVerificationTracker()
     t.noteMutation('src/a.ts', true)
+    t.noteOtherWriteCount(0)
     t.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, true)
-    t.noteCheckpointFileCount(1)
+    t.noteOtherWriteCount(0)
 
     expect(evaluateVerificationGate(t.state()).wouldFire).toBe(false)
   })
 
+  // Reconciled after every tool call, so a terminal write lands where it
+  // happened: one before the check is verified, one after it is not.
+  it('orders a non-edit write against the checks around it', () => {
+    const before = createVerificationTracker()
+    before.noteOtherWriteCount(1, 'cp-1') // terminal write
+    before.noteOtherWriteCount(1, 'cp-1')
+    before.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, true)
+    before.noteOtherWriteCount(1, 'cp-1') // step end
+    expect(evaluateVerificationGate(before.state()).wouldFire).toBe(false)
+
+    const after = createVerificationTracker()
+    after.noteMutation('src/a.ts', true)
+    after.noteOtherWriteCount(0, 'cp-1')
+    after.noteToolResult('run_tests', PASSING_TESTS, true)
+    after.noteOtherWriteCount(1, 'cp-1') // terminal re-write of src/a.ts
+    expect(evaluateVerificationGate(after.state())).toMatchObject({
+      wouldFire: true,
+      reason: 'never_checked'
+    })
+  })
+
   it('skips the reconciliation when no checkpoint session is open', () => {
     const t = createVerificationTracker()
-    t.noteCheckpointFileCount(3)
+    t.noteOtherWriteCount(3)
     t.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, true)
     // An absent session must not read as the count collapsing to zero and
     // then "growing" again into a phantom mutation.
-    t.noteCheckpointFileCount(undefined)
-    t.noteCheckpointFileCount(3)
+    t.noteOtherWriteCount(undefined)
+    t.noteOtherWriteCount(3)
 
     expect(evaluateVerificationGate(t.state()).wouldFire).toBe(false)
   })
@@ -142,15 +248,15 @@ describe('verification tracker', () => {
 
   it('re-baselines when the write checkpoint is re-anchored mid-run', () => {
     // `flushWriteCheckpoint({reopen})` finalizes the session and opens a fresh
-    // one with an empty file set at every follow-up / goal-continue boundary.
+    // one with a zero count at every follow-up / goal-continue boundary.
     // A stale high-water mark would swallow every later terminal write.
     const t = createVerificationTracker()
-    t.noteCheckpointFileCount(2, 'cp-1')
+    t.noteOtherWriteCount(2, 'cp-1')
     t.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, true)
     expect(evaluateVerificationGate(t.state()).wouldFire).toBe(false)
 
-    // New session, one new file — fewer than the old mark, but still a mutation.
-    t.noteCheckpointFileCount(1, 'cp-2')
+    // New session, one new write — fewer than the old mark, but still a mutation.
+    t.noteOtherWriteCount(1, 'cp-2')
 
     expect(evaluateVerificationGate(t.state())).toMatchObject({
       wouldFire: true,
@@ -160,28 +266,78 @@ describe('verification tracker', () => {
 
   it('keeps the high-water mark within one checkpoint session', () => {
     const t = createVerificationTracker()
-    t.noteCheckpointFileCount(3, 'cp-1')
+    t.noteOtherWriteCount(3, 'cp-1')
     t.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, true)
     // Same session reporting the same count is not a new mutation.
-    t.noteCheckpointFileCount(3, 'cp-1')
+    t.noteOtherWriteCount(3, 'cp-1')
 
     expect(evaluateVerificationGate(t.state()).wouldFire).toBe(false)
   })
 
-  it('closes the step even when no checkpoint session is open', () => {
-    // The per-step "a tool already stamped this" flag must not leak forward,
-    // or the next step's checkpoint growth is silently swallowed.
+  it('still registers a later non-edit write after an absent session', () => {
     const t = createVerificationTracker()
     t.noteMutation('src/a.ts', true)
-    t.noteCheckpointFileCount(undefined)
+    t.noteOtherWriteCount(undefined)
     t.noteToolResult('diagnostics', CLEAN_DIAGNOSTICS, true)
     expect(evaluateVerificationGate(t.state()).wouldFire).toBe(false)
 
     // Next step: a terminal write with no edit tool must still register.
-    t.noteCheckpointFileCount(1, 'cp-1')
+    t.noteOtherWriteCount(1, 'cp-1')
     expect(evaluateVerificationGate(t.state())).toMatchObject({
       wouldFire: true,
       reason: 'never_checked'
     })
+  })
+})
+
+describe('terminal checks', () => {
+  const PASS = 'cwd: /ws\n\n Test Files  1 passed (1)\n      Tests  4 passed (4)\n\nexit_code: 0\n\n[Tool hint] use read'
+  const FAIL = 'cwd: /ws\n\n Tests  1 failed | 3 passed (4)\n\nexit_code: 1'
+  const RUNNING = 'session_id: s1\nstatus: running\ncommand: pnpm vitest\n\nRUN v4\n\nexit_code: -1'
+
+  it('counts a recognised test run by its exit code', () => {
+    const t = createVerificationTracker()
+    t.noteMutation('src/a.ts', true)
+    t.noteToolResult('terminal', PASS, true, 'pnpm vitest run tests/a.test.ts')
+    expect(t.state().verifiedAfterLastMutation).toBe(true)
+
+    const failed = createVerificationTracker()
+    failed.noteMutation('src/a.ts', true)
+    failed.noteToolResult('terminal', FAIL, false, 'pnpm vitest run')
+    expect(evaluateVerificationGate(failed.state()).reason).toBe('check_failed')
+  })
+
+  it('does not count other commands, or a run still going', () => {
+    const t = createVerificationTracker()
+    t.noteMutation('src/a.ts', true)
+    t.noteToolResult('terminal', 'cwd: /ws\n\nPython 3.12\n\nexit_code: 0', true, 'python --version')
+    t.noteToolResult('terminal', RUNNING, true, 'pnpm vitest')
+    expect(evaluateVerificationGate(t.state()).reason).toBe('never_checked')
+  })
+
+  it('reads the command from a session poll header when the call has none', () => {
+    const t = createVerificationTracker()
+    t.noteMutation('src/a.ts', true)
+    t.noteToolResult('terminal', 'session_id: s1\nstatus: done\ncommand: pnpm test\n\nok\n\nexit_code: 0', true)
+    expect(t.state().verifiedAfterLastMutation).toBe(true)
+  })
+})
+
+describe('verificationNudgeText', () => {
+  it('names a sample of the changed paths and asks for a check or an honest answer', () => {
+    const text = verificationNudgeText({
+      wouldFire: true,
+      reason: 'never_checked',
+      paths: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts', 'g.ts']
+    })
+    expect(text).toContain('(a.ts, b.ts, c.ts, d.ts, e.ts, +2 more)')
+    expect(text).toContain('run the narrowest check')
+    expect(text).toContain('say in your answer exactly what is unverified')
+  })
+
+  it('asks to fix a failed check', () => {
+    const text = verificationNudgeText({ wouldFire: true, reason: 'check_failed', paths: [] })
+    expect(text).toContain('did not pass')
+    expect(text).not.toContain('()')
   })
 })

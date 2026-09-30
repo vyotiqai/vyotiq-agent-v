@@ -20,6 +20,10 @@ export type ResolveMentionsResult = {
   stale?: boolean
 }
 
+/** How much of a folder's listing main is asked for, and how many rows go in the block. */
+const FOLDER_LIST_PAGE = 200
+const FOLDER_LIST_CAP = 40
+
 const BROWSER_INSTRUCTION =
   'Prefer browser_* tools this turn when page interaction or inspection helps. Browser tools still follow mode and approval rules.'
 
@@ -143,6 +147,39 @@ async function resolveDocsBlock(
   }
 }
 
+/** A folder mention resolves to what is in the directory, not to an attachment. */
+async function resolveFolderBlock(
+  workspacePath: string,
+  path: string
+): Promise<string | { error: string }> {
+  if (!isSafeWorkspaceRelPath(path)) {
+    return { error: `Path is outside the workspace: ${path}` }
+  }
+  if (!window.vyotiq?.workspaceFileList) {
+    return { error: `Cannot list folder ${path}` }
+  }
+  let res: Awaited<ReturnType<typeof window.vyotiq.workspaceFileList>>
+  try {
+    res = await window.vyotiq.workspaceFileList({
+      workspacePath,
+      path,
+      offset: 0,
+      limit: FOLDER_LIST_PAGE
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { error: `Cannot list folder ${path}: ${msg}` }
+  }
+  if (!res.ok) return { error: res.error }
+  const { entries, total, truncated } = res.data
+  const head = `## Referenced folder\nPath: ${path}\nEntries: ${entries.length} shown of ${total}${truncated ? ' (truncated)' : ''}`
+  if (!entries.length) return [head, '(empty folder)'].join('\n')
+  const shown = entries.slice(0, FOLDER_LIST_CAP)
+  const lines = shown.map((e) => `- ${e.path}${e.kind === 'directory' ? '/' : ''}`)
+  if (entries.length > shown.length) lines.push('…')
+  return [head, ...lines].join('\n')
+}
+
 async function resolveRuleBlock(workspacePath: string, path: string): Promise<string | { error: string }> {
   if (!isSafeWorkspaceRelPath(path)) {
     return { error: `Path is outside the workspace: ${path}` }
@@ -264,6 +301,17 @@ export async function resolveComposerMentions(opts: {
         }
         if (resolved.block) contextBlocks.push(resolved.block)
         if (resolved.file && !already) files.push(resolved.file)
+        break
+      }
+      case 'folder': {
+        if (!opts.workspacePath) {
+          problems.push(`Cannot list folder ${mention.path} (no workspace)`)
+          break
+        }
+        const folderBlock = await resolveFolderBlock(opts.workspacePath, mention.path)
+        if (!stillCurrent()) return staleResult()
+        if (typeof folderBlock === 'object') problems.push(folderBlock.error)
+        else contextBlocks.push(folderBlock)
         break
       }
       case 'rule': {

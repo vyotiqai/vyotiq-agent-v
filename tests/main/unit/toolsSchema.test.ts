@@ -294,12 +294,10 @@ describe('harness tool catalog', () => {
     expect(handbook).toMatch(/workspace_harness/)
     expect(handbook).toMatch(/untrusted preferences/i)
     expect(handbook).toMatch(/never replaces the first-party harness/i)
-    expect(handbook).toMatch(/harness-apply/i)
     expect(handbook).toMatch(/normal code change/i)
     expect(handbook).toMatch(/compaction use dedicated prompts/i)
     expect(handbook).not.toMatch(/harness rewriting/i)
     expect(handbook).toMatch(/does not rewrite the spine with a model/i)
-    expect(handbook).toMatch(/proposed body starts as the current canonical harness/i)
     }
   )
 

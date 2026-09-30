@@ -10,7 +10,7 @@ import { lineDiffStat, splitLines } from '@shared/utils/lineDiffStat'
  * wholesale; that over-counts every unchanged line inside it, so a step would
  * not add up to the Changes total. Here:
  * - `str_replace` diffs its old text against its new text;
- * - `edit` with a unified diff counts that diff's +/- lines;
+ * - `edit` with a unified diff counts the +/- rows inside its hunks;
  * - `edit` that created a file counts every line it wrote;
  * - a whole-file overwrite, a `replace_all` and a delete are not countable
  *   from their arguments (the old text is not there), so they report the path
@@ -33,14 +33,7 @@ export function editStatOf(tool: UiToolRow): EditStat | null {
 
   if (tool.name === 'edit') {
     if (typeof args?.diff === 'string' && args.diff.trim()) {
-      let add = 0
-      let del = 0
-      for (const line of splitLines(args.diff)) {
-        if (line.startsWith('+++') || line.startsWith('---')) continue
-        if (line.startsWith('+')) add += 1
-        else if (line.startsWith('-')) del += 1
-      }
-      return { path, exact: true, add, del }
+      return diffStatOf(args.diff, path)
     }
     if (typeof args?.contents === 'string' && inferFileWriteAction(tool.name, tool.content) === 'created') {
       return { path, exact: true, add: splitLines(args.contents).length, del: 0 }
@@ -50,6 +43,40 @@ export function editStatOf(tool: UiToolRow): EditStat | null {
 
   if (tool.name === 'delete') return { path, exact: false }
   return null
+}
+
+/** The `@@ -a,b +c,d @@` line that opens a hunk, as `parseReviewDiff` reads it. */
+const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/
+
+/**
+ * The +/- rows a unified diff actually changed.
+ *
+ * Headers and metadata sit before the first `@@` and nowhere else, so a
+ * `--- ` / `+++ ` row inside a hunk is a removed / added line whose own text
+ * starts with `-` / `+` — skipping it by its prefix, as the old filter did,
+ * dropped real changes while still reporting `exact: true`. A diff with no
+ * hunk header is a body either way and is counted. A row inside a hunk that
+ * carries no sign at all means the diff is malformed; guessing there would be
+ * a confidently wrong number, so it reports the path and none.
+ */
+function diffStatOf(diff: string, path: string): EditStat {
+  let add = 0
+  let del = 0
+  let inHunk = false
+  for (const line of splitLines(diff)) {
+    if (HUNK_HEADER_RE.test(line)) {
+      inHunk = true
+      continue
+    }
+    if (!inHunk && (line.startsWith('+++') || line.startsWith('---'))) continue
+    const sign = line[0]
+    if (line === '' || sign === '\\') continue
+    if (sign === '+') add += 1
+    else if (sign === '-') del += 1
+    else if (sign === ' ') continue
+    else if (inHunk) return { path, exact: false }
+  }
+  return { path, exact: true, add, del }
 }
 
 /** Sum of a step's writes: files touched, and lines when every write was countable. */

@@ -28,7 +28,7 @@ Use when asked to upgrade, update, or bump dependencies, or to check what is out
 
 ## When not to use
 
-A single dependency is causing a specific bug: use fix-bug.
+A single dependency is causing a specific bug: fix that bug rather than upgrading everything.
 
 The user wants a vulnerability audit specifically: run the audit and report it rather than upgrading everything.
 

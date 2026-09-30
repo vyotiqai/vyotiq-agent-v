@@ -99,9 +99,6 @@ export const IPC = {
   // the unrelated app-level bug report.
   runFeedbackGet: 'runs:feedback:get',
   runFeedbackSet: 'runs:feedback:set',
-  harnessReview: 'harness:review',
-  harnessPreviewApply: 'harness:previewApply',
-  harnessApply: 'harness:apply',
   browserState: 'browser:state',
   browserGetState: 'browser:getState',
   browserFocus: 'browser:focus',

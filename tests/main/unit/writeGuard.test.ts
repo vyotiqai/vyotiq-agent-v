@@ -133,7 +133,7 @@ describe('writeGuard', () => {
       ).not.toThrow()
     })
 
-    it('denies diagnostics git_commit and MCP for shared path_scope instances', () => {
+    it('denies git_commit and MCP for shared path_scope instances', () => {
       const workspace = join(root, 'ws-unscoped')
       mkdirSync(workspace, { recursive: true })
       const runId = 'child-unscoped'
@@ -143,9 +143,6 @@ describe('writeGuard', () => {
         pathScope: ['src/allowed']
       })
       const dir = resolveRunDir(workspace, runId)
-      expect(() => assertInlineInstanceUnscopedToolAllowed(dir, 'diagnostics')).toThrow(
-        /diagnostics is denied/
-      )
       expect(() => assertInlineInstanceUnscopedToolAllowed(dir, 'git_commit')).toThrow(
         /git_commit is denied/
       )

@@ -13,29 +13,48 @@ let mermaidPromise: Promise<MermaidApi> | null = null
 /** The theme variables mermaid was last initialised with (JSON). */
 let initialisedWith: string | null = null
 
+/** Each role's token ladder: first name first, then those that mean the same. */
+const BG = ['--vy-sunken', '--vy-bg', '--vy-card'] as const
+const SURFACE = ['--vy-surface', '--vy-surface-2', '--vy-card'] as const
+const CARD = ['--vy-card', '--vy-surface'] as const
+const BORDER = ['--vy-border', '--vy-border-strong'] as const
+const BORDER_STRONG = ['--vy-border-strong', '--vy-border'] as const
+const FG = ['--vy-fg', '--vy-fg-strong'] as const
+const FG_STRONG = ['--vy-fg-strong', '--vy-fg'] as const
+const MUTED = ['--vy-muted', '--vy-tertiary', '--vy-fg'] as const
+
 /**
- * A token's computed value, for mermaid's theme object, which cannot take
- * `var()`. Mermaid parses colours itself, so anything that is not a plain
- * hex/rgb/hsl colour (a custom skin's `color-mix`, say) takes the fallback —
- * the sanctioned literal shape (see TerminalPanel's readCssColor).
+ * The first token on the ladder whose computed value mermaid can parse, or ''
+ * when none of them can. Mermaid's theme object cannot take `var()` and parses
+ * colours itself, so a value that is not a plain hex/rgb/hsl colour (a custom
+ * skin's `color-mix`, say) is skipped for the next name on the ladder — every
+ * skin/theme block in `styles.css` defines these tokens as literals, so the
+ * first name resolves in the app. Nothing here invents a colour: a role no
+ * token filled is dropped from the theme, leaving mermaid its own base value.
+ * (TerminalPanel's readCssColor is the sanctioned *literal* shape; this is the
+ * same read with the literals gone.)
  */
-function readCssColor(varName: string, fallback: string): string {
-  if (typeof document === 'undefined') return fallback
-  const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
-  return /^(#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i.test(value) ? value : fallback
+function readCssColor(varNames: readonly string[]): string {
+  if (typeof document === 'undefined') return ''
+  const computed = getComputedStyle(document.documentElement)
+  for (const varName of varNames) {
+    const value = computed.getPropertyValue(varName).trim()
+    if (/^(#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i.test(value)) return value
+  }
+  return ''
 }
 
 /** Diagrams drawn from the active skin's tokens, so all five skins reach them. */
 export function readMermaidThemeVariables(dark: boolean): Record<string, string | boolean> {
-  const bg = readCssColor('--vy-sunken', dark ? '#0f1315' : '#f5f7f9')
-  const surface = readCssColor('--vy-surface', dark ? '#1b2227' : '#eef2f5')
-  const card = readCssColor('--vy-card', dark ? '#151b1f' : '#f7f9fa')
-  const border = readCssColor('--vy-border', dark ? '#2a343b' : '#dde4ea')
-  const borderStrong = readCssColor('--vy-border-strong', dark ? '#36424b' : '#c2cdd6')
-  const fg = readCssColor('--vy-fg', dark ? '#e6ebef' : '#1a252d')
-  const fgStrong = readCssColor('--vy-fg-strong', dark ? '#f5f8fa' : '#0b1318')
-  const muted = readCssColor('--vy-muted', dark ? '#93a1ad' : '#5d6b76')
-  return {
+  const bg = readCssColor(BG)
+  const surface = readCssColor(SURFACE)
+  const card = readCssColor(CARD)
+  const border = readCssColor(BORDER)
+  const borderStrong = readCssColor(BORDER_STRONG)
+  const fg = readCssColor(FG)
+  const fgStrong = readCssColor(FG_STRONG)
+  const muted = readCssColor(MUTED)
+  const theme: Record<string, string | boolean> = {
     darkMode: dark,
     background: bg,
     fontFamily: 'inherit',
@@ -60,6 +79,10 @@ export function readMermaidThemeVariables(dark: boolean): Record<string, string 
     noteTextColor: fg,
     noteBorderColor: border
   }
+  for (const [key, value] of Object.entries(theme)) {
+    if (value === '') delete theme[key]
+  }
+  return theme
 }
 
 function loadMermaid(themeVariables: Record<string, string | boolean>): Promise<MermaidApi> {

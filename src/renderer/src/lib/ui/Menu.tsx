@@ -233,7 +233,7 @@ export function Menu({
             <div className="border-b border-border p-1.5">
               <SearchInput
                 ref={searchRef}
-                inputClassName="min-h-7 text-xs"
+                compact
                 placeholder={searchPlaceholder}
                 value={query}
                 onChange={(e) => {

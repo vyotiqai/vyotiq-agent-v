@@ -2,7 +2,7 @@
 import '@/styles/global.css'
 import Nav from '@/components/site/Nav.astro'
 import Footer from '@/components/site/Footer.astro'
-import { TAGLINE } from '@/data/site'
+import { TAGLINE, X_HANDLE } from '@/data/site'
 import { pagePath } from '@/lib/paths'
 
 interface Props {
@@ -36,6 +36,7 @@ const card = new URL('/og.png', Astro.site)
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="Agent V running a task: the task record beside its instances" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content={X_HANDLE} />
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>

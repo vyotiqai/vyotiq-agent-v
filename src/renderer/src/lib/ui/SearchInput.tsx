@@ -17,6 +17,15 @@ export const SearchInput = forwardRef<
     keys?: readonly string[]
     /** Omit for the pre-redesign geometry. */
     size?: 'sm' | 'md'
+    /**
+     * The menu-header field: a menu row is `h-7` with `text-xs`, so the field
+     * inside it has to be too. Passed as a state, not as `inputClassName` —
+     * `cn()` has no tailwind-merge, so appending `min-h-7 text-xs` beside the
+     * base `min-h-[…] text-sm` left the winner to emission order in the
+     * generated sheet (CLAUDE.md, constraint 3). A ternary keeps one class per
+     * slot, whichever of the two sizes is on.
+     */
+    compact?: boolean
   }
 >(function SearchInput(
   {
@@ -29,6 +38,7 @@ export const SearchInput = forwardRef<
     tone = 'default',
     keys,
     size,
+    compact,
     ...props
   },
   ref
@@ -55,12 +65,13 @@ export const SearchInput = forwardRef<
         data-vy-text-entry
         className={cn(
           'w-full min-w-0 border-none bg-transparent text-fg outline-none placeholder:text-tertiary',
-          size === 'sm' ? 'text-xs' : 'text-sm',
-          size
+          compact || size === 'sm' ? 'text-xs' : 'text-sm',
+          compact || size
             ? ''
             : tone === 'quiet'
               ? 'min-h-[calc(var(--vy-control-min-h)+0.25rem)] py-2'
               : 'min-h-[var(--vy-control-min-h)]',
+          compact ? 'min-h-7' : '',
           inputClassName
         )}
         value={value}

@@ -7,6 +7,8 @@ export const LATEST_RELEASE = `${RELEASES}/latest`
 export const ISSUES = `${REPO}/issues`
 export const ORG = 'https://github.com/vyotiqai'
 export const LICENSE = 'https://www.gnu.org/licenses/gpl-3.0.html'
+export const X_HANDLE = '@Vyotiq'
+export const X_PROFILE = 'https://x.com/Vyotiq'
 
 export const TAGLINE = 'Agent V is a desktop coding agent. Write what you want and how you will know it is done; it does the work and shows you every step.'
 
@@ -53,6 +55,7 @@ export const FOOTER_NAV: { label: string; links: NavLink[] }[] = [
     label: 'Connect',
     links: [
       { label: 'GitHub', href: ORG },
+      { label: 'X', href: X_PROFILE },
       { label: 'Report an issue', href: ISSUES }
     ]
   }

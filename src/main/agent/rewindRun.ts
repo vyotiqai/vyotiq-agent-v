@@ -403,7 +403,7 @@ async function applyRewindPersistence(input: {
   await flushEventAppends(runDir)
   await flushStatusWrites(runDir)
   const events = await loadEventsAsync(runDir, runId)
-  const receipt = await writeRunReceiptBestEffort({
+  await writeRunReceiptBestEffort({
     runDir,
     runId,
     loadStatus,
@@ -414,8 +414,7 @@ async function applyRewindPersistence(input: {
   writeTrajectoryArtifactsBestEffort({
     runDir,
     runId,
-    loadEvents: () => events,
-    receipt
+    loadEvents: () => events
   })
 }
 

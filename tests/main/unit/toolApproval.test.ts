@@ -507,6 +507,19 @@ describe('createApprovalGate', () => {
     expect(isAutonomousHighRiskTool('mcp__server__run_command')).toBe(true)
   })
 
+  // run_tests runs any binary it is handed while terminal stays gated;
+  // autonomy answers only for the project's own test runs.
+  it('gates run_tests in autonomous mode unless it runs a test runner', () => {
+    const args = (a: Record<string, unknown>): string => JSON.stringify(a)
+    expect(isAutonomousHighRiskTool('run_tests')).toBe(false)
+    expect(isAutonomousHighRiskTool('run_tests', args({}))).toBe(false)
+    expect(isAutonomousHighRiskTool('run_tests', args({ command: 'pnpm exec vitest run tests/a.test.ts' }))).toBe(false)
+    expect(isAutonomousHighRiskTool('run_tests', args({ script: 'typecheck' }))).toBe(false)
+    expect(isAutonomousHighRiskTool('run_tests', args({ command: "python -c \"import os; os.remove('x')\"" }))).toBe(true)
+    expect(isAutonomousHighRiskTool('run_tests', args({ command: 'python fetch.py https://example.com' }))).toBe(true)
+    expect(isAutonomousHighRiskTool('run_tests', args({ script: 'deploy' }))).toBe(true)
+  })
+
   it('does not auto-approve aliased high-risk tools in autonomous mode', async () => {
     let asked = 0
     const gate = createApprovalGate({

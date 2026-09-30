@@ -287,6 +287,47 @@ describe('PlanPanel', () => {
     expect(badge.className).toMatch(/text-warning/)
   })
 
+  // A read-only run whose check failed changed no files; saying "file
+  // mutations after last check" sent people looking for writes that never happened.
+  it('says the last check failed when nothing was written after it', async () => {
+    window.vyotiq.readRunArtifact = vi.fn().mockImplementation(async (req: { name?: string }) => {
+      if (req.name !== 'receipt.json') {
+        return { ok: true, data: { name: req.name ?? '', exists: false, content: null } }
+      }
+      return {
+        ok: true,
+        data: {
+          name: 'receipt.json',
+          exists: true,
+          content: JSON.stringify({
+            version: 5,
+            writtenAt: '2026-07-30T00:00:00.000Z',
+            runId: 'run-verify',
+            status: 'done',
+            step: 3,
+            compactionCount: 0,
+            toolStats: { totalCalls: 1, ok: 0, failed: 1, byName: {} },
+            failureClusters: [],
+            unreadEditPaths: [],
+            wroteFiles: [],
+            diagnostics: { calls: 0, ok: 0, clean: 0 },
+            tests: { calls: 1, ok: 0, failed: 1 },
+            verification: { lastCheckAt: '2026-07-30T00:00:00.000Z', verifiedAfterLastMutation: false },
+            contractExcerpt: ''
+          })
+        }
+      }
+    })
+
+    render(<PlanPanel workspacePath="/ws" runId="run-verify" running={false} />)
+    await openView('Receipt')
+
+    await waitFor(() => {
+      expect(screen.getByText('Last check did not pass (unverified)')).toBeTruthy()
+    })
+    expect(screen.queryByText(/File mutations after last successful check/)).toBeNull()
+  })
+
   it('ignores stale tab responses when switching tabs quickly', async () => {
     let resolvePlan: ((v: unknown) => void) | undefined
     const planPromise = new Promise((resolve) => {

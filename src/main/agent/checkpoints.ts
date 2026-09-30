@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmdirSync,
   rmSync,
@@ -12,7 +13,7 @@ import {
   writeFileSync,
   type Stats
 } from 'fs'
-import { copyFile, mkdir, readdir, rm, stat } from 'fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, dirname, join, relative } from 'path'
 import { createHash, randomUUID } from 'crypto'
@@ -41,6 +42,20 @@ export type CheckpointFileEntry = {
   resolved?: CheckpointFileResolution
   /** Revert was refused because the file was edited after the agent wrote it. */
   conflicted?: boolean
+  /**
+   * When this path entered the checkpoint — its first write this invoke. The
+   * `writes_checkpoint` event is only flushed at invoke end, after every
+   * check the turn ran, so the receipt dates the mutation by this instead.
+   * Absent on checkpoints written before the field existed.
+   */
+  recordedAt?: string
+  /**
+   * The latest write to a path already in the checkpoint by a tool the
+   * verification tracker cannot see by name (terminal, MCP, lsp rename,
+   * merge, git_apply, the watcher). Edit tools re-dating a path is left to
+   * their own tool_result. Absent when the path was written once.
+   */
+  lastMutatedAt?: string
 }
 
 export type WriteCheckpointMeta = {
@@ -87,12 +102,84 @@ function toCheckpointRelPath(workspaceRoot: string, pathArg: string): string {
   return normalizeRelPath(pathArg)
 }
 
+/**
+ * Hashes already taken, keyed by path and the exact file version they were
+ * taken at. One path gets hashed repeatedly: a turn stamps its writes, a
+ * restore compares the file against its copy, and a rewind preview and the
+ * rewind itself re-walk the same writes. A restore reads a file and then
+ * writes it, so an entry is only reusable while the file is provably the same
+ * one — nanosecond mtime/ctime (two same-size writes inside one millisecond
+ * are ordinary on a fast disk) plus the size. A stale hit here would read a
+ * user's change as the agent's output and let a restore overwrite it, so a
+ * mismatch re-reads rather than trusts.
+ */
+const hashCache = new Map<string, { size: number; mtimeNs: number; ctimeNs: number; hash: string }>()
+const HASH_CACHE_MAX = 512
+
+/** The digest of `path` when it is byte for byte the version last read. */
+function hashFromCache(path: string, st: Stats): string | undefined {
+  const hit = hashCache.get(path)
+  if (!hit) return undefined
+  if (hit.size !== st.size) return undefined
+  if (hit.mtimeNs !== Math.trunc(st.mtimeMs * 1e6)) return undefined
+  if (hit.ctimeNs !== Math.trunc(st.ctimeMs * 1e6)) return undefined
+  return hit.hash
+}
+
+function rememberHash(path: string, st: Stats, hash: string): void {
+  if (hashCache.size >= HASH_CACHE_MAX && !hashCache.has(path)) {
+    const oldest = hashCache.keys().next().value
+    if (oldest !== undefined) hashCache.delete(oldest)
+  }
+  hashCache.set(path, {
+    size: st.size,
+    mtimeNs: Math.trunc(st.mtimeMs * 1e6),
+    ctimeNs: Math.trunc(st.ctimeMs * 1e6),
+    hash
+  })
+}
+
+/** sha256 of a file's bytes, or undefined when there is no file to read. */
 function hashExistingFile(path: string): string | undefined {
-  if (!existsSync(path)) return undefined
+  let st: Stats
   try {
-    const st = statSync(path)
-    if (!st.isFile()) return undefined
-    return createHash('sha256').update(readFileSync(path)).digest('hex')
+    st = statSync(path)
+  } catch {
+    hashCache.delete(path)
+    return undefined
+  }
+  if (!st.isFile()) return undefined
+  const hit = hashFromCache(path, st)
+  if (hit) return hit
+  try {
+    const hash = createHash('sha256').update(readFileSync(path)).digest('hex')
+    rememberHash(path, st, hash)
+    return hash
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * hashExistingFile without blocking the main thread: `fs/promises` only, same
+ * digest and same `undefined` for a path that is not a readable file. The
+ * turn's own stamping and the rewind's per-file walk use this, so neither
+ * waits on disk reads.
+ */
+async function hashExistingFileAsync(path: string): Promise<string | undefined> {
+  let st: Stats
+  try {
+    st = await stat(path)
+  } catch {
+    return undefined
+  }
+  if (!st.isFile()) return undefined
+  const hit = hashFromCache(path, st)
+  if (hit) return hit
+  try {
+    const hash = createHash('sha256').update(await readFile(path)).digest('hex')
+    rememberHash(path, st, hash)
+    return hash
   } catch {
     return undefined
   }
@@ -136,20 +223,94 @@ function indexEntries(raw: unknown): CheckpointIndex['checkpoints'] {
   )
 }
 
+/** runDirs whose index.json was unreadable and has been rebuilt from disk. */
+const rebuiltIndexRuns = new Set<string>()
+
+/**
+ * The index is the only way back to a run's checkpoints, and it is one JSON
+ * file that a crash or a full disk can leave half-written. Reading it used to
+ * swallow the parse error and answer "no checkpoints", so the next save wrote a
+ * fresh index over the only record of every earlier turn's undo copies — each
+ * still on disk, none of them reachable. An unreadable index is rebuilt from
+ * the checkpoint dirs beside it instead, and the file it replaced is kept.
+ */
 function loadIndex(runDir: string): CheckpointIndex {
   const p = join(runDir, 'checkpoints', 'index.json')
   if (!existsSync(p)) return { checkpoints: [] }
   try {
     return { checkpoints: indexEntries(JSON.parse(readFileSync(p, 'utf8'))) }
-  } catch {
-    return { checkpoints: [] }
+  } catch (err) {
+    const recovered = indexEntriesFromDirs(join(runDir, 'checkpoints'))
+    if (recovered.length > 0) rebuiltIndexRuns.add(runDir)
+    logger.warn('Checkpoint index unreadable; recovered its entries from the checkpoint dirs', {
+      scope: 'agent',
+      correlationId: basename(runDir),
+      code: 'CHECKPOINT_INDEX_UNREADABLE',
+      recovered: recovered.length,
+      err
+    })
+    return { checkpoints: recovered }
   }
+}
+
+/** Every checkpoint dir beside the index that still has a readable meta, oldest first. */
+function indexEntriesFromDirs(dir: string): CheckpointIndex['checkpoints'] {
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return []
+  }
+  const out: CheckpointIndex['checkpoints'] = []
+  for (const name of names) {
+    if (!CHECKPOINT_ID_RE.test(name)) continue
+    let meta: WriteCheckpointMeta
+    try {
+      meta = JSON.parse(readFileSync(join(dir, name, 'meta.json'), 'utf8')) as WriteCheckpointMeta
+    } catch {
+      continue
+    }
+    if (typeof meta.createdAt !== 'string') continue
+    out.push({ id: name, createdAt: meta.createdAt, ...(meta.undone ? { undone: true } : {}) })
+  }
+  out.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))
+  return out
 }
 
 function saveIndex(runDir: string, index: CheckpointIndex): void {
   const dir = join(runDir, 'checkpoints')
   mkdirSync(dir, { recursive: true })
+  // One repair per rebuild: keep the file that could not be read beside the
+  // one that replaces it, then write the rebuilt index. A backup that fails
+  // leaves the unreadable file exactly as it was — the rebuild is repeated on
+  // the next load rather than trading one lost record for another.
+  if (rebuiltIndexRuns.delete(runDir) && !keepUnreadableIndex(join(dir, 'index.json'))) return
   atomicWriteJson(join(dir, 'index.json'), index)
+}
+
+/**
+ * Keep the index a recovery is about to replace, beside it. False means the
+ * copy failed, and the caller leaves the unreadable file in place rather than
+ * destroying the only record of what it held.
+ */
+function keepUnreadableIndex(p: string): boolean {
+  const backup = `${p}.unreadable-${Date.now()}`
+  try {
+    copyFileSync(p, backup)
+    logger.warn('Kept an unreadable checkpoint index as a backup', {
+      scope: 'storage',
+      code: 'CHECKPOINT_INDEX_UNREADABLE',
+      backup
+    })
+    return true
+  } catch (err) {
+    logger.warn('Could not back up an unreadable checkpoint index; leaving it untouched', {
+      scope: 'storage',
+      code: 'CHECKPOINT_INDEX_UNREADABLE',
+      err
+    })
+    return false
+  }
 }
 
 function loadMeta(runDir: string, id: string): WriteCheckpointMeta | null {
@@ -232,6 +393,8 @@ export class InvokeWriteCheckpoint {
   /** Rel-paths with an in-flight async snapshot so first-path-wins stays racy-safe. */
   private readonly pendingRels = new Set<string>()
   private finalized = false
+  /** See {@link otherWriteCount}. */
+  private otherWrites = 0
 
   constructor(
     runDir: string,
@@ -254,6 +417,31 @@ export class InvokeWriteCheckpoint {
     return this.files.size
   }
 
+  /**
+   * Writes recorded for tools other than the edit family (terminal, MCP, lsp
+   * rename, merges, git_apply, the watcher), re-writes of an already-recorded
+   * path included. The verification tracker sees edit tools by name; this is
+   * how it sees everything else, per tool call, in the order it happened.
+   * Edit tools stay out of it: their snapshot is taken before the write, so a
+   * str_replace that then fails would otherwise read as a mutation.
+   */
+  get otherWriteCount(): number {
+    return this.otherWrites
+  }
+
+  /** A non-edit-tool write to `rel`: count it, and date it if the path was already recorded. */
+  private noteOtherWrite(rel: string): void {
+    this.otherWrites += 1
+    const existing = this.files.get(rel)
+    if (existing) this.files.set(rel, { ...existing, lastMutatedAt: new Date().toISOString() })
+  }
+
+  /** Every entry goes through here so `recordedAt` is stamped once, on first write. */
+  private putFile(rel: string, entry: CheckpointFileEntry): void {
+    const recordedAt = this.files.get(rel)?.recordedAt ?? entry.recordedAt ?? new Date().toISOString()
+    this.files.set(rel, { ...entry, recordedAt })
+  }
+
   private realWorkspaceRoot(): string {
     return existsSync(this.workspaceRoot) ? realpathSync(this.workspaceRoot) : this.workspaceRoot
   }
@@ -274,7 +462,11 @@ export class InvokeWriteCheckpoint {
   async recordPrior(
     pathArg: string,
     kind: 'write' | 'delete',
-    opts?: { recursiveDir?: boolean }
+    opts?: {
+      recursiveDir?: boolean
+      /** The writer is not an edit-family tool — see {@link otherWriteCount}. */
+      nonEditTool?: boolean
+    }
   ): Promise<void> {
     if (this.finalized) return
     const resolved = resolveInsideWorkspace(this.workspaceRoot, pathArg)
@@ -284,6 +476,7 @@ export class InvokeWriteCheckpoint {
     // and no slash), which `looksLikeWorkspacePath` rejects; still allow the
     // checkpoint entry.
     if (!opts?.recursiveDir && !looksLikeWorkspacePath(rel)) return
+    if (opts?.nonEditTool) this.noteOtherWrite(rel)
     if (this.files.has(rel) || this.pendingRels.has(rel)) return
     this.pendingRels.add(rel)
     const filesBefore = this.files.size
@@ -291,7 +484,9 @@ export class InvokeWriteCheckpoint {
       await this.snapshotPrior(resolved, rel, kind, opts)
     } finally {
       this.pendingRels.delete(rel)
-      if (this.files.size > filesBefore) this.persistIncremental()
+      // The write this protects has not happened yet, so `rel` is not hashed
+      // here — hashing it would stamp the pre-write content as the agent's.
+      if (this.files.size > filesBefore) await this.persistIncremental(rel)
     }
   }
 
@@ -309,7 +504,7 @@ export class InvokeWriteCheckpoint {
     }
     if (kind === 'write') {
       if (!st) {
-        this.files.set(rel, { path: rel, action: 'created', undoable: true })
+        this.putFile(rel, { path: rel, action: 'created', undoable: true })
         return
       }
       if (st.isDirectory()) {
@@ -319,7 +514,7 @@ export class InvokeWriteCheckpoint {
       const dest = blobPathFor(this.checkpointDir(), rel)
       await mkdir(dirname(dest), { recursive: true })
       await copyFile(resolved, dest)
-      this.files.set(rel, { path: rel, action: 'modified', undoable: true })
+      this.putFile(rel, { path: rel, action: 'modified', undoable: true })
       return
     }
 
@@ -364,7 +559,7 @@ export class InvokeWriteCheckpoint {
             continue
           }
           recordedChildren.push(childRel)
-          this.files.set(childRel, { path: childRel, action: 'deleted', undoable: true })
+          this.putFile(childRel, { path: childRel, action: 'deleted', undoable: true })
         }
       }
       await snapshotTree(resolved)
@@ -376,7 +571,7 @@ export class InvokeWriteCheckpoint {
         // files. If the tree cannot be restored whole, none of it is undoable.
         for (const childRel of recordedChildren) {
           const entry = this.files.get(childRel)
-          if (entry) this.files.set(childRel, { ...entry, undoable: false })
+          if (entry) this.putFile(childRel, { ...entry, undoable: false })
         }
         // Nothing reads a non-undoable entry's copy, so the copies already made
         // are dead weight — 119 MB for one 20,000-file node_modules delete.
@@ -385,17 +580,17 @@ export class InvokeWriteCheckpoint {
           scope: 'agent',
           path: rel
         })
-        this.files.set(rel, { path: rel, action: 'deleted', undoable: false })
+        this.putFile(rel, { path: rel, action: 'deleted', undoable: false })
       } else if (fileCount === 0) {
         // Empty directory: nothing to restore, but keep the entry for UI parity.
-        this.files.set(rel, { path: rel, action: 'deleted', undoable: false })
+        this.putFile(rel, { path: rel, action: 'deleted', undoable: false })
       }
       return
     }
     const dest = blobPathFor(this.checkpointDir(), rel)
     await mkdir(dirname(dest), { recursive: true })
     await copyFile(resolved, dest)
-    this.files.set(rel, { path: rel, action: 'deleted', undoable: true })
+    this.putFile(rel, { path: rel, action: 'deleted', undoable: true })
   }
 
   /**
@@ -412,12 +607,13 @@ export class InvokeWriteCheckpoint {
     const rel = this.relPathFromResolved(resolved)
     if (!rel || rel.startsWith('..')) return
     if (!looksLikeWorkspacePath(rel)) return
+    this.noteOtherWrite(rel)
     if (this.files.has(rel) || this.pendingRels.has(rel)) return
     this.pendingRels.add(rel)
     const filesBefore = this.files.size
     try {
       if (kind === 'created') {
-        this.files.set(rel, { path: rel, action: 'created', undoable: true })
+        this.putFile(rel, { path: rel, action: 'created', undoable: true })
         return
       }
 
@@ -431,7 +627,7 @@ export class InvokeWriteCheckpoint {
         }
       }
       if (!priorBlobPath || !blobExists) {
-        this.files.set(rel, {
+        this.putFile(rel, {
           path: rel,
           action: kind === 'modified' ? 'modified' : 'deleted',
           undoable: false
@@ -442,40 +638,83 @@ export class InvokeWriteCheckpoint {
       const dest = blobPathFor(this.checkpointDir(), rel)
       await mkdir(dirname(dest), { recursive: true })
       await copyFile(priorBlobPath, dest)
-      this.files.set(rel, {
+      this.putFile(rel, {
         path: rel,
         action: kind === 'modified' ? 'modified' : 'deleted',
         undoable: true
       })
     } finally {
       this.pendingRels.delete(rel)
-      if (this.files.size > filesBefore) this.persistIncremental()
+      if (this.files.size > filesBefore) await this.persistIncremental()
     }
   }
 
-  private stampPostWriteHashes(): void {
+  /**
+   * Stamp every entry that can carry a post-write hash, except `skipRel`.
+   * The turn's own persistence, off the main thread.
+   */
+  private async stampPostWriteHashesAsync(skipRel?: string): Promise<void> {
     for (const file of this.files.values()) {
-      if (!file.undoable || file.action === 'deleted') continue
-      try {
-        const resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
-        const hash = hashExistingFile(resolved)
-        if (hash) file.hash = hash
-      } catch {
-        // Leave unhashed; restore falls back to unguarded copy/delete.
+      if (!this.needsPostWriteHash(file, skipRel)) continue
+      await this.stampPostWriteHashAsync(file)
+    }
+  }
+
+  /**
+   * The same pass for finalize(), which is synchronous. One read per file the
+   * turn left unhashed — the mid-turn persistence already stamped the rest.
+   */
+  private stampPostWriteHashesSync(): void {
+    for (const file of this.files.values()) {
+      if (!this.needsPostWriteHash(file)) continue
+      this.stampPostWriteHashSync(file)
+    }
+  }
+
+  private needsPostWriteHash(file: CheckpointFileEntry, skipRel?: string): boolean {
+    return Boolean(file.undoable) && file.action !== 'deleted' && !file.hash && file.path !== skipRel
+  }
+
+  private async stampPostWriteHashAsync(file: CheckpointFileEntry): Promise<void> {
+    try {
+      const resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
+      if (file.action === 'modified') {
+        const prior = await hashExistingFileAsync(blobPathFor(this.checkpointDir(), file.path))
+        if (prior && prior === (await hashExistingFileAsync(resolved))) return
       }
+      const stamped = await hashExistingFileAsync(resolved)
+      if (stamped) file.hash = stamped
+    } catch {
+      // Leave unhashed; restore then refuses rather than overwrites.
+    }
+  }
+
+  private stampPostWriteHashSync(file: CheckpointFileEntry): void {
+    try {
+      const resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
+      if (file.action === 'modified') {
+        const prior = hashExistingFile(blobPathFor(this.checkpointDir(), file.path))
+        if (prior && prior === hashExistingFile(resolved)) return
+      }
+      const stamped = hashExistingFile(resolved)
+      if (stamped) file.hash = stamped
+    } catch {
+      // Leave unhashed; restore then refuses rather than overwrites.
     }
   }
 
   /**
    * Persist the in-progress checkpoint (meta + index entry) so a crash or power
-   * loss mid-turn cannot erase the turn's undo data. Post-write hashes are only
-   * stamped by finalize(); the incremental meta restores the pre-crash content
-   * without user-edit conflict detection, which is the best available outcome
-   * after an unorderly death.
+   * loss mid-turn cannot erase the turn's undo data. Post-write hashes are
+   * stamped here for the paths already written, so a turn that dies before
+   * finalize still leaves meta that can tell the agent's output from a later
+   * edit; an entry whose write has not landed is left unhashed, and an
+   * unhashed entry is refused on restore rather than copied over.
    */
-  private persistIncremental(): void {
+  private async persistIncremental(skipRel?: string): Promise<void> {
     if (this.finalized) return
     if (this.files.size === 0) return
+    await this.stampPostWriteHashesAsync(skipRel)
     const meta: WriteCheckpointMeta = {
       id: this.id,
       createdAt: this.createdAt,
@@ -486,11 +725,7 @@ export class InvokeWriteCheckpoint {
     }
     try {
       saveMeta(this.runDir, meta)
-      const index = loadIndex(this.runDir)
-      if (!index.checkpoints.some((c) => c.id === this.id)) {
-        index.checkpoints.push({ id: meta.id, createdAt: meta.createdAt })
-        saveIndex(this.runDir, index)
-      }
+      this.indexCheckpoint(meta)
     } catch (err) {
       logger.warn('Failed to persist incremental write checkpoint', {
         scope: 'agent',
@@ -499,6 +734,21 @@ export class InvokeWriteCheckpoint {
         err
       })
     }
+  }
+
+  /**
+   * Put this checkpoint in the run's index. An index that could not be read is
+   * written back even when the entry is already there: a rebuild reads the
+   * checkpoint dirs beside the index, and this checkpoint's own dir is one of
+   * them, so "already listed" is exactly the case where the unreadable file on
+   * disk would otherwise have been left in place unrepaired.
+   */
+  private indexCheckpoint(meta: WriteCheckpointMeta): void {
+    const index = loadIndex(this.runDir)
+    const listed = index.checkpoints.some((c) => c.id === meta.id)
+    if (!listed) index.checkpoints.push({ id: meta.id, createdAt: meta.createdAt })
+    if (listed && !rebuiltIndexRuns.has(this.runDir)) return
+    saveIndex(this.runDir, index)
   }
 
   /**
@@ -581,7 +831,7 @@ export class InvokeWriteCheckpoint {
       this.discardPersistedCheckpoint()
       return null
     }
-    this.stampPostWriteHashes()
+    this.stampPostWriteHashesSync()
 
     const meta: WriteCheckpointMeta = {
       id: this.id,
@@ -592,15 +842,8 @@ export class InvokeWriteCheckpoint {
       files: [...this.files.values()]
     }
     saveMeta(this.runDir, meta)
-    const index = loadIndex(this.runDir)
     // Incremental persistence may already have registered this id mid-turn.
-    if (!index.checkpoints.some((c) => c.id === meta.id)) {
-      index.checkpoints.push({
-        id: meta.id,
-        createdAt: meta.createdAt
-      })
-      saveIndex(this.runDir, index)
-    }
+    this.indexCheckpoint(meta)
     return meta
   }
 }
@@ -697,14 +940,22 @@ function resolveCheckpointId(runDir: string, checkpointId?: string): string | nu
  * `current` is the file's content hash, undefined when there is no file.
  * Restore passes what is on disk; the rewind preview passes what the newer
  * restores in its walk would leave, so the dialog says what the rewind will do.
+ *
+ * A write with no post-write hash is `edited` whenever the path holds content:
+ * a checkpoint whose meta was persisted mid-turn (a crash before finalize
+ * stamped hashes) cannot tell the agent's output from anything written after
+ * it, so it must not copy over or delete what is there. With no file on disk
+ * there is nothing to destroy and the copy still recreates the old one.
  */
 function writeState(current: string | undefined, blob: string | null, file: CheckpointFileEntry): 'edited' | 'restored' | 'writable' {
   if (file.action === 'created') {
-    return file.hash && current && current !== file.hash ? 'edited' : 'writable'
+    if (!current) return 'writable'
+    return !file.hash || current !== file.hash ? 'edited' : 'writable'
   }
   if (!current || !blob) return 'writable'
   if (file.action === 'modified') {
-    if (!file.hash || current === file.hash) return 'writable'
+    if (!file.hash) return 'edited'
+    if (current === file.hash) return 'writable'
     return current === hashExistingFile(blob) ? 'restored' : 'edited'
   }
   // Deleted by the agent and back on disk: already the old file, or someone else's.
@@ -1454,7 +1705,30 @@ export function rewindWritesFromScopes(
     undo.dispose()
   }
 
-  for (const entry of entries) markCheckpointFullyResolved(entry.runDir, entry.meta)
+  // Marking is per checkpoint and follows what the walk actually did to it. A
+  // checkpoint whose every write the rewind took back is undone: its copies
+  // are dead weight and retention may free them. One whose file was left as
+  // what was on disk — the user's own change, or a newer run's write that
+  // stopped the walk — keeps its copies and stays unresolved: that write is
+  // still in the file, and a later rewind over this run needs the copy. The
+  // per-file outcomes are persisted either way, so the Changes list still shows
+  // each file as kept or reverted (its own resolved flags drive the banner).
+  for (const entry of entries) {
+    if (entry.meta.files.every((file) => !file.undoable || file.resolved === 'discarded')) {
+      markCheckpointFullyResolved(entry.runDir, entry.meta)
+      continue
+    }
+    try {
+      saveMeta(entry.runDir, entry.meta)
+    } catch (err) {
+      logger.warn('Failed to record how a rewind left a checkpoint', {
+        scope: 'agent',
+        correlationId: basename(entry.runDir),
+        checkpointId: entry.meta.id,
+        err
+      })
+    }
+  }
   const leftAsOf = (outcome: RestoreOutcome): string[] =>
     [...leftAs].filter(([, left]) => left === outcome).map(([path]) => path)
   return {

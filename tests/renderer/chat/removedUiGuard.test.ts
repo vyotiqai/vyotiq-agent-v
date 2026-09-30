@@ -6,7 +6,8 @@ import { join } from 'path'
  * Removal guard — these chat UI features were deliberately deleted and must
  * never come back: the agent session tab strip and the git-status start-work
  * chip. Any session that restores, re-creates, or re-imports them fails here.
- * See AGENTS.md → "Removed UI — never restore" before touching chat surfaces.
+ * See .cursor/rules/no-revert-removals.mdc → "Removed UI — Never Restore"
+ * before touching chat surfaces.
  */
 
 const REPO = process.cwd()
@@ -55,7 +56,7 @@ describe('removed UI stays removed', () => {
     for (const rel of FORBIDDEN_FILES) {
       expect(
         existsSync(join(REPO, rel)),
-        `${rel} was restored — this feature was deliberately removed (see AGENTS.md "Removed UI — never restore") and must stay removed. Fix forward instead.`
+        `${rel} was restored — this feature was deliberately removed (see .cursor/rules/no-revert-removals.mdc "Removed UI — Never Restore") and must stay removed. Fix forward instead.`
       ).toBe(false)
     }
   })
@@ -73,7 +74,7 @@ describe('removed UI stays removed', () => {
     }
     expect(
       offenders,
-      `removed-UI symbols reappeared (see AGENTS.md "Removed UI — never restore"): ${offenders.join(', ')}`
+      `removed-UI symbols reappeared (see .cursor/rules/no-revert-removals.mdc "Removed UI — Never Restore"): ${offenders.join(', ')}`
     ).toEqual([])
   })
 
@@ -85,7 +86,7 @@ describe('removed UI stays removed', () => {
     for (const token of ['onOpenRunTab', 'onCloseRunTab', 'openRunIds', 'RunSummary']) {
       expect(
         chatView.includes(token),
-        `ChatView.tsx re-references removed session-tab prop "${token}" — see AGENTS.md "Removed UI — never restore".`
+        `ChatView.tsx re-references removed session-tab prop "${token}" — see .cursor/rules/no-revert-removals.mdc "Removed UI — Never Restore".`
       ).toBe(false)
     }
   })

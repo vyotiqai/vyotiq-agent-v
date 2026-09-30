@@ -51,11 +51,6 @@ describe('run artifact files', () => {
     writeFileSync(join(runDir, 'browser', 'snapshot.jpg'), Buffer.from([0xff, 0xd8, 0xff]))
     writeFileSync(join(runDir, 'trajectory.jsonl'), '{"step":0,"kind":"status"}\n', 'utf8')
     writeFileSync(
-      join(runDir, 'prediction.json'),
-      '{"version":1,"runId":"run-artifacts","writtenAt":"t","observed_only":true,"predictions":[]}\n',
-      'utf8'
-    )
-    writeFileSync(
       join(runDir, 'goal.json'),
       JSON.stringify({
         objective: 'Ship',

@@ -33,7 +33,8 @@ import {
   assertNotRetiredAgentDataPath,
   assertInlineInstancePushDenied,
   assertInlineInstanceTerminalAllowed,
-  assertInlineInstanceUnscopedToolAllowed
+  assertInlineInstanceUnscopedToolAllowed,
+  inlineInstancePathScope
 } from './writeGuard'
 import { toolTodoWrite, type TodoItem } from './todo'
 import { proposeGoal, updateGoalStatus, goalToolContent } from '../runGoal'
@@ -61,6 +62,7 @@ import { toolEditNotebookAsync, type EditNotebookArgs } from './editNotebook'
 import { toolLsp, applyLspRenameEdits } from './lsp'
 import { getSettings } from '@main/settings/settings'
 import { getWriteCheckpoint } from '../checkpoints'
+import { isBinaryGitPatch, patchTouchedPaths } from './applyPatch'
 import { applyMcpFilesystemMutations, recordMcpFilesystemPriors } from './mcpCheckpoint'
 import { noteInlineInstanceDeniedTool } from '../agentInstances'
 import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
@@ -794,7 +796,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       if (!context.skipWriteCheckpoint) {
         const cp = getWriteCheckpoint(context.runDir)
         if (cp) {
-          for (const path of paths) await cp.recordPrior(path, 'write')
+          for (const path of paths) await cp.recordPrior(path, 'write', { nonEditTool: true })
         }
       }
       const mutated = await applyLspRenameEdits(workspace, result.pendingRenameEdits)
@@ -1204,17 +1206,31 @@ export async function executeTool(
   // included where the path_scope block below cannot reach it: `.vyotiq` is
   // skipped by the walkers, so glob/grep/search/list_dir never surface these
   // files, but a direct path read had nothing stopping it.
+  // git_apply names its targets inside the patch rather than a `path` arg, so
+  // both guards below read them from the patch itself.
+  const patchText =
+    name === 'git_apply' && typeof effectiveArgs.patch === 'string' ? effectiveArgs.patch : ''
+
   if (
     effectiveWorkspace === workspace &&
     (name === 'read' ||
       name === 'edit' ||
       name === 'str_replace' ||
       name === 'delete' ||
-      name === 'edit_notebook')
+      name === 'edit_notebook' ||
+      // A `check` run writes nothing, so it is left alone exactly as the
+      // path_scope block below leaves it.
+      (name === 'git_apply' && effectiveArgs.check !== true))
   ) {
     const p = readPathArg(effectiveArgs)
     try {
-      assertNotRetiredAgentDataPath(p ? [p] : [])
+      assertNotRetiredAgentDataPath(
+        name === 'git_apply'
+          ? patchTouchedPaths(patchText).map((t) => t.path)
+          : p
+            ? [p]
+            : []
+      )
     } catch (err) {
       return toolFail(name, summary, formatToolResultError(err))
     }
@@ -1246,6 +1262,34 @@ export async function executeTool(
     }
   }
 
+  // git_apply writes every file its patch names; a path_scope instance may
+  // only patch inside its scope, the same rule the edit tools follow.
+  if (effectiveWorkspace === workspace && name === 'git_apply' && effectiveArgs.check !== true) {
+    const touched = patchTouchedPaths(patchText).map((p) => p.path)
+    const scope = inlineInstancePathScope(effectiveContext.runDir, {
+      inlineInstance: effectiveContext.inlineInstance
+    })
+    // Fail closed: an empty path list is what a binary or headerless patch
+    // extracts to, and asserting scope on nothing would wave the write
+    // through. A blank patch is left to the handler's `patch is required`.
+    if (scope && touched.length === 0 && patchText.trim()) {
+      return toolFail(
+        name,
+        summary,
+        isBinaryGitPatch(patchText)
+          ? 'Binary GIT patches are denied for an instance with a path_scope: their paths are encoded in the patch, so they cannot be checked against the scope.'
+          : `Patch names no paths to check against path_scope (${scope.join(', ')}). Include the \`---\` / \`+++\` headers \`git apply\` reads.`
+      )
+    }
+    try {
+      assertInlineInstancePathScope(effectiveContext.runDir, touched, {
+        inlineInstance: effectiveContext.inlineInstance
+      })
+    } catch (err) {
+      return toolFail(name, summary, formatToolResultError(err))
+    }
+  }
+
   const unscopedOpts = { inlineInstance: effectiveContext.inlineInstance }
   if (name === 'terminal') {
     try {
@@ -1255,14 +1299,9 @@ export async function executeTool(
       return toolFail(name, summary, formatError(err))
     }
   }
-  if (name === 'diagnostics') {
-    try {
-      assertInlineInstanceUnscopedToolAllowed(effectiveContext.runDir, 'diagnostics', unscopedOpts)
-    } catch (err) {
-      noteInlineInstanceDeniedTool(effectiveContext.runId)
-      return toolFail(name, summary, formatError(err))
-    }
-  }
+  // `diagnostics` is allowed in shared path_scope instances: a typecheck or
+  // lint reads the tree and writes nothing, and without it those children
+  // could not check their own code (22 denials in recorded runs).
   if (name === 'git_commit') {
     try {
       assertInlineInstanceUnscopedToolAllowed(effectiveContext.runDir, 'git_commit', unscopedOpts)

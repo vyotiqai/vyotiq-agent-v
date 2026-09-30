@@ -14,21 +14,20 @@ import {
   MENU_SURFACE,
   MenuItemBody
 } from '@renderer/lib/ui'
-import {
-  COMPOSER_DROPDOWN_PAD_PX,
-  COMPOSER_DROPDOWN_TREE_MIN_PX,
-  clampComposerDropdownPanel
-} from './composerDropdownLayout'
-import {
-  pathSegments,
-  type MentionMenuItem,
-  type MentionMenuView
-} from './mentionModel'
+import { clampComposerDropdownPanel } from './composerDropdownLayout'
+import type { MentionMenuItem, MentionMenuView } from './mentionModel'
 import { buildMentionRootSections } from './mentionPresentation'
 
-const MENTION_MAX_PX = 420
-/** The list and the path tree beside it. */
-const MENTION_TREE_MAX_PX = 600
+/**
+ * Width bounds. The anchor is the composer's input wrap, so the panel tracks
+ * the composer's own width between these and stops there, so a full-width pane
+ * does not stretch the rows. Viewport clamping is the layout helper's job.
+ */
+const MENTION_PANEL_MIN_PX = 260
+const MENTION_PANEL_MAX_PX = 420
+
+/** One of the four non-results states the panel can be in. */
+type MentionPanelState = 'results' | 'loading' | 'error' | 'empty'
 
 function itemIcon(item: MentionMenuItem): IconName {
   switch (item.kind) {
@@ -46,6 +45,8 @@ function itemIcon(item: MentionMenuItem): IconName {
     case 'file':
     case 'docs':
       return 'file'
+    case 'folder':
+      return 'folder'
     case 'rule':
       return 'rules'
     case 'chat':
@@ -66,34 +67,6 @@ const VIEW_TITLE: Record<Exclude<MentionMenuView, 'root'>, string> = {
   rules: 'Rules'
 }
 
-function PathTree({ path }: { path: string }) {
-  const parts = pathSegments(path)
-  if (!parts.length) return null
-  return (
-    <div className="scroll-thin flex min-h-0 min-w-[140px] max-w-[180px] shrink-0 flex-col gap-0.5 overflow-y-auto border-l border-border px-2 py-1.5">
-      {parts.map((part, i) => {
-        const isLast = i === parts.length - 1
-        return (
-          <div
-            key={`${i}:${part}`}
-            className="flex items-center gap-1.5 text-caption text-secondary"
-            style={{ paddingLeft: i * 8 }}
-          >
-            {isLast ? (
-              <FileTypeIcon path={path} size={14} />
-            ) : (
-              <FileTypeIcon path={part} kind="folder" size={14} />
-            )}
-            <span className={cn('truncate', isLast && 'font-medium text-fg')} title={part}>
-              {part}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 function emptyCopy(view: MentionMenuView): string {
   switch (view) {
     case 'files':
@@ -107,6 +80,48 @@ function emptyCopy(view: MentionMenuView): string {
     default:
       return 'No matches'
   }
+}
+
+function emptyHint(view: MentionMenuView): string {
+  if (view === 'root') return 'Keep typing to filter, or open a list to browse it.'
+  return 'Keep typing to filter this list.'
+}
+
+/** The row's full path, for the footer: where the mention points. */
+function footerSubject(item: MentionMenuItem): { text: string; mono: boolean } | null {
+  switch (item.kind) {
+    case 'file':
+    case 'folder':
+    case 'docs':
+    case 'rule':
+      return { text: item.path, mono: true }
+    case 'branch':
+    case 'browser':
+    case 'lints':
+    case 'chat':
+      return { text: item.subtitle, mono: false }
+    case 'nav':
+      return { text: item.label, mono: false }
+    case 'show-more':
+      return { text: `${item.remaining} more waiting`, mono: false }
+    default: {
+      const _exhaustive: never = item
+      return _exhaustive
+    }
+  }
+}
+
+/** What accepting the row under the pointer or keyboard does. */
+function acceptHint(item: MentionMenuItem): string {
+  if (item.kind === 'nav') return 'Enter to open'
+  if (item.kind === 'show-more') return 'Enter to load more'
+  return 'Enter to attach'
+}
+
+/** Accessible name: the row's own text runs the label into its detail. */
+function rowName(item: MentionMenuItem): string {
+  const detail = 'subtitle' in item ? item.subtitle : undefined
+  return detail ? `${item.label} · ${detail}` : item.label
 }
 
 function MentionRow({
@@ -124,24 +139,43 @@ function MentionRow({
   onPick: () => void
   optionRef: (el: HTMLElement | null) => void
 }) {
-  const path = item.kind === 'file' || item.kind === 'docs' ? item.path : null
+  const path =
+    item.kind === 'file' || item.kind === 'folder' || item.kind === 'docs'
+      ? item.path
+      : null
+  // A folder row is a target, not a list: it draws the folder icon and picks
+  // straight into the draft, same as a file row.
+  const kind = item.kind === 'folder' ? 'folder' : 'file'
   return (
     <button
       type="button"
       id={optionId}
       role="option"
       aria-selected={selected}
+      aria-label={rowName(item)}
       ref={optionRef}
-      title={path ?? undefined}
       className={cn(MENU_ROW, selected ? MENU_ROW_ACTIVE : MENU_ROW_IDLE, MENU_ROW_TEXT)}
       onMouseDown={(e) => e.preventDefault()}
       onMouseEnter={onActive}
       onClick={onPick}
     >
       <MenuItemBody
-        {...(path ? { lead: <FileTypeIcon path={path} size={14} /> } : { icon: itemIcon(item) })}
+        {...(path
+          ? {
+              lead: (
+                <FileTypeIcon path={path} kind={kind} size={14} />
+              )
+            }
+          : { icon: itemIcon(item) })}
         label={item.label}
-        detail={'subtitle' in item ? item.subtitle : undefined}
+        // Narrow panel: the label is the row's name, and the parent directory
+        // is the first thing to give way. Measured against the panel's own
+        // width, not the viewport's.
+        detail={
+          'subtitle' in item ? (
+            <span className="@max-[300px]:hidden">{item.subtitle}</span>
+          ) : undefined
+        }
         trailing={
           item.kind === 'nav' ? (
             <Icon name="chevronRight" size={12} className="shrink-0 text-tertiary" />
@@ -153,9 +187,12 @@ function MentionRow({
 }
 
 /**
- * The @ menu: what can be attached to the instruction (Context), recent or
- * matching files, and lists to browse into. A list opens in place with a way
- * back; files, docs and rules show where the row lives beside the list.
+ * The @ menu: what can be attached to the instruction (Context), the recent or
+ * matching files, and the lists to browse into, under quiet group labels and a
+ * quiet header. A list opens in place with a way back. The row under the
+ * pointer or keyboard has its full path pinned in the footer, so the list never
+ * has to give up width to a side panel. Loading, a failed workspace search and
+ * no match each get their own glyph, so none of them reads as an empty list.
  */
 export function MentionMenu({
   open,
@@ -169,6 +206,7 @@ export function MentionMenu({
   onBack,
   anchorRef,
   loading,
+  error,
   listId = 'composer-mention-menu'
 }: {
   open: boolean
@@ -183,6 +221,8 @@ export function MentionMenu({
   onBack?: () => boolean
   anchorRef: RefObject<HTMLElement | null>
   loading?: boolean
+  /** The workspace search failed. Distinct from "nothing matched". */
+  error?: string | null
   listId?: string
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -216,29 +256,35 @@ export function MentionMenu({
 
   if (!open || !position) return null
 
-  const active = items[activeIndex] ?? null
-  const activePath =
-    active?.kind === 'file' || active?.kind === 'docs' || active?.kind === 'rule'
-      ? active.path
-      : null
-  const treeDesired =
-    (view === 'files' || view === 'docs' || view === 'rules') && Boolean(activePath)
-  const title = view === 'root' ? null : VIEW_TITLE[view]
-
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
+  // Responsive: the anchor is the composer's input wrap, so the menu tracks the
+  // composer's own width between these bounds instead of one fixed size.
+  // `position.minWidth` is the measured anchor width (floored), and it is
+  // already re-measured on resize and scroll — no second layout read here.
   const { left, width, maxHeight } = clampComposerDropdownPanel({
     position,
-    maxWidthPx:
-      treeDesired && vw >= COMPOSER_DROPDOWN_TREE_MIN_PX + COMPOSER_DROPDOWN_PAD_PX * 2
-        ? MENTION_TREE_MAX_PX
-        : MENTION_MAX_PX
+    maxWidthPx: Math.min(
+      MENTION_PANEL_MAX_PX,
+      Math.max(MENTION_PANEL_MIN_PX, Math.round(position.minWidth))
+    ),
+    minHeightPx: 180
   })
-  const showTree = treeDesired && width >= COMPOSER_DROPDOWN_TREE_MIN_PX
 
+  const state: MentionPanelState =
+    items.length > 0
+      ? 'results'
+      : error
+        ? 'error'
+        : loading
+          ? 'loading'
+          : 'empty'
+
+  const active = items[activeIndex] ?? null
+  const subject = active ? footerSubject(active) : null
   const activeDescendant =
     activeIndex >= 0 && items[activeIndex]
       ? `${listId}-opt-${items[activeIndex]!.id}`
       : undefined
+  const title = view === 'root' ? 'Mentions' : VIEW_TITLE[view]
 
   const row = (item: MentionMenuItem, index: number) => (
     <MentionRow
@@ -261,8 +307,10 @@ export function MentionMenu({
       role="listbox"
       aria-label="Mentions"
       aria-activedescendant={activeDescendant}
+      aria-busy={state === 'loading' ? true : undefined}
       tabIndex={0}
-      className={cn(MENU_SURFACE, 'fixed flex origin-bottom text-sm')}
+      data-mention-state={state}
+      className={cn(MENU_SURFACE, '@container fixed flex origin-bottom flex-col text-sm')}
       style={{
         top: position.placement === 'up' ? undefined : position.top,
         bottom:
@@ -273,49 +321,110 @@ export function MentionMenu({
         maxHeight
       }}
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {title ? (
-          <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
-            {onBack ? (
-              <IconButton
-                icon="chevronLeft"
-                label="Back"
-                size="sm"
-                tone="muted"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onBack()}
-              />
-            ) : null}
-            <span className="min-w-0 flex-1 truncate px-1 text-xs font-medium text-fg">{title}</span>
-            {loading && items.length > 0 ? (
-              <span className="shrink-0 px-1 text-xs text-tertiary">Searching…</span>
-            ) : null}
+      {/* Quiet header: what this list is, and how much of it there is. */}
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pl-1 pr-2">
+        {view !== 'root' && onBack ? (
+          <IconButton
+            icon="chevronLeft"
+            label="Back"
+            size="sm"
+            tone="muted"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onBack()}
+          />
+        ) : null}
+        <span className="min-w-0 flex-1 truncate px-1 text-xs font-medium text-fg">
+          {title}
+        </span>
+        {state === 'results' ? (
+          <span className="shrink-0 text-caption text-tertiary tnum">
+            {items.length === 1 ? '1 row' : `${items.length} rows`}
+          </span>
+        ) : null}
+        {loading && items.length > 0 ? (
+          <Icon
+            name="loader"
+            size={13}
+            className="shrink-0 motion-safe:animate-spin text-muted"
+          />
+        ) : null}
+      </div>
+
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-1">
+        {state === 'loading' ? (
+          <div
+            className="flex items-center gap-2 px-2 py-2 text-xs text-muted"
+            role="status"
+          >
+            <Icon name="loader" size={13} className="motion-safe:animate-spin" />
+            <span>{view === 'root' ? 'Searching the workspace…' : 'Loading…'}</span>
           </div>
         ) : null}
 
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-1">
-          {loading && items.length === 0 ? (
-            <p className="m-0 px-2 py-1.5 text-xs text-muted">Searching…</p>
-          ) : items.length === 0 ? (
-            <p className="m-0 px-2 py-1.5 text-xs text-muted">{emptyCopy(view)}</p>
-          ) : rootSections ? (
-            rootSections.map((section) => (
-              <div key={section.id} role="group" aria-label={section.label}>
-                <div className={MENU_LABEL} aria-hidden="true">
-                  <span>{section.label}</span>
-                  {section.id === 'files' && loading ? (
-                    <span className="font-normal normal-case tracking-normal">Searching…</span>
-                  ) : null}
-                </div>
-                {section.entries.map(({ item, flatIndex }) => row(item, flatIndex))}
+        {state === 'error' ? (
+          <div
+            className="flex items-start gap-2 px-2 py-2 text-xs text-danger"
+            role="alert"
+          >
+            <Icon name="warningCircle" size={13} className="mt-px" />
+            <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{error}</span>
+          </div>
+        ) : null}
+
+        {state === 'empty' ? (
+          <div className="px-2 py-2">
+            <p className="m-0 flex items-center gap-2 text-xs text-fg">
+              <Icon name="search" size={13} className="text-muted" />
+              <span>{emptyCopy(view)}</span>
+            </p>
+            <p className="m-0 pl-[21px] pt-1 text-caption text-tertiary">
+              {emptyHint(view)}
+            </p>
+          </div>
+        ) : null}
+
+        {rootSections?.map((section, sectionIndex) => {
+          const labelId = `${listId}-group-${sectionIndex}`
+          return (
+            <div key={section.id} role="group" aria-labelledby={labelId}>
+              <div id={labelId} className={MENU_LABEL}>
+                {section.label}
               </div>
-            ))
-          ) : (
-            items.map((item, index) => row(item, index))
-          )}
-        </div>
+              {section.entries.map(({ item, flatIndex }) => row(item, flatIndex))}
+            </div>
+          )
+        })}
+
+        {rootSections
+          ? null
+          : items.map((item, index) => row(item, index))}
       </div>
-      {showTree && activePath ? <PathTree path={activePath} /> : null}
+
+      {/* Pinned outside the scroll region: the footer never covers a row. */}
+      <div className="shrink-0 border-t border-border p-1" data-mention-footer>
+        {active && subject ? (
+          <p
+            className="m-0 flex items-center gap-1.5 px-2 py-1.5 text-xs"
+            title={subject.text}
+          >
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate',
+                subject.mono ? 'font-mono text-muted' : 'text-muted'
+              )}
+            >
+              {subject.text}
+            </span>
+            <span className="shrink-0 text-tertiary">{acceptHint(active)}</span>
+          </p>
+        ) : (
+          <p className="m-0 px-2 py-1.5 text-xs text-tertiary">
+            {state === 'results' || state === 'loading'
+              ? 'Nothing selected'
+              : 'Nothing to select'}
+          </p>
+        )}
+      </div>
     </div>,
     document.body
   )

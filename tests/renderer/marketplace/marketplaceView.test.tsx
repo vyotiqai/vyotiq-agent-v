@@ -50,16 +50,16 @@ const catalog: MarketplaceCatalogEntry[] = [
     publisher: 'Model Context Protocol'
   }),
   entry({ id: 'fetch', name: 'Fetch', kind: 'mcp', description: 'Fetch MCP', publisher: 'Model Context Protocol' }),
-  entry({ id: 'implement-feature', name: 'Implement feature', kind: 'skill', publisher: 'Agent V' }),
-  entry({ id: 'create-skill', name: 'Create skill', kind: 'skill', publisher: 'Agent V' }),
+  entry({ id: 'dependency-upgrade', name: 'Dependency upgrade', kind: 'skill', publisher: 'Agent V' }),
+  entry({ id: 'incident-triage', name: 'Incident triage', kind: 'skill', publisher: 'Agent V' }),
   entry({
-    id: 'grill-me',
-    name: 'Grill me',
+    id: 'pr-review-reply',
+    name: 'PR review reply',
     kind: 'skill',
-    description: 'A relentless interview',
-    publisher: 'Matt Pocock',
+    description: 'Work through open review comments on your pull requests',
+    publisher: 'Agent V',
     // Hands off to a skill that ships as its own card, so Add pulls it in too.
-    dependsOn: ['grilling', 'memory']
+    dependsOn: ['incident-triage', 'memory']
   }),
   entry({ id: 'devtools', name: 'Devtools', kind: 'plugin', publisher: 'Agent V' })
 ]
@@ -254,7 +254,7 @@ describe('Extensions list', () => {
       'extensions-installed',
       'extensions-discover'
     ])
-    for (const name of ['Filesystem', 'Memory', 'Fetch', 'Grill me', 'Devtools', 'ship-notes']) {
+    for (const name of ['Filesystem', 'Memory', 'Fetch', 'PR review reply', 'Devtools', 'ship-notes']) {
       expect(within(list).getAllByText(name)).toHaveLength(1)
     }
     const installed = section(/^Installed/)
@@ -266,11 +266,11 @@ describe('Extensions list', () => {
     const names = Array.from(discover.querySelectorAll('li')).map((li) => li.dataset.extensionKey)
     expect(names).toEqual([
       'mcp:filesystem',
-      'skill:create-skill',
+      'skill:dependency-upgrade',
       'plugin:devtools',
       'mcp:fetch',
-      'skill:grill-me',
-      'skill:implement-feature'
+      'skill:incident-triage',
+      'skill:pr-review-reply'
     ])
   })
 
@@ -477,9 +477,9 @@ describe('Extensions list', () => {
   it('names only the missing packages an Add pulls in with it', async () => {
     renderView()
     await screen.findByRole('heading', { level: 2, name: /^Discover/ })
-    fireEvent.click(screen.getByText('Grill me'))
-    const note = within(detail('Grill me')).getByText(/^Also adds/)
-    expect(note.textContent).toBe('Also adds grilling — it hands work to them.')
+    fireEvent.click(screen.getByText('PR review reply'))
+    const note = within(detail('PR review reply')).getByText(/^Also adds/)
+    expect(note.textContent).toBe('Also adds Incident triage — it hands work to them.')
   })
 
   it('gives every row its full name and every tab its panel', async () => {
@@ -504,7 +504,7 @@ describe('Extensions list', () => {
     expect(mcp.getAttribute('tabindex')).toBe('0')
     const panel = screen.getByRole('tabpanel', { name: 'MCP servers' })
     expect(panel.id).toBe('extensions-panel-mcp')
-    expect(within(panel).queryByText('Grill me')).toBeNull()
+    expect(within(panel).queryByText('PR review reply')).toBeNull()
     expect(within(panel).getByText('Filesystem')).toBeTruthy()
   })
 
@@ -569,7 +569,7 @@ describe('Extensions opened from elsewhere', () => {
     expect(screen.getByRole('tab', { name: /^Skills/ }).getAttribute('aria-selected')).toBe('true')
     expect(consumed).toHaveBeenCalledTimes(1)
     const panel = screen.getByRole('tabpanel', { name: 'Skills' })
-    expect(await within(panel).findByText('Grill me')).toBeTruthy()
+    expect(await within(panel).findByText('PR review reply')).toBeTruthy()
     expect(within(panel).queryByText('Filesystem')).toBeNull()
   })
 })

@@ -10,6 +10,7 @@ import {
 } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { execFileSync } from 'child_process'
 
 vi.mock('@main/app/window', () => ({
   getMainWindow: () => null
@@ -141,6 +142,97 @@ describe('write checkpoints', async () => {
     writeFileSync(join(workspace, 'a.txt'), 'end\n', 'utf8')
     const meta = finalizeWriteCheckpoint(runDir)
     expect(meta!.files).toHaveLength(1)
+    resolveWrites(runDir, workspace, { checkpointId: meta!.id, action: 'discard' })
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('hello\n')
+  })
+
+  // The checkpoint is flushed at invoke end; the receipt dates each write by
+  // this stamp so a check run after it is not read as stale.
+  it('stamps each path with its first write, not the flush', async () => {
+    const cp = beginWriteCheckpoint(runDir, workspace)
+    const before = new Date().toISOString()
+    await cp.recordPrior('a.txt', 'write')
+    const firstAt = cp['files'].get('a.txt')?.recordedAt
+    await new Promise((r) => setTimeout(r, 5))
+    await cp.recordObservedMutation('b.txt', 'created')
+    await cp.recordPrior('a.txt', 'write')
+    writeFileSync(join(workspace, 'a.txt'), 'end\n', 'utf8')
+    writeFileSync(join(workspace, 'b.txt'), 'new\n', 'utf8')
+    await new Promise((r) => setTimeout(r, 5))
+    const flushedAt = new Date().toISOString()
+    const meta = finalizeWriteCheckpoint(runDir)
+
+    const byPath = new Map(meta!.files.map((f) => [f.path, f]))
+    expect(firstAt! >= before).toBe(true)
+    expect(byPath.get('a.txt')?.recordedAt).toBe(firstAt)
+    expect(byPath.get('b.txt')?.recordedAt! > firstAt!).toBe(true)
+    expect(byPath.get('b.txt')?.recordedAt! < flushedAt).toBe(true)
+  })
+
+  // The live verification tracker reads otherWriteCount after every tool
+  // call; the receipt reads lastMutatedAt. Edit tools stay out of both: the
+  // tracker sees them by name, and their snapshot precedes a write that can
+  // still fail.
+  it('counts and dates writes by tools other than the edit family', async () => {
+    const cp = beginWriteCheckpoint(runDir, workspace)
+    await cp.recordPrior('a.txt', 'write')
+    expect(cp.otherWriteCount).toBe(0)
+
+    await new Promise((r) => setTimeout(r, 5))
+    const beforeRewrite = new Date().toISOString()
+    await cp.recordPrior('a.txt', 'write', { nonEditTool: true }) // e.g. terminal `sed -i a.txt`
+    expect(cp.otherWriteCount).toBe(1)
+    await cp.recordObservedMutation('b.txt', 'created') // e.g. a watched build
+    expect(cp.otherWriteCount).toBe(2)
+    writeFileSync(join(workspace, 'a.txt'), 'end\n', 'utf8')
+    writeFileSync(join(workspace, 'b.txt'), 'new\n', 'utf8')
+
+    const byPath = new Map(finalizeWriteCheckpoint(runDir)!.files.map((f) => [f.path, f]))
+    expect(byPath.get('a.txt')?.lastMutatedAt! >= beforeRewrite).toBe(true)
+    expect(byPath.get('a.txt')?.recordedAt! < beforeRewrite).toBe(true)
+    expect(byPath.get('b.txt')?.lastMutatedAt).toBeUndefined()
+  })
+
+  it('does not count a str_replace that failed', async () => {
+    const cp = beginWriteCheckpoint(runDir, workspace)
+    const result = await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'a.txt', old_string: 'not there', new_string: 'x' }),
+      workspace,
+      new AbortController().signal,
+      { runDir }
+    )
+    expect(result.ok).toBe(false)
+    expect(cp.otherWriteCount).toBe(0)
+    expect(finalizeWriteCheckpoint(runDir)).toBeNull()
+  })
+
+  it('checkpoints the files a git_apply patch writes', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: workspace })
+    const cp = beginWriteCheckpoint(runDir, workspace)
+    const patch = [
+      'diff --git a/a.txt b/a.txt',
+      '--- a/a.txt',
+      '+++ b/a.txt',
+      '@@ -1 +1 @@',
+      '-hello',
+      '+patched',
+      ''
+    ].join('\n')
+    const result = await executeTool(
+      'git_apply',
+      JSON.stringify({ patch }),
+      workspace,
+      new AbortController().signal,
+      { runDir }
+    )
+    expect(result.ok, result.content).toBe(true)
+    // core.autocrlf may turn the patched line into CRLF.
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('patched\n')
+    expect(cp.otherWriteCount).toBe(1)
+
+    const meta = finalizeWriteCheckpoint(runDir)
+    expect(meta!.files.map((f) => [f.path, f.action])).toEqual([['a.txt', 'modified']])
     resolveWrites(runDir, workspace, { checkpointId: meta!.id, action: 'discard' })
     expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('hello\n')
   })
@@ -862,5 +954,121 @@ describe('a rewind that fails partway', () => {
     } finally {
       setRewindUndoMemoryBytesForTests(null)
     }
+  })
+})
+
+/**
+ * A checkpoint's record of what it wrote is the only thing that stops a restore
+ * from destroying a later change. These three cover the ways that record goes
+ * missing: an index that cannot be read, hashes a crash never wrote, and a
+ * rewind that did not take every file back.
+ */
+describe('checkpoint integrity', () => {
+  const cpDir = (id: string): string => join(runDir, 'checkpoints', id)
+  const indexPath = (): string => join(runDir, 'checkpoints', 'index.json')
+
+  it('a corrupt index.json keeps every earlier checkpoint reachable', async () => {
+    const first = beginWriteCheckpoint(runDir, workspace, 0)
+    await first.recordPrior('a.txt', 'write')
+    writeFileSync(join(workspace, 'a.txt'), 'turn1\n', 'utf8')
+    const meta1 = finalizeWriteCheckpoint(runDir)!
+
+    // The index is one file: a crash mid-write leaves it unparseable, and it
+    // is the only way back to every turn's undo copies.
+    writeFileSync(indexPath(), '{ "checkpoints": [', 'utf8')
+
+    const second = beginWriteCheckpoint(runDir, workspace, 2)
+    await second.recordPrior('a.txt', 'write')
+    writeFileSync(join(workspace, 'a.txt'), 'turn2\n', 'utf8')
+    const meta2 = finalizeWriteCheckpoint(runDir)!
+
+    // The next save no longer writes over the record of the earlier turns: the
+    // entries came back from the checkpoint dirs, and the unreadable file it
+    // replaced was kept beside it.
+    const index = JSON.parse(readFileSync(indexPath(), 'utf8')) as { checkpoints: { id: string }[] }
+    expect(index.checkpoints.map((c) => c.id).sort()).toEqual([meta1.id, meta2.id].sort())
+    expect(readdirSync(join(runDir, 'checkpoints')).filter((n) => n.startsWith('index.json.unreadable-')))
+      .toHaveLength(1)
+
+    // Both turns are still actionable, newest first. A path-resolved discard
+    // spans checkpoints, so the file itself says which turn it took back.
+    const newest = resolveWrites(runDir, workspace, { action: 'discard', paths: ['a.txt'] })
+    expect(newest.discarded).toEqual(['a.txt'])
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('turn1\n')
+    expect(getWriteCheckpointMeta(runDir, meta2.id)?.undone).toBe(true)
+    expect(getWriteCheckpointMeta(runDir, meta1.id)?.undone).not.toBe(true)
+
+    const older = resolveWrites(runDir, workspace, { checkpointId: meta1.id, action: 'discard' })
+    expect(older.discarded).toEqual(['a.txt'])
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('hello\n')
+  })
+
+  it('a checkpoint with no post-write hash conflicts instead of overwriting', async () => {
+    // A turn that died before finalize persisted its copies and meta with no
+    // hash of what it wrote: nothing on disk can tell its output from yours.
+    const id = '1a2b3c4d-0000-4000-8000-00000000b00c'
+    const createdAt = new Date().toISOString()
+    mkdirSync(join(cpDir(id), 'files'), { recursive: true })
+    writeFileSync(join(cpDir(id), 'files', 'a.txt'), 'before\n', 'utf8')
+    writeFileSync(
+      join(cpDir(id), 'meta.json'),
+      JSON.stringify({
+        id,
+        createdAt,
+        files: [
+          { path: 'a.txt', action: 'modified', undoable: true },
+          { path: 'new.txt', action: 'created', undoable: true }
+        ]
+      }),
+      'utf8'
+    )
+    writeFileSync(indexPath(), JSON.stringify({ checkpoints: [{ id, createdAt }] }), 'utf8')
+
+    // You changed both after the crash.
+    writeFileSync(join(workspace, 'a.txt'), 'mine\n', 'utf8')
+    writeFileSync(join(workspace, 'new.txt'), 'mine, still wanted\n', 'utf8')
+
+    const result = resolveWrites(runDir, workspace, { action: 'discard' })
+
+    // Neither the copy over a.txt nor the delete of new.txt happened.
+    expect(result.discarded).toEqual([])
+    expect(result.conflicted).toEqual(['a.txt', 'new.txt'])
+    expect(result.fullyResolved).toBe(false)
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('mine\n')
+    expect(readFileSync(join(workspace, 'new.txt'), 'utf8')).toBe('mine, still wanted\n')
+
+    const meta = getWriteCheckpointMeta(runDir, id)
+    expect(meta?.resolved).not.toBe(true)
+    expect(meta?.undone).not.toBe(true)
+    expect(meta?.files.every((f) => f.conflicted === true)).toBe(true)
+  })
+
+  it('a rewind that left your edit keeps that turn revertible', async () => {
+    const older = beginWriteCheckpoint(runDir, workspace, 0)
+    await older.recordPrior('a.txt', 'write')
+    writeFileSync(join(workspace, 'a.txt'), 'a1\n', 'utf8')
+    const olderId = finalizeWriteCheckpoint(runDir)!.id
+    const newer = beginWriteCheckpoint(runDir, workspace, 2)
+    await newer.recordPrior('a.txt', 'write')
+    writeFileSync(join(workspace, 'a.txt'), 'a2\n', 'utf8')
+    const newerId = finalizeWriteCheckpoint(runDir)!.id
+    writeFileSync(join(workspace, 'a.txt'), 'mine\n', 'utf8')
+
+    const result = rewindWritesFrom(runDir, workspace, 0)
+
+    expect(result.edited).toEqual(['a.txt'])
+    expect(result.restored).toEqual([])
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('mine\n')
+
+    // Marking follows what the rewind did. The writes are still in the file,
+    // so both turns keep their before-images and stay unresolved: retention
+    // frees a resolved checkpoint's copies, and a later rewind needs these.
+    for (const id of [newerId, olderId]) {
+      const meta = getWriteCheckpointMeta(runDir, id)
+      expect(meta?.undone).not.toBe(true)
+      expect(meta?.resolved).not.toBe(true)
+      expect(existsSync(join(cpDir(id), 'files', 'a.txt'))).toBe(true)
+    }
+    expect(getWriteCheckpointMeta(runDir, newerId)?.files[0]?.resolved).toBe('kept')
   })
 })
