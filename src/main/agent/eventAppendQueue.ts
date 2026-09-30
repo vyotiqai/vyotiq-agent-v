@@ -3,6 +3,7 @@ import { appendFile, open, readdir, rename, stat, unlink, writeFile } from 'fs/p
 import { basename, join } from 'path'
 import { logger } from '../../shared/logger'
 import { stampEventSeq } from './eventSeq'
+import { redactForRecord } from './recordRedaction'
 import {
   bumpFailure,
   formatAppendFailure,
@@ -259,7 +260,8 @@ export function enqueueEventAppend(dir: string, event: unknown, at?: string): vo
   // Stamped on the event itself: the object the loop goes on to send carries
   // the same seq as its row (see eventSeq).
   stampEventSeq(event)
-  const line = `${JSON.stringify({ at: at ?? new Date().toISOString(), event })}\n`
+  // Written redacted; the event the loop sends on keeps its text (and its seq).
+  const line = `${JSON.stringify({ at: at ?? new Date().toISOString(), event: redactForRecord(event) })}\n`
   const lineBytes = Buffer.byteLength(line, 'utf8')
   const pending = pendingBytes.get(dir) ?? 0
   const isStreamSnapshot =

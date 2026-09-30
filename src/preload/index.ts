@@ -65,6 +65,8 @@ const api: VyotiqApi = {
   storageCleanupPreview: () => ipcRenderer.invoke(IPC.storageCleanupPreview),
   storageCleanupRun: (payload) => ipcRenderer.invoke(IPC.storageCleanupRun, payload),
   storageAckSurface: (acked) => ipcRenderer.invoke(IPC.storageAckSurface, { acked }),
+  dataWipePreview: () => ipcRenderer.invoke(IPC.dataWipePreview),
+  dataWipeRun: (payload) => ipcRenderer.invoke(IPC.dataWipeRun, payload),
   getAccessibilitySupportState: () =>
     ipcRenderer.invoke(IPC.accessibilitySupportState) as Promise<
       IpcResult<{ enabled: boolean }>

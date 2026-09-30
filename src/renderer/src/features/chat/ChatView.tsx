@@ -28,6 +28,7 @@ import type {
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { Button, PanelResizeHandle, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
+import { registerEditorFlush } from '@renderer/lib/hooks/useEditorFlushResponder'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import {
@@ -290,16 +291,8 @@ export function ChatView({
   const flushDirtyFiles = useCallback(async (): Promise<boolean> => {
     return filesFlushRef.current ? filesFlushRef.current() : true
   }, [])
-  useEffect(() => {
-    const onFlushRequest = window.vyotiq?.onWorkspaceEditorFlushRequest
-    const respond = window.vyotiq?.respondWorkspaceEditorFlush
-    if (!onFlushRequest || !respond) return undefined
-    return onFlushRequest((requestId) => {
-      void flushDirtyFiles()
-        .then((ok) => respond(requestId, ok))
-        .catch(() => respond(requestId, false))
-    })
-  }, [flushDirtyFiles])
+  // Quit asks the app root, which asks every mounted editor (see useEditorFlushResponder).
+  useEffect(() => registerEditorFlush(flushDirtyFiles), [flushDirtyFiles])
   // Fetch git chrome only while the Changes tab is on screen — never on mount.
   const changesDockVisible = activeRightPanel === 'changes'
   const gitChrome = useGitChrome(

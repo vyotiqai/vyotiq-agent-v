@@ -125,3 +125,31 @@ export const StorageSurfaceAckRequestSchema = z.object({
   acked: z.boolean()
 })
 export type StorageSurfaceAckRequest = z.infer<typeof StorageSurfaceAckRequestSchema>
+
+/**
+ * "Delete all my data": what it would remove, measured, and the token the
+ * confirm must echo. Nothing is deleted until the app restarts.
+ */
+export const DataWipePreviewResultSchema = z.object({
+  /** The data folder the wipe empties. */
+  dataPath: z.string().min(1),
+  /** Measured size of that folder. */
+  totalBytes: z.number().int().nonnegative(),
+  /** Task records across every workspace, tracked or not. */
+  tasks: z.number().int().nonnegative(),
+  /** Tasks running now: stopped by the restart. */
+  runningTasks: z.number().int().nonnegative(),
+  /** Task worktrees whose folders live in the data folder. */
+  taskWorktrees: z.number().int().nonnegative(),
+  /** Of those, how many hold changes that were never committed. */
+  uncommittedWorktrees: z.number().int().nonnegative(),
+  /** Files in the Home scratch folder. */
+  homeFiles: z.number().int().nonnegative(),
+  confirm: StorageCleanupTokenSchema
+})
+export type DataWipePreviewResult = z.infer<typeof DataWipePreviewResultSchema>
+
+export const DataWipeRunRequestSchema = z.object({
+  confirmToken: z.string().min(1)
+})
+export type DataWipeRunRequest = z.infer<typeof DataWipeRunRequestSchema>

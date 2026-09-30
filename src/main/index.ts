@@ -9,6 +9,8 @@ import { handleDeepLinkArgv, registerDeepLinks } from '@main/app/deepLinks'
 import { applyBadgeNow, notifyBadgeChange, setBadgeProvider } from '@main/app/badges'
 import { initCustomCssWatchFromSettings } from '@main/appearance/customCss'
 import { configureChromiumDiskCache } from '@main/app/chromiumProfile'
+import { performPendingWipe, type WipeReport } from '@main/storage/wipeUserData'
+import { pruneWorktreesAfterWipe } from '@main/storage/dataWipe'
 import { applyCertificateLogging, applyCsp } from '@main/app/security'
 import { widenHappyEyeballsWindow } from '@main/net/happyEyeballs'
 import { applyEarlyNodeProxy, applyNetworkSettings } from '@main/net/proxy'
@@ -55,6 +57,22 @@ import { initCrashReporter } from './logging/crashReporter'
 import { logger } from '../shared/logger'
 import { IPC } from '../shared/channels'
 import { startLoadPerfMonitor } from './perf/loadSnapshot'
+
+// One lock request for the process: the data wipe below takes it early, the
+// single-instance check further down reads the same answer.
+let singleInstanceLock: boolean | undefined
+const takeSingleInstanceLock = (): boolean => (singleInstanceLock ??= app.requestSingleInstanceLock())
+
+// "Delete all my data" left a request: empty the data folder now, before the
+// Chromium profile, crash reporter or log open anything in it — and only while
+// this process holds the app lock, so a dev and a packaged build sharing the
+// folder never delete under each other.
+let dataWipeReport: WipeReport | null = null
+try {
+  dataWipeReport = performPendingWipe(app.getPath('userData'), { beforeDelete: takeSingleInstanceLock })
+} catch (err) {
+  logger.warn('Pending data wipe failed', { scope: 'main', err })
+}
 
 // Keep Chromium caches under userData so concurrent/dev instances do not
 // fight over the default Windows profile cache (Access denied / Gpu Cache).
@@ -189,7 +207,7 @@ function requestRendererEditorFlush(win: BrowserWindow | null): Promise<EditorFl
   })
 }
 
-const gotLock = app.requestSingleInstanceLock()
+const gotLock = takeSingleInstanceLock()
 if (!gotLock) {
   // Logging is not initialized this early; the shared logger falls back to
   // console so a rejected relaunch is no longer a silent no-op.
@@ -263,6 +281,15 @@ if (!gotLock) {
     // Subscribe before anything can egress, so a run's outbound origins are
     // recorded from its first request rather than from whenever this ran.
     startEgressRunLedger()
+    if (dataWipeReport && !dataWipeReport.skipped) {
+      logger.info('Deleted all app data on request', {
+        scope: 'main',
+        code: 'DATA_WIPED',
+        removed: dataWipeReport.deleted,
+        remaining: dataWipeReport.failed.length
+      })
+      void pruneWorktreesAfterWipe(dataWipeReport.repos)
+    }
 
     electronApp.setAppUserModelId('com.vyotiq.agent')
     applyCsp()

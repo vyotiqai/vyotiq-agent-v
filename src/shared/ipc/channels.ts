@@ -276,6 +276,8 @@ export const IPC = {
   storageCleanupPreview: 'storage:cleanup-preview',
   storageCleanupRun: 'storage:cleanup-run',
   storageAckSurface: 'storage:ack-surface',
+  dataWipePreview: 'storage:data-wipe-preview',
+  dataWipeRun: 'storage:data-wipe-run',
   /** Deep links (vyotiq:// URLs): push on receipt, invoke to drain the pending slot. */
   deepLinkOpened: 'deeplink:opened',
   deepLinkConsume: 'deeplink:consume'

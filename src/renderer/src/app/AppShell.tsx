@@ -12,6 +12,7 @@ import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { useNotifications } from '@renderer/lib/hooks/useNotifications'
 import { useRunToasts } from '@renderer/lib/hooks/useRunToasts'
 import { useRunAnnouncements } from '@renderer/lib/hooks/useRunAnnouncements'
+import { useEditorFlushResponder } from '@renderer/lib/hooks/useEditorFlushResponder'
 import {
   SIDEBAR_COLLAPSED_KEY,
   SIDEBAR_WIDTH_KEY,
@@ -252,6 +253,8 @@ function AppShellInner(props: AppShellProps) {
   })
 
   useRunAnnouncements(notifications.items)
+  // Before quit, whatever view is showing.
+  useEditorFlushResponder()
 
   const onNextNeedsYou = useCallback((): void => {
     const waiting = allTasks.filter((row) => row.state === 'needs')

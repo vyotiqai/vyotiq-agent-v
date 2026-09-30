@@ -430,6 +430,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'storage'
   },
   {
+    id: 'storage-delete-all',
+    title: 'Delete all my data',
+    keywords: ['wipe', 'erase', 'remove everything', 'privacy', 'uninstall', 'start over', 'factory reset', 'forget'],
+    section: 'storage'
+  },
+  {
     id: 'storage-checkpoint-gc',
     title: 'Clean up undo points',
     keywords: ['checkpoints', 'undo', 'retention', 'evict', 'storage', 'checkpoint cleanup', 'undo points'],

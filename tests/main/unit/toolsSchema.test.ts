@@ -276,7 +276,10 @@ describe('harness tool catalog', () => {
     // The unranked fallback let a broken `read` send the model to PowerShell
     // paging for hours, and the silent detour hid the defect; HEAD sat at 2073
     // with only 4 tokens free, so the clause could not fit under 2100.
-    expect(estimateTextTokens(harness)).toBeLessThan(2150)
+    // 2150 -> 2175: records store keys as [redacted:secret] (recordRedaction),
+    // so a later turn sees the placeholder; without the 23-token note the model
+    // can write it into a config file. HEAD sat at 2146, 4 tokens free.
+    expect(estimateTextTokens(harness)).toBeLessThan(2175)
   })
 
   it.skipIf(!existsSync(join(process.cwd(), 'docs', 'harness-handbook.md')))(

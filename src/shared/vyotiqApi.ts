@@ -63,6 +63,7 @@ import type {
   Settings,
   StorageCleanupPreviewResult,
   StorageCleanupRunResult,
+  DataWipePreviewResult,
   StorageReportResult,
   CodeIndexSettings,
   CodeIndexRuntimeStatus,
@@ -257,6 +258,10 @@ export interface VyotiqApi {
   }) => Promise<IpcResult<StorageCleanupRunResult>>
   /** One-time ack that the user has seen Settings → Storage (§8.1). */
   storageAckSurface: (acked: boolean) => Promise<IpcResult<Settings>>
+  /** "Delete all my data": what it would remove, measured, with a confirm token. */
+  dataWipePreview: () => Promise<IpcResult<DataWipePreviewResult>>
+  /** Confirmed: the app restarts and empties its data folder before it opens anything. */
+  dataWipeRun: (payload: { confirmToken: string }) => Promise<IpcResult<true>>
   getAccessibilitySupportState: () => Promise<IpcResult<{ enabled: boolean }>>
   onAccessibilitySupportChanged: (listener: (payload: { enabled: boolean }) => void) => () => void
   setSecret: (provider: SecretProvider, key: string) => Promise<IpcResult<true>>

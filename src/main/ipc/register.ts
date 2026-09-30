@@ -169,6 +169,7 @@ import {
   DEFAULT_SETTINGS,
   StorageCleanupPreviewRequestSchema,
   StorageCleanupRunRequestSchema,
+  DataWipeRunRequestSchema,
   StorageSurfaceAckRequestSchema,
   DictationInstallRequestSchema,
   DictationDeleteCacheRequestSchema,
@@ -188,6 +189,7 @@ import {
   type Settings,
   type StorageCleanupPreviewResult,
   type StorageCleanupRunResult,
+  type DataWipePreviewResult,
   type StorageReportResult,
   type AgentEvent,
   type AgentQuestionRequest,
@@ -344,6 +346,7 @@ import {
   runStorageCleanup,
   deleteWorkspaceStorageDir
 } from '@main/storage/retention'
+import { previewDataWipe, runDataWipe } from '@main/storage/dataWipe'
 import { collectHomeActivity } from '../agent/activityStats'
 import { applyNetworkSettings, proxyStatus } from '@main/net/proxy'
 import { searchRuns } from '@main/agent/runSearch'
@@ -1415,6 +1418,26 @@ export function registerIpc(): void {
       }
     }
   )
+
+  ipcMain.handle(IPC.dataWipePreview, async (event): Promise<IpcResult<DataWipePreviewResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(await previewDataWipe())
+    } catch (err) {
+      return failFrom(err, IPC.dataWipePreview)
+    }
+  })
+
+  ipcMain.handle(IPC.dataWipeRun, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = DataWipeRunRequestSchema.parse(raw)
+      await runDataWipe(req.confirmToken)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.dataWipeRun)
+    }
+  })
 
   ipcMain.handle(IPC.storageAckSurface, async (event, raw): Promise<IpcResult<Settings>> => {
     if (!senderOk(event)) return fail('Invalid sender')

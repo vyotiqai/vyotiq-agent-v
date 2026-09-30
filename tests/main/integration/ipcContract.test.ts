@@ -65,6 +65,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   storageCleanupPreview: IPC.storageCleanupPreview,
   storageCleanupRun: IPC.storageCleanupRun,
   storageAckSurface: IPC.storageAckSurface,
+  dataWipePreview: IPC.dataWipePreview,
+  dataWipeRun: IPC.dataWipeRun,
   setSecret: IPC.setSecret,
   clearSecret: IPC.clearSecret,
   secretStatus: IPC.secretStatus,

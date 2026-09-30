@@ -30,6 +30,8 @@ export type LaunchOptions = {
   preLaunchSeed?: (userDataDir: string) => void
   /** More Chromium/Electron switches (a fake microphone fed from a file, say). */
   extraArgs?: string[]
+  /** Launch on this data folder instead of a fresh one: a second launch of the same profile. */
+  userDataDir?: string
 }
 
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
@@ -39,7 +41,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     )
   }
 
-  const userDataDir = mkdtempSync(join(tmpdir(), 'vyotiq-gui-e2e-'))
+  const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), 'vyotiq-gui-e2e-'))
   mkdirSync(userDataDir, { recursive: true })
   options.preLaunchSeed?.(userDataDir)
   // The e2e specs drive the classic sidebar chrome; the shipped default is

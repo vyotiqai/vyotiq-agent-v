@@ -36,6 +36,12 @@ If `settings.json` is damaged, Agent V starts with default settings and keeps th
 
 Settings, "Diagnostics", shows the logs path and has "Open folder". Logs are "always written locally", whether or not crash reporting is on.
 
+### Keys in task records
+
+Task records don't keep secrets. Before a message, event or summary is written to disk, anything shaped like a key is replaced with `[redacted:secret]`: provider keys (OpenAI, Anthropic, OpenRouter, Google, xAI, Groq, Bedrock), GitHub, GitLab, Slack and Stripe tokens, AWS access key ids, JSON web tokens, private-key blocks, and the value after `Bearer` or `Basic`. A key in a brief is replaced in the task's title and contract too.
+
+The step that read a key still has it, so a task can use a key you paste into it. Later turns are rebuilt from the record, so they see the placeholder; the agent is told to read the real value from its source again rather than write the placeholder into a file. Undo points are copies of your files and are kept as they are. Other key-like strings (a password in a config file, say) aren't recognized, and are kept as written.
+
 ## Settings as a file
 
 Settings, "About", "Settings file" has three actions.
@@ -57,6 +63,8 @@ Settings, "Storage" covers "What Agent V keeps on disk, and when it lets go of i
 | "Managed size cap" | 5 GB. "Past this, the oldest undo points are evicted until it fits." |
 
 "Free up space now" runs a cleanup on demand. It "Shows what it would delete first. Nothing from the last 24 hours."
+
+"Delete all my data" deletes everything Agent V keeps on this computer: tasks and their undo points, keys and sign-ins, settings, extensions, logs, worktree task folders, the home workspace, and the browser's data. It shows what it would delete first — how many tasks (and how many are running and will be stopped), worktree folders and how many have uncommitted changes, and files in the home workspace — and asks once. Agent V then restarts, and deletes before it opens anything, because it can't remove files it has open. Your projects, and the branches and commits of worktree tasks in them, are not touched. If a file can't be deleted, the next launch tries that file again, and only that file.
 
 Removing old undo points means you can no longer undo or rewind those tasks' edits. See [Review and rewind](/docs/review-and-rewind).
 

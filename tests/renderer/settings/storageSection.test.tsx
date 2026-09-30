@@ -437,3 +437,57 @@ describe('Settings → Storage', () => {
     )
   })
 })
+
+describe('Settings → Storage → Delete all my data', () => {
+  const wipePreview = {
+    dataPath: '/home/me/.config/vyotiq',
+    totalBytes: 2 * 1024 * 1024 * 1024,
+    tasks: 41,
+    runningTasks: 1,
+    taskWorktrees: 2,
+    uncommittedWorktrees: 1,
+    homeFiles: 3,
+    confirm: { token: 'wipe-tok', mintedAt: '2026-09-30T00:00:00.000Z' }
+  }
+
+  it('measures first, says what goes in words, and only the confirm sends the token', async () => {
+    const bridge = makeBridge({
+      dataWipePreview: vi.fn(async () => ({ ok: true as const, data: wipePreview })),
+      dataWipeRun: vi.fn(async () => ({ ok: true as const, data: true as const }))
+    })
+    renderStorage(bridge)
+    const field = await waitFor(() => document.querySelector('[data-settings-field="storage-delete-all"]') as HTMLElement)
+    fireEvent.click(within(field).getByRole('button', { name: 'Delete…' }))
+    await waitFor(() => expect(bridge.dataWipePreview).toHaveBeenCalledTimes(1))
+
+    const list = await within(field).findByRole('list', { name: 'What gets deleted' })
+    expect(within(list).getByText('41 tasks')).toBeTruthy()
+    expect(within(list).getByText('1 running, stopped first')).toBeTruthy()
+    expect(within(list).getByText('1 with uncommitted changes')).toBeTruthy()
+    expect(within(list).getByText('3 files')).toBeTruthy()
+    expect(within(field).getByText(/Branches and commits stay in your repositories/)).toBeTruthy()
+    expect(bridge.dataWipeRun).not.toHaveBeenCalled()
+
+    fireEvent.click(within(field).getByRole('button', { name: 'Delete 2.0 GB and restart' }))
+    await waitFor(() => expect(bridge.dataWipeRun).toHaveBeenCalledWith({ confirmToken: 'wipe-tok' }))
+    expect(within(field).getByRole('status').textContent).toBe('Restarting…')
+  })
+
+  it('cancel deletes nothing; a refused confirm says why and offers the button again', async () => {
+    const bridge = makeBridge({
+      dataWipePreview: vi.fn(async () => ({ ok: true as const, data: wipePreview })),
+      dataWipeRun: vi.fn(async () => ({ ok: false as const, error: 'That confirmation expired — check again' }))
+    })
+    renderStorage(bridge)
+    const field = await waitFor(() => document.querySelector('[data-settings-field="storage-delete-all"]') as HTMLElement)
+    fireEvent.click(within(field).getByRole('button', { name: 'Delete…' }))
+    fireEvent.click(await within(field).findByRole('button', { name: 'Cancel' }))
+    expect(bridge.dataWipeRun).not.toHaveBeenCalled()
+    expect(within(field).queryByRole('list')).toBeNull()
+
+    fireEvent.click(within(field).getByRole('button', { name: 'Delete…' }))
+    fireEvent.click(await within(field).findByRole('button', { name: 'Delete 2.0 GB and restart' }))
+    expect((await within(field).findByRole('alert')).textContent).toBe('That confirmation expired — check again')
+    expect(within(field).getByRole('button', { name: 'Delete…' })).toBeTruthy()
+  })
+})

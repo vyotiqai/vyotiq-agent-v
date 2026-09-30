@@ -86,6 +86,12 @@ function updateRegistry<T>(change: (list: TaskWorktree[]) => { next: TaskWorktre
   return run
 }
 
+/** Every task worktree this app made (merged ones too, until discarded). */
+export async function listTaskWorktrees(): Promise<TaskWorktree[]> {
+  await chain
+  return readRegistry()
+}
+
 export async function findTaskWorktree(workspacePath: string): Promise<TaskWorktree | null> {
   await chain
   return (await readRegistry()).find((w) => workspacePathsEqual(w.workspacePath, workspacePath)) ?? null

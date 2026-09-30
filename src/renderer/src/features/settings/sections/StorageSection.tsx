@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type {
+  DataWipePreviewResult,
   Settings,
   StorageCleanupPreviewResult,
   StorageCleanupRunResult,
@@ -28,6 +29,125 @@ function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 type CleanupStage = 'idle' | 'previewing' | 'confirming' | 'running' | 'done'
+
+type WipeStage = 'idle' | 'checking' | 'confirming' | 'restarting'
+
+/**
+ * Everything the app keeps, gone: measured first, then one confirm, then a
+ * restart that deletes before anything is opened again.
+ */
+function DeleteAllDataField() {
+  const [stage, setStage] = useState<WipeStage>('idle')
+  const [preview, setPreview] = useState<DataWipePreviewResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const bridge = typeof window.vyotiq?.dataWipePreview === 'function' ? window.vyotiq : null
+
+  const fail = (message: string): void => {
+    setError(message)
+    setPreview(null)
+    setStage('idle')
+  }
+
+  const check = (): void => {
+    if (!bridge) return
+    setStage('checking')
+    setError(null)
+    void bridge
+      .dataWipePreview()
+      .then((res) => {
+        if (!res.ok) return fail(res.error)
+        setPreview(res.data)
+        setStage('confirming')
+      })
+      .catch((err: unknown) => fail(err instanceof Error ? err.message : String(err)))
+  }
+
+  const confirm = (): void => {
+    if (!bridge || !preview) return
+    setStage('restarting')
+    void bridge
+      .dataWipeRun({ confirmToken: preview.confirm.token })
+      .then((res) => {
+        if (!res.ok) fail(res.error)
+      })
+      .catch((err: unknown) => fail(err instanceof Error ? err.message : String(err)))
+  }
+
+  const cancel = (): void => {
+    setPreview(null)
+    setStage('idle')
+  }
+
+  const rows: Array<{ label: string; value: string; note?: string }> = preview
+    ? [
+        {
+          label: 'Tasks and their undo points',
+          value: plural(preview.tasks, 'task'),
+          ...(preview.runningTasks > 0 ? { note: `${preview.runningTasks} running, stopped first` } : {})
+        },
+        {
+          label: 'Task worktree folders',
+          value: plural(preview.taskWorktrees, 'folder'),
+          ...(preview.uncommittedWorktrees > 0
+            ? { note: `${preview.uncommittedWorktrees} with uncommitted changes` }
+            : {})
+        },
+        { label: 'Files in the Home folder', value: plural(preview.homeFiles, 'file') },
+        { label: 'Keys, sign-ins, settings, extensions, logs', value: 'All' }
+      ]
+    : []
+
+  const below =
+    stage === 'confirming' && preview ? (
+      <div className="flex flex-col gap-2">
+        <ul className="m-0 list-none divide-y divide-border/60 border-y border-border p-0" aria-label="What gets deleted">
+          {rows.map((row) => (
+            <li key={row.label} className="flex h-8 items-center gap-3 text-xs">
+              <span className="min-w-0 flex-1 truncate text-fg">{row.label}</span>
+              {row.note ? <span className="shrink-0 text-warning">{row.note}</span> : null}
+              <span className="w-24 shrink-0 text-right text-muted tnum">{row.value}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="m-0 text-xs text-muted">
+          Branches and commits stay in your repositories. VYOTIQ restarts to delete, since it can’t remove files it has
+          open.
+        </p>
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" variant="ghost" onClick={cancel}>
+            Cancel
+          </Button>
+          <Button size="sm" variant="danger" onClick={confirm}>
+            Delete {formatBytes(preview.totalBytes)} and restart
+          </Button>
+        </div>
+      </div>
+    ) : error ? (
+      <p className="m-0 text-xs text-danger" role="alert">
+        {error}
+      </p>
+    ) : null
+
+  return (
+    <SettingsField
+      id="storage-delete-all"
+      title="Delete all my data"
+      hint="Tasks, keys, settings and everything else this app keeps on this computer."
+      help="Your projects are never touched. Shows what it would delete first."
+      below={below}
+    >
+      {stage === 'checking' || stage === 'restarting' ? (
+        <span className="text-xs text-muted" role="status">
+          {stage === 'checking' ? 'Checking…' : 'Restarting…'}
+        </span>
+      ) : stage === 'confirming' ? null : (
+        <Button size="sm" variant="danger" disabled={!bridge} onClick={check}>
+          Delete…
+        </Button>
+      )}
+    </SettingsField>
+  )
+}
 
 /** Largest first, so the row worth acting on is the one read first. */
 function bySize(a: StorageReportCategory, b: StorageReportCategory): number {
@@ -444,6 +564,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
             </Button>
           )}
         </SettingsField>
+        <DeleteAllDataField />
       </SettingsGroup>
 
       {report && report.workspaces.length > 0 ? (

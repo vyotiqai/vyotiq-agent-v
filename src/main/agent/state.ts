@@ -21,6 +21,8 @@ import {
 } from './messageAppendQueue'
 import { enqueueStatusPatch, flushStatusWrites, writeStatusImmediate, clearStatusWritesForDir } from './statusWriteQueue'
 import { getCachedListRuns, invalidateListRunsCache } from './runListCache'
+import { redactForRecord } from './recordRedaction'
+import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import {
   ChatMessageSchema,
   PersistedEventSchema,
@@ -145,7 +147,7 @@ export function saveCompaction(runDir: string, record: CompactionRecord): boolea
     return false
   }
   try {
-    atomicWriteJson(join(runDir, 'compaction.json'), parsed.data)
+    atomicWriteJson(join(runDir, 'compaction.json'), redactForRecord(parsed.data))
     return true
   } catch (err) {
     logger.warn('Failed to write compaction.json', {
@@ -239,7 +241,7 @@ export function ensureUserMessageAt(
 }
 
 export function syncMessages(dir: string, messages: ChatMessage[]): void {
-  const body = messages.map((m) => JSON.stringify(m)).join('\n')
+  const body = messages.map((m) => JSON.stringify(redactForRecord(m))).join('\n')
   atomicWriteFile(join(dir, 'messages.jsonl'), body ? `${body}\n` : '')
   // The rewritten live file is authoritative and callers pass stitched content;
   // stale archive heads would otherwise be re-prepended by stitched readers and
@@ -253,7 +255,7 @@ export function syncMessages(dir: string, messages: ChatMessage[]): void {
  * main-thread event loop mid-run. */
 export async function syncMessagesAsync(dir: string, messages: ChatMessage[]): Promise<void> {
   await flushMessageAppends(dir)
-  const body = messages.map((m) => JSON.stringify(m)).join('\n')
+  const body = messages.map((m) => JSON.stringify(redactForRecord(m))).join('\n')
   await atomicWriteFileAsync(join(dir, 'messages.jsonl'), body ? `${body}\n` : '')
   // Same archive reconciliation as syncMessages — see the comment there.
   await removeMessageArchives(dir)
@@ -277,7 +279,8 @@ function ensureMessageAt(message: ChatMessage): ChatMessage {
 }
 
 export function appendMessage(dir: string, message: ChatMessage): Promise<void> {
-  const line = `${JSON.stringify(ensureMessageAt(message))}\n`
+  // The record copy: the run keeps the message it holds as it was.
+  const line = `${JSON.stringify(redactForRecord(ensureMessageAt(message)))}\n`
   return enqueueMessageAppend(dir, line)
 }
 
@@ -318,7 +321,8 @@ export function createRun(
   const dir = resolveRunDir(workspacePath, runId)
   ensureWorkspaceStorage(workspacePath)
   mkdirSync(dir, { recursive: true })
-  const goalText = goal.trim() || 'chat'
+  // The contract and the navigator title are records too.
+  const goalText = redactSecretsInText(goal.trim()) || 'chat'
   const briefChecks = briefDoneWhenChecks(options.doneWhen ?? [], new Date().toISOString())
   if (briefChecks.length > 0) atomicWriteJson(join(dir, DONE_WHEN_CHECKS_FILE), { checks: briefChecks })
   atomicWriteFile(
@@ -365,7 +369,7 @@ export function appendEvent(dir: string, event: unknown, at?: string): void {
  */
 export async function syncEventsAsync(dir: string, rows: PersistedEvent[]): Promise<void> {
   await flushEventAppends(dir)
-  const body = rows.map((row) => JSON.stringify({ at: row.at, event: row.event })).join('\n')
+  const body = rows.map((row) => JSON.stringify({ at: row.at, event: redactForRecord(row.event) })).join('\n')
   atomicWriteFile(join(dir, 'events.jsonl'), body ? `${body}\n` : '')
   // The rewritten live file is authoritative and callers pass the stitched
   // (archive + live) history; stale archive heads would resurrect truncated
