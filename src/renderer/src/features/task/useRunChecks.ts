@@ -1,5 +1,23 @@
 import { useEffect, useState } from 'react'
 import { DONE_WHEN_CHECKS_FILE, parseDoneWhenChecks, type DoneWhenCheck } from '@shared/doneWhenChecks'
+import type { UiItem } from '@shared/transcript'
+
+/**
+ * When to read `checks.json` again: `create_plan` and `check_done_when` are
+ * the only writers, so the revision moves when one of them settles, and when
+ * the run starts or stops (a rewind or a new run can drop checks).
+ */
+export function checksRevisionOf(items: readonly UiItem[], live: boolean): string {
+  let n = 0
+  let lastId = ''
+  for (const item of items) {
+    if (item.kind !== 'tool' || item.tool.status === 'running') continue
+    if (item.tool.name !== 'create_plan' && item.tool.name !== 'check_done_when') continue
+    n += 1
+    lastId = item.id
+  }
+  return `${n}:${lastId}:${live ? 1 : 0}`
+}
 
 /**
  * The run's done-when checks from `checks.json`. Only `create_plan` and

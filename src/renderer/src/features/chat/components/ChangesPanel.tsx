@@ -41,8 +41,10 @@ import type { AskTarget } from '@renderer/features/inspector/ReviewDiffTable'
 import { lineLabel } from '@renderer/features/inspector/reviewDiff'
 import { reviewSignature, useReviewViewed } from '@renderer/features/inspector/reviewViewed'
 import { sessionEditTotals, settledWriteCount } from '@renderer/features/inspector/taskCounts'
+import { checksRevisionOf, useRunChecks } from '@renderer/features/task/useRunChecks'
 import { FileBadge } from './FileBadge'
 import { RepoCommandsNotice } from './RepoCommandsNotice'
+import { ReviewChecks } from './ReviewChecks'
 import {
   collectSessionChangedFiles,
   collectSessionFileDiffs,
@@ -196,7 +198,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   variant = 'panel',
   reviewTitle = 'Review',
   onReviewBack,
-  onAskAboutLine
+  onAskAboutLine,
+  onHandToAgent
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
@@ -242,6 +245,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   onReviewBack?: () => void
   /** Asking about a line sends this instruction to the agent as a follow-up. */
   onAskAboutLine?: (instruction: string) => void
+  /** Sends an instruction to the task, as a follow-up: an open check's "Ask it to cover this". */
+  onHandToAgent?: (instruction: string) => void
 }) {
   // Prefer parent-shared chrome; fall back for tests that mount the panel alone.
   const localChrome = useGitChrome(
@@ -1090,6 +1095,15 @@ export const ChangesPanel = memo(function ChangesPanel({
     </p>
   ) : null
 
+  // The task's done-when checks lead the review once the run has stopped:
+  // what is still open first, the met ones folded to a count.
+  const checksRevision = useMemo(() => checksRevisionOf(sourceItems, running), [sourceItems, running])
+  const checks = useRunChecks(workspacePath ?? null, runId ?? null, checksRevision)
+  const checksBlock =
+    displayScope === 'agent' && !running && checks.length > 0 ? (
+      <ReviewChecks checks={checks} inset={variant === 'review' ? 'px-4' : 'px-3'} onAsk={onHandToAgent} />
+    ) : null
+
   const repoCommandsNotice =
     workspacePath && status?.repoCommands ? (
       <RepoCommandsNotice
@@ -1532,6 +1546,7 @@ export const ChangesPanel = memo(function ChangesPanel({
 
         {gitNotice}
         {repoCommandsNotice}
+        {checksBlock}
 
         <div className="flex min-h-0 flex-1">
           <aside className="flex w-[300px] shrink-0 flex-col border-r border-border" aria-label="Files to review">
@@ -1817,6 +1832,7 @@ export const ChangesPanel = memo(function ChangesPanel({
 
       {gitNotice}
       {repoCommandsNotice}
+      {checksBlock}
 
       {status?.truncated && displayScope !== 'agent' && displayScope !== 'commits' ? (
         <p className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted">

@@ -907,6 +907,7 @@ export function ChatView({
               reviewTitle={taskTitle ?? 'Review'}
               onReviewBack={toggleInspectorExpanded}
               onAskAboutLine={handToAgent}
+              onHandToAgent={handToAgent}
             />
           </ErrorBoundary>
         </div>
