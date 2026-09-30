@@ -481,3 +481,38 @@ describe('useAppShortcuts workspace switching', () => {
     expect(onSwitchWorkspaceByIndex).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('useAppShortcuts task stepping', () => {
+  it('routes Alt+Up and Alt+Down to the task above and below, and leaves text fields alone', () => {
+    const onStepTask = vi.fn()
+    renderHook(() =>
+      useAppShortcuts({
+        onToggleSidebar: () => {},
+        onOpenSearch: () => {},
+        onNewChat: () => {},
+        onOpenSettings: () => {},
+        onStepTask
+      })
+    )
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true }))
+    expect(onStepTask.mock.calls).toEqual([[-1], [1]])
+
+    // Bare, Shift or Ctrl arrows are the list's and the text's own keys.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, shiftKey: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, ctrlKey: true }))
+    const field = document.createElement('input')
+    document.body.appendChild(field)
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
+    field.remove()
+    expect(onStepTask).toHaveBeenCalledTimes(2)
+  })
+
+  it('labels them with arrows', () => {
+    const entry = shortcutCatalog().find((e) => e.id === 'nextTask')
+    expect(entry?.label).toMatch(/↓$/)
+    expect(shortcutLabel('prevTask')).toMatch(/↑$/)
+  })
+})

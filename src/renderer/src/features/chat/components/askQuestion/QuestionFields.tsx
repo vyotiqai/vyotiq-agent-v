@@ -1,5 +1,5 @@
 import { useRef, type JSX, type KeyboardEvent } from 'react'
-import { CheckMark, Input, RadioMark, Textarea, cn } from '@renderer/lib/ui'
+import { CheckMark, Input, Kbd, RadioMark, Textarea, cn } from '@renderer/lib/ui'
 import { CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type { UiAgentQuestionItem } from '@shared/transcript'
 import { AGENT_QUESTION_MAX_ANSWER_CHARS } from '@shared/utils/agentQuestionForm'
@@ -83,14 +83,33 @@ function optionSelections(
   return custom && !selected.includes(custom) ? [...selected, custom] : selected
 }
 
+/** Options past the ninth have no number key. */
+const MAX_NUMBERED = 9
+
+/** The option's number key, on the row's right edge; `aria-keyshortcuts` says it to a screen reader. */
+function OptionKey({ index }: { index: number }): JSX.Element | null {
+  return index < MAX_NUMBERED ? (
+    <span aria-hidden="true" className="ml-auto flex shrink-0">
+      <Kbd>{index + 1}</Kbd>
+    </span>
+  ) : null
+}
+
+function optionKeyShortcut(index: number): string | undefined {
+  return index < MAX_NUMBERED ? String(index + 1) : undefined
+}
+
 /**
  * WAI-ARIA roving tabindex for option groups: one stop in the Tab order,
- * arrows move focus (and, for radios, selection follows focus).
+ * arrows move focus (and, for radios, selection follows focus). While an
+ * option has focus, 1–9 picks that option and Enter on a picked one sends the
+ * form.
  */
 function useRovingOptions(
   count: number,
   tabbableIndex: number,
-  onArrowSelect?: (index: number) => void
+  onArrowSelect?: (index: number) => void,
+  onNumberKey?: (index: number) => void
 ): {
   tabIndexFor: (index: number) => number
   setOptionRef: (index: number) => (el: HTMLButtonElement | null) => void
@@ -104,12 +123,31 @@ function useRovingOptions(
       refs.current[index] = el
     }
   const onGroupKeyDown = (e: KeyboardEvent): void => {
+    const active = document.activeElement
+    const current = refs.current.findIndex((el) => el === active)
+    if (current < 0 || e.ctrlKey || e.metaKey || e.altKey) return
+    const picked = onNumberKey && /^[1-9]$/.test(e.key) ? Number(e.key) - 1 : -1
+    if (picked >= 0) {
+      const target = refs.current[picked]
+      if (picked >= count || !target || target.disabled) return
+      e.preventDefault()
+      target.focus()
+      onNumberKey!(picked)
+      return
+    }
+    // A checkbox's Enter, or a radio's once it is the answer, continues;
+    // otherwise Enter clicks the option as a button does.
+    if (e.key === 'Enter' && !e.shiftKey) {
+      const el = refs.current[current]!
+      if (el.getAttribute('role') === 'checkbox' || el.getAttribute('aria-checked') === 'true') {
+        e.preventDefault()
+        el.form?.requestSubmit()
+      }
+      return
+    }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowLeft') {
       return
     }
-    const active = document.activeElement
-    const current = refs.current.findIndex((el) => el === active)
-    if (current < 0) return
     e.preventDefault()
     const delta = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1
     const next = (current + delta + count) % count
@@ -142,7 +180,8 @@ export function SingleChoiceField({
   const { tabIndexFor, setOptionRef, onGroupKeyDown } = useRovingOptions(
     options.length,
     selectedIndex >= 0 ? selectedIndex : 0,
-    selectOnArrow === false ? undefined : (index) => onChange([options[index]!], customText)
+    selectOnArrow === false ? undefined : (index) => onChange([options[index]!], customText),
+    (index) => onChange([options[index]!], customText)
   )
 
   return (
@@ -163,6 +202,7 @@ export function SingleChoiceField({
               type="button"
               role="radio"
               aria-checked={active}
+              aria-keyshortcuts={optionKeyShortcut(index)}
               tabIndex={tabIndexFor(index)}
               disabled={disabled}
               className={cn(OPTION_BASE, active ? OPTION_ACTIVE : OPTION_IDLE)}
@@ -170,6 +210,7 @@ export function SingleChoiceField({
             >
               <OptionMark kind="radio" active={active} />
               <span className="min-w-0 break-words">{option}</span>
+              <OptionKey index={index} />
             </button>
           )
         })}
@@ -204,9 +245,17 @@ export function MultiChoiceField({
   const allowCustom = item.allowCustom === true
   const selected = new Set(options.filter((o) => values.includes(o)))
   const firstSelected = options.findIndex((o) => selected.has(o))
+  const toggle = (option: string): void => {
+    const next = new Set(selected)
+    if (next.has(option)) next.delete(option)
+    else next.add(option)
+    onChange(optionSelections(options, [...next], customText), customText)
+  }
   const { tabIndexFor, setOptionRef, onGroupKeyDown } = useRovingOptions(
     options.length,
-    firstSelected >= 0 ? firstSelected : 0
+    firstSelected >= 0 ? firstSelected : 0,
+    undefined,
+    (index) => toggle(options[index]!)
   )
 
   return (
@@ -224,22 +273,16 @@ export function MultiChoiceField({
             type="button"
             role="checkbox"
             aria-checked={active}
+            aria-keyshortcuts={optionKeyShortcut(index)}
             tabIndex={tabIndexFor(index)}
             disabled={disabled}
             className={cn(OPTION_BASE, active ? OPTION_ACTIVE : OPTION_IDLE)}
-            onClick={() => {
-              const next = new Set(selected)
-              if (next.has(option)) next.delete(option)
-              else next.add(option)
-              onChange(
-                optionSelections(options, [...next], customText),
-                customText
-              )
-            }}
+            onClick={() => toggle(option)}
             onKeyDown={onGroupKeyDown}
           >
             <OptionMark kind="check" active={active} />
             <span className="min-w-0 break-words">{option}</span>
+            <OptionKey index={index} />
           </button>
         )
       })}

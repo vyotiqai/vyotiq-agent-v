@@ -42,14 +42,19 @@ function matches(line: ReviewLine | null, q: string): boolean {
  * +/− sign beside every changed line (tint is never the only cue). Split sets
  * removed lines against the lines that replaced them. With `onAsk`, a line's
  * number opens a line under it to ask the agent about that line.
+ *
+ * A new file is all additions, so the tint would say the same thing on every
+ * row: it drops the wash and the old side (split and the old numbers), and
+ * keeps the + gutter and one number column.
  */
 export function ReviewDiffTable({
   path,
   diff,
   layout,
   wordWrap = false,
-  numbers = 'new',
+  numbers: numbersAsked = 'new',
   findQuery = '',
+  added: addedFile = false,
   onAsk
 }: {
   path: string
@@ -59,6 +64,8 @@ export function ReviewDiffTable({
   /** Unified only: the new file's numbers, or old and new side by side. */
   numbers?: 'new' | 'both'
   findQuery?: string
+  /** The file is new; git's `@@ -0,0` header says so too when this is left out. */
+  added?: boolean
   onAsk?: (target: AskTarget, question: string) => void
 }) {
   const parsed = useMemo(() => parseReviewDiff(diff), [diff])
@@ -77,7 +84,9 @@ export function ReviewDiffTable({
   }
 
   const q = findQuery.trim().toLowerCase()
-  const split = layout === 'split'
+  const added = addedFile || (parsed.hunks.length > 0 && parsed.hunks.every((h) => h.header.startsWith('@@ -0,0 ')))
+  const split = layout === 'split' && !added
+  const numbers = added ? 'new' : numbersAsked
   const rows = useMemo(() => {
     const all: Array<SplitRow | UnifiedRow> = split ? splitRows(parsed) : unifiedRows(parsed)
     if (!q) return all
@@ -151,6 +160,7 @@ export function ReviewDiffTable({
       <table
         className={cn('border-collapse', split || wordWrap ? 'w-full table-fixed' : 'w-max min-w-full')}
         data-review-diff={layout}
+        data-review-new={added ? '' : undefined}
       >
         <colgroup>
           {split ? (
@@ -189,7 +199,7 @@ export function ReviewDiffTable({
               const { line } = row
               // Unified tints the whole row, as the mockup's DiffView does.
               body = (
-                <tr className={ROW_BG[line.kind]} data-diff-line={line.kind}>
+                <tr className={added ? undefined : ROW_BG[line.kind]} data-diff-line={line.kind}>
                   {numbers === 'both' ? number(line, 'old', row.key, 'pr-1') : null}
                   {number(line, 'new', row.key, 'pr-1')}
                   <td

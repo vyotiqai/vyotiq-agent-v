@@ -44,9 +44,12 @@ function DiffLines({
   expanded,
   followEnd,
   findQuery,
-  wordWrap
+  wordWrap,
+  added = false
 }: {
   lines: DiffLine[]
+  /** Every line is an addition: the sign carries it, so rows go untinted. */
+  added?: boolean
   path: string
   expanded?: boolean
   /** While streaming: show newest lines in the peek instead of the head. */
@@ -117,7 +120,7 @@ function DiffLines({
             key={line.rowKey ?? `diff-${hiddenBeforeCount + index}-${line.kind}`}
             className={cn(
               'flex min-w-0',
-              line.kind === 'add' && 'diff-row-add',
+              line.kind === 'add' && !added && 'diff-row-add',
               line.kind === 'del' && 'diff-row-del',
               match && 'ring-1 ring-inset ring-accent'
             )}
@@ -159,7 +162,8 @@ export const DiffPreview = memo(function DiffPreview({
   followEnd,
   layout = 'unified',
   findQuery,
-  wordWrap = true
+  wordWrap = true,
+  added = false
 }: {
   lines: DiffLine[]
   /** Used to pick a grammar for syntax colours. */
@@ -170,14 +174,16 @@ export const DiffPreview = memo(function DiffPreview({
   layout?: DiffLayout
   findQuery?: string
   wordWrap?: boolean
+  /** A new file: no old side to split against, and no wash (see DiffLines). */
+  added?: boolean
 }) {
   const splitSides = useMemo(() => {
-    if (layout !== 'split') return null
+    if (layout !== 'split' || added) return null
     return {
       left: lines.filter((l) => l.kind === 'del' || l.kind === 'context' || l.kind === 'gap'),
       right: lines.filter((l) => l.kind === 'add' || l.kind === 'context' || l.kind === 'gap')
     }
-  }, [lines, layout])
+  }, [lines, layout, added])
 
   if (!lines.length) return null
 
@@ -216,6 +222,7 @@ export const DiffPreview = memo(function DiffPreview({
       followEnd={followEnd}
       findQuery={findQuery}
       wordWrap={wordWrap}
+      added={added}
     />
   )
 })

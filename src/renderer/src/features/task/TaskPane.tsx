@@ -243,6 +243,8 @@ export function TaskPane(props: TaskPaneProps) {
   // ── Header ────────────────────────────────────────────────────────────
   const firstNeed = live ? (last?.needs[0] ?? null) : null
   const liveSteps = last?.steps ?? []
+  // Steps a later plan dropped stay in the record for their work, not in the plan.
+  const planSteps = useMemo(() => (last?.steps ?? []).filter((s) => s.n > 0), [last])
   const liveStepAt = liveSteps.findIndex((s) => s.state === 'running' || s.state === 'needs')
   const doneSteps = liveSteps.filter((s) => s.state === 'done').length
   const header = taskHeaderState({
@@ -544,6 +546,7 @@ export function TaskPane(props: TaskPaneProps) {
           ) : undefined
         }
         facts={facts}
+        plan={planSteps}
         actions={
           <>
             {liveNow ? (

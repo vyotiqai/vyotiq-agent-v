@@ -271,6 +271,34 @@ function AppShellInner(props: AppShellProps) {
     openTask(next.workspacePath, next.runId)
   }, [allTasks, focusedRun, openTask])
 
+  /**
+   * Alt ↑ / ↓: the task above or below the open one, in the order the list
+   * shows its rows (its filters, folds and search). With the list hidden, or
+   * the open task folded out of it, the same order unfiltered, in its scope.
+   * At either end it stays put.
+   */
+  const onStepTask = useCallback(
+    (delta: -1 | 1): void => {
+      const byId = new Map(allTasks.map((row) => [row.runId, row]))
+      const shown = [...document.querySelectorAll<HTMLElement>('[data-navigator] [data-nav-row][data-run-id]')].flatMap(
+        (el) => byId.get(el.dataset.runId ?? '') ?? []
+      )
+      const scoped = scopePath ? allTasks.filter((row) => workspacePathsEqual(row.workspacePath, scopePath)) : allTasks
+      const indexIn = (rows: NavRow[]): number =>
+        focusedRun
+          ? rows.findIndex(
+              (row) => row.runId === focusedRun.runId && workspacePathsEqual(row.workspacePath, focusedRun.workspacePath)
+            )
+          : -1
+      const rows = indexIn(shown) >= 0 || (!focusedRun && shown.length > 0) ? shown : scoped
+      if (rows.length === 0) return
+      const at = indexIn(rows)
+      const next = at < 0 ? rows[delta > 0 ? 0 : rows.length - 1] : rows[at + delta]
+      if (next) openTask(next.workspacePath, next.runId)
+    },
+    [allTasks, scopePath, focusedRun, openTask]
+  )
+
   /** Where a new task goes: the workspace the navigator is filtered to, else the active one. */
   const newTaskPath = scopePath ?? workspacePath ?? openWorkspaces[0] ?? null
 
@@ -350,6 +378,7 @@ function AppShellInner(props: AppShellProps) {
     onToggleSidebar: onToggleNavigator,
     onOpenSearch: () => setPaletteOpen(true),
     onNextNeedsYou,
+    onStepTask,
     onNewChat: onNewTask,
     onOpenHome,
     onSwitchWorkspaceByIndex: switchWorkspaceByIndex,

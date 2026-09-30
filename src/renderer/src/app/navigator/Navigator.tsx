@@ -389,6 +389,18 @@ export function Navigator(props: NavigatorProps) {
     return count
   }, [openPaths, runsByWorkspacePath, props.activeRuns])
 
+  // A task opened from elsewhere (Ctrl K, Ctrl J, Alt ↑/↓, the Inbox) comes
+  // into view in the list. Only when the open task changes: one already in
+  // view stays put, and a row moving between groups never pulls the list.
+  const tasksRef = useRef<HTMLDivElement>(null)
+  const selectedRunId = place === 'task' ? (selected?.runId ?? null) : null
+  useEffect(() => {
+    if (!selectedRunId) return
+    const rows = tasksRef.current?.querySelectorAll<HTMLElement>('[data-nav-row][data-run-id]') ?? []
+    const row = [...rows].find((el) => el.dataset.runId === selectedRunId)
+    row?.scrollIntoView?.({ block: 'nearest' })
+  }, [selectedRunId])
+
   const selectionSize = checked.size
   const onNavKeyDown = useCallback((e: KeyboardEvent<HTMLButtonElement>) => {
     // Esc on a row clears the selection first, before it could stop a run.
@@ -514,6 +526,7 @@ export function Navigator(props: NavigatorProps) {
           padding, so the rows' right edge meets the head's and the foot's whether
           or not the list scrolls. */}
       <div
+        ref={tasksRef}
         className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2 pl-2 pt-2 [scrollbar-gutter:stable]"
         data-navigator-tasks
       >

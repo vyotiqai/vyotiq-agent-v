@@ -15,6 +15,8 @@ export type AppShortcutHandlers = {
   onOpenSearch: () => void
   /** Ctrl/Cmd+J — open the next task that is waiting on you. */
   onNextNeedsYou?: () => void
+  /** Alt ↑ / ↓ — open the task above or below the open one in the list. */
+  onStepTask?: (delta: -1 | 1) => void
   onNewChat: () => void
   /** Ctrl/Cmd+Shift+H — show the Home launch surface. */
   onOpenHome?: () => void
@@ -42,6 +44,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onToggleSidebar,
     onOpenSearch,
     onNextNeedsYou,
+    onStepTask,
     onNewChat,
     onOpenHome,
     onSwitchWorkspaceByIndex,
@@ -77,6 +80,15 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         if (shouldBlockAppShortcut(e.target)) return
         e.preventDefault()
         onNextNeedsYou()
+        return
+      }
+
+      const step = matchShortcut(e, 'prevTask') ? -1 : matchShortcut(e, 'nextTask') ? 1 : 0
+      if (step !== 0) {
+        if (!onStepTask) return
+        if (shouldBlockAppShortcut(e.target)) return
+        e.preventDefault()
+        onStepTask(step)
         return
       }
 
@@ -169,6 +181,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onToggleSidebar,
     onOpenSearch,
     onNextNeedsYou,
+    onStepTask,
     onNewChat,
     onOpenHome,
     onSwitchWorkspaceByIndex,

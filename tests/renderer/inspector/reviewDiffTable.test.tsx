@@ -30,3 +30,31 @@ describe('ReviewDiffTable questions', () => {
     expect(screen.queryByRole('textbox', ask)).toBeNull()
   })
 })
+
+describe('ReviewDiffTable new files', () => {
+  const NEW_FILE = '@@ -0,0 +1,2 @@\n+# Notes\n+second\n'
+  const INSERT = '@@ -3,0 +4 @@\n+inserted\n'
+
+  it('drops the wash and the old side, keeping the + gutter and one number column', () => {
+    const { container } = render(<ReviewDiffTable path="notes.md" diff={NEW_FILE} layout="split" numbers="both" />)
+    const table = container.querySelector('table')!
+    expect(table.hasAttribute('data-review-new')).toBe(true)
+    expect(container.querySelector('.diff-row-add')).toBeNull()
+    // Unified: number, sign, code.
+    expect(table.querySelectorAll('col')).toHaveLength(3)
+    const rows = table.querySelectorAll('[data-diff-line="add"]')
+    expect(rows).toHaveLength(2)
+    expect([...rows[0]!.querySelectorAll('td')].map((td) => td.textContent)).toEqual(['1', '+', '# Notes'])
+  })
+
+  it('keeps the wash on an edit that only adds lines to an existing file', () => {
+    const { container } = render(<ReviewDiffTable path="a.ts" diff={INSERT} layout="unified" />)
+    expect(container.querySelector('[data-review-new]')).toBeNull()
+    expect(container.querySelector('.diff-row-add')).toBeTruthy()
+  })
+
+  it('takes the file status when the diff cannot say', () => {
+    const { container } = render(<ReviewDiffTable path="a.ts" diff={INSERT} layout="unified" added />)
+    expect(container.querySelector('.diff-row-add')).toBeNull()
+  })
+})

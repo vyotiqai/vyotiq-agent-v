@@ -192,12 +192,15 @@ export function FileDiffBody({
   wordWrap,
   findQuery,
   numbers = 'new',
+  added,
   onAsk
 }: {
   path: string
   diff: FileDiffState
   layout: DiffLayout
   wordWrap: boolean
+  /** The file is new: all additions, so no wash and no old side. */
+  added?: boolean
   findQuery: string
   numbers?: 'new' | 'both'
   onAsk?: (target: AskTarget, question: string) => void
@@ -205,7 +208,9 @@ export function FileDiffBody({
   if (diff.state === 'loading') return <p className="m-0 px-3 py-2 font-sans text-xs text-muted">Loading diff…</p>
   if (diff.state === 'none') return <p className="m-0 px-3 py-2 font-sans text-xs text-muted">{diff.message}</p>
   if (diff.state === 'lines') {
-    return <DiffPreview lines={diff.lines} path={path} expanded layout={layout} findQuery={findQuery} wordWrap={wordWrap} />
+    return (
+      <DiffPreview lines={diff.lines} path={path} expanded layout={layout} findQuery={findQuery} wordWrap={wordWrap} added={added} />
+    )
   }
   return (
     <ReviewDiffTable
@@ -215,6 +220,7 @@ export function FileDiffBody({
       wordWrap={wordWrap}
       findQuery={findQuery}
       numbers={numbers}
+      added={added}
       onAsk={onAsk}
     />
   )
@@ -233,6 +239,7 @@ export function ChangeDiff({
   layout,
   wordWrap,
   findQuery,
+  added,
   onOpen,
   onPrev,
   onNext,
@@ -242,6 +249,7 @@ export function ChangeDiff({
   lines?: DiffLine[] | null
   fetchDiff?: FileDiffSource
   binary?: boolean
+  added?: boolean
   layout: DiffLayout
   wordWrap: boolean
   findQuery: string
@@ -269,7 +277,7 @@ export function ChangeDiff({
         className="scroll-thin min-h-0 flex-1 overflow-auto bg-sunken py-1 font-mono text-xs leading-[18px]"
         data-diff-scroll-root
       >
-        <FileDiffBody path={path} diff={diff} layout={layout} wordWrap={wordWrap} findQuery={findQuery} />
+        <FileDiffBody path={path} diff={diff} layout={layout} wordWrap={wordWrap} findQuery={findQuery} added={added} />
       </div>
     </div>
   )

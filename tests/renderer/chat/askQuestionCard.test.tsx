@@ -484,3 +484,63 @@ describe('AskQuestionPanel focus and keyboard', () => {
     expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['Mine'] }])
   })
 })
+
+describe('AskQuestionPanel number keys', () => {
+  it('picks an option by its number and continues on Enter', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AskQuestionPanel
+        question={baseQuestion({
+          questions: [{ id: 'q1', prompt: 'Which path?', type: 'single', options: ['A', 'B', 'C'], allowCustom: true }]
+        })}
+        onSubmit={onSubmit}
+      />
+    )
+    const a = screen.getByRole('radio', { name: 'A' })
+    expect(a.getAttribute('aria-keyshortcuts')).toBe('1')
+    a.focus()
+    fireEvent.keyDown(a, { key: '3' })
+    const c = screen.getByRole('radio', { name: 'C' })
+    expect(c.getAttribute('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(c)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(c, { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['C'] }])
+  })
+
+  it('answers a quick form on the number alone', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AskQuestionPanel
+        question={baseQuestion({ questions: [{ id: 'q1', prompt: 'Which path?', type: 'single', options: ['A', 'B'] }] })}
+        onSubmit={onSubmit}
+      />
+    )
+    const a = screen.getByRole('radio', { name: 'A' })
+    a.focus()
+    fireEvent.keyDown(a, { key: '2' })
+    expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['B'] }])
+  })
+
+  it('toggles a checkbox by its number, ignores numbers past the last, and leaves modified keys alone', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AskQuestionPanel
+        question={baseQuestion({ questions: [{ id: 'q1', prompt: 'Which ones?', type: 'multi', options: ['A', 'B'] }] })}
+        onSubmit={onSubmit}
+      />
+    )
+    const a = screen.getByRole('checkbox', { name: 'A' })
+    a.focus()
+    fireEvent.keyDown(a, { key: '2' })
+    fireEvent.keyDown(a, { key: '1' })
+    fireEvent.keyDown(a, { key: '5' })
+    fireEvent.keyDown(a, { key: '2', ctrlKey: true })
+    expect(screen.getByRole('checkbox', { name: 'A' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('checkbox', { name: 'B' }).getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.keyDown(screen.getByRole('checkbox', { name: 'A' }), { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['A', 'B'] }])
+  })
+})

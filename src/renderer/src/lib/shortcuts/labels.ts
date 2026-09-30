@@ -8,6 +8,8 @@ function isDarwin(): boolean {
 function keyGlyph(key: string): string {
   if (key === 'escape') return 'Esc'
   if (key === ',') return ','
+  if (key === 'arrowup') return '↑'
+  if (key === 'arrowdown') return '↓'
   return key.toUpperCase()
 }
 
@@ -35,6 +37,8 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   sidebar: 'Show / hide navigator',
   search: 'Search and commands',
   nextNeedsYou: 'Next task that needs you',
+  prevTask: 'Previous task in the list',
+  nextTask: 'Next task in the list',
   newChat: 'New task',
   goHome: 'Home',
   settings: 'Settings',

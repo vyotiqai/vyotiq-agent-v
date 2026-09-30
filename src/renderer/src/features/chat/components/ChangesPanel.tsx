@@ -1180,6 +1180,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           layout={layout}
           wordWrap={wordWrap}
           findQuery={findQuery}
+          added={selected.status === 'A' || selected.status === '?'}
           onOpen={onOpenFile && selected.status !== 'D' ? () => onOpenFile(selected.path) : undefined}
           onPrev={selectByOffset(-1)}
           onNext={selectByOffset(1)}
@@ -1694,6 +1695,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                     wordWrap={wordWrap}
                     findQuery={findQuery}
                     numbers="both"
+                    added={selected.status === 'A' || selected.status === '?'}
                     onAsk={askAboutLine}
                   />
                 </div>

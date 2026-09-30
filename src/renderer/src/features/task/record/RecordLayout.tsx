@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from 'react'
-import { STATE_LABEL, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { STATE_LABEL, StatusGlyph, Tooltip, cn, type TaskState } from '@renderer/lib/ui'
 import { DIVIDER_FILL, RECORD_MAX, SECTION_LABEL } from '@renderer/lib/utils/layout'
 
 /**
@@ -14,7 +14,8 @@ export function TaskHeader({
   title,
   editor,
   facts,
-  actions
+  actions,
+  plan
 }: {
   /** None for a task that has not started. */
   state?: TaskState | null
@@ -24,10 +25,12 @@ export function TaskHeader({
   editor?: ReactNode
   facts?: Array<{ text: ReactNode; mono?: boolean; title?: string }>
   actions?: ReactNode
+  /** The latest plan's steps, drawn over the header's bottom rule. */
+  plan?: ReadonlyArray<{ title: string; state: TaskState }>
 }) {
   return (
     <header
-      className="flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2"
+      className="relative flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2"
       data-task-header
     >
       {state ? (
@@ -51,8 +54,53 @@ export function TaskHeader({
       ))}
       <span className="flex-1" />
       {actions ? <div className="flex shrink-0 items-center gap-0.5">{actions}</div> : null}
+      {plan ? <PlanLine steps={plan} /> : null}
     </header>
   )
+}
+
+/**
+ * The plan as the header's bottom rule: one segment per step, so progress
+ * costs no row. Done steps are quiet ink, the live one breathes in the
+ * accent, one that needs you is solid accent, a failed one is the danger hue.
+ * A plan with nothing left to do draws nothing.
+ */
+export function PlanLine({ steps }: { steps: ReadonlyArray<{ title: string; state: TaskState }> }) {
+  if (steps.length === 0 || steps.every((s) => s.state === 'done' || s.state === 'review')) return null
+  const at = steps.findIndex((s) => s.state === 'running' || s.state === 'needs')
+  const done = steps.filter((s) => s.state === 'done' || s.state === 'review').length
+  return (
+    <div
+      className="absolute inset-x-0 -bottom-px z-sticky flex h-[3px] gap-[3px]"
+      role="img"
+      aria-label={at >= 0 ? `Step ${at + 1} of ${steps.length}` : `${done} of ${steps.length} steps done`}
+      data-plan-line
+    >
+      {steps.map((s, i) => (
+        <Tooltip key={i} content={`${i + 1}. ${s.title}`} describeChild={false}>
+          <span className={cn('h-full min-w-0 flex-1 rounded-full', planSegmentFill(s.state))} data-plan-step={s.state} />
+        </Tooltip>
+      ))}
+    </div>
+  )
+}
+
+function planSegmentFill(state: TaskState): string {
+  switch (state) {
+    case 'done':
+    case 'review':
+      return 'bg-muted'
+    case 'running':
+      return 'animate-live bg-accent'
+    case 'needs':
+      return 'bg-accent'
+    case 'failed':
+      return 'bg-danger'
+    case 'stopped':
+      return 'bg-border-strong'
+    default:
+      return DIVIDER_FILL
+  }
 }
 
 /**

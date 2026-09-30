@@ -92,7 +92,7 @@ export function paletteCommands({
 }): PaletteCommand[] {
   const base: PaletteCommand[] = shortcutCatalog()
     // One tab per Alt chord would repeat the panel commands; the chords are listed in Settings.
-    .filter((entry) => !EXCLUDED.has(entry.id) && !/^(workspace[1-9]|inspectorTab[1-6])$/.test(entry.id))
+    .filter((entry) => !EXCLUDED.has(entry.id) && !/^(workspace[1-9]|inspectorTab[1-6]|prevTask|nextTask)$/.test(entry.id))
     .map((entry) => ({
       id: entry.id,
       title: entry.title,
