@@ -1,14 +1,16 @@
-import { useContext, useState, type ReactNode } from 'react'
+import { useContext, useMemo, useState, type ReactNode } from 'react'
 import type { ToolApprovalDecision, RunFeedbackRating } from '@shared/ipc'
-import type { UiAgentQuestionAnswer } from '@shared/transcript'
+import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { formatDisplayTime, formatElapsed } from '@shared/utils/timeFormat'
 import { formatUsdCost } from '@shared/utils/costDisplay'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { Icon } from '@renderer/lib/icons'
-import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
+import { Button, DiffStat, StatusGlyph, cn } from '@renderer/lib/ui'
+import { FileTypeIcon } from '@renderer/lib/fileIcons'
 import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { turnCost } from '@renderer/features/chat/utils/messageFooterStats'
+import { collectSessionChangedFiles, type ChangedFile } from '@renderer/features/chat/utils/turnFileDiffs'
 import { AskQuestionPanel } from '@renderer/features/chat/components/AskQuestionPanel'
 import type { InlineInstanceGate } from '@renderer/features/chat/hooks/useInlineInstanceUi'
 import type { DoneWhenCheck } from '@shared/doneWhenChecks'
@@ -156,22 +158,106 @@ export function TaskRecord(props: TaskRecordProps) {
   )
 }
 
+type ToolItem = Extract<UiItem, { kind: 'tool' }>
+
+/** Every call in a run, in order, wherever the record filed it. */
+function runTools(run: RecordRun): ToolItem[] {
+  const out: ToolItem[] = []
+  const add = (list: readonly WorkItem[]): void => {
+    for (const w of list) {
+      if (w.kind === 'explore') out.push(...w.tools)
+      else if (w.kind === 'tool' || w.kind === 'card' || w.kind === 'instance' || w.kind === 'plan') out.push(w.tool)
+    }
+  }
+  add(run.setup)
+  for (const s of run.steps) {
+    add(s.work)
+    add(s.between)
+  }
+  add(run.after)
+  return out
+}
+
+/** Past this many, the rest are one line into Changes. */
+const RESULT_FILES_SHOWN = 8
+
+/** What the run changed, file by file; each opens in Changes. */
+function ResultFiles({ files, onOpen }: { files: readonly ChangedFile[]; onOpen: (path?: string) => void }) {
+  const shown = files.slice(0, RESULT_FILES_SHOWN)
+  const more = files.length - shown.length
+  return (
+    <ul aria-label="Files changed" className="mt-3" data-result-files>
+      {shown.map((f) => {
+        const cut = f.path.lastIndexOf('/')
+        return (
+          <li key={f.path}>
+            <button
+              type="button"
+              onClick={() => onOpen(f.path)}
+              title={f.path}
+              className={cn(
+                'group -mx-2 flex h-7 w-[calc(100%+16px)] min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs focus-visible:vy-focus-ring',
+                ROW_HOVER
+              )}
+            >
+              <FileTypeIcon path={f.path} size={14} />
+              <span className="min-w-0 flex-1 truncate">
+                {cut >= 0 ? <span className="text-tertiary">{f.path.slice(0, cut + 1)}</span> : null}
+                <span className="text-fg">{f.path.slice(cut + 1)}</span>
+              </span>
+              {f.action === 'created' || f.action === 'deleted' ? (
+                <span className="shrink-0 text-caption text-tertiary">{f.action === 'created' ? 'New' : 'Deleted'}</span>
+              ) : null}
+              {f.added != null || f.removed != null ? <DiffStat add={f.added ?? 0} del={f.removed ?? 0} className="shrink-0" /> : null}
+              <Icon
+                name="chevronRight"
+                size={11}
+                className="shrink-0 text-tertiary opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+              />
+            </button>
+          </li>
+        )
+      })}
+      {more > 0 ? (
+        <li>
+          <button
+            type="button"
+            onClick={() => onOpen()}
+            className={cn(
+              '-mx-2 flex h-7 w-[calc(100%+16px)] items-center rounded-md px-2 text-left text-xs text-muted focus-visible:vy-focus-ring',
+              ROW_HOVER
+            )}
+          >
+            {more} more in Changes
+          </button>
+        </li>
+      ) : null}
+    </ul>
+  )
+}
+
 /** The closing answer, and under it how the run did against its checks. */
 function ResultRow({
   text,
   streaming = false,
   checks,
+  files,
+  onOpenFile,
   review
 }: {
   text: string
   streaming?: boolean
   checks: readonly DoneWhenCheck[]
+  /** What the run changed; listed only when there is somewhere to open them. */
+  files?: readonly ChangedFile[]
+  onOpenFile?: (path?: string) => void
   /** Its edits are still open: how many, and the way to them. */
   review?: { count: number; open: () => void }
 }) {
   return (
     <RecordRow label="Result">
       <RecordProse text={text} streaming={streaming} size="md" tone="strong" />
+      {files && files.length > 0 && onOpenFile && !streaming ? <ResultFiles files={files} onOpen={onOpenFile} /> : null}
       <CheckedBlock checks={checks} />
       {review ? (
         <div className="mt-3 flex items-center gap-2" data-result-review>
@@ -238,6 +324,10 @@ function RunBody({
   const { pendingWrites } = useRunSession()
   const { onOpenChanges, onRetry, retryableErrorId } = useContext(RecordActionsContext)
   const unkept = isLast && !live ? (pendingWrites?.count ?? 0) : 0
+  const changedFiles = useMemo(
+    () => (run.result && !live ? collectSessionChangedFiles(runTools(run)) : []),
+    [run, live]
+  )
   // An error row with Retry already says how to carry on.
   const resume = state === 'stopped' && isLast && onRetry && !retryableErrorId ? onRetry : undefined
   const afterActivity = tail?.kind === 'after' && looseActivity(run.after)
@@ -283,6 +373,8 @@ function RunBody({
           text={run.result.text}
           streaming={run.result.streaming}
           checks={live ? [] : checks}
+          files={changedFiles}
+          onOpenFile={onOpenChanges}
           review={unkept > 0 && onOpenChanges ? { count: unkept, open: () => onOpenChanges() } : undefined}
         />
       ) : null}

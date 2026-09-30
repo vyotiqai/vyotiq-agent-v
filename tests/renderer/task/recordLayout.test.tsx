@@ -239,6 +239,33 @@ describe('what the record offers for the run’s open edits', () => {
     expect(onOpenChanges).toHaveBeenCalledWith()
   })
 
+  it('lists what the run changed under the result, each opening in Changes', () => {
+    const onOpenChanges = vi.fn()
+    const { container, getByRole } = showEnd(noPlanRun(), { running: false }, { onOpenChanges })
+    const list = getByRole('list', { name: 'Files changed' })
+    expect([...list.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'src/login.ts+1−1',
+      'tests/login.test.ts+1−1'
+    ])
+    // Under the answer, not above it.
+    const result = container.querySelector('[data-result-files]')!
+    expect(result.previousElementSibling?.textContent).toContain('ANSWER_TEXT')
+    fireEvent.click(getByRole('button', { name: /login\.test\.ts/ }))
+    expect(onOpenChanges).toHaveBeenCalledWith('tests/login.test.ts')
+  })
+
+  it('folds a long list into one line into Changes, and lists nothing with nowhere to open it', () => {
+    const many = [user('Rename it', 0), ...Array.from({ length: 11 }, (_, i) => edit(`src/f${i}.ts`, i + 1)), said('Renamed.', 20)]
+    const onOpenChanges = vi.fn()
+    const { getByRole, unmount } = showEnd(many, { running: false }, { onOpenChanges })
+    expect(getByRole('list', { name: 'Files changed' }).querySelectorAll('li')).toHaveLength(9)
+    fireEvent.click(getByRole('button', { name: '3 more in Changes' }))
+    expect(onOpenChanges).toHaveBeenCalledWith()
+    unmount()
+    const bare = showEnd(noPlanRun(), { running: false }, {})
+    expect(bare.queryByRole('list', { name: 'Files changed' })).toBeNull()
+  })
+
   it('says nothing more once the edits are kept or undone', () => {
     const { container } = showEnd(noPlanRun(), { running: false }, { onOpenChanges: vi.fn() }, 0)
     expect(container.querySelector('[data-result-review]')).toBeNull()

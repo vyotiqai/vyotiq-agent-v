@@ -1,0 +1,19 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+
+    { "type": "text_delta", "text": "Updating the stream." },
+    { "type": "tool_call_delta", "toolCallId": "edit-1", "name": "edit", "argumentsDelta": "{\"path\":\"src/live-stream.ts\",\"diff\":\"@@\\n-old code\\n+LIVE_EARLY_MARK\\n+pad-1\\n+pad-2\\n+pad-3\\n+LIVE_LATE_MARK\\n\"}" },
+    {
+      "type": "assistant_message",
+      "content": "Updating the stream.",
+      "toolCalls": [{ "id": "edit-1", "name": "edit", "arguments": "{\"path\":\"src/live-stream.ts\",\"diff\":\"@@\\n-old code\\n+LIVE_EARLY_MARK\\n+pad-1\\n+pad-2\\n+pad-3\\n+LIVE_LATE_MARK\\n\"}" }]
+    },
+    { "type": "tool_start", "toolCallId": "edit-1", "name": "edit", "summary": "src/live-stream.ts" },
+    { "type": "tool_result", "toolCallId": "edit-1", "name": "edit", "summary": "src/live-stream.ts", "ok": true, "content": "Updated src/live-stream.ts" },
+
+    { "type": "text_delta", "text": "RESULT_FILES_DONE the stream is updated." },
+    { "type": "assistant_message", "content": "RESULT_FILES_DONE the stream is updated." },
+    { "type": "status", "status": "done" }
+  ]
+}
