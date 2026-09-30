@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   iterateNetworkWait,
-  probeNetworkOnline,
-  resolveOfflineWaitMs
+  probeNetworkOnline
 } from '@main/agent/networkMonitor'
 
 describe('probeNetworkOnline', () => {
@@ -56,18 +55,5 @@ describe('iterateNetworkWait', () => {
     await pending
 
     expect(intervals).toEqual([2000, 2000])
-  })
-})
-
-describe('resolveOfflineWaitMs', () => {
-  it('waits indefinitely offline regardless of mode (cap removed)', () => {
-    expect(resolveOfflineWaitMs({ offlineWaitMode: 'default' })).toBe(Number.POSITIVE_INFINITY)
-    expect(resolveOfflineWaitMs({ offlineWaitMode: 'extended' })).toBe(Number.POSITIVE_INFINITY)
-    expect(resolveOfflineWaitMs({ offlineWaitMode: 'wait_forever', autonomousMode: false })).toBe(
-      Number.POSITIVE_INFINITY
-    )
-    expect(resolveOfflineWaitMs({ offlineWaitMode: 'wait_forever', autonomousMode: true })).toBe(
-      Number.POSITIVE_INFINITY
-    )
   })
 })

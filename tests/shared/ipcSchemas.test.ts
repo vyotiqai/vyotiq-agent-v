@@ -896,15 +896,16 @@ describe('ipc schemas', () => {
       model: 'qwen2.5',
       ollamaBaseUrl: 'http://127.0.0.1:11434',
       theme: 'system',
-      // The removed Density setting: still in old files, stripped on parse.
-      uiDensity: 'compact'
+      // Removed settings (Density, the offline wait): still in old files, stripped on parse.
+      uiDensity: 'compact',
+      offlineWaitMode: 'wait_forever'
     })
     expect(legacy.telemetryEnabled).toBe(false)
     expect(legacy.autoCompactThresholdRatio).toBe(0.55)
     expect(legacy.settingsVersion).toBe(SETTINGS_FORMAT_VERSION)
     expect(legacy.thinkingEffort).toBe('low')
     expect(legacy.autoModeSwitch).toBe(true)
-    expect(legacy.offlineWaitMode).toBe('default')
+    expect('offlineWaitMode' in legacy).toBe(false)
     expect(legacy.fontScale).toBe('default')
     expect('uiDensity' in legacy).toBe(false)
     expect(parsed.dictation.engine).toBe('openai')

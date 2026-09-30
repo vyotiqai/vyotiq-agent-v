@@ -3,17 +3,14 @@ import type { AgentEvent, ChatMessage } from '../../../shared/ipc'
 /**
  * Execution substrate for agent runs.
  *
- * The local runtime executes inside the Electron main process. A cloud runtime
- * executes on a provider that keeps running when this app is closed, which is
- * what forces the shape below: a runtime is not just a source of events, it is
- * a handle to work that may outlive the window showing it.
- *
- * That distinction is why `dispose` and `cancel` are separate operations. For
- * the local runtime they would collapse into one — closing the stream ends the
- * work. For a cloud runtime, detaching a listener must NOT stop a turn the user
- * is paying for and expects to find finished later.
+ * The local runtime executes inside the Electron main process, and it is the
+ * only one: a cloud runtime was designed for and then dropped by decision. The
+ * shape stays one a remote runtime could fill — a handle to work that may
+ * outlive the window showing it — which is why `dispose` (detach a listener)
+ * and `cancel` (stop the work) are separate operations even though, locally,
+ * closing the stream ends the work.
  */
-export type RuntimeKind = 'local' | 'cloud'
+export type RuntimeKind = 'local'
 
 /**
  * What a runtime can actually do. Every capability is false by default so a new

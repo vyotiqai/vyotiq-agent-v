@@ -10,6 +10,7 @@ import {
   isDocxPath,
   MAX_DOCX_ARCHIVE_BYTES
 } from './docxText'
+import { extractPdfPages } from '../../attachments/extract'
 
 const SUGGEST_CAP = 8
 const LINE_STREAM_CHUNK = 64 * 1024
@@ -259,6 +260,9 @@ export async function toolRead(
   if (isDocxPath(pathArg)) {
     return readDocx(resolved, pathArg, st.size, options)
   }
+  if (isPdfPath(pathArg)) {
+    return readPdf(resolved, pathArg, st.size, options)
+  }
 
   if (options.startLine !== undefined || options.endLine !== undefined) {
     return readLineRange(resolved, pathArg, st.size, options)
@@ -298,6 +302,78 @@ async function readDocx(
     text = '(no extractable text in Word document)'
   }
   return applyTextReadWindows(text, pathArg, options)
+}
+
+/** A PDF is parsed in memory; past this, read refuses rather than stall the step. */
+export const MAX_PDF_READ_BYTES = 64 * 1024 * 1024
+
+const pdfPageHeading = (page: number, of: number): string => `--- page ${page} of ${of} ---\n`
+
+export function isPdfPath(pathArg: string): boolean {
+  return /\.pdf$/i.test(pathArg)
+}
+
+/**
+ * PDF text, page by page, each page under a `--- page N of M ---` line. Only
+ * the pages the requested window reaches are parsed — the default window stops
+ * after READ_DEFAULT_MAX_LINES lines — and the reply says where it stopped.
+ */
+async function readPdf(resolved: string, pathArg: string, size: number, options: ReadOptions): Promise<string> {
+  if (size > MAX_PDF_READ_BYTES) {
+    throw new Error(`PDF too large to read: ${pathArg} (${size} bytes; the limit is ${MAX_PDF_READ_BYTES / (1024 * 1024)} MB).`)
+  }
+  const byLines = options.startLine !== undefined || options.endLine !== undefined
+  const offset = Math.max(0, Math.trunc(options.offset ?? 0))
+  const limit = options.limit === undefined ? undefined : Math.trunc(options.limit)
+  const byBytes = !byLines && (limit !== undefined || offset > 0)
+  const wantLines = byLines
+    ? options.endLine !== undefined
+      ? Math.max(Math.trunc(options.endLine), Math.trunc(options.startLine ?? 1))
+      : Number.POSITIVE_INFINITY
+    : byBytes
+      ? Number.POSITIVE_INFINITY
+      : READ_DEFAULT_MAX_LINES
+  const wantBytes = byBytes && limit !== undefined ? offset + Math.max(0, limit) : Number.POSITIVE_INFINITY
+  let lines = 0
+  let bytes = 0
+  let extracted: { pages: string[]; numPages: number }
+  try {
+    extracted = await extractPdfPages(await fsp.readFile(resolved), (pageText, pageNumber, numPages) => {
+      // Exactly what this page adds below: its heading line, its text, the join.
+      const text = pageText.trimEnd()
+      lines += 1 + (text ? text.split('\n').length : 0)
+      bytes += Buffer.byteLength(pdfPageHeading(pageNumber, numPages) + text, 'utf8') + 1
+      return lines > wantLines || bytes >= wantBytes
+    })
+  } catch (err) {
+    const name = err instanceof Error ? err.name : ''
+    if (name === 'PasswordException') throw new Error(`PDF is password-protected: ${pathArg}. Its text can't be read.`)
+    const reason = err instanceof Error ? err.message : String(err)
+    throw new Error(`Could not read PDF ${pathArg}: ${reason}`)
+  }
+  const { pages, numPages } = extracted
+  if (pages.every((page) => !page.trim()) && pages.length === numPages) {
+    return `(no extractable text in ${pathArg}: ${numPages} page${numPages === 1 ? '' : 's'}, likely scanned images)`
+  }
+  const text = pages.map((page, i) => pdfPageHeading(i + 1, numPages) + page.trimEnd()).join('\n')
+  const stoppedAt = pages.length < numPages ? pages.length : null
+  const through = stoppedAt ? ` (pages 1-${stoppedAt} of ${numPages} read)` : ''
+  if (byLines) {
+    const out = sliceTextLineRange(text, pathArg, options)
+    // A partial parse can't know the document's line count: name the pages instead.
+    return stoppedAt ? out.replace(/ of \d+ ---\n/, `${through} ---\n`) : out
+  }
+  if (byBytes) {
+    const out = applyTextReadWindows(text, pathArg, options)
+    return stoppedAt ? out.replace(/ of \d+ bytes ---\n/, `${through} ---\n`) : out
+  }
+  const all = text.split('\n')
+  if (all.length <= READ_DEFAULT_MAX_LINES) return text
+  return (
+    `--- lines 1-${READ_DEFAULT_MAX_LINES}${through} ---\n` +
+    all.slice(0, READ_DEFAULT_MAX_LINES).join('\n') +
+    `\n… read truncated at ${READ_DEFAULT_MAX_LINES} lines; pass startLine/endLine to read further.`
+  )
 }
 
 function applyTextReadWindows(text: string, pathArg: string, options: ReadOptions): string {

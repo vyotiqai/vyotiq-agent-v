@@ -78,6 +78,7 @@ describe('toolsSchema', () => {
     expect(read!.description).toMatch(/omit offset\/limit/i)
     expect(read!.description).toMatch(/byte window, not lines/i)
     expect(read!.description).toMatch(/\.docx/)
+    expect(read!.description).toMatch(/\bPDF\b/)
     expect(read!.description).toMatch(/extracted document text/i)
     expect(read!.description).toMatch(/do not unzip/i)
     const props = (read!.parameters as { properties: Record<string, { description?: string }> })

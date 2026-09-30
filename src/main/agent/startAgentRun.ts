@@ -31,7 +31,7 @@ import {
   noteInstanceChildEvent
 } from './agentInstances'
 import { notifyBadgeChange } from '../app/badges'
-import { resolveAvailableRuntime, type RunHandle } from './runtimes'
+import { resolveAvailableRuntime, type RunHandle, type RuntimeKind } from './runtimes'
 import {
   cancelPendingApprovals,
   registerApprovalSender
@@ -118,8 +118,8 @@ export type StartAgentRunAgentInput = {
   provider?: ProviderIdAny
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
-  /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
-  runtime?: 'local' | 'cloud'
+  /** Execution substrate (the runtime seam); only local exists. */
+  runtime?: RuntimeKind
   /** A new task's done-when checks, from its brief. */
   doneWhen?: string[]
 }

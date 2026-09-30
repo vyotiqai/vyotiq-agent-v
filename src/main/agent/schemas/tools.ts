@@ -1199,7 +1199,7 @@ const buildToolArgs = z.object({
 export const TOOL_REGISTRY = {
   read: {
     description:
-      'Read a file under the workspace root (text; Word .docx returns extracted document text — do not unzip it in the terminal; PNG/JPEG/GIF/WebP come back as an image you can see). Directories return a shallow listing. Prefer startLine/endLine for a line window and omit offset/limit then — offset/limit is a byte window, not lines. A read without a window is capped at 2000 lines with a truncation hint — zoom with startLine/endLine to read further. For .ipynb cell edits use edit_notebook. Cite as [[path]] or [[path:line]].',
+      'Read a file under the workspace root (text; Word .docx and PDF return extracted document text — do not unzip or convert them in the terminal; PNG/JPEG/GIF/WebP come back as an image you can see). Directories return a shallow listing. Prefer startLine/endLine for a line window and omit offset/limit then — offset/limit is a byte window, not lines. A read without a window is capped at 2000 lines with a truncation hint — zoom with startLine/endLine to read further. For .ipynb cell edits use edit_notebook. Cite as [[path]] or [[path:line]].',
     schema: readArgs
   },
   edit: {

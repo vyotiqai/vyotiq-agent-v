@@ -100,17 +100,32 @@ function clip(text: string): { text: string; truncated: boolean } {
 }
 
 async function extractPdfText(bytes: Buffer): Promise<string> {
+  // clip() only ever keeps MAX_ATTACHMENT_CHARS, so parsing past a small
+  // multiple of that is pure waste — and was the cause of a real OOM on a
+  // large fixture.
+  const budget = MAX_ATTACHMENT_CHARS * 2
+  let total = 0
+  const { pages } = await extractPdfPages(bytes, (page) => {
+    total += page.length
+    return total >= budget
+  })
+  return pages.join('\n\n')
+}
+
+/**
+ * A PDF's text page by page, in order, until `enough` (called with each new
+ * page's text, its 1-based number and the page count) says stop. unpdf's extractText() has no page range, so this
+ * walks pages itself; callers stop as soon as they hold what they can use.
+ */
+export async function extractPdfPages(
+  bytes: Uint8Array,
+  enough: (pageText: string, pageNumber: number, numPages: number) => boolean
+): Promise<{ pages: string[]; numPages: number }> {
   // unpdf ships as ESM only, so it has to be pulled in at call time from CJS main.
   const { getDocumentProxy } = await import('unpdf')
   const pdf = await getDocumentProxy(new Uint8Array(bytes))
   try {
-    // clip() only ever keeps MAX_ATTACHMENT_CHARS, so parsing past a small
-    // multiple of that is pure waste — and was the cause of a real OOM on a
-    // large fixture. unpdf's extractText() has no page range, so walk pages
-    // ourselves and stop as soon as we hold more text than clip() can keep.
-    const budget = MAX_ATTACHMENT_CHARS * 2
     const pages: string[] = []
-    let total = 0
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber)
       let pageText = ''
@@ -126,10 +141,9 @@ async function extractPdfText(bytes: Buffer): Promise<string> {
         await page.cleanup()
       }
       pages.push(pageText)
-      total += pageText.length
-      if (total >= budget) break
+      if (enough(pageText, pageNumber, pdf.numPages)) break
     }
-    return pages.join('\n\n')
+    return { pages, numPages: pdf.numPages }
   } finally {
     // The proxy unpdf returns has no destroy(); its loading task is the
     // teardown handle — same call unpdf's extractText uses internally.

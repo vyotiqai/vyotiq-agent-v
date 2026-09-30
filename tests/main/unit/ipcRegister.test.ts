@@ -9,6 +9,8 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 const handlers = vi.hoisted(() => new Map<string, (...args: unknown[]) => unknown>())
+/** Channels registered with ipcMain.handle (invoke), as against ipcMain.on (send). */
+const invokeChannels = vi.hoisted(() => new Set<string>())
 
 const mockWin = vi.hoisted(() => ({
   isDestroyed: vi.fn(() => false),
@@ -64,6 +66,7 @@ vi.mock('electron', () => ({
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler)
+      invokeChannels.add(channel)
     },
     on: (channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler)
@@ -518,6 +521,27 @@ describe('registerIpc', () => {
       expect(result.ok).toBe(false)
       expect(result.code).toBe('IPC_VALIDATION')
       expect(transcribeDictationMock).not.toHaveBeenCalledWith(expect.objectContaining({ requestId: 'r2' }), expect.anything())
+    })
+  })
+
+  describe('every invoke handler', () => {
+    it('refuses a subframe before doing anything, whatever it is sent', async () => {
+      const main = { id: 'main' }
+      const subframe = { id: 'child' }
+      const channels = [...invokeChannels]
+      // registerIpc registers every channel the preload can invoke.
+      expect(channels.length).toBeGreaterThan(200)
+      const leaked: string[] = []
+      const closesBefore = mockWin.close.mock.calls.length
+      for (const channel of channels) {
+        const result = await handlers.get(channel)!({ sender: { ...mockWc, mainFrame: main }, senderFrame: subframe }, { junk: true })
+        const refused = !!result && typeof result === 'object' && (result as { ok?: unknown; error?: unknown }).ok === false && (result as { error?: unknown }).error === 'Invalid sender'
+        if (!refused) leaked.push(channel)
+      }
+      expect(leaked).toEqual([])
+      // Nothing a refused call could have started ran.
+      expect(runAgentMock).not.toHaveBeenCalled()
+      expect(mockWin.close.mock.calls.length).toBe(closesBefore)
     })
   })
 

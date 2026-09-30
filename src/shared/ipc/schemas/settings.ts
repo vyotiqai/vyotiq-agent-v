@@ -190,8 +190,6 @@ export type ResponseVerbosity = z.infer<typeof ResponseVerbositySchema>
 export const SearchEngineSchema = z.enum(['duckduckgo', 'bing', 'google'])
 export type SearchEngineId = z.infer<typeof SearchEngineSchema>
 
-export const OfflineWaitModeSchema = z.enum(['default', 'extended', 'wait_forever'])
-export type OfflineWaitMode = z.infer<typeof OfflineWaitModeSchema>
 
 /** Primary navigation layout: sessions/workspaces on Home, or the classic sidebar. */
 export const NavigationModeSchema = z.enum(['home', 'sidebar'])
@@ -766,12 +764,6 @@ export const SettingsSchema = z.object({
    */
   storageSurfaceAcked: z.boolean().default(false),
   /**
-   * Retired: offline waits are unlimited now (resolveOfflineWaitMs ignores
-   * this), so Settings no longer shows it. Kept so settings.json files that
-   * carry it still parse.
-   */
-  offlineWaitMode: OfflineWaitModeSchema.default('default'),
-  /**
    * User-global rules injected as `<user_rules>` on every agent step.
    * Disabled rules are omitted. Workspace rules override these on conflict.
    */
@@ -849,7 +841,6 @@ export const DEFAULT_SETTINGS: Settings = {
   autonomousSkipQuestions: 'wait',
   storage: DEFAULT_STORAGE_SETTINGS,
   storageSurfaceAcked: false,
-  offlineWaitMode: 'default',
   userRules: [],
   agentPersona: '',
   agentTone: '',

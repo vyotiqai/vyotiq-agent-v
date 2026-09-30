@@ -4,20 +4,6 @@ import { isRetriableNetworkError } from './providers/fetchWithRetry'
 const DEFAULT_PROBE_URL = 'https://1.1.1.1/cdn-cgi/trace'
 const PROBE_TIMEOUT_MS = 5000
 const OFFLINE_POLL_MS = 2000
-export type OfflineWaitMode = 'default' | 'extended' | 'wait_forever'
-
-/**
- * Offline wait is unlimited (run-stopping caps removed — user decision): the
- * caller polls every OFFLINE_POLL_MS and resumes on its own when connectivity
- * returns, or the user cancels the run. `settings` kept for call-site
- * compatibility.
- */
-export function resolveOfflineWaitMs(_settings: {
-  offlineWaitMode?: OfflineWaitMode
-  autonomousMode?: boolean
-}): number {
-  return Number.POSITIVE_INFINITY
-}
 
 function probeTimeoutSignal(parent?: AbortSignal): AbortSignal {
   if (typeof AbortSignal.timeout === 'function') {

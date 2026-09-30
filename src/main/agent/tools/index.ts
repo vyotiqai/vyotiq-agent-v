@@ -1095,6 +1095,8 @@ export async function executeTool(
       runDir: context.runDir,
       skipWriteCheckpoint: context.skipWriteCheckpoint
     })
+    // The server may ask the person something mid-call (elicitation): same
+    // card, same unattended rule and same hard-cancel signal as ask_question.
     const mcpResult = await invokeMcpTool(
       mcp.serverId,
       mcp.toolName,
@@ -1103,7 +1105,19 @@ export async function executeTool(
       name,
       context.runEnabledMcpIds,
       workspace,
-      context.runDir
+      context.runDir,
+      context.runId && context.toolCallId
+        ? {
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            signal: context.runSignal ?? signal,
+            ask: context.askQuestion ?? ((req, sig) => askQuestionThroughRenderer(req, sig, context.invokeId)),
+            skipQuestions: () => {
+              const settings = context.invokeSettings ?? getSettings()
+              return settings.autonomousMode && settings.autonomousSkipQuestions === 'skip'
+            }
+          }
+        : undefined
     )
     if (mcpResult.ok) {
       const mutated = new Set<string>()

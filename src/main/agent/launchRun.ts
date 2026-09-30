@@ -13,6 +13,7 @@ import {
   waitUntilRunInactive
 } from './runRegistry'
 import { hydrateRunFollowUps, startAgentRunInBackground } from './startAgentRun'
+import type { RuntimeKind } from './runtimes'
 
 /**
  * The one path that starts an agent run.
@@ -39,7 +40,7 @@ export type LaunchRunRequest = {
   focusedFile?: string | null
   provider?: ProviderIdAny
   model?: string
-  runtime?: 'local' | 'cloud'
+  runtime?: RuntimeKind
   /** A new task's done-when checks, from its brief. */
   doneWhen?: string[]
   /** Where this run's events stream. */

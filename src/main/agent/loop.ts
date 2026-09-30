@@ -17,7 +17,7 @@ import { resolveProviderChatBaseUrl, seedModelsFor } from '../../shared/provider
 import { formatError, isAbortError } from '../../shared/errors'
 import { logger, logErrorSummary } from '../../shared/logger'
 import { workspaceIdFromPath } from '../../shared/workspaceId'
-import { isNetworkFailureCode, iterateNetworkWait, resolveOfflineWaitMs } from './networkMonitor'
+import { isNetworkFailureCode, iterateNetworkWait } from './networkMonitor'
 import { isRetriableProviderMessage } from './providers/fetchWithRetry'
 import { providerHttpErrorCode } from './providers/httpErrors'
 import { circuitKeyProvider } from './circuitBreaker'
@@ -426,10 +426,9 @@ async function* yieldStreamRetryWait(
   failureMessage: string
 ): AsyncGenerator<AgentEvent, void, unknown> {
   try {
-    for await (const retryInMs of iterateNetworkWait({
-      signal,
-      maxWaitMs: resolveOfflineWaitMs(getSettings())
-    })) {
+    // No time limit (run-stopping caps removed — user decision): it polls
+    // until the network is back, or the run is cancelled.
+    for await (const retryInMs of iterateNetworkWait({ signal })) {
       const waitEv: AgentEvent = {
         type: 'network_wait',
         runId,

@@ -60,6 +60,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     onclose?: () => void
     onerror?: (err: unknown) => void
     setRequestHandler(): void {}
+    setNotificationHandler(): void {}
     getServerCapabilities(): Record<string, unknown> {
       return {}
     }

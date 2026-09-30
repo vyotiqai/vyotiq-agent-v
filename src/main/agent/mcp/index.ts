@@ -3,7 +3,16 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
-import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import {
+  ElicitRequestSchema,
+  ErrorCode,
+  ListRootsRequestSchema,
+  McpError,
+  ToolListChangedNotificationSchema,
+  type ElicitRequest,
+  type ElicitResult
+} from '@modelcontextprotocol/sdk/types.js'
+import { randomUUID } from 'crypto'
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { pathToFileURL } from 'url'
 import { basename } from 'path'
@@ -16,7 +25,10 @@ import { logger } from '../../../shared/logger'
 import { neutralizeUntrustedBody, wrapUntrustedContent } from '../untrustedContent'
 import { mcpToolSummary } from '../../../shared/toolSummary'
 import type { ToolResult } from '../tools'
-import type { ToolImageRef } from '../../../shared/ipc'
+import type { AgentQuestionAnswer, AgentQuestionRequest, ToolImageRef } from '../../../shared/ipc'
+import { AGENT_QUESTION_MAX_TITLE_CHARS } from '../../../shared/utils/agentQuestionForm'
+import { elicitationContent, elicitationForm } from './elicitation'
+import { PausableCallTimer } from './callTimer'
 import { storeToolImage } from '../toolImageStore'
 import { sanitizedTerminalEnv } from '../tools/terminal'
 import {
@@ -548,6 +560,135 @@ function rebuildToolsByNameIndex(): void {
   }
 }
 
+/** A server's tool list as catalog entries: prefixed names, untrusted text neutralized. */
+function catalogToolsFor(
+  server: McpServer,
+  listed: Awaited<ReturnType<Client['listTools']>>
+): { tools: ToolDefinition[]; skippedToolNames: string[] } {
+  const tools: ToolDefinition[] = []
+  const skippedToolNames: string[] = []
+  for (const t of listed.tools ?? []) {
+    const fullName = mcpToolName(server.id, t.name)
+    if (!isSupportedMcpToolName(fullName)) {
+      skippedToolNames.push(t.name)
+      continue
+    }
+    mcpReadOnlyHints.set(fullName, t.annotations?.readOnlyHint === true)
+    tools.push({
+      name: fullName,
+      description: neutralizeUntrustedBody(t.description ?? `MCP tool ${t.name} (${server.name})`),
+      parameters: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} }
+    })
+  }
+  if (skippedToolNames.length > 0) {
+    logger.warn('Skipped MCP tools whose names no provider will accept', {
+      scope: 'mcp',
+      serverId: server.id,
+      tools: skippedToolNames.slice(0, 10)
+    })
+  }
+  return { tools, skippedToolNames }
+}
+
+/** Which session a client belongs to, once it is connected (elicitation looks it up). */
+const clientSessions = new WeakMap<Client, { key: string; serverId: string; serverName: string }>()
+/** Refreshes in flight per session; a change announced mid-refresh runs one more. */
+const toolRefreshes = new Map<string, { again: boolean }>()
+
+/** `notifications/tools/list_changed`: list again and swap the session's tools in place. */
+export async function refreshMcpSessionTools(key: string, server: McpServer, client: Client): Promise<void> {
+  const running = toolRefreshes.get(key)
+  if (running) {
+    running.again = true
+    return
+  }
+  const state = { again: false }
+  toolRefreshes.set(key, state)
+  try {
+    do {
+      state.again = false
+      if (sessions.get(key)?.client !== client) return
+      const { tools } = catalogToolsFor(server, await client.listTools())
+      const session = sessions.get(key)
+      // Replaced or closed while listing: that session's tools are someone else's now.
+      if (session?.client !== client) return
+      const kept = new Set(tools.map((tool) => tool.name))
+      for (const tool of session.tools) if (!kept.has(tool.name)) mcpReadOnlyHints.delete(tool.name)
+      session.tools = tools
+      rebuildToolsByNameIndex()
+      logger.info('MCP tools changed', { scope: 'mcp', serverId: server.id, count: tools.length })
+    } while (state.again)
+  } catch (err) {
+    logger.warn('MCP tool list refresh failed', { scope: 'mcp', serverId: server.id, err: formatError(err) })
+  } finally {
+    toolRefreshes.delete(key)
+  }
+}
+
+/**
+ * A task whose tool call is in flight on a session. A server's elicitation
+ * goes to it, shown the way the agent's own questions are.
+ */
+export type McpAsker = {
+  runId: string
+  toolCallId: string
+  /** The run's own cancel: a question outlives a stream interrupt. */
+  signal: AbortSignal
+  ask: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionAnswer[]>
+  /** Unattended with questions skipped: decline rather than wait (read when a question comes). */
+  skipQuestions?: () => boolean
+}
+
+/** In-flight callers per session key, newest last. */
+const sessionAskers = new Map<string, Array<McpAsker & { onWaiting: (waiting: boolean) => void }>>()
+
+const ELICIT_ATTEMPTS = 3
+
+async function answerElicitation(client: Client, params: ElicitRequest['params']): Promise<ElicitResult> {
+  const owner = clientSessions.get(client)
+  const decline = (reason: string): ElicitResult => {
+    logger.info('MCP elicitation declined', { scope: 'mcp', serverId: owner?.serverId, reason })
+    return { action: 'decline' }
+  }
+  if (!owner) return decline('the server is not connected yet')
+  if (params.mode === 'url') return decline('link requests are not supported')
+  const askers = sessionAskers.get(owner.key) ?? []
+  if (askers.length === 0) return decline('no task is calling this server')
+  if (new Set(askers.map((a) => a.runId)).size > 1) return decline('several tasks are calling this server')
+  const asker = askers[askers.length - 1]!
+  if (asker.skipQuestions?.()) return decline('unattended, questions are skipped')
+  const built = elicitationForm(owner.serverName, params.message, params.requestedSchema)
+  if (!built.ok) return decline(`the form can't be shown: it ${built.reason}`)
+  const { title, questions } = built.form
+  asker.onWaiting(true)
+  try {
+    let problem = ''
+    for (let attempt = 0; attempt < ELICIT_ATTEMPTS; attempt++) {
+      const heading = problem ? `${title} — ${problem}` : title
+      const answers = await asker.ask(
+        {
+          requestId: randomUUID(),
+          runId: asker.runId,
+          toolCallId: asker.toolCallId,
+          title: heading.length <= AGENT_QUESTION_MAX_TITLE_CHARS ? heading : `${heading.slice(0, AGENT_QUESTION_MAX_TITLE_CHARS - 1)}…`,
+          questions
+        },
+        asker.signal
+      )
+      const result = elicitationContent(built.form, answers)
+      if (result.action === 'accept') return { action: 'accept', content: result.content }
+      if (result.action === 'decline') return { action: 'decline' }
+      problem = result.problem
+    }
+    return decline('the answers were still not valid after three tries')
+  } catch {
+    // Stopped, or the card was closed: the person didn't answer.
+    return { action: 'cancel' }
+  } finally {
+    asker.onWaiting(false)
+  }
+}
+
 /** Last connect-config fingerprint per session key — config changes reset the connect circuit. */
 const connectConfigByKey = new Map<string, string>()
 
@@ -983,9 +1124,13 @@ export async function retryFailedMcpServers(servers: McpServer[]): Promise<McpSe
 function createMcpClient(workspacePath?: string | null): Client {
   const client = new Client({ name: 'vyotiq', version: '1.0.0' }, {
     capabilities: {
-      roots: { listChanged: false }
+      roots: { listChanged: false },
+      // Forms only: a link request would send the person to a page on the
+      // server's say-so, outside anything the app can show or check.
+      elicitation: { form: {} }
     }
   })
+  client.setRequestHandler(ElicitRequestSchema, (request) => answerElicitation(client, request.params))
   client.setRequestHandler(ListRootsRequestSchema, () => {
     const workspace = resolveStdioWorkspacePath(workspacePath)
     if (!workspace) return { roots: [] }
@@ -1475,31 +1620,7 @@ export async function connectMcpServer(
     }
 
     const { client, transport } = connected
-    const listed = await client.listTools()
-    const tools: ToolDefinition[] = []
-    const skippedToolNames: string[] = []
-    for (const t of listed.tools ?? []) {
-      const fullName = mcpToolName(server.id, t.name)
-      if (!isSupportedMcpToolName(fullName)) {
-        skippedToolNames.push(t.name)
-        continue
-      }
-      mcpReadOnlyHints.set(fullName, t.annotations?.readOnlyHint === true)
-      tools.push({
-        name: fullName,
-        description: neutralizeUntrustedBody(
-          t.description ?? `MCP tool ${t.name} (${server.name})`
-        ),
-        parameters: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} }
-      })
-    }
-    if (skippedToolNames.length > 0) {
-      logger.warn('Skipped MCP tools whose names no provider will accept', {
-        scope: 'mcp',
-        serverId: server.id,
-        tools: skippedToolNames.slice(0, 10)
-      })
-    }
+    const { tools, skippedToolNames } = catalogToolsFor(server, await client.listTools())
     const { resources, prompts } = await probeResourcesAndPrompts(client)
     // If the server is still in the effective settings map, drop the session when
     // it was disabled or reconfigured mid-connect. Servers not in the map (explicit
@@ -1518,7 +1639,12 @@ export async function connectMcpServer(
       return
     }
     sessions.set(key, { client, transport, tools, resources, prompts })
+    clientSessions.set(client, { key, serverId: server.id, serverName: server.name || server.id })
     rebuildToolsByNameIndex()
+    // A server that adds or drops tools says so; the catalog follows without a reconnect.
+    client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+      void refreshMcpSessionTools(key, server, client)
+    })
     sessionConfigKeys.set(key, mcpServerConfigKey(server, workspacePath))
     connectErrors.delete(key)
     connectErrors.delete(server.id)
@@ -2122,6 +2248,59 @@ export function mcpResultContent(
   return { text: texts.join('\n'), images, notes }
 }
 
+/** Longer than any call can run; the call's real limits are PausableCallTimer's. */
+const SDK_TIMEOUT_OFF_MS = 2_147_483_647
+
+/**
+ * `tools/call` with limits that suit real work. The SDK default is 60s, which
+ * browser automation and large tracker queries exceed routinely. The idle
+ * limit restarts on each progress notification — which a server only sends
+ * when the call carries a progress token, i.e. when `onprogress` is passed —
+ * and the working-time cap still bounds a server that streams progress
+ * forever. Both stop while a question from the server waits on the person.
+ */
+async function callMcpToolTimed(
+  client: Client,
+  sessionKey: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  signal: AbortSignal,
+  asker: McpAsker | undefined
+): Promise<Awaited<ReturnType<Client['callTool']>>> {
+  const call = new AbortController()
+  const onRunAbort = (): void => call.abort(signal.reason)
+  signal.addEventListener('abort', onRunAbort, { once: true })
+  const timer = new PausableCallTimer({
+    idleMs: MCP_INVOKE_TIMEOUT_MS,
+    totalMs: MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS,
+    // The SDK's own timeout error, so what follows a timeout is unchanged.
+    onTimeout: (limit) =>
+      call.abort(
+        new McpError(ErrorCode.RequestTimeout, 'Request timed out', {
+          timeout: limit === 'idle' ? MCP_INVOKE_TIMEOUT_MS : MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS
+        })
+      )
+  })
+  const entry = asker ? { ...asker, onWaiting: (waiting: boolean) => (waiting ? timer.pause() : timer.resume()) } : null
+  if (entry) sessionAskers.set(sessionKey, [...(sessionAskers.get(sessionKey) ?? []), entry])
+  timer.start()
+  try {
+    return await client.callTool({ name: toolName, arguments: args }, undefined, {
+      signal: call.signal,
+      timeout: SDK_TIMEOUT_OFF_MS,
+      onprogress: () => timer.progress()
+    })
+  } finally {
+    timer.stop()
+    signal.removeEventListener('abort', onRunAbort)
+    if (entry) {
+      const rest = (sessionAskers.get(sessionKey) ?? []).filter((a) => a !== entry)
+      if (rest.length > 0) sessionAskers.set(sessionKey, rest)
+      else sessionAskers.delete(sessionKey)
+    }
+  }
+}
+
 export async function invokeMcpTool(
   serverId: string,
   toolName: string,
@@ -2131,7 +2310,9 @@ export async function invokeMcpTool(
   enabledIds?: ReadonlySet<string>,
   workspacePath?: string | null,
   /** Run directory; image blocks are stored there and returned as images. */
-  runDir?: string
+  runDir?: string,
+  /** The task making the call: where the server's questions (elicitation) go. */
+  asker?: McpAsker
 ): Promise<ToolResult> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
   const summary = mcpToolSummary(toolName, args)
@@ -2156,20 +2337,7 @@ export async function invokeMcpTool(
     if (argsError) {
       return { ok: false, summary, content: argsError }
     }
-    const result = await session.client.callTool(
-      { name: toolName, arguments: args },
-      undefined,
-      {
-        signal,
-        // The SDK default is 60s, which real work exceeds routinely (browser
-        // automation, large tracker queries). Progress notifications extend
-        // the window; `maxTotalTimeout` still bounds a server that streams
-        // progress forever.
-        timeout: MCP_INVOKE_TIMEOUT_MS,
-        resetTimeoutOnProgress: true,
-        maxTotalTimeout: MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS
-      }
-    )
+    const result = await callMcpToolTimed(session.client, access.sessionKey, toolName, args, signal, asker)
     const { text, images, notes } = mcpResultContent(
       result.content as Array<Record<string, unknown>>,
       runDir

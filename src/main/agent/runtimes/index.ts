@@ -8,7 +8,7 @@ import { localRuntime } from './local'
  */
 const runtimes = new Map<RuntimeKind, RunRuntime>([['local', localRuntime]])
 
-/** @internal — register an additional runtime (cloud adapter, tests). */
+/** @internal — register an additional runtime (tests). */
 export function registerRuntime(runtime: RunRuntime): void {
   runtimes.set(runtime.kind, runtime)
 }

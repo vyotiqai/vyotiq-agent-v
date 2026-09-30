@@ -4,7 +4,7 @@ import type { AgentEvent } from '@shared/ipc'
 /**
  * The local runtime is the reference behavior every other substrate is compared
  * against. If this adapter reorders, filters, or synthesizes events, every
- * equivalence claim made about a cloud runtime later is measured against the
+ * equivalence claim made about any other runtime is measured against the
  * wrong baseline — so the wrapper is pinned here before any second runtime can
  * be registered.
  */
@@ -56,7 +56,8 @@ import {
   getRuntime,
   isRuntimeRegistered,
   listRegisteredRuntimes,
-  resolveAvailableRuntime
+  resolveAvailableRuntime,
+  type RuntimeKind
 } from '@main/agent/runtimes'
 
 const input = { runId: 'run-1', workspacePath: '/ws' }
@@ -122,21 +123,24 @@ describe('local runtime adapter', () => {
   })
 })
 
+/** A kind nothing registers: the registry must refuse it, never run it locally. */
+const UNREGISTERED = 'remote' as unknown as RuntimeKind
+
 describe('runtime registry', () => {
   it('ships local only until another runtime is implemented and tested', () => {
     expect(listRegisteredRuntimes()).toEqual(['local'])
     expect(isRuntimeRegistered('local')).toBe(true)
-    expect(isRuntimeRegistered('cloud')).toBe(false)
+    expect(isRuntimeRegistered(UNREGISTERED)).toBe(false)
   })
 
   it('fails loudly for an unregistered runtime rather than falling back', () => {
-    expect(() => getRuntime('cloud')).toThrow('is not configured')
+    expect(() => getRuntime(UNREGISTERED)).toThrow('is not configured')
   })
 
   it('reports an unavailable runtime as an error, never as local', async () => {
-    const resolved = await resolveAvailableRuntime('cloud')
+    const resolved = await resolveAvailableRuntime(UNREGISTERED)
     expect(resolved.ok).toBe(false)
-    if (!resolved.ok) expect(resolved.error).toContain('cloud')
+    if (!resolved.ok) expect(resolved.error).toContain('remote')
   })
 
   it('resolves local when it is available', async () => {
