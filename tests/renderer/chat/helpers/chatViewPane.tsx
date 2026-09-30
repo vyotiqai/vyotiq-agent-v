@@ -9,7 +9,7 @@ type MultiPane = ChatViewProps['multiPane']
 
 /** What the host hands each pane; a test never passes these itself. */
 type HostWired =
-  | 'onShowInspector'
+  | 'inspectorToggle'
   | 'onOpenChanges'
   | 'onOpenWorkspaceFile'
   | 'showPageHeading'
@@ -70,7 +70,7 @@ export function PaneChatView({ multiPane: overrides, ...props }: PaneChatViewPro
       <SessionChatColumn
         {...column}
         approvalAutoFocus={options.focused}
-        onShowInspector={options.onShowInspector}
+        inspectorToggle={options.inspectorToggle}
         onOpenChanges={options.onOpenChanges}
         onOpenWorkspaceFile={options.onOpenWorkspaceFile}
         runActions={{

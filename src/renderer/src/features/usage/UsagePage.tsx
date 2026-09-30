@@ -4,8 +4,7 @@ import { formatUsdCost, windowCostDisplay } from '@shared/utils/costDisplay'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon } from '@renderer/lib/icons'
 import { Button, Menu, ProgressBar, Segmented, cn, type MenuOption } from '@renderer/lib/ui'
-import { buildLineSegments } from '@renderer/lib/ui/lineChart'
-import { SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { DIVIDER_FILL, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { UNTITLED_TASK, taskTitleFromGoal } from '@shared/utils/taskTitle'
 import { ProviderLogo } from '@renderer/features/chat/components/composer/ProviderLogo'
@@ -15,6 +14,7 @@ import {
   activityModelMix,
   activitySpendSeries,
   finishedShare,
+  keptShare,
   formatCompactCount,
   formatCount,
   weekdayShort
@@ -22,8 +22,6 @@ import {
 import { useHomeActivity, type ActivityWindowDays } from '@renderer/features/home/useHomeActivity'
 
 const ALL = 'all'
-const SPEND_W = 300
-const SPEND_H = 120
 
 /**
  * The analytics that used to lead Home, on their own page: what the tasks
@@ -116,8 +114,7 @@ function UsageBody({
   const tokens = totals.billedInputTokens + totals.outputTokens
   const cost = windowCostDisplay(totals)
   const finished = finishedShare(data.outcomes)
-  const bars = useMemo(() => activityDayBars(data.days, span), [data.days, span])
-  const peak = bars.reduce((max, bar) => Math.max(max, bar.runs), 0)
+  const kept = keptShare(data.changes)
 
   const previous = totals.previousRuns
   const taskTrend =
@@ -140,7 +137,7 @@ function UsageBody({
 
   return (
     <>
-      <div className="grid grid-cols-2 divide-border/60 border-y border-border @3xl:grid-cols-4 @3xl:divide-x">
+      <div className="grid grid-cols-2 divide-border/60 border-y border-border @3xl:grid-cols-5 @3xl:divide-x">
         <BigStat value={formatCount(totals.runs)} label="Tasks" detail={taskTrend} />
         <BigStat
           value={formatCompactCount(tokens)}
@@ -167,28 +164,16 @@ function UsageBody({
           label="Finished"
           detail={endedDetail || (finished ? 'none failed' : 'none ended')}
         />
+        <BigStat
+          value={kept ? `${kept.percent}%` : '—'}
+          label="Kept"
+          detail={kept ? `${formatCount(kept.kept)} of ${formatCount(kept.total)} changed files` : 'No changes reviewed'}
+          title="Files the tasks changed that were kept rather than undone. Files still waiting for review are not counted."
+        />
       </div>
 
-      <div className="mt-8 grid gap-10 @3xl:grid-cols-2">
-        <Chart title="Tasks per day" note={`peak ${formatCount(peak)}`}>
-          <div role="img" aria-label={`Tasks per day: ${bars.map((bar) => bar.title).join(', ')}`} className="flex h-36 items-end gap-2">
-            {bars.map((bar, i) => (
-              <div key={bar.date} title={bar.title} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1.5">
-                <span className="font-mono text-caption text-tertiary tnum" aria-hidden="true">
-                  {span <= 14 && bar.runs ? bar.runs : ''}
-                </span>
-                <div
-                  className={cn('w-full rounded-sm', i === bars.length - 1 ? 'bg-accent' : bar.runs ? 'bg-border-strong' : 'bg-border')}
-                  style={{ height: bar.runs ? `${Math.max(4, (bar.runs / Math.max(1, peak)) * 100)}px` : 2 }}
-                />
-                <span className="text-caption text-tertiary" aria-hidden="true">
-                  {span <= 7 ? weekdayShort(bar.date) : i % 5 === 0 || i === bars.length - 1 ? bar.label : ' '}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Chart>
-        <SpendChart data={data} span={span} />
+      <div className="mt-8">
+        <ByDayChart data={data} span={span} />
       </div>
 
       <div className="mt-10 grid gap-10 @3xl:grid-cols-3">
@@ -200,66 +185,121 @@ function UsageBody({
   )
 }
 
-/** Spend per day as an area, or tokens when no cost was reported. Gaps are days nobody reported. */
-function SpendChart({ data, span }: { data: HomeActivityResult; span: number }) {
-  const [chosen, setChosen] = useState<'cost' | 'tokens' | null>(null)
+type Measure = 'cost' | 'tokens' | 'tasks'
+
+const MEASURE_TITLE: Record<Measure, string> = {
+  cost: 'Spend per day',
+  tokens: 'Tokens per day',
+  tasks: 'Tasks per day'
+}
+
+function measureText(measure: Measure, value: number): string {
+  return measure === 'cost' ? formatUsdCost(value) : measure === 'tokens' ? formatCompactCount(value) : formatCount(value)
+}
+
+/**
+ * One chart by day, with what it measures on a switch: spend, tokens or
+ * tasks. It opens on spend when any was reported. A day nobody reported a
+ * cost or tokens for is a gap, never a zero, and every bar's tooltip carries
+ * all three for its day.
+ */
+function ByDayChart({ data, span }: { data: HomeActivityResult; span: number }) {
+  const [chosen, setChosen] = useState<Measure | null>(null)
   const series = useMemo(() => activitySpendSeries(data.days, span), [data.days, span])
+  const bars = useMemo(() => activityDayBars(data.days, span), [data.days, span])
   const hasCost = series.some((point) => point.cost != null)
-  const metric = chosen ?? (hasCost ? 'cost' : 'tokens')
-  const values = series.map((point) => (metric === 'cost' ? point.cost : point.tokens))
-  const { segments, total } = buildLineSegments(values, SPEND_W, SPEND_H)
-  const totalText = segments.length === 0 ? '—' : metric === 'cost' ? formatUsdCost(total) : formatCompactCount(total)
-  const title = metric === 'cost' ? 'Spend per day' : 'Tokens per day'
-  const base = SPEND_H - 2
+  const measure = chosen ?? (hasCost ? 'cost' : 'tasks')
+  const values = series.map((point, i) =>
+    measure === 'cost' ? point.cost : measure === 'tokens' ? point.tokens : (bars[i]?.runs ?? 0)
+  )
+  const peak = values.reduce<number>((max, value) => Math.max(max, value ?? 0), 0)
+  const peakAt = peak > 0 ? values.indexOf(peak) : -1
+  const last = values.length - 1
+  const reported = values.some((value) => value != null)
+  const total = values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+  // Spend is an estimate when any day's is, or when a day ran tasks nobody priced: the true total is higher.
+  const costEstimated = series.some((point) => point.estimated || point.unpriced)
+  const title = MEASURE_TITLE[measure]
+  const note =
+    measure === 'tasks'
+      ? `peak ${formatCount(peak)}`
+      : reported
+        ? `total ${measureText(measure, total)}${measure === 'cost' && costEstimated ? ' est.' : ''}`
+        : undefined
+  const dayTitle = (i: number): string => {
+    const point = series[i]!
+    const parts = [bars[i]?.title ?? point.dateLabel]
+    if (point.tokens != null) parts.push(`${formatCompactCount(point.tokens)} tokens`)
+    if (point.cost != null) parts.push(`${formatUsdCost(point.cost)}${point.estimated ? ' est.' : ''}`)
+    else if (point.unpriced) parts.push('no cost reported')
+    return parts.join(' · ')
+  }
 
   return (
     <Chart
       title={title}
-      note={segments.length === 0 ? undefined : `total ${totalText}`}
+      note={note}
       trailing={
         <Segmented
           label="Measure"
-          value={metric}
+          value={measure}
           items={[
             { id: 'cost', label: 'Spend' },
-            { id: 'tokens', label: 'Tokens' }
+            { id: 'tokens', label: 'Tokens' },
+            { id: 'tasks', label: 'Tasks' }
           ]}
           onChange={setChosen}
         />
       }
     >
-      {segments.length === 0 ? (
+      {!reported ? (
         <p className="flex h-36 items-center justify-center text-xs text-tertiary">
-          {metric === 'cost' ? 'No provider reported a cost in these days.' : 'No token usage recorded in these days.'}
+          {measure === 'cost' ? 'No provider reported a cost in these days.' : 'No token usage recorded in these days.'}
         </p>
       ) : (
         <>
-          <svg
-            viewBox={`0 0 ${SPEND_W} ${SPEND_H}`}
-            preserveAspectRatio="none"
-            className="h-36 w-full"
+          <div
             role="img"
-            aria-label={`${title}, total ${totalText}`}
+            aria-label={`${title}${note ? `, ${note}` : ''}: ${series
+              .map((point, i) => {
+                const cost = measure === 'cost'
+                const value =
+                  values[i] != null
+                    ? `${measureText(measure, values[i]!)}${cost && point.estimated ? ' est.' : ''}`
+                    : cost && point.unpriced
+                      ? 'no cost reported'
+                      : '—'
+                return `${point.dateLabel} ${value}`
+              })
+              .join(', ')}`}
+            className={cn('flex h-36 items-end', span > 10 ? 'gap-1' : 'gap-2')}
           >
-            {segments.map((segment, index) => {
-              const line = segment.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
-              const first = segment[0]!
-              const last = segment[segment.length - 1]!
-              return (
-                <g key={index}>
-                  <path
-                    d={`${line} L${last.x.toFixed(2)} ${base} L${first.x.toFixed(2)} ${base} Z`}
-                    fill="var(--vy-accent-soft)"
+            {values.map((value, i) => (
+              <div
+                key={series[i]!.date}
+                title={dayTitle(i)}
+                className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
+              >
+                <span className="whitespace-nowrap font-mono text-caption text-tertiary tnum" aria-hidden="true">
+                  {value && (span <= 7 || i === peakAt || i === last) ? measureText(measure, value) : ''}
+                </span>
+                {measure === 'cost' && series[i]!.unpriced ? (
+                  // Tasks ran and nobody priced them: unknown, drawn apart from a day that spent nothing.
+                  <div data-day-bar data-day-unpriced className="h-0 w-full border-t-2 border-dashed border-border" />
+                ) : (
+                  <div
+                    data-day-bar
+                    className={cn('w-full rounded-sm', value ? (i === last ? 'bg-accent' : 'bg-border-strong') : DIVIDER_FILL)}
+                    style={{ height: value ? `${Math.max(4, (value / Math.max(1, peak)) * 100)}px` : 2 }}
                   />
-                  <path d={line} fill="none" stroke="var(--vy-accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-                </g>
-              )
-            })}
-          </svg>
-          <div className="mt-1.5 flex text-caption text-tertiary" aria-hidden="true">
+                )}
+              </div>
+            ))}
+          </div>
+          <div className={cn('mt-1.5 flex text-caption text-tertiary', span > 10 ? 'gap-1' : 'gap-2')} aria-hidden="true">
             {series.map((point, i) => (
               <span key={point.date} className="min-w-0 flex-1 text-center" title={point.dateLabel}>
-                {span <= 7 ? weekdayShort(point.date) : i % 5 === 0 || i === series.length - 1 ? point.label : ''}
+                {span <= 7 ? weekdayShort(point.date) : i % 5 === 0 || i === last ? point.label : '\u00a0'}
               </span>
             ))}
           </div>

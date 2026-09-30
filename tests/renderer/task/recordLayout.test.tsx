@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { UiItem } from '@shared/transcript'
 import { buildRecordModel, type BuildOptions } from '@renderer/features/task/recordModel'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
@@ -315,5 +315,193 @@ describe('a call refused at approval', () => {
     const card = container.querySelector('[data-record-edit]')!
     expect(card.textContent).toContain('Denied')
     expect(card.querySelector('.text-danger')).toBeNull()
+  })
+})
+
+describe('an edit that creates a file', () => {
+  it('keeps the + gutter and drops the wash a changed file’s additions get', () => {
+    const { container } = show(
+      [
+        user('Add it', 0),
+        tool('edit', { path: 'src/new.ts', contents: 'export const a = 1\nexport const b = 2' }, 'Created src/new.ts', 1),
+        tool('edit', { path: 'src/old.ts', diff: '@@ -1 +1,2 @@\n a\n+b' }, 'Wrote src/old.ts', 3)
+      ],
+      { running: false }
+    )
+    const [created, changed] = [...container.querySelectorAll<HTMLElement>('[data-record-edit]')]
+    for (const card of [created!, changed!]) {
+      const toggle = card.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')
+      if (toggle) fireEvent.click(toggle)
+    }
+    expect(created!.textContent).toContain('export const a = 1')
+    expect(created!.querySelector('.diff-row-add')).toBeNull()
+    expect(created!.textContent).toContain('+')
+    expect(changed!.querySelector('.diff-row-add')).not.toBeNull()
+  })
+})
+
+describe('a call waiting on you', () => {
+  afterEach(() => {
+    window.vyotiq = undefined as unknown as typeof window.vyotiq
+  })
+
+  const gated = (command: string, s: number): UiItem => {
+    const item = tool('terminal', { command }, '', s) as Extract<UiItem, { kind: 'tool' }>
+    return {
+      ...item,
+      tool: { ...item.tool, status: 'running' },
+      approval: {
+        requestId: 'req-1',
+        runId: 'r',
+        toolCallId: item.tool.id,
+        toolName: 'terminal',
+        summary: command,
+        argsPreview: JSON.stringify({ command }),
+        mutating: true
+      }
+    } as UiItem
+  }
+  const asked = (s: number): UiItem =>
+    ({
+      kind: 'question',
+      id: id('q'),
+      at: at(s),
+      question: { requestId: 'q-1', toolCallId: 'qc', questions: [{ id: 'fmt', prompt: 'QUESTION_TEXT Which format?', type: 'text' }] }
+    }) as UiItem
+
+  it('asks inside the step it stopped, after that step’s work — not above the record', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const items = [
+      user('Ship it', 0),
+      todos([['a', 'x', 'Read'], ['b', '~', 'Migrate']], 1),
+      tool('read', { path: 'db.ts' }, 'contents', 2),
+      gated('pnpm db:migrate', 4)
+    ]
+    const { container } = show(items, { running: true })
+    const card = container.querySelector('[data-needs-you]')!
+    const step = container.querySelector('[data-step="2"]')!
+    expect(step.contains(card)).toBe(true)
+    expect(before(step.querySelector('[data-record-tool], [data-work-row], li') ?? step, card)).toBe(true)
+    // The step row no longer points elsewhere.
+    expect(step.textContent).not.toContain('see above')
+    expect(container.querySelector('[data-step="1"]')!.contains(card)).toBe(false)
+  })
+
+  it('stands in for the call it gates: the command and the agent’s words once each', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const items = [
+      user('Ship it', 0),
+      todos([['a', '~', 'Migrate']], 1),
+      said('WHY_TEXT It writes to the database.', 2),
+      gated('pnpm db:migrate --env staging', 3)
+    ]
+    const { container } = show(items, { running: true })
+    const step = container.querySelector('[data-step="1"]')!
+    const count = (text: string): number => step.textContent!.split(text).length - 1
+    expect(count('--env staging')).toBe(1)
+    expect(count('WHY_TEXT')).toBe(1)
+    expect(step.textContent).not.toContain('Waiting for approval')
+    // The words stay in the work, right above the card.
+    const card = step.querySelector('[data-needs-you]')!
+    expect(card.textContent).not.toContain('WHY_TEXT')
+    expect(before(within(step as HTMLElement).getByText(/^WHY_TEXT/), card)).toBe(true)
+  })
+
+  it('once answered, the call is back in its step as the command it runs', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const answered = gated('pnpm db:migrate --env staging', 3) as Extract<UiItem, { kind: 'tool' }>
+    const { approval: _answered, ...running } = answered
+    const items = [user('Ship it', 0), todos([['a', '~', 'Migrate']], 1), running as UiItem]
+    const { container } = show(items, { running: true })
+    const step = container.querySelector('[data-step="1"]')!
+    expect(container.querySelector('[data-needs-you]')).toBeNull()
+    expect(step.textContent).toContain('pnpm db:migrate --env staging')
+  })
+
+  it('folded, the step says it is waiting and opens back onto the card', async () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const items = [user('Ship it', 0), todos([['a', '~', 'Migrate']], 1), gated('pnpm db:migrate', 2)]
+    const scrolled = vi.fn()
+    Element.prototype.scrollIntoView = scrolled
+    const { container, getByRole, queryByRole } = show(items, { running: true })
+    expect(queryByRole('button', { name: 'Waiting for you' })).toBeNull()
+    fireEvent.click(getByRole('button', { name: 'Migrate' }))
+    expect(container.querySelector('[data-needs-you]')).toBeNull()
+    fireEvent.click(getByRole('button', { name: 'Waiting for you' }))
+    expect(container.querySelector('[data-step="1"] [data-needs-you]')).not.toBeNull()
+    await waitFor(() => expect(scrolled).toHaveBeenCalled())
+  })
+
+  it('without a plan, asks in the loose work where the call would have gone', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const items = [user('Ship it', 0), tool('read', { path: 'db.ts' }, 'contents', 1), asked(3)]
+    const { container } = show(items, { running: true })
+    const card = container.querySelector('[data-needs-you]')!
+    expect(card.textContent).toContain('QUESTION_TEXT')
+    expect(before(container.querySelector('[data-brief="1"]')!, card)).toBe(true)
+    // In the same row as the read before it, after it.
+    const row = card.closest('section')!
+    expect(row.textContent).toMatch(/^Read1 file.*QUESTION_TEXT/)
+  })
+
+  it('after a step settled and before the next, asks between them', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const items = [user('Ship it', 0), todos([['a', 'x', 'Read'], ['b', ' ', 'Migrate']], 1), gated('pnpm db:migrate', 3)]
+    const { container } = show(items, { running: true })
+    expect(container.querySelector('[data-step-between="1"] [data-needs-you]')).not.toBeNull()
+  })
+
+  it('keeps a card whose step the record no longer draws above the record, never out of sight', () => {
+    window.vyotiq = { platform: 'win32' } as unknown as typeof window.vyotiq
+    const items = [
+      user('Ship it', 0),
+      todos([['a', '~', 'Migrate']], 1),
+      said('WHY_TEXT It writes to the database.', 2),
+      gated('pnpm db:migrate', 3)
+    ]
+    const options = { running: true }
+    const model = buildRecordModel(items, options)
+    // As if a later plan had dropped the step the call was made in.
+    model.runs[0]!.needs[0]!.place = { kind: 'step', key: 'gone' }
+    const { container } = render(<TaskRecord model={model} options={options} messageCount={items.length} />)
+    const card = container.querySelector('[data-needs-you]')!
+    expect(card).not.toBeNull()
+    expect(card.closest('[data-step]')).toBeNull()
+    expect(before(card, container.querySelector('[data-brief="1"]')!)).toBe(true)
+    // Away from the agent's words, the card says them.
+    expect(card.textContent).toContain('WHY_TEXT')
+  })
+
+  it('an instance waiting on you asks in the step that started it, and opens that step', () => {
+    const child = 'c0ffee00-1111-4222-8333-444455556666'
+    const spawn: UiItem = tool(
+      'spawn_agent_instance',
+      { goal: 'Map it', step_id: 'a' },
+      `Agent V Instance id; ${child} (short c0ffee00)\nrun_id: ${child}`,
+      2
+    )
+    const items = [
+      user('Ship it', 0),
+      todos([['a', '~', 'Map the code'], ['b', ' ', 'Write it up']], 1),
+      spawn,
+      todos([['a', 'x', 'Map the code'], ['b', '~', 'Write it up']], 5),
+      tool('read', { path: 'notes.md' }, 'contents', 6)
+    ]
+    const options = { running: true }
+    const model = buildRecordModel(items, options)
+    const { container } = render(
+      <TaskRecord
+        model={model}
+        options={options}
+        messageCount={items.length}
+        instanceGates={[{ runId: child, kind: 'approval' }]}
+      />
+    )
+    const card = container.querySelector('[data-needs-you]')!
+    expect(card.textContent).toContain('Instance c0ffee00 wants approval')
+    const step = container.querySelector('[data-step="1"]')!
+    expect(step.getAttribute('data-step-state')).toBe('done')
+    // Settled, yet open: what waits on you is never folded away.
+    expect(step.contains(card)).toBe(true)
   })
 })

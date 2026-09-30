@@ -131,4 +131,42 @@ describe('useRecordScroll', () => {
     expect(box.scrollTo).not.toHaveBeenCalled()
     expect(box.el.scrollTop).toBe(200)
   })
+
+  it('brings a card deep in the record to the top of the view, and stops following there', () => {
+    const { box, api } = mount(true)
+    follow(box, api())
+    // A card 300px above the view's top edge, which sits at the end of 2000px.
+    const card = document.createElement('div')
+    card.getBoundingClientRect = () => ({ top: -300 }) as DOMRect
+    box.el.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
+    act(() => api().jumpTo(card))
+    expect(box.scrollTo).toHaveBeenLastCalledWith({ top: 1600 - 300 - 16, behavior: 'smooth' })
+    // The glide's own scroll events are not the reader's; growth leaves it on the card.
+    box.el.dispatchEvent(new Event('scroll'))
+    box.grow(500)
+    act(() => observers.forEach((fire) => fire()))
+    expect(box.el.scrollTop).toBe(1600 - 300 - 16)
+    expect(api().isFollowing()).toBe(false)
+  })
+
+  it('ends a glide whose target the record shrank below, so the reader’s own scrolling counts again', () => {
+    const { box, api } = mount(false)
+    box.el.scrollTop = 0
+    const card = document.createElement('div')
+    card.getBoundingClientRect = () => ({ top: 1500 }) as DOMRect
+    box.el.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
+    // A smooth glide still under way…
+    box.scrollTo.mockImplementation(() => {})
+    act(() => api().jumpTo(card))
+    // …when a step folds: the record is 1200px now, its end at 800.
+    box.grow(-800)
+    box.el.scrollTop = 800
+    box.el.dispatchEvent(new Event('scroll'))
+    // The reader scrolls up and back to the end: theirs, so it follows again.
+    box.el.scrollTop = 500
+    box.el.dispatchEvent(new Event('scroll'))
+    box.el.scrollTop = 800
+    box.el.dispatchEvent(new Event('scroll'))
+    expect(api().isFollowing()).toBe(true)
+  })
 })

@@ -69,6 +69,8 @@ function mentionChipIcon(mention: ComposerMention): IconName | null {
       return 'branch'
     case 'browser':
       return 'browser'
+    case 'element':
+      return 'target'
     case 'chat':
       return 'tasks'
     case 'slash':

@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react'
+import { useContext, useState, type ReactNode } from 'react'
 import { parseAgentInstanceRunId, parseAgentInstanceRunIdFromArgs, formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { formatElapsed } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
@@ -9,7 +9,7 @@ import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import type { RecordStep, RecordTail } from '../recordModel'
 import { RecordOpenContext, stepOpenKey } from '../recordFind'
 import { RecordRow } from './RecordLayout'
-import { NowLine, WorkList, workIsLive } from './WorkItems'
+import { NowLine, WorkList, counted, workCounts, workIsLive } from './WorkItems'
 
 /**
  * The plan's steps; only the step the live work is going into is open, the
@@ -20,7 +20,8 @@ export function Steps({
   steps,
   runN,
   tail = null,
-  activity = null
+  activity = null,
+  needs
 }: {
   steps: readonly RecordStep[]
   runN: number
@@ -28,6 +29,8 @@ export function Steps({
   tail?: RecordTail | null
   /** The live run's activity, shown where its latest work is going. */
   activity?: string | null
+  /** Needs-you cards by `placeKey` of where the gated call would have gone. */
+  needs?: ReadonlyMap<string, ReactNode>
 }) {
   if (steps.length === 0) return null
   return (
@@ -41,6 +44,8 @@ export function Steps({
             holdsTail={tail?.kind === 'step' && tail.key === s.key}
             activity={tail?.kind === 'step' && tail.key === s.key ? activity : null}
             betweenActivity={tail?.kind === 'between' && tail.key === s.key ? activity : null}
+            needs={needs?.get(placeKey({ kind: 'step', key: s.key })) ?? null}
+            betweenNeeds={needs?.get(placeKey({ kind: 'between', key: s.key })) ?? null}
           />
         ))}
       </ol>
@@ -48,16 +53,21 @@ export function Steps({
   )
 }
 
-/** Brings this record's needs-you card into view and puts focus on its first action. */
-export function showNeedsYou(from: Element): void {
-  const card = from.closest('[data-record-scroll]')?.querySelector<HTMLElement>('[data-needs-you]')
+/** One key per place a run's work goes, for the needs-you cards placed there. */
+export function placeKey(place: RecordTail): string {
+  return place.kind === 'step' || place.kind === 'between' ? `${place.kind}:${place.key}` : place.kind
+}
+
+/** Brings the needs-you card inside `within` into view and puts focus on its first action. */
+function showNeedsYou(within: Element): void {
+  const card = within.querySelector<HTMLElement>('[data-needs-you]')
   if (!card) return
   card.scrollIntoView({ block: 'start', behavior: 'smooth' })
   card.querySelector<HTMLElement>('button:not([disabled]), [href], input, textarea')?.focus({ preventScroll: true })
 }
 
 /** Instances this step started, with the short id the navigator and panes use. */
-function instancesOf(step: RecordStep): { runId: string; shortId: string }[] {
+export function instancesOf(step: RecordStep): { runId: string; shortId: string }[] {
   const out: { runId: string; shortId: string }[] = []
   for (const w of step.work) {
     if (w.kind !== 'instance' || w.tool.tool.name !== 'spawn_agent_instance') continue
@@ -74,12 +84,30 @@ function editSummaryText(edits: RecordStep['edits']): string | null {
   return `${files} · +${edits.add} −${edits.del}`
 }
 
+/**
+ * What a step's own work amounts to, for its folded line: "6 lookups · 2
+ * commands · 3 files edited · +12 −4". Edits come last so their lines stay
+ * beside them; instances are left out — the row's chips already name them.
+ */
+export function stepSummaryText(step: Pick<RecordStep, 'work' | 'edits'>): string | null {
+  const c = workCounts(step.work)
+  const parts = [
+    c.lookups > 0 ? counted(c.lookups, 'lookup') : '',
+    c.commands > 0 ? counted(c.commands, 'command') : '',
+    c.calls > 0 ? counted(c.calls, 'call') : '',
+    editSummaryText(step.edits) ?? ''
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function StepRow({
   step,
   runN,
   holdsTail,
   activity,
-  betweenActivity
+  betweenActivity,
+  needs,
+  betweenNeeds
 }: {
   step: RecordStep
   runN: number
@@ -88,24 +116,31 @@ function StepRow({
   activity: string | null
   /** The live run's activity, when its latest work sits after this step. */
   betweenActivity: string | null
+  /** Needs-you cards for a call gated in this step, after its work. */
+  needs: ReactNode
+  /** …and for one gated after it settled. */
+  betweenNeeds: ReactNode
 }) {
   const live = step.state === 'running' || step.state === 'needs'
   const [open, setOpen] = useState<boolean | null>(null)
   // Find in record opens a step that holds a match, whatever you last chose.
   const forced = useContext(RecordOpenContext).has(stepOpenKey(runN, step.key))
+  // A card waiting on you inside the step (an instance it started may ask
+  // after the step itself settled).
+  const waiting = needs != null
   // The step the live work is going into stays open, even one marked done:
-  // what is happening now is never folded away.
-  const expanded = forced || (open ?? (live || holdsTail))
+  // what is happening now is never folded away — nor what is waiting on you.
+  const expanded = forced || (open ?? (live || holdsTail || waiting))
   const quiet = step.state === 'queued'
   const now = useSharedNow(live && step.startedAt != null)
   const durationMs =
     step.startedAt == null ? null : step.endedAt != null ? step.endedAt - step.startedAt : live ? now - step.startedAt : null
   const instances = instancesOf(step)
   const { onOpenAgentInstance } = useRunSession()
-  const summary = editSummaryText(step.edits)
+  const summary = stepSummaryText(step)
   const tail = step.work[step.work.length - 1]
   const showActivity = activity != null && !(tail && workIsLive(tail))
-  const canOpen = step.work.length > 0 || showActivity
+  const canOpen = step.work.length > 0 || showActivity || waiting
   const errors = step.work.filter((w) => w.kind === 'error')
   const betweenTail = step.between[step.between.length - 1]
   const showBetweenActivity = betweenActivity != null && !(betweenTail && workIsLive(betweenTail))
@@ -165,15 +200,20 @@ function StepRow({
             </span>
           )
         )}
-        {step.state === 'needs' ? (
+        {waiting && !expanded ? (
+          // Folded away, the step still says it is waiting, and opens onto the card.
           <button
             type="button"
-            onClick={(e) => showNeedsYou(e.currentTarget)}
+            onClick={(e) => {
+              const row = e.currentTarget.closest('li')
+              setOpen(true)
+              requestAnimationFrame(() => row && showNeedsYou(row))
+            }}
             className="relative z-[1] shrink-0 rounded-sm text-xs font-medium text-accent hover:underline focus-visible:vy-focus-ring"
           >
-            Waiting for you — see above
+            Waiting for you
           </button>
-        ) : summary ? (
+        ) : waiting ? null : summary ? (
           <span className="hidden shrink-0 text-xs text-tertiary @[640px]/record:inline">{summary}</span>
         ) : null}
         <span className="w-14 shrink-0 text-right font-mono text-caption text-tertiary tnum">
@@ -193,6 +233,7 @@ function StepRow({
         <div className="space-y-2 pb-3 pl-[36px] pr-2">
           {step.work.length > 0 ? <WorkList items={step.work} /> : null}
           {showActivity ? <NowLine text={activity!} /> : null}
+          {needs}
         </div>
       ) : errors.length > 0 ? (
         // Folded, a step still shows why its run failed — and Retry with it.
@@ -200,12 +241,13 @@ function StepRow({
           <WorkList items={errors} />
         </div>
       ) : null}
-      {step.between.length > 0 || showBetweenActivity ? (
+      {step.between.length > 0 || showBetweenActivity || betweenNeeds != null ? (
         // Done after this step settled and before another started: on the
         // run's own edge, never folded into the step above it.
         <div className="space-y-2 px-2 pb-3 pt-1" data-step-between={step.n}>
           {step.between.length > 0 ? <WorkList items={step.between} /> : null}
           {showBetweenActivity ? <NowLine text={betweenActivity!} /> : null}
+          {betweenNeeds}
         </div>
       ) : null}
     </li>

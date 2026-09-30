@@ -18,7 +18,16 @@ import {
   Transaction,
   type Extension
 } from '@codemirror/state'
-import { Decoration, EditorView, highlightActiveLine, highlightActiveLineGutter, hoverTooltip, lineNumbers } from '@codemirror/view'
+import {
+  Decoration,
+  EditorView,
+  GutterMarker,
+  gutter,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  hoverTooltip,
+  lineNumbers
+} from '@codemirror/view'
 import type { WorkspaceEditorSelection } from '@shared/ipc'
 import {
   mapLspDiagnosticsToCm,
@@ -209,6 +218,36 @@ function markedLinesExtension(range: { from: number; to: number } | null): Exten
   ]
 }
 
+/** One line the task changed: a 3px bar beside its number, named for anything that reads it. */
+class TaskChangeMarker extends GutterMarker {
+  override toDOM(): Node {
+    const bar = document.createElement('div')
+    bar.className = 'cm-taskChange'
+    bar.title = 'Changed by this task'
+    return bar
+  }
+}
+const TASK_CHANGE = new TaskChangeMarker()
+
+/**
+ * The lines the task changed (1-based, as the file reads now), as a bar in a
+ * gutter of their own before the numbers — the Changes diff says the same.
+ */
+function taskChangesExtension(lines: readonly number[] | null): Extension {
+  if (!lines?.length) return []
+  const changed = new Set(lines)
+  return [
+    gutter({
+      class: 'cm-taskChanges',
+      lineMarker: (view, block) => (changed.has(view.state.doc.lineAt(block.from).number) ? TASK_CHANGE : null)
+    }),
+    EditorView.baseTheme({
+      '.cm-taskChanges .cm-gutterElement': { width: '3px', padding: '0' },
+      '.cm-taskChange': { width: '3px', height: '100%', backgroundColor: 'var(--vy-success)' }
+    })
+  ]
+}
+
 export function TextCodeEditor({
   path,
   value,
@@ -219,6 +258,7 @@ export function TextCodeEditor({
   scrollTop = 0,
   scrollToLine = null,
   markedLines = null,
+  changedLines = null,
   lspDiagnostics = null,
   onLspHover,
   onScrollToLineHandled,
@@ -236,6 +276,8 @@ export function TextCodeEditor({
   scrollToLine?: number | null
   /** Lines to tint — the range the task's agent read of this file. */
   markedLines?: { from: number; to: number } | null
+  /** Lines the task changed, as the file reads now: a bar in the gutter beside each. */
+  changedLines?: readonly number[] | null
   lspDiagnostics?: readonly LspDiagnosticItem[] | null
   onLspHover?: (line: number, character: number) => Promise<string | null>
   onScrollToLineHandled?: () => void
@@ -263,6 +305,8 @@ export function TextCodeEditor({
   const lintCompartmentRef = useRef(new Compartment())
   const markCompartmentRef = useRef(new Compartment())
   const initialMarkedLinesRef = useRef(markedLines)
+  const changesCompartmentRef = useRef(new Compartment())
+  const initialChangedLinesRef = useRef(changedLines)
   const hoverCompartmentRef = useRef(new Compartment())
   const completeCompartmentRef = useRef(new Compartment())
   const lspDiagnosticsRef = useRef(lspDiagnostics)
@@ -304,6 +348,7 @@ export function TextCodeEditor({
         bracketMatching(),
         highlightActiveLine(),
         highlightActiveLineGutter(),
+        changesCompartmentRef.current.of(taskChangesExtension(initialChangedLinesRef.current)),
         lineNumbersCompartmentRef.current.of(
           lineNumbersRef.current ? lineNumbers() : []
         ),
@@ -502,6 +547,12 @@ export function TextCodeEditor({
       )
     })
   }, [markFrom, markTo])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: changesCompartmentRef.current.reconfigure(taskChangesExtension(changedLines)) })
+  }, [changedLines])
 
   useEffect(() => {
     const view = viewRef.current

@@ -90,6 +90,18 @@ describe('buildNavigatorSections', () => {
     expect(sectionOf(sections, 'r1')?.row.meta).toEqual({ kind: 'steps', current: 5, total: 5 })
   })
 
+  it('keeps a live task’s plan on its row while it waits on you, and drops it once it settles', () => {
+    const waiting = buildNavigatorSections(
+      input({
+        runsByWorkspacePath: { [A]: { runs: [run('r1', { status: 'running' })] } },
+        activeRuns: [live('r1', { steps: { completed: 1, total: 3 }, waiting: { kind: 'approval', since: minsAgo(1) } })]
+      })
+    )
+    expect(sectionOf(waiting, 'r1')?.row.steps).toEqual({ current: 2, total: 3 })
+    const settled = buildNavigatorSections(input({ runsByWorkspacePath: { [A]: { runs: [run('r1')] } } }))
+    expect(sectionOf(settled, 'r1')?.row.steps).toBeUndefined()
+  })
+
   it('trusts the live registry over a stale "running" snapshot once it has answered', () => {
     const runs = { [A]: { runs: [run('r1', { status: 'running' })] } }
     expect(sectionOf(buildNavigatorSections(input({ runsByWorkspacePath: runs })), 'r1')).toMatchObject({

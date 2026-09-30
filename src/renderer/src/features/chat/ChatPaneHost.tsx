@@ -7,6 +7,7 @@ import {
 } from '@renderer/lib/chat/chatPaneLayout'
 import { CHAT_COLUMN_MIN_USABLE_PX } from '@renderer/lib/utils/layout'
 import { PanelResizeHandle } from '@renderer/lib/ui'
+import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import { cn } from '@renderer/lib/ui/cn'
 import type { WorkspaceFileOpenOptions } from './components/FilesPanel'
 
@@ -24,10 +25,10 @@ export type PaneRenderOptions = {
   /** Open an empty pane beside this one. */
   onSplit?: () => void
   /**
-   * The inspector is hidden: the pane nearest where it opens offers it back.
+   * The inspector's toggle: the pane nearest where it opens carries it, open or not.
    * Set on the rightmost pane only.
    */
-  onShowInspector?: () => void
+  inspectorToggle?: InspectorToggle
   /** Open Changes dock (agent scope) — injected by ChatView when multi-pane. */
   onOpenChanges?: (path?: string) => void
   /** Open a workspace path in the Files dock — injected by ChatView. */
@@ -52,7 +53,7 @@ export function ChatPaneHost({
   panes,
   focusedPaneId,
   sizes,
-  onShowInspector,
+  inspectorToggle,
   onFocusPane,
   onClosePane,
   onSplitPane,
@@ -64,8 +65,8 @@ export function ChatPaneHost({
   panes: ChatPane[]
   focusedPaneId: string
   sizes: number[]
-  /** Set while the inspector is hidden — handed to the rightmost pane. */
-  onShowInspector?: () => void
+  /** The inspector toggle — handed to the rightmost pane only. */
+  inspectorToggle?: InspectorToggle
   onFocusPane: (paneId: string) => void
   onClosePane: (paneId: string) => void
   /** Insert an empty draft pane beside this pane (pointerdown already focused it). */
@@ -177,7 +178,7 @@ export function ChatPaneHost({
           multi,
           onClose: multi ? () => onClosePane(pane.paneId) : undefined,
           onSplit: onSplitPane,
-          onShowInspector: isRightmost ? onShowInspector : undefined
+          inspectorToggle: isRightmost ? inspectorToggle : undefined
         })
         return (
           <div

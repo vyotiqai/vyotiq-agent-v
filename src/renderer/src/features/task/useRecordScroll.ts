@@ -6,6 +6,8 @@ const NEAR_BOTTOM_PX = 80
 /** At the bottom, give or take sub-pixel rounding. */
 const AT_BOTTOM_PX = 4
 const REPORT_DELAY_MS = 150
+/** Room left above something a jump brings to the top, so its edge is not flush with the pane's. */
+const JUMP_MARGIN_PX = 16
 
 function distanceFromBottom(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight
@@ -47,8 +49,8 @@ export function useRecordScroll({
   const pendingRef = useRef<number | null>(null)
   /** Scroll events our own `scrollTop` writes will fire, still to be seen. */
   const programmaticRef = useRef(false)
-  /** A smooth jump in flight: its own scroll events are not the reader's. */
-  const jumpingRef = useRef<'top' | 'bottom' | null>(null)
+  /** A smooth jump in flight — to the end, or to a scroll offset: its own scroll events are not the reader's. */
+  const jumpingRef = useRef<'bottom' | number | null>(null)
   const appliedTokenRef = useRef<number | null>(null)
   const reportTimerRef = useRef<number | null>(null)
   const onScrollTopChangeRef = useRef(onScrollTopChange)
@@ -123,7 +125,7 @@ export function useRecordScroll({
         if (Math.abs(el.scrollTop - pending) <= 1) pendingRef.current = null
         return
       }
-      if (liveRef.current && pinnedRef.current && jumpingRef.current !== 'top') followToEnd()
+      if (liveRef.current && pinnedRef.current && typeof jumpingRef.current !== 'number') followToEnd()
     })
     ro.observe(content)
     ro.observe(el)
@@ -157,9 +159,15 @@ export function useRecordScroll({
     const distance = distanceFromBottom(el)
     if (programmaticRef.current) {
       programmaticRef.current = false
-    } else if (jumpingRef.current) {
+    } else if (jumpingRef.current != null) {
       // Our own smooth jump: done once it arrives.
-      if (jumpingRef.current === 'bottom' ? distance <= AT_BOTTOM_PX : el.scrollTop <= 1) jumpingRef.current = null
+      const to = jumpingRef.current
+      // An offset the record shrank below (a step folded mid-glide) ends at the bottom instead.
+      const arrived =
+        to === 'bottom'
+          ? distance <= AT_BOTTOM_PX
+          : Math.abs(el.scrollTop - to) <= 1 || (to > el.scrollHeight - el.clientHeight && distance <= AT_BOTTOM_PX)
+      if (arrived) jumpingRef.current = null
     } else {
       // The reader moved: a stale saved position no longer applies.
       pendingRef.current = null
@@ -182,12 +190,30 @@ export function useRecordScroll({
     []
   )
 
-  const jumpTop = useCallback(() => {
+  /** Glides to a scroll offset (clamped to what the record can scroll), letting go of the live run. */
+  const glideTo = useCallback((top: number) => {
+    const el = scrollRef.current
     pendingRef.current = null
     pinnedRef.current = false
-    jumpingRef.current = 'top'
-    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    if (!el) return
+    const to = Math.max(0, Math.min(Math.round(top), el.scrollHeight - el.clientHeight))
+    // Already there: no scroll event will come to say it arrived.
+    jumpingRef.current = Math.abs(el.scrollTop - to) <= 1 ? null : to
+    el.scrollTo({ top: to, behavior: 'smooth' })
   }, [])
+
+  const jumpTop = useCallback(() => glideTo(0), [glideTo])
+
+  /** Brings `target` (inside the record) to the top of the view, a little below its edge. */
+  const jumpTo = useCallback(
+    (target: HTMLElement) => {
+      const el = scrollRef.current
+      if (!el) return
+      const offset = target.getBoundingClientRect().top - el.getBoundingClientRect().top
+      glideTo(el.scrollTop + offset - JUMP_MARGIN_PX)
+    },
+    [glideTo]
+  )
 
   const jumpBottom = useCallback(() => {
     const el = scrollRef.current
@@ -243,5 +269,5 @@ export function useRecordScroll({
     }
   }, [jumpBottom, jumpTop, letGo])
 
-  return { scrollRef, contentRef, onScroll, jumpTop, jumpBottom, isFollowing }
+  return { scrollRef, contentRef, onScroll, jumpTop, jumpTo, jumpBottom, isFollowing }
 }

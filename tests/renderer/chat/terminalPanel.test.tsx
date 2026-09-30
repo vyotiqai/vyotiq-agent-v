@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { TerminalPanel } from '@renderer/features/chat/components/TerminalPanel'
 import type { PtySessionInfo } from '@shared/ipc'
+import type { UiItem } from '@shared/transcript'
 
 type CapturedTerm = {
   handler: ((event: KeyboardEvent) => boolean) | null
@@ -286,5 +287,90 @@ describe('TerminalPanel', () => {
     ).toBe(true)
     expect(term.handler!(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true }))).toBe(true)
     expect(term.handler!(new KeyboardEvent('keyup', { key: 'c', ctrlKey: true }))).toBe(true)
+  })
+})
+
+describe('TerminalPanel — what this task ran', () => {
+  const ranTests: UiItem[] = [
+    {
+      kind: 'tool',
+      id: 't1',
+      at: '2026-09-30T10:00:00.000Z',
+      endedAt: '2026-09-30T10:00:02.000Z',
+      tool: {
+        toolCallId: 't1',
+        name: 'terminal',
+        status: 'done',
+        summary: 'pnpm test',
+        argsPreview: JSON.stringify({ command: 'pnpm test' }),
+        content: 'cwd: /ws\n3 passed\nexit_code: 0'
+      }
+    } as UiItem
+  ]
+
+  const stubPty = (): void => {
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        ptyList: vi.fn().mockResolvedValue({ ok: true, data: [session] }),
+        ptyCreate: vi.fn().mockResolvedValue({ ok: true, data: session }),
+        ptyKill: vi.fn().mockResolvedValue({ ok: true, data: true }),
+        ptyWrite: vi.fn().mockResolvedValue({ ok: true, data: true }),
+        ptyResize: vi.fn().mockResolvedValue({ ok: true, data: true }),
+        onPtyData: vi.fn().mockReturnValue(() => undefined),
+        onPtyExit: vi.fn().mockReturnValue(() => undefined)
+      }
+    })
+  }
+
+  it('opens on the task’s commands, and a shell tab moves to the shell', async () => {
+    stubPty()
+    render(<TerminalPanel workspacePath="/ws" visible items={ranTests} taskKey="run-1" />)
+    const tab = screen.getByRole('tab', { name: 'This task' })
+    expect(tab.getAttribute('aria-selected')).toBe('true')
+    const list = screen.getByRole('list', { name: 'What this task ran' })
+    expect(list.textContent).toContain('pnpm test')
+    expect(list.textContent).toContain('exit 0 · 2s')
+    expect(list.textContent).toContain('3 passed')
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'cmd' }))
+    expect(screen.queryByRole('list', { name: 'What this task ran' })).toBeNull()
+    expect(tab.getAttribute('aria-selected')).toBe('false')
+    await waitFor(() => expect(document.querySelector('[data-terminal-status]')).toBeTruthy())
+
+    fireEvent.click(tab)
+    expect(screen.getByRole('list', { name: 'What this task ran' })).toBeTruthy()
+  })
+
+  it('opens on the shells when the task has run nothing, with the list a tab away', async () => {
+    stubPty()
+    render(<TerminalPanel workspacePath="/ws" visible items={[]} taskKey="run-1" />)
+    expect(screen.getByRole('tab', { name: 'This task' }).getAttribute('aria-selected')).toBe('false')
+    fireEvent.click(screen.getByRole('tab', { name: 'This task' }))
+    expect(screen.getByText('Nothing run yet')).toBeTruthy()
+  })
+
+  it('keeps the shell on screen when the task runs its first command, and opens on the list if it was out of sight', async () => {
+    stubPty()
+    const { rerender } = render(<TerminalPanel workspacePath="/ws" visible items={[]} taskKey="run-1" />)
+    const tab = screen.getByRole('tab', { name: 'This task' })
+    expect(tab.getAttribute('aria-selected')).toBe('false')
+    rerender(<TerminalPanel workspacePath="/ws" visible items={ranTests} taskKey="run-1" />)
+    // Someone may be typing in that shell: the list waits a tab away.
+    expect(tab.getAttribute('aria-selected')).toBe('false')
+
+    // Another task, out of sight until it has run something: it opens on its list.
+    rerender(<TerminalPanel workspacePath="/ws" visible={false} items={[]} taskKey="run-2" />)
+    rerender(<TerminalPanel workspacePath="/ws" visible={false} items={ranTests} taskKey="run-2" />)
+    rerender(<TerminalPanel workspacePath="/ws" visible items={ranTests} taskKey="run-2" />)
+    expect(screen.getByRole('tab', { name: 'This task' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('has no task tab without a task', async () => {
+    stubPty()
+    render(<TerminalPanel workspacePath="/ws" visible />)
+    await screen.findByRole('tab', { name: 'cmd' })
+    expect(screen.queryByRole('tab', { name: 'This task' })).toBeNull()
   })
 })

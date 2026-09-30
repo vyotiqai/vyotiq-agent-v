@@ -34,6 +34,7 @@ import {
   ActionMenu,
   Badge,
   Button,
+  DiffStat,
   IconButton,
   PanelResizeHandle,
   SearchInput,
@@ -50,6 +51,7 @@ import { setFocusedFile } from '@renderer/lib/focusedFile'
 import { handleTabListKeyDown } from '@renderer/lib/utils/tabListKeyboard'
 import { HexEditor } from './HexEditor'
 import { TextCodeEditor } from './TextCodeEditor'
+import { useTaskChangedFile } from './useTaskChangedLines'
 import { FilePreview } from './FilePreview'
 import { defaultPreviewOpen, filePreviewKind } from './filePreviewKind'
 import { DiffPreview } from './DiffPreview'
@@ -493,7 +495,8 @@ export const FilesPanel = memo(function FilesPanel({
   recoveryData,
   onRecoveryDataConsumed,
   findInFilesNonce = 0,
-  agentMarks
+  agentMarks,
+  runId = null
 }: {
   workspacePath: string | null
   active: boolean
@@ -509,6 +512,8 @@ export const FilesPanel = memo(function FilesPanel({
   onRecoveryDataConsumed?: (workspacePath: string) => void
   /** What this task edited and read, keyed by workspace-relative path. */
   agentMarks?: AgentFileMarks
+  /** The task those marks are from: its record of a file gives the lines it changed. */
+  runId?: string | null
 }) {
   const sessionRef = useRef<FileSession | null>(null)
   const wasActiveRef = useRef(false)
@@ -548,6 +553,12 @@ export const FilesPanel = memo(function FilesPanel({
   workspacePathRef.current = workspacePath
   recoveryDataRef.current = recoveryData
   const [treeFilter, setTreeFilter] = useState('')
+  /** The tree narrowed to what this task changed, and the folders that hold it. */
+  const [changedOnly, setChangedOnly] = useState(false)
+  // It narrows to one task's files: another task starts on the whole tree.
+  useEffect(() => {
+    setChangedOnly(false)
+  }, [runId])
   const [treeFocusPath, setTreeFocusPath] = useState<string | null>(null)
   const [followAgent, setFollowAgent] = usePersistedBoolean(FILES_FOLLOW_AGENT_KEY, false)
   const followTokenRef = useRef<number | null>(null)
@@ -747,13 +758,18 @@ export const FilesPanel = memo(function FilesPanel({
     [updateSession]
   )
 
+  /**
+   * Loads one page of a folder into the tree, and resolves with that page (null
+   * when it did not land): the ref only catches up when React runs the update,
+   * so a caller walking the tree reads what it asked for from here.
+   */
   const loadDirectory = useCallback(
-    async (path: string, append = false): Promise<void> => {
+    async (path: string, append = false): Promise<WorkspaceFileEntry[] | null> => {
       const operation = captureWorkspaceOperation()
-      if (!operation || !window.vyotiq?.workspaceFileList) return
+      if (!operation || !window.vyotiq?.workspaceFileList) return null
       const current = directoriesRef.current[path] ?? emptyDirectoryState()
       const offset = append ? (current.nextOffset ?? 0) : 0
-      if (append && current.nextOffset == null) return
+      if (append && current.nextOffset == null) return null
       const requestKey = `${operation.path}\0${path}`
       const requestId = (directoryRequestRef.current.get(requestKey) ?? 0) + 1
       directoryRequestRef.current.set(requestKey, requestId)
@@ -782,7 +798,7 @@ export const FilesPanel = memo(function FilesPanel({
           !isCurrentWorkspaceOperation(operation) ||
           directoryRequestRef.current.get(requestKey) !== requestId
         ) {
-          return
+          return null
         }
         const message = err instanceof Error ? err.message : String(err)
         setDirectories((previous) => {
@@ -797,13 +813,13 @@ export const FilesPanel = memo(function FilesPanel({
           directoriesRef.current = next
           return next
         })
-        return
+        return null
       }
       if (
         !isCurrentWorkspaceOperation(operation) ||
         directoryRequestRef.current.get(requestKey) !== requestId
       ) {
-        return
+        return null
       }
       if (result == null) {
         setDirectories((previous) => {
@@ -818,7 +834,7 @@ export const FilesPanel = memo(function FilesPanel({
           directoriesRef.current = next
           return next
         })
-        return
+        return null
       }
       if (!result.ok) {
         setDirectories((previous) => {
@@ -833,7 +849,7 @@ export const FilesPanel = memo(function FilesPanel({
           directoriesRef.current = next
           return next
         })
-        return
+        return null
       }
       const data: WorkspaceFileListResult = result.data
       setDirectories((previous) => {
@@ -852,6 +868,7 @@ export const FilesPanel = memo(function FilesPanel({
         directoriesRef.current = next
         return next
       })
+      return data.entries
     },
     [captureWorkspaceOperation, isCurrentWorkspaceOperation]
   )
@@ -1184,6 +1201,16 @@ export const FilesPanel = memo(function FilesPanel({
   ])
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null
+  const activeChange = activeTab ? agentMarks?.get(activeTab.path)?.change : undefined
+  const activeChanged = useTaskChangedFile({
+    workspacePath,
+    runId,
+    path: activeTab?.kind === 'text' ? activeTab.path : null,
+    changed: activeChange === 'A' || activeChange === 'M',
+    // A save or an outside write moves the file's hash; a keep or undo moves git's revision.
+    revision: `${gitRevision}:${activeTab?.version?.sha256 ?? ''}`
+  })
+  const changedLines = activeChanged.lines
   useEffect(() => {
     setFocusedFile(activeTab?.path ?? null)
     return () => setFocusedFile(null)
@@ -1856,9 +1883,32 @@ export const FilesPanel = memo(function FilesPanel({
     [directories, expandedPaths, loadDirectory, updateSession]
   )
 
+  // What this task changed that is still on disk, and every folder above it.
+  const taskChanged = useMemo(() => {
+    const files = new Set<string>()
+    const dirs = new Set<string>()
+    for (const [path, mark] of agentMarks ?? []) {
+      if (mark.change !== 'A' && mark.change !== 'M') continue
+      files.add(path)
+      for (const parent of parentChain(path)) dirs.add(parent)
+    }
+    return { files, dirs }
+  }, [agentMarks])
+  const narrowToChanged = changedOnly && taskChanged.files.size > 0
+
+  // Narrowed, the folders on the way to a changed file open on their own: read any not read yet.
+  useEffect(() => {
+    if (!narrowToChanged) return
+    for (const dir of taskChanged.dirs) {
+      if (!directoriesRef.current[dir]) void loadDirectory(dir)
+    }
+  }, [narrowToChanged, taskChanged, loadDirectory])
+
   const visibleEntries = useMemo(() => {
     const output: VisibleEntry[] = []
     const filter = treeFilter.trim().toLowerCase()
+    const keep = (entry: WorkspaceFileEntry): boolean =>
+      !narrowToChanged || (isDirectoryEntry(entry) ? taskChanged.dirs.has(entry.path) : taskChanged.files.has(entry.path))
     const sortEntries = (entries: WorkspaceFileEntry[]): WorkspaceFileEntry[] =>
       [...entries].sort((left, right) => {
         if (treeSort === 'kind' && left.kind !== right.kind) {
@@ -1883,6 +1933,7 @@ export const FilesPanel = memo(function FilesPanel({
           if (
             (entry.name.toLowerCase().includes(filter) ||
               entry.path.toLowerCase().includes(filter)) &&
+            keep(entry) &&
             !seen.has(entry.path)
           ) {
             seen.add(entry.path)
@@ -1898,9 +1949,10 @@ export const FilesPanel = memo(function FilesPanel({
       if (!directory) return
       const entries = sortEntries(directory.entries)
       for (const entry of entries) {
-        if (!showIgnoredFiles && isIgnoredWorkspaceEntryName(entry.name)) continue
+        if (!showIgnoredFiles && isIgnoredWorkspaceEntryName(entry.name) && !narrowToChanged) continue
+        if (!keep(entry)) continue
         output.push({ kind: 'entry', entry, level })
-        if (isDirectoryEntry(entry) && expandedPaths.includes(entry.path)) {
+        if (isDirectoryEntry(entry) && (narrowToChanged || expandedPaths.includes(entry.path))) {
           visit(entry.path, level + 1)
           const childDir = directories[entry.path]
           if (
@@ -1921,7 +1973,7 @@ export const FilesPanel = memo(function FilesPanel({
     }
     visit('', 1)
     return output
-  }, [directories, expandedPaths, treeFilter, treeSort, showIgnoredFiles])
+  }, [directories, expandedPaths, treeFilter, treeSort, showIgnoredFiles, narrowToChanged, taskChanged])
 
   const getTreeItemKey = useCallback(
     (index: number) => {
@@ -2013,15 +2065,18 @@ export const FilesPanel = memo(function FilesPanel({
         while (queue.length > 0 && !cancelled && token === filterRevealTokenRef.current) {
           const dir = queue.shift()!
           let state = directoriesRef.current[dir]
+          let loaded: WorkspaceFileEntry[] | null = null
           if (!state?.entries.length && !state?.loading) {
-            await loadDirectory(dir)
+            loaded = await loadDirectory(dir)
           }
           if (cancelled || token !== filterRevealTokenRef.current) return
           state = directoriesRef.current[dir]
-          if (!state || state.error) continue
+          // What the load returned, until the ref catches up with it.
+          const entries = loaded ?? (state && !state.error ? state.entries : null)
+          if (!entries) continue
           visited += 1
           if (visited > FILTER_REVEAL_MAX_DIRS) break
-          for (const entry of state.entries) {
+          for (const entry of entries) {
             const matches =
               entry.name.toLowerCase().includes(filter) ||
               entry.path.toLowerCase().includes(filter)
@@ -3768,6 +3823,16 @@ export const FilesPanel = memo(function FilesPanel({
               <Switch checked={followAgent} onCheckedChange={setFollowAgent} label="Follow agent edits" />
               Follow
             </label>
+            {taskChanged.files.size > 0 ? (
+              <IconButton
+                icon="diff"
+                label={changedOnly ? 'Show every file' : 'Only files this task changed'}
+                size="sm"
+                tone="muted"
+                active={changedOnly}
+                onClick={() => setChangedOnly((value) => !value)}
+              />
+            ) : null}
             {dirtyTabCount > 0 ? (
               <Button
                 size="xs"
@@ -3883,7 +3948,7 @@ export const FilesPanel = memo(function FilesPanel({
             !directories['']?.error &&
             visibleEntries.length === 0 ? (
               <div className="px-3 py-5 text-center text-xs text-muted" role="status">
-                {treeFilter ? 'No matching files.' : 'No files in this workspace.'}
+                {treeFilter ? 'No matching files.' : narrowToChanged ? 'No changed files to show.' : 'No files in this workspace.'}
               </div>
             ) : null}
             <ul
@@ -4226,6 +4291,9 @@ export const FilesPanel = memo(function FilesPanel({
                     </Badge>
                   )
                 })()}
+                {activeChanged.add != null && activeChanged.del != null ? (
+                  <DiffStat add={activeChanged.add} del={activeChanged.del} className="shrink-0" />
+                ) : null}
                 {previewKind ? (
                   <Button
                     size="xs"
@@ -4431,6 +4499,7 @@ export const FilesPanel = memo(function FilesPanel({
                       ? { from: read.startLine, to: read.endLine ?? Number.MAX_SAFE_INTEGER }
                       : null
                   })()}
+                  changedLines={changedLines}
                   lspDiagnostics={
                     inlineLspEnabled && inlineLsp.status?.kind === 'available'
                       ? inlineLsp.diagnostics

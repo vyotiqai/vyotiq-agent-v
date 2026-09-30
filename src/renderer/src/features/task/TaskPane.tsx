@@ -16,6 +16,7 @@ import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
 import { ActionMenu, Button, IconButton, ImageLightbox, Tooltip, pushToast } from '@renderer/lib/ui'
 import { isEditableShortcutTarget, isMainComposerTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
+import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
 import { AgentContextCard } from '@renderer/features/chat/components/AgentContextCard'
@@ -122,8 +123,8 @@ export type TaskPaneProps = {
   onStopLoop?: () => void | Promise<boolean>
   /** The instruction line. */
   composer: ReactNode
-  /** Set on the rightmost pane while the inspector is hidden: offer it back. */
-  onShowInspector?: () => void
+  /** Set on the rightmost pane: the inspector's toggle, there whether it is open or not. */
+  inspectorToggle?: InspectorToggle
   /** Not started yet: the composer (its brief variant) is the whole pane. */
   newTask?: boolean
 }
@@ -147,28 +148,33 @@ function useRunEndRevision(live: boolean): number {
  * and the run list; nothing is kept here that those do not say.
  */
 /**
- * The pane's own controls at the end of its header: the inspector, when it is
- * hidden, and closing this pane of a split — named for the task, so each pane
- * says which one closes.
+ * The pane's own controls at the end of its header: the inspector's toggle,
+ * lit while it is open, and closing this pane of a split — named for the task,
+ * so each pane says which one closes.
  */
 export function PaneHeaderActions({
   title,
-  onShowInspector,
+  inspectorToggle,
   onClosePane
 }: {
   title: string
-  onShowInspector?: () => void
+  inspectorToggle?: InspectorToggle
   onClosePane?: () => void
 }) {
   return (
     <>
-      {onShowInspector ? (
+      {inspectorToggle ? (
         <IconButton
           icon="inspector"
-          label={`Show inspector (${shortcutLabel('inspector')})`}
+          label={`${inspectorToggle.open ? 'Hide' : 'Show'} inspector (${shortcutLabel('inspector')})`}
           size="sm"
           tone="muted"
-          onClick={onShowInspector}
+          active={inspectorToggle.open}
+          aria-expanded={inspectorToggle.open}
+          // Its words and aria-expanded say the state; pressed would say it a third time.
+          aria-pressed={undefined}
+          onClick={inspectorToggle.onToggle}
+          data-inspector-toggle
         />
       ) : null}
       {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={onClosePane} /> : null}
@@ -451,7 +457,7 @@ export function TaskPane(props: TaskPaneProps) {
   }, [scroll.scrollRef])
 
   // ── A new request for you comes into view in the focused pane ─────────
-  const { jumpTop, jumpBottom, isFollowing } = scroll
+  const { jumpTop, jumpTo, jumpBottom, isFollowing } = scroll
   const needsKey = firstNeed ? (firstNeed.kind === 'approval' ? firstNeed.approval.requestId : firstNeed.question.requestId) : null
   const gateKey = props.instanceGates?.[0]?.runId ?? null
   const shownNeedRef = useRef<string | null>(null)
@@ -471,8 +477,12 @@ export function TaskPane(props: TaskPaneProps) {
     if (key === shownNeedRef.current || !props.approvalAutoFocus) return
     if (shownNeedRef.current == null) resumeFollowRef.current = isFollowing()
     shownNeedRef.current = key
-    jumpTop()
-  }, [needsKey, gateKey, props.approvalAutoFocus, jumpTop, jumpBottom, isFollowing, live])
+    // The card sits in the step it holds up, which may be far down: go to it,
+    // not to the top. The first in the record is the first to answer.
+    const card = scroll.contentRef.current?.querySelector<HTMLElement>('[data-needs-you]')
+    if (card) jumpTo(card)
+    else jumpTop()
+  }, [needsKey, gateKey, props.approvalAutoFocus, jumpTop, jumpTo, jumpBottom, isFollowing, live, scroll.contentRef])
 
   // ── What the live run is doing when its work does not say ─────────────
   const activity = !live
@@ -578,7 +588,7 @@ export function TaskPane(props: TaskPaneProps) {
                 )}
               />
             ) : null}
-            <PaneHeaderActions title={title} onShowInspector={props.onShowInspector} onClosePane={props.actions.onClosePane} />
+            <PaneHeaderActions title={title} inspectorToggle={props.inspectorToggle} onClosePane={props.actions.onClosePane} />
           </>
         }
       />

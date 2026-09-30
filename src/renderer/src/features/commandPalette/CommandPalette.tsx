@@ -40,11 +40,14 @@ type Item =
 const TASK_LIMIT = 6
 const FILE_LIMIT = 6
 const COMMAND_LIMIT = 8
+/** Before anything is typed: a few of the open task's changed files, under the commands. */
+const CHANGED_FILE_LIMIT = 3
 
 /**
- * Search & commands (Ctrl K). One list, three groups — tasks, files, commands —
- * with the matched text highlighted. `>` narrows to commands. Ctrl ↵ turns
- * the query into a new task in the active workspace.
+ * Search & commands (Ctrl K). One list, three groups — tasks, commands, files —
+ * with the matched text highlighted. Before you type, the files are the ones
+ * the open task changed. `>` narrows to commands. Ctrl ↵ turns the query into
+ * a new task in the active workspace.
  */
 export function CommandPalette({
   open,
@@ -53,6 +56,7 @@ export function CommandPalette({
   commands,
   settingsCommands,
   searchFiles,
+  changedFiles,
   newTaskIn,
   onOpenTask,
   onOpenFile,
@@ -68,6 +72,8 @@ export function CommandPalette({
   settingsCommands?: (needle: string) => PaletteCommand[]
   /** Paths in the active workspace matching a query; absent without a workspace. */
   searchFiles?: (query: string, limit: number) => Promise<PaletteFile[]>
+  /** The files the open task changed, offered before anything is typed; absent without an open task. */
+  changedFiles?: () => Promise<PaletteFile[]>
   /** Where Ctrl ↵ starts a task, or null when no workspace is open. */
   newTaskIn: { name: string } | null
   onOpenTask: (row: NavRow, beside: boolean) => void
@@ -78,6 +84,7 @@ export function CommandPalette({
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
   const [files, setFiles] = useState<PaletteFile[]>([])
+  const [changed, setChanged] = useState<PaletteFile[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -124,6 +131,26 @@ export function CommandPalette({
     }
   }, [open, commandsOnly, needle, searchFiles])
 
+  // The open task's changed files, read once each time the palette opens.
+  useEffect(() => {
+    if (!open || !changedFiles) {
+      setChanged([])
+      return
+    }
+    let cancelled = false
+    changedFiles().then(
+      (found) => {
+        if (!cancelled) setChanged(found.slice(0, CHANGED_FILE_LIMIT))
+      },
+      () => {
+        if (!cancelled) setChanged([])
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [open, changedFiles])
+
   const groups = useMemo(() => {
     const lower = needle.toLowerCase()
     const matches = (text: string): boolean => !lower || text.toLowerCase().includes(lower)
@@ -135,7 +162,7 @@ export function CommandPalette({
           .map((row) => ({ kind: 'task' as const, key: `task:${row.workspacePath}:${row.runId}`, row }))
     const fileItems: Item[] = commandsOnly
       ? []
-      : files.map((file) => ({ kind: 'file' as const, key: `file:${file.path}`, file }))
+      : (needle ? files : changed).map((file) => ({ kind: 'file' as const, key: `file:${file.path}`, file }))
     const matched = [...commands.filter((c) => matches(c.title)), ...(needle ? (settingsCommands?.(needle) ?? []) : [])]
     const commandItems: Item[] = matched
       .slice(0, commandsOnly ? matched.length : COMMAND_LIMIT)
@@ -145,10 +172,10 @@ export function CommandPalette({
         ? [{ kind: 'newTask', key: 'new-task', text: needle, where: newTaskIn.name }]
         : []
     return { taskItems, fileItems, commandItems, newTask }
-  }, [needle, commandsOnly, tasks, files, commands, settingsCommands, newTaskIn])
+  }, [needle, commandsOnly, tasks, files, changed, commands, settingsCommands, newTaskIn])
 
   const flat = useMemo(
-    () => [...groups.taskItems, ...groups.fileItems, ...groups.commandItems, ...groups.newTask],
+    () => [...groups.taskItems, ...groups.commandItems, ...groups.fileItems, ...groups.newTask],
     [groups]
   )
   const positionOf = useMemo(() => new Map(flat.map((item, i) => [item.key, i])), [flat])
@@ -257,16 +284,16 @@ export function CommandPalette({
               {groups.taskItems.map(render)}
             </div>
           ) : null}
-          {groups.fileItems.length > 0 ? (
-            <div role="group" aria-label="Files">
-              <div className={MENU_LABEL}>Files</div>
-              {groups.fileItems.map(render)}
-            </div>
-          ) : null}
           {groups.commandItems.length > 0 ? (
             <div role="group" aria-label="Commands">
               <div className={MENU_LABEL}>Commands</div>
               {groups.commandItems.map(render)}
+            </div>
+          ) : null}
+          {groups.fileItems.length > 0 ? (
+            <div role="group" aria-label="Files">
+              <div className={MENU_LABEL}>Files</div>
+              {groups.fileItems.map(render)}
             </div>
           ) : null}
           {groups.newTask.length > 0 ? (
@@ -332,7 +359,16 @@ function PaletteRow({
             </span>
           }
           label={highlight(row.title, needle)}
-          detail={[row.workspaceName, taskDetail(row)].filter(Boolean).join(' · ')}
+          detail={
+            // A running task says what it is doing now, as its navigator row does.
+            row.state === 'running' && row.activity ? (
+              <span className="vy-text-live" data-palette-activity>
+                {row.activity}
+              </span>
+            ) : (
+              [row.workspaceName, taskDetail(row)].filter(Boolean).join(' · ')
+            )
+          }
           hint={active ? '↵ open' : undefined}
         />
       </div>

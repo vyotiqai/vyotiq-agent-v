@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import type { ActiveRun, NotificationItem, RunSummary } from '@shared/ipc'
+import type { ActiveRun, NotificationItem, RunSummary, ToolApprovalDecision } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import type { AppearanceSettings } from '@shared/appearance'
 import type { SkinId } from '@shared/skins'
@@ -39,7 +39,8 @@ import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import { TitleBar } from './TitleBar'
 import { FirstRunNavigator, Navigator, type NavigatorPlace, type NavigatorProps } from './navigator/Navigator'
 import { requestUpdatePanel } from './navigator/UpdateChip'
-import { buildNavigatorSections, type NavRow } from './navigator/navigatorModel'
+import { NavigatorRail } from './navigator/NavigatorRail'
+import { buildNavigatorSections, type NavRow, type NavSection } from './navigator/navigatorModel'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 import { useNavigatorView } from './navigator/useNavigatorView'
 
@@ -50,7 +51,10 @@ export type AppShellProps = {
   /** The active workspace. */
   workspacePath: string | null
   openWorkspaces?: string[]
-  runsByWorkspacePath?: Record<string, { runs: RunSummary[]; runsCapped?: boolean; runsError?: string | null }>
+  runsByWorkspacePath?: Record<
+    string,
+    { runs: RunSummary[]; instanceRuns?: RunSummary[]; runsCapped?: boolean; runsError?: string | null }
+  >
   /** Clear a workspace's failed task-list load once it has been read. */
   onDismissRunsError?: (path?: string) => void
   activeRuns?: ActiveRun[]
@@ -84,6 +88,10 @@ export type AppShellProps = {
   onCopyRunLinkInWorkspace?: (path: string, runId: string) => void
   onStopRunInWorkspace?: (path: string, runId: string) => void
   onResumeRunInWorkspace?: (path: string, runId: string) => void
+  /** Carry a failed task on, as its record's Retry does (row menu, Inbox). */
+  onRetryRunInWorkspace?: (path: string, runId: string) => void
+  /** The task header's Fork, from the row menu. */
+  onForkRunInWorkspace?: (path: string, runId: string) => void
   onPauseGoalInWorkspace?: (path: string, runId: string, live: boolean) => void
   onStopLoopInWorkspace?: (path: string, runId: string) => void
   /** `pinnedRunKey` of every pinned task. */
@@ -92,6 +100,8 @@ export type AppShellProps = {
   /** `pinnedRunKey` of every archived task. */
   archivedRunKeys?: readonly string[]
   onToggleArchivedRun?: (path: string, runId: string) => void
+  /** Allow once or Deny a waiting approval from its navigator row. */
+  onRespondApproval?: (path: string, runId: string, requestId: string, decision: ToolApprovalDecision) => Promise<void>
   /** Archive several tasks in one write (a selection, or Archive all done). */
   onArchiveRuns?: (keys: readonly string[]) => void
   /** Delete several tasks after one confirm. */
@@ -230,6 +240,36 @@ function AppShellInner(props: AppShellProps) {
     [runsByWorkspacePath, openWorkspaces, workspacePath, activeRuns, activeRunsLoaded, archivedKeys, navigatorView.showArchived]
   )
 
+  // Below the desktop breakpoint the list is a drawer and a rail of its live
+  // tasks stands in its column: the same groups the list shows, in its scope.
+  const railGroups = useMemo<NavSection[]>(
+    () =>
+      isDesktop
+        ? []
+        : buildNavigatorSections({
+            runsByWorkspacePath,
+            openPaths: openWorkspaces,
+            activePath: workspacePath,
+            activeRuns,
+            activeRunsLoaded,
+            scopePath,
+            // What the list hides, the rail hides too.
+            archivedKeys,
+            showArchived: navigatorView.showArchived
+          }),
+    [
+      isDesktop,
+      runsByWorkspacePath,
+      openWorkspaces,
+      workspacePath,
+      activeRuns,
+      activeRunsLoaded,
+      scopePath,
+      archivedKeys,
+      navigatorView.showArchived
+    ]
+  )
+
   const openTask = useCallback(
     (path: string, runId: string): void => {
       onSelectRunInWorkspace?.(path, runId)
@@ -336,6 +376,21 @@ function AppShellInner(props: AppShellProps) {
     }
   }, [workspacePath])
 
+  // What the open task changed, for the palette before anything is typed.
+  const changedRunPath = view === 'chat' ? (focusedRun?.workspacePath ?? null) : null
+  const changedRunId = view === 'chat' ? (focusedRun?.runId ?? null) : null
+  const changedFiles = useMemo(() => {
+    const path = changedRunPath
+    const runId = changedRunId
+    if (!path || !runId || !window.vyotiq?.taskFileStats) return undefined
+    return async (): Promise<PaletteFile[]> => {
+      const res = await window.vyotiq.taskFileStats({ workspacePath: path, runId })
+      if (!res.ok) return []
+      // A deleted file has nothing to open.
+      return res.data.files.filter((f) => f.action !== 'deleted').map((f) => ({ workspacePath: path, path: f.path }))
+    }
+  }, [changedRunPath, changedRunId])
+
   // Search inside tasks: main reads their transcripts; null when it could not.
   const searchRuns = useCallback(async (workspacePaths: string[], query: string) => {
     if (!window.vyotiq?.runsSearch) return null
@@ -416,6 +471,29 @@ function AppShellInner(props: AppShellProps) {
     [openTask, onOpenSettingsSection, onOpenSettings]
   )
 
+  const inbox: NavigatorProps['notifications'] = {
+    items: notifications.items,
+    unreadCount: notifications.unreadCount,
+    onMarkRead: (req) => void notifications.markRead(req),
+    onDismiss: (req) => void notifications.dismiss(req),
+    onOpenItem: onOpenNotification,
+    onRetry: props.onRetryRunInWorkspace,
+    // Only while the task still stands failed, not once it is going again, and
+    // only for a failure Retry can get past — the one its record offers Retry for.
+    canRetry: (path, runId) =>
+      allTasks.some(
+        (row) =>
+          row.runId === runId &&
+          row.state === 'failed' &&
+          row.run.retryable === true &&
+          workspacePathsEqual(row.workspacePath, path)
+      ),
+    onOpenSettings: () => {
+      if (props.onOpenSettingsSection) props.onOpenSettingsSection('notifications')
+      else props.onOpenSettings()
+    }
+  }
+
   const navigator = lendsNavigatorColumn ? (
     <div
       ref={setNavigatorSlot}
@@ -472,10 +550,13 @@ function AppShellInner(props: AppShellProps) {
         onCopyLink: props.onCopyRunLinkInWorkspace,
         onStop: props.onStopRunInWorkspace,
         onResume: props.onResumeRunInWorkspace,
+        onRetry: props.onRetryRunInWorkspace,
+        onFork: props.onForkRunInWorkspace,
         onPauseGoal: props.onPauseGoalInWorkspace,
         onStopLoop: props.onStopLoopInWorkspace,
         onTogglePin: props.onTogglePinnedRun,
-        onToggleArchive: props.onToggleArchivedRun
+        onToggleArchive: props.onToggleArchivedRun,
+        onRespondApproval: props.onRespondApproval
       }}
       pinnedKeys={pinnedKeys}
       archivedKeys={archivedKeys}
@@ -485,22 +566,13 @@ function AppShellInner(props: AppShellProps) {
       view={navigatorView}
       onViewChange={updateNavigatorView}
       drafts={props.drafts}
-      notifications={{
-        items: notifications.items,
-        unreadCount: notifications.unreadCount,
-        onMarkRead: (req) => void notifications.markRead(req),
-        onDismiss: (req) => void notifications.dismiss(req),
-        onOpenItem: onOpenNotification,
-        onOpenSettings: () => {
-          if (props.onOpenSettingsSection) props.onOpenSettingsSection('notifications')
-          else props.onOpenSettings()
-        }
-      }}
+      notifications={inbox}
       widthPx={isDesktop ? navigatorWidthPx : SIDEBAR_WIDTH_PX}
     />
   )
 
   const showDesktopNavigator = isDesktop && !navigatorHidden
+  const showRail = !isDesktop && !props.firstRun
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-chrome text-fg" data-app-shell>
@@ -536,13 +608,32 @@ function AppShellInner(props: AppShellProps) {
             />
           </>
         ) : null}
+        {showRail ? (
+          <ErrorBoundary title="Navigator couldn't render" resetKey={openWorkspaces.join('|')}>
+            <NavigatorRail
+              sections={railGroups}
+              place={placeOf(view)}
+              selected={focusedRun}
+              onSelect={openTask}
+              onNewTask={onNewTask}
+              onOpenHome={props.onOpenHome}
+              onOpenExtensions={props.onOpenMarketplace}
+              onOpenUsage={props.onOpenUsage}
+              onOpenSettings={props.onOpenSettings}
+              notifications={inbox}
+              activeRuns={activeRuns}
+              openPaths={openWorkspaces}
+              onRespondApproval={props.onRespondApproval}
+            />
+          </ErrorBoundary>
+        ) : null}
 
         <main
           id="main-content"
           ref={mainRef}
           className={cn(
             'flex min-h-0 min-w-0 flex-1 flex-col bg-bg outline-none',
-            showDesktopNavigator ? 'border-l border-border' : ''
+            showDesktopNavigator || showRail ? 'border-l border-border' : ''
           )}
           tabIndex={-1}
           aria-busy={loading ? true : undefined}
@@ -579,6 +670,7 @@ function AppShellInner(props: AppShellProps) {
         commands={commands}
         settingsCommands={paletteSettingsCommands}
         searchFiles={searchFiles}
+        changedFiles={changedFiles}
         newTaskIn={newTaskPath ? { name: formatWorkspaceName(newTaskPath) } : null}
         onOpenTask={(row, beside) => {
           if (beside && props.onOpenRunBeside) props.onOpenRunBeside(row.workspacePath, row.runId)

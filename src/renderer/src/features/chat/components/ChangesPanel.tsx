@@ -9,7 +9,6 @@ import {
   ProgressBar,
   Segmented,
   StatusGlyph,
-  Textarea,
   cn,
   type ActionMenuItem,
   type MenuOption
@@ -18,7 +17,7 @@ import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts
 import { Icon } from '@renderer/lib/icons'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { CHAT_RIGHT_PANEL_BODY, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
-import type { GitBranchEntry, GitChangedFile, GitLogEntry, GitStatus, TaskFileStat } from '@shared/ipc'
+import type { GitBranchEntry, GitChangedFile, GitLogEntry, GitStatus, TaskCommitSettled, TaskFileStat } from '@shared/ipc'
 import { namedGitBranch } from '@shared/utils/gitBranch'
 import type { UiItem } from '@shared/transcript'
 import type { ChatItemsStore } from '../chatStores'
@@ -29,8 +28,6 @@ import { useGitChrome, type GitChrome } from './GitChrome'
 import { useGitInit } from './useGitInit'
 import { defaultCommitMessage } from './CommitComposer'
 import {
-  ChangeDiff,
-  ChangesList,
   FileDiffBody,
   useFileDiff,
   type BrowserFileEntry,
@@ -38,13 +35,16 @@ import {
   type FileDiffSource
 } from '@renderer/features/inspector/ChangesList'
 import type { AskTarget } from '@renderer/features/inspector/ReviewDiffTable'
+import { ChangesColumn } from '@renderer/features/inspector/ChangesColumn'
 import { lineLabel } from '@renderer/features/inspector/reviewDiff'
 import { reviewSignature, useReviewViewed } from '@renderer/features/inspector/reviewViewed'
 import { sessionEditTotals, settledWriteCount } from '@renderer/features/inspector/taskCounts'
 import { checksRevisionOf, useRunChecks } from '@renderer/features/task/useRunChecks'
+import { outcomeMarks, useTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
 import { FileBadge } from './FileBadge'
 import { RepoCommandsNotice } from './RepoCommandsNotice'
 import { ReviewChecks } from './ReviewChecks'
+import { ConflictResolver } from './ConflictResolver'
 import {
   collectSessionChangedFiles,
   collectSessionFileDiffs,
@@ -162,8 +162,8 @@ function readChangeData(
 
 /**
  * The inspector's Changes tab: what this task changed, with Keep and Undo,
- * and git's view of the working tree, with Commit. One file list; the
- * selected file's diff below it.
+ * and git's view of the working tree, with Commit. One column of files, each
+ * header over its own diff.
  */
 const STALE_DRAFT_NOTE = 'Written for an earlier version of these changes — check it before committing'
 
@@ -186,6 +186,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   onDiscardWriteFile,
   onKeepAllWrites,
   onDiscardAllWrites,
+  onReopenWriteFile,
+  onTaskCommitted,
   writeCheckpointFiles,
   active = true,
   running = false,
@@ -221,6 +223,10 @@ export const ChangesPanel = memo(function ChangesPanel({
   onDiscardWriteFile?: (path: string) => void | Promise<unknown>
   onKeepAllWrites?: () => void | Promise<unknown>
   onDiscardAllWrites?: () => void | Promise<unknown>
+  /** Un-keep: a kept file waits on review again. */
+  onReopenWriteFile?: (path: string) => void | Promise<unknown>
+  /** A commit from this task's Changes took (some of) its edits. */
+  onTaskCommitted?: (settled: TaskCommitSettled, pushed: boolean) => void
   /** Latest writes_checkpoint files (terminal/MCP observed writes). */
   writeCheckpointFiles?: readonly CheckpointChangedFile[]
   /** When false (hidden mounted dock), do not intercept Ctrl/Cmd+F/R. */
@@ -314,14 +320,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [conflictSides, setConflictSides] = useState<{
-    path: string
-    ours: string
-    theirs: string
-    base: string
-    working: string
-  } | null>(null)
-  const [workingDraft, setWorkingDraft] = useState('')
+  /** Bumped when a file is sent here from elsewhere: the column opens it and scrolls to it. */
+  const [revealToken, setRevealToken] = useState(0)
   const [composing, setComposing] = useState(false)
   const [message, setMessage] = useState('')
   const [messageGenerating, setMessageGenerating] = useState(false)
@@ -378,6 +378,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   useEffect(() => {
     if (preferredSelectedPathToken <= 0 || !preferredSelectedPath) return
     setSelectedPath(preferredSelectedPath)
+    setRevealToken((n) => n + 1)
   }, [preferredSelectedPath, preferredSelectedPathToken])
 
   // Non-git workspaces with agent edits: prefer agent scope so we never stack
@@ -514,30 +515,6 @@ export const ChangesPanel = memo(function ChangesPanel({
   const draftedMessageRef = useRef<string | null>(null)
   const gitFiles = useMemo(() => status?.files ?? [], [status?.files])
 
-  useEffect(() => {
-    if (
-      !workspacePath ||
-      !selectedPath ||
-      !gitFiles.some((file) => file.path === selectedPath && file.status === 'conflicted')
-    ) {
-      setConflictSides(null)
-      return
-    }
-    let cancelled = false
-    void window.vyotiq.gitConflictFile({ workspacePath, path: selectedPath }).then((res) => {
-      if (cancelled) return
-      if (!res.ok) {
-        chrome?.reportNotice(res.error, true)
-        return
-      }
-      setConflictSides({ path: selectedPath, ...res.data })
-      setWorkingDraft(res.data.working)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [workspacePath, selectedPath, gitFiles, chrome])
-
   const visibleGitFiles = useMemo(() => {
     switch (displayScope) {
       case 'agent':
@@ -597,8 +574,10 @@ export const ChangesPanel = memo(function ChangesPanel({
 
   const sendCommit = useCallback(
     (push: boolean) => {
-      void chrome.commit(message, push, commitMode).then(async (ok) => {
+      void chrome.commit(message, push, commitMode, runId).then(async (ok) => {
         if (!ok) return
+        // It took this task's edits: main kept them, and the task says so.
+        if (ok.task) onTaskCommitted?.(ok.task, ok.pushed)
         setMessage('')
         setMessageGenerating(false)
         messageGenerationSeqRef.current += 1
@@ -612,7 +591,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         setSelectedCommit(list[0] ?? null)
       })
     },
-    [chrome, message, commitMode, onGitMutated, refreshCommits]
+    [chrome, message, commitMode, runId, onTaskCommitted, onGitMutated, refreshCommits]
   )
 
   const sendCreatePr = useCallback(() => {
@@ -794,6 +773,9 @@ export const ChangesPanel = memo(function ChangesPanel({
         ? false
         : filteredFiles.length === 0 && !chrome.busy
 
+  // A task that has stopped with nothing listed changed nothing; one still
+  // working (or not started) just has nothing yet.
+  const taskFinished = Boolean(runId) && !running
   const emptyTitle = !workspacePath
     ? 'No workspace'
     : chrome.error
@@ -801,7 +783,9 @@ export const ChangesPanel = memo(function ChangesPanel({
       : chrome.result?.kind === 'unavailable'
         ? 'Git not found'
         : displayScope === 'agent'
-          ? 'No changes yet'
+          ? taskFinished
+            ? 'Nothing changed'
+            : 'No changes yet'
           : chrome.result?.kind === 'not_repo'
             ? 'Not a git repository'
             : 'No changes yet'
@@ -813,7 +797,9 @@ export const ChangesPanel = memo(function ChangesPanel({
       : chrome.result?.kind === 'unavailable'
         ? chrome.result.detail
         : displayScope === 'agent'
-          ? 'Edits the agent makes land here as it makes them.'
+          ? taskFinished
+            ? 'This task finished without changing a file.'
+            : 'Edits the agent makes land here as it makes them.'
           : chrome.result?.kind === 'not_repo'
             ? 'Uncommitted changes, commits and PRs need git. Initialise one here — nothing else changes.'
             : 'Working tree changes will appear here when files differ from HEAD.'
@@ -897,8 +883,22 @@ export const ChangesPanel = memo(function ChangesPanel({
   )
 
   const repoOk = chrome.result?.kind === 'ok'
-  const resolutionOf = (path: string): 'kept' | 'discarded' | undefined =>
-    writeFileResolutions?.get(normalizeRelPath(path)) ?? writeFileResolutions?.get(path)
+  // What main recorded for each file: the live checkpoint drops a settled
+  // turn on reload, so its Kept and Undone come from here then.
+  const settledOutcome = useTaskOutcome(
+    workspacePath,
+    runId,
+    active && displayScope === 'agent' && !running,
+    `${gitRevision}:${settledWrites}`
+  )
+  const settledMarks = useMemo(() => outcomeMarks(settledOutcome), [settledOutcome])
+  const resolutionOf = (path: string): 'kept' | 'discarded' | undefined => {
+    const key = normalizeRelPath(path)
+    if (writeFileResolutions?.has(key)) return writeFileResolutions.get(key)
+    if (writeFileResolutions?.has(path)) return writeFileResolutions.get(path)
+    const mark = settledMarks.get(key)
+    return mark === 'kept' ? 'kept' : mark === 'undone' ? 'discarded' : undefined
+  }
   const conflictedOf = (path: string): boolean =>
     Boolean(conflictedPaths?.has(normalizeRelPath(path)) || conflictedPaths?.has(path))
   const normalizedResolvable = resolvablePaths
@@ -938,22 +938,21 @@ export const ChangesPanel = memo(function ChangesPanel({
             path: f.path,
             status: action === 'created' ? 'A' : action === 'deleted' ? 'D' : 'M',
             ...exact,
-            ...note
-          }
+            ...note,
+            ...(resolution === 'kept' ? { resolution: 'kept' } : resolution === 'discarded' ? { resolution: 'undone' } : {})
+          } satisfies ChangesListFile
         })
       : browserFiles.map((f) => ({ path: f.path, status: f.statusLetter, added: f.added, removed: f.removed }))
 
   const selectedIndex = selectedPath ? listFiles.findIndex((f) => f.path === selectedPath) : -1
   const selected = selectedIndex >= 0 ? listFiles[selectedIndex]! : null
-  const selectByOffset = (offset: number): (() => void) | undefined => {
-    const next = listFiles[selectedIndex + offset]
-    return next ? () => setSelectedPath(next.path) : undefined
-  }
 
   // Without a run to ask, the edit's own arguments are all there is to show.
-  const taskDiffLines = selected && displayScope === 'agent' && !runId
-    ? (sessionAgentDiffs.get(normalizeRelPath(selected.path)) ?? sessionAgentDiffs.get(selected.path) ?? null)
-    : null
+  const taskLinesOf = (path: string) =>
+    displayScope === 'agent' && !runId
+      ? (sessionAgentDiffs.get(normalizeRelPath(path)) ?? sessionAgentDiffs.get(path) ?? null)
+      : null
+  const taskDiffLines = selected ? taskLinesOf(selected.path) : null
   // The task's own record of the file: its first before-image against the file
   // now. A file the run changed some other way (a command) is not in it; git's
   // view against HEAD is the next best answer.
@@ -993,6 +992,8 @@ export const ChangesPanel = memo(function ChangesPanel({
       ) : null
     if (displayScope === 'agent') {
       const decidable = canResolve && resolvableOf(file.path) && !resolutionOf(file.path) && !conflictedOf(file.path)
+      // A kept file can go back to review while the run is stopped; an undone one is back as it was.
+      const unkeepable = Boolean(onReopenWriteFile) && !running && resolutionOf(file.path) === 'kept'
       return (
         <>
           {decidable && onDiscardWriteFile ? (
@@ -1015,6 +1016,18 @@ export const ChangesPanel = memo(function ChangesPanel({
               tone="muted"
               disabled={resolveLocked}
               onClick={() => void onKeepWriteFile(file.path)}
+            />
+          ) : null}
+          {unkeepable ? (
+            <IconButton
+              icon="check"
+              label={`Unkeep ${name}`}
+              title="Return this file to review"
+              size="xs"
+              tone="muted"
+              active
+              disabled={Boolean(resolveBusy || chrome.busy)}
+              onClick={() => void onReopenWriteFile?.(file.path)}
             />
           ) : null}
           {open}
@@ -1049,35 +1062,22 @@ export const ChangesPanel = memo(function ChangesPanel({
     )
   }
 
-  const resolveConflict = (path: string, pick: (sides: { ours: string; theirs: string }) => string): void => {
-    if (!workspacePath) return
-    const apply = (content: string): void => {
-      void window.vyotiq.gitResolveConflict({ workspacePath, path, content }).then((resolved) => {
-        if (!resolved.ok) {
-          chrome.reportNotice(resolved.error, true)
-          return
-        }
-        chrome.refresh()
-        onGitMutated?.()
-      })
-    }
-    if (conflictSides?.path === path) {
-      apply(pick(conflictSides))
-      return
-    }
-    void window.vyotiq.gitConflictFile({ workspacePath, path }).then((res) => {
-      if (!res.ok) {
-        chrome.reportNotice(res.error, true)
-        return
-      }
-      apply(pick(res.data))
-    })
-  }
-
-  const selectedConflicted =
-    Boolean(workspacePath && selected) &&
+  /** Both sides changed this file: how to settle it, under its header. */
+  const conflictFor = (path: string) =>
+    workspacePath &&
     displayScope !== 'agent' &&
-    gitFiles.some((file) => file.path === selected!.path && file.status === 'conflicted')
+    gitFiles.some((file) => file.path === path && file.status === 'conflicted') ? (
+      <ConflictResolver
+        key={path}
+        workspacePath={workspacePath}
+        path={path}
+        onResolved={() => {
+          chrome.refresh()
+          onGitMutated?.()
+        }}
+        onError={(error) => chrome.reportNotice(error, true)}
+      />
+    ) : null
 
   /** Git's last word: a failure says so with an icon, not only in red. */
   const gitNotice = chrome.notice ? (
@@ -1114,81 +1114,36 @@ export const ChangesPanel = memo(function ChangesPanel({
       />
     ) : null
 
-  const conflictBlock =
-    selectedConflicted && selected ? (
-      <div className="@container shrink-0 space-y-2 border-b border-border bg-warning-soft px-3 py-2 text-xs" data-changes-conflict>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Icon name="warning" size={13} className="shrink-0 text-warning" />
-          <span className="min-w-0 flex-1 truncate text-fg">Both sides changed this file</span>
-          <Button size="xs" onClick={() => resolveConflict(selected.path, (sides) => sides.ours)}>
-            Keep ours
-          </Button>
-          <Button size="xs" onClick={() => resolveConflict(selected.path, (sides) => sides.theirs)}>
-            Keep theirs
-          </Button>
-          <Button size="xs" onClick={() => resolveConflict(selected.path, () => workingDraft)}>
-            Save working
-          </Button>
-        </div>
-        {conflictSides?.path === selected.path ? (
-          // Three columns only when the block itself is wide (the review), not the window.
-          <div className="grid max-h-56 grid-cols-1 gap-1 overflow-auto @xl:grid-cols-3">
-            {(['ours', 'theirs', 'base'] as const).map((side) => (
-              <pre
-                key={side}
-                className="m-0 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-sunken p-1.5 font-mono text-xs text-fg"
-              >
-                <span className="block font-sans text-caption font-medium text-muted">
-                  {side === 'ours' ? 'Ours' : side === 'theirs' ? 'Theirs' : 'Base'}
-                </span>
-                {conflictSides[side] || '∅'}
-              </pre>
-            ))}
-          </div>
-        ) : null}
-        <label className="m-0 block text-muted">
-          Working copy
-          <Textarea
-            size="sm"
-            rows={4}
-            className="mt-1 max-h-36 font-mono"
-            value={workingDraft}
-            onChange={(e) => setWorkingDraft(e.target.value)}
-          />
-        </label>
-      </div>
-    ) : null
+  const askAboutLine =
+    onAskAboutLine && displayScope !== 'commits'
+      ? (target: AskTarget, question: string) => {
+          const n = lineLabel(target.line)
+          const where =
+            target.line.kind === 'del' ? `line ${n} as it was before the change (removed)` : `line ${n}`
+          onAskAboutLine(
+            [`In \`${target.path}\`, ${where}:`, '```', target.line.text, '```', '', question].join('\n')
+          )
+        }
+      : undefined
 
   const fileArea = (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <ChangesList
-        files={listFiles}
-        selectedPath={selected?.path ?? null}
-        onSelect={setSelectedPath}
-        actions={rowActions}
-        className={cn(
-          'scroll-thin shrink-0 overflow-y-auto',
-          selected ? 'max-h-[210px] border-b border-border' : 'min-h-0 flex-1'
-        )}
-      />
-      {selected ? (
-        <ChangeDiff
-          path={selected.path}
-          lines={taskDiffLines}
-          fetchDiff={displayScope === 'agent' ? fetchTaskDiff : fetchGitDiff}
-          binary={browserFiles.find((f) => f.path === selected.path)?.binary}
-          layout={layout}
-          wordWrap={wordWrap}
-          findQuery={findQuery}
-          added={selected.status === 'A' || selected.status === '?'}
-          onOpen={onOpenFile && selected.status !== 'D' ? () => onOpenFile(selected.path) : undefined}
-          onPrev={selectByOffset(-1)}
-          onNext={selectByOffset(1)}
-        >
-          {conflictBlock}
-        </ChangeDiff>
-      ) : null}
-    </div>
+    <ChangesColumn
+      files={listFiles}
+      selectedPath={selected?.path ?? null}
+      revealToken={revealToken}
+      onSelect={setSelectedPath}
+      actions={rowActions}
+      source={(file) =>
+        displayScope === 'agent'
+          ? { lines: taskLinesOf(file.path), fetchDiff: fetchTaskDiff }
+          : { fetchDiff: fetchGitDiff, binary: browserFiles.find((f) => f.path === file.path)?.binary }
+      }
+      layout={layout}
+      wordWrap={wordWrap}
+      findQuery={findQuery}
+      onAsk={askAboutLine}
+      slot={(file) => conflictFor(file.path)}
+    />
   )
 
   const scopeOptions: MenuOption[] = (Object.keys(SCOPE_LABEL) as ChangeScope[]).map((key) => ({
@@ -1281,6 +1236,15 @@ export const ChangesPanel = memo(function ChangesPanel({
           }
         : null
       : { added: gitTotals.added, removed: gitTotals.removed }
+  // What has been decided for this task's files, from the write checkpoint.
+  const keptCount = displayScope === 'agent' ? listFiles.filter((f) => f.resolution === 'kept').length : 0
+  const undoneCount = displayScope === 'agent' ? listFiles.filter((f) => f.resolution === 'undone').length : 0
+  const decidedSummary = [
+    keptCount > 0 ? `${keptCount} kept` : null,
+    undoneCount > 0 ? `${undoneCount} undone` : null
+  ]
+    .filter(Boolean)
+    .join(', ')
 
   // ── Review: the inspector taken to the whole work area ──────────────────
   const reviewing = variant === 'review'
@@ -1303,18 +1267,6 @@ export const ChangesPanel = memo(function ChangesPanel({
     reviewSource,
     browserFiles.find((f) => f.path === selected?.path)?.binary
   )
-  const askAboutLine =
-    onAskAboutLine && displayScope !== 'commits'
-      ? (target: AskTarget, question: string) => {
-          const n = lineLabel(target.line)
-          const where =
-            target.line.kind === 'del' ? `line ${n} as it was before the change (removed)` : `line ${n}`
-          onAskAboutLine(
-            [`In \`${target.path}\`, ${where}:`, '```', target.line.text, '```', '', question].join('\n')
-          )
-        }
-      : undefined
-
   if (reviewing) {
     const name = selected ? (selected.path.split('/').pop() ?? selected.path) : ''
     const dir = selected && selected.path.includes('/') ? selected.path.slice(0, selected.path.lastIndexOf('/') + 1) : ''
@@ -1683,7 +1635,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                     onCheckedChange={(next) => viewed.setViewed(selected.path, reviewSignature(selected), next)}
                   />
                 </div>
-                {conflictBlock}
+                {conflictFor(selected.path)}
                 <div
                   className="scroll-thin min-h-0 flex-1 overflow-auto bg-sunken py-1 font-mono text-xs leading-[20px]"
                   data-diff-scroll-root
@@ -1762,6 +1714,11 @@ export const ChangesPanel = memo(function ChangesPanel({
               {listFiles.length} {listFiles.length === 1 ? 'file' : 'files'}
             </span>
             {shownTotals ? <DiffStat add={shownTotals.added} del={shownTotals.removed} className="shrink-0" /> : null}
+            {decidedSummary ? (
+              <span className="min-w-0 truncate text-caption text-tertiary" data-changes-decided>
+                · {decidedSummary}
+              </span>
+            ) : null}
           </>
         ) : null}
         <span className="flex-1" />

@@ -4,7 +4,8 @@ import { checksTally, type DoneWhenCheck } from '@shared/doneWhenChecks'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { formatUsdCost } from '@shared/utils/costDisplay'
 import { formatElapsed } from '@shared/utils/timeFormat'
-import { IconButton, STATE_LABEL, StatusGlyph, cn } from '@renderer/lib/ui'
+import { IconButton, STATE_LABEL, StatusGlyph, cn, pushToast } from '@renderer/lib/ui'
+import { copyText } from '@renderer/lib/markdown/copyText'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import {
   cacheCaptionPct,
@@ -66,7 +67,8 @@ export function ReceiptLine({
   feedback,
   checks = [],
   outcome,
-  actions
+  actions,
+  summary
 }: {
   usage: StepUsageTotals | null
   startedAt: number | null
@@ -80,12 +82,15 @@ export function ReceiptLine({
   feedback?: { value: RunFeedbackRating | null; onRate: (rating: RunFeedbackRating | null) => void }
   /** What to do about how it ended (a stopped run: undo, resume), at the line's end. */
   actions?: ReactNode
+  /** The run's result as text: a settled run offers to copy it. */
+  summary?: string
 }) {
   const now = useSharedNow(live && startedAt != null)
   const end = live ? now : endedAt
   const duration = startedAt != null && end != null ? end - startedAt : null
   const parts = receiptParts(usage, duration, live ? [] : checks)
-  if (parts.length === 0 && !feedback && !outcome && !actions) return null
+  const copyable = !live && Boolean(summary?.trim())
+  if (parts.length === 0 && !feedback && !outcome && !actions && !copyable) return null
   const rate = (rating: RunFeedbackRating): void => {
     if (!feedback) return
     feedback.onRate(feedback.value === rating ? null : rating)
@@ -122,29 +127,44 @@ export function ReceiptLine({
             {actions}
           </span>
         ) : null}
-        {!live && feedback ? (
+        {!live && (feedback || copyable) ? (
           <span className="flex items-center gap-0.5">
-            <IconButton
-              icon="thumbsUp"
-              label={feedback.value === 'up' ? 'Marked helpful' : 'Mark helpful'}
-              size="sm"
-              tone="muted"
-              active={feedback.value === 'up'}
-              aria-pressed={feedback.value === 'up'}
-              onClick={() => rate('up')}
-            />
-            <IconButton
-              icon="thumbsDown"
-              label={feedback.value === 'down' ? 'Marked unhelpful' : 'Mark unhelpful'}
-              size="sm"
-              tone="muted"
-              active={feedback.value === 'down'}
-              aria-pressed={feedback.value === 'down'}
-              onClick={() => rate('down')}
-            />
+            {feedback ? (
+              <>
+                <IconButton
+                  icon="thumbsUp"
+                  label={feedback.value === 'up' ? 'Marked helpful' : 'Mark helpful'}
+                  size="sm"
+                  tone="muted"
+                  active={feedback.value === 'up'}
+                  aria-pressed={feedback.value === 'up'}
+                  onClick={() => rate('up')}
+                />
+                <IconButton
+                  icon="thumbsDown"
+                  label={feedback.value === 'down' ? 'Marked unhelpful' : 'Mark unhelpful'}
+                  size="sm"
+                  tone="muted"
+                  active={feedback.value === 'down'}
+                  aria-pressed={feedback.value === 'down'}
+                  onClick={() => rate('down')}
+                />
+              </>
+            ) : null}
+            {copyable ? (
+              <IconButton icon="copy" label="Copy the summary" size="sm" tone="muted" onClick={() => copySummary(summary!)} />
+            ) : null}
           </span>
         ) : null}
       </div>
     </RecordRow>
   )
+}
+
+/** The result as it reads, markdown and all, onto the clipboard. */
+function copySummary(text: string): void {
+  void copyText(text.trim()).then((ok) => {
+    if (ok) pushToast('Summary copied', { icon: 'copy' })
+    else pushToast('Could not copy the summary.', 'error')
+  })
 }

@@ -73,6 +73,16 @@ test('Changes leads with the open check and folds the met ones', async () => {
   await expect(changes.locator('[data-change-row="src/settings/sections.ts"]')).toBeVisible()
 })
 
+test('its navigator row says what it changed and how its checks stand', async () => {
+  const { window } = launched
+  const row = window.locator('[data-nav-section="review"]').getByRole('button', { name: /^Regroup Settings/ })
+  const line = row.locator('[data-nav-review]')
+  await expect(line).toContainText('2/3 checks', { timeout: 20_000 })
+  await expect(line).toContainText(/[+−]\d/)
+  // One unmet check: the tally reads as a warning, beside its words.
+  await expect(line.locator('.text-warning')).toHaveText('· 2/3 checks')
+})
+
 test('the full review leads with it too', async () => {
   const { window } = launched
   await window.keyboard.press(`${MOD}+Shift+I`)
@@ -81,6 +91,27 @@ test('the full review leads with it too', async () => {
   await expect(review.getByRole('region', { name: 'Done-when checks' })).toContainText(OPEN_CHECK)
   await review.getByRole('button', { name: 'Back to the record' }).click()
   await expect(window.getByRole('region', { name: 'Changes' })).toBeVisible()
+})
+
+test('Files bars the lines the task changed, in a gutter before the numbers', async () => {
+  const { window } = launched
+  await window.keyboard.press('Alt+2')
+  await window.getByRole('textbox', { name: 'Filter workspace files' }).fill('sections.ts')
+  await window.locator('[role="treeitem"]').filter({ hasText: /^sections\.ts/ }).click()
+  await expect(window.getByRole('tab', { name: /sections\.ts/i })).toBeVisible({ timeout: 20_000 })
+
+  // One changed line, read from the task's own before-image: one bar, on line 1.
+  const bars = window.locator('.cm-taskChanges .cm-taskChange')
+  await expect(bars).toHaveCount(1, { timeout: 20_000 })
+  await expect(bars.first()).toHaveAttribute('title', 'Changed by this task')
+  const [bar, lineOne] = await Promise.all([
+    bars.first().boundingBox(),
+    window.locator('.cm-lineNumbers .cm-gutterElement').filter({ hasText: /^1$/ }).boundingBox()
+  ])
+  expect(bar && lineOne ? Math.abs(bar.y - lineOne.y) : Infinity).toBeLessThan(2)
+  expect(bar!.x).toBeLessThan(lineOne!.x)
+  // Focus is in the editor now, which keeps its own keys: back to Changes by its tab.
+  await window.getByRole('tab', { name: 'Changes' }).click()
 })
 
 test('Ask it to cover this sends the check to the task as its next instruction', async () => {

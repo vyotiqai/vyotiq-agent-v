@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { NotificationItem } from '@shared/ipc'
+import type { PendingAsk } from '@renderer/features/home/usePendingAsks'
 import { NotificationsRow } from '@renderer/app/navigator/NotificationsRow'
 
 afterEach(cleanup)
@@ -41,6 +42,22 @@ const ITEMS: NotificationItem[] = [
   })
 ]
 
+/** r1 still waits on a terminal command. */
+const ASKS: Record<string, PendingAsk | null> = {
+  r1: {
+    kind: 'approval',
+    request: {
+      requestId: 'req-1',
+      runId: 'r1',
+      toolCallId: 'call-1',
+      name: 'terminal',
+      summary: 'Run pnpm vitest run',
+      argsPreview: JSON.stringify({ command: 'pnpm   vitest run' }),
+      mutating: true
+    }
+  }
+}
+
 function open(over: Partial<Parameters<typeof NotificationsRow>[0]> = {}) {
   const handlers = {
     onMarkRead: vi.fn(),
@@ -59,19 +76,42 @@ describe('NotificationsRow', () => {
     expect(within(panel).getByText('2 new')).toBeTruthy()
   })
 
-  it('marks each row with its task state, the way the navigator draws it', () => {
-    const { panel } = open()
+  it('says a group’s state once on its heading, and marks only Earlier’s rows, where kinds mix', () => {
+    const { panel } = open({ asks: ASKS })
+    const headings = [...panel.querySelectorAll('[data-inbox-group] h3')].map(
+      (h) => h.querySelector('[data-state]')?.getAttribute('data-state') ?? null
+    )
+    expect(headings).toEqual(['needs', 'review', null])
     const states = [...panel.querySelectorAll('[data-notification-kind]')].map((row) => [
       row.getAttribute('data-notification-kind'),
-      row.querySelector('[data-state]')?.getAttribute('data-state') ?? 'icon'
+      row.querySelector('[data-state]')?.getAttribute('data-state') ?? (row.querySelector('svg') ? 'icon' : null)
     ])
     expect(states).toEqual([
-      ['needs_you', 'needs'],
-      ['run_done', 'review'],
+      ['needs_you', null],
+      ['run_done', null],
       ['run_error', 'failed'],
       ['run_done', 'done'],
       ['crash', 'icon']
     ])
+  })
+
+  it('takes a question to its task with Answer, and says what it asks', () => {
+    const question: Record<string, PendingAsk | null> = {
+      r1: {
+        kind: 'question',
+        request: {
+          requestId: 'q-1',
+          runId: 'r1',
+          toolCallId: 'call-q',
+          questions: [{ id: 'q1', prompt: 'Which database?', type: 'single', options: ['Postgres', 'SQLite'] }]
+        }
+      } as PendingAsk
+    }
+    const { handlers, panel } = open({ asks: question })
+    const row = within(panel).getByRole('button', { name: /^Add backpressure/ })
+    expect(row.querySelector('[data-inbox-question]')?.textContent).toBeTruthy()
+    fireEvent.click(within(panel).getByRole('button', { name: 'Answer Add backpressure' }))
+    expect(handlers.onOpenItem).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
   })
 
   it('names the task, says what happened, and marks the unread ones', () => {
@@ -80,10 +120,68 @@ describe('NotificationsRow', () => {
     expect(review.textContent).toContain('Ready for review · 14 files')
     expect(review.textContent).toContain('2m')
     expect(within(review).getByText('Unread')).toBeTruthy()
-    expect(within(review).getByText('Regroup Settings').className).toContain('font-medium')
+    // Unread is ink, never weight.
+    expect(within(review).getByText('Regroup Settings').className).toContain('text-fg-strong')
+    expect(within(review).getByText('Regroup Settings').className).not.toContain('font-medium')
     const read = within(panel).getByRole('button', { name: /^Audit the runtime/ })
     expect(within(read).queryByText('Unread')).toBeNull()
     expect(within(read).getByText('Audit the runtime').className).not.toContain('font-medium')
+  })
+
+  it('groups open asks, then work ready for review, then everything else', () => {
+    const { panel } = open({ asks: ASKS })
+    const groups = [...panel.querySelectorAll<HTMLElement>('[data-inbox-group]')].map((group) => ({
+      heading: within(group).getByRole('heading').textContent,
+      kinds: [...group.querySelectorAll('[data-notification-kind]')].map((row) => row.getAttribute('data-notification-kind'))
+    }))
+    expect(groups).toEqual([
+      { heading: 'Needs you', kinds: ['needs_you'] },
+      { heading: 'Ready for review', kinds: ['run_done'] },
+      { heading: 'Earlier', kinds: ['run_error', 'run_done', 'crash'] }
+    ])
+  })
+
+  it('files an ask already answered under Earlier, with no decision', () => {
+    const { panel } = open({ asks: {}, onRespondApproval: vi.fn() })
+    expect(panel.querySelector('[data-inbox-group="asks"]')).toBeNull()
+    const earlier = panel.querySelector('[data-inbox-group="earlier"]') as HTMLElement
+    expect(within(earlier).getByRole('button', { name: /^Add backpressure/ })).toBeTruthy()
+    expect(within(panel).queryByRole('group', { name: 'Answer Add backpressure' })).toBeNull()
+  })
+
+  it('shows a waiting command and allows it in place', async () => {
+    const onRespondApproval = vi.fn().mockResolvedValue(undefined)
+    const { handlers, panel } = open({ asks: ASKS, onRespondApproval })
+    const row = within(panel).getByRole('button', { name: /^Add backpressure/ })
+    expect(row.querySelector('[data-inbox-command]')?.textContent).toBe('$pnpm vitest run')
+    const decision = within(panel).getByRole('group', { name: 'Answer Add backpressure' })
+    fireEvent.click(within(decision).getByRole('button', { name: 'Allow once' }))
+    expect(onRespondApproval).toHaveBeenCalledWith(WS, 'r1', 'req-1', 'once')
+    await waitFor(() => expect(handlers.onMarkRead).toHaveBeenCalledWith({ id: 'a' }))
+    expect(handlers.onOpenItem).not.toHaveBeenCalled()
+  })
+
+  it('retries a failed task in place, while it still stands failed', () => {
+    const onRetry = vi.fn()
+    const canRetry = vi.fn().mockReturnValue(true)
+    const { handlers, panel } = open({ onRetry, canRetry })
+    // Only the failed item offers it.
+    expect(within(panel).getAllByRole('button', { name: /^Retry/ })).toHaveLength(1)
+    fireEvent.click(within(panel).getByRole('button', { name: 'Retry Audit the runtime' }))
+    expect(canRetry).toHaveBeenCalledWith(WS, 'r1')
+    expect(onRetry).toHaveBeenCalledWith(WS, 'r1')
+    expect(handlers.onMarkRead).toHaveBeenCalledWith({ id: 'c' })
+    expect(handlers.onOpenItem).not.toHaveBeenCalled()
+    // Retrying opens the task, so the panel steps aside.
+    expect(screen.queryByRole('dialog', { name: 'Inbox' })).toBeNull()
+  })
+
+  it('offers no Retry once the task is going again, or without a way to retry', () => {
+    const first = open({ onRetry: vi.fn(), canRetry: () => false })
+    expect(within(first.panel).queryByRole('button', { name: /^Retry/ })).toBeNull()
+    cleanup()
+    const second = open()
+    expect(within(second.panel).queryByRole('button', { name: /^Retry/ })).toBeNull()
   })
 
   it('opens an item and marks it read', () => {

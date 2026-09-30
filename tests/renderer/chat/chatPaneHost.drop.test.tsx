@@ -49,7 +49,7 @@ describe('ChatPaneHost drop', () => {
   it('labels each pane and hands it close and split — the pane draws its own header', () => {
     const onClosePane = vi.fn()
     const onSplitPane = vi.fn()
-    const onShowInspector = vi.fn()
+    const inspectorToggle = { open: false, onToggle: vi.fn() }
     const panes: ChatPane[] = [
       pane,
       { paneId: 'pane-2', workspacePath: '/ws/a', runId: null }
@@ -59,7 +59,7 @@ describe('ChatPaneHost drop', () => {
         panes={panes}
         focusedPaneId="pane-1"
         sizes={[0.5, 0.5]}
-        onShowInspector={onShowInspector}
+        inspectorToggle={inspectorToggle}
         onFocusPane={() => {}}
         onClosePane={onClosePane}
         onSplitPane={onSplitPane}
@@ -67,7 +67,7 @@ describe('ChatPaneHost drop', () => {
         onSessionDrop={() => true}
         getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New task')}
         renderPane={(p, opts) => (
-          <div data-testid="pane-body" data-inspector-offer={opts.onShowInspector ? '1' : '0'} data-multi={opts.multi ? '1' : '0'}>
+          <div data-testid="pane-body" data-inspector-offer={opts.inspectorToggle ? '1' : '0'} data-multi={opts.multi ? '1' : '0'}>
             <button type="button" onClick={opts.onClose}>
               Close {p.paneId}
             </button>

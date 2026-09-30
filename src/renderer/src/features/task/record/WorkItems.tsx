@@ -1,15 +1,21 @@
 import { createContext, memo, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { UiItem } from '@shared/transcript'
+import type { ToolApprovalGrant } from '@shared/ipc'
 import { isRetryableTurnFailure } from '@shared/errors'
 import { inferFileWriteAction, parseArgsRecord, summarizeToolArgs } from '@shared/toolSummary'
 import { parseTerminalOutput } from '@shared/utils/terminalFormat'
 import { formatElapsed } from '@shared/utils/timeFormat'
-import { formatAgentInstanceShortId, parseAgentInstanceRunId, parseAgentInstanceRunIdFromArgs } from '@shared/utils/agentInstance'
+import {
+  formatAgentInstanceShortId,
+  parseAgentInstanceRunId,
+  parseAgentInstanceRunIdFromArgs,
+  type AgentInstanceUiState
+} from '@shared/utils/agentInstance'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { Button, DiffStat, IconButton, MarkdownContent, cn } from '@renderer/lib/ui'
-import { ROW_HOVER } from '@renderer/lib/utils/layout'
+import { Button, DiffStat, IconButton, MarkdownContent, STATE_LABEL, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { BORDER_DIVIDER, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { ToolRowOutput } from '@renderer/features/chat/components/ToolRow'
 import { useFullToolContent } from '@renderer/features/chat/components/useFullToolContent'
@@ -139,59 +145,101 @@ function WorkLine({
   )
 }
 
+function isSpawn(w: WorkItem): w is Extract<WorkItem, { kind: 'instance' }> {
+  return w.kind === 'instance' && w.tool.tool.name === 'spawn_agent_instance'
+}
+
+/** Rows of a work list: one per item, except spawns made together, which are one block. */
+export function groupWork(items: readonly WorkItem[]): (WorkItem | { kind: 'instances'; spawns: ToolItem[] })[] {
+  const out: (WorkItem | { kind: 'instances'; spawns: ToolItem[] })[] = []
+  for (let i = 0; i < items.length; ) {
+    let j = i
+    while (j < items.length && isSpawn(items[j]!)) j += 1
+    if (j - i >= 2) {
+      out.push({ kind: 'instances', spawns: items.slice(i, j).map((w) => (w as Extract<WorkItem, { kind: 'instance' }>).tool) })
+      i = j
+    } else {
+      out.push(items[i]!)
+      i += 1
+    }
+  }
+  return out
+}
+
 export function WorkList({ items }: { items: readonly WorkItem[] }) {
   // A provider that reuses call ids across steps can give two rows one id; a
   // repeated key would make React drop or merge one of them.
   const seen = new Map<string, number>()
+  const keyOf = (id: string): string => {
+    const count = seen.get(id) ?? 0
+    seen.set(id, count + 1)
+    return count === 0 ? id : `${id}#${count}`
+  }
   return (
     <div className="space-y-2">
-      {items.map((w) => {
-        const count = seen.get(w.id) ?? 0
-        seen.set(w.id, count + 1)
-        return <WorkItemView key={count === 0 ? w.id : `${w.id}#${count}`} item={w} />
-      })}
+      {groupWork(items).map((w) =>
+        w.kind === 'instances' ? (
+          <InstancesBlock key={keyOf(`instances:${rowKeyOf(w.spawns[0]!)}`)} spawns={w.spawns} />
+        ) : (
+          <WorkItemView key={keyOf(w.id)} item={w} />
+        )
+      )}
     </div>
   )
+}
+
+function rowKeyOf(item: ToolItem): string {
+  return item.key ?? item.id
 }
 
 /** From this many rows, a settled run's work outside any step folds to one line. */
 export const FOLD_LOOSE_AT = 4
 
-function counted(n: number, one: string): string {
+export function counted(n: number, one: string): string {
   return `${n} ${n === 1 ? one : `${one}s`}`
 }
 
-/** What a list of work amounts to, by kind: "12 lookups · 3 commands · 2 edits". */
-export function workSummary(items: readonly WorkItem[]): string {
-  let lookups = 0
-  let commands = 0
-  let edits = 0
-  let instances = 0
-  let calls = 0
-  let notes = 0
+export type WorkCounts = {
+  lookups: number
+  commands: number
+  edits: number
+  instances: number
+  calls: number
+  notes: number
+}
+
+/** How much of each kind of work a list holds. */
+export function workCounts(items: readonly WorkItem[]): WorkCounts {
+  const c: WorkCounts = { lookups: 0, commands: 0, edits: 0, instances: 0, calls: 0, notes: 0 }
   for (const w of items) {
     switch (w.kind) {
       case 'explore':
-        lookups += w.tools.length
+        c.lookups += w.tools.length
         break
       case 'card':
-        if (w.tool.tool.name === 'terminal') commands += 1
-        else edits += 1
+        if (w.tool.tool.name === 'terminal') c.commands += 1
+        else c.edits += 1
         break
       case 'instance':
-        if (w.tool.tool.name === 'spawn_agent_instance') instances += 1
+        if (w.tool.tool.name === 'spawn_agent_instance') c.instances += 1
         break
       case 'tool':
       case 'plan':
-        calls += 1
+        c.calls += 1
         break
       case 'note':
-        notes += 1
+        c.notes += 1
         break
       default:
         break
     }
   }
+  return c
+}
+
+/** What a list of work amounts to, by kind: "12 lookups · 3 commands · 2 edits". */
+export function workSummary(items: readonly WorkItem[]): string {
+  const { lookups, commands, edits, instances, calls, notes } = workCounts(items)
   const parts = [
     lookups > 0 ? counted(lookups, 'lookup') : '',
     commands > 0 ? counted(commands, 'command') : '',
@@ -327,11 +375,19 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
     case 'explore':
       return <ExploreItem tools={item.tools} />
     case 'card':
-      return item.tool.tool.name === 'terminal' ? <TerminalCard item={item.tool} /> : <EditCard item={item.tool} />
+      return (
+        <WithApproval grant={item.tool.tool.approvedBy}>
+          {item.tool.tool.name === 'terminal' ? <TerminalCard item={item.tool} /> : <EditCard item={item.tool} />}
+        </WithApproval>
+      )
     case 'instance':
       return <InstanceItem item={item.tool} />
     case 'tool':
-      return <ToolLine item={item.tool} />
+      return (
+        <WithApproval grant={item.tool.tool.approvedBy}>
+          <ToolLine item={item.tool} />
+        </WithApproval>
+      )
     case 'plan':
       return <PlanItem title={item.title} running={item.tool.tool.status === 'running'} />
     case 'note':
@@ -457,6 +513,52 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
 /** A call held for your approval says so; it has not started, so nothing spins. */
 function AwaitingApproval() {
   return <span className="shrink-0 text-caption font-medium text-accent">Waiting for approval</span>
+}
+
+/** Who let a held call run, and for how long: "Allowed by you · always for this task". */
+export function approvedByText(grant: ToolApprovalGrant): { lead: string; allow?: string; tail?: string } {
+  if (grant.by === 'rule') {
+    return { lead: grant.scope === 'task' ? 'Allowed by a rule for this task' : 'Allowed by a rule for this workspace' }
+  }
+  if (grant.scope === 'task') return { lead: 'Allowed by you · always for this task' }
+  if (grant.scope === 'workspace') {
+    return grant.allow
+      ? { lead: 'Allowed by you · always for ', allow: grant.allow, tail: ' in this workspace' }
+      : { lead: 'Allowed by you · always in this workspace' }
+  }
+  return { lead: 'Allowed by you' }
+}
+
+/**
+ * The decision above the call it let through — muted, since the call is what
+ * you read; it answers "why did this run without asking?" once asked.
+ */
+function ApprovedLine({ grant }: { grant: ToolApprovalGrant }) {
+  const { lead, allow, tail } = approvedByText(grant)
+  return (
+    <p className="m-0 mb-1 flex min-w-0 items-center gap-1.5 text-caption text-tertiary" data-record-approved={`${grant.by}:${grant.scope}`}>
+      <Icon name="check" size={12} className="shrink-0" />
+      <span className="min-w-0 truncate">
+        {lead}
+        {allow ? <span className="font-mono">{allow}</span> : null}
+        {tail}
+      </span>
+    </p>
+  )
+}
+
+/**
+ * A call's row, with the decision that let it run above it when there was one.
+ * Always the same wrapper, so the row under it is not remounted when the
+ * decision lands.
+ */
+function WithApproval({ grant, children }: { grant: ToolApprovalGrant | undefined; children: ReactNode }) {
+  return (
+    <div>
+      {grant ? <ApprovedLine grant={grant} /> : null}
+      {children}
+    </div>
+  )
 }
 
 function TerminalCard({ item }: { item: ToolItem }) {
@@ -625,14 +727,12 @@ function ToolLine({ item }: { item: ToolItem }) {
   // A stopped or refused call's summary is only why; what it was doing is in its args.
   const summary = stopped || refused ? summarizeToolArgs(tool.name, tool.argsPreview) : tool.summary
   const target = summary?.trim() && summary.trim() !== tool.name ? summary.trim() : ''
+  const status = tool.name === 'ask_question' || tool.name === 'switch_mode' ? parseStatusMessageData(tool) : null
+  // An answered question says what you answered, under it; "Answered" alone
+  // would make you open it to find out.
+  const answers = !stopped && !refused && tool.name === 'ask_question' ? (status?.answers ?? []) : []
   // Questions and mode switches settle with a word of their own.
-  const chip = stopped
-    ? tool.content!
-    : refused
-      ? refused
-      : tool.name === 'ask_question' || tool.name === 'switch_mode'
-        ? parseStatusMessageData(tool).chip
-        : null
+  const chip = stopped ? tool.content! : refused ? refused : answers.length > 0 ? null : (status?.chip ?? null)
   const reason = failed ? (tool.content ?? '').trim().split('\n').find((l) => l.trim()) ?? '' : ''
   const images = toolImagesOf(tool)
   return (
@@ -642,7 +742,8 @@ function ToolLine({ item }: { item: ToolItem }) {
         detail={target || undefined}
         tone={failed ? 'danger' : undefined}
         open={open}
-        onToggle={tool.content ? () => setOpen((v) => !v) : undefined}
+        // The answer under it is all its body would show.
+        onToggle={tool.content && answers.length === 0 ? () => setOpen((v) => !v) : undefined}
         trailing={
           <>
             {chip && chip !== verb ? (
@@ -659,6 +760,7 @@ function ToolLine({ item }: { item: ToolItem }) {
         }
       />
       {reason && !open ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
+      {answers.length > 0 ? <YouAnswered answers={answers} /> : null}
       {images.length > 0 ? <ToolImageStrip images={images} className="mt-1" /> : null}
       {open ? (
         <div className="mt-1 border-l border-border pl-3">
@@ -671,6 +773,34 @@ function ToolLine({ item }: { item: ToolItem }) {
           />
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * Your answer to a question, under the question: the label quiet, the words
+ * yours. A form of several questions lists each answer on its own line.
+ */
+function YouAnswered({ answers }: { answers: readonly string[] }) {
+  return (
+    <div className="mt-0.5 text-caption" data-record-answer>
+      {answers.length === 1 ? (
+        <p className="m-0 whitespace-pre-line [overflow-wrap:anywhere]">
+          <span className="text-tertiary">You answered: </span>
+          <span className="text-fg">{answers[0]}</span>
+        </p>
+      ) : (
+        <>
+          <p className="m-0 text-tertiary">You answered:</p>
+          <ul className="m-0 list-none space-y-0.5 p-0">
+            {answers.map((answer, i) => (
+              <li key={i} className="whitespace-pre-line text-fg [overflow-wrap:anywhere]">
+                {answer}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   )
 }
@@ -734,8 +864,29 @@ function InstanceItem({ item }: { item: ToolItem }) {
  * and the one way into it. Its state is the child's own — a spawn that
  * returned only means it started.
  */
-function SpawnRow({ item }: { item: ToolItem }) {
-  const { agentInstances } = useRunSession()
+type SpawnFacts = {
+  runId: string | null
+  shortId: string
+  /** What it was asked to deliver. */
+  goal: string
+  failed: boolean
+  phase: AgentInstanceUiState['phase'] | null
+  verb: string
+  state: TaskState
+  startedAt: string | undefined
+  /** How long the child ran, once it has settled. */
+  ranMs: number | null
+  /** Its step and activity while it runs. */
+  doing: string
+  /** Why it failed, when it did. */
+  reason: string
+}
+
+/**
+ * The child a spawn started, as the record shows it: its state is the child's
+ * own — a spawn that returned only means it started.
+ */
+function spawnFacts(item: ToolItem, agentInstances: Record<string, AgentInstanceUiState> | undefined): SpawnFacts {
   const tool = item.tool
   const runId = parseAgentInstanceRunId(tool.content)
   const instance = runId ? agentInstances?.[runId] : undefined
@@ -765,7 +916,14 @@ function SpawnRow({ item }: { item: ToolItem }) {
               : phase === 'cancelled'
                 ? `Instance cancelled ${shortId}`
                 : `Spawned instance ${shortId}`
-  const startedAt = instance?.startedAt ?? item.endedAt
+  const state: TaskState =
+    tool.status === 'running' || phase === 'started'
+      ? 'running'
+      : failed || phase === 'error'
+        ? 'failed'
+        : phase === 'cancelled'
+          ? 'stopped'
+          : 'done'
   const ranMs =
     instance?.startedAt && instance.endedAt ? Date.parse(instance.endedAt) - Date.parse(instance.startedAt) : null
   const doing =
@@ -773,6 +931,25 @@ function SpawnRow({ item }: { item: ToolItem }) {
       ? [instance?.step ? `Step ${instance.step}` : '', instance?.activity ?? ''].filter(Boolean).join(' · ')
       : ''
   const reason = failed ? firstLine(tool.content) : phase === 'error' ? firstLine(instance?.summary) : ''
+  return {
+    runId,
+    shortId,
+    goal,
+    failed,
+    phase,
+    verb,
+    state,
+    startedAt: instance?.startedAt ?? item.endedAt,
+    ranMs: ranMs != null && Number.isFinite(ranMs) && ranMs >= 0 ? ranMs : null,
+    doing,
+    reason
+  }
+}
+
+function SpawnRow({ item }: { item: ToolItem }) {
+  const { agentInstances } = useRunSession()
+  const tool = item.tool
+  const { runId, shortId, goal, failed, phase, verb, startedAt, ranMs, doing, reason } = spawnFacts(item, agentInstances)
   return (
     <div data-record-instance={shortId || undefined} data-instance-phase={phase ?? undefined}>
       <WorkLine
@@ -789,7 +966,7 @@ function SpawnRow({ item }: { item: ToolItem }) {
                 {phase === 'started' ? <ElapsedSince since={startedAt} /> : null}
               </>
             ) : (
-              <Duration ms={ranMs != null && Number.isFinite(ranMs) && ranMs >= 0 ? ranMs : toolDurationMs(item)} />
+              <Duration ms={ranMs ?? toolDurationMs(item)} />
             )}
           </>
         }
@@ -800,6 +977,100 @@ function SpawnRow({ item }: { item: ToolItem }) {
         </p>
       ) : null}
       {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
+    </div>
+  )
+}
+
+/**
+ * Several children started together: one block, a row each, instead of a row
+ * of spawn lines. The header counts them and how they stand; each row is the
+ * child's state, id, what it is doing (or was asked, or why it failed) and
+ * its time, and opens it.
+ */
+function InstancesBlock({ spawns }: { spawns: readonly ToolItem[] }) {
+  const { agentInstances, onOpenAgentInstance } = useRunSession()
+  const kids = spawns.map((item) => ({ item, facts: spawnFacts(item, agentInstances) }))
+  const tally = (['running', 'failed', 'stopped', 'done'] as const)
+    .map((state) => ({ state, n: kids.filter((k) => k.facts.state === state).length }))
+    .filter((t) => t.n > 0)
+    .map((t) => `${t.n} ${STATE_LABEL[t.state].toLowerCase()}`)
+  return (
+    <div className="overflow-hidden rounded-lg border border-border" data-record-instances={kids.length}>
+      <div className={cn('flex h-8 items-center gap-2 border-b bg-bg px-3 text-xs', BORDER_DIVIDER)}>
+        <Icon name="crew" size={14} className="shrink-0 text-tertiary" />
+        <span className="shrink-0 font-medium text-fg">{counted(kids.length, 'instance')}</span>
+        {tally.length > 0 ? <span className="min-w-0 truncate text-tertiary">· {tally.join(' · ')}</span> : null}
+      </div>
+      <ul className="m-0 list-none p-0">
+        {kids.map(({ item, facts }) => {
+          const running = facts.state === 'running'
+          const detail = facts.reason || facts.doing || facts.goal
+          const body = (
+            <>
+              <StatusGlyph state={facts.state} size={14} />
+              <span className="shrink-0 font-mono text-caption text-fg">
+                {facts.shortId ? (
+                  <>
+                    {/* The row is the way in; its name says so. */}
+                    {onOpenAgentInstance && facts.runId ? <span className="sr-only">Open instance</span> : null}{' '}
+                    {facts.shortId}
+                  </>
+                ) : (
+                  facts.verb
+                )}
+              </span>
+              <span
+                className={cn(
+                  'min-w-0 flex-1 truncate',
+                  facts.reason ? 'text-danger' : running && facts.doing ? 'vy-text-live' : 'text-tertiary'
+                )}
+                title={detail || undefined}
+              >
+                {/* Failed or stopped says so in words, not only by the glyph. */}
+                {facts.state === 'failed' || facts.state === 'stopped' ? (
+                  <span className="sr-only">{STATE_LABEL[facts.state]}:</span>
+                ) : null}{' '}
+                {detail}
+              </span>
+              {running ? (
+                facts.phase === 'started' ? (
+                  <ElapsedSince since={facts.startedAt} className="w-12 text-right" />
+                ) : null
+              ) : (
+                <Duration ms={facts.ranMs ?? toolDurationMs(item)} className="w-12 text-right" />
+              )}
+            </>
+          )
+          return (
+            <li
+              key={rowKeyOf(item)}
+              className={cn('border-b last:border-b-0', BORDER_DIVIDER)}
+              data-record-instance={facts.shortId || undefined}
+              data-instance-phase={facts.phase ?? undefined}
+            >
+              {onOpenAgentInstance && facts.runId ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenAgentInstance(facts.runId!)}
+                  // Inset: the block's overflow-hidden would clip an outside outline.
+                  className={cn(
+                    'group flex h-9 w-full min-w-0 items-center gap-2.5 px-3 text-left text-xs outline-none vy-transition focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus',
+                    ROW_HOVER
+                  )}
+                >
+                  {body}
+                  <Icon name="chevronRight" size={11} className="shrink-0 text-tertiary" />
+                </button>
+              ) : (
+                <div className="flex h-9 min-w-0 items-center gap-2.5 px-3 text-xs">
+                  {body}
+                  <span aria-hidden className="w-[11px] shrink-0" />
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

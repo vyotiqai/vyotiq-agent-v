@@ -86,9 +86,23 @@ export type RecordStep = {
   superseded?: true
 }
 
+/**
+ * `place` is where the gated call would have gone: its card is shown there, in
+ * the work, standing in for the call until you answer. `why` is what the agent
+ * said right before it — already above the card there, so only a card shown
+ * away from its place quotes it.
+ */
 export type NeedsYou =
-  | { kind: 'approval'; approval: UiToolApproval; tool: ToolItem; stepKey: string | null; at: number | null }
-  | { kind: 'question'; question: UiAgentQuestion; stepKey: string | null; at: number | null }
+  | {
+      kind: 'approval'
+      approval: UiToolApproval
+      tool: ToolItem
+      stepKey: string | null
+      place: RecordTail
+      at: number | null
+      why?: string
+    }
+  | { kind: 'question'; question: UiAgentQuestion; stepKey: string | null; place: RecordTail; at: number | null }
 
 /** Where the run's latest work went: the live activity line belongs there. */
 export type RecordTail =
@@ -437,6 +451,17 @@ function isUndecidedCommand(item: ToolItem): boolean {
 }
 
 type Bucket = { work: WorkItem[]; pending: ToolItem[] }
+
+/** What the agent said last in this bucket, when nothing but its reasoning came after. */
+function saidJustBefore(bucket: Bucket): string | undefined {
+  if (bucket.pending.length > 0) return undefined
+  for (let i = bucket.work.length - 1; i >= 0; i--) {
+    const w = bucket.work[i]!
+    if (w.kind === 'note') return w.text
+    if (w.kind !== 'thought') return undefined
+  }
+  return undefined
+}
 
 function newBucket(): Bucket {
   return { work: [], pending: [] }
@@ -843,11 +868,13 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean, contin
     b.run.tail = tailOf(b.target)
   }
 
-  // A step waiting on you shows it; the card itself sits at the top.
+  // A step waiting on you shows it, and holds the card; with no plan, the card
+  // goes where the work went.
   if (live) {
     for (const need of b.run.needs) {
       const step = b.run.steps.find((s) => s.key === need.stepKey)
       if (step && step.state === 'running') step.state = 'needs'
+      if (b.run.steps.length === 0) need.place = { kind: 'after' }
     }
   } else {
     b.run.needs = []
@@ -938,17 +965,21 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
       // Verdicts on done-when checks show with the checks, not as work.
       if (item.tool.name === 'check_done_when') continue
       if (item.approval) {
+        const why = saidJustBefore(current(run))
         run.run.needs.push({
           kind: 'approval',
           approval: item.approval,
           tool: item,
           stepKey: run.target.startsWith('s:') ? run.target.slice(2) : null,
-          at: stamp(item.approval.requestedAt) ?? stamp(item.at)
+          place: tailOf(run.target),
+          at: stamp(item.approval.requestedAt) ?? stamp(item.at),
+          ...(why ? { why } : {})
         })
       }
       // Work after the agent spoke means that was not its closing answer.
       run.lastAssistant = null
-      if (questionGated.has(item.id) || isUndecidedCommand(item)) continue
+      // A call waiting on your answer is its card until then: one place, not two.
+      if (item.approval || questionGated.has(item.id) || isUndecidedCommand(item)) continue
       ;(instanceBucket(run, item) ?? current(run)).pending.push(item)
       if (snapshot) {
         if (item.tool.name === 'create_plan') snapshot = mergeTodos(run.todos, snapshot)
@@ -962,6 +993,7 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
         kind: 'question',
         question: item.question,
         stepKey: run.target.startsWith('s:') ? run.target.slice(2) : null,
+        place: tailOf(run.target),
         at: stamp(item.at)
       })
       continue

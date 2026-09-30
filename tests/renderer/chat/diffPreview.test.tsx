@@ -90,7 +90,23 @@ describe('DiffPreview', () => {
     const sent = highlightToLines.mock.calls[0]![0] as string
     expect(sent.split('\n')).toHaveLength(14)
     expect(sent.startsWith('line 1\n')).toBe(true)
-    expect(screen.getByText('26 more lines')).toBeTruthy()
+    expect(screen.getByText('26 more changed lines')).toBeTruthy()
+  })
+
+  it('counts only the changed lines the excerpt leaves out, not the context around them', () => {
+    const lines = [
+      ...Array.from({ length: 14 }, (_, index) => line('context', `ctx ${index + 1}`, index + 1)),
+      line('context', 'ctx 15', 15),
+      line('del', 'old 16', 16),
+      line('add', 'new 16', 16),
+      line('context', 'ctx 17', 17)
+    ]
+    render(<DiffPreview lines={lines} path="notes.unknown" />)
+    expect(screen.getByText('2 more changed lines')).toBeTruthy()
+    cleanup()
+    // Only context past the cut: nothing changed is hidden, so nothing is said.
+    render(<DiffPreview lines={Array.from({ length: 20 }, (_, index) => line('context', `c ${index}`, index + 1))} path="notes.unknown" />)
+    expect(screen.queryByText(/more changed/)).toBeNull()
   })
 
   it('caps expanded rendering so huge diffs cannot flood the DOM', async () => {
@@ -107,7 +123,7 @@ describe('DiffPreview', () => {
     expect(screen.getByText('line 1')).toBeTruthy()
     expect(screen.getByText(`line ${DIFF_MAX_EXPANDED_LINES}`)).toBeTruthy()
     expect(screen.queryByText(`line ${DIFF_MAX_EXPANDED_LINES + 1}`)).toBeNull()
-    expect(screen.getByText('100 more lines')).toBeTruthy()
+    expect(screen.getByText('100 more changed lines')).toBeTruthy()
     // Highlight only the first chunk of visible lines.
     const sent = highlightToLines.mock.calls[0]![0] as string
     expect(sent.split('\n').length).toBeLessThanOrEqual(64)

@@ -8,7 +8,7 @@ import { ReviewDiffTable, type AskTarget } from './ReviewDiffTable'
 
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'C' | '?'
 
-const STATUS_TONE: Record<ChangeStatus, string> = {
+export const STATUS_TONE: Record<ChangeStatus, string> = {
   M: 'text-muted',
   A: 'text-success',
   D: 'text-danger',
@@ -17,7 +17,7 @@ const STATUS_TONE: Record<ChangeStatus, string> = {
   '?': 'text-muted'
 }
 
-const STATUS_WORD: Record<ChangeStatus, string> = {
+export const STATUS_WORD: Record<ChangeStatus, string> = {
   M: 'Modified',
   A: 'Added',
   D: 'Deleted',
@@ -47,6 +47,8 @@ export type ChangesListFile = {
   /** Said where the counts go once there is nothing left to decide ("Kept"). */
   note?: string
   noteTone?: 'quiet' | 'warning'
+  /** This task's file, kept or undone: an undone one has nothing left to read. */
+  resolution?: 'kept' | 'undone'
 }
 
 /** Git answers these when it has no patch; they are not diff text. */
@@ -60,7 +62,7 @@ export function isEmptyDiffSentinel(content: string): boolean {
   )
 }
 
-function splitPath(path: string): { name: string; dir: string } {
+export function splitPath(path: string): { name: string; dir: string } {
   const normalized = path.replace(/\\/g, '/')
   const slash = normalized.lastIndexOf('/')
   return slash >= 0 ? { name: normalized.slice(slash + 1), dir: normalized.slice(0, slash) } : { name: normalized, dir: '' }

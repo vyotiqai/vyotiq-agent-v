@@ -27,14 +27,16 @@ export function commandProgram(command: string): string {
 }
 
 /**
- * The terminal's session row: the agent's read-only session first when there
- * is one, then your shells, New and Split. One 40px row, like every pane.
+ * The terminal's session row: what this task ran first when there is a task,
+ * then the agent's read-only session when there is one, then your shells, New
+ * and Split. One 40px row, like every pane.
  */
 export function TerminalSessionBar({
   sessions,
   activeId,
   splitId,
   agentCommand = null,
+  task = null,
   onSelect,
   onKill,
   onCreate,
@@ -45,6 +47,8 @@ export function TerminalSessionBar({
   splitId: string | null
   /** The command the run is executing right now, if any. */
   agentCommand?: string | null
+  /** The list of what this task ran, as the row's first tab. */
+  task?: { selected: boolean; onSelect: () => void } | null
   onSelect: (id: string) => void
   onKill: (id: string) => void
   onCreate: () => void
@@ -59,6 +63,23 @@ export function TerminalSessionBar({
       aria-label="Terminal sessions"
     >
       <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+        {task ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={task.selected}
+            tabIndex={task.selected ? 0 : -1}
+            className={cn(
+              'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs vy-transition focus-visible:vy-focus-ring',
+              task.selected ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface hover:text-fg'
+            )}
+            data-terminal-task-tab
+            onClick={task.onSelect}
+          >
+            <Icon name="list" size={13} className="shrink-0" />
+            This task
+          </button>
+        ) : null}
         {sessions.map((s) => {
           const selected = s.id === activeId
           const emphasized = selected || Boolean(splitId && s.id === splitId)

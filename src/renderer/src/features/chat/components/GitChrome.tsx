@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import type { GitStatus, GitStatusResult } from '@shared/ipc'
+import type { GitCommitResult, GitStatus, GitStatusResult } from '@shared/ipc'
 import { useGitStatus } from './useGitStatus'
 
 export type GitChrome = {
@@ -13,7 +13,11 @@ export type GitChrome = {
   notice: string | null
   noticeFailed: boolean
   refresh: () => void
-  commit: (message: string, push: boolean, mode?: 'all' | 'staged') => Promise<boolean>
+  /**
+   * What main answered, or false when nothing was committed. With `runId`
+   * (committed from that task's Changes) the answer says what it settled.
+   */
+  commit: (message: string, push: boolean, mode?: 'all' | 'staged', runId?: string | null) => Promise<GitCommitResult | false>
   createPr: (message: string, mode?: 'all' | 'staged', draft?: boolean) => Promise<boolean>
   stageAll: () => Promise<boolean>
   stagePaths: (paths: string[]) => Promise<boolean>
@@ -57,7 +61,12 @@ export function useGitChrome(
   }, [beforeMutation])
 
   const commit = useCallback(
-    async (message: string, push: boolean, mode: 'all' | 'staged' = 'all'): Promise<boolean> => {
+    async (
+      message: string,
+      push: boolean,
+      mode: 'all' | 'staged' = 'all',
+      runId?: string | null
+    ): Promise<GitCommitResult | false> => {
       if (!workspacePath || !message.trim() || busy) return false
       setBusy(true)
       setNotice(null)
@@ -67,15 +76,12 @@ export function useGitChrome(
         return false
       }
       try {
-        const commitResult = await window.vyotiq.gitCommit(
-          workspacePath,
-          message.trim(),
-          push,
-          mode
-        )
+        const commitResult = runId
+          ? await window.vyotiq.gitCommit(workspacePath, message.trim(), push, mode, runId)
+          : await window.vyotiq.gitCommit(workspacePath, message.trim(), push, mode)
         setNotice(commitResult.ok ? commitResult.data.detail : commitResult.error)
         setNoticeFailed(!commitResult.ok)
-        return commitResult.ok
+        return commitResult.ok ? commitResult.data : false
       } finally {
         setBusy(false)
         refresh()

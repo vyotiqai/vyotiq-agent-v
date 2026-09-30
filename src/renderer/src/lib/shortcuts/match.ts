@@ -80,6 +80,18 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
   return Boolean(el.isContentEditable)
 }
 
+/**
+ * True when the target is a text field with text in it: someone typing, whose
+ * caret keys (Option ↑/↓ moves by paragraph on macOS) are the field's own. An
+ * empty field — the composer between instructions — is not typing.
+ */
+export function isTypingIn(target: EventTarget | null): boolean {
+  if (!isEditableShortcutTarget(target)) return false
+  const el = target as HTMLElement
+  const text = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : (el.textContent ?? '')
+  return text.trim().length > 0
+}
+
 /** True when the event originated in the main chat composer. */
 export function isMainComposerTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null

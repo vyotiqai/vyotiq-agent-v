@@ -1,21 +1,24 @@
 import type { AgentInteractionMode } from '@shared/ipc'
 
+/** How the task's latest run ended, when that changes what the line is for. */
+export type LineOutcome = 'failed' | 'stopped' | null
+
 /**
- * The instruction line's placeholder says what sending does right now. While
- * a run is live the instruction queues and applies when the run's turn ends
- * (the loop drains queued follow-ups at turn end); after that it starts the
- * task's next run. Ask mode keeps its one fact: it won't edit files.
+ * The instruction line's placeholder follows the task: while a run is live
+ * an instruction steers it (Send now) or queues for when its turn ends; after
+ * a failure or a stop it is what to do differently; otherwise a change or a
+ * follow-up. Ask mode keeps its one fact: it reads, and changes nothing.
  */
 export function resolveLinePlaceholder(opts: {
   hasWorkspace: boolean
   running: boolean
   agentMode: AgentInteractionMode
-  /** Runs the task has had so far. */
-  runCount: number
+  outcome?: LineOutcome
 }): string {
   if (!opts.hasWorkspace) return 'Open a workspace to start a task'
-  if (opts.running) return 'Add an instruction — starts when this run ends · Shift+Enter sends it now'
-  const readOnly = opts.agentMode === 'ask' ? ' · won’t edit files' : ''
-  if (opts.runCount > 0) return `Follow up — starts run ${opts.runCount + 1}${readOnly}`
-  return `Add an instruction${readOnly}`
+  if (opts.running) return 'Steer it, or queue what comes next…'
+  if (opts.agentMode === 'ask') return 'Ask about the code — it reads, and changes nothing'
+  if (opts.outcome === 'failed') return 'Tell it what to do differently…'
+  if (opts.outcome === 'stopped') return 'Say what to change before it carries on…'
+  return 'Ask for a change, or a follow-up…'
 }

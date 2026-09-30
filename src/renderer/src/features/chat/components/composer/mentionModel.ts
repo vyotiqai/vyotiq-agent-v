@@ -1,4 +1,5 @@
-import type { SlashCommandKind } from '@shared/ipc'
+import type { BrowserPickedElement, SlashCommandKind } from '@shared/ipc'
+import { pickedElementLabel, sanitizePickedElement } from '@shared/browserPick'
 import { isSafeWorkspaceRelPath, isCuratedDocPath } from '@shared/workspacePath'
 import { basename } from '@shared/utils/path'
 import {
@@ -22,6 +23,8 @@ export type ComposerMention =
   | { kind: 'lints'; diagnosticsKind: DiagnosticsKind }
   | { kind: 'branch'; branch?: string | null }
   | { kind: 'browser' }
+  /** An element picked in the Browser tab; the chip carries all of it. */
+  | { kind: 'element'; element: BrowserPickedElement }
   | { kind: 'chat'; runId: string; title: string }
   | {
       kind: 'slash'
@@ -217,6 +220,8 @@ export function mentionLabel(mention: ComposerMention): string {
       return mention.branch?.trim() || 'Branch'
     case 'browser':
       return 'Browser'
+    case 'element':
+      return pickedElementLabel(mention.element)
     case 'chat':
       return mention.title.trim() || mention.runId.slice(0, 8)
     case 'slash':
@@ -244,6 +249,8 @@ function encodePayload(mention: ComposerMention): string {
       return mention.branch ? `branch:${mention.branch}` : 'branch'
     case 'browser':
       return 'browser'
+    case 'element':
+      return `element:${encodeURIComponent(JSON.stringify(mention.element))}`
     case 'chat':
       return `chat:${mention.runId}|${encodeURIComponent(mention.title)}`
     case 'slash': {
@@ -316,6 +323,16 @@ export function decodeMentionPayload(payload: string): ComposerMention | null {
   const raw = payload.trim()
   if (!raw) return null
   if (raw === 'browser') return { kind: 'browser' }
+  if (raw.startsWith('element:')) {
+    // A draft is only text, and text can be edited: the element is re-checked
+    // on every read, not trusted because it once came from main.
+    try {
+      const element = sanitizePickedElement(JSON.parse(decodeURIComponent(raw.slice('element:'.length))))
+      return element ? { kind: 'element', element } : null
+    } catch {
+      return null
+    }
+  }
   if (raw === 'branch' || raw.startsWith('branch:')) {
     const branch = raw === 'branch' ? null : raw.slice('branch:'.length)
     return { kind: 'branch', branch }

@@ -114,7 +114,15 @@ test('Ctrl I hides the inspector, and the task header offers it back on the same
   await expect(offer).toBeVisible()
   await offer.click()
   await expect(tab(window, /^Plan/)).toHaveAttribute('aria-selected', 'true')
-  await expect(window.locator('[data-task-header]').getByRole('button', { name: /^Show inspector/ })).toHaveCount(0)
+  // The same button stays, lit, and now hides it.
+  const toggle = window.locator('[data-task-header] [data-inspector-toggle]')
+  await expect(toggle).toHaveAccessibleName(/^Hide inspector/)
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await toggle.click()
+  await expect(inspector(window)).toHaveCount(0)
+  await expect(toggle).toHaveAccessibleName(/^Show inspector/)
+  await toggle.click()
+  await expect(tab(window, /^Plan/)).toHaveAttribute('aria-selected', 'true')
 })
 
 test('Alt 1–6 pick tabs in strip order', async () => {

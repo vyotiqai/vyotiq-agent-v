@@ -510,6 +510,23 @@ describe('useAppShortcuts task stepping', () => {
     expect(onStepTask).toHaveBeenCalledTimes(2)
   })
 
+  it('steps from an empty composer, never from one with text in it', () => {
+    const onStepTask = vi.fn()
+    renderHook(() =>
+      useAppShortcuts({ onToggleSidebar: () => {}, onOpenSearch: () => {}, onNewChat: () => {}, onOpenSettings: () => {}, onStepTask })
+    )
+    const composer = document.createElement('textarea')
+    composer.setAttribute('data-composer-input', '')
+    document.body.appendChild(composer)
+    composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
+    expect(onStepTask).toHaveBeenCalledTimes(1)
+    // Typing: Option ↓ is the caret's (to the paragraph's end, on macOS), not a task switch.
+    composer.value = 'Fix the flaky test'
+    composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
+    expect(onStepTask).toHaveBeenCalledTimes(1)
+    composer.remove()
+  })
+
   it('labels them with arrows', () => {
     const entry = shortcutCatalog().find((e) => e.id === 'nextTask')
     expect(entry?.label).toMatch(/↓$/)

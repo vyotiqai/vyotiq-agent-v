@@ -162,6 +162,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'providers'
   },
   {
+    id: 'thinking-effort',
+    title: 'Effort',
+    keywords: ['effort', 'thinking', 'reasoning', 'budget', 'default effort', 'think longer', 'cost'],
+    section: 'providers'
+  },
+  {
     id: 'api-keys',
     title: 'API keys',
     keywords: ['secret', 'key', 'token', 'credentials', 'secure storage', 'access key', 'service account', 'gcloud', 'region', 'headers'],
@@ -227,6 +233,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'auto-resume-interrupted',
     title: 'Resume interrupted runs',
     keywords: ['resume', 'interrupted', 'continue', 'runs'],
+    section: 'agent'
+  },
+  {
+    id: 'new-task-worktree',
+    title: 'New tasks start in a worktree',
+    keywords: ['worktree', 'new task', 'branch', 'isolate', 'this folder', 'checkout'],
     section: 'agent'
   },
   {
@@ -305,6 +317,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'workspace-rules',
     title: 'Rules',
     keywords: ['rules', 'agents.md', 'claude.md', 'cursorrules', 'instructions', 'marketplace'],
+    section: 'agent'
+  },
+  {
+    id: 'agent-memory',
+    title: 'Memory',
+    keywords: ['memory', 'notes', 'remember', 'forget', 'clear memory', 'state.md', 'index.md'],
     section: 'agent'
   },
 

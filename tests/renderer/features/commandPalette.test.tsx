@@ -76,6 +76,69 @@ describe('CommandPalette', () => {
     expect(screen.queryByText('Regroup Settings')).toBeNull()
   })
 
+  it('lists tasks, then commands, then files', async () => {
+    vi.useFakeTimers()
+    const searchFiles = vi.fn(async (): Promise<PaletteFile[]> => [{ workspacePath: WS, path: 'src/settings/regroup.ts' }])
+    const { handlers, input } = renderPalette({
+      searchFiles,
+      commands: [{ id: 'settings', title: 'Open Settings', icon: 'gear' }]
+    })
+    fireEvent.change(input, { target: { value: 'settings' } })
+    await act(async () => {
+      vi.advanceTimersByTime(120)
+    })
+    vi.useRealTimers()
+    const groups = within(screen.getByRole('listbox')).getAllByRole('group').map((g) => g.getAttribute('aria-label'))
+    expect(groups).toEqual(['Tasks', 'Commands', 'Files'])
+    // Arrow order follows the groups: task, command, file.
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(handlers.onOpenFile).toHaveBeenCalledWith({ workspacePath: WS, path: 'src/settings/regroup.ts' })
+  })
+
+  it('offers the open task’s changed files before anything is typed', async () => {
+    const changedFiles = vi.fn(
+      async (): Promise<PaletteFile[]> => [
+        { workspacePath: WS, path: 'src/a.ts' },
+        { workspacePath: WS, path: 'src/b.ts' },
+        { workspacePath: WS, path: 'src/c.ts' },
+        { workspacePath: WS, path: 'src/d.ts' }
+      ]
+    )
+    const searchFiles = vi.fn(async (): Promise<PaletteFile[]> => [])
+    const { handlers } = renderPalette({ changedFiles, searchFiles })
+    const files = await screen.findByRole('group', { name: 'Files' })
+    expect(changedFiles).toHaveBeenCalledTimes(1)
+    // A few, under the commands.
+    expect(within(files).getAllByRole('option').map((o) => o.textContent)).toEqual(['src/a.ts', 'src/b.ts', 'src/c.ts'])
+    expect(searchFiles).not.toHaveBeenCalled()
+    fireEvent.click(within(files).getByRole('option', { name: 'src/b.ts' }))
+    expect(handlers.onOpenFile).toHaveBeenCalledWith({ workspacePath: WS, path: 'src/b.ts' })
+    // Typing searches the workspace instead.
+    cleanup()
+    const again = renderPalette({ changedFiles, searchFiles })
+    await screen.findByRole('group', { name: 'Files' })
+    fireEvent.change(again.input, { target: { value: 'zzz-nothing' } })
+    expect(screen.queryByRole('group', { name: 'Files' })).toBeNull()
+  })
+
+  it('says what a running task is doing now in its result', () => {
+    const tasks = buildNavigatorSections({
+      runsByWorkspacePath: { [WS]: { runs: [{ runId: 'live', status: 'running', updatedAt: new Date().toISOString(), goal: 'Ship it' }] } },
+      openPaths: [WS],
+      activePath: WS,
+      activeRuns: [{ runId: 'live', workspacePath: WS, invokeId: 1, pendingFollowUps: [], activity: 'Running pnpm test' }],
+      activeRunsLoaded: true,
+      scopePath: null
+    }).flatMap((s) => s.rows)
+    renderPalette({ tasks })
+    const option = within(screen.getByRole('group', { name: 'Tasks' })).getByRole('option')
+    const line = option.querySelector('[data-palette-activity]') as HTMLElement
+    expect(line.textContent).toBe('Running pnpm test')
+    expect(line.className).toContain('vy-text-live')
+  })
+
   it('opens the highlighted task on Enter and beside the current one on Shift Enter', () => {
     const { handlers, input } = renderPalette()
     fireEvent.change(input, { target: { value: 'flaky' } })

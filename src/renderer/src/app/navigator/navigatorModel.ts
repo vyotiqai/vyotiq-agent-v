@@ -53,8 +53,17 @@ export type NavRow = {
   pinned: boolean
   /** You archived it. */
   archived: boolean
+  /** What a running task is doing now ("Running pnpm test"); absent before its first step. */
+  activity?: string
+  /** A live task's plan: the step it is on, of how many. Absent without a todo list. */
+  steps?: { current: number; total: number }
+  /** A live task's instances: the ones still going first. */
+  instances?: NavInstance[]
   run: RunSummary
 }
+
+/** One instance under its task: what it is called, how it stands, what it is doing. */
+export type NavInstance = { runId: string; title: string; state: TaskState; activity?: string }
 
 export type NavSection = { key: NavSectionKey; label: string; rows: NavRow[] }
 
@@ -70,7 +79,7 @@ export const NAV_SECTION_LABEL: Record<NavSectionKey, string> = {
 const ORDER: NavSectionKey[] = ['needs', 'running', 'review', 'pinned', 'done', 'archived']
 
 export type NavigatorInput = {
-  runsByWorkspacePath: Readonly<Record<string, { runs: readonly RunSummary[] }>>
+  runsByWorkspacePath: Readonly<Record<string, { runs: readonly RunSummary[]; instanceRuns?: readonly RunSummary[] }>>
   /** Open workspaces, in slot order. */
   openPaths: readonly string[]
   activePath: string | null
@@ -104,6 +113,7 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
   for (const path of input.openPaths) {
     if (input.scopePath && !workspacePathsEqual(path, input.scopePath)) continue
     const runs = input.runsByWorkspacePath[path]?.runs ?? []
+    const instanceRuns = input.runsByWorkspacePath[path]?.instanceRuns ?? []
     const foreign = input.activePath ? !workspacePathsEqual(path, input.activePath) : false
     for (const run of runs) {
       if (run.inlineInstance) continue
@@ -119,6 +129,14 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
       if (archived && settled && !input.showArchived) continue
       const section: NavSectionKey =
         archived && settled ? 'archived' : pinned && placed.section === 'done' ? 'pinned' : placed.section
+      const instances = settled
+        ? []
+        : instancesOf(
+            instanceRuns.filter((child) => child.parentRunId === run.runId),
+            path,
+            input.activeRuns,
+            input.activeRunsLoaded
+          )
       buckets[section].push({
         runId: run.runId,
         workspacePath: path,
@@ -132,6 +150,9 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
         unread: input.unreadRunIds?.has(run.runId) ?? false,
         pinned,
         archived,
+        ...(placed.state === 'running' && live?.activity ? { activity: live.activity } : {}),
+        ...(!settled && live?.steps ? { steps: stepOf(live.steps) } : {}),
+        ...(instances.length > 0 ? { instances } : {}),
         run
       })
     }
@@ -155,7 +176,39 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
   }))
 }
 
+/** A live task's instances, the ones still going first; each stands as its own run does. */
+function instancesOf(
+  children: readonly RunSummary[],
+  path: string,
+  activeRuns: readonly ActiveRun[],
+  loaded: boolean
+): NavInstance[] {
+  const out = children.map((child): NavInstance => {
+    const live = activeRuns.find((a) => a.runId === child.runId && workspacePathsEqual(a.workspacePath, path))
+    const state: TaskState = live?.waiting
+      ? 'needs'
+      : live || (!loaded && child.status === 'running')
+        ? 'running'
+        : finishedState(child).state
+    return {
+      runId: child.runId,
+      title: runTitle(child),
+      state,
+      ...(live?.activity && !live.waiting ? { activity: live.activity } : {})
+    }
+  })
+  // Still going first, then by id: a row that moved every time a child
+  // reported would be hard to keep an eye on.
+  const going = (i: NavInstance): number => Number(i.state === 'running' || i.state === 'needs')
+  return out.sort((a, b) => going(b) - going(a) || a.runId.localeCompare(b.runId))
+}
+
 type Placement = { section: NavSectionKey; state: TaskState; label: string; meta: NavMeta }
+
+/** The step in progress: the one after the last done, never past the end. */
+function stepOf(steps: { completed: number; total: number }): { current: number; total: number } {
+  return { current: Math.min(steps.completed + 1, steps.total), total: steps.total }
+}
 
 function place(run: RunSummary, live: ActiveRun | undefined, loaded: boolean, now: number): Placement {
   const age = (iso: string): NavMeta => ({ kind: 'age', text: ageText(iso, now) })
@@ -176,9 +229,7 @@ function place(run: RunSummary, live: ActiveRun | undefined, loaded: boolean, no
       section: 'running',
       state: 'running',
       label: 'Running',
-      meta: steps
-        ? { kind: 'steps', current: Math.min(steps.completed + 1, steps.total), total: steps.total }
-        : age(run.updatedAt)
+      meta: steps ? { kind: 'steps', ...stepOf(steps) } : age(run.updatedAt)
     }
   }
   if (run.loopArmed && run.loopNextAt) {

@@ -55,7 +55,8 @@ test('a force push asks past a standing allow, with only Allow once and Deny', a
   await expect(page.getByText('git push --force origin main').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Allow for this task' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Always allow/ })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Deny' }).click()
+  // The record's card; the navigator row offers the same answer.
+  await page.locator('[data-needs-you]').getByRole('button', { name: 'Deny' }).click()
 
   // The plain push runs on the standing allow — no second card.
   await expect(page.getByText('Pushed without forcing.')).toBeVisible({ timeout: 30_000 })

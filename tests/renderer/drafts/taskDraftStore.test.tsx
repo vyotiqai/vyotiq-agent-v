@@ -13,6 +13,7 @@ import {
   setBriefChecks,
   setBriefState,
   setBriefWorktree,
+  setNewTaskWorktreeDefault,
   taskDraftsFor,
   useTaskDrafts
 } from '@renderer/lib/drafts/taskDraftStore'
@@ -112,5 +113,20 @@ describe('task draft store', () => {
     setBriefWorktree('/ws', false)
     setBriefChecks('/ws', [])
     expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: [], worktree: false })
+  })
+
+  it('starts on the Settings default until the page picks, and keeps a pick against it', () => {
+    setNewTaskWorktreeDefault(true)
+    expect(briefStateFor('/ws').worktree).toBe(true)
+    // Picking This folder against the default is kept, checks or not.
+    setBriefWorktree('/ws', false)
+    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: [], worktree: false })
+    // Starting the task empties the page: the next one opens on the default again.
+    setBriefState('/ws', null)
+    expect(briefStateFor('/ws').worktree).toBe(true)
+    // A page with no pick of its own follows the setting when it changes.
+    setBriefChecks('/ws', ['A check'])
+    setNewTaskWorktreeDefault(false)
+    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: ['A check'], worktree: false })
   })
 })

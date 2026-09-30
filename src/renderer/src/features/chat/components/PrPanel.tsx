@@ -34,6 +34,10 @@ import {
   type ChangesListFile
 } from '@renderer/features/inspector/ChangesList'
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
+import type { UiItem } from '@shared/transcript'
+import { buildRecordModel } from '@renderer/features/task/recordModel'
+import { checksRevisionOf, useRunChecks } from '@renderer/features/task/useRunChecks'
+import { prBodyFrom, prTitleFrom } from './prDraft'
 
 type PrTab = 'changes' | 'description' | 'commits' | 'checks' | 'reviews' | 'issues'
 
@@ -353,7 +357,11 @@ export function PrPanel({
   active = true,
   gitRevision = 0,
   onOpenFile,
-  onHandToAgent
+  onHandToAgent,
+  runId = null,
+  items,
+  running = false,
+  taskTitle = null
 }: {
   workspacePath?: string | null
   className?: string
@@ -366,6 +374,11 @@ export function PrPanel({
   onOpenFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   /** Give the task an instruction — used for a failing check. */
   onHandToAgent?: (instruction: string) => void
+  /** The task on screen: a new PR's title and description are written from its result and checks. */
+  runId?: string | null
+  items?: readonly UiItem[]
+  running?: boolean
+  taskTitle?: string | null
 }) {
   const [pr, setPr] = useState<PrView | null>(null)
   const [loading, setLoading] = useState(false)
@@ -671,16 +684,48 @@ export function PrPanel({
     }
   }, [load, refreshAuth])
 
+  // A new PR is written from the task: the title from its name, the
+  // description from its result and its done-when checks, editable before it
+  // is created. With no result there is nothing to write from, and gh fills
+  // both from the commits as before.
+  const draftRunId = !pr && !running && runId ? runId : null
+  const checksRevision = useMemo(() => checksRevisionOf(items ?? [], running), [items, running])
+  const draftChecks = useRunChecks(workspacePath ?? null, draftRunId, checksRevision)
+  const draftSummary = useMemo(() => {
+    if (!draftRunId || !items?.length) return ''
+    const runs = buildRecordModel(items, { running: false }).runs
+    for (let i = runs.length - 1; i >= 0; i -= 1) {
+      const result = runs[i]!.result
+      if (result && !result.streaming && result.text.trim()) return result.text
+    }
+    return ''
+  }, [draftRunId, items])
+  const draftSource = useMemo(
+    () => (draftSummary ? { title: taskTitle, summary: draftSummary, checks: draftChecks } : null),
+    [draftSummary, taskTitle, draftChecks]
+  )
+  const [prTitleEdit, setPrTitleEdit] = useState<string | null>(null)
+  const [prBodyEdit, setPrBodyEdit] = useState<string | null>(null)
+  const prTitle = prTitleEdit ?? (draftSource ? prTitleFrom(draftSource) : '')
+  const prBody = prBodyEdit ?? (draftSource ? prBodyFrom(draftSource) : '')
+  useEffect(() => {
+    setPrTitleEdit(null)
+    setPrBodyEdit(null)
+  }, [workspacePath, runId])
+
   const createPr = useCallback(async () => {
     if (!workspacePath || !window.vyotiq?.prCreate || createBusy) return
     setCreateBusy(true)
     setNotice(null)
     setNoticeFailed(false)
     try {
-      const res = await window.vyotiq.prCreate(workspacePath, { draft: true })
+      const written = draftSource && prTitle.trim() ? { title: prTitle.trim(), body: prBody } : {}
+      const res = await window.vyotiq.prCreate(workspacePath, { draft: true, ...written })
       if (res.ok) {
         setNotice(`${res.data.detail}: ${res.data.url}`)
         setNoticeFailed(false)
+        setPrTitleEdit(null)
+        setPrBodyEdit(null)
         await load()
       } else {
         setNotice(res.error)
@@ -689,7 +734,7 @@ export function PrPanel({
     } finally {
       setCreateBusy(false)
     }
-  }, [workspacePath, createBusy, load])
+  }, [workspacePath, createBusy, load, draftSource, prTitle, prBody])
 
   const openExternal = useCallback(async (url: string) => {
     if (!window.vyotiq?.shellOpenExternal) return
@@ -1272,6 +1317,49 @@ export function PrPanel({
             />
           ) : showConnect || auth?.pending ? (
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">{githubAuthPanel}</div>
+          ) : canCreatePr && draftSource ? (
+            <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              <form
+                className="space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void createPr()
+                }}
+              >
+                <h4 className={SECTION_LABEL}>New pull request</h4>
+                <Input
+                  size="sm"
+                  value={prTitle}
+                  onChange={(e) => setPrTitleEdit(e.target.value)}
+                  placeholder="Title"
+                  aria-label="Pull request title"
+                  maxLength={256}
+                  required
+                />
+                <Textarea
+                  size="sm"
+                  rows={12}
+                  placeholder="Description"
+                  aria-label="Pull request description"
+                  value={prBody}
+                  onChange={(e) => setPrBodyEdit(e.target.value)}
+                />
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    type="submit"
+                    pending={createBusy}
+                    disabled={createBusy || !prTitle.trim()}
+                  >
+                    {createBusy ? 'Creating…' : 'Create a draft PR'}
+                  </Button>
+                  <Button size="sm" onClick={() => setTab('issues')}>
+                    Issues
+                  </Button>
+                </div>
+              </form>
+            </div>
           ) : (
             <EmptyPanel
               icon="pullRequest"

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { runCostDisplay } from '@shared/utils/costDisplay'
 import { relativeTimeAgo } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
-import { MENU_SURFACE, StatusGlyph, cn } from '@renderer/lib/ui'
+import { MENU_SURFACE, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { planSegmentFill } from '@renderer/features/task/record/RecordLayout'
 import type { NavRow } from './navigatorModel'
 
 const VIEWPORT_PAD = 8
@@ -22,9 +23,11 @@ export function hoverCardAnchor(rowEl: HTMLElement): TaskHoverCardAnchor {
 /**
  * What a task is, without opening it: beside the navigator, level with the
  * row the pointer rests on. Every line is one the task actually has — a branch
- * only for a worktree, changes only while edits wait on review, a cost only
- * once one was measured. Pointer only and hidden from assistive tech: the
- * row's description already says the same.
+ * only for a worktree, the plan only while it works on one, changes only while
+ * edits wait on review, checks then and while it works, a cost only once one
+ * was measured. Pointer
+ * only and hidden from assistive tech: the row's description already says the
+ * same.
  */
 export function TaskHoverCard({ row, anchor }: { row: NavRow; anchor: TaskHoverCardAnchor }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -41,8 +44,13 @@ export function TaskHoverCard({ row, anchor }: { row: NavRow; anchor: TaskHoverC
   const { run } = row
   const cost = runCostDisplay(run)
   const updated = relativeTimeAgo(run.updatedAt)
-  const steps = row.meta.kind === 'steps' ? `step ${row.meta.current} of ${row.meta.total}` : null
+  const live = row.state === 'running' || row.state === 'needs'
+  const steps = live ? row.steps : undefined
   const review = run.review
+  // Main reads a run's checks while it works and while its edits wait on review.
+  const checks = review || live ? run.checks : undefined
+  // Unmet is news only once the work has settled; while it works, it is the plan.
+  const checksShort = checks != null && checks.met < checks.total && !live
   const footer = [cost?.text, updated ? `Updated ${updated}` : null].filter(Boolean).join(' · ')
   const left = Math.min(anchor.left, window.innerWidth - VIEWPORT_PAD - 288)
 
@@ -58,8 +66,17 @@ export function TaskHoverCard({ row, anchor }: { row: NavRow; anchor: TaskHoverC
       <div className="space-y-1">
         <Line icon={<StatusGlyph state={row.state} size={13} />}>
           <span className="text-fg">{row.stateLabel}</span>
-          {steps ? <span className="text-tertiary"> · {steps}</span> : null}
         </Line>
+        {steps ? (
+          <Line icon={<Icon name="plan" size={13} className="text-tertiary" />}>
+            <span className="flex items-center gap-2" data-hover-plan>
+              <PlanMeter current={steps.current} total={steps.total} state={row.state} />
+              <span className="font-mono text-tertiary tnum">
+                {steps.current}/{steps.total}
+              </span>
+            </span>
+          </Line>
+        ) : null}
         {run.worktreeBranch ? (
           <Line icon={<Icon name="branch" size={13} className="text-tertiary" />}>
             <span className="font-mono">{run.worktreeBranch}</span>
@@ -78,10 +95,32 @@ export function TaskHoverCard({ row, anchor }: { row: NavRow; anchor: TaskHoverC
             ) : null}
           </Line>
         ) : null}
+        {checks ? (
+          <Line icon={<Icon name="checklist" size={13} className="text-tertiary" />}>
+            <span className={checksShort ? 'text-warning' : 'text-muted'} data-hover-checks>
+              {checks.met} of {checks.total} checks met
+            </span>
+          </Line>
+        ) : null}
       </div>
       {footer ? <p className="text-caption text-tertiary tnum">{footer}</p> : null}
     </div>,
     document.body
+  )
+}
+
+/**
+ * The plan as a short meter, one segment per step: the header's plan rule in
+ * small. The steps behind are done, the one it is on stands as the task does.
+ */
+function PlanMeter({ current, total, state }: { current: number; total: number; state: TaskState }) {
+  return (
+    <span className="flex h-[3px] w-16 shrink-0 gap-[2px]" aria-hidden>
+      {Array.from({ length: total }, (_, i) => {
+        const step: TaskState = i < current - 1 ? 'done' : i === current - 1 ? state : 'queued'
+        return <span key={i} className={cn('h-full min-w-0 flex-1 rounded-full', planSegmentFill(step))} data-plan-step={step} />
+      })}
+    </span>
   )
 }
 

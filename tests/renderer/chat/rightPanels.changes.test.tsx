@@ -300,11 +300,10 @@ describe('ChangesPanel', () => {
     expect(screen.queryByText('new.ts')).toBeNull()
   })
 
-  it('shows the selected file’s diff below the list, staged under Staged scope', async () => {
+  it('shows every file’s diff under its own header, staged under Staged scope', async () => {
     renderGit()
     await screen.findByText('a.ts')
     await chooseScope('Staged')
-    fireEvent.click(screen.getByRole('button', { name: 'src/a.ts, modified' }))
     await waitFor(() => {
       expect(window.vyotiq.gitDiff).toHaveBeenCalledWith({
         workspacePath: '/ws',
@@ -314,9 +313,10 @@ describe('ChangesPanel', () => {
         sha: undefined
       })
     })
-    const diff = document.querySelector('[data-change-diff]') as HTMLElement
-    expect(within(diff).getByText('src/a.ts')).toBeTruthy()
+    const diff = document.querySelector('[data-change-diff="src/a.ts"]') as HTMLElement
     expect(await within(diff).findByText('new')).toBeTruthy()
+    // One column: the other staged file's diff is open below it, not a click away.
+    expect(document.querySelector('[data-change-diff="gone.ts"]')).toBeTruthy()
   })
 
   it('requests vsHead diffs for Uncommitted mixed files', async () => {
@@ -334,14 +334,17 @@ describe('ChangesPanel', () => {
     })
   })
 
-  it('steps to the next and previous file from the diff header', async () => {
+  it('folds a file’s diff from its header, and marks it as the one you are on', async () => {
     renderGit()
     await screen.findByText('a.ts')
-    fireEvent.click(screen.getByRole('button', { name: 'gone.ts, deleted' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Next file' }))
-    expect(row('new.ts').getAttribute('class')).toContain('bg-surface-2')
-    fireEvent.click(screen.getByRole('button', { name: 'Previous file' }))
+    const header = screen.getByRole('button', { name: 'gone.ts, deleted' })
+    expect(header.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(header)
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-change-diff="gone.ts"]')).toBeNull()
     expect(row('gone.ts').getAttribute('class')).toContain('bg-surface-2')
+    fireEvent.click(header)
+    expect(document.querySelector('[data-change-diff="gone.ts"]')).toBeTruthy()
   })
 
   it('opens the file in the editor from its row', async () => {
@@ -775,6 +778,105 @@ describe('ChangesPanel', () => {
     expect(screen.queryByRole('button', { name: 'Keep all' })).toBeNull()
   })
 
+  it('returns a kept file to review from its row, and never while the run is live', async () => {
+    const onReopenWriteFile = vi.fn()
+    const props = {
+      items: agentEdit('src/a.ts'),
+      workspacePath: '/ws',
+      gitRevision: 1,
+      writeFileResolutions: new Map([['src/a.ts', 'kept' as const]]),
+      onReopenWriteFile
+    }
+    const { rerender } = render(<ChangesPanel {...props} />)
+    await screen.findByText('a.ts')
+    const unkeep = within(row('src/a.ts')).getByRole('button', { name: 'Unkeep a.ts' })
+    expect(unkeep.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(unkeep)
+    expect(onReopenWriteFile).toHaveBeenCalledWith('src/a.ts')
+    rerender(<ChangesPanel {...props} running />)
+    expect(within(row('src/a.ts')).queryByRole('button', { name: 'Unkeep a.ts' })).toBeNull()
+  })
+
+  it('reads Kept and Undone from what main recorded when the live checkpoint is gone', async () => {
+    const edits = ['src/a.ts', 'src/b.ts'].flatMap((path, index) =>
+      agentEdit(path).map((item) => ({ ...item, id: `${item.id}-${index}` }))
+    )
+    window.vyotiq.taskOutcome = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        files: [
+          { path: 'src/a.ts', mark: 'kept' },
+          { path: 'src/b.ts', mark: 'undone' }
+        ]
+      }
+    })
+    render(<ChangesPanel items={edits} workspacePath="/ws-outcome" gitRevision={1} runId="run-outcome" onReopenWriteFile={vi.fn()} />)
+    await waitFor(() => {
+      expect(document.querySelector('[data-changes-decided]')?.textContent).toBe('· 1 kept, 1 undone')
+    })
+    expect(within(row('src/a.ts')).getByRole('button', { name: 'Unkeep a.ts' })).toBeTruthy()
+    expect(within(row('src/b.ts')).queryByRole('button', { name: 'Unkeep b.ts' })).toBeNull()
+  })
+
+  it('commits from a task’s Changes with its run, and says what the commit settled', async () => {
+    const task = { sha: 'a'.repeat(40), branch: 'main', kept: ['src/a.ts'], undoable: true }
+    window.vyotiq.gitCommit = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { committed: true, pushed: false, detail: 'Committed', task }
+    })
+    const onTaskCommitted = vi.fn()
+    renderGit({ runId: 'run-1', onTaskCommitted })
+    await screen.findByText('a.ts')
+    const input = await compose(/^Commit…$/)
+    await waitFor(() => {
+      expect(input.value).not.toBe('')
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^Commit$/ }))
+    await waitFor(() => {
+      expect(onTaskCommitted).toHaveBeenCalledWith(task, false)
+    })
+    expect(window.vyotiq.gitCommit).toHaveBeenCalledWith('/ws', expect.any(String), false, 'all', 'run-1')
+  })
+
+  it('sums what was kept and undone beside the counts, and folds an undone file', async () => {
+    const edits = ['src/a.ts', 'src/b.ts', 'src/c.ts'].flatMap((path, index) =>
+      agentEdit(path).map((item) => ({ ...item, id: `${item.id}-${index}` }))
+    )
+    render(
+      <ChangesPanel
+        items={edits}
+        workspacePath="/ws"
+        gitRevision={1}
+        writeFileResolutions={
+          new Map<string, 'kept' | 'discarded'>([
+            ['src/a.ts', 'kept'],
+            ['src/b.ts', 'kept'],
+            ['src/c.ts', 'discarded']
+          ])
+        }
+      />
+    )
+    await screen.findByText('c.ts')
+    const decided = document.querySelector('[data-changes-decided]') as HTMLElement
+    expect(decided.textContent).toBe('· 2 kept, 1 undone')
+    expect(screen.getByRole('button', { name: 'src/c.ts, modified' }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByRole('button', { name: 'src/a.ts, modified' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('says nothing is decided until something is', async () => {
+    render(<ChangesPanel items={agentEdit('src/a.ts')} workspacePath="/ws" gitRevision={1} />)
+    await screen.findByText('a.ts')
+    expect(document.querySelector('[data-changes-decided]')).toBeNull()
+  })
+
+  it('tells a finished task that changed nothing from one that has not changed anything yet', async () => {
+    const { rerender } = render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} runId="run-1" running />)
+    expect(await screen.findByText('No changes yet')).toBeTruthy()
+    rerender(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} runId="run-1" running={false} />)
+    expect(await screen.findByText('Nothing changed')).toBeTruthy()
+    expect(screen.getByText('This task finished without changing a file.')).toBeTruthy()
+  })
+
   it('holds Commit and Keep/Undo while the run is live, with Stop at hand', async () => {
     const onStopRun = vi.fn()
     render(
@@ -858,7 +960,6 @@ describe('This task — counts and diffs from the task’s checkpoints', () => {
       data: { path: 'src/swap.ts', action: 'modified', diff: SWAP_DIFF, add: 1, del: 0 }
     })
     render(<ChangesPanel items={agentReplace('src/swap.ts')} workspacePath="/ws" gitRevision={1} runId="run-1" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'src/swap.ts, modified' }))
     const table = await waitFor(() => {
       const el = document.querySelector('[data-review-diff]')
       expect(el).toBeTruthy()

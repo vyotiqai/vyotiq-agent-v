@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import {
   DEFAULT_MAX_PARALLEL_INSTANCES,
   MAX_PARALLEL_INSTANCES_LIMIT,
@@ -7,7 +7,9 @@ import {
 } from '@shared/ipc'
 import { commandFromAllowKey } from '@shared/utils/commandAllow'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Input } from '@renderer/lib/ui'
+import { Button, Input, pushToast } from '@renderer/lib/ui'
+import { useConfirm } from '@renderer/lib/hooks/useConfirm'
+import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import { AutoTextarea } from '../components/AutoTextarea'
@@ -133,6 +135,87 @@ function AllowedTools({
   )
 }
 
+function plural(n: number, word: string): string {
+  return `${n} ${n === 1 ? word : `${word}s`}`
+}
+
+/**
+ * The notes earlier tasks wrote about the workspace Settings is showing, and
+ * a way to forget them. Clearing deletes what the memory tools keep (notes,
+ * index.md, state.md) and nothing else, after a confirm — it can't be undone.
+ */
+export function MemoryField({ workspacePath }: { workspacePath: string | null }) {
+  const { context, reload } = useAgentContext(workspacePath)
+  const { confirm, dialog } = useConfirm()
+  const [clearing, setClearing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const name = context?.workspaceName ?? 'this workspace'
+  const notes = context?.memoryNotes ?? 0
+  const files = context ? [context.memoryIndex ? 'index.md' : null, context.memoryState ? 'state.md' : null].filter(Boolean) : []
+  const empty = context != null && notes === 0 && files.length === 0
+  const hint = !workspacePath
+    ? 'No workspace is open.'
+    : !context
+    ? 'Notes earlier tasks wrote about this workspace.'
+    : notes > 0
+      ? `${plural(notes, 'note')} earlier tasks wrote about ${name}.`
+      : files.length > 0
+        ? `No notes about ${name}; ${files.join(' and ')} remain.`
+        : `None yet for ${name}.`
+
+  const clear = async (): Promise<void> => {
+    const what =
+      notes > 0
+        ? `The ${plural(notes, 'note')} earlier tasks wrote about ${name}, and its memory index and state, are deleted.`
+        : `The memory index and state for ${name} are deleted.`
+    const ok = await confirm(
+      `${what} New tasks start without them. This can’t be undone.`,
+      { title: 'Clear memory?', confirmLabel: 'Clear memory', danger: true }
+    )
+    if (!ok) return
+    const bridge = window.vyotiq?.clearWorkspaceMemory
+    if (!workspacePath) return
+    if (!bridge) {
+      setError('Clearing memory is unavailable in this window.')
+      return
+    }
+    setClearing(true)
+    setError(null)
+    try {
+      const res = await bridge({ workspacePath })
+      if (res.ok) {
+        pushToast(`Memory cleared for ${name}`, { icon: 'check' })
+        reload()
+      } else setError(res.error)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return (
+    <SettingsField
+      id="agent-memory"
+      title="Memory"
+      hint={hint}
+      help="Kept in .vyotiq/memory in the workspace. Tasks read index.md and state.md every step and open notes when they need them."
+      below={
+        error ? (
+          <p className="m-0 text-xs text-danger" role="alert">
+            {error}
+          </p>
+        ) : null
+      }
+    >
+      <Button size="sm" variant="danger" disabled={!context || empty || clearing} onClick={() => void clear()}>
+        {clearing ? 'Clearing…' : 'Clear…'}
+      </Button>
+      {dialog}
+    </SettingsField>
+  )
+}
+
 export function AgentSection({
   form,
   secrets,
@@ -254,6 +337,18 @@ export function AgentSection({
             void form.runUpdate({ autoResumeInterruptedRuns })
           }}
           {...form.defaultMark('autoResumeInterruptedRuns')}
+        />
+        <SwitchField
+          id="new-task-worktree"
+          title="New tasks start in a worktree"
+          hint="Your checkout stays untouched until you merge."
+          help="New task opens on New worktree instead of This folder; each task can still choose. A folder with no commit to branch from starts in the folder."
+          checked={form.settings.newTaskWorktree}
+          disabled={form.formLocked}
+          onChange={(newTaskWorktree) => {
+            void form.runUpdate({ newTaskWorktree })
+          }}
+          {...form.defaultMark('newTaskWorktree')}
         />
         <NumberField
           id="parallel-instances"
@@ -489,7 +584,7 @@ export function AgentSection({
         </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup title="Rules">
+      <SettingsGroup title="Rules and memory">
         <SettingsField
           id="workspace-rules"
           title="Rules"
@@ -506,6 +601,7 @@ export function AgentSection({
             Manage rules
           </Button>
         </SettingsField>
+        <MemoryField workspacePath={form.activeWorkspacePath ?? null} />
       </SettingsGroup>
     </SettingsStack>
   )

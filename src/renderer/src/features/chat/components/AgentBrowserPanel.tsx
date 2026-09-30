@@ -23,6 +23,8 @@ import { DEFAULT_SETTINGS } from '@shared/ipc'
 import { resolveAddressBarTarget } from '@shared/utils/searchEngine'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
 import type { AgentBrowserState } from '@shared/ipc'
+import { pickedElementLabel } from '@shared/browserPick'
+import { addMentionToComposer } from './composer/composerMentionEvent'
 import {
   clearBrowserRecents,
   filterBrowserRecents,
@@ -139,6 +141,9 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   const blurTimerRef = useRef<number | null>(null)
   const lastRecordedUrl = useRef('')
   const lastRecordedTitle = useRef('')
+  const pickButtonRef = useRef<HTMLButtonElement>(null)
+  /** This panel armed the picker: its picks go to this task's composer. */
+  const pickOwnerRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -250,6 +255,79 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
     const t = window.setTimeout(() => setStatus(null), 2500)
     return () => window.clearTimeout(t)
   }, [status])
+
+  const picking = Boolean(state.picking)
+  /** The last element this picking added, named in the picking row. */
+  const [lastPicked, setLastPicked] = useState<string | null>(null)
+  const pickTargetRef = useRef({ workspacePath, activeRunId })
+  pickTargetRef.current = { workspacePath, activeRunId }
+
+  useEffect(() => {
+    return window.vyotiq.onBrowserElementPicked?.((element) => {
+      if (!pickOwnerRef.current) return
+      const target = pickTargetRef.current
+      addMentionToComposer({
+        workspacePath: target.workspacePath ?? null,
+        runId: target.activeRunId ?? null,
+        mention: { kind: 'element', element }
+      })
+      setLastPicked(pickedElementLabel(element))
+    })
+  }, [])
+
+  // Picking ended (Esc in the page, a navigation, the tab hidden): with the
+  // keyboard handed back to the app and nowhere to be, it lands on the button.
+  const wasPicking = useRef(false)
+  useEffect(() => {
+    if (picking) {
+      wasPicking.current = true
+      return
+    }
+    if (!wasPicking.current) return
+    wasPicking.current = false
+    setLastPicked(null)
+    const owned = pickOwnerRef.current
+    pickOwnerRef.current = false
+    const active = document.activeElement
+    if (owned && (!active || active === document.body)) pickButtonRef.current?.focus()
+  }, [picking])
+
+  // Leaving the panel (hidden tab, unmount) ends this panel's picking.
+  useEffect(() => {
+    if (visible) return undefined
+    if (pickOwnerRef.current) void window.vyotiq.browserPickStop?.()
+    return undefined
+  }, [visible])
+  useEffect(() => {
+    return () => {
+      if (pickOwnerRef.current) void window.vyotiq.browserPickStop?.()
+    }
+  }, [])
+
+  // Esc while the app has the keyboard (the page handles its own Esc in main).
+  useEffect(() => {
+    if (!picking || !pickOwnerRef.current) return undefined
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      e.preventDefault()
+      void window.vyotiq.browserPickStop?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [picking])
+
+  const togglePicking = useCallback(() => {
+    if (picking) {
+      void window.vyotiq.browserPickStop?.()
+      return
+    }
+    pickOwnerRef.current = true
+    void window.vyotiq.browserPickStart?.(workspacePath ?? undefined)?.then((res) => {
+      if (res?.ok) return
+      pickOwnerRef.current = false
+      fail(res ? res.error : 'Could not start picking')
+    })
+  }, [fail, picking, workspacePath])
 
   const tabs = state.tabs ?? []
   const hasPage = Boolean(state.open) && tabs.length > 0
@@ -641,6 +719,17 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         {canFocusPage ? (
           <IconButton icon="keyboard" label="Type in the page" size="sm" tone="muted" onClick={focusPage} />
         ) : null}
+        <IconButton
+          ref={pickButtonRef}
+          icon="target"
+          label={picking ? 'Stop picking (Esc)' : 'Pick an element to ask about'}
+          size="sm"
+          tone="muted"
+          active={picking}
+          disabled={!picking && (!hasPage || Boolean(state.pip) || Boolean(state.agentBusy))}
+          onClick={togglePicking}
+          data-browser-pick
+        />
         <Segmented
           label="Viewport size"
           value={viewportFitted ? 'fit' : fixedPreset.id}
@@ -732,6 +821,23 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
                 Take control
               </Button>
             </>
+          )}
+        </div>
+      ) : null}
+
+      {picking ? (
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs" role="status" data-browser-picking>
+          <Icon name="target" size={12} className="shrink-0 text-accent" />
+          {lastPicked ? (
+            <span className="min-w-0 flex-1 truncate text-muted">
+              Added <span className="font-mono text-caption text-fg">{lastPicked}</span>
+              {' · pick another, or Esc to stop'}
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-muted">
+              <span className="text-fg">Click an element to add it to the box</span>
+              {' · arrows walk the page, Enter adds, Esc stops'}
+            </span>
           )}
         </div>
       ) : null}

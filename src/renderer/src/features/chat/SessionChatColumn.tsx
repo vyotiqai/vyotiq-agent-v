@@ -1,6 +1,5 @@
 import { memo, useCallback, useMemo } from 'react'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
-import { userTurnCount } from '@shared/utils/turnUsage'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type {
@@ -18,7 +17,9 @@ import { PaneHeaderActions, TaskPane, type TaskPaneRunActions } from '@renderer/
 import type { NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
 import { runTitle } from '@renderer/app/navigator/runTitle'
 import { useTaskRecentFiles } from '@renderer/features/inspector/agentFileMarks'
+import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import { Composer } from './components/composer'
+import type { LineOutcome } from './components/composer/composerPlaceholder'
 import { useHasChatItems } from './components/ChatStreamLeaves'
 import { RunSessionProvider, useRunSession } from './RunSessionContext'
 import { AgentInstancePane } from './components/AgentInstancePane'
@@ -99,7 +100,7 @@ export function SessionChatColumn({
   chatSurfaceEpoch = 0,
   mcpServerNames,
   slashHandlers,
-  onShowInspector,
+  inspectorToggle,
   onActivate,
   approvalAutoFocus = true,
   onOpenChanges,
@@ -194,8 +195,8 @@ export function SessionChatColumn({
   chatSurfaceEpoch?: number
   mcpServerNames?: ReadonlyMap<string, string>
   slashHandlers?: import('./components/composer/slashCommandExecute').SlashClientHandlers
-  /** Set on the rightmost pane while the inspector is hidden. */
-  onShowInspector?: () => void
+  /** Set on the rightmost pane: its header toggles the inspector. */
+  inspectorToggle?: InspectorToggle
   onActivate?: () => void
   approvalAutoFocus?: boolean
   onOpenChanges?: (path?: string) => void
@@ -402,9 +403,15 @@ export function SessionChatColumn({
     active: true
   })
 
-  // Runs so far, as the record numbers them: one per instruction you sent —
-  // not the loop's own synthetic turns (a nudge made one run read as two).
-  const runCount = useMemo(() => userTurnCount(messages), [messages])
+  // How the latest run ended, as the record reads it: the line's placeholder
+  // says what an instruction is for now.
+  const lineOutcome: LineOutcome = running
+    ? null
+    : turnFailed || turnStatus === 'error'
+      ? 'failed'
+      : turnStatus === 'cancelled' || turnStatus === 'interrupted' || incomplete?.reason === 'spend_limit'
+        ? 'stopped'
+        : null
 
   return (
     <>
@@ -415,7 +422,7 @@ export function SessionChatColumn({
           instanceRunId={openInstanceRunId}
           instanceMeta={agentInstances?.[openInstanceRunId]}
           getController={getInstanceController}
-          onShowInspector={onShowInspector}
+          inspectorToggle={inspectorToggle}
           pendingGates={pendingGates}
           onOpenInstance={openInstancePane}
           onClose={closeInstancePane}
@@ -480,7 +487,7 @@ export function SessionChatColumn({
             onGoalActivate={runGoal.activate}
             onGoalDismiss={runGoal.dismiss}
             onStopLoop={runGoal.stopLoop}
-            onShowInspector={onShowInspector}
+            inspectorToggle={inspectorToggle}
             newTask={newTask}
             composer={
               <div
@@ -492,7 +499,7 @@ export function SessionChatColumn({
                   key={`composer:${surfaceKey}`}
                   {...composerProps}
                   variant={newTask ? 'brief' : 'line'}
-                  runCount={runCount}
+                  lineOutcome={lineOutcome}
                   onDismissError={onDismissError}
                   newTaskTargets={newTaskTargets}
                   taskFiles={taskFiles}
@@ -500,7 +507,7 @@ export function SessionChatColumn({
                     newTask ? (
                       <PaneHeaderActions
                         title="New task"
-                        onShowInspector={onShowInspector}
+                        inspectorToggle={inspectorToggle}
                         onClosePane={runActions.onClosePane}
                       />
                     ) : undefined

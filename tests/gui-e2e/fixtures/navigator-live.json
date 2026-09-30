@@ -1,0 +1,303 @@
+{
+  "events": [
+    {
+      "type": "status",
+      "status": "running"
+    },
+    {
+      "type": "text_delta",
+      "text": "Running the suite first."
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-live-1",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"pnpm test --run\"}"
+    },
+    {
+      "type": "assistant_message",
+      "content": "Running the suite first.",
+      "toolCalls": [
+        {
+          "id": "nav-live-1",
+          "name": "terminal",
+          "arguments": "{\"command\":\"pnpm test --run\"}"
+        }
+      ]
+    },
+    {
+      "type": "tool_start",
+      "toolCallId": "nav-live-1",
+      "name": "terminal",
+      "summary": "pnpm test --run"
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "nav-hold",
+      "name": "read",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "nav-live-1",
+      "name": "terminal",
+      "summary": "pnpm test --run",
+      "ok": true,
+      "content": "Tests  12 passed (12)\nexit_code: 0"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "nav-live-2",
+      "name": "terminal",
+      "arguments": "{\"command\":\"pnpm build --filter nav-live\"}",
+      "summary": "pnpm build --filter nav-live",
+      "result": "built in 1.2s\nexit_code: 0"
+    },
+    {
+      "type": "text_delta",
+      "text": "NAV_LIVE_DONE the build passes."
+    },
+    {
+      "type": "assistant_message",
+      "content": "NAV_LIVE_DONE the build passes."
+    },
+    {
+      "type": "status",
+      "status": "done"
+    }
+  ]
+}

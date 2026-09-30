@@ -1,0 +1,42 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+
+    { "type": "tool_call_delta", "toolCallId": "plan-1", "name": "todo_write", "argumentsDelta": "{\"todos\":[{\"id\":\"a\",\"content\":\"Read the schema\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Apply the migration\",\"status\":\"in_progress\"}]}" },
+    {
+      "type": "assistant_message",
+      "content": "",
+      "toolCalls": [{ "id": "plan-1", "name": "todo_write", "arguments": "{\"todos\":[{\"id\":\"a\",\"content\":\"Read the schema\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Apply the migration\",\"status\":\"in_progress\"}]}" }]
+    },
+    { "type": "tool_start", "toolCallId": "plan-1", "name": "todo_write", "summary": "2 tasks" },
+    { "type": "tool_result", "toolCallId": "plan-1", "name": "todo_write", "summary": "2 tasks", "ok": true, "content": "1/2 complete\n[x] (a) Read the schema\n[~] (b) Apply the migration" },
+
+    { "type": "tool_call_delta", "toolCallId": "read-db", "name": "read", "argumentsDelta": "{\"path\":\"db.ts\"}" },
+    { "type": "assistant_message", "content": "", "toolCalls": [{ "id": "read-db", "name": "read", "arguments": "{\"path\":\"db.ts\"}" }] },
+    { "type": "tool_start", "toolCallId": "read-db", "name": "read", "summary": "db.ts" },
+    { "type": "tool_result", "toolCallId": "read-db", "name": "read", "summary": "db.ts", "ok": true, "content": "export {}" },
+
+    { "type": "assistant_message", "content": "NEEDS_WHY The migration writes to the database." },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "migrate-1",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"pnpm db:migrate --env staging\"}"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "migrate-1",
+      "name": "terminal",
+      "arguments": "{\"command\":\"pnpm db:migrate --env staging\"}",
+      "summary": "pnpm db:migrate --env staging",
+      "result": "Applied 1 migration\nexit_code: 0"
+    },
+    { "type": "tool_call_delta", "toolCallId": "plan-2", "name": "todo_write", "argumentsDelta": "{\"merge\":true,\"todos\":[{\"id\":\"b\",\"status\":\"completed\"}]}" },
+    { "type": "assistant_message", "content": "", "toolCalls": [{ "id": "plan-2", "name": "todo_write", "arguments": "{\"merge\":true,\"todos\":[{\"id\":\"b\",\"status\":\"completed\"}]}" }] },
+    { "type": "tool_start", "toolCallId": "plan-2", "name": "todo_write", "summary": "2 tasks" },
+    { "type": "tool_result", "toolCallId": "plan-2", "name": "todo_write", "summary": "2 tasks", "ok": true, "content": "2/2 complete\n[x] (a) Read the schema\n[x] (b) Apply the migration" },
+    { "type": "text_delta", "text": "NEEDS_DONE the migration is applied." },
+    { "type": "assistant_message", "content": "NEEDS_DONE the migration is applied." },
+    { "type": "status", "status": "done" }
+  ]
+}

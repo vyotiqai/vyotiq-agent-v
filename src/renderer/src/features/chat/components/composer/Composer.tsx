@@ -27,17 +27,21 @@ import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effective
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
 import { isRetryableTurnFailure } from '@shared/errors'
 import { Alert, Button, IconButton, Textarea, cn, pushToast } from '@renderer/lib/ui'
+import { RECORD_MAX } from '@renderer/lib/utils/layout'
 import {
   draftTitle,
   saveTaskDraftFor,
   setBriefChecks,
   setBriefState,
   setBriefWorktree,
-  useBriefState
+  useBriefState,
+  useNewTaskWorktreeDefault
 } from '@renderer/lib/drafts/taskDraftStore'
+import { useGitStatus } from '../useGitStatus'
 import { isSessionDragEvent } from '@renderer/lib/chat/chatPaneLayout'
 import { ComposerMentionInput, type ComposerMentionInputHandle } from './ComposerMentionInput'
 import { ComposerAttachments } from './ComposerAttachments'
+import { AttachMenu, useBrowserScreenshotAttach } from './AttachMenu'
 import { ModelPicker } from './ModelPicker'
 import { ModeSwitch } from './ModePicker'
 import { ContextMeter, type ContextUsageState } from './ContextMeter'
@@ -69,10 +73,15 @@ import { useComposerMentions } from './useComposerMentions'
 import { draftHasImageMention, resolveComposerMentions } from './resolveMentions'
 import { mentionMarker, type MentionMenuItem } from './mentionModel'
 import {
+  ADD_COMPOSER_MENTION_EVENT,
+  appendMentionToDraft,
+  type AddComposerMentionDetail
+} from './composerMentionEvent'
+import {
   executeSlashResolveResult,
   type SlashClientHandlers
 } from './slashCommandExecute'
-import { resolveLinePlaceholder } from './composerPlaceholder'
+import { resolveLinePlaceholder, type LineOutcome } from './composerPlaceholder'
 import { filesFromDataTransfer } from './dataTransferFiles'
 import { focusComposerMessage, isMainComposerTarget } from '@renderer/lib/shortcuts'
 
@@ -152,7 +161,7 @@ export function Composer({
   onCancelEdit,
   onFocus,
   onEditLastUserMessage,
-  runCount = 0,
+  lineOutcome = null,
   newTaskTargets,
   briefHeaderActions,
   taskFiles
@@ -218,8 +227,8 @@ export function Composer({
   onFocus?: () => void
   /** Line only: ArrowUp on empty draft or caret at start edits the last user prompt. */
   onEditLastUserMessage?: () => boolean
-  /** Line only: runs the task has had — the placeholder names the next one. */
-  runCount?: number
+  /** Line only: how the latest run ended — the placeholder says what the line is for now. */
+  lineOutcome?: LineOutcome
   /** Brief only: the workspaces a new task can move to. */
   newTaskTargets?: NewTaskTargets
   /** Brief only: the pane's controls, at the end of its header. */
@@ -323,14 +332,37 @@ export function Composer({
 
   const { audio, setAudio, audioError, addAudio, removeAudio } = useComposerAudio(attachmentKey)
 
+  // The paperclip's menu: an image-only picker, and a capture of the Browser tab kept with the run.
+  const imageRef = useRef<HTMLInputElement>(null)
+  const attachScreenshot = useCallback(
+    (dataUrl: string) => {
+      setImageError(null)
+      setImages((prev) => [...prev, dataUrl].slice(0, MAX_IMAGES))
+    },
+    [setImages, setImageError]
+  )
+  const browserScreenshot = useBrowserScreenshotAttach({
+    workspacePath: variant === 'brief' ? null : workspacePath,
+    runId: activeRunId,
+    onImage: attachScreenshot,
+    onError: setImageError
+  })
+
   // New task: its checks and the draft it continues live per workspace, so
   // leaving the page keeps them and a start made elsewhere can empty them.
   const briefWorkspace = variant === 'brief' ? (workspacePath ?? null) : null
   const briefState = useBriefState(briefWorkspace)
   const briefDraftIdRef = useRef(briefState.draftId)
   briefDraftIdRef.current = briefState.draftId
-  const briefWorktreeRef = useRef(Boolean(briefState.worktree))
-  briefWorktreeRef.current = Boolean(briefState.worktree)
+  // Settings can open the page on New worktree; that only holds where there
+  // is a commit to branch from — the same test that shows the switch — so a
+  // folder without one still starts here. Asked only while the default is on.
+  const worktreeDefault = useNewTaskWorktreeDefault()
+  const briefGit = useGitStatus(briefWorkspace, 0, variant === 'brief' && worktreeDefault, 0)
+  const worktreeOffered = Boolean(briefGit.status?.branch && briefGit.status.hasCommits)
+  const briefWorktree = Boolean(briefState.worktree) && (!worktreeDefault || worktreeOffered)
+  const briefWorktreeRef = useRef(briefWorktree)
+  briefWorktreeRef.current = briefWorktree
   const [savingDraft, setSavingDraft] = useState(false)
   /** Bumped after a save empties the page, so a half-typed check goes too. */
   const [briefClearToken, setBriefClearToken] = useState(0)
@@ -820,6 +852,25 @@ export function Composer({
   /** A take is writing into the field: typing, attaching and menus wait. */
   const takeOpen = take.field.locked
 
+  // A chip from outside the field (an element picked in the Browser tab) lands
+  // at the end of this task's draft. Focus stays where it is, so picking can go on.
+  const addedTextRef = useRef(text)
+  addedTextRef.current = text
+  const addLockedRef = useRef(false)
+  addLockedRef.current = inputLocked || takeOpen
+  useEffect(() => {
+    if (variant === 'inline') return undefined
+    const onAdd = (event: Event): void => {
+      const detail = (event as CustomEvent<AddComposerMentionDetail>).detail
+      if (!detail || addLockedRef.current) return
+      if ((detail.workspacePath ?? null) !== (workspacePath ?? null)) return
+      if ((detail.runId ?? null) !== (activeRunId ?? null)) return
+      setText(appendMentionToDraft(addedTextRef.current, detail.mention))
+    }
+    window.addEventListener(ADD_COMPOSER_MENTION_EVENT, onAdd)
+    return () => window.removeEventListener(ADD_COMPOSER_MENTION_EVENT, onAdd)
+  }, [variant, workspacePath, activeRunId, setText])
+
   preferNativePdfRef.current = Boolean(
     (
       modelMetaByValue?.[modelSelectionKey(provider, model)] ?? modelMetaByValue?.[model]
@@ -991,24 +1042,40 @@ export function Composer({
           : 'Describe the task — the agent plans it, does it, and shows you the result'
       : isInline
         ? INLINE_PLACEHOLDER
-        : resolveLinePlaceholder({ hasWorkspace: Boolean(hasWorkspace), running, agentMode, runCount }))
+        : resolveLinePlaceholder({ hasWorkspace: Boolean(hasWorkspace), running, agentMode, outcome: lineOutcome }))
 
   // ── The pieces every variant is built from ────────────────────────────
 
   const fileInput = (
-    <input
-      ref={fileRef}
-      type="file"
-      accept={ATTACHMENT_ACCEPT}
-      multiple
-      className="hidden"
-      aria-hidden
-      tabIndex={-1}
-      onChange={(e) => {
-        void onPickAttachments(e.target.files)
-        e.target.value = ''
-      }}
-    />
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept={ATTACHMENT_ACCEPT}
+        multiple
+        className="hidden"
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => {
+          void onPickAttachments(e.target.files)
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={imageRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        aria-hidden
+        tabIndex={-1}
+        data-composer-image-input
+        onChange={(e) => {
+          void onPickImages(e.target.files)
+          e.target.value = ''
+        }}
+      />
+    </>
   )
 
   const field = (
@@ -1232,15 +1299,13 @@ export function Composer({
                 running={running}
               />
             ) : null}
-            <IconButton
-              icon="paperclip"
+            <AttachMenu
               label={attachLabel}
-              size="md"
-              tone="muted"
               disabled={inputLocked || attachFullAll}
-              data-composer-attach
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => fileRef.current?.click()}
+              imagesFull={imagesFull}
+              onPickFiles={() => fileRef.current?.click()}
+              onPickImage={() => imageRef.current?.click()}
+              screenshot={browserScreenshot}
             />
             <MicControl take={take} />
             {action}
@@ -1297,7 +1362,7 @@ export function Composer({
           if (briefWorkspace) setBriefChecks(briefWorkspace, next)
         }}
         clearToken={briefClearToken}
-        worktree={Boolean(briefState.worktree)}
+        worktree={briefWorktree}
         onWorktreeChange={(on) => {
           if (briefWorkspace) setBriefWorktree(briefWorkspace, on)
         }}
@@ -1365,105 +1430,115 @@ export function Composer({
       </>
     )
     return (
-      <div className={cn('shrink-0 border-t border-border bg-bg', className)} data-composer-line>
-        {errorAlerts ? <div className="flex flex-col gap-2 border-b border-border px-4 py-2">{errorAlerts}</div> : null}
+      // A box on the record's column, its edges on the brief's and the steps'
+      // — the same box the brief and Edit and rerun are.
+      <div className={cn('shrink-0 bg-bg', className)} data-composer-line>
+        <div className={cn('mx-auto w-full px-4 pb-4', RECORD_MAX)}>
+          {errorAlerts ? <div className="flex flex-col gap-2 pb-2">{errorAlerts}</div> : null}
 
-        {pendingFollowUps.length > 0 ? (
-          <ul className="m-0 list-none p-0" data-follow-up-queue aria-label="Queued instructions">
-            {pendingFollowUps.map((entry) =>
-              editingFollowUpId === entry.id ? (
-                <li key={entry.id} className="flex items-start gap-2 border-b border-border/60 py-2 pl-4 pr-3">
-                  <Textarea
-                    ref={followUpEditRef}
-                    className="min-w-0 flex-1"
-                    value={editingFollowUpText}
-                    onChange={(e) => setEditingFollowUpText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        e.stopPropagation()
-                        setEditingFollowUpId(null)
-                      }
-                    }}
-                    aria-label="Edit queued instruction"
-                    rows={2}
-                  />
-                  <Button size="xs" variant="ghost" aria-label="Cancel queued instruction edit" onClick={() => setEditingFollowUpId(null)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    aria-label="Save queued instruction edit"
-                    disabled={!editingFollowUpText.trim()}
-                    onClick={async () => {
-                      const trimmed = editingFollowUpText.trim()
-                      if (!trimmed) return
-                      const ok = onEditFollowUp ? await onEditFollowUp(entry.id, trimmed) : true
-                      if (ok) setEditingFollowUpId(null)
-                    }}
-                  >
-                    Save
-                  </Button>
-                </li>
-              ) : (
-                <li
-                  key={entry.id}
-                  className="flex h-9 items-center gap-2 border-b border-border/60 pl-4 pr-3 text-xs"
-                  data-follow-up-offline={entry.offline ? '' : undefined}
-                >
-                  {/* Offline: kept here, starts when the connection is back — the words say so. */}
-                  <span className="shrink-0 text-tertiary">{entry.offline ? 'Queued · offline' : 'Queued'}</span>
-                  <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
-                    {entry.preview}
-                  </span>
-                  {onEditFollowUp ? (
+          {pendingFollowUps.length > 0 ? (
+            <ul className="m-0 mb-1.5 list-none p-0" data-follow-up-queue aria-label="Queued instructions">
+              {pendingFollowUps.map((entry) =>
+                editingFollowUpId === entry.id ? (
+                  <li key={entry.id} className="flex items-start gap-2 py-1.5 pl-3 pr-2">
+                    <Textarea
+                      ref={followUpEditRef}
+                      className="min-w-0 flex-1"
+                      value={editingFollowUpText}
+                      onChange={(e) => setEditingFollowUpText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.stopPropagation()
+                          setEditingFollowUpId(null)
+                        }
+                      }}
+                      aria-label="Edit queued instruction"
+                      rows={2}
+                    />
+                    <Button size="xs" variant="ghost" aria-label="Cancel queued instruction edit" onClick={() => setEditingFollowUpId(null)}>
+                      Cancel
+                    </Button>
                     <Button
                       size="xs"
-                      variant="ghost"
-                      aria-label="Edit queued instruction"
-                      onClick={() => {
-                        setEditingFollowUpId(entry.id)
-                        setEditingFollowUpText(entry.text)
+                      variant="secondary"
+                      aria-label="Save queued instruction edit"
+                      disabled={!editingFollowUpText.trim()}
+                      onClick={async () => {
+                        const trimmed = editingFollowUpText.trim()
+                        if (!trimmed) return
+                        const ok = onEditFollowUp ? await onEditFollowUp(entry.id, trimmed) : true
+                        if (ok) setEditingFollowUpId(null)
                       }}
                     >
-                      Edit
+                      Save
                     </Button>
-                  ) : null}
-                  {onSendFollowUpNow && !entry.offline ? (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      aria-label="Send queued instruction now"
-                      title="Interrupt the run and apply it now"
-                      onClick={() => onSendFollowUpNow(entry.id)}
-                    >
-                      Send now
-                    </Button>
-                  ) : null}
-                  {onRemoveFollowUp ? (
-                    <IconButton
-                      icon="close"
-                      label="Remove queued instruction"
-                      size="xs"
-                      tone="muted"
-                      onClick={() => onRemoveFollowUp(entry.id)}
-                    />
-                  ) : null}
-                </li>
-              )
-            )}
-          </ul>
-        ) : null}
+                  </li>
+                ) : (
+                  <li
+                    key={entry.id}
+                    className="flex h-8 items-center gap-2 pl-3 pr-2 text-xs"
+                    data-follow-up-offline={entry.offline ? '' : undefined}
+                  >
+                    {/* Offline: kept here, starts when the connection is back — the words say so. */}
+                    <span className="shrink-0 text-tertiary">{entry.offline ? 'Queued · offline' : 'Queued'}</span>
+                    <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
+                      {entry.preview}
+                    </span>
+                    {onEditFollowUp ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        aria-label="Edit queued instruction"
+                        onClick={() => {
+                          setEditingFollowUpId(entry.id)
+                          setEditingFollowUpText(entry.text)
+                        }}
+                      >
+                        Edit
+                      </Button>
+                    ) : null}
+                    {onSendFollowUpNow && !entry.offline ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        aria-label="Send queued instruction now"
+                        title="Interrupt the run and apply it now"
+                        onClick={() => onSendFollowUpNow(entry.id)}
+                      >
+                        Send now
+                      </Button>
+                    ) : null}
+                    {onRemoveFollowUp ? (
+                      <IconButton
+                        icon="close"
+                        label="Remove queued instruction"
+                        size="xs"
+                        tone="muted"
+                        onClick={() => onRemoveFollowUp(entry.id)}
+                      />
+                    ) : null}
+                  </li>
+                )
+              )}
+            </ul>
+          ) : null}
 
-        <form onSubmit={submit} data-composer-shell onDragOver={onAttachmentDragOver} onDrop={onAttachmentDrop}>
-          {fileInput}
-          {readiness ? <div className="px-4 pt-3">{readiness}</div> : null}
-          <div className="px-4 pt-3">{field}</div>
-          {attachments ? <div className="px-4 pt-2">{attachments}</div> : null}
-          <div className="pb-1 pl-4 pr-3 @container">
-            {controls(lineAction, { context: true, takeSendLabel: running ? 'Queue' : 'Send' })}
-          </div>
-        </form>
+          <form
+            onSubmit={submit}
+            className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
+            data-composer-shell
+            onDragOver={onAttachmentDragOver}
+            onDrop={onAttachmentDrop}
+          >
+            {fileInput}
+            {readiness ? <div className="px-3 pt-3">{readiness}</div> : null}
+            <div className="px-3 pt-2.5">{field}</div>
+            {attachments ? <div className="px-3 pt-2">{attachments}</div> : null}
+            <div className="pb-1 pl-3 pr-2 @container">
+              {controls(lineAction, { context: true, takeSendLabel: running ? 'Queue' : 'Send' })}
+            </div>
+          </form>
+        </div>
 
         {menus}
       </div>

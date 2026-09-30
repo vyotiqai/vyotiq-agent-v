@@ -46,7 +46,8 @@ test('Always allow remembers the command, and a chained command still asks', asy
   await always.click()
 
   // The second pnpm vitest runs without asking; the chained one asks — with no Always.
-  const allowOnce = page.getByRole('button', { name: 'Allow once' })
+  // The record's card; the navigator row offers the same answer.
+  const allowOnce = page.locator('[data-needs-you]').getByRole('button', { name: 'Allow once' })
   await expect(allowOnce).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('pnpm vitest run && rm -rf dist').first()).toBeVisible()
   await expect(page.getByRole('button', { name: /^Always allow/ })).toHaveCount(0)

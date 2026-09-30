@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { RunSearchResult, TaskDraft } from '@shared/ipc'
 import { pinnedRunKey } from '@renderer/features/home/pinnedRuns'
+import { useWaitingAsks, type PendingAsk } from '@renderer/features/home/usePendingAsks'
 import { NavigatorDraftRow, type NavigatorDraftActions } from './NavigatorDraftRow'
 import type { ActiveRun, NotificationItem, NotificationMutateRequest, RunSummary } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
@@ -70,7 +71,16 @@ export type NavigatorProps = {
   openPaths: readonly string[]
   activePath: string | null
   runsByWorkspacePath: Readonly<
-    Record<string, { runs: readonly RunSummary[]; runsCapped?: boolean; runsError?: string | null }>
+    Record<
+      string,
+      {
+        runs: readonly RunSummary[]
+        /** Instances, listed under the live task that spawned them. */
+        instanceRuns?: readonly RunSummary[]
+        runsCapped?: boolean
+        runsError?: string | null
+      }
+    >
   >
   activeRuns: readonly ActiveRun[]
   activeRunsLoaded: boolean
@@ -112,6 +122,10 @@ export type NavigatorProps = {
     onDismiss: (req: NotificationMutateRequest) => void
     onOpenItem: (item: NotificationItem) => void
     onOpenSettings: () => void
+    /** A failed task's Retry, in place. */
+    onRetry?: (workspacePath: string, runId: string) => void
+    /** The task still stands failed. */
+    canRetry?: (workspacePath: string, runId: string) => boolean
   }
   widthPx: number
   /** New task briefs put aside, and what their rows can do. */
@@ -346,11 +360,18 @@ export function Navigator(props: NavigatorProps) {
   // A running task has more to say: it can't be archived or deleted until it stops.
   const settledSelection = selectedRows.filter((row) => row.state !== 'running' && row.state !== 'needs')
   const liveSelected = selectedRows.length - settledSelection.length
+  // What each waiting task waits on, so its row can say it — and take Allow once or Deny.
+  const { asks, respond } = useWaitingAsks(props.activeRuns, openPaths, props.rowActions.onRespondApproval)
+  const rowActions = useMemo<NavigatorRowActions>(
+    () => (respond ? { ...props.rowActions, onRespondApproval: respond } : props.rowActions),
+    [props.rowActions, respond]
+  )
   const rowExtras: RowExtras = {
     checkedKeys: checked,
     onMultiSelect: canSelect ? onMultiSelect : undefined,
     snippets: searching ? hitsByKey : undefined,
-    query: needle
+    query: needle,
+    asks
   }
 
   // "Archive all done": what the list shows as over, not pinned or archived yet.
@@ -647,7 +668,7 @@ export function Navigator(props: NavigatorProps) {
               onLoadOlder={() => props.onLoadOlderRuns(block.path)}
               selected={place === 'task' ? selected : null}
               isRunOpen={place === 'task' ? props.isRunOpen : undefined}
-              actions={props.rowActions}
+              actions={rowActions}
               onNavKeyDown={onNavKeyDown}
               rowExtras={rowExtras}
             />
@@ -672,7 +693,7 @@ export function Navigator(props: NavigatorProps) {
             the column's 16px left edge; Settings ends on the right edge New task does. */}
         <div className="flex h-10 items-center gap-1 pl-2.5 pr-2" role="group" aria-label="Places">
           <PlaceButton icon="home" label="Home" place="home" active={place === 'home'} onClick={props.onOpenHome} />
-          <NotificationsRow {...props.notifications} />
+          <NotificationsRow {...props.notifications} asks={asks} onRespondApproval={respond} />
           <PlaceButton
             icon="extensions"
             label="Extensions"
@@ -1122,6 +1143,7 @@ function TaskSection({
             onMultiSelect={rowExtras.onMultiSelect}
             snippet={rowExtras.snippets?.get(pinnedRunKey(row.workspacePath, row.runId))}
             query={rowExtras.query}
+            ask={row.state === 'needs' ? (rowExtras.asks[row.runId] ?? null) : null}
           />
         ))}
       </ul>
@@ -1239,6 +1261,8 @@ type RowExtras = {
   onMultiSelect?: (row: NavRow, range: boolean) => void
   snippets?: ReadonlyMap<string, RowSnippet>
   query: string
+  /** By run id: what a waiting task waits on. */
+  asks: Readonly<Record<string, PendingAsk | null>>
 }
 
 function matchCountLabel(count: number, truncated: boolean): string {

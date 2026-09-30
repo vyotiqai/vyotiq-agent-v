@@ -29,7 +29,8 @@ export function sameActiveRuns(
       prev.waiting?.kind === next.waiting?.kind &&
       prev.waiting?.since === next.waiting?.since &&
       prev.steps?.completed === next.steps?.completed &&
-      prev.steps?.total === next.steps?.total
+      prev.steps?.total === next.steps?.total &&
+      prev.activity === next.activity
     )
   })
 }

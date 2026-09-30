@@ -1,10 +1,14 @@
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { NotificationItem, NotificationMutateRequest } from '@shared/ipc'
+import type { NotificationItem, NotificationMutateRequest, ToolApprovalDecision } from '@shared/ipc'
 import { relativeTime } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { Badge, Button, IconButton, MENU_SURFACE, StatusGlyph, cn } from '@renderer/lib/ui'
+import { ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import type { PendingAsk } from '@renderer/features/home/usePendingAsks'
+import { questionAsk } from '@shared/needsYouText'
+import { RowDecision, commandOf } from './NavigatorTaskRow'
 
 function unreadLabel(count: number): string {
   if (count <= 0) return 'Inbox'
@@ -35,11 +39,48 @@ export function NotificationGlyph({ item }: { item: Pick<NotificationItem, 'kind
   }
 }
 
+type InboxGroup = { key: 'asks' | 'review' | 'earlier'; label: string; items: NotificationItem[] }
+
+/**
+ * The state a group says once, on its heading (the heading's words name it, so the
+ * glyph stays silent); Earlier mixes kinds, so its rows say their own.
+ */
+const GROUP_GLYPH: Record<InboxGroup['key'], ReactNode> = {
+  asks: <StatusGlyph state="needs" size={14} />,
+  review: <StatusGlyph state="review" size={14} />,
+  earlier: null
+}
+
+/** The approval a needs-you item's task still waits on, or null once it has been answered. */
+function openAsk(item: NotificationItem, asks: Readonly<Record<string, PendingAsk | null>> | undefined): PendingAsk | null {
+  if (item.kind !== 'needs_you' || item.action?.type !== 'open_run') return null
+  return asks?.[item.action.runId] ?? null
+}
+
+/**
+ * Asks still open first, then finished work waiting on review, then the rest.
+ * An ask already answered is history, so it goes to Earlier.
+ */
+function inboxGroups(items: NotificationItem[], asks: Readonly<Record<string, PendingAsk | null>> | undefined): InboxGroup[] {
+  const groups: InboxGroup[] = [
+    { key: 'asks', label: 'Needs you', items: [] },
+    { key: 'review', label: 'Ready for review', items: [] },
+    { key: 'earlier', label: 'Earlier', items: [] }
+  ]
+  for (const item of items) {
+    const at = openAsk(item, asks) ? 0 : item.kind === 'run_done' && item.reviewFiles ? 1 : 2
+    groups[at]!.items.push(item)
+  }
+  return groups.filter((group) => group.items.length > 0)
+}
+
 /**
  * The navigator's Inbox and the panel it opens: tasks that want you, wait on
  * your review, finished or failed, and app alerts. An icon in the foot's row;
  * a dot on it says something is unread, and the count is in its name and in
- * the panel.
+ * the panel. A waiting command is allowed or denied in place, with the same
+ * decision the task's row and record offer; a failed task is retried in place,
+ * with the Retry its row menu offers.
  */
 export function NotificationsRow({
   items,
@@ -47,7 +88,11 @@ export function NotificationsRow({
   onMarkRead,
   onDismiss,
   onOpenItem,
-  onOpenSettings
+  onOpenSettings,
+  asks,
+  onRespondApproval,
+  onRetry,
+  canRetry
 }: {
   items: NotificationItem[]
   unreadCount: number
@@ -55,6 +100,13 @@ export function NotificationsRow({
   onDismiss: (req: NotificationMutateRequest) => void
   onOpenItem: (item: NotificationItem) => void
   onOpenSettings: () => void
+  /** What each waiting task asks, by run id (the navigator reads them). */
+  asks?: Readonly<Record<string, PendingAsk | null>>
+  onRespondApproval?: (workspacePath: string, runId: string, requestId: string, decision: ToolApprovalDecision) => Promise<void>
+  /** A failed task's Retry, the one its row menu and record offer. */
+  onRetry?: (workspacePath: string, runId: string) => void
+  /** The task still stands failed: not going again, not gone. */
+  canRetry?: (workspacePath: string, runId: string) => boolean
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -71,6 +123,7 @@ export function NotificationsRow({
     autoFocusFirst: true
   })
   const label = unreadLabel(unreadCount)
+  const groups = open ? inboxGroups(items, asks) : []
 
   const panel =
     open && position ? (
@@ -105,53 +158,57 @@ export function NotificationsRow({
         {items.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-tertiary">Nothing new.</p>
         ) : (
-          <ul className="scroll-thin m-0 min-h-0 flex-1 list-none divide-y divide-border/60 overflow-y-auto p-0">
-            {items.map((item) => (
-              <li key={item.id} className="group relative">
-                <button
-                  type="button"
-                  data-notification-kind={item.kind}
-                  className="flex w-full min-w-0 items-start gap-3 px-3 py-2.5 text-left vy-transition hover:bg-surface focus-visible:vy-focus-ring"
-                  onClick={() => {
-                    onMarkRead({ id: item.id })
-                    onOpenItem(item)
-                    close(true)
-                  }}
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+            {groups.map((group) => (
+              <section key={group.key} aria-labelledby={`${panelId}-${group.key}`} data-inbox-group={group.key}>
+                <h3
+                  id={`${panelId}-${group.key}`}
+                  className={cn('m-0 flex h-7 items-end justify-between gap-2 px-3 pb-1', SECTION_LABEL)}
                 >
-                  <span className="mt-0.5 flex shrink-0">
-                    <NotificationGlyph item={item} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span
-                      className={cn('block truncate text-sm', item.read ? 'text-fg' : 'font-medium text-fg-strong')}
-                    >
-                      {item.title}
-                    </span>
-                    {item.body ? <span className="block truncate text-xs text-muted">{item.body}</span> : null}
-                  </span>
-                  <span className="shrink-0 font-mono text-caption text-tertiary tnum group-focus-within:invisible group-hover:invisible">
-                    {relativeTime(item.createdAt)}
-                  </span>
-                  {item.read ? (
-                    <span aria-hidden="true" className="w-1.5 shrink-0" />
-                  ) : (
-                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent group-focus-within:invisible group-hover:invisible">
-                      <span className="sr-only">Unread</span>
-                    </span>
-                  )}
-                </button>
-                <span className="absolute right-2 top-2 hidden group-focus-within:block group-hover:block">
-                  <IconButton
-                    icon="close"
-                    label={`Dismiss ${item.title}`}
-                    size="xs"
-                    tone="muted"
-                    onClick={() => onDismiss({ id: item.id })}
-                  />
-                </span>
-              </li>
+                  {group.label}
+                  {GROUP_GLYPH[group.key] ? <span className="flex shrink-0 normal-case">{GROUP_GLYPH[group.key]}</span> : null}
+                </h3>
+                <ul className="m-0 list-none divide-y divide-border/60 p-0">
+                  {group.items.map((item) => (
+                    <InboxItem
+                      key={item.id}
+                      item={item}
+                      ask={openAsk(item, asks)}
+                      showGlyph={group.key === 'earlier'}
+                      onOpen={() => {
+                        onMarkRead({ id: item.id })
+                        onOpenItem(item)
+                        close(true)
+                      }}
+                      onDismiss={() => onDismiss({ id: item.id })}
+                      onDecide={
+                        onRespondApproval && item.action?.type === 'open_run'
+                          ? async (requestId: string, decision: ToolApprovalDecision) => {
+                              const { workspacePath, runId } = item.action as { workspacePath: string; runId: string }
+                              await onRespondApproval(workspacePath, runId, requestId, decision)
+                              onMarkRead({ id: item.id })
+                            }
+                          : undefined
+                      }
+                      onRetry={
+                        onRetry &&
+                        item.kind === 'run_error' &&
+                        item.action?.type === 'open_run' &&
+                        (canRetry?.(item.action.workspacePath, item.action.runId) ?? true)
+                          ? () => {
+                              const { workspacePath, runId } = item.action as { workspacePath: string; runId: string }
+                              onMarkRead({ id: item.id })
+                              onRetry(workspacePath, runId)
+                              close(true)
+                            }
+                          : undefined
+                      }
+                    />
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         )}
         <div className="flex h-10 shrink-0 items-center border-t border-border pl-3 pr-2">
           <button
@@ -194,5 +251,102 @@ export function NotificationsRow({
       </span>
       {panel ? createPortal(panel, document.body) : null}
     </>
+  )
+}
+
+/**
+ * One Inbox row; an approval its task still waits on is answered under it, a
+ * question is a way to its task, and a task that failed is retried there. The
+ * title holds the one left edge; a row in Earlier, where kinds mix, says its
+ * state on the right, before its age.
+ */
+function InboxItem({
+  item,
+  ask,
+  showGlyph,
+  onOpen,
+  onDismiss,
+  onDecide,
+  onRetry
+}: {
+  item: NotificationItem
+  ask: PendingAsk | null
+  showGlyph: boolean
+  onOpen: () => void
+  onDismiss: () => void
+  onDecide?: (requestId: string, decision: ToolApprovalDecision) => Promise<void>
+  onRetry?: () => void
+}): ReactNode {
+  const command = commandOf(ask)
+  return (
+    <li className="group relative">
+      <button
+        type="button"
+        data-notification-kind={item.kind}
+        className={cn('flex w-full min-w-0 items-start gap-2 px-3 py-2.5 text-left vy-transition focus-visible:vy-focus-ring', ROW_HOVER)}
+        onClick={onOpen}
+      >
+        <span className="min-w-0 flex-1">
+          {/* Unread is ink, never weight: the read rows around it are quieter. */}
+          <span className={cn('block truncate text-sm', item.read ? 'text-fg' : 'text-fg-strong')}>{item.title}</span>
+          {command ? (
+            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 font-mono text-caption text-fg" data-inbox-command>
+              <span className="text-tertiary" aria-hidden>
+                $
+              </span>
+              <span className="min-w-0 truncate">{command}</span>
+            </span>
+          ) : ask?.kind === 'question' ? (
+            <span className="block truncate text-xs text-accent" data-inbox-question>
+              {questionAsk(ask.request)}
+            </span>
+          ) : item.body ? (
+            <span className="block truncate text-xs text-muted">{item.body}</span>
+          ) : null}
+        </span>
+        {item.read ? null : (
+          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent group-focus-within:invisible group-hover:invisible">
+            <span className="sr-only">Unread</span>
+          </span>
+        )}
+        {showGlyph ? (
+          <span className="mt-0.5 flex shrink-0">
+            <NotificationGlyph item={item} />
+          </span>
+        ) : null}
+        <span className="shrink-0 font-mono text-caption text-tertiary tnum group-focus-within:invisible group-hover:invisible">
+          {relativeTime(item.createdAt)}
+        </span>
+      </button>
+      <span className="absolute right-2 top-2 hidden group-focus-within:block group-hover:block">
+        <IconButton icon="close" label={`Dismiss ${item.title}`} size="xs" tone="muted" onClick={onDismiss} />
+      </span>
+      {ask?.kind === 'approval' && onDecide ? (
+        <RowDecision
+          // One per request: the next ask gets its buttons back.
+          key={ask.request.requestId}
+          title={item.title}
+          // On the title's edge.
+          className="pb-2.5 pl-3 pr-3"
+          onDecide={(decision) => onDecide(ask.request.requestId, decision)}
+        />
+      ) : null}
+      {ask?.kind === 'question' ? (
+        // A question is answered in its task, where the choices are: this is the way there.
+        <div className="pb-2.5 pl-3 pr-3" data-inbox-answer>
+          <Button size="xs" variant="primary" aria-label={`Answer ${item.title}`} onClick={onOpen}>
+            Answer
+          </Button>
+        </div>
+      ) : null}
+      {onRetry ? (
+        // On the title's edge, as Allow once and Deny are.
+        <div className="pb-2.5 pl-3 pr-3" data-inbox-retry>
+          <Button size="xs" variant="secondary" icon="retry" aria-label={`Retry ${item.title}`} onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+    </li>
   )
 }

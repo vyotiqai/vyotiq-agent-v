@@ -1467,6 +1467,18 @@ export function useWorkspaceManager(options?: {
     for (const entry of finishedBackgroundRuns(prevActive, nextActive, backgroundRunIdsRef.current)) {
       backgroundRunIdsRef.current.delete(entry.runId)
     }
+    // A run the list has never seen (an instance a task just spawned) is on
+    // disk already; read the list again so the navigator can put it under its task.
+    const unlisted = new Set<string>()
+    for (const entry of nextActive) {
+      if (prevActive.some((r) => r.runId === entry.runId)) continue
+      const ctx = findByWorkspacePath(contextsRef.current, entry.workspacePath)
+      if (!ctx) continue
+      const listed =
+        ctx.runs.some((r) => r.runId === entry.runId) || (ctx.instanceRuns ?? []).some((r) => r.runId === entry.runId)
+      if (!listed) unlisted.add(ctx.path)
+    }
+    for (const path of unlisted) void refreshRunsRef.current(path)
     const activeIds = new Set(nextActive.map((entry) => entry.runId))
     await reattachActiveRuns(nextActive)
     for (const [key, ctrl] of controllersRef.current.entries()) {
@@ -2805,6 +2817,7 @@ export function useWorkspaceManager(options?: {
             setCompacting: activeController.setCompacting.bind(activeController),
             applyWriteCheckpointResolution:
               activeController.applyWriteCheckpointResolution.bind(activeController),
+            applyWriteCheckpointReopen: activeController.applyWriteCheckpointReopen.bind(activeController),
             loadEarlierMessages: activeController.loadEarlierMessages.bind(activeController)
           }
         : null,

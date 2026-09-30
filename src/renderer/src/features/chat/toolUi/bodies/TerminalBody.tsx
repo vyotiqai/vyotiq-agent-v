@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactElement, type UIEvent } from 'react'
+import { useEffect, useMemo, useRef, type ReactElement, type ReactNode, type UIEvent } from 'react'
 import { cn } from '@renderer/lib/ui'
 import { TOOL_TERMINAL_VIEWPORT } from '@renderer/lib/utils/layout'
 import { sanitizeTerminalDisplayText } from '@shared/utils/terminalFormat'
@@ -7,6 +7,43 @@ import { parseTerminalCardData } from '../parsers/terminal'
 import { TruncatedBanner } from '../primitives'
 
 const VIEWPORT_PIN_PX = 24
+
+/** A test runner's pass and fail marks at the start of a line. */
+const PASS_MARKS = '✓✔'
+const MARK_LINE = /^(\s*)([✓✔✗✘✕×])(.*)$/
+const ANY_MARK = /[✓✔✗✘✕×]/
+
+/**
+ * Test output reads at a glance: a line's pass mark in the success hue and a
+ * failure mark in danger, each line lifted a step off the quiet rest. The
+ * glyph itself stays, so the hue is never the only thing that says it.
+ */
+export function markedOutput(text: string): ReactNode {
+  if (!ANY_MARK.test(text)) return text
+  const out: ReactNode[] = []
+  let plain = ''
+  const lines = text.split('\n')
+  lines.forEach((line, i) => {
+    const nl = i < lines.length - 1 ? '\n' : ''
+    const m = MARK_LINE.exec(line)
+    if (!m) {
+      plain += line + nl
+      return
+    }
+    if (plain) out.push(plain)
+    plain = nl
+    const pass = PASS_MARKS.includes(m[2]!)
+    out.push(
+      <span key={i} className={pass ? 'text-fg' : 'text-fg-strong'} data-output-mark={pass ? 'pass' : 'fail'}>
+        {m[1]}
+        <span className={pass ? 'text-success' : 'text-danger'}>{m[2]}</span>
+        {m[3]}
+      </span>
+    )
+  })
+  if (plain) out.push(plain)
+  return out
+}
 
 function TerminalDivider(): ReactElement {
   return <span className="block text-tertiary" aria-hidden>
@@ -24,6 +61,7 @@ export function TerminalBody({ tool, loading, loadFailed, inGroup }: ToolBodyPro
       stderr: sanitizeTerminalDisplayText(parsed.stderr)
     }
   }, [tool])
+  const output = useMemo(() => markedOutput(data.output), [data.output])
   const running = tool.status === 'running'
   const viewportRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
@@ -91,7 +129,7 @@ export function TerminalBody({ tool, loading, loadFailed, inGroup }: ToolBodyPro
           <span className="block text-fg">{`$ ${data.command}`}</span>
         ) : null}
         {hasCommand && hasStream ? <TerminalDivider /> : null}
-        {data.output ? <span className="text-secondary">{data.output}</span> : null}
+        {data.output ? <span className="text-secondary">{output}</span> : null}
         {data.stderr ? (
           <span className="text-danger">
             {data.output ? '\n' : ''}

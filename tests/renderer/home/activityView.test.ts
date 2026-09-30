@@ -6,6 +6,7 @@ import {
   activitySpendSeries,
   finishedShare,
   formatCompactCount,
+  keptShare,
   weekdayShort
 } from '@renderer/features/home/activityView'
 
@@ -86,17 +87,28 @@ describe('activitySpendSeries', () => {
     expect(series[0]!.tokens).toBeNull()
   })
 
-  it('prefers the provider bill over the estimate, and gaps when neither exists', () => {
+  it('adds the bills and the estimates, as the window’s Spend does, and says which days hold an estimate', () => {
     const series = activitySpendSeries(
       [
+        day('2026-01-05', { billedCost: 0.5 }),
+        // Main keeps the two apart: one run's bill, another run's estimate.
         day('2026-01-06', { billedCost: 0.5, estimatedCost: 9 }),
         day('2026-01-07', { estimatedCost: 0.75 })
       ],
       7,
       NOW
     )
-    expect(series[5]!.cost).toBe(0.5)
-    expect(series[6]!.cost).toBe(0.75)
+    expect(series.slice(4).map((point) => [point.cost, point.estimated])).toEqual([
+      [0.5, false],
+      [9.5, true],
+      [0.75, true]
+    ])
+  })
+
+  it('tells a day whose tasks nobody priced from a day with no tasks', () => {
+    const series = activitySpendSeries([day('2026-01-07')], 7, NOW)
+    expect(series.at(-1)).toMatchObject({ cost: null, unpriced: true })
+    expect(series[0]).toMatchObject({ cost: null, unpriced: false })
   })
 
   it('reads a zero-usage day as a token gap', () => {
@@ -170,5 +182,22 @@ describe('finishedShare', () => {
 
   it('gives no share when nothing ended', () => {
     expect(finishedShare({ done: 0, error: 0, cancelled: 0, running: 2 })).toBeNull()
+  })
+})
+
+describe('keptShare', () => {
+  it('is kept against everything settled', () => {
+    expect(keptShare({ kept: 41, undone: 9 })).toEqual({ percent: 82, kept: 41, total: 50 })
+  })
+
+  it('never reads 100% while something was undone, or 0% while something was kept', () => {
+    expect(keptShare({ kept: 999, undone: 1 })?.percent).toBe(99)
+    expect(keptShare({ kept: 1, undone: 999 })?.percent).toBe(1)
+    expect(keptShare({ kept: 0, undone: 3 })?.percent).toBe(0)
+  })
+
+  it('gives no share when main reported none', () => {
+    expect(keptShare(undefined)).toBeNull()
+    expect(keptShare({ kept: 0, undone: 0 })).toBeNull()
   })
 })

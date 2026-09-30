@@ -2325,3 +2325,78 @@ describe('settings', () => {
     expect(radio('Home').getAttribute('aria-checked')).toBe('false')
   })
 })
+
+describe('Effort beside the model', () => {
+  it('sets the effort new tasks start at, app-wide', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={{ ...emptySecrets, openai: true }}
+        section="providers"
+        onClose={vi.fn()}
+        onUpdate={onUpdate}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    const row = document.querySelector('[data-settings-field="thinking-effort"]') as HTMLElement
+    expect(row).toBeTruthy()
+    expect(within(row).queryByText('this workspace')).toBeNull()
+    const effort = within(row).getByRole('radiogroup', { name: 'Effort' })
+    fireEvent.click(within(effort).getByRole('radio', { name: 'High' }))
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ thinkingEnabled: true, thinkingEffort: 'high' }))
+    )
+  })
+
+  it('writes the workspace override while one is on, and says so on the row', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    const onSetSettingsOverride = vi.fn(async () => ({ ok: true as const, data: {} as never }))
+    const workspacePath = 'C:/work/effort'
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={{ ...emptySecrets, openai: true }}
+        section="providers"
+        onClose={vi.fn()}
+        onUpdate={onUpdate}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+        activeWorkspacePath={workspacePath}
+        settingsOverridesByPath={{
+          [workspacePath]: { useOverride: true, provider: 'openai', model: 'gpt-5.6', thinkingEffort: 'medium' }
+        }}
+        effectiveChatSettings={{
+          provider: 'openai',
+          model: 'gpt-5.6',
+          ollamaBaseUrl: DEFAULT_SETTINGS.ollamaBaseUrl,
+          customOpenAiBaseUrl: DEFAULT_SETTINGS.customOpenAiBaseUrl,
+          keepRecentTurns: DEFAULT_SETTINGS.keepRecentTurns,
+          autoCompactThresholdRatio: DEFAULT_SETTINGS.autoCompactThresholdRatio,
+          thinkingEnabled: true,
+          thinkingEffort: 'medium',
+          showThinking: DEFAULT_SETTINGS.showThinking,
+          toolApproval: DEFAULT_SETTINGS.toolApproval,
+          agentPersona: '',
+          agentTone: '',
+          responseLanguage: '',
+          responseVerbosity: 'concise'
+        }}
+        onSetSettingsOverride={onSetSettingsOverride}
+      />
+    )
+    const row = document.querySelector('[data-settings-field="thinking-effort"]') as HTMLElement
+    expect(within(row).getByText('this workspace')).toBeTruthy()
+    const effort = within(row).getByRole('radiogroup', { name: 'Effort' })
+    expect(within(effort).getByRole('radio', { name: 'Med' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(within(effort).getByRole('radio', { name: 'High' }))
+    await waitFor(() =>
+      expect(onSetSettingsOverride).toHaveBeenCalledWith(
+        workspacePath,
+        expect.objectContaining({ useOverride: true, thinkingEnabled: true, thinkingEffort: 'high' })
+      )
+    )
+    expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ thinkingEffort: 'high' }))
+  })
+})

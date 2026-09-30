@@ -932,6 +932,69 @@ describe('FilesPanel', () => {
     expect(header.textContent).toContain('agent read L1–20')
   })
 
+  it('narrows the tree to what this task changed, and the folders that hold it', async () => {
+    const marks = new Map([
+      ['README.md', { read: { startLine: 1 } }],
+      ['src/note.ts', { change: 'M' as const }]
+    ])
+    render(<FilesPanel workspacePath={workspacePath} active agentMarks={marks} />)
+    await screen.findByText('README.md')
+    fireEvent.click(screen.getByRole('button', { name: 'Only files this task changed' }))
+    // src opens on its own to show the file inside it; the file it only read goes.
+    expect(await screen.findByText('note.ts')).toBeTruthy()
+    expect(screen.getByText('src')).toBeTruthy()
+    expect(screen.queryByText('README.md')).toBeNull()
+    const toggle = screen.getByRole('button', { name: 'Show every file' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(toggle)
+    expect(await screen.findByText('README.md')).toBeTruthy()
+  })
+
+  it('starts another task on the whole tree, not narrowed to the last one’s files', async () => {
+    const marks = new Map([['src/note.ts', { change: 'M' as const }]])
+    const { rerender } = render(<FilesPanel workspacePath={workspacePath} active agentMarks={marks} runId="run-1" />)
+    await screen.findByText('README.md')
+    fireEvent.click(screen.getByRole('button', { name: 'Only files this task changed' }))
+    await waitFor(() => expect(screen.queryByText('README.md')).toBeNull())
+    rerender(<FilesPanel workspacePath={workspacePath} active agentMarks={marks} runId="run-2" />)
+    expect(await screen.findByText('README.md')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Only files this task changed' }).getAttribute('aria-pressed')).not.toBe('true')
+  })
+
+  it('offers no narrowing when the task has changed nothing', async () => {
+    render(<FilesPanel workspacePath={workspacePath} active agentMarks={new Map([['README.md', { read: {} }]])} />)
+    await screen.findByText('README.md')
+    expect(screen.queryByRole('button', { name: 'Only files this task changed' })).toBeNull()
+  })
+
+  it('counts what this task changed in the open file, over it', async () => {
+    const taskFileDiff = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        path: 'src/note.ts',
+        action: 'modified',
+        diff: '--- a/src/note.ts\n+++ b/src/note.ts\n@@ -1 +1,2 @@\n-hi\n+hello\n+there\n',
+        add: 2,
+        del: 1
+      }
+    })
+    ;(api as Record<string, unknown>).taskFileDiff = taskFileDiff
+    try {
+      const marks = new Map([['src/note.ts', { change: 'M' as const }]])
+      render(<FilesPanel workspacePath={workspacePath} active agentMarks={marks} runId="run-1" />)
+      fireEvent.click(await screen.findByText('src'))
+      fireEvent.click(await screen.findByText('note.ts'))
+      await waitFor(() => {
+        const header = document.querySelector('[data-editor-header]') as HTMLElement | null
+        expect(header?.textContent).toContain('+2')
+        expect(header?.textContent).toContain('−1')
+      })
+      expect(taskFileDiff).toHaveBeenCalledWith({ workspacePath, runId: 'run-1', path: 'src/note.ts' })
+    } finally {
+      delete (api as Record<string, unknown>).taskFileDiff
+    }
+  })
+
   it('reads the open file out in the status bar', async () => {
     render(<FilesPanel workspacePath={workspacePath} active />)
     fireEvent.click(await screen.findByText('README.md'))
@@ -1193,5 +1256,28 @@ describe('TextCodeEditor', () => {
     await waitFor(() => expect(tinted()).toEqual(['four', 'five']))
     view.rerender(<TextCodeEditor {...props} markedLines={null} />)
     await waitFor(() => expect(tinted()).toEqual([]))
+  })
+
+  it('bars the lines the task changed in a gutter of their own, before the numbers', async () => {
+    const text = ['one', 'two', 'three', 'four', 'five'].join('\n')
+    const props = {
+      path: 'note.ts',
+      value: text,
+      cursor: 0,
+      selections: [{ from: 0, to: 0 }],
+      onChange: vi.fn(),
+      onMetaChange: vi.fn()
+    }
+    const view = render(<TextCodeEditor {...props} changedLines={[2, 4]} />)
+    const bars = (): Element[] => Array.from(document.querySelectorAll('.cm-taskChange'))
+    await waitFor(() => expect(bars()).toHaveLength(2))
+    expect(bars()[0]!.getAttribute('title')).toBe('Changed by this task')
+    const gutters = Array.from(document.querySelectorAll('.cm-gutter')).map((g) => g.className)
+    expect(gutters.findIndex((c) => c.includes('cm-taskChanges'))).toBeLessThan(
+      gutters.findIndex((c) => c.includes('cm-lineNumbers'))
+    )
+    view.rerender(<TextCodeEditor {...props} changedLines={null} />)
+    await waitFor(() => expect(bars()).toHaveLength(0))
+    expect(document.querySelector('.cm-taskChanges')).toBeNull()
   })
 })

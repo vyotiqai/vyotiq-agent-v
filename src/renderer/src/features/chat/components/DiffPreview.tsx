@@ -34,6 +34,13 @@ function LineText({
   )
 }
 
+/** Added and removed lines: what "more changed lines" counts. */
+function changedCount(lines: readonly DiffLine[]): number {
+  let n = 0
+  for (const line of lines) if (line.kind === 'add' || line.kind === 'del') n += 1
+  return n
+}
+
 /**
  * Row cues: background tint + gutter sign (+/−) mark add/del — never hue alone.
  * The sign lives in the line-# gutter; compact and keyboard-free (D2/D7 kept).
@@ -87,7 +94,9 @@ function DiffLines({
   }, [visible])
 
   if (!filtered.length) return null
-  const hidden = filtered.length - visible.length
+  // What the cut leaves out that matters: the changed lines, not the context
+  // and gaps around them.
+  const hidden = changedCount(filtered) - changedCount(visible)
   const hiddenBefore = hiddenBeforeCount > 0
 
   return (
@@ -97,9 +106,9 @@ function DiffLines({
         wordWrap ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden'
       )}
     >
-      {hiddenBefore ? (
+      {hiddenBefore && hidden > 0 ? (
         <p className="m-0 px-2 py-1 text-caption text-tertiary">
-          {hidden} earlier {hidden === 1 ? 'line' : 'lines'}
+          {hidden} earlier changed {hidden === 1 ? 'line' : 'lines'}
         </p>
       ) : null}
       {visible.map((line, index) => {
@@ -148,7 +157,7 @@ function DiffLines({
       })}
       {!hiddenBefore && hidden > 0 ? (
         <p className="m-0 px-2 py-1 text-caption text-tertiary">
-          {hidden} more {hidden === 1 ? 'line' : 'lines'}
+          {hidden} more changed {hidden === 1 ? 'line' : 'lines'}
         </p>
       ) : null}
     </div>

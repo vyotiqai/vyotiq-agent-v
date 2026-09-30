@@ -9,6 +9,7 @@ import type {
   ProviderIdAny,
   PersistedEvent,
   ToolApprovalDecision,
+  ToolApprovalGrant,
   ToolApprovalRequest,
   AgentQuestionAnswer,
   AgentQuestionRequest
@@ -67,6 +68,7 @@ import {
   MAX_TOOL_PROGRESS_ENTRIES,
   LIVE_COMPACTION_ID,
   type UiItem,
+  type UiToolApproval,
   type UiToolProgressEntry,
   type UiToolRow,
   type TurnOutcome
@@ -678,15 +680,32 @@ function clearQuestionsForTool(items: UiItem[], toolCallId: string): UiItem[] {
 }
 
 /** Drop pending approval prompts, either one answered or all of them. */
-function clearApprovals(items: UiItem[], requestId?: string): UiItem[] {
+/**
+ * What main saves for this answer (see toolApproval.ts), shown on the row while
+ * the call runs; the call's tool_result carries main's own and replaces it.
+ */
+function provisionalGrant(approval: UiToolApproval, decision: ToolApprovalDecision): ToolApprovalGrant | undefined {
+  if (decision === 'deny') return undefined
+  if (approval.danger || decision === 'once') return { by: 'you', scope: 'once' }
+  if (decision === 'session') return { by: 'you', scope: 'task' }
+  if (approval.toolName === 'terminal') {
+    return approval.alwaysAllowCommand
+      ? { by: 'you', scope: 'workspace', allow: approval.alwaysAllowCommand }
+      : { by: 'you', scope: 'once' }
+  }
+  return { by: 'you', scope: 'workspace', allow: approval.toolName }
+}
+
+function clearApprovals(items: UiItem[], requestId?: string, decision?: ToolApprovalDecision): UiItem[] {
   let changed = false
   const next = items.map((item) => {
     if (item.kind !== 'tool') return item
     let nextItem = item
     if (item.approval && (!requestId || item.approval.requestId === requestId)) {
       changed = true
-      const { approval: _approval, ...rest } = item
-      nextItem = rest
+      const { approval, ...rest } = item
+      const grant = decision ? provisionalGrant(approval, decision) : undefined
+      nextItem = grant ? { ...rest, tool: { ...rest.tool, approvedBy: grant } } : rest
     }
     return nextItem
   })
@@ -1405,6 +1424,15 @@ export type ChatStreamController = ChatStreamState & {
     kept: string[]
     discarded: string[]
     fullyResolved: boolean
+  }) => void
+  /**
+   * Apply a taken-back Keep or Undo: those files wait on review again. Works
+   * with no live checkpoint too (a reload drops a settled one), so the
+   * reopened files can be kept or undone again straight away.
+   */
+  applyWriteCheckpointReopen: (result: {
+    reopened: string[]
+    checkpoints: ReadonlyArray<{ checkpointId: string; files: readonly WriteCheckpointFileState[] }>
   }) => void
   handleEvent: (event: AgentEvent) => void
   /**
@@ -2805,7 +2833,8 @@ export function createChatStreamController(
                 status: event.ok ? 'done' : 'fail',
                 content: event.content ?? existing.tool.content,
                 contentTruncated: event.contentTruncated ?? existing.tool.contentTruncated,
-                images: event.images ?? existing.tool.images
+                images: event.images ?? existing.tool.images,
+                ...(event.approvedBy ? { approvedBy: event.approvedBy } : {})
               }
             },
             event.toolCallId
@@ -2842,7 +2871,8 @@ export function createChatStreamController(
                     status: event.ok ? 'done' : 'fail',
                     content: event.content ?? row.tool.content,
                     contentTruncated: event.contentTruncated ?? row.tool.contentTruncated,
-                    images: event.images ?? row.tool.images
+                    images: event.images ?? row.tool.images,
+                    ...(event.approvedBy ? { approvedBy: event.approvedBy } : {})
                   }
                 },
                 event.toolCallId
@@ -2863,7 +2893,8 @@ export function createChatStreamController(
                 status: event.ok ? 'done' : 'fail',
                 content: event.content,
                 contentTruncated: event.contentTruncated,
-                ...(event.images ? { images: event.images } : {})
+                ...(event.images ? { images: event.images } : {}),
+                ...(event.approvedBy ? { approvedBy: event.approvedBy } : {})
               }
             },
             state.runStartedAt
@@ -4683,7 +4714,7 @@ export function createChatStreamController(
       logger.warn('Tool approval response not accepted', { scope: 'chat' })
       throw new Error('Tool approval was not accepted. Try again.')
     }
-    patch({ items: clearApprovals(state.items, requestId), error: null })
+    patch({ items: clearApprovals(state.items, requestId, decision), error: null })
   }
 
   const handleQuestionRequest = (request: AgentQuestionRequest): void => {
@@ -5057,6 +5088,34 @@ export function createChatStreamController(
     })
   }
 
+  const applyWriteCheckpointReopen = (result: {
+    reopened: string[]
+    checkpoints: ReadonlyArray<{ checkpointId: string; files: readonly WriteCheckpointFileState[] }>
+  }): void => {
+    if (disposed || result.reopened.length === 0 || result.checkpoints.length === 0) return
+    const reopened = new Set(result.reopened)
+    const current = state.writeCheckpoint
+    const byPath = new Map((current?.files ?? []).map((f) => [f.path, f] as const))
+    for (const checkpoint of result.checkpoints) {
+      for (const f of checkpoint.files) {
+        if (!reopened.has(f.path)) continue
+        byPath.set(f.path, { path: f.path, action: f.action, undoable: f.undoable })
+      }
+    }
+    const files = [...byPath.values()]
+    // Keep and Undo all act on one checkpoint: the live one while it still
+    // waits, else the newest one reopened here.
+    const checkpointId =
+      current && !current.undone ? current.checkpointId : result.checkpoints[result.checkpoints.length - 1]!.checkpointId
+    patch({
+      writeCheckpoint: {
+        checkpointId,
+        undone: files.every((f) => Boolean(f.resolved) || !f.undoable),
+        files
+      }
+    })
+  }
+
   const dispose = (): void => {
     disposed = true
     flushStreamingPatches()
@@ -5179,6 +5238,7 @@ export function createChatStreamController(
     setCompacting,
     setProviderModel,
     applyWriteCheckpointResolution,
+    applyWriteCheckpointReopen,
     handleEvent,
     setUiSuspended,
     markUiCatchUpNeeded,

@@ -36,7 +36,13 @@ import type { ContextUsageState } from './ContextMeter'
 import { ProviderLogo } from './ProviderLogo'
 import { clampComposerDropdownPanel } from './composerDropdownLayout'
 import { formatModelDisplayName, supportedTiersForModel, type ModelPickerOption } from './composerModelUtils'
-import { buildModes, modeIndex, modelShowsThinkingControls, resolveThinkingUiMeta } from './ThinkingControls'
+import {
+  buildModes,
+  modeIndex,
+  modelShowsThinkingControls,
+  resolveThinkingUiMeta
+} from './ThinkingControls'
+import { effortFootNote, effortNotes } from './effortCost'
 import { useResolvedContextUsage } from './useContextUsage'
 
 const PANEL_MAX_PX = 520
@@ -166,6 +172,13 @@ export function ModelPicker(props: ModelPickerProps) {
 
   const { selectedKey, meta, modelName, thinkingUi, effortModes, showsEffort, effortAt, effort } = useModelSummary(props)
   const tiers = supportedTiersForModel(provider, model, meta)
+  // What each effort costs, said before it is picked: on the level's hover, and under the levels for the one set.
+  const effortNoteList = effortNotes(effortModes, {
+    provider,
+    model,
+    meta,
+    onOffOnly: thinkingUi.thinkingMode === 'boolean'
+  })
 
   // ── A long run at high effort: offer one step down, never apply it ────
   const usage = useResolvedContextUsage(props.metaStore, props.contextUsage)
@@ -420,7 +433,10 @@ export function ModelPicker(props: ModelPickerProps) {
                 <Segmented
                   label="Effort"
                   value={String(effortAt)}
-                  items={effortModes.map((m, i) => ({ id: String(i), label: m.short, title: m.label }))}
+                  items={effortModes.map((m, i) => {
+                    const note = effortNoteList[i]
+                    return { id: String(i), label: m.short, title: note ? `${m.label}: ${note}` : m.label }
+                  })}
                   onChange={(id) => {
                     const next = effortModes[Number(id)]
                     if (!next) return
@@ -443,6 +459,13 @@ export function ModelPicker(props: ModelPickerProps) {
                   disabled={locked}
                 />
               </span>
+            ) : null}
+            {effort ? (
+              <p className="m-0 w-full text-caption text-tertiary" data-effort-note>
+                {effortNoteList[effortAt] ? `${effort.label}: ${effortNoteList[effortAt]}.` : null}
+                {effortNoteList[effortAt] && effort.enabled ? ' ' : null}
+                {effort.enabled ? effortFootNote(provider, model) : null}
+              </p>
             ) : null}
           </div>
         ) : null}

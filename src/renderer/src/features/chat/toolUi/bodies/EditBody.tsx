@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { inferFileWriteAction } from '@shared/toolSummary'
 import { cn } from '@renderer/lib/ui'
 import { BORDER_DIVIDER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
 import { DiffPreview, DIFF_COLLAPSED_LINES, DIFF_MAX_EXPANDED_LINES } from '../../components/DiffPreview'
@@ -66,6 +67,8 @@ export function EditBody({ tool, expanded, loading, loadFailed }: ToolBodyProps)
   const painted = useLiveDiffLines(diffLines, live)
   const status = (tool.content ?? '').trim()
   const highlightPath = editData.iconPath || editData.path
+  // A new file is all additions: the + gutter says so, and a wash on every row would say nothing.
+  const created = inferFileWriteAction(tool.name, tool.content) === 'created'
 
   return (
     <div aria-busy={loading || running || undefined}>
@@ -91,6 +94,7 @@ export function EditBody({ tool, expanded, loading, loadFailed }: ToolBodyProps)
             path={highlightPath}
             expanded={expanded}
             followEnd={live}
+            added={created}
           />
         </>
       ) : !failed && status ? (

@@ -10,7 +10,8 @@ import { Button, DiffStat, StatusGlyph, cn } from '@renderer/lib/ui'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
 import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { turnCost } from '@renderer/features/chat/utils/messageFooterStats'
-import { collectSessionChangedFiles, type ChangedFile } from '@renderer/features/chat/utils/turnFileDiffs'
+import { collectSessionChangedFiles, normalizeRelPath, type ChangedFile } from '@renderer/features/chat/utils/turnFileDiffs'
+import { outcomeMarks, summarizeOutcome, useTaskOutcome, type OutcomeSummary } from './taskOutcomeStore'
 import { AskQuestionPanel } from '@renderer/features/chat/components/AskQuestionPanel'
 import type { InlineInstanceGate } from '@renderer/features/chat/hooks/useInlineInstanceUi'
 import type { DoneWhenCheck } from '@shared/doneWhenChecks'
@@ -21,7 +22,7 @@ import { Brief } from './record/Brief'
 import { ReceiptLine } from './record/Receipt'
 import { RecordRow, RunDivider } from './record/RecordLayout'
 import { RecordProse } from './record/RecordProse'
-import { Steps } from './record/Steps'
+import { Steps, instancesOf, placeKey } from './record/Steps'
 import { LooseWork, NowLine, RecordActionsContext, workIsLive } from './record/WorkItems'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
@@ -68,26 +69,6 @@ function messageIndexOf(run: RecordRun): number | null {
   return m ? Number(m[1]) : null
 }
 
-function stepLabelFor(run: RecordRun, need: NeedsYou): string | undefined {
-  const step = run.steps.find((s) => s.key === need.stepKey)
-  return step ? `Step ${step.n} · ${step.title}` : undefined
-}
-
-/** What the agent said right before the gated call, in the same list. */
-function whyFor(run: RecordRun, toolId: string): string | undefined {
-  const lists: WorkItem[][] = [run.setup, ...run.steps.flatMap((s) => [s.work, s.between]), run.after]
-  for (const list of lists) {
-    const at = list.findIndex((w) => w.kind === 'card' && w.tool.id === toolId)
-    if (at < 0) continue
-    for (let i = at - 1; i >= 0; i--) {
-      const w = list[i]!
-      if (w.kind === 'note') return w.text
-      if (w.kind !== 'thought') break
-    }
-  }
-  return undefined
-}
-
 function runDuration(run: RecordRun): number | null {
   return run.startedAt != null && run.endedAt != null ? run.endedAt - run.startedAt : null
 }
@@ -101,6 +82,33 @@ export function TaskRecord(props: TaskRecordProps) {
   const lastLive = options.running
   const earlier = runs.slice(0, -1)
   const needs = lastLive ? last.needs : []
+  // Each card goes where the gated call would have: in its step, or the loose
+  // work around the steps. An instance's goes in the step that started it.
+  // A place the record does not draw (a step a later plan dropped) keeps its
+  // card above the record, so nothing waiting on you is ever out of sight.
+  const drawn = new Set([
+    placeKey({ kind: 'setup' }),
+    placeKey({ kind: 'after' }),
+    ...last.steps.flatMap((s) => [placeKey({ kind: 'step', key: s.key }), placeKey({ kind: 'between', key: s.key })])
+  ])
+  const placed = new Map<string, ReactNode[]>()
+  const top: ReactNode[] = []
+  const place = (key: string, card: ReactNode): void => {
+    if (!drawn.has(key)) top.push(card)
+    else placed.set(key, [...(placed.get(key) ?? []), card])
+  }
+  for (const need of needs) {
+    const key = placeKey(need.place)
+    // In its place the agent's words are right above it; away from it, the card says them.
+    place(key, <NeedCard key={needId(need)} need={need} quoteWhy={!drawn.has(key)} props={props} />)
+  }
+  for (const gate of gates) {
+    const card = <InstanceGateCard key={gate.runId} gate={gate} onOpen={props.onOpenInstance} />
+    const step = last.steps.find((s) => instancesOf(s).some((i) => i.runId === gate.runId))
+    if (step) place(placeKey({ kind: 'step', key: step.key }), card)
+    else top.push(card)
+  }
+  const needCards = new Map<string, ReactNode>([...placed].map(([key, cards]) => [key, <>{cards}</>]))
   const byRun = checksByRun(runs, props.checks ?? [])
   // The cost column is kept only when some run has a cost, so durations share
   // the right edge the work rows' durations use instead of stopping short of a gap.
@@ -108,34 +116,8 @@ export function TaskRecord(props: TaskRecordProps) {
 
   return (
     <>
-      {needs.length > 0 || gates.length > 0 ? (
-        <div className="space-y-2 pb-1 pt-3">
-          {needs.map((need) =>
-            need.kind === 'approval' ? (
-              <ApprovalCard
-                key={need.approval.requestId}
-                approval={need.approval}
-                stepLabel={stepLabelFor(last, need)}
-                requestedAt={need.at}
-                why={whyFor(last, need.tool.id)}
-                onDecide={props.onApprovalDecision}
-                captureFocus={props.approvalAutoFocus}
-              />
-            ) : (
-              <AskQuestionPanel
-                key={need.question.requestId}
-                question={need.question}
-                stepLabel={stepLabelFor(last, need)}
-                onSubmit={props.onQuestionSubmit}
-                captureFocus={props.approvalAutoFocus}
-              />
-            )
-          )}
-          {gates.map((gate) => (
-            <InstanceGateCard key={gate.runId} gate={gate} onOpen={props.onOpenInstance} />
-          ))}
-        </div>
-      ) : null}
+      {/* A card with nowhere closer to wait: an instance started outside any step, or a dropped step's call. */}
+      {top.length > 0 ? <div className="space-y-2 pb-1 pt-3">{top}</div> : null}
 
       {props.lead}
 
@@ -153,7 +135,7 @@ export function TaskRecord(props: TaskRecordProps) {
         <RunDivider n={last.n} at={last.at != null ? formatDisplayTime(new Date(last.at).toISOString()) : undefined} />
       ) : null}
       {/* Keyed by run: a follow-up's run must not inherit the last one's open steps. */}
-      <RunBody key={last.id} run={last} isLast props={props} checks={byRun.get(last.n) ?? []} />
+      <RunBody key={last.id} run={last} isLast props={props} checks={byRun.get(last.n) ?? []} needs={needCards} />
     </>
   )
 }
@@ -182,13 +164,23 @@ function runTools(run: RecordRun): ToolItem[] {
 const RESULT_FILES_SHOWN = 8
 
 /** What the run changed, file by file; each opens in Changes. */
-function ResultFiles({ files, onOpen }: { files: readonly ChangedFile[]; onOpen: (path?: string) => void }) {
+function ResultFiles({
+  files,
+  onOpen,
+  marks
+}: {
+  files: readonly ChangedFile[]
+  onOpen: (path?: string) => void
+  /** What was decided for each file once reviewed: Kept or Undone. */
+  marks?: ReadonlyMap<string, 'kept' | 'undone'>
+}) {
   const shown = files.slice(0, RESULT_FILES_SHOWN)
   const more = files.length - shown.length
   return (
     <ul aria-label="Files changed" className="mt-3" data-result-files>
       {shown.map((f) => {
         const cut = f.path.lastIndexOf('/')
+        const mark = marks?.get(normalizeRelPath(f.path))
         return (
           <li key={f.path}>
             <button
@@ -203,10 +195,17 @@ function ResultFiles({ files, onOpen }: { files: readonly ChangedFile[]; onOpen:
               <FileTypeIcon path={f.path} size={14} />
               <span className="min-w-0 flex-1 truncate">
                 {cut >= 0 ? <span className="text-tertiary">{f.path.slice(0, cut + 1)}</span> : null}
-                <span className="text-fg">{f.path.slice(cut + 1)}</span>
+                <span className={mark === 'undone' ? 'text-muted line-through decoration-tertiary' : 'text-fg'}>
+                  {f.path.slice(cut + 1)}
+                </span>
               </span>
               {f.action === 'created' || f.action === 'deleted' ? (
                 <span className="shrink-0 text-caption text-tertiary">{f.action === 'created' ? 'New' : 'Deleted'}</span>
+              ) : null}
+              {mark ? (
+                <span className="shrink-0 text-caption text-tertiary" data-result-file-mark={mark}>
+                  {mark === 'kept' ? 'Kept' : 'Undone'}
+                </span>
               ) : null}
               {f.added != null || f.removed != null ? <DiffStat add={f.added ?? 0} del={f.removed ?? 0} className="shrink-0" /> : null}
               <Icon
@@ -236,6 +235,31 @@ function ResultFiles({ files, onOpen }: { files: readonly ChangedFile[]; onOpen:
   )
 }
 
+/** How the task's edits were settled after review, on one quiet line. */
+function SettledLine({ settled }: { settled: OutcomeSummary }) {
+  const icon = settled.kind === 'committed' ? 'gitCommit' : settled.kind === 'undone' ? 'undo' : 'check'
+  return (
+    <div className="mt-3 flex min-w-0 items-center gap-2 text-xs text-tertiary" data-result-outcome={settled.kind}>
+      <Icon name={icon} size={13} className="shrink-0" />
+      <span className="min-w-0 truncate">
+        {settled.kind === 'committed' ? (
+          <>
+            Committed <span className="font-mono text-muted">{settled.sha.slice(0, 7)}</span>
+            {settled.branch ? <> to {settled.branch}</> : null}
+            {settled.undone > 0 ? `, ${settled.undone} undone` : null}
+          </>
+        ) : settled.kind === 'kept' ? (
+          'Kept, not committed'
+        ) : settled.kind === 'undone' ? (
+          'Undone'
+        ) : (
+          `${settled.kept} kept, ${settled.undone} undone`
+        )}
+      </span>
+    </div>
+  )
+}
+
 /** The closing answer, and under it how the run did against its checks. */
 function ResultRow({
   text,
@@ -243,7 +267,9 @@ function ResultRow({
   checks,
   files,
   onOpenFile,
-  review
+  review,
+  marks,
+  settled
 }: {
   text: string
   streaming?: boolean
@@ -253,12 +279,19 @@ function ResultRow({
   onOpenFile?: (path?: string) => void
   /** Its edits are still open: how many, and the way to them. */
   review?: { count: number; open: () => void }
+  /** Each reviewed file's decision, marked on its row. */
+  marks?: ReadonlyMap<string, 'kept' | 'undone'>
+  /** How the task's edits were settled, once nothing waits on review. */
+  settled?: OutcomeSummary | null
 }) {
   return (
     <RecordRow label="Result">
       <RecordProse text={text} streaming={streaming} size="md" tone="strong" />
-      {files && files.length > 0 && onOpenFile && !streaming ? <ResultFiles files={files} onOpen={onOpenFile} /> : null}
+      {files && files.length > 0 && onOpenFile && !streaming ? (
+        <ResultFiles files={files} onOpen={onOpenFile} marks={marks} />
+      ) : null}
       <CheckedBlock checks={checks} />
+      {settled && !review ? <SettledLine settled={settled} /> : null}
       {review ? (
         <div className="mt-3 flex items-center gap-2" data-result-review>
           <span className="min-w-0 flex-1 text-xs text-tertiary">
@@ -270,6 +303,29 @@ function ResultRow({
         </div>
       ) : null}
     </RecordRow>
+  )
+}
+
+function needId(need: NeedsYou): string {
+  return need.kind === 'approval' ? need.approval.requestId : need.question.requestId
+}
+
+/** A call or question waiting on you, answered where it stopped the work. */
+function NeedCard({ need, quoteWhy, props }: { need: NeedsYou; quoteWhy: boolean; props: TaskRecordProps }) {
+  return need.kind === 'approval' ? (
+    <ApprovalCard
+      approval={need.approval}
+      requestedAt={need.at}
+      why={quoteWhy ? need.why : undefined}
+      onDecide={props.onApprovalDecision}
+      captureFocus={props.approvalAutoFocus}
+    />
+  ) : (
+    <AskQuestionPanel
+      question={need.question}
+      onSubmit={props.onQuestionSubmit}
+      captureFocus={props.approvalAutoFocus}
+    />
   )
 }
 
@@ -300,12 +356,15 @@ function RunBody({
   run,
   isLast,
   props,
-  checks
+  checks,
+  needs
 }: {
   run: RecordRun
   isLast: boolean
   props: TaskRecordProps
   checks: readonly DoneWhenCheck[]
+  /** The live run's needs-you cards, by `placeKey` of where each goes. */
+  needs?: ReadonlyMap<string, ReactNode>
 }) {
   const live = isLast && props.options.running
   const index = messageIndexOf(run)
@@ -319,15 +378,27 @@ function RunBody({
   const looseActivity = (list: readonly WorkItem[]): boolean =>
     activity != null && !(list.length > 0 && workIsLive(list[list.length - 1]!))
   const setupActivity = tail?.kind === 'setup' && looseActivity(run.setup)
+  const setupNeeds = needs?.get(placeKey({ kind: 'setup' })) ?? null
+  const afterNeeds = needs?.get(placeKey({ kind: 'after' })) ?? null
   const state = live ? null : runStateOf(run, isLast, props.options)
   // The latest run's edits still open in the inspector, and what the record offers for them.
-  const { pendingWrites } = useRunSession()
+  const { pendingWrites, workspacePath: sessionWorkspace, runId: sessionRunId } = useRunSession()
   const { onOpenChanges, onRetry, retryableErrorId } = useContext(RecordActionsContext)
   const unkept = isLast && !live ? (pendingWrites?.count ?? 0) : 0
   const changedFiles = useMemo(
     () => (run.result && !live ? collectSessionChangedFiles(runTools(run)) : []),
     [run, live]
   )
+  // How the task's edits were settled: each file's Kept or Undone, and on the
+  // latest run the one line that says it once nothing waits on review.
+  const outcome = useTaskOutcome(
+    sessionWorkspace,
+    sessionRunId,
+    !live && run.result != null && (isLast || changedFiles.length > 0),
+    `${run.n}:${run.endedAt ?? ''}:${unkept}`
+  )
+  const marks = useMemo(() => outcomeMarks(outcome), [outcome])
+  const settled = isLast && unkept === 0 ? summarizeOutcome(outcome) : null
   // An error row with Retry already says how to carry on.
   const resume = state === 'stopped' && isLast && onRetry && !retryableErrorId ? onRetry : undefined
   const afterActivity = tail?.kind === 'after' && looseActivity(run.after)
@@ -351,20 +422,22 @@ function RunBody({
       ) : null}
       {/* Open checks sit under the brief; once there is a result they move under it. */}
       {checks.length > 0 && (live || !run.result) ? <DoneWhenRow checks={checks} live={live} /> : null}
-      {run.setup.length > 0 || setupActivity ? (
+      {run.setup.length > 0 || setupActivity || setupNeeds ? (
         <RecordRow>
           <div className="space-y-2">
             {run.setup.length > 0 ? <LooseWork items={run.setup} fold={foldLoose} openKey={looseOpenKey(run.n, 'setup')} /> : null}
             {setupActivity ? <NowLine text={activity!} /> : null}
+            {setupNeeds}
           </div>
         </RecordRow>
       ) : null}
-      <Steps steps={run.steps} runN={run.n} tail={tail} activity={activity} />
-      {run.after.length > 0 || afterActivity ? (
+      <Steps steps={run.steps} runN={run.n} tail={tail} activity={activity} needs={needs} />
+      {run.after.length > 0 || afterActivity || afterNeeds ? (
         <RecordRow label={run.steps.length === 0 && run.after.length > 0 ? props.workLabel : undefined}>
           <div className="space-y-2">
             {run.after.length > 0 ? <LooseWork items={run.after} fold={foldLoose} openKey={looseOpenKey(run.n, 'after')} /> : null}
             {afterActivity ? <NowLine text={activity!} /> : null}
+            {afterNeeds}
           </div>
         </RecordRow>
       ) : null}
@@ -376,6 +449,8 @@ function RunBody({
           files={changedFiles}
           onOpenFile={onOpenChanges}
           review={unkept > 0 && onOpenChanges ? { count: unkept, open: () => onOpenChanges() } : undefined}
+          marks={marks}
+          settled={settled}
         />
       ) : null}
       <ReceiptLine
@@ -385,6 +460,7 @@ function RunBody({
         live={live}
         feedback={isLast && !live ? props.runFeedback : undefined}
         checks={checks}
+        summary={run.result && !run.result.streaming ? run.result.text : undefined}
         outcome={state === 'stopped' || state === 'failed' ? state : undefined}
         actions={
           state === 'stopped' && isLast && (resume || (unkept > 0 && pendingWrites)) ? (

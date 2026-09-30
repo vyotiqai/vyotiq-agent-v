@@ -56,14 +56,17 @@ function renderLine(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
 }
 
 describe('resolveLinePlaceholder', () => {
-  it('says what sending does now', () => {
-    const base = { hasWorkspace: true, agentMode: 'agent' as const, runCount: 0 }
-    expect(resolveLinePlaceholder({ ...base, running: true })).toBe(
-      'Add an instruction — starts when this run ends · Shift+Enter sends it now'
+  it('follows the task: live, failed, stopped, settled, and Ask', () => {
+    const base = { hasWorkspace: true, agentMode: 'agent' as const }
+    expect(resolveLinePlaceholder({ ...base, running: true })).toBe('Steer it, or queue what comes next…')
+    // Live wins over how the run before it ended.
+    expect(resolveLinePlaceholder({ ...base, running: true, outcome: 'failed' })).toBe('Steer it, or queue what comes next…')
+    expect(resolveLinePlaceholder({ ...base, running: false, outcome: 'failed' })).toBe('Tell it what to do differently…')
+    expect(resolveLinePlaceholder({ ...base, running: false, outcome: 'stopped' })).toBe('Say what to change before it carries on…')
+    expect(resolveLinePlaceholder({ ...base, running: false })).toBe('Ask for a change, or a follow-up…')
+    expect(resolveLinePlaceholder({ ...base, running: false, agentMode: 'ask', outcome: 'failed' })).toBe(
+      'Ask about the code — it reads, and changes nothing'
     )
-    expect(resolveLinePlaceholder({ ...base, running: false, runCount: 2 })).toBe('Follow up — starts run 3')
-    expect(resolveLinePlaceholder({ ...base, running: false })).toBe('Add an instruction')
-    expect(resolveLinePlaceholder({ ...base, running: false, agentMode: 'ask' })).toBe('Add an instruction · won’t edit files')
     expect(resolveLinePlaceholder({ ...base, hasWorkspace: false, running: false })).toBe('Open a workspace to start a task')
   })
 })
@@ -89,6 +92,22 @@ describe('instruction line', () => {
     expect(screen.queryByRole('button', { name: /^Stop$/ })).toBeNull()
     // The decorative prompt glyph is gone.
     expect(shell.textContent).not.toContain('›')
+  })
+
+  it('is one box on the record’s column, and its placeholder follows how the run ended', () => {
+    const { rerender, props } = renderLine({ lineOutcome: 'failed' })
+    const line = document.querySelector<HTMLElement>('[data-composer-line]')!
+    const shell = line.querySelector<HTMLElement>('[data-composer-shell]')!
+    expect(shell.classList.contains('border')).toBe(true)
+    expect(shell.classList.contains('rounded-lg')).toBe(true)
+    // No rule across the pane: the box is the edge.
+    expect(line.classList.contains('border-t')).toBe(false)
+    expect(shell.parentElement!.classList.contains('max-w-[780px]')).toBe(true)
+    expect(line.textContent).toContain('Tell it what to do differently…')
+    rerender(<Composer {...props} lineOutcome="stopped" />)
+    expect(line.textContent).toContain('Say what to change before it carries on…')
+    rerender(<Composer {...props} running lineOutcome="stopped" />)
+    expect(line.textContent).toContain('Steer it, or queue what comes next…')
   })
 
   it('sends from the Send button, as Enter does', async () => {

@@ -85,7 +85,8 @@ export function PlanLine({ steps }: { steps: ReadonlyArray<{ title: string; stat
   )
 }
 
-function planSegmentFill(state: TaskState): string {
+/** A plan step's segment, by how the step stands; the navigator's hover card draws the same. */
+export function planSegmentFill(state: TaskState): string {
   switch (state) {
     case 'done':
     case 'review':

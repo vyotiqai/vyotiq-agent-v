@@ -10,7 +10,8 @@ import { SettingsField, SettingsGroup, SettingsStack } from '../components/Setti
 import { SettingsNotice } from '../components/SettingsNotice'
 import { AddEndpointRow, ProviderKeys } from '../components/ProviderKeys'
 import { PROVIDER_KEY_ORDER } from '../constants'
-import { useModelOptions } from '../hooks/useModelOptions'
+import { modelMenuOptions, useModelList } from '../hooks/useModelOptions'
+import { EffortField } from '../components/EffortField'
 import { workspaceShort } from '../utils/settingsHelpers'
 
 export function ProvidersSection({
@@ -54,7 +55,8 @@ export function ProvidersSection({
       : settings.provider === 'custom'
         ? settings.customOpenAiBaseUrl
         : undefined
-  const modelOptions = useModelOptions(settings.provider, baseUrl, settings.model, form.refreshingModels)
+  const models = useModelList(settings.provider, baseUrl, form.refreshingModels)
+  const modelOptions = useMemo(() => modelMenuOptions(models, settings.model), [models, settings.model])
 
   // The open workspace can run its own model; say which, since this row
   // does not change it.
@@ -178,6 +180,7 @@ export function ProvidersSection({
             </div>
           </div>
         </SettingsField>
+        <EffortField form={form} models={models} />
       </SettingsGroup>
 
       <SettingsGroup

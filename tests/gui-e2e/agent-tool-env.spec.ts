@@ -139,7 +139,8 @@ test('an agent-built tool runs without the secrets the app was started with', as
   await brief.press('Control+Enter')
 
   // Agent-built tools always ask.
-  const allow = page.getByRole('button', { name: /^Allow once/ })
+  // The record's card; the navigator row offers the same answer.
+  const allow = page.locator('[data-needs-you]').getByRole('button', { name: /^Allow once/ })
   await expect(allow).toBeVisible({ timeout: 60_000 })
   await allow.click()
 

@@ -14,6 +14,7 @@ import {
   type InspectorTabState
 } from '@renderer/features/inspector/Inspector'
 import { useAgentFileMarks } from '@renderer/features/inspector/agentFileMarks'
+import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import {
   useAgentFileFocus,
   useAgentLiveActivity,
@@ -23,6 +24,9 @@ import { useGitChrome } from './components/GitChrome'
 import type { UiItem } from '@shared/transcript'
 import type {
   AgentBrowserState,
+  ReopenWritesResult,
+  ResolveWritesResult,
+  TaskCommitSettled,
   WorkspaceEditorRecoveryLoadResult
 } from '@shared/ipc'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
@@ -69,6 +73,34 @@ const TerminalPanel = lazy(() =>
   import('./components/TerminalPanel').then((m) => ({ default: m.TerminalPanel }))
 )
 const PrPanel = lazy(() => import('./components/PrPanel').then((m) => ({ default: m.PrPanel })))
+
+/**
+ * Settling is reversible: Keep all, Undo all and Commit each say so in a
+ * toast whose Undo takes it back (App applies the answer to the live task).
+ */
+export type SettleActions = {
+  /** Take back a Keep or an Undo: those files wait on review again. */
+  reopen: (req: { checkpointId?: string; paths: string[] }) => Promise<ReopenWritesResult | null>
+  /** Take back the commit made from the task's Changes. */
+  undoCommit: (sha: string) => Promise<ReopenWritesResult | null>
+  /** A commit from the task's Changes took (some of) its edits. */
+  committed: (settled: TaskCommitSettled) => void
+  /** Undo all, answering what it undid. */
+  undoAll: () => Promise<ResolveWritesResult | false>
+}
+
+const filesWord = (n: number): string => `${n} ${n === 1 ? 'file' : 'files'}`
+
+/** Undo of an Undo: what came back, and what changed since and was left. */
+function toastReopened(result: ReopenWritesResult | null, what: string): void {
+  if (!result) return
+  if (result.conflicted.length > 0) {
+    pushToast(`${what}, except ${filesWord(result.conflicted.length)}`, {
+      icon: 'warning',
+      detail: 'Changed since the Undo, so left as they are'
+    })
+  }
+}
 
 function DockPanelSuspenseFallback() {
   return <div className="min-h-0 min-w-0 flex-1 animate-pulse bg-surface" aria-busy="true" />
@@ -120,6 +152,7 @@ export function ChatView({
   onKeepWriteFile,
   onDiscardWriteFile,
   onKeepAllWrites,
+  settle,
   resolveBlockedReason = null,
   multiPane = null,
   loadError = null,
@@ -162,6 +195,8 @@ export function ChatView({
   onKeepWriteFile?: (path: string) => void | Promise<unknown>
   onDiscardWriteFile?: (path: string) => void | Promise<unknown>
   onKeepAllWrites?: () => void | Promise<unknown>
+  /** Taking back Keep, Undo and a commit from the task's Changes (each toast's Undo). */
+  settle?: SettleActions
   resolveBlockedReason?: string | null
   multiPane?: {
     panes: ChatPane[]
@@ -324,8 +359,54 @@ export function ChatView({
   )
   const keepAllWrites = useCallback(async () => {
     const ok = await onKeepAllWrites?.()
-    if (ok !== false) notifyGitMutated()
-  }, [onKeepAllWrites, notifyGitMutated])
+    if (ok === false) return
+    notifyGitMutated()
+    const kept = ok && typeof ok === 'object' ? (ok as ResolveWritesResult) : null
+    if (!settle || !kept || kept.kept.length === 0) return
+    pushToast(`Kept ${filesWord(kept.kept.length)}`, {
+      icon: 'check',
+      action: {
+        label: 'Undo',
+        onClick: () =>
+          void settle
+            .reopen({ ...(kept.checkpointId ? { checkpointId: kept.checkpointId } : {}), paths: kept.kept })
+            .then(() => notifyGitMutated())
+      }
+    })
+  }, [onKeepAllWrites, notifyGitMutated, settle])
+  // Un-keep one file from its row: it waits on review again.
+  const reopenWriteFile = useCallback(
+    async (path: string) => {
+      const result = await settle?.reopen({ paths: [path] })
+      if (result) notifyGitMutated()
+    },
+    [settle, notifyGitMutated]
+  )
+  // A commit from the task's Changes: main kept what it took; say so, with Undo while it is unpushed.
+  const taskCommitted = useCallback(
+    (settled: TaskCommitSettled, pushed: boolean) => {
+      settle?.committed(settled)
+      const short = settled.sha.slice(0, 7)
+      pushToast(settled.branch ? `Committed ${short} to ${settled.branch}` : `Committed ${short}`, {
+        icon: 'gitCommit',
+        ...(pushed ? { detail: 'Pushed' } : {}),
+        ...(settle && settled.undoable
+          ? {
+              action: {
+                label: 'Undo',
+                onClick: () =>
+                  void settle.undoCommit(settled.sha).then((result) => {
+                    if (!result) return
+                    notifyGitMutated()
+                    pushToast('Commit taken back', { icon: 'undo', detail: 'Its changes are staged' })
+                  })
+              }
+            }
+          : {})
+      })
+    },
+    [settle, notifyGitMutated]
+  )
   const { confirm, dialog: confirmDialog } = useConfirm()
 
   const discardAllWrites = useCallback(async () => {
@@ -340,12 +421,36 @@ export function ChatView({
       }
     )
     if (!ok) return
+    if (settle) {
+      const undone = await settle.undoAll()
+      if (undone === false) return
+      notifyGitMutated()
+      if (undone.discarded.length === 0) {
+        pushToast('All agent edits were undone.', 'success')
+        return
+      }
+      pushToast(`Undid ${filesWord(undone.discarded.length)}`, {
+        icon: 'undo',
+        detail: 'Back as they were before the agent',
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            void settle
+              .reopen({ ...(undone.checkpointId ? { checkpointId: undone.checkpointId } : {}), paths: undone.discarded })
+              .then((result) => {
+                if (result) notifyGitMutated()
+                toastReopened(result, 'Brought back the agent’s edits')
+              })
+        }
+      })
+      return
+    }
     const okDone = await onUndoWrites?.()
     if (okDone !== false) {
       notifyGitMutated()
       pushToast('All agent edits were undone.', 'success')
     }
-  }, [onUndoWrites, notifyGitMutated, confirm, writeCheckpointFiles])
+  }, [onUndoWrites, notifyGitMutated, confirm, writeCheckpointFiles, settle])
 
   // Prefer the shared mutating-tool revision (same clock as composer chrome), not
   // a per-done-tool + fileCount formula that over-fetches and races the status cache.
@@ -747,9 +852,11 @@ export function ChatView({
     [workspacePath, activeRunId, openAgentTerminal, unkeptWrites, onUndoWrites, undoAllWrites]
   )
 
-  /** With the inspector hidden, the rightmost pane's header offers it back. */
-  const showInspector = useCallback(() => setRightPanel(inspectorTab), [inspectorTab, setRightPanel])
-  const onShowInspector = inspectorVisible ? undefined : showInspector
+  /** The rightmost pane's header toggles the inspector, lit while it is open. */
+  const inspectorToggle = useMemo<InspectorToggle>(
+    () => ({ open: inspectorVisible, onToggle: toggleInspector }),
+    [inspectorVisible, toggleInspector]
+  )
 
   const renderMultiPane = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) =>
@@ -772,7 +879,7 @@ export function ChatView({
             panes={multiPane.panes}
             focusedPaneId={multiPane.focusedPaneId}
             sizes={multiPane.sizes}
-            onShowInspector={onShowInspector}
+            inspectorToggle={inspectorToggle}
             onFocusPane={multiPane.onFocusPane}
             onClosePane={multiPane.onClosePane}
             onSizesChange={multiPane.onSizesChange}
@@ -829,6 +936,7 @@ export function ChatView({
                 onRecoveryDataConsumed={handleFilesRecoveryConsumed}
                 findInFilesNonce={findInFilesNonce}
                 agentMarks={agentFileMarks}
+                runId={activeRunId ?? null}
               />
             </Suspense>
           </ErrorBoundary>
@@ -877,6 +985,9 @@ export function ChatView({
                 agentCommand={liveActivity.command}
                 agentCommandAt={liveActivity.commandAt}
                 showAgentRequest={agentTerminalRequest}
+                items={items}
+                itemsStore={itemsStore}
+                taskKey={activeRunId}
               />
             </Suspense>
           </ErrorBoundary>
@@ -916,6 +1027,8 @@ export function ChatView({
               onDiscardWriteFile={discardWriteFile}
               onKeepAllWrites={keepAllWrites}
               onDiscardAllWrites={discardAllWrites}
+              onReopenWriteFile={settle ? reopenWriteFile : undefined}
+              onTaskCommitted={taskCommitted}
               active={visiblePanelId === 'changes'}
               running={running}
               onStopRun={onStop}
@@ -955,6 +1068,10 @@ export function ChatView({
                 onUnlink={hideInspector}
                 onHandToAgent={handToAgent}
                 active={visiblePanelId === 'pr'}
+                runId={activeRunId}
+                items={items}
+                running={running}
+                taskTitle={taskTitle}
               />
             </Suspense>
           </ErrorBoundary>

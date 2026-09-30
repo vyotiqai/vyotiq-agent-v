@@ -17,6 +17,7 @@ import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
 import { Button, IconButton, MarkdownContent, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
 import { focusComposerMessage, shortcutLabel } from '@renderer/lib/shortcuts'
+import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
 import { ContextMeter } from './composer/ContextMeter'
 import { useResolvedTurnUsage } from './ChatStreamLeaves'
@@ -191,8 +192,8 @@ type AgentInstancePaneProps = {
   instanceMeta?: AgentInstanceUiState
   /** Prefer workspace-manager controller so IPC is not dual-subscribed. */
   getController?: (runId: string, workspacePath: string) => ChatStreamController | null
-  /** Set on the rightmost pane while the inspector is hidden: offer it back. */
-  onShowInspector?: () => void
+  /** Set on the rightmost pane: its header toggles the inspector. */
+  inspectorToggle?: InspectorToggle
   /** Parent-tracked approval/question gates (visible while nested in this pane). */
   pendingGates?: InlineInstanceGate[]
   onOpenInstance?: (runId: string) => void
@@ -233,7 +234,7 @@ export function AgentInstancePane({
   instanceRunId,
   instanceMeta,
   getController,
-  onShowInspector,
+  inspectorToggle,
   pendingGates = [],
   onOpenInstance,
   onClose,
@@ -533,13 +534,18 @@ export function AgentInstancePane({
             Stop
           </Button>
         ) : null}
-        {onShowInspector ? (
+        {inspectorToggle ? (
           <IconButton
             icon="inspector"
-            label={`Show inspector (${shortcutLabel('inspector')})`}
+            label={`${inspectorToggle.open ? 'Hide' : 'Show'} inspector (${shortcutLabel('inspector')})`}
             size="sm"
             tone="muted"
-            onClick={onShowInspector}
+            active={inspectorToggle.open}
+            aria-expanded={inspectorToggle.open}
+            // Its words and aria-expanded say the state; pressed would say it a third time.
+            aria-pressed={undefined}
+            onClick={inspectorToggle.onToggle}
+            data-inspector-toggle
           />
         ) : null}
         {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={onClosePane} /> : null}

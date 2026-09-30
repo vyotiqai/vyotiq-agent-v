@@ -127,7 +127,7 @@ test('drag sidebar session onto right third splits into two panes', async () => 
   // its seeded message and the composer leaves the draft placeholder.
   const betaPane = window.locator('[data-chat-pane]').nth(1)
   await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
-  await expect(betaPane.getByText(/Follow up — starts run/)).toBeVisible({ timeout: 20_000 })
+  await expect(betaPane.getByText(/Ask for a change, or a follow-up/)).toBeVisible({ timeout: 20_000 })
 
   // Clicking an already-open session focuses its pane; does not add a third.
   await window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first().click()
@@ -186,6 +186,9 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, inspector
   await expect(window.locator('[data-inspector]')).toBeVisible()
   await expect(window.locator('[data-chat-side-rail]')).toHaveCount(0)
   await expect(window.getByRole('button', { name: /^Show inspector/ })).toHaveCount(0)
+  // Its toggle is on the rightmost pane only, and says it is open.
+  await expect(window.locator('[data-inspector-toggle]')).toHaveCount(1)
+  await expect(window.locator('[data-chat-pane]').nth(1).locator('[data-inspector-toggle]')).toHaveAttribute('aria-expanded', 'true')
 
   // A new task in multi-pane gets its brief inside the pane (no centered hero).
   await window.getByRole('button', { name: /new task/i }).first().click()
@@ -314,7 +317,7 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
   const betaPane = window.locator('[data-chat-pane-title="Pane Session Beta"]')
   await expect(betaPane).toBeVisible({ timeout: 15_000 })
   await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
-  await expect(betaPane.getByText(/Follow up — starts run/)).toBeVisible({ timeout: 20_000 })
+  await expect(betaPane.getByText(/Ask for a change, or a follow-up/)).toBeVisible({ timeout: 20_000 })
 
   // Pane 3: Cmd+\ again (Beta pane focused), then click Gamma into the draft.
   await window.keyboard.press('ControlOrMeta+Backslash')
@@ -335,7 +338,7 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
   const gammaPane = window.locator('[data-chat-pane-title="Pane Session Gamma"]')
   await expect(gammaPane).toBeVisible({ timeout: 15_000 })
   await expect(gammaPane.getByText('Pane Session Gamma')).toHaveCount(2, { timeout: 20_000 })
-  await expect(gammaPane.getByText(/Follow up — starts run/)).toBeVisible({ timeout: 20_000 })
+  await expect(gammaPane.getByText(/Ask for a change, or a follow-up/)).toBeVisible({ timeout: 20_000 })
 
   // Pane 1 must still show Alpha's transcript.
   const alphaPane = window.locator('[data-chat-pane-title="Pane Session Alpha"]')

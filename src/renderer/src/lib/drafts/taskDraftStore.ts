@@ -151,8 +151,28 @@ export type BriefState = {
   worktree?: boolean
 }
 
-const EMPTY_BRIEF: BriefState = Object.freeze({ draftId: null, checks: [], worktree: false }) as BriefState
-const briefs = new Map<string, BriefState>()
+/**
+ * Where a page with no choice made starts: Settings → Agent → "New tasks
+ * start in a worktree". Only a choice that differs from it is kept per
+ * workspace, so turning the setting on moves every untouched page with it.
+ */
+let worktreeDefault = false
+
+export function setNewTaskWorktreeDefault(on: boolean): void {
+  if (worktreeDefault === on) return
+  worktreeDefault = on
+  emit()
+}
+
+export function useNewTaskWorktreeDefault(): boolean {
+  useSyncExternalStore(subscribe, () => version)
+  return worktreeDefault
+}
+
+/** Stored per workspace: `worktree` is present only when the page chose against the default. */
+type StoredBrief = { draftId: string | null; checks: string[]; worktree?: boolean }
+const NO_CHECKS: string[] = Object.freeze([]) as unknown as string[]
+const briefs = new Map<string, StoredBrief>()
 
 function briefKeyOf(workspacePath: string): string {
   for (const key of briefs.keys()) if (workspacePathsEqual(key, workspacePath)) return key
@@ -160,13 +180,24 @@ function briefKeyOf(workspacePath: string): string {
 }
 
 export function briefStateFor(workspacePath: string | null | undefined): BriefState {
-  return workspacePath ? (briefs.get(briefKeyOf(workspacePath)) ?? EMPTY_BRIEF) : EMPTY_BRIEF
+  const stored = workspacePath ? briefs.get(briefKeyOf(workspacePath)) : undefined
+  return {
+    draftId: stored?.draftId ?? null,
+    checks: stored?.checks ?? NO_CHECKS,
+    worktree: stored?.worktree ?? worktreeDefault
+  }
 }
 
 export function setBriefState(workspacePath: string, next: BriefState | null): void {
   const key = briefKeyOf(workspacePath)
-  if (next == null || (next.draftId == null && next.checks.length === 0 && !next.worktree)) briefs.delete(key)
-  else briefs.set(key, { draftId: next.draftId, checks: [...next.checks], worktree: Boolean(next.worktree) })
+  const chosen = next?.worktree != null && next.worktree !== worktreeDefault ? next.worktree : undefined
+  if (next == null || (next.draftId == null && next.checks.length === 0 && chosen === undefined)) briefs.delete(key)
+  else
+    briefs.set(key, {
+      draftId: next.draftId,
+      checks: [...next.checks],
+      ...(chosen !== undefined ? { worktree: chosen } : {})
+    })
   emit()
 }
 
@@ -189,5 +220,6 @@ export function resetTaskDraftStoreForTests(): void {
   readAgain.clear()
   localChanges.clear()
   briefs.clear()
+  worktreeDefault = false
   emit()
 }

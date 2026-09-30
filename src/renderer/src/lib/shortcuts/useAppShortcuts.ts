@@ -5,6 +5,7 @@ import {
   COMPOSER_MESSAGE_SELECTOR,
   focusBrowserUrlIfOpen,
   isEditableShortcutTarget,
+  isTypingIn,
   matchShortcut,
   shouldBlockAppShortcut
 } from './match'
@@ -86,7 +87,8 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
       const step = matchShortcut(e, 'prevTask') ? -1 : matchShortcut(e, 'nextTask') ? 1 : 0
       if (step !== 0) {
         if (!onStepTask) return
-        if (shouldBlockAppShortcut(e.target)) return
+        // Not while typing, even in the composer: there Alt ↑/↓ is the caret's (by paragraph, on macOS).
+        if (shouldBlockAppShortcut(e.target) || isTypingIn(e.target)) return
         e.preventDefault()
         onStepTask(step)
         return

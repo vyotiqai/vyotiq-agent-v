@@ -267,19 +267,22 @@ test.describe('Home and Usage', () => {
 
     // Home has the same ask, answerable where it is.
     await goHome(window)
-    const needs = window.getByRole('region', { name: 'Needs you' })
+    // Home's own region: the navigator's reads "Needs you 1", and its row says the ask too.
+    const needs = window.locator('[data-home]').getByRole('region', { name: 'Needs you' })
     const row = needs.getByRole('listitem').filter({ hasText: 'Wants to run pnpm vitest run tests/main/unit/updaterSwap.test.ts' })
     await expect(row).toBeVisible({ timeout: 20_000 })
     await expect(row).toContainText('Run the updater suite and report')
     // The navigator agrees: the task is under Needs you there too.
     await expect(window.locator('[data-nav-section="needs"]')).toContainText('Run the updater suite and report')
-    // And the bell: main's notification names the task and says what it wants,
-    // in the same words as the row above.
+    // And the bell: the ask leads the Inbox, naming the task and the command it
+    // waits on, with the same Allow once / Deny under it.
     await window.getByRole('button', { name: /^Inbox/ }).click()
     const inbox = window.getByRole('dialog', { name: 'Inbox' })
     const ask = inbox.locator('[data-notification-kind="needs_you"]')
     await expect(ask).toContainText('Run the updater suite and report', { timeout: 20_000 })
-    await expect(ask).toContainText('Wants to run pnpm vitest run tests/main/unit/updaterSwap.test.ts')
+    await expect(ask.locator('[data-inbox-command]')).toContainText('pnpm vitest run tests/main/unit/updaterSwap.test.ts')
+    const asks = inbox.locator('[data-inbox-group="asks"]')
+    await expect(asks.getByRole('button', { name: 'Allow once' })).toBeVisible()
     await window.keyboard.press('Escape')
     await expect(inbox).toBeHidden()
 

@@ -149,7 +149,7 @@ describe('buildRecordModel', () => {
     expect(r!.steps[0]!.work.map((w) => w.kind)).toEqual(['note'])
   })
 
-  it('puts a pending approval at the top and marks its step as needing you', () => {
+  it('files a pending approval in its step and marks the step as needing you', () => {
     const gated: UiItem = {
       ...(run('pnpm vitest run', 5) as Extract<UiItem, { kind: 'tool' }>),
       approval: {
@@ -165,7 +165,7 @@ describe('buildRecordModel', () => {
     const items = [user('Do it', 0), todos([['a', '~', 'Verify']], 1), gated]
     const [r] = buildRecordModel(items, { running: true }).runs
     expect(r!.needs).toHaveLength(1)
-    expect(r!.needs[0]).toMatchObject({ kind: 'approval', stepKey: 'a' })
+    expect(r!.needs[0]).toMatchObject({ kind: 'approval', stepKey: 'a', place: { kind: 'step', key: 'a' } })
     expect(r!.steps[0]!.state).toBe('needs')
     expect(runStateOf(r!, true, { running: true })).toBe('needs')
   })

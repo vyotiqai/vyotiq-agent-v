@@ -229,6 +229,41 @@ describe('PrPanel', () => {
     })
   })
 
+  it('writes a new PR from the task’s result and checks, editable, instead of --fill', async () => {
+    ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, data: null })
+    const readRunArtifact = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        exists: true,
+        content: JSON.stringify({
+          checks: [
+            { id: 'c1', text: 'Tests pass', source: 'brief', verdict: 'met', evidence: 'pnpm test: 4 passed', createdAt: '2026-09-30T10:00:00.000Z' }
+          ]
+        })
+      }
+    })
+    ;(window.vyotiq as unknown as Record<string, unknown>).readRunArtifact = readRunArtifact
+    const items = [
+      { kind: 'message', id: 'user-0', role: 'user', content: 'Fix the swap', at: 1 },
+      { kind: 'message', id: 'a1', role: 'assistant', content: 'The watcher now closes before the swap.', at: 2 }
+    ] as never
+    render(<PrPanel workspacePath="/ws" runId="run-1" items={items} taskTitle="Fix the swap" />)
+    const body = (await screen.findByRole('textbox', { name: 'Pull request description' })) as HTMLTextAreaElement
+    await waitFor(() => expect(body.value).toContain('- [x] Tests pass'))
+    expect(body.value.startsWith('The watcher now closes before the swap.')).toBe(true)
+    const title = screen.getByRole('textbox', { name: 'Pull request title' }) as HTMLInputElement
+    expect(title.value).toBe('Fix the swap')
+    fireEvent.change(title, { target: { value: 'Close the watcher first' } })
+    fireEvent.click(screen.getByRole('button', { name: /Create a draft PR/i }))
+    await waitFor(() => {
+      expect(window.vyotiq.prCreate).toHaveBeenCalledWith('/ws', {
+        draft: true,
+        title: 'Close the watcher first',
+        body: expect.stringContaining('Evidence: pnpm test: 4 passed')
+      })
+    })
+  })
+
   it('does not re-fetch when only onPrMeta identity changes', async () => {
     const { rerender } = render(
       <PrPanel workspacePath="/ws" onPrMeta={() => undefined} />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -13,12 +13,19 @@ import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
 import type { PtySessionInfo } from '@shared/ipc'
+import type { UiItem } from '@shared/transcript'
+import { collectTaskCommands } from '@renderer/features/inspector/taskCommands'
+import { TaskCommandList } from '@renderer/features/inspector/TaskCommandList'
+import type { ChatItemsStore } from '../chatStores'
+import { useChatLiveItems } from './ChatStreamLeaves'
 import { prunePtyOutputBuffers } from '@shared/utils/ptyOutputBuffer'
 import { getPtyOutputBuffers, ensurePtyOutputBufferListener } from './ptyOutputBuffers'
 import { EmptyPanel } from './PanelChrome'
 import { TerminalSessionBar } from './TerminalSessionBar'
 
 ensurePtyOutputBufferListener()
+
+const NO_ITEMS: UiItem[] = []
 
 function readCssColor(varName: string, fallback: string): string {
   if (typeof document === 'undefined') return fallback
@@ -282,7 +289,9 @@ function PtySessionView({
  * Interactive user PTY terminal panel (VS Code–style).
  * The agent's `terminal` commands show here only as a read-only mirror session
  * (main's ptySessions agent mirror); their output stays in the record too. The
- * dock must not auto-open on agent activity.
+ * dock must not auto-open on agent activity. With a task open, its first tab
+ * is what that task ran, read from its record — there for a finished task as
+ * much as a running one.
  */
 export function TerminalPanel({
   className,
@@ -290,7 +299,10 @@ export function TerminalPanel({
   visible = true,
   agentCommand = null,
   agentCommandAt = null,
-  showAgentRequest = 0
+  showAgentRequest = 0,
+  items,
+  itemsStore,
+  taskKey = null
 }: {
   className?: string
   workspacePath?: string | null
@@ -302,8 +314,32 @@ export function TerminalPanel({
   agentCommandAt?: string | null
   /** Bumped to bring the run's own session forward (a command card asked). */
   showAgentRequest?: number
+  /** The open task's record; its `terminal` calls are the "This task" list. */
+  items?: UiItem[]
+  itemsStore?: ChatItemsStore
+  /** Which task that is: a new one starts back on its list. */
+  taskKey?: string | null
 }) {
   const [sessions, setSessions] = useState<PtySessionInfo[]>([])
+  const liveItems = useChatLiveItems(itemsStore, items ?? NO_ITEMS, visible && Boolean(taskKey))
+  const commands = useMemo(() => (taskKey ? collectTaskCommands(liveItems) : []), [liveItems, taskKey])
+  /**
+   * The list or the shells. Unset, a task that has run something opens on its
+   * list; picking a shell, making one, or a command card asking for the run's
+   * session is what moves to the shells.
+   */
+  const [chosenView, setChosenView] = useState<'task' | 'sessions' | null>(null)
+  /** What the tab showed once it was on screen, unpicked: the task's first command does not swap it. */
+  const [shownView, setShownView] = useState<'task' | 'sessions' | null>(null)
+  useEffect(() => {
+    setChosenView(null)
+    setShownView(null)
+  }, [taskKey])
+  const openingView: 'task' | 'sessions' = commands.length > 0 ? 'task' : 'sessions'
+  useEffect(() => {
+    if (visible && taskKey && chosenView == null && shownView == null) setShownView(openingView)
+  }, [visible, taskKey, chosenView, shownView, openingView])
+  const view: 'task' | 'sessions' = !taskKey ? 'sessions' : (chosenView ?? shownView ?? openingView)
   const listSeqRef = useRef(0)
   const [activeId, setActiveId] = useState<string | null>(null)
   /** Second pane session id for side-by-side split; null = single pane. */
@@ -451,6 +487,7 @@ export function TerminalPanel({
     if (!mirror) return
     handledAgentRequestRef.current = showAgentRequest
     agentAskedRef.current = true
+    setChosenView('sessions')
     setActiveId(mirror.id)
     setSplitId((cur) => (cur === mirror.id ? null : cur))
   }, [showAgentRequest, sessions])
@@ -501,13 +538,20 @@ export function TerminalPanel({
   const workspaceName = workspacePath ? formatWorkspaceName(workspacePath) : ''
   const shellName = activeSession && !activeIsAgent ? activeSession.title : null
 
+  const onTask = view === 'task'
+  const openShell = (): void => {
+    setChosenView('sessions')
+    void createSession()
+  }
   const sessionBar = (
     <TerminalSessionBar
       sessions={sessions}
-      activeId={activeId}
-      splitId={splitId}
+      activeId={onTask ? null : activeId}
+      splitId={onTask ? null : splitId}
       agentCommand={agentCommand}
+      task={taskKey ? { selected: onTask, onSelect: () => setChosenView('task') } : null}
       onSelect={(id) => {
+        setChosenView('sessions')
         // Selecting the secondary split pane: swap roles so split stays open.
         if (splitId && id === splitId && activeId && id !== activeId) {
           setSplitId(activeId)
@@ -517,7 +561,7 @@ export function TerminalPanel({
         setActiveId(id)
       }}
       onKill={(id) => void killSession(id)}
-      onCreate={() => void createSession()}
+      onCreate={openShell}
       onToggleSplit={() => void toggleSplit()}
     />
   )
@@ -536,7 +580,7 @@ export function TerminalPanel({
       </p>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {sessionBar}
-        {activeIsAgent ? (
+        {onTask ? null : activeIsAgent ? (
           <div className="flex h-8 shrink-0 items-center gap-2 bg-surface pl-3 pr-1 text-xs text-muted" data-terminal-readonly>
             <Icon name="lock" size={12} className="shrink-0" />
             <span className="min-w-0 flex-1 truncate">Agent session · read-only</span>
@@ -560,7 +604,11 @@ export function TerminalPanel({
             Pipe shell fallback — rebuild node-pty for Electron for a full interactive PTY.
           </p>
         ) : null}
-        <div className="relative min-h-0 min-w-0 flex-1 bg-sunken p-1">
+        {onTask ? (
+          <TaskCommandList commands={commands} />
+        ) : null}
+        {/* Hidden, not unmounted, under the list: a shell keeps its screen. */}
+        <div className={onTask ? 'hidden' : 'relative min-h-0 min-w-0 flex-1 bg-sunken p-1'}>
           {activeId && workspacePath ? (
             splitId && splitId !== activeId ? (
               <div className="flex h-full min-h-0 w-full gap-1">
@@ -568,8 +616,8 @@ export function TerminalPanel({
                   <PtySessionView
                     sessionId={activeId}
                     workspacePath={workspacePath}
-                    visible={visible}
-                    focused={visible}
+                    visible={visible && !onTask}
+                    focused={visible && !onTask}
                     isReadOnly={isMirrorSession}
                   />
                 </div>
@@ -578,7 +626,7 @@ export function TerminalPanel({
                   <PtySessionView
                     sessionId={splitId}
                     workspacePath={workspacePath}
-                    visible={visible}
+                    visible={visible && !onTask}
                     focused={false}
                     isReadOnly={isMirrorSession}
                   />
@@ -588,8 +636,8 @@ export function TerminalPanel({
               <PtySessionView
                 sessionId={activeId}
                 workspacePath={workspacePath}
-                visible={visible}
-                focused={visible}
+                visible={visible && !onTask}
+                focused={visible && !onTask}
                 isReadOnly={isMirrorSession}
               />
             )
@@ -604,7 +652,7 @@ export function TerminalPanel({
               }
               actions={
                 workspacePath ? (
-                  <Button size="sm" onClick={() => void createSession()}>
+                  <Button size="sm" onClick={openShell}>
                     Open a shell
                   </Button>
                 ) : null
@@ -612,7 +660,7 @@ export function TerminalPanel({
             />
           )}
         </div>
-        {activeSession ? (
+        {activeSession && !onTask ? (
           <div
             className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3 font-mono text-caption text-tertiary"
             data-terminal-status

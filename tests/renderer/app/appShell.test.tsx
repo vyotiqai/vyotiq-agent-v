@@ -105,6 +105,94 @@ describe('AppShell', () => {
     expect(screen.queryByRole('dialog', { name: /^navigator$/i })).toBeNull()
   })
 
+  it('keeps a rail of live tasks and the places below the desktop breakpoint', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: () => ({ matches: false, media: '', addEventListener: () => {}, removeEventListener: () => {} })
+    })
+    const onSelectRunInWorkspace = vi.fn()
+    const onOpenHome = vi.fn()
+    render(
+      <AppShell
+        {...baseProps}
+        onSelectRunInWorkspace={onSelectRunInWorkspace}
+        onOpenHome={onOpenHome}
+        runsByWorkspacePath={{
+          '/ws/demo': {
+            ...baseProps.runsByWorkspacePath['/ws/demo'],
+            runs: [
+              ...baseProps.runsByWorkspacePath['/ws/demo'].runs,
+              { runId: 'run-live', goal: 'Ship it', status: 'running' as const, updatedAt: new Date().toISOString() }
+            ]
+          }
+        }}
+        activeRuns={[{ runId: 'run-live', workspacePath: '/ws/demo', invokeId: 1, pendingFollowUps: [], activity: 'Editing a.ts' }]}
+        activeRunsLoaded
+      >
+        <p>Main content</p>
+      </AppShell>
+    )
+    const rail = document.querySelector('[data-navigator-rail]') as HTMLElement
+    expect(rail).not.toBeNull()
+    // Only the task still in play: the finished one is the drawer's.
+    const task = within(rail).getByRole('button', { name: 'Ship it, Editing a.ts' })
+    expect(within(rail).queryByRole('button', { name: /^Fix tests/ })).toBeNull()
+    fireEvent.click(task)
+    expect(onSelectRunInWorkspace).toHaveBeenCalledWith('/ws/demo', 'run-live')
+    fireEvent.click(within(rail).getByRole('button', { name: 'Home' }))
+    expect(onOpenHome).toHaveBeenCalled()
+    expect(within(rail).getByRole('button', { name: /^New task/ })).toBeTruthy()
+    // The full list is still the drawer.
+    fireEvent.click(screen.getByRole('button', { name: /show navigator/i }))
+    expect(screen.getByRole('dialog', { name: /^navigator$/i })).toBeTruthy()
+  })
+
+  it('hides from the rail what the list hides, and finds the open task whatever case its path is in', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: () => ({ matches: false, media: '', addEventListener: () => {}, removeEventListener: () => {} })
+    })
+    const WS = 'C:\\work\\demo'
+    const at = new Date().toISOString()
+    render(
+      <AppShell
+        {...baseProps}
+        workspacePath={WS}
+        openWorkspaces={[WS]}
+        runsByWorkspacePath={{
+          [WS]: {
+            runs: [
+              { runId: 'run-kept', goal: 'Kept review', status: 'done' as const, updatedAt: at, review: { files: 1, add: 1, del: 0 } },
+              { runId: 'run-gone', goal: 'Archived review', status: 'done' as const, updatedAt: at, review: { files: 1, add: 2, del: 0 } }
+            ],
+            runsCapped: false,
+            runsError: null,
+            activeRunId: null
+          }
+        }}
+        archivedRunKeys={[`${WS}\u0000run-gone`]}
+        // The focused run's path with its drive letter as another part of the app writes it.
+        focusedRun={{ workspacePath: 'c:\\work\\demo', runId: 'run-kept' }}
+        activeRunsLoaded
+      >
+        <p>Main content</p>
+      </AppShell>
+    )
+    const rail = document.querySelector('[data-navigator-rail]') as HTMLElement
+    const kept = within(rail).getByRole('button', { name: /^Kept review/ })
+    expect(within(rail).queryByRole('button', { name: /^Archived review/ })).toBeNull()
+    expect(kept.getAttribute('aria-current')).toBe('page')
+  })
+
+  it('keeps no rail beside the full navigator', () => {
+    render(
+      <AppShell {...baseProps}>
+        <p>Main content</p>
+      </AppShell>
+    )
+    expect(document.querySelector('[data-navigator-rail]')).toBeNull()
+  })
+
   it('selects a chat from the sidebar', () => {
     const onSelectRunInWorkspace = vi.fn()
     const onOpenChat = vi.fn()
@@ -206,6 +294,58 @@ describe('AppShell', () => {
     await waitFor(() => expect(document.activeElement).toBe(search))
     fireEvent.keyDown(search, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: /search and commands/i })).toBeNull()
+  })
+
+  it('offers the open task’s changed files in search before anything is typed', async () => {
+    const taskFileStats = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        files: [
+          { path: 'src/kept.ts', action: 'modified' as const, add: 2, del: 1 },
+          { path: 'src/gone.ts', action: 'deleted' as const }
+        ]
+      }
+    }))
+    Object.assign(window.vyotiq, { taskFileStats })
+    const onOpenWorkspaceFile = vi.fn()
+    render(
+      <AppShell {...baseProps} focusedRun={{ workspacePath: '/ws/demo', runId: 'run-abc' }} onOpenWorkspaceFile={onOpenWorkspaceFile}>
+        <p>Task</p>
+      </AppShell>
+    )
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+    const files = await screen.findByRole('group', { name: 'Files' })
+    expect(taskFileStats).toHaveBeenCalledWith({ workspacePath: '/ws/demo', runId: 'run-abc' })
+    // A deleted file has nothing to open.
+    expect(within(files).getAllByRole('option').map((o) => o.textContent)).toEqual(['src/kept.ts'])
+    fireEvent.click(within(files).getByRole('option', { name: 'src/kept.ts' }))
+    expect(onOpenWorkspaceFile).toHaveBeenCalledWith('/ws/demo', 'src/kept.ts')
+  })
+
+  it('retries and forks a task from its row menu', () => {
+    const onRetryRunInWorkspace = vi.fn()
+    const onForkRunInWorkspace = vi.fn()
+    render(
+      <AppShell
+        {...baseProps}
+        runsByWorkspacePath={{
+          '/ws/demo': {
+            ...baseProps.runsByWorkspacePath['/ws/demo'],
+            runs: [{ ...baseProps.runsByWorkspacePath['/ws/demo'].runs[0]!, status: 'error' as const, retryable: true as const }]
+          }
+        }}
+        onRetryRunInWorkspace={onRetryRunInWorkspace}
+        onForkRunInWorkspace={onForkRunInWorkspace}
+      >
+        <p>Task</p>
+      </AppShell>
+    )
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^fix tests/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Retry' }))
+    expect(onRetryRunInWorkspace).toHaveBeenCalledWith('/ws/demo', 'run-abc')
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^fix tests/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Fork' }))
+    expect(onForkRunInWorkspace).toHaveBeenCalledWith('/ws/demo', 'run-abc')
   })
 
   it('opens the task that waits on you with Ctrl/Cmd+J', () => {
@@ -621,5 +761,115 @@ describe('AppShell run toasts', () => {
     // A task open in no pane still speaks up.
     publish([finished('run-abc'), finished('run-other')])
     expect(getToasts().map((t) => t.message)).toEqual(['Ready for review'])
+  })
+
+  it('answers an ask from the rail’s Inbox, below the desktop breakpoint', async () => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: () => ({ matches: false, media: '', addEventListener: () => {}, removeEventListener: () => {} })
+    })
+    const publish = withInbox()
+    const request = {
+      requestId: 'req-1',
+      runId: 'run-wait',
+      toolCallId: 'call-1',
+      name: 'terminal',
+      summary: 'pnpm test',
+      argsPreview: JSON.stringify({ command: 'pnpm test' }),
+      mutating: true
+    }
+    Object.assign(window.vyotiq, { listPendingToolApprovals: vi.fn(async () => ({ ok: true as const, data: [request] })) })
+    const onRespondApproval = vi.fn(async () => {})
+    render(
+      <AppShell
+        {...baseProps}
+        view="home"
+        runsByWorkspacePath={{
+          '/ws/demo': {
+            ...baseProps.runsByWorkspacePath['/ws/demo'],
+            runs: [{ runId: 'run-wait', goal: 'Ship it', status: 'running' as const, updatedAt: new Date().toISOString() }]
+          }
+        }}
+        activeRuns={[
+          { runId: 'run-wait', workspacePath: '/ws/demo', invokeId: 1, pendingFollowUps: [], waiting: { kind: 'approval', since: new Date().toISOString() } }
+        ]}
+        activeRunsLoaded
+        onRespondApproval={onRespondApproval}
+      >
+        <p>Home</p>
+      </AppShell>
+    )
+    await waitFor(() => expect(window.vyotiq.listNotifications).toHaveBeenCalled())
+    publish([
+      {
+        ...finished('run-wait'),
+        id: 'n-ask',
+        kind: 'needs_you',
+        title: 'Ship it',
+        body: 'Wants to run pnpm test',
+        dedupeKey: 'run:run-wait:needs',
+        reviewFiles: undefined
+      }
+    ])
+    const rail = document.querySelector('[data-navigator-rail]') as HTMLElement
+    fireEvent.click(within(rail).getByRole('button', { name: /^Inbox/ }))
+    const panel = screen.getByRole('dialog', { name: 'Inbox' })
+    await waitFor(() => expect(panel.querySelector('[data-inbox-group="asks"]')).not.toBeNull())
+    const decision = within(panel).getByRole('group', { name: 'Answer Ship it' })
+    fireEvent.click(within(decision).getByRole('button', { name: 'Allow once' }))
+    expect(onRespondApproval).toHaveBeenCalledWith('/ws/demo', 'run-wait', 'req-1', 'once')
+  })
+
+  it('retries a failed task from the Inbox only while it still stands failed', async () => {
+    const publish = withInbox()
+    const onRetryRunInWorkspace = vi.fn()
+    const failedRuns = (status: 'error' | 'done', retryable: boolean = status === 'error') => ({
+      '/ws/demo': {
+        ...baseProps.runsByWorkspacePath['/ws/demo'],
+        runs: [{ ...baseProps.runsByWorkspacePath['/ws/demo'].runs[0]!, status, ...(retryable ? { retryable: true as const } : {}) }]
+      }
+    })
+    const failure = { ...finished('run-abc'), id: 'n-err', kind: 'run_error', body: 'Failed: rate limit', dedupeKey: 'run:run-abc:error', reviewFiles: undefined }
+    const { rerender } = render(
+      <AppShell {...baseProps} view="home" runsByWorkspacePath={failedRuns('error')} onRetryRunInWorkspace={onRetryRunInWorkspace}>
+        <p>Home</p>
+      </AppShell>
+    )
+    await waitFor(() => expect(window.vyotiq.listNotifications).toHaveBeenCalled())
+    publish([failure])
+    fireEvent.click(screen.getByRole('button', { name: /^Inbox/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Inbox' })).getByRole('button', { name: 'Retry Fix tests' }))
+    expect(onRetryRunInWorkspace).toHaveBeenCalledWith('/ws/demo', 'run-abc')
+
+    // Once it is going again (or done), the Inbox no longer offers it.
+    rerender(
+      <AppShell {...baseProps} view="home" runsByWorkspacePath={failedRuns('done')} onRetryRunInWorkspace={onRetryRunInWorkspace}>
+        <p>Home</p>
+      </AppShell>
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^Inbox/ }))
+    const panel = screen.getByRole('dialog', { name: 'Inbox' })
+    expect(within(panel).queryByRole('button', { name: /^Retry/ })).toBeNull()
+  })
+
+  it('offers no Inbox Retry for a failure Retry cannot get past', async () => {
+    const publish = withInbox()
+    const runs = {
+      '/ws/demo': {
+        ...baseProps.runsByWorkspacePath['/ws/demo'],
+        runs: [{ ...baseProps.runsByWorkspacePath['/ws/demo'].runs[0]!, status: 'error' as const }]
+      }
+    }
+    const failure = { ...finished('run-abc'), id: 'n-err', kind: 'run_error', body: 'Failed: crashed', dedupeKey: 'run:run-abc:error', reviewFiles: undefined }
+    render(
+      <AppShell {...baseProps} view="home" runsByWorkspacePath={runs} onRetryRunInWorkspace={vi.fn()}>
+        <p>Home</p>
+      </AppShell>
+    )
+    await waitFor(() => expect(window.vyotiq.listNotifications).toHaveBeenCalled())
+    publish([failure])
+    fireEvent.click(screen.getByRole('button', { name: /^Inbox/ }))
+    const panel = screen.getByRole('dialog', { name: 'Inbox' })
+    expect(within(panel).queryByRole('button', { name: /^Retry/ })).toBeNull()
   })
 })

@@ -1,6 +1,7 @@
 import { contentDisplayText, MAX_IMAGE_BYTES, MAX_IMAGE_DATA_URL_CHARS } from '@shared/ipc'
 import type { AttachedFile } from '@shared/ipc'
 import { filePreviewKind } from '../filePreviewKind'
+import { pickedElementContextBlock } from '@shared/browserPick'
 import { MAX_FILES } from './useComposerFiles'
 import { MAX_IMAGES } from './useComposerImages'
 import {
@@ -445,6 +446,12 @@ export async function resolveComposerMentions(opts: {
         contextBlocks.push(
           [screenshotNote, instruction].filter((line) => line != null).join('\n\n')
         )
+        break
+      }
+      case 'element': {
+        // Read in main when it was picked; nothing to fetch now.
+        const block = pickedElementContextBlock(mention.element)
+        if (!contextBlocks.includes(block)) contextBlocks.push(block)
         break
       }
       case 'chat': {

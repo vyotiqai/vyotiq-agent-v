@@ -79,6 +79,22 @@ export function finishedShare(
   return { percent: Math.round((outcomes.done / ended) * 100), done: outcomes.done, ended }
 }
 
+/**
+ * The share of settled files that were kept, not undone. Never rounds up to
+ * 100% while anything was undone, or down to 0% while anything was kept.
+ */
+export function keptShare(
+  changes: HomeActivityResult['changes']
+): { percent: number; kept: number; total: number } | null {
+  if (!changes) return null
+  const total = changes.kept + changes.undone
+  if (total === 0) return null
+  let percent = Math.round((changes.kept / total) * 100)
+  if (changes.undone > 0) percent = Math.min(99, percent)
+  if (changes.kept > 0) percent = Math.max(1, percent)
+  return { percent, kept: changes.kept, total }
+}
+
 export type ActivitySpendPoint = {
   date: string
   /** Axis tick — weekday for a 7-day window, day-of-month for longer ones. */
@@ -86,11 +102,16 @@ export type ActivitySpendPoint = {
   /** "Sep 18" tooltip date, or the raw day key when unparseable. */
   dateLabel: string
   /**
-   * Cost reported that day — the provider bill when one exists, the
-   * tokens × published-price estimate otherwise. Null means nobody reported
-   * a cost: a gap, never a free day.
+   * Cost that day: the provider bills plus the tokens × published-price
+   * estimates, which main keeps apart and never counts twice — the same sum
+   * as the window's Spend. Null means nobody reported a cost: a gap, never a
+   * free day.
    */
   cost: number | null
+  /** Some of `cost` is an estimate, not a bill. */
+  estimated: boolean
+  /** Tasks ran that day but none reported a cost: unknown spend, not a quiet day. */
+  unpriced: boolean
   /** Billed input + output tokens that day; null when the day had no usage. */
   tokens: number | null
 }
@@ -110,6 +131,7 @@ export function activitySpendSeries(
   const byDate = new Map(days.map((day) => [day.date, day]))
   return axis.map((date) => {
     const day = byDate.get(date)
+    const cost = (day?.billedCost ?? 0) + (day?.estimatedCost ?? 0)
     const parsed = new Date(`${date}T00:00:00`)
     const valid = !Number.isNaN(parsed.getTime())
     return {
@@ -122,7 +144,9 @@ export function activitySpendSeries(
       dateLabel: valid
         ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : date,
-      cost: day ? (day.billedCost ?? day.estimatedCost ?? null) : null,
+      cost: cost > 0 ? cost : null,
+      estimated: (day?.estimatedCost ?? 0) > 0,
+      unpriced: day != null && day.runs > 0 && !(cost > 0),
       tokens:
         day && day.billedInputTokens + day.outputTokens > 0
           ? day.billedInputTokens + day.outputTokens

@@ -7,7 +7,7 @@ import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/
 import { ARCHIVED_RUNS_CAP, archiveRuns, toggleArchivedRun } from './navigator/archivedRuns'
 import { requestNavigatorScope } from './navigator/useNavigatorScope'
 import { requestUpdatePanel } from './navigator/UpdateChip'
-import { ChatView } from '../features/chat/ChatView'
+import { ChatView, type SettleActions } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
 import { runTitle } from './navigator/runTitle'
@@ -84,10 +84,12 @@ import {
   draftTitle,
   saveTaskDraftFor,
   setBriefState,
+  setNewTaskWorktreeDefault,
   useBriefState,
   useTaskDrafts
 } from '@renderer/lib/drafts/taskDraftStore'
-import type { TaskDraft } from '@shared/ipc'
+import type { IpcResult, ReopenWritesResult, ResolveWritesResult, TaskDraft } from '@shared/ipc'
+import { bumpTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -195,6 +197,8 @@ function App() {
   } = useSettings()
   const { setAppearance, hydrate } = useAppearance(pickAppearanceSettings(settings))
   const { customCssError } = useCustomSkinCss(settings.customCssPath)
+  // Settings → Agent: where New task starts when the page has no choice of its own.
+  useEffect(() => setNewTaskWorktreeDefault(settings.newTaskWorktree), [settings.newTaskWorktree])
   const [openInstanceByParent, setOpenInstanceByParent] = useState<Record<string, string | null>>(
     {}
   )
@@ -1314,7 +1318,7 @@ function App() {
         writeCheckpoint: ChatStreamController['writeCheckpoint']
         applyWriteCheckpointResolution?: ChatStreamController['applyWriteCheckpointResolution']
       }
-    ): Promise<boolean> => {
+    ): Promise<ResolveWritesResult | false> => {
       const workspacePath = target?.workspacePath ?? focusedWorkspacePath ?? activeWorkspace
       const runId = target?.runId ?? activeRunId
       const running = target?.running ?? chat.running
@@ -1327,7 +1331,9 @@ function App() {
         setSettingsError('Stop the run to Keep/Discard agent writes.')
         return false
       }
-      const checkpointId = writeCheckpoint?.undone
+      // A file goes to the newest turn still waiting on it, which main finds;
+      // the live checkpoint may be a later turn that never wrote it.
+      const checkpointId = writeCheckpoint?.undone || paths?.length
         ? undefined
         : writeCheckpoint?.checkpointId
       setUndoBusy(true)
@@ -1348,10 +1354,11 @@ function App() {
           chatActionsRef.current?.applyWriteCheckpointResolution
         apply?.(res.data)
         setSettingsError(null)
+        bumpTaskOutcome()
         // Resolved edits can take the task out of Ready for review; main has
         // already dropped its cached list, so ask for it again.
         refreshWorkspaceRuns(workspacePath)
-        return true
+        return res.data
       } finally {
         setUndoBusy(false)
       }
@@ -1368,8 +1375,63 @@ function App() {
   )
 
   const onUndoWrites = useCallback(async (): Promise<boolean> => {
-    return resolveAgentWrites('discard')
+    return (await resolveAgentWrites('discard')) !== false
   }, [resolveAgentWrites])
+  const onUndoAllWrites = useCallback(() => resolveAgentWrites('discard'), [resolveAgentWrites])
+
+  // Taking back a Keep, an Undo or a commit from the task's Changes. A toast's
+  // Undo keeps the task it was made for; the live task is only told when it
+  // is still the one on screen (another one reads the change from disk).
+  const liveRunIdRef = useRef(activeRunId)
+  liveRunIdRef.current = activeRunId
+  const reopenAgentWrites = useCallback(
+    async (
+      call: (workspacePath: string, runId: string) => Promise<IpcResult<ReopenWritesResult>>
+    ): Promise<ReopenWritesResult | null> => {
+      const workspacePath = focusedWorkspacePath ?? activeWorkspace
+      const runId = activeRunId
+      if (!workspacePath || !runId || chat.running) return null
+      setUndoBusy(true)
+      try {
+        const res = await call(workspacePath, runId)
+        if (!res.ok) {
+          setSettingsError(res.error)
+          return null
+        }
+        if (liveRunIdRef.current === runId) chatActionsRef.current?.applyWriteCheckpointReopen?.(res.data)
+        setSettingsError(null)
+        bumpTaskOutcome()
+        refreshWorkspaceRuns(workspacePath)
+        return res.data
+      } finally {
+        setUndoBusy(false)
+      }
+    },
+    [activeWorkspace, activeRunId, chat.running, focusedWorkspacePath, refreshWorkspaceRuns, setSettingsError]
+  )
+  const settleActions = useMemo<SettleActions>(
+    () => ({
+      reopen: (req) =>
+        reopenAgentWrites((workspacePath, runId) => window.vyotiq.reopenWrites({ workspacePath, runId, ...req })),
+      undoCommit: (sha) =>
+        reopenAgentWrites((workspacePath, runId) => window.vyotiq.undoTaskCommit({ workspacePath, runId, sha })),
+      committed: (settled) => {
+        if (settled.kept.length > 0 && liveRunIdRef.current === activeRunId) {
+          chatActionsRef.current?.applyWriteCheckpointResolution({
+            checkpointId: '',
+            kept: settled.kept,
+            discarded: [],
+            fullyResolved: false
+          })
+        }
+        bumpTaskOutcome()
+        const workspacePath = focusedWorkspacePath ?? activeWorkspace
+        if (workspacePath) refreshWorkspaceRuns(workspacePath)
+      },
+      undoAll: onUndoAllWrites
+    }),
+    [activeWorkspace, activeRunId, focusedWorkspacePath, onUndoAllWrites, refreshWorkspaceRuns, reopenAgentWrites]
+  )
 
   const onKeepWriteFile = useCallback(
     (path: string) => resolveAgentWrites('keep', [path]),
@@ -1790,7 +1852,7 @@ function App() {
   })
   const renderPaneSession = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) => {
-      const { focused, onShowInspector, onOpenChanges, onOpenWorkspaceFile, multi, onClose, onSplit } =
+      const { focused, inspectorToggle, onOpenChanges, onOpenWorkspaceFile, multi, onClose, onSplit } =
         options
       const paneContext = findByWorkspacePath(contexts, pane.workspacePath)
       // Standalone instance pane: inspect + stop only (no composer) — the same
@@ -1812,7 +1874,7 @@ function App() {
             instanceRunId={pane.runId}
             instanceMeta={parentCtrl?.agentInstances?.[pane.runId]}
             getController={getRunController}
-            onShowInspector={onShowInspector}
+            inspectorToggle={inspectorToggle}
             showThinking={paneChatSettings.showThinking}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
             approvalAutoFocus={focused}
@@ -1930,14 +1992,14 @@ function App() {
             ok: false as const,
             message: 'Compaction is unavailable.'
           })),
-        onUndoWrites: () =>
-          resolveAgentWrites('discard', undefined, {
+        onUndoWrites: async () =>
+          (await resolveAgentWrites('discard', undefined, {
             workspacePath: pane.workspacePath,
             runId: pane.runId,
             running: snap.running,
             writeCheckpoint: snap.writeCheckpoint,
             applyWriteCheckpointResolution: paneCtrl?.applyWriteCheckpointResolution.bind(paneCtrl)
-          }),
+          })) !== false,
         onSetAgentMode: (mode) => {
           setAgentMode(mode, { workspacePath: pane.workspacePath, runId: pane.runId })
         },
@@ -2102,7 +2164,7 @@ function App() {
           mcpServerNames={mcpServerNames}
           slashHandlers={paneSlashHandlers}
           approvalAutoFocus={focused}
-          onShowInspector={onShowInspector}
+          inspectorToggle={inspectorToggle}
           onOpenChanges={onOpenChanges}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
           run={paneRun}
@@ -2393,6 +2455,29 @@ function App() {
         return
       }
       if (!(await controller.resumeInterrupted())) return
+      await refreshWorkspaceRuns(path)
+      await refreshActiveRuns()
+      setHomeRefreshVersion((version) => version + 1)
+    },
+    [getRunController, onSelectRunInWorkspace, refreshActiveRuns, refreshWorkspaceRuns]
+  )
+
+  /**
+   * A failed task's Retry from outside it (its navigator row, the Inbox): the
+   * record's own Retry — the task's controller sends CONTINUE_PROMPT — so it
+   * opens the task first, as resuming does. A task already going again is
+   * left alone.
+   */
+  const onRetryRunInWorkspace = useCallback(
+    async (path: string, runId: string): Promise<void> => {
+      await onSelectRunInWorkspace(path, runId)
+      const controller = getRunController(runId, path)
+      if (!controller) {
+        pushToast('That session could not be opened.', 'error')
+        return
+      }
+      if (controller.running || controller.pendingRun) return
+      if (!(await controller.send(CONTINUE_PROMPT))) return
       await refreshWorkspaceRuns(path)
       await refreshActiveRuns()
       setHomeRefreshVersion((version) => version + 1)
@@ -2732,8 +2817,11 @@ function App() {
       onTogglePinnedRun={onTogglePinnedRun}
       archivedRunKeys={settings.archivedRuns}
       onToggleArchivedRun={onToggleArchivedRun}
+      onRespondApproval={onRespondApprovalFromHome}
       onStopRunInWorkspace={(path, runId) => void onStopRunInWorkspace(path, runId)}
       onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
+      onRetryRunInWorkspace={(path, runId) => void onRetryRunInWorkspace(path, runId)}
+      onForkRunInWorkspace={(path, runId) => void paneRunActionsRef.current.fork(path, runId)}
       onPauseGoalInWorkspace={(path, runId, live) => void onPauseGoalInWorkspace(path, runId, live)}
       onStopLoopInWorkspace={(path, runId) => void onStopLoopInWorkspace(path, runId)}
       onReviewTask={(path, runId) => void onReviewTask(path, runId)}
@@ -2905,6 +2993,7 @@ function App() {
             onKeepWriteFile={onKeepWriteFile}
             onDiscardWriteFile={onDiscardWriteFile}
             onKeepAllWrites={onKeepAllWrites}
+            settle={settleActions}
             multiPane={multiPaneConfig}
             loadError={registry ? null : workspaceError}
             onPaneCapacityChange={setPaneCapacityContext}

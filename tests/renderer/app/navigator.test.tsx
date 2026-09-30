@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { NotificationItem, RunSummary } from '@shared/ipc'
 import { RUN_INTERRUPTED_ERROR } from '@shared/runInterrupt'
 import { SESSION_DRAG_MIME } from '@renderer/lib/chat/chatPaneLayout'
@@ -93,10 +93,12 @@ describe('Navigator', () => {
     const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
     // Earlier is told by day: everything here finished today.
     expect(headings).toEqual(['Needs you1', 'Ready for review1', 'Today1'])
-    // One kind of number per group: a review row says its file count, and the
-    // exact line counts ride in its description.
-    expect(within(row('Task rv')).getByText('2 files')).toBeTruthy()
-    expect(row('Task rv').textContent).not.toContain('+5')
+    // A review row's second line says what it changed; its column keeps to
+    // one kind of number, how long ago it moved.
+    const review = row('Task rv').querySelector('[data-nav-review]')
+    expect(review?.textContent).toContain('+5')
+    expect(review?.textContent).toContain('−1')
+    expect(row('Task rv').textContent).not.toContain('2 files')
     const described = document.getElementById(row('Task rv').getAttribute('aria-describedby')!)
     expect(described?.textContent).toContain('5 lines added, 1 removed')
   })
@@ -230,6 +232,56 @@ describe('Navigator', () => {
     fireEvent.contextMenu(row('Task loop'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Pin' }))
     expect(actions.onTogglePin).toHaveBeenCalledWith(WS, 'loop')
+  })
+
+  it('retries a failed task and forks a settled one from its menu; a live one has neither', () => {
+    const actions = { onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), onRetry: vi.fn(), onFork: vi.fn(), onExport: vi.fn() }
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [
+                run('bad', { status: 'error', retryable: true }),
+                run('broken', { status: 'error' }),
+                run('ok'),
+                run('live', { status: 'running' })
+              ]
+            }
+          },
+          activeRuns: [{ runId: 'live', workspacePath: WS, invokeId: 1, pendingFollowUps: [] }],
+          rowActions: actions
+        })}
+      />
+    )
+    const menuFor = (name: string): string[] => {
+      fireEvent.contextMenu(row(name))
+      const items = screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
+      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+      return items
+    }
+
+    const failed = menuFor('Task bad')
+    expect(failed[0]).toBe('Retry')
+    // Where the task header has it: after Export, before Copy link.
+    expect(failed.indexOf('Fork')).toBe(failed.indexOf('Export as Markdown') + 1)
+    fireEvent.contextMenu(row('Task bad'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Retry' }))
+    expect(actions.onRetry).toHaveBeenCalledWith(WS, 'bad')
+
+    // A failure Retry cannot get past gets none, as in its task view.
+    expect(menuFor('Task broken')).not.toContain('Retry')
+
+    const done = menuFor('Task ok')
+    expect(done).not.toContain('Retry')
+    fireEvent.contextMenu(row('Task ok'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Fork' }))
+    expect(actions.onFork).toHaveBeenCalledWith(WS, 'ok')
+
+    // Main forks only a task that has stopped.
+    const live = menuFor('Task live')
+    expect(live).not.toContain('Fork')
+    expect(live).not.toContain('Retry')
   })
 
   it('lists pinned tasks in their own group, and offers to unpin them', () => {
@@ -383,7 +435,8 @@ describe('Navigator', () => {
   it('puts a row\'s glyph on the right, beside its number, and titles on the one left edge', () => {
     render(<Navigator {...props({ runsByWorkspacePath: { [WS]: { runs: [run('bad', { status: 'error' })] } } })} />)
     const button = row('Task bad')
-    const children = Array.from(button.children)
+    // The row's first line; a second line (activity, ask, changes) sits under it.
+    const children = Array.from(button.firstElementChild!.children)
     const glyphAt = children.findIndex((el) => el.hasAttribute('data-row-glyph'))
     const titleAt = children.findIndex((el) => el.textContent === 'Task bad')
     expect(titleAt).toBe(0)
@@ -744,6 +797,54 @@ describe('Navigator — View menu, workspace headings, archive, hover card, rece
     }
   })
 
+  it('draws a working task’s plan and checks on its card, and a reviewed task’s checks', () => {
+    vi.useFakeTimers()
+    try {
+      render(
+        <Navigator
+          {...props({
+            runsByWorkspacePath: {
+              [WS]: {
+                runs: [
+                  run('live', { status: 'running', checks: { met: 1, total: 3 } }),
+                  run('rv', { review: { files: 2, add: 5, del: 1 }, checks: { met: 2, total: 3 } })
+                ]
+              }
+            },
+            activeRuns: [{ runId: 'live', workspacePath: WS, invokeId: 1, pendingFollowUps: [], steps: { completed: 1, total: 4 } }]
+          })}
+        />
+      )
+      const cardFor = (name: string): HTMLElement => {
+        fireEvent.pointerEnter(row(name), { pointerType: 'mouse' })
+        act(() => {
+          vi.advanceTimersByTime(600)
+        })
+        return document.querySelector('[data-task-hover-card]') as HTMLElement
+      }
+
+      const live = cardFor('Task live')
+      const segments = [...live.querySelectorAll('[data-plan-step]')].map((s) => s.getAttribute('data-plan-step'))
+      expect(segments).toEqual(['done', 'running', 'queued', 'queued'])
+      expect(live.querySelector('[data-hover-plan]')?.textContent).toBe('2/4')
+      const working = live.querySelector('[data-hover-checks]') as HTMLElement
+      expect(working.textContent).toBe('1 of 3 checks met')
+      // Unmet while it works is the plan, not news: no warning colour yet.
+      expect(working.className).toContain('text-muted')
+      expect(working.className).not.toContain('text-warning')
+      fireEvent.pointerLeave(row('Task live'), { pointerType: 'mouse' })
+
+      const review = cardFor('Task rv')
+      expect(review.querySelector('[data-hover-plan]')).toBeNull()
+      const checks = review.querySelector('[data-hover-checks]') as HTMLElement
+      expect(checks.textContent).toBe('2 of 3 checks met')
+      // One still open: the count is not the only sign, the words say it too.
+      expect(checks.className).toContain('text-warning')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('reopens a recent workspace from the workspace menu', () => {
     const p = props({ recentPaths: ['C:\\work\\gamma'], onOpenRecentWorkspace: vi.fn() })
     render(<Navigator {...p} />)
@@ -751,5 +852,194 @@ describe('Navigator — View menu, workspace headings, archive, hover card, rece
     expect(screen.getByText('Recent')).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: 'gamma' }))
     expect(p.onOpenRecentWorkspace).toHaveBeenCalledWith('C:\\work\\gamma')
+  })
+})
+
+describe('Navigator row lines', () => {
+  const live = (runId: string, over: Partial<NavigatorProps['activeRuns'][number]> = {}): NavigatorProps['activeRuns'][number] => ({
+    runId,
+    workspacePath: WS,
+    invokeId: 1,
+    pendingFollowUps: [],
+    ...over
+  })
+  const setBridge = (bridge: unknown): void => {
+    ;(window as unknown as { vyotiq?: unknown }).vyotiq = bridge
+  }
+  afterEach(() => setBridge(undefined))
+
+  it('says what a running task is doing, under its title', () => {
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: { [WS]: { runs: [run('go', { status: 'running' })] } },
+          activeRuns: [live('go', { activity: 'Editing src/app.ts' })]
+        })}
+      />
+    )
+    expect(row('Task go').querySelector('[data-nav-activity]')?.textContent).toBe('Editing src/app.ts')
+  })
+
+  it('shows a waiting task’s command and answers it from the row', async () => {
+    const request = {
+      requestId: 'req-1',
+      runId: 'waiting',
+      toolCallId: 'call-1',
+      name: 'terminal',
+      summary: 'pnpm test',
+      argsPreview: JSON.stringify({ command: 'pnpm   test' }),
+      mutating: true
+    }
+    setBridge({ listPendingToolApprovals: vi.fn(async () => ({ ok: true, data: [request] })) })
+    const onRespondApproval = vi.fn(async () => {})
+    const p = props({
+      runsByWorkspacePath: { [WS]: { runs: [run('waiting', { status: 'running' })] } },
+      activeRuns: [live('waiting', { waiting: { kind: 'approval', since: new Date().toISOString() } })]
+    })
+    render(<Navigator {...p} rowActions={{ ...p.rowActions, onRespondApproval }} />)
+    await waitFor(() => expect(row('Task waiting').querySelector('[data-nav-ask]')?.textContent).toBe('$pnpm test'))
+    const decision = screen.getByRole('group', { name: 'Answer Task waiting' })
+    fireEvent.click(within(decision).getByRole('button', { name: 'Allow once' }))
+    expect(onRespondApproval).toHaveBeenCalledWith(WS, 'waiting', 'req-1', 'once')
+    // One decision per ask: both buttons wait on the one in flight.
+    expect(within(decision).getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
+    expect(within(decision).getByRole('button', { name: 'Deny' })).toHaveProperty('disabled', true)
+  })
+
+  it('gives the next ask its buttons once one is answered, even two made in the same millisecond', async () => {
+    const ask = (requestId: string, command: string) => ({
+      requestId,
+      runId: 'waiting',
+      toolCallId: `call-${requestId}`,
+      name: 'terminal',
+      summary: command,
+      argsPreview: JSON.stringify({ command }),
+      mutating: true
+    })
+    let pending = [ask('req-1', 'pnpm lint'), ask('req-2', 'pnpm test')]
+    setBridge({ listPendingToolApprovals: vi.fn(async () => ({ ok: true, data: pending })) })
+    const onRespondApproval = vi.fn(async (_ws: string, _run: string, requestId: string) => {
+      pending = pending.filter((r) => r.requestId !== requestId)
+    })
+    // One `since` throughout: main's oldest ask moved to one stamped the same.
+    const p = props({
+      runsByWorkspacePath: { [WS]: { runs: [run('waiting', { status: 'running' })] } },
+      activeRuns: [live('waiting', { waiting: { kind: 'approval', since: '2026-09-30T10:00:00.000Z' } })]
+    })
+    render(<Navigator {...p} rowActions={{ ...p.rowActions, onRespondApproval }} />)
+    await waitFor(() => expect(row('Task waiting').querySelector('[data-nav-ask]')?.textContent).toBe('$pnpm lint'))
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    await waitFor(() => expect(row('Task waiting').querySelector('[data-nav-ask]')?.textContent).toBe('$pnpm test'))
+    const allow = screen.getByRole('button', { name: 'Allow once' })
+    expect(allow).toHaveProperty('disabled', false)
+    fireEvent.click(allow)
+    expect(onRespondApproval).toHaveBeenLastCalledWith(WS, 'waiting', 'req-2', 'once')
+  })
+
+  it('says why a decision did not go, and lets you try again', async () => {
+    const request = {
+      requestId: 'req-2',
+      runId: 'waiting',
+      toolCallId: 'call-2',
+      name: 'write',
+      summary: 'src/a.ts',
+      argsPreview: '{}',
+      mutating: true
+    }
+    setBridge({ listPendingToolApprovals: vi.fn(async () => ({ ok: true, data: [request] })) })
+    const onRespondApproval = vi.fn(async () => {
+      throw new Error('The task has stopped.')
+    })
+    const p = props({
+      runsByWorkspacePath: { [WS]: { runs: [run('waiting', { status: 'running' })] } },
+      activeRuns: [live('waiting', { waiting: { kind: 'approval', since: new Date().toISOString() } })]
+    })
+    render(<Navigator {...p} rowActions={{ ...p.rowActions, onRespondApproval }} />)
+    const deny = await screen.findByRole('button', { name: 'Deny' })
+    fireEvent.click(deny)
+    expect(onRespondApproval).toHaveBeenCalledWith(WS, 'waiting', 'req-2', 'deny')
+    expect((await screen.findByRole('alert')).textContent).toBe('The task has stopped.')
+    expect(screen.getByRole('button', { name: 'Deny' })).toHaveProperty('disabled', false)
+  })
+
+  it('offers no decision for a question, which is answered in the task', async () => {
+    setBridge({
+      listPendingAgentQuestions: vi.fn(async () => ({
+        ok: true,
+        data: [{ requestId: 'q-1', runId: 'asking', questions: [{ question: 'Which port?', options: [] }] }]
+      }))
+    })
+    const p = props({
+      runsByWorkspacePath: { [WS]: { runs: [run('asking', { status: 'running' })] } },
+      activeRuns: [live('asking', { waiting: { kind: 'question', since: new Date().toISOString() } })]
+    })
+    render(<Navigator {...p} rowActions={{ ...p.rowActions, onRespondApproval: vi.fn(async () => {}) }} />)
+    await waitFor(() => expect(row('Task asking').querySelector('[data-nav-ask]')).not.toBeNull())
+    expect(screen.queryByRole('group', { name: /^Answer/ })).toBeNull()
+  })
+
+  it('lists a live task’s instances under it, going first, and opens one in place', () => {
+    const p = props({
+      runsByWorkspacePath: {
+        [WS]: {
+          runs: [run('parent', { status: 'running' })],
+          instanceRuns: [
+            run('a-done', { parentRunId: 'parent', goal: 'Read the docs' }),
+            run('b-live', { parentRunId: 'parent', status: 'running', goal: 'Write the tests' })
+          ]
+        }
+      },
+      activeRuns: [live('parent'), live('b-live', { activity: 'Running pnpm test' })]
+    })
+    render(<Navigator {...p} />)
+    const fold = screen.getByRole('button', { name: /^2 instances/ })
+    expect(fold.textContent).toBe('2 instances · 1 going')
+    const list = document.querySelector('[data-nav-instances] ul')!
+    const titles = Array.from(list.querySelectorAll('button')).map((b) => b.getAttribute('title'))
+    expect(titles).toEqual(['Write the tests', 'Read the docs'])
+    expect(within(list as HTMLElement).getByText('Running pnpm test')).toBeTruthy()
+    // Each says its state in words too, not in its glyph alone.
+    expect(within(list as HTMLElement).getAllByRole('img').map((g) => g.getAttribute('aria-label'))).toEqual(['Running', 'Done'])
+    fireEvent.click(within(list as HTMLElement).getByTitle('Write the tests'))
+    expect(p.rowActions.onSelect).toHaveBeenCalledWith(WS, 'b-live')
+    fireEvent.click(fold)
+    expect(fold.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-nav-instances] ul')).toBeNull()
+  })
+
+  it('drops a task’s instances once it has settled', () => {
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: { runs: [run('parent')], instanceRuns: [run('kid', { parentRunId: 'parent' })] }
+          }
+        })}
+      />
+    )
+    expect(document.querySelector('[data-nav-instances]')).toBeNull()
+  })
+
+  it('says how a review task’s checks stand, and marks the unmet ones', () => {
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [
+                run('some', { review: { files: 1, add: 2, del: 0 }, checks: { met: 1, total: 3 } }),
+                run('all', { review: { files: 3 }, checks: { met: 2, total: 2 } })
+              ]
+            }
+          }
+        })}
+      />
+    )
+    const some = row('Task some').querySelector('[data-nav-review]')!
+    expect(some.textContent).toBe('+2· 1/3 checks')
+    expect(some.querySelector('.text-warning')).not.toBeNull()
+    const all = row('Task all').querySelector('[data-nav-review]')!
+    expect(all.textContent).toBe('3 files· 2/2 checks')
+    expect(all.querySelector('.text-warning')).toBeNull()
   })
 })
