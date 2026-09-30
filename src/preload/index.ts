@@ -118,6 +118,11 @@ const api: VyotiqApi = {
   taskFileDiff: (payload) => ipcRenderer.invoke(IPC.runsTaskFileDiff, payload),
   homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),
   runFeedbackGet: (payload) => ipcRenderer.invoke(IPC.runFeedbackGet, payload),
+  runsSearch: (payload) => ipcRenderer.invoke(IPC.runsSearch, payload),
+  settingsExport: () => ipcRenderer.invoke(IPC.settingsExport),
+  settingsImportPreview: () => ipcRenderer.invoke(IPC.settingsImportPreview),
+  settingsImportApply: (payload) => ipcRenderer.invoke(IPC.settingsImportApply, payload),
+  settingsReset: () => ipcRenderer.invoke(IPC.settingsReset),
   runFeedbackSet: (payload) => ipcRenderer.invoke(IPC.runFeedbackSet, payload),
   onChatEvent: (handler) => {
     const listener = (_: IpcRendererEvent, raw: unknown): void => {

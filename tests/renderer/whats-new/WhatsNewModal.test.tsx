@@ -2,11 +2,13 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import {
   compareVersions,
-  LAST_SEEN_UPDATE_VERSION_KEY
+  CURRENT_NOTES_KEY,
+  LAST_SEEN_UPDATE_VERSION_KEY,
+  requestWhatsNew
 } from '@renderer/features/whats-new/useWhatsNew'
 import {
   ANNOUNCED_VERSION_KEY,
@@ -233,5 +235,47 @@ describe('WhatsNewModal pending notes', () => {
     // notesSections empty → plain-text notesText fallback panel.
     expect(screen.getByText('plain fallback body')).toBeTruthy()
     expect(window.localStorage.getItem(PENDING_NOTES_KEY)).toBeNull()
+  })
+})
+
+describe('reopening What’s new', () => {
+  it('keeps the notes it showed after an update, and shows them again on request', async () => {
+    setLastSeen('1.1.0')
+    seedPendingNotes({
+      version: '1.2.0',
+      notesText: 'note',
+      notesSections: [{ heading: 'Features', items: ['Faster streaming'] }]
+    })
+    installBridge('1.2.0')
+    render(<WhatsNewModal />)
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(window.localStorage.getItem(PENDING_NOTES_KEY)).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem(CURRENT_NOTES_KEY)!)).toMatchObject({ version: '1.2.0' })
+
+    act(() => {
+      expect(requestWhatsNew()).toBe(true)
+    })
+    await screen.findByRole('dialog')
+    expect(screen.getByText('Faster streaming')).toBeTruthy()
+    // Reopened on purpose: no "from" version, nothing re-recorded as new.
+    expect(screen.queryByText(/^from /)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    expect(window.localStorage.getItem(LAST_SEEN_UPDATE_VERSION_KEY)).toBe('1.2.0')
+  })
+
+  it('opens with the release link when this version has no stored notes, and says so when nothing is mounted', async () => {
+    expect(requestWhatsNew()).toBe(false)
+    setLastSeen('1.2.0')
+    installBridge('1.2.0')
+    render(<WhatsNewModal />)
+    await waitFor(() => expect(window.localStorage.getItem(LAST_SEEN_UPDATE_VERSION_KEY)).toBe('1.2.0'))
+    act(() => {
+      requestWhatsNew()
+    })
+    await screen.findByRole('dialog')
+    expect(screen.getByText(/Agent V was updated to 1.2.0/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Full release notes' })).toBeTruthy()
   })
 })

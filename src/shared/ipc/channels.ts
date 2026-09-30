@@ -99,6 +99,11 @@ export const IPC = {
   // Per-run user verdict. Namespaced away from `feedback:compose`, which is
   // the unrelated app-level bug report.
   runFeedbackGet: 'runs:feedback:get',
+  runsSearch: 'runs:search',
+  settingsExport: 'settings:export',
+  settingsImportPreview: 'settings:import-preview',
+  settingsImportApply: 'settings:import-apply',
+  settingsReset: 'settings:reset',
   runFeedbackSet: 'runs:feedback:set',
   browserState: 'browser:state',
   browserGetState: 'browser:getState',

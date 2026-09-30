@@ -54,6 +54,12 @@ When the run is over, a strip under the record says "Works in its own worktree, 
 
 The navigator's view menu has "In place" and "In a worktree" entries, so you can show or hide either kind of task.
 
+## Finding and tidying tasks
+
+The magnifier at the top of the navigator searches your tasks. Titles match as you type; a moment later the navigator also lists tasks whose words match, what you or the agent said in them, with the matching line under the task. Search covers the workspaces the navigator shows and includes archived tasks. Tasks older than the list has loaded appear under "Older tasks". A very long task is searched from its newest 16 MB, and a search that runs out of time says "so far".
+
+To tidy several tasks at once, `Ctrl`-click them (`Shift`-click selects a range). A bar at the top says how many are selected and offers "Archive" and "Delete…"; a running task in the selection is left out. The view menu's "Archive all done" archives every finished task the navigator shows that isn't pinned. Archiving shows "Undo"; deleting asks first. The archive keeps up to 500 tasks, and archiving past that brings the oldest back into view.
+
 Worktrees need git on your PATH. See [Git and GitHub](/docs/git-and-github).
 
 ## Per-workspace settings

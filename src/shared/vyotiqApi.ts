@@ -29,6 +29,9 @@ import type {
   RunArtifactName,
   HomeActivityResult,
   RunFeedbackGetResult,
+  RunSearchResult,
+  SettingsExportResult,
+  SettingsImportPreviewResult,
   RunFeedbackSetResult,
   RunFeedbackRating,
   GitCommitResult,
@@ -327,6 +330,20 @@ export interface VyotiqApi {
     workspacePaths: string[]
     windowDays?: number
   }) => Promise<IpcResult<HomeActivityResult>>
+  /** Save settings to a file (no keys, no MCP servers). */
+  settingsExport: () => Promise<IpcResult<SettingsExportResult>>
+  /** Choose a settings file and see what importing it would change. */
+  settingsImportPreview: () => Promise<IpcResult<SettingsImportPreviewResult>>
+  /** Apply the previewed import. */
+  settingsImportApply: (payload: { token: string }) => Promise<IpcResult<Settings>>
+  /** Everything back to its default, keys and your data kept. */
+  settingsReset: () => Promise<IpcResult<Settings>>
+  /** Search inside tasks: titles, then what was said in them. */
+  runsSearch: (payload: {
+    workspacePaths: string[]
+    query: string
+    maxResults?: number
+  }) => Promise<IpcResult<RunSearchResult>>
   runFeedbackGet: (payload: {
     workspacePath: string
     runId: string

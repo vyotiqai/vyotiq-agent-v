@@ -244,6 +244,15 @@ export const NetworkSettingsSchema = z.object({
 })
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>
 
+/** A key chord the user bound a shortcut to (Settings → Shortcuts). */
+export const ShortcutChordSchema = z.object({
+  key: z.string().min(1).max(12),
+  mod: z.boolean(),
+  shift: z.enum(['forbid', 'allow', 'require']).optional(),
+  alt: z.boolean().optional()
+})
+export type ShortcutChordSetting = z.infer<typeof ShortcutChordSchema>
+
 export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   proxyMode: 'system',
   proxyUrl: '',
@@ -780,7 +789,9 @@ export const SettingsSchema = z.object({
   /**
    * App-wide inbox + OS toast preferences. Not a workspace override.
    */
-  notifications: NotificationSettingsSchema.default(DEFAULT_NOTIFICATION_SETTINGS)
+  notifications: NotificationSettingsSchema.default(DEFAULT_NOTIFICATION_SETTINGS),
+  /** Shortcuts rebound from their defaults, by shortcut id; absent ids use the built-in keys. */
+  shortcutOverrides: z.record(z.string(), ShortcutChordSchema).catch({}).default({})
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
@@ -845,7 +856,8 @@ export const DEFAULT_SETTINGS: Settings = {
   agentIdentity: '',
   responseLanguage: '',
   responseVerbosity: 'concise',
-  notifications: DEFAULT_NOTIFICATION_SETTINGS
+  notifications: DEFAULT_NOTIFICATION_SETTINGS,
+  shortcutOverrides: {}
 }
 
 /**

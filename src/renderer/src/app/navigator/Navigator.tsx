@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
-import type { TaskDraft } from '@shared/ipc'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import type { RunSearchResult, TaskDraft } from '@shared/ipc'
+import { pinnedRunKey } from '@renderer/features/home/pinnedRuns'
 import { NavigatorDraftRow, type NavigatorDraftActions } from './NavigatorDraftRow'
 import type { ActiveRun, NotificationItem, NotificationMutateRequest, RunSummary } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
@@ -8,6 +9,7 @@ import {
   ActionMenu,
   Button,
   IconButton,
+  SearchInput,
   StatusGlyph,
   Tooltip,
   cn,
@@ -23,6 +25,7 @@ import {
   filterNavigatorSections,
   groupSectionsByWorkspace,
   navFilterActive,
+  searchNavigatorSections,
   splitRowsByDate,
   NO_NAV_FILTER,
   type NavRow,
@@ -33,6 +36,7 @@ import {
   type NavWorkspaceBlock
 } from './navigatorModel'
 import { NavigatorTaskRow, type NavigatorRowActions } from './NavigatorTaskRow'
+import { WHERE_WORDS, highlightMatch, type RowSnippet } from './searchSnippet'
 import { NotificationsRow } from './NotificationsRow'
 import { UpdateChip } from './UpdateChip'
 import { DEFAULT_NAVIGATOR_VIEW, isCollapsed, type NavigatorView } from './useNavigatorView'
@@ -92,6 +96,12 @@ export type NavigatorProps = {
   pinnedKeys?: ReadonlySet<string>
   /** `pinnedRunKey` of every archived task. */
   archivedKeys?: ReadonlySet<string>
+  /** Archive several tasks in one write: a selection, or Archive all done. */
+  onArchiveMany?: (keys: readonly string[]) => void
+  /** Delete several tasks; the caller confirms first. */
+  onDeleteMany?: (items: ReadonlyArray<{ workspacePath: string; runId: string }>) => void
+  /** Search inside tasks (main reads their transcripts); absent, search matches titles only. */
+  searchRuns?: (workspacePaths: string[], query: string) => Promise<RunSearchResult | null>
   /** What the View menu is set to, and folded workspaces. Kept here when the caller does not own it. */
   view?: NavigatorView
   onViewChange?: ViewUpdate
@@ -211,8 +221,151 @@ export function Navigator(props: NavigatorProps) {
       view.showArchived
     ]
   )
-  const shownSections = useMemo(() => filterNavigatorSections(sections, view), [sections, view])
-  const shownDrafts = draftsPassFilter(view) ? drafts : []
+  // ── Search: titles at once, then what was said in each task (main). ──
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [search, setSearch] = useState<{ query: string; result: RunSearchResult | null } | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const needle = searchOpen ? query.trim() : ''
+  const searching = needle.length >= 2
+  const scopePaths = useMemo(
+    () => openPaths.filter((path) => !scopePath || workspacePathsEqual(path, scopePath)),
+    [openPaths, scopePath]
+  )
+  const searchRuns = props.searchRuns
+  useEffect(() => {
+    if (!searching || !searchRuns || scopePaths.length === 0) {
+      setSearch(null)
+      return
+    }
+    let stale = false
+    const timer = window.setTimeout(() => {
+      void searchRuns([...scopePaths], needle).then((result) => {
+        if (!stale) setSearch({ query: needle, result })
+      })
+    }, 200)
+    return () => {
+      stale = true
+      window.clearTimeout(timer)
+    }
+  }, [searching, needle, searchRuns, scopePaths])
+  const hits = search?.query === needle ? search.result : null
+  const hitsByKey = useMemo(() => {
+    const map = new Map<string, RowSnippet>()
+    for (const hit of hits?.hits ?? []) {
+      map.set(pinnedRunKey(hit.workspacePath, hit.runId), {
+        text: hit.snippet,
+        start: hit.matchStart,
+        length: hit.matchLength,
+        where: hit.where
+      })
+    }
+    return map
+  }, [hits])
+  // While searching, archived tasks count too: a search is for finding things.
+  const searchSections = useMemo(
+    () =>
+      searching
+        ? buildNavigatorSections({
+            runsByWorkspacePath,
+            openPaths,
+            activePath,
+            activeRuns: props.activeRuns,
+            activeRunsLoaded: props.activeRunsLoaded,
+            scopePath,
+            unreadRunIds,
+            pinnedKeys: props.pinnedKeys,
+            archivedKeys: props.archivedKeys,
+            showArchived: true
+          })
+        : null,
+    [searching, runsByWorkspacePath, openPaths, activePath, props.activeRuns, props.activeRunsLoaded, scopePath, unreadRunIds, props.pinnedKeys, props.archivedKeys]
+  )
+  const shownSections = useMemo(
+    () =>
+      searchSections
+        ? searchNavigatorSections(searchSections, needle, new Set(hitsByKey.keys()))
+        : filterNavigatorSections(sections, view),
+    [searchSections, needle, hitsByKey, sections, view]
+  )
+  // Matches in tasks the list hasn't loaded (past "Show older tasks").
+  const olderHits = useMemo(() => {
+    if (!hits) return []
+    const loaded = new Set(
+      (searchSections ?? []).flatMap((section) => section.rows.map((row) => pinnedRunKey(row.workspacePath, row.runId)))
+    )
+    return hits.hits.filter((hit) => !loaded.has(pinnedRunKey(hit.workspacePath, hit.runId)))
+  }, [hits, searchSections])
+  const closeSearch = (): void => {
+    setSearchOpen(false)
+    setQuery('')
+  }
+
+  // ── Selection: Ctrl/Cmd-click or Ctrl Space adds a task, Shift extends. ──
+  const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set())
+  const anchorRef = useRef<string | null>(null)
+  const shownRows = useMemo(() => shownSections.flatMap((section) => section.rows), [shownSections])
+  const rowsByKey = useMemo(
+    () => new Map(shownRows.map((row) => [pinnedRunKey(row.workspacePath, row.runId), row])),
+    [shownRows]
+  )
+  // A task that left the list (deleted, filtered out) leaves the selection too.
+  useEffect(() => {
+    setChecked((prev) => {
+      const next = new Set([...prev].filter((key) => rowsByKey.has(key)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [rowsByKey])
+  const canSelect = Boolean(props.onArchiveMany || props.onDeleteMany)
+  const onMultiSelect = useCallback(
+    (row: NavRow, range: boolean): void => {
+      const key = pinnedRunKey(row.workspacePath, row.runId)
+      const keys = shownRows.map((r) => pinnedRunKey(r.workspacePath, r.runId))
+      const anchor = anchorRef.current
+      setChecked((prev) => {
+        const next = new Set(prev)
+        if (range && anchor && keys.includes(anchor)) {
+          const [a, b] = [keys.indexOf(anchor), keys.indexOf(key)].sort((x, y) => x - y)
+          for (const k of keys.slice(a, b + 1)) next.add(k)
+        } else if (next.has(key)) {
+          next.delete(key)
+        } else {
+          next.add(key)
+        }
+        return next
+      })
+      anchorRef.current = key
+    },
+    [shownRows]
+  )
+  const clearSelection = (): void => {
+    setChecked(new Set())
+    anchorRef.current = null
+  }
+  const selectedRows = [...checked].map((key) => rowsByKey.get(key)).filter((row): row is NavRow => row != null)
+  // A running task has more to say: it can't be archived or deleted until it stops.
+  const settledSelection = selectedRows.filter((row) => row.state !== 'running' && row.state !== 'needs')
+  const liveSelected = selectedRows.length - settledSelection.length
+  const rowExtras: RowExtras = {
+    checkedKeys: checked,
+    onMultiSelect: canSelect ? onMultiSelect : undefined,
+    snippets: searching ? hitsByKey : undefined,
+    query: needle
+  }
+
+  // "Archive all done": what the list shows as over, not pinned or archived yet.
+  const doneKeys = useMemo(
+    () =>
+      props.activeRunsLoaded
+        ? sections
+            .filter((section) => section.key === 'done')
+            .flatMap((section) => section.rows)
+            .filter((row) => !row.pinned && !row.archived)
+            .map((row) => pinnedRunKey(row.workspacePath, row.runId))
+        : [],
+    [sections, props.activeRunsLoaded]
+  )
+  const shownDrafts = searching ? [] : draftsPassFilter(view) ? drafts : []
   const hiddenCount = countRows(sections) + drafts.length - countRows(shownSections) - shownDrafts.length
 
   // Every workspace at once: one block each, so their tasks never interleave.
@@ -236,7 +389,16 @@ export function Navigator(props: NavigatorProps) {
     return count
   }, [openPaths, runsByWorkspacePath, props.activeRuns])
 
+  const selectionSize = checked.size
   const onNavKeyDown = useCallback((e: KeyboardEvent<HTMLButtonElement>) => {
+    // Esc on a row clears the selection first, before it could stop a run.
+    if (e.key === 'Escape' && selectionSize > 0) {
+      e.preventDefault()
+      e.stopPropagation()
+      setChecked(new Set())
+      anchorRef.current = null
+      return
+    }
     const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End']
     if (!keys.includes(e.key)) return
     const list = e.currentTarget.closest('nav')?.querySelectorAll<HTMLButtonElement>('[data-nav-row]')
@@ -247,12 +409,12 @@ export function Navigator(props: NavigatorProps) {
       e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : e.key === 'ArrowDown' ? Math.min(i + 1, rows.length - 1) : Math.max(i - 1, 0)
     e.preventDefault()
     rows[next]?.focus()
-  }, [])
+  }, [selectionSize])
 
   const hasWorkspace = openPaths.length > 0
   const empty = !hasWorkspace || (sections.length === 0 && drafts.length === 0)
   // Everything there is, hidden by the View menu: one line says so, not one per workspace.
-  const allFiltered = !empty && shownSections.length === 0 && shownDrafts.length === 0
+  const allFiltered = !empty && shownSections.length === 0 && shownDrafts.length === 0 && olderHits.length === 0
   const clearFilter = (): void => updateView((prev) => ({ ...prev, ...NO_NAV_FILTER }))
 
   return (
@@ -275,7 +437,34 @@ export function Navigator(props: NavigatorProps) {
         {/* The only gap: a long workspace name gets every pixel up to the controls. */}
         <span className="min-w-2 flex-1" />
         <div className="flex shrink-0 items-center gap-1">
-          {hasWorkspace ? <ViewMenu view={view} grouped={grouped} openPaths={openPaths} onChange={updateView} /> : null}
+          {hasWorkspace ? (
+            <IconButton
+              icon="search"
+              label="Search tasks"
+              size="xs"
+              active={searchOpen}
+              aria-expanded={searchOpen}
+              data-navigator-search-toggle
+              onClick={() => {
+                if (searchOpen) closeSearch()
+                else {
+                  setSearchOpen(true)
+                  window.setTimeout(() => searchInputRef.current?.focus(), 0)
+                }
+              }}
+            />
+          ) : null}
+          {hasWorkspace ? (
+            <ViewMenu
+              view={view}
+              grouped={grouped}
+              openPaths={openPaths}
+              onChange={updateView}
+              archiveAllDone={props.onArchiveMany && doneKeys.length > 0 ? () => props.onArchiveMany?.(doneKeys) : undefined}
+              doneCount={doneKeys.length}
+              canArchive={Boolean(props.onArchiveMany)}
+            />
+          ) : null}
           {hasWorkspace ? (
             <Tooltip content={`New task (${shortcutLabel('newChat')})`} side="bottom">
               <Button size="xs" variant="secondary" onClick={props.onNewTask} data-navigator-new-task>
@@ -290,6 +479,36 @@ export function Navigator(props: NavigatorProps) {
           )}
         </div>
       </div>
+
+      {searchOpen ? (
+        <div className={cn('flex h-10 shrink-0 items-center border-b px-2', BORDER_DIVIDER)} data-navigator-search>
+          <SearchInput
+            ref={searchInputRef}
+            size="sm"
+            aria-label="Search tasks"
+            placeholder={props.searchRuns ? 'Search titles and what was said' : 'Search titles'}
+            value={query}
+            className="w-full"
+            onChange={(e) => setQuery(e.target.value)}
+            onClear={() => setQuery('')}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                closeSearch()
+                return
+              }
+              if (e.key === 'ArrowDown') {
+                const first = e.currentTarget.closest('nav')?.querySelector<HTMLButtonElement>('[data-nav-row]')
+                if (first) {
+                  e.preventDefault()
+                  first.focus()
+                }
+              }
+            }}
+          />
+        </div>
+      ) : null}
 
       {/* The 8px scrollbar gutter is always reserved and stands in for the right
           padding, so the rows' right edge meets the head's and the foot's whether
@@ -317,7 +536,58 @@ export function Navigator(props: NavigatorProps) {
               />
             </p>
           ))}
-        {filterOn && !empty ? (
+        {checked.size > 0 ? (
+          <div
+            className="mb-1 flex h-7 items-center gap-1 px-2 text-xs text-fg"
+            data-nav-selection
+            role="group"
+            aria-label="Selected tasks"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {checked.size} selected
+              {liveSelected > 0 ? <span className="text-muted"> · {liveSelected} running left out</span> : null}
+            </span>
+            {props.onArchiveMany ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={settledSelection.length === 0}
+                onClick={() => {
+                  props.onArchiveMany?.(
+                    settledSelection.filter((row) => !row.archived).map((row) => pinnedRunKey(row.workspacePath, row.runId))
+                  )
+                  clearSelection()
+                }}
+              >
+                Archive
+              </Button>
+            ) : null}
+            {props.onDeleteMany ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={settledSelection.length === 0}
+                onClick={() => {
+                  props.onDeleteMany?.(settledSelection.map((row) => ({ workspacePath: row.workspacePath, runId: row.runId })))
+                  clearSelection()
+                }}
+              >
+                Delete…
+              </Button>
+            ) : null}
+            <IconButton icon="close" label="Clear the selection" size="xs" tone="muted" onClick={clearSelection} />
+          </div>
+        ) : searching ? (
+          <div className="mb-1 flex h-7 items-center px-2 text-xs text-muted" data-nav-search-status aria-live="polite">
+            <span className="min-w-0 flex-1 truncate">
+              {!props.searchRuns
+                ? 'Titles only'
+                : !hits
+                  ? 'Searching…'
+                  : matchCountLabel(countRows(shownSections) + olderHits.length, hits.truncated)}
+            </span>
+          </div>
+        ) : filterOn && !empty ? (
           // What the View menu hides is said once, at the top, with the way back.
           <div className="mb-1 flex h-7 items-center gap-2 px-2 text-xs text-muted" data-nav-filter-notice>
             <span className="min-w-0 flex-1 truncate">
@@ -337,9 +607,10 @@ export function Navigator(props: NavigatorProps) {
             Tasks you start show up here, grouped by what they need from you.
           </p>
         ) : allFiltered ? (
-          <p className="px-2 text-xs text-tertiary">No tasks match the filter.</p>
+          <p className="px-2 text-xs text-tertiary">{searching ? 'No tasks match.' : 'No tasks match the filter.'}</p>
         ) : (
-          blocks.map((block, index) => (
+          <>
+          {blocks.map((block, index) => (
             <WorkspaceBlock
               key={block.path}
               index={index}
@@ -365,8 +636,17 @@ export function Navigator(props: NavigatorProps) {
               isRunOpen={place === 'task' ? props.isRunOpen : undefined}
               actions={props.rowActions}
               onNavKeyDown={onNavKeyDown}
+              rowExtras={rowExtras}
             />
-          ))
+          ))}
+          {olderHits.length > 0 ? (
+            <OlderMatches
+              hits={olderHits}
+              query={needle}
+              onOpen={(hit) => props.rowActions.onSelect(hit.workspacePath, hit.runId)}
+            />
+          ) : null}
+          </>
         )}
       </div>
 
@@ -428,7 +708,8 @@ function WorkspaceBlock({
   selected,
   isRunOpen,
   actions,
-  onNavKeyDown
+  onNavKeyDown,
+  rowExtras
 }: {
   index: number
   block: NavWorkspaceBlock
@@ -447,13 +728,14 @@ function WorkspaceBlock({
   isRunOpen?: (workspacePath: string, runId: string) => boolean
   actions: NavigatorRowActions
   onNavKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void
+  rowExtras: RowExtras
 }) {
   const idBase = `nav-${index}`
   const live = block.sections.filter((section) => section.key !== 'done' && section.key !== 'archived')
   const earlier = block.sections.find((section) => section.key === 'done')
   const archived = block.sections.find((section) => section.key === 'archived')
   const days = earlier ? splitRowsByDate(earlier.rows) : []
-  const rowProps = { selected, isRunOpen, actions, onNavKeyDown }
+  const rowProps = { selected, isRunOpen, actions, onNavKeyDown, rowExtras }
   const olderButton = capped ? (
     <button
       type="button"
@@ -644,12 +926,19 @@ function ViewMenu({
   view,
   grouped,
   openPaths,
-  onChange
+  onChange,
+  archiveAllDone,
+  doneCount = 0,
+  canArchive = false
 }: {
   view: NavigatorView
   grouped: boolean
   openPaths: readonly string[]
   onChange: ViewUpdate
+  /** Archive every finished task the list shows; absent when there are none. */
+  archiveAllDone?: () => void
+  doneCount?: number
+  canArchive?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const filterOn = navFilterActive(view)
@@ -700,6 +989,18 @@ function ViewMenu({
       disabledReason: foldReason,
       onSelect: () => onChange((prev) => ({ ...prev, collapsed: [] }))
     },
+    ...(canArchive
+      ? [
+          {
+            id: 'archive-done',
+            label: doneCount > 0 ? `Archive all done (${doneCount})` : 'Archive all done',
+            separatorBefore: true,
+            disabled: !archiveAllDone,
+            disabledReason: 'Nothing finished to archive',
+            onSelect: () => archiveAllDone?.()
+          }
+        ]
+      : []),
     ...(filterOn
       ? [
           {
@@ -768,6 +1069,7 @@ function TaskSection({
   isRunOpen,
   actions,
   onNavKeyDown,
+  rowExtras,
   trailing = null
 }: {
   id: string
@@ -778,6 +1080,7 @@ function TaskSection({
   isRunOpen?: (workspacePath: string, runId: string) => boolean
   actions: NavigatorRowActions
   onNavKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void
+  rowExtras: RowExtras
   trailing?: ReactNode
 }) {
   const group = GROUP_STATE[section.key]
@@ -802,6 +1105,10 @@ function TaskSection({
             open={isRunOpen?.(row.workspacePath, row.runId) ?? false}
             actions={actions}
             onNavKeyDown={onNavKeyDown}
+            checked={rowExtras.checkedKeys.has(pinnedRunKey(row.workspacePath, row.runId))}
+            onMultiSelect={rowExtras.onMultiSelect}
+            snippet={rowExtras.snippets?.get(pinnedRunKey(row.workspacePath, row.runId))}
+            query={rowExtras.query}
           />
         ))}
       </ul>
@@ -910,5 +1217,57 @@ function WorkspaceScope({
         </button>
       )}
     />
+  )
+}
+
+/** What the rows under the list get from it: selection, and search snippets. */
+type RowExtras = {
+  checkedKeys: ReadonlySet<string>
+  onMultiSelect?: (row: NavRow, range: boolean) => void
+  snippets?: ReadonlyMap<string, RowSnippet>
+  query: string
+}
+
+function matchCountLabel(count: number, truncated: boolean): string {
+  return `${count} ${count === 1 ? 'task matches' : 'tasks match'}${truncated ? ' so far' : ''}`
+}
+
+/**
+ * Matches in tasks the list hasn't loaded yet (past "Show older tasks"): the
+ * title and the matching line, and a click opens the task.
+ */
+function OlderMatches({
+  hits,
+  query,
+  onOpen
+}: {
+  hits: RunSearchResult['hits']
+  query: string
+  onOpen: (hit: RunSearchResult['hits'][number]) => void
+}) {
+  return (
+    <section aria-labelledby="nav-older-matches" data-nav-section="older-matches" className="mt-3">
+      <GroupHeading id="nav-older-matches" glyph={null} label="Older tasks" count={hits.length} />
+      <ul className="space-y-px">
+        {hits.map((hit) => (
+          <li key={`${hit.workspacePath}::${hit.runId}`}>
+            <button
+              type="button"
+              data-nav-older-match
+              className="flex w-full flex-col items-start rounded-md px-2 py-1 text-left vy-transition hover:bg-surface focus-visible:vy-focus-ring"
+              onClick={() => onOpen(hit)}
+            >
+              <span className="w-full truncate text-sm text-fg">{hit.title || 'Untitled task'}</span>
+              {hit.where !== 'title' ? (
+                <span className="w-full truncate text-caption text-muted">
+                  <span className="text-tertiary">{WHERE_WORDS[hit.where]}: </span>
+                  {highlightMatch(hit.snippet, hit.matchStart, hit.matchLength, query)}
+                </span>
+              ) : null}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

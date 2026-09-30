@@ -36,6 +36,14 @@ If `settings.json` is damaged, Agent V starts with default settings and keeps th
 
 Settings, "Diagnostics", shows the logs path and has "Open folder". Logs are "always written locally", whether or not crash reporting is on.
 
+## Settings as a file
+
+Settings, "About", "Settings file" has three actions.
+
+- "Export…" saves your settings to a JSON file. It leaves out API keys and sign-ins (they never leave the key vault), MCP servers, custom endpoint headers, and things that only make sense on this computer: pinned and archived tasks, your microphone, paused index folders, and your custom CSS path.
+- "Import…" reads such a file and lists what would change before anything does. Each setting is checked on its own, so one bad value is left out rather than the whole file. Some settings are never taken from a file, because a file someone hands you must not decide them: where your saved keys are sent (the Ollama and Custom base URLs), the proxy, crash reporting, the diagnostics command, what runs without asking, sites the browser opens without asking, and autonomous mode. Custom endpoints in the file are added next to yours; yours keep their URLs and none is removed.
+- "Reset all…" puts every setting back to its default after asking. It keeps API keys and sign-ins, custom endpoints, the provider and model tasks use, MCP servers, your rules, and pinned and archived tasks.
+
 ## Keeping storage in check
 
 Settings, "Storage" covers "What Agent V keeps on disk, and when it lets go of it." It shows what each workspace uses and has these controls:

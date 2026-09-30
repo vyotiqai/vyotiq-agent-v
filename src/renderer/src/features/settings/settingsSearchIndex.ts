@@ -566,6 +566,30 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'about'
   },
   {
+    id: 'about-whats-new',
+    title: 'What’s new',
+    keywords: ['release notes', 'changelog', 'whats new', 'what is new', 'changes', 'version'],
+    section: 'about'
+  },
+  {
+    id: 'settings-export',
+    title: 'Export settings',
+    keywords: ['export', 'backup', 'save settings', 'settings file', 'move to another computer'],
+    section: 'about'
+  },
+  {
+    id: 'settings-import',
+    title: 'Import settings',
+    keywords: ['import', 'restore', 'load settings', 'settings file'],
+    section: 'about'
+  },
+  {
+    id: 'settings-reset-all',
+    title: 'Reset all settings',
+    keywords: ['reset', 'defaults', 'factory', 'start over', 'reset all'],
+    section: 'about'
+  },
+  {
     id: 'send-feedback',
     title: 'Send feedback',
     keywords: ['feedback', 'bug', 'feature request', 'praise', 'email', 'contact', 'support'],

@@ -1,4 +1,5 @@
-import { SHORTCUT_BINDINGS, type ShortcutId } from './bindings'
+import type { ShortcutId } from './bindings'
+import { getBinding } from './registry'
 
 /**
  * The composer's editable field, in every form it takes — the New task brief,
@@ -31,7 +32,7 @@ const SHIFTED_PUNCTUATION: Record<string, string> = {
  * Escape (stop) ignores Ctrl/Meta/Alt/Shift so modified Esc never stops a run.
  */
 export function matchShortcut(e: ShortcutKeyEvent, id: ShortcutId): boolean {
-  const binding = SHORTCUT_BINDINGS[id]
+  const binding = getBinding(id)
   if (binding.alt) {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false
     // Option+digit types a symbol on macOS; the physical key still says which.
@@ -61,9 +62,12 @@ export function matchShortcut(e: ShortcutKeyEvent, id: ShortcutId): boolean {
     }
     return true
   }
-  if (id === 'stop') {
-    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false
-  }
+  // A key on its own (Esc, a function key): no Ctrl/Cmd/Alt, and Shift as the
+  // binding says — so a modified Esc never stops a run.
+  if (e.ctrlKey || e.metaKey || e.altKey) return false
+  const shiftMode = binding.shift ?? 'forbid'
+  if (shiftMode === 'forbid' && e.shiftKey) return false
+  if (shiftMode === 'require' && !e.shiftKey) return false
   return true
 }
 

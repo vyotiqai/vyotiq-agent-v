@@ -14,7 +14,7 @@ import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcr
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { ActionMenu, Button, IconButton, ImageLightbox } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, ImageLightbox, pushToast } from '@renderer/lib/ui'
 import { isEditableShortcutTarget, isMainComposerTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
@@ -38,6 +38,14 @@ import { TaskRecord } from './TaskRecord'
 import { clearMatches, findRanges, foldsToOpen, paintMatches, RecordOpenContext } from './recordFind'
 import { useRecordScroll } from './useRecordScroll'
 import { useRunChecks } from './useRunChecks'
+
+/** Palette commands that run one of the task header menu's items. */
+const TASK_COMMAND_MENU_ITEMS: Record<string, string> = {
+  renameTask: 'rename',
+  archiveTask: 'archive',
+  forkTask: 'fork',
+  deleteTask: 'delete'
+}
 
 export type TaskPaneRunActions = {
   onRename?: (title: string) => void | Promise<void>
@@ -421,6 +429,34 @@ export function TaskPane(props: TaskPaneProps) {
       window.removeEventListener('vyotiq:command', onCommand)
     }
   }, [findOpen, scroll.scrollRef])
+
+  // Task commands from the palette act on the focused pane exactly as its menu
+  // would: the same items, so the same rules (no delete while live). An action
+  // the menu doesn't offer right now says why instead of doing nothing.
+  const menuItemsRef = useRef(menuItems)
+  menuItemsRef.current = menuItems
+  const taskStateRef = useRef({ runId, liveNow, archived })
+  taskStateRef.current = { runId, liveNow, archived }
+  useEffect(() => {
+    const onCommand = (event: Event): void => {
+      const command = (event as CustomEvent<{ id?: string }>).detail?.id ?? ''
+      const itemId = TASK_COMMAND_MENU_ITEMS[command]
+      if (!itemId) return
+      const pane = scroll.scrollRef.current?.closest('[data-chat-pane]')
+      if (!scroll.scrollRef.current || pane?.getAttribute('data-chat-pane-focused') === '0') return
+      const item = menuItemsRef.current.find((entry) => entry.id === itemId)
+      if (item) {
+        item.onSelect()
+        return
+      }
+      const state = taskStateRef.current
+      pushToast(!state.runId ? 'Open a task first.' : state.liveNow ? 'Stop the task first.' : 'This task can’t do that.', {
+        state: 'failed'
+      })
+    }
+    window.addEventListener('vyotiq:command', onCommand)
+    return () => window.removeEventListener('vyotiq:command', onCommand)
+  }, [scroll.scrollRef])
 
   // ── A new request for you comes into view in the focused pane ─────────
   const { jumpTop, jumpBottom, isFollowing } = scroll

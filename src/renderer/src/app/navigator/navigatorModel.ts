@@ -415,6 +415,28 @@ export function filterNavigatorSections(sections: readonly NavSection[], filter:
     .filter((section) => section.rows.length > 0)
 }
 
+/**
+ * Rows a search finds: a title with the text in it, or a task main found it
+ * inside (`contentKeys`, as `pinnedRunKey`s). The View menu does not apply while
+ * searching — a search is for finding things, filtered away or not.
+ */
+export function searchNavigatorSections(
+  sections: readonly NavSection[],
+  query: string,
+  contentKeys: ReadonlySet<string>
+): NavSection[] {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return [...sections]
+  return sections
+    .map((section) => ({
+      ...section,
+      rows: section.rows.filter(
+        (row) => row.title.toLowerCase().includes(needle) || contentKeys.has(pinnedRunKey(row.workspacePath, row.runId))
+      )
+    }))
+    .filter((section) => section.rows.length > 0)
+}
+
 /** Drafts are never unread and have not started anywhere, so only their own entry and Unread only apply. */
 export function draftsPassFilter(filter: NavFilter): boolean {
   return !filter.hiddenStates.includes('drafts') && !filter.unreadOnly

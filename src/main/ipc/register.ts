@@ -32,6 +32,11 @@ import {
   type TaskFileDiffResult,
   HomeActivityRequestSchema,
   RunFeedbackGetRequestSchema,
+  RunSearchRequestSchema,
+  type RunSearchResult,
+  SettingsImportApplyRequestSchema,
+  type SettingsExportResult,
+  type SettingsImportPreviewResult,
   RunFeedbackSetRequestSchema,
   SetSettingsRequestSchema,
   ToolCatalogRequestSchema,
@@ -254,7 +259,8 @@ import {
 } from '../../shared/providers'
 import { isCustomProviderId } from '../../shared/ipc/schemas/providers'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
-import { writeFile } from 'fs/promises'
+import { readFile, stat, writeFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
 import { formatError, AppError, isAbortError, isAppError } from '../../shared/errors'
 import { scrubString } from '../../shared/utils/scrub'
 import { logger, logErrorSummary } from '../../shared/logger'
@@ -340,6 +346,13 @@ import {
 } from '@main/storage/retention'
 import { collectHomeActivity } from '../agent/activityStats'
 import { applyNetworkSettings, proxyStatus } from '@main/net/proxy'
+import { searchRuns } from '@main/agent/runSearch'
+import {
+  buildSettingsExport,
+  buildSettingsReset,
+  previewSettingsImport,
+  SETTINGS_FILE_MAX_BYTES
+} from '@main/settings/settingsFile'
 import { readAdcCredentials } from '@main/agent/providers/google/googleAuth'
 import type { GoogleAdcStatus, ProxyStatus } from '../../shared/domain/network'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
@@ -1259,32 +1272,112 @@ export function registerIpc(): void {
         }
       }
       const next = await enqueueSettingsMutation(() => setSettings(partial))
-      if (partial.theme !== undefined || partial.skinId !== undefined) {
-        applyWindowChrome(next.theme, next.skinId)
-      }
-      if (partial.customCssPath !== undefined) {
-        syncCustomCssWatch(next.customCssPath)
-        notifyCustomCssChanged()
-      }
-      if (partial.telemetryEnabled !== undefined) {
-        applySentryTelemetry(next.telemetryEnabled)
-      }
-      if (partial.network !== undefined) {
-        await applyNetworkSettings(next.network)
-      }
-      if (partial.autoCheckUpdates !== undefined) {
-        // Arm/disarm the background checks now instead of at the next launch,
-        // so switching it off stops network calls immediately.
-        applyUpdateCheckSchedule(next.autoCheckUpdates)
-      }
-      if (partial.mcpServers !== undefined || partial.marketplace !== undefined) {
-        invalidateMcpResolveCache()
-        await syncMcpServers(resolveMcpServersForSessionMap())
-        notifyToolCatalogChanged()
-      }
+      await afterSettingsWrite(partial, next)
       return ok(redactSettingsForIpc(next))
     } catch (err) {
       return failFrom(err, IPC.setSettings)
+    }
+  })
+
+  /** What a settings write sets in motion beyond the file: chrome, CSS, network, telemetry, updates, MCP. */
+  async function afterSettingsWrite(partial: Partial<Settings>, next: Settings): Promise<void> {
+    if (partial.theme !== undefined || partial.skinId !== undefined) {
+      applyWindowChrome(next.theme, next.skinId)
+    }
+    if (partial.customCssPath !== undefined) {
+      syncCustomCssWatch(next.customCssPath)
+      notifyCustomCssChanged()
+    }
+    if (partial.telemetryEnabled !== undefined) {
+      applySentryTelemetry(next.telemetryEnabled)
+    }
+    if (partial.network !== undefined) {
+      await applyNetworkSettings(next.network)
+    }
+    if (partial.autoCheckUpdates !== undefined) {
+      // Arm/disarm the background checks now instead of at the next launch,
+      // so switching it off stops network calls immediately.
+      applyUpdateCheckSchedule(next.autoCheckUpdates)
+    }
+    if (partial.mcpServers !== undefined || partial.marketplace !== undefined) {
+      invalidateMcpResolveCache()
+      await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
+    }
+  }
+
+  ipcMain.handle(IPC.settingsExport, async (event): Promise<IpcResult<SettingsExportResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const doc = buildSettingsExport(getSettings(), app.getVersion())
+      const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const options: Electron.SaveDialogOptions = {
+        title: 'Export settings',
+        defaultPath: 'agent-v-settings.json',
+        filters: [{ name: 'Agent V settings', extensions: ['json'] }]
+      }
+      const picked = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
+      if (picked.canceled || !picked.filePath) return ok({ saved: false })
+      await writeFile(picked.filePath, JSON.stringify(doc, null, 2) + '\n', 'utf8')
+      return ok({ saved: true, path: picked.filePath })
+    } catch (err) {
+      return failFrom(err, IPC.settingsExport)
+    }
+  })
+
+  // A preview is applied by its token, exactly as shown; one pending per window.
+  const pendingImports = new Map<number, { token: string; patch: Partial<Settings> }>()
+  ipcMain.handle(IPC.settingsImportPreview, async (event): Promise<IpcResult<SettingsImportPreviewResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const options: Electron.OpenDialogOptions = {
+        title: 'Import settings',
+        properties: ['openFile'],
+        filters: [{ name: 'Agent V settings', extensions: ['json'] }]
+      }
+      const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+      const path = picked.filePaths[0]
+      if (picked.canceled || !path) return ok({ picked: false })
+      if ((await stat(path)).size > SETTINGS_FILE_MAX_BYTES) return failExpected('That file is too large to be a settings file.', IPC.settingsImportPreview)
+      let result: ReturnType<typeof previewSettingsImport>
+      try {
+        result = previewSettingsImport(await readFile(path, 'utf8'), getSettings())
+      } catch (err) {
+        return failExpected(err instanceof Error ? err.message : String(err), IPC.settingsImportPreview)
+      }
+      const token = randomUUID()
+      pendingImports.set(event.sender.id, { token, patch: result.patch })
+      return ok({ picked: true, token, path, ...result.preview })
+    } catch (err) {
+      return failFrom(err, IPC.settingsImportPreview)
+    }
+  })
+
+  ipcMain.handle(IPC.settingsImportApply, async (event, raw): Promise<IpcResult<Settings>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = SettingsImportApplyRequestSchema.parse(raw)
+      const pending = pendingImports.get(event.sender.id)
+      if (!pending || pending.token !== req.token) return failExpected('Choose the settings file again.', IPC.settingsImportApply)
+      pendingImports.delete(event.sender.id)
+      const next = await enqueueSettingsMutation(() => setSettings(pending.patch))
+      await afterSettingsWrite(pending.patch, next)
+      return ok(redactSettingsForIpc(next))
+    } catch (err) {
+      return failFrom(err, IPC.settingsImportApply)
+    }
+  })
+
+  ipcMain.handle(IPC.settingsReset, async (event): Promise<IpcResult<Settings>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const patch = buildSettingsReset(getSettings())
+      const next = await enqueueSettingsMutation(() => setSettings(patch))
+      await afterSettingsWrite(patch, next)
+      return ok(redactSettingsForIpc(next))
+    } catch (err) {
+      return failFrom(err, IPC.settingsReset)
     }
   })
 
@@ -2348,6 +2441,23 @@ export function registerIpc(): void {
       }
     }
   )
+
+  // One search per window at a time: a newer query stops the one before it.
+  const runSearchGeneration = new Map<number, number>()
+  ipcMain.handle(IPC.runsSearch, async (event, raw): Promise<IpcResult<RunSearchResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = RunSearchRequestSchema.parse(raw)
+      const closed = req.workspacePaths.filter((path) => !isOpenWorkspace(path))
+      if (closed.length > 0) return fail('Workspace is not open')
+      const sender = event.sender.id
+      const generation = (runSearchGeneration.get(sender) ?? 0) + 1
+      runSearchGeneration.set(sender, generation)
+      return ok(await searchRuns(req, { isCurrent: () => runSearchGeneration.get(sender) === generation }))
+    } catch (err) {
+      return failFrom(err, IPC.runsSearch)
+    }
+  })
 
   ipcMain.handle(
     IPC.runFeedbackGet,

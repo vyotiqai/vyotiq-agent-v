@@ -4,7 +4,7 @@ import { requestOpenWorkspaceFile } from '@renderer/lib/chat/workspaceFileReques
 import { launchViewFor } from './launchView'
 import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
-import { toggleArchivedRun } from './navigator/archivedRuns'
+import { ARCHIVED_RUNS_CAP, archiveRuns, toggleArchivedRun } from './navigator/archivedRuns'
 import { requestNavigatorScope } from './navigator/useNavigatorScope'
 import { requestUpdatePanel } from './navigator/UpdateChip'
 import { ChatView } from '../features/chat/ChatView'
@@ -17,14 +17,14 @@ import type { PaneRenderOptions } from '../features/chat/ChatPaneHost'
 import type { SettingsSection } from '../features/settings'
 import { useAppearance } from '@renderer/lib/hooks/useAppearance'
 import { useCustomSkinCss } from '@renderer/lib/hooks/useCustomSkinCss'
-import { pickAppearanceSettings, stepFontScale, DEFAULT_FONT_SCALE } from '@shared/appearance'
+import { pickAppearanceSettings, stepFontScale, DEFAULT_FONT_SCALE, type AppearanceSettings } from '@shared/appearance'
 import { useSettings } from '@renderer/lib/hooks/useSettings'
 import { useWorkspaceManager, resolveComposerDraft } from '@renderer/lib/hooks/useWorkspaceManager'
 import type { WorkspaceContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { ToastHost, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
-import { focusComposerMessage } from '@renderer/lib/shortcuts'
+import { applyShortcutOverrides, focusComposerMessage, notifyShortcutListeners } from '@renderer/lib/shortcuts'
 import { useFocusComposerSoon } from './useFocusComposerSoon'
 import { useLiveAnnouncer } from '@renderer/lib/a11y'
 import type {
@@ -403,6 +403,13 @@ function App() {
     setView(showSetup ? 'home' : launchViewFor(settings.navigationMode))
   }, [loading, setupUndecided, showSetup, settings.navigationMode])
 
+  // Rebound shortcuts: taken during render so this render's children already
+  // match and label the new keys; memoized ones hear about it after.
+  applyShortcutOverrides(settings.shortcutOverrides)
+  useLayoutEffect(() => {
+    notifyShortcutListeners()
+  }, [settings.shortcutOverrides])
+
   useLayoutEffect(() => {
     hydrate(
       pickAppearanceSettings({
@@ -444,6 +451,18 @@ function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [settings, setAppearance, update])
+
+  /** Apply appearance at once, then save it; a failed save puts it back. Settings and the palette. */
+  const onAppearanceChange = useCallback(
+    (partial: Partial<AppearanceSettings>): void => {
+      const prev = pickAppearanceSettings(settings)
+      setAppearance(partial)
+      void update(partial).then((res) => {
+        if (!res.ok) setAppearance(prev)
+      })
+    },
+    [settings, setAppearance, update]
+  )
 
   const onProviderModelForWorkspace = useCallback((
     workspacePath: string | null | undefined,
@@ -563,6 +582,39 @@ function App() {
             void update({
               archivedRuns: now.archivedRuns.filter((k) => k !== key),
               ...(wasPinned && !now.pinnedRuns.includes(key) ? { pinnedRuns: togglePinnedRun(now.pinnedRuns, key) } : {})
+            })
+          }
+        }
+      })
+    },
+    [update]
+  )
+
+  // Several at once (a selection, or "Archive all done"): one settings write,
+  // so no archive is lost to another's stale copy of the list; one Undo.
+  const onArchiveRuns = useCallback(
+    (keys: readonly string[]): void => {
+      const before = archiveSettingsRef.current
+      const { next, added, dropped } = archiveRuns(before.archivedRuns, keys)
+      if (added.length === 0) return
+      const addedSet = new Set(added)
+      const unpinned = before.pinnedRuns.filter((k) => addedSet.has(k))
+      void update({
+        archivedRuns: next,
+        ...(unpinned.length ? { pinnedRuns: before.pinnedRuns.filter((k) => !addedSet.has(k)) } : {})
+      })
+      pushToast(added.length === 1 ? 'Task archived' : `${added.length} tasks archived`, {
+        ...(dropped > 0
+          ? { detail: `The archive keeps ${ARCHIVED_RUNS_CAP}; the ${dropped} oldest came back.` }
+          : {}),
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            const now = archiveSettingsRef.current
+            const pins = unpinned.filter((k) => !now.pinnedRuns.includes(k))
+            void update({
+              archivedRuns: now.archivedRuns.filter((k) => !addedSet.has(k)),
+              ...(pins.length ? { pinnedRuns: [...now.pinnedRuns, ...pins] } : {})
             })
           }
         }
@@ -2191,6 +2243,51 @@ function App() {
     }
   }
 
+  /**
+   * Delete several tasks after one confirm. One at a time, as main wants: each
+   * delete drains that run's writers first, and a live one is refused. Pins and
+   * archive entries are pruned once, from the settings as they are now.
+   */
+  const onDeleteRunsInWorkspace = async (items: ReadonlyArray<{ workspacePath: string; runId: string }>): Promise<void> => {
+    if (items.length === 0 || !window.vyotiq?.deleteRun) return
+    const ok = await confirm(
+      `Delete ${items.length === 1 ? 'this task' : `these ${items.length} tasks`}? Their records and checkpoints are removed; files they changed stay as they are.`,
+      { title: items.length === 1 ? 'Delete task' : 'Delete tasks', confirmLabel: 'Delete', danger: true }
+    )
+    if (!ok) return
+    const deletedKeys = new Set<string>()
+    const touched = new Set<string>()
+    const errors: string[] = []
+    for (const { workspacePath: path, runId } of items) {
+      const res = await window.vyotiq.deleteRun(path, runId)
+      if (!res.ok) {
+        errors.push(res.error)
+        continue
+      }
+      removeOfflineQueueEntriesForRun(path, runId)
+      purgeDeletedRunUi(path, runId)
+      clearOpenInstanceMatching(runId)
+      if (activeWorkspace && workspacePathsEqual(path, activeWorkspace)) closeRunTab(runId)
+      deletedKeys.add(pinnedRunKey(path, runId))
+      touched.add(path)
+    }
+    for (const path of touched) refreshWorkspaceRuns(path)
+    const now = archiveSettingsRef.current
+    const pins = now.pinnedRuns.filter((k) => !deletedKeys.has(k))
+    const archived = now.archivedRuns.filter((k) => !deletedKeys.has(k))
+    if (pins.length !== now.pinnedRuns.length || archived.length !== now.archivedRuns.length) {
+      void update({ pinnedRuns: pins, archivedRuns: archived })
+    }
+    if (errors.length > 0) {
+      pushToast(
+        `Deleted ${deletedKeys.size} of ${items.length}. ${errors.length} couldn’t be deleted: ${[...new Set(errors)].join('; ')}`,
+        'error'
+      )
+    } else {
+      pushToast(deletedKeys.size === 1 ? 'Task deleted' : `${deletedKeys.size} tasks deleted`)
+    }
+  }
+
   const onCloseWorkspace = async (path: string): Promise<void> => {
     // Storage retention (audit H5): offer storage-dir deletion with the measured
     // size, confirmed here BEFORE the remove IPC — main never prompts.
@@ -2619,6 +2716,10 @@ function App() {
         setView('settings')
       }}
       onOpenMarketplace={() => setView('marketplace')}
+      onAppearanceChange={onAppearanceChange}
+      appearance={{ theme: settings.theme, skinId: settings.skinId }}
+      onArchiveRuns={onArchiveRuns}
+      onDeleteRuns={(items) => void onDeleteRunsInWorkspace(items)}
       onOpenChat={() => setView('chat')}
       onOpenHome={() => setView('home')}
       onOpenUsage={() => setView('usage')}
@@ -2661,13 +2762,7 @@ function App() {
             onUpdate={update}
             onSaveSecret={saveSecret}
             onClearSecret={removeSecret}
-            onAppearanceChange={(partial) => {
-              const prev = pickAppearanceSettings(settings)
-              setAppearance(partial)
-              void update(partial).then((res) => {
-                if (!res.ok) setAppearance(prev)
-              })
-            }}
+            onAppearanceChange={onAppearanceChange}
             customCssError={customCssError}
             onPickWorkspace={async () => {
               const res = await pickWorkspace()

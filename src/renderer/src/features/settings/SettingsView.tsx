@@ -142,7 +142,7 @@ export function SettingsView(props: SettingsViewProps) {
       case 'notifications':
         return <NotificationsSection form={form} />
       case 'shortcuts':
-        return <ShortcutsSection />
+        return <ShortcutsSection form={form} />
       case 'providers':
         return (
           <ProvidersSection

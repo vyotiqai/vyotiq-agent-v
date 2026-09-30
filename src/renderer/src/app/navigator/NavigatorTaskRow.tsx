@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { IconButton, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { CheckMark, IconButton, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from '@renderer/lib/ui/ContextMenu'
 import {
   markSessionDragEnd,
@@ -8,6 +8,9 @@ import {
 } from '@renderer/lib/chat/chatPaneLayout'
 import type { NavMeta, NavRow } from './navigatorModel'
 import { TaskHoverCard, hoverCardAnchor, type TaskHoverCardAnchor } from './TaskHoverCard'
+import { WHERE_WORDS, highlightMatch, type RowSnippet } from './searchSnippet'
+
+export type { RowSnippet }
 
 /** A resting pointer, not one passing through on its way down the list. */
 const HOVER_CARD_DELAY_MS = 500
@@ -47,7 +50,11 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   selected,
   open = false,
   actions,
-  onNavKeyDown
+  onNavKeyDown,
+  checked = false,
+  onMultiSelect,
+  snippet,
+  query = ''
 }: {
   row: NavRow
   /** The state the group's heading says; a row in it shows no glyph of its own. */
@@ -58,6 +65,13 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   open?: boolean
   actions: NavigatorRowActions
   onNavKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
+  /** In the navigator's selection (Ctrl-click, Ctrl Space). */
+  checked?: boolean
+  /** Add or remove this task from the selection; `range` extends it (Shift). */
+  onMultiSelect?: (row: NavRow, range: boolean) => void
+  /** The line a search matched, when it wasn't the title. */
+  snippet?: RowSnippet
+  query?: string
 }) {
   const [renaming, setRenaming] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -156,7 +170,9 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
     metaLabel(row.meta),
     row.run.worktreeBranch ? `worktree ${row.run.worktreeBranch}` : null,
     row.foreign ? row.workspaceName : null,
-    row.archived ? 'archived' : null
+    row.archived ? 'archived' : null,
+    checked ? 'selected' : null,
+    snippet && snippet.where !== 'title' ? `found: ${snippet.text}` : null
   ]
     .filter(Boolean)
     .join(', ')
@@ -193,9 +209,10 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         aria-describedby={descriptionId}
         data-session-open={selected || open ? '1' : '0'}
         data-session-focused={selected ? '1' : '0'}
+        data-nav-checked={checked ? '1' : undefined}
         className={cn(
           'app-region-no-drag flex h-7 w-full items-center gap-2 rounded-md pl-2 text-left vy-transition focus-visible:vy-focus-ring',
-          selected ? 'bg-surface-2' : 'hover:bg-surface',
+          checked ? 'bg-accent-soft' : selected ? 'bg-surface-2' : 'hover:bg-surface',
           // Room for the ⋯ after the meta: while its menu is open, and on hover or focus.
           confirmingDelete ? 'pr-[108px]' : menuAnchor ? 'pr-7' : 'pr-2 group-hover:pr-7 group-focus-within:pr-7',
           dragging && 'opacity-50'
@@ -211,7 +228,14 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         }}
         onPointerLeave={hideCard}
         onPointerDown={hideCard}
-        onClick={() => actions.onSelect(workspacePath, runId)}
+        onClick={(e) => {
+          if (onMultiSelect && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+            e.preventDefault()
+            onMultiSelect(row, e.shiftKey)
+            return
+          }
+          actions.onSelect(workspacePath, runId)
+        }}
         onDoubleClick={(e) => {
           e.preventDefault()
           setRenaming(true)
@@ -225,6 +249,11 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
           if (e.key === 'Delete' && !confirmingDelete) {
             e.preventDefault()
             setConfirmingDelete(true)
+            return
+          }
+          if (e.key === ' ' && onMultiSelect && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+            e.preventDefault()
+            onMultiSelect(row, e.shiftKey)
             return
           }
           if (e.key === 'F2') {
@@ -263,7 +292,10 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         </span>
         {confirmingDelete ? null : (
           <>
-            {showGlyph ? (
+            {checked ? (
+              // The fill is not the only sign: selected rows are ticked.
+              <CheckMark on className="shrink-0" />
+            ) : showGlyph ? (
               <span className="inline-flex shrink-0" data-row-glyph>
                 <StatusGlyph state={row.state} size={14} />
               </span>
@@ -273,6 +305,12 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         )}
       </button>
 
+      {snippet && snippet.where !== 'title' ? (
+        <p className="m-0 truncate pb-0.5 pl-2 pr-2 text-caption text-muted" data-nav-snippet aria-hidden="true">
+          <span className="text-tertiary">{WHERE_WORDS[snippet.where]}: </span>
+          {highlightMatch(snippet.text, snippet.start, snippet.length, query)}
+        </p>
+      ) : null}
       {confirmingDelete ? (
         <DeleteConfirm
           title={row.title}

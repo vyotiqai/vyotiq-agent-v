@@ -16,6 +16,22 @@ import {
  */
 export const LAST_SEEN_UPDATE_VERSION_KEY = 'vyotiq.updates.lastSeenVersion'
 
+/**
+ * The running version's notes, kept after the post-update modal consumed the
+ * pending copy, so What's new can be opened again (About, the palette).
+ */
+export const CURRENT_NOTES_KEY = 'vyotiq.updates.currentNotes'
+
+/** Open requests from outside the modal — not a second updater subscriber. */
+const openRequests = new Set<() => void>()
+
+/** Show What's new for the running version. False when nothing is mounted to show it. */
+export function requestWhatsNew(): boolean {
+  if (openRequests.size === 0) return false
+  for (const open of openRequests) open()
+  return true
+}
+
 export interface UseWhatsNew {
   /** True while the post-restart modal is visible. */
   open: boolean
@@ -51,9 +67,9 @@ export function compareVersions(a: string, b: string): number {
  * Read the notes payload Stage A persisted before the install restart.
  * Returns null when absent, malformed, or stamped for a different version.
  */
-function readPendingNotes(version: string): ParsedReleaseNotes | null {
+function readPendingNotes(version: string, key: string = PENDING_NOTES_KEY): ParsedReleaseNotes | null {
   try {
-    const raw = window.localStorage.getItem(PENDING_NOTES_KEY)
+    const raw = window.localStorage.getItem(key)
     if (!raw) return null
     const candidate = JSON.parse(raw) as Partial<PendingNotes> | null
     if (
@@ -90,6 +106,8 @@ export function useWhatsNew(): UseWhatsNew {
   const [pendingNotes, setPendingNotes] = useState<ParsedReleaseNotes | null>(null)
   const [open, setOpen] = useState(false)
   const gateRanRef = useRef(false)
+  const currentVersionRef = useRef<string | null>(null)
+  currentVersionRef.current = currentVersion
 
   useEffect(() => {
     if (gateRanRef.current) return
@@ -142,6 +160,13 @@ export function useWhatsNew(): UseWhatsNew {
 
         // App was updated: open the modal and consume the pending notes.
         const notes = readPendingNotes(version)
+        if (notes) {
+          try {
+            window.localStorage.setItem(CURRENT_NOTES_KEY, JSON.stringify({ version, ...notes }))
+          } catch {
+            // Only the reopen path loses its notes; it falls back to the link.
+          }
+        }
         clearPending()
         setCurrentVersion(version)
         setLastRunVersion(stored)
@@ -153,6 +178,27 @@ export function useWhatsNew(): UseWhatsNew {
     }
 
     void decide()
+  }, [])
+
+  useEffect(() => {
+    const show = (): void => {
+      void (async () => {
+        let version = currentVersionRef.current
+        if (version == null) {
+          const info = await window.vyotiq?.getAppInfo?.()
+          if (!info?.ok) return
+          version = info.data.version
+          setCurrentVersion(version)
+        }
+        setLastRunVersion(null)
+        setPendingNotes(readPendingNotes(version, CURRENT_NOTES_KEY))
+        setOpen(true)
+      })()
+    }
+    openRequests.add(show)
+    return () => {
+      openRequests.delete(show)
+    }
   }, [])
 
   const dismiss = useCallback((): void => {

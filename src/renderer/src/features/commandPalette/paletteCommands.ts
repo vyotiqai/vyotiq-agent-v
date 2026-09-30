@@ -1,10 +1,14 @@
 import type { UpdaterStatePayload } from '@shared/ipc'
+import type { ThemeId } from '@shared/theme'
+import type { AppearanceSettings } from '@shared/appearance'
+import { SKIN_CATALOG, type SkinId } from '@shared/skins'
 import type { IconName } from '@renderer/lib/icons'
 import { shortcutCatalog, shortcutLabel, type ShortcutId } from '@renderer/lib/shortcuts'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { SECTION_LABELS } from '@renderer/features/settings/constants'
 import { filterSettingsSearch } from '@renderer/features/settings/settingsSearchIndex'
 import { downloadUpdate, installUpdate } from '@renderer/features/updates/updaterStore'
+import { requestWhatsNew } from '@renderer/features/whats-new/useWhatsNew'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import type { PaletteCommand } from './CommandPalette'
 
@@ -53,14 +57,38 @@ export function labelToKeys(label: string): string[] {
   return label.split('+').filter(Boolean)
 }
 
+const THEMES: ReadonlyArray<{ id: ThemeId; label: string; icon: IconName }> = [
+  { id: 'system', label: 'System', icon: 'monitor' },
+  { id: 'light', label: 'Light', icon: 'sun' },
+  { id: 'dark', label: 'Dark', icon: 'moon' }
+]
+
+/** Task header actions, for the task in the focused pane. */
+const TASK_COMMANDS: PaletteCommand[] = [
+  { id: 'renameTask', title: 'Rename task', icon: 'edit' },
+  { id: 'archiveTask', title: 'Archive or unarchive task', icon: 'archive' },
+  { id: 'forkTask', title: 'Fork task', icon: 'fork' },
+  { id: 'deleteTask', title: 'Delete task…', icon: 'trash' }
+]
+
 export function paletteCommands({
   workspaces,
   activePath,
-  canSendFeedback
+  canSendFeedback,
+  canOpenExtensions = false,
+  canAddWorkspace = false,
+  appearance = null,
+  hasTask = false
 }: {
   workspaces: readonly string[]
   activePath: string | null
   canSendFeedback: boolean
+  canOpenExtensions?: boolean
+  canAddWorkspace?: boolean
+  /** The theme and skin now, to mark the current ones; null hides appearance commands. */
+  appearance?: { theme: ThemeId; skinId: SkinId } | null
+  /** A task view is showing, so the task commands have something to act on. */
+  hasTask?: boolean
 }): PaletteCommand[] {
   const base: PaletteCommand[] = shortcutCatalog()
     // One tab per Alt chord would repeat the panel commands; the chords are listed in Settings.
@@ -89,9 +117,29 @@ export function paletteCommands({
 
   const extras: PaletteCommand[] = [
     { id: 'goUsage', title: 'Usage', icon: 'chart' },
+    ...(canOpenExtensions ? [{ id: 'openExtensions', title: 'Extensions', icon: 'extensions' as const }] : []),
+    ...(canAddWorkspace ? [{ id: 'addWorkspace', title: 'Add workspace…', icon: 'folderPlus' as const }] : []),
+    { id: 'whatsNew', title: 'What’s new', icon: 'sparkles' },
     ...(canSendFeedback ? [{ id: 'sendFeedback', title: 'Send feedback', icon: ICON.sendFeedback }] : [])
   ]
-  return [...base, ...perWorkspace, ...extras]
+  const look: PaletteCommand[] = appearance
+    ? [
+        ...THEMES.map((t) => ({
+          id: `${THEME_PREFIX}${t.id}`,
+          title: `Theme: ${t.label}`,
+          icon: t.icon,
+          ...(appearance.theme === t.id ? { hint: 'current' } : {})
+        })),
+        ...SKIN_CATALOG.map((skin) => ({
+          id: `${SKIN_PREFIX}${skin.id}`,
+          title: `Skin: ${skin.label}`,
+          icon: 'star' as const,
+          detail: skin.description,
+          ...(appearance.skinId === skin.id ? { hint: 'current' } : {})
+        }))
+      ]
+    : []
+  return [...base, ...(hasTask ? TASK_COMMANDS : []), ...perWorkspace, ...extras, ...look]
 }
 
 /**
@@ -111,6 +159,8 @@ export function paletteUpdateCommands(update: UpdaterStatePayload): PaletteComma
 }
 
 const SETTINGS_PREFIX = 'settings:'
+const THEME_PREFIX = 'theme:'
+const SKIN_PREFIX = 'skin:'
 
 /**
  * Settings rows that match, as commands ("Settings: Check automatically"),
@@ -144,6 +194,9 @@ export type PaletteHandlers = {
   onFocusInstructionLine: () => void
   /** A settings row by its `data-settings-field` id. */
   onOpenSettingsField: (fieldId: string) => void
+  onOpenExtensions?: () => void
+  onAddWorkspace?: () => void
+  onAppearanceChange?: (partial: Partial<AppearanceSettings>) => void
 }
 
 export function runPaletteCommand(id: string, h: PaletteHandlers): void {
@@ -158,6 +211,22 @@ export function runPaletteCommand(id: string, h: PaletteHandlers): void {
   if (id === 'stop') return h.onStop?.()
   if (id === 'closeChat') return h.onCloseChat?.()
   if (id === 'splitPane') return h.onSplitPane?.()
+  if (id === 'openExtensions') return h.onOpenExtensions?.()
+  if (id === 'addWorkspace') return h.onAddWorkspace?.()
+  if (id === 'whatsNew') {
+    requestWhatsNew()
+    return
+  }
+  if (id.startsWith(THEME_PREFIX)) {
+    const theme = id.slice(THEME_PREFIX.length)
+    if (THEMES.some((t) => t.id === theme)) h.onAppearanceChange?.({ theme: theme as ThemeId })
+    return
+  }
+  if (id.startsWith(SKIN_PREFIX)) {
+    const skin = SKIN_CATALOG.find((entry) => entry.id === id.slice(SKIN_PREFIX.length))
+    if (skin) h.onAppearanceChange?.({ skinId: skin.id })
+    return
+  }
   if (id === 'downloadUpdate') return downloadUpdate()
   if (id === 'installUpdate') return installUpdate()
   if (id.startsWith(SETTINGS_PREFIX)) return h.onOpenSettingsField(id.slice(SETTINGS_PREFIX.length))

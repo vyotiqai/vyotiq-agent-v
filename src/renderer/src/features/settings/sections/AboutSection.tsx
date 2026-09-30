@@ -12,6 +12,8 @@ import {
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { SettingsField, SettingsGroup, SettingsItem, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
+import { requestWhatsNew } from '@renderer/features/whats-new/useWhatsNew'
+import { SettingsFileGroup } from '../components/SettingsFileGroup'
 
 const SOURCE_URL = 'https://github.com/vyotiqai/vyotiq-agent-v'
 
@@ -271,7 +273,24 @@ export function AboutSection({
             </Button>
           )}
         </SettingsItem>
+        <SettingsField
+          id="about-whats-new"
+          title="What’s new"
+          hint={info ? `What changed in ${info.version}.` : 'What changed in this version.'}
+        >
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              if (!requestWhatsNew()) form.setErrorMessage('What’s new can’t be shown right now.')
+            }}
+          >
+            Show
+          </Button>
+        </SettingsField>
       </SettingsGroup>
+
+      <SettingsFileGroup form={form} />
 
       <SettingsGroup title="Feedback">
         <SettingsField

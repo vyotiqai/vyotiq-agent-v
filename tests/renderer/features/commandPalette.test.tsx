@@ -244,3 +244,63 @@ describe('palette update and settings commands', () => {
     expect(screen.queryByText(/^Settings: /)).toBeNull()
   })
 })
+
+describe('palette extensions, workspace, appearance and task commands', () => {
+  const base = { workspaces: [WS], activePath: WS, canSendFeedback: false }
+
+  it('lists them only when there is something to run them, marking the current look', () => {
+    const none = paletteCommands(base).map((c) => c.id)
+    expect(none).not.toContain('openExtensions')
+    expect(none).not.toContain('theme:dark')
+    expect(none).not.toContain('renameTask')
+    expect(none).toContain('whatsNew')
+
+    const all = paletteCommands({
+      ...base,
+      canOpenExtensions: true,
+      canAddWorkspace: true,
+      appearance: { theme: 'dark', skinId: 'native' },
+      hasTask: true
+    })
+    const ids = all.map((c) => c.id)
+    expect(ids).toEqual(expect.arrayContaining(['openExtensions', 'addWorkspace', 'theme:system', 'theme:light', 'theme:dark', 'skin:gild', 'renameTask', 'archiveTask', 'forkTask', 'deleteTask']))
+    expect(all.find((c) => c.id === 'theme:dark')?.hint).toBe('current')
+    expect(all.find((c) => c.id === 'theme:light')?.hint).toBeUndefined()
+    expect(all.find((c) => c.id === 'skin:native')?.hint).toBe('current')
+  })
+
+  it('routes extensions, workspace and appearance to their handlers, and task commands to the task view', () => {
+    const h = {
+      workspaces: [WS],
+      onOpenSettings: vi.fn(),
+      onOpenHome: vi.fn(),
+      onOpenUsage: vi.fn(),
+      onNewTask: vi.fn(),
+      onToggleNavigator: vi.fn(),
+      onNextNeedsYou: vi.fn(),
+      onSwitchWorkspaceByIndex: vi.fn(),
+      onFocusInstructionLine: vi.fn(),
+      onOpenSettingsField: vi.fn(),
+      onOpenExtensions: vi.fn(),
+      onAddWorkspace: vi.fn(),
+      onAppearanceChange: vi.fn()
+    }
+    runPaletteCommand('openExtensions', h)
+    runPaletteCommand('addWorkspace', h)
+    runPaletteCommand('theme:light', h)
+    runPaletteCommand('skin:proof', h)
+    runPaletteCommand('theme:neon', h)
+    runPaletteCommand('skin:neon', h)
+    expect(h.onOpenExtensions).toHaveBeenCalledTimes(1)
+    expect(h.onAddWorkspace).toHaveBeenCalledTimes(1)
+    expect(h.onAppearanceChange.mock.calls).toEqual([[{ theme: 'light' }], [{ skinId: 'proof' }]])
+
+    const seen: string[] = []
+    const onCommand = (e: Event) => seen.push((e as CustomEvent<{ id: string }>).detail.id)
+    window.addEventListener('vyotiq:command', onCommand)
+    runPaletteCommand('renameTask', h)
+    runPaletteCommand('deleteTask', h)
+    window.removeEventListener('vyotiq:command', onCommand)
+    expect(seen).toEqual(['renameTask', 'deleteTask'])
+  })
+})

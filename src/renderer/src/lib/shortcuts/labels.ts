@@ -1,4 +1,5 @@
 import { SHORTCUT_BINDINGS, type ShortcutId } from './bindings'
+import { getBinding } from './registry'
 
 function isDarwin(): boolean {
   return typeof window !== 'undefined' && window.vyotiq?.platform === 'darwin'
@@ -21,10 +22,10 @@ export function altChordLabel(key: string): string {
 
 /** Platform-correct label for a shortcut (Darwin `⌘K` vs `Ctrl+K`). */
 export function shortcutLabel(id: ShortcutId): string {
-  const binding = SHORTCUT_BINDINGS[id]
+  const binding = getBinding(id)
   const glyph = keyGlyph(binding.key)
   if (binding.alt) return isDarwin() ? `⌥${glyph}` : `Alt+${glyph}`
-  if (!binding.mod) return glyph
+  if (!binding.mod) return binding.shift === 'require' ? (isDarwin() ? `⇧${glyph}` : `Shift+${glyph}`) : glyph
   const shift = binding.shift === 'require'
   if (isDarwin()) return shift ? `⌘⇧${glyph}` : `⌘${glyph}`
   return shift ? `Ctrl+Shift+${glyph}` : `Ctrl+${glyph}`

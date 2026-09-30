@@ -19,3 +19,14 @@ export {
   type ShortcutKeyEvent
 } from './match'
 export { useAppShortcuts, type AppShortcutHandlers } from './useAppShortcuts'
+export {
+  applyShortcutOverrides,
+  chordFromEvent,
+  findShortcutConflict,
+  getBinding,
+  isRebindable,
+  notifyShortcutListeners,
+  reservedChordReason,
+  useShortcutsVersion,
+  type ShortcutChord
+} from './registry'

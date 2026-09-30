@@ -5,7 +5,13 @@ group: Reference
 order: 1
 ---
 
-On macOS, `Ctrl` is `⌘`, `Alt` is `⌥` and `Shift` is `⇧`. Settings, "Shortcuts" lists most of them with the right keys for your system.
+On macOS, `Ctrl` is `⌘`, `Alt` is `⌥` and `Shift` is `⇧`. Settings, "Shortcuts" lists most of them with the right keys for your system. The keys below are the defaults; you can change most of them.
+
+## Changing a shortcut
+
+In Settings, "Shortcuts", click "Change" beside a shortcut and press the keys you want. `Esc` cancels. A chord needs `Ctrl` or `Alt` (a function key works on its own). The app refuses keys another shortcut already uses, naming it, and keys text fields and the system own: copy, paste and undo, the text-size keys, and on macOS `⌘H`, `⌘Q` and `⌘M`. "Reset" puts one back; "Reset all shortcuts" puts them all back.
+
+`Esc` (stop the run) and the numbered keys for workspaces and inspector tabs can't be changed.
 
 ## Getting around
 
@@ -20,6 +26,8 @@ On macOS, `Ctrl` is `⌘`, `Alt` is `⌥` and `Shift` is `⇧`. Settings, "Short
 | `Ctrl+1` to `Ctrl+9` | Switch to workspace 1 to 9 |
 | `Ctrl+W` | Close task tab |
 | `Ctrl+\` | Open a second task pane |
+
+The command palette (`Ctrl+K`) also runs things without a shortcut: "Extensions", "Add workspace…", "What’s new", every theme and skin ("Theme: Dark", "Skin: Proof"), and, with a task open, "Rename task", "Archive or unarchive task", "Fork task" and "Delete task…". Those act on the task in the focused pane, under the same rules as its menu: a running task can't be archived, forked or deleted until it stops.
 
 ## Tasks
 
@@ -79,3 +87,16 @@ See [Appearance](/docs/appearance) for the text size setting.
 ## Dictation keys
 
 `Ctrl+M` starts a take anywhere you can type a brief or an instruction. Press it again to insert the words. With "Hold to talk" on in Settings, "Voice", you hold the shortcut while you speak and let go to insert. See [Writing a task](/docs/writing-a-task#dictation).
+
+## In the navigator
+
+| Keys | What they do |
+| --- | --- |
+| `Ctrl`-click, or `Ctrl+Space` on a focused task | Add a task to the selection, or take it out |
+| `Shift`-click | Select every task from the last one you picked to this one |
+| `Esc` | Clear the selection, or close search |
+| `↓` in search | Move to the first matching task |
+
+## Screen readers
+
+A screen reader hears when a task finishes, fails, or needs you: a finished task politely, the other two at once. It follows the same switches as the inbox in Settings, "Notifications", and speaks for the task in front of you too.

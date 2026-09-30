@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import type { ActiveRun, NotificationItem, RunSummary } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
+import type { AppearanceSettings } from '@shared/appearance'
+import type { SkinId } from '@shared/skins'
+import type { ThemeId } from '@shared/theme'
 import { BreakpointProvider, useIsDesktop } from '@renderer/lib/context/BreakpointProvider'
 import { NavigatorSlotContext } from '@renderer/lib/context/NavigatorSlot'
 import { useOverlayPanel } from '@renderer/lib/hooks/useOverlayPanel'
@@ -8,6 +11,7 @@ import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { useNotifications } from '@renderer/lib/hooks/useNotifications'
 import { useRunToasts } from '@renderer/lib/hooks/useRunToasts'
+import { useRunAnnouncements } from '@renderer/lib/hooks/useRunAnnouncements'
 import {
   SIDEBAR_COLLAPSED_KEY,
   SIDEBAR_WIDTH_KEY,
@@ -18,7 +22,7 @@ import {
 } from '@renderer/lib/utils/layout'
 import { PanelResizeHandle, cn, pushToast } from '@renderer/lib/ui'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
-import { focusComposerMessage, useAppShortcuts } from '@renderer/lib/shortcuts'
+import { focusComposerMessage, useAppShortcuts, useShortcutsVersion } from '@renderer/lib/shortcuts'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import type { SettingsSection } from '@renderer/features/settings'
 import { CommandPalette, type PaletteFile } from '@renderer/features/commandPalette/CommandPalette'
@@ -58,6 +62,9 @@ export type AppShellProps = {
   onOpenSettingsSection?: (section: SettingsSection) => void
   onOpenFeedback?: () => void
   onOpenMarketplace: () => void
+  /** Theme and skin now, and how to change them (the palette's appearance commands). */
+  appearance?: { theme: ThemeId; skinId: SkinId }
+  onAppearanceChange?: (partial: Partial<AppearanceSettings>) => void
   onOpenChat: () => void
   onOpenHome: () => void
   onOpenUsage: () => void
@@ -84,6 +91,10 @@ export type AppShellProps = {
   /** `pinnedRunKey` of every archived task. */
   archivedRunKeys?: readonly string[]
   onToggleArchivedRun?: (path: string, runId: string) => void
+  /** Archive several tasks in one write (a selection, or Archive all done). */
+  onArchiveRuns?: (keys: readonly string[]) => void
+  /** Delete several tasks after one confirm. */
+  onDeleteRuns?: (items: ReadonlyArray<{ workspacePath: string; runId: string }>) => void
   onLoadOlderRuns?: (path: string) => void
   onSwitchWorkspace?: (path: string) => void
   onCloseWorkspace?: (path: string) => void
@@ -240,6 +251,8 @@ function AppShellInner(props: AppShellProps) {
     }
   })
 
+  useRunAnnouncements(notifications.items)
+
   const onNextNeedsYou = useCallback((): void => {
     const waiting = allTasks.filter((row) => row.state === 'needs')
     if (waiting.length === 0) {
@@ -292,13 +305,32 @@ function AppShellInner(props: AppShellProps) {
     }
   }, [workspacePath])
 
+  // Search inside tasks: main reads their transcripts; null when it could not.
+  const searchRuns = useCallback(async (workspacePaths: string[], query: string) => {
+    if (!window.vyotiq?.runsSearch) return null
+    const res = await window.vyotiq.runsSearch({ workspacePaths, query })
+    return res.ok ? res.data : null
+  }, [])
   const update = useUpdaterState()
-  const commands = useMemo(
-    () => [
+  // Keycaps in the palette follow a rebound shortcut.
+  const shortcutsVersion = useShortcutsVersion()
+  const commands = useMemo(() => {
+    // Keycap labels read the shortcut registry: recompute when it changes.
+    void shortcutsVersion
+    return [
       ...paletteUpdateCommands(update),
-      ...paletteCommands({ workspaces: openWorkspaces, activePath: workspacePath, canSendFeedback: Boolean(props.onOpenFeedback) })
-    ],
-    [update, openWorkspaces, workspacePath, props.onOpenFeedback]
+      ...paletteCommands({
+        workspaces: openWorkspaces,
+        activePath: workspacePath,
+        canSendFeedback: Boolean(props.onOpenFeedback),
+        canOpenExtensions: true,
+        canAddWorkspace: Boolean(props.onAddWorkspace),
+        appearance: props.onAppearanceChange ? (props.appearance ?? null) : null,
+        hasTask: view === 'chat' && focusedRun != null
+      })
+    ]
+  },
+    [update, openWorkspaces, workspacePath, props.onOpenFeedback, props.onAddWorkspace, props.onAppearanceChange, props.appearance, view, focusedRun, shortcutsVersion]
   )
 
   const openSettingsField = useCallback(
@@ -415,6 +447,9 @@ function AppShellInner(props: AppShellProps) {
       }}
       pinnedKeys={pinnedKeys}
       archivedKeys={archivedKeys}
+      onArchiveMany={props.onArchiveRuns}
+      onDeleteMany={props.onDeleteRuns}
+      searchRuns={searchRuns}
       view={navigatorView}
       onViewChange={updateNavigatorView}
       drafts={props.drafts}
@@ -539,7 +574,10 @@ function AppShellInner(props: AppShellProps) {
             onFocusInstructionLine: () => {
               focusComposerMessage()
             },
-            onOpenSettingsField: openSettingsField
+            onOpenSettingsField: openSettingsField,
+            onOpenExtensions: props.onOpenMarketplace,
+            onAddWorkspace: props.onAddWorkspace,
+            onAppearanceChange: props.onAppearanceChange
           })
         }
       />
