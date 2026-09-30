@@ -219,7 +219,10 @@ export const WorkspaceLspCapabilitySchema = z.enum([
   'completion',
   'diagnostics',
   'definition',
-  'rename'
+  'rename',
+  'references',
+  'document_symbols',
+  'workspace_symbols'
 ])
 export type WorkspaceLspCapability = z.infer<typeof WorkspaceLspCapabilitySchema>
 
@@ -234,7 +237,7 @@ export const WorkspaceLspServerSchema = z.object({
   label: z.string().min(1).max(128),
   command: z.string().min(1).max(1_024),
   source: z.enum(['workspace', 'path']),
-  capabilities: z.array(WorkspaceLspCapabilitySchema).max(5)
+  capabilities: z.array(WorkspaceLspCapabilitySchema).max(8)
 })
 export type WorkspaceLspServer = z.infer<typeof WorkspaceLspServerSchema>
 
@@ -254,12 +257,43 @@ export const WorkspaceLspRequestSchema = z.object({
   workspacePath: WorkspacePathSchema,
   path: WorkspacePathSchema,
   content: z.string(),
-  action: z.enum(['hover', 'completion', 'diagnostics', 'definition', 'rename']),
+  action: z.enum([
+    'hover',
+    'completion',
+    'diagnostics',
+    'definition',
+    'rename',
+    'references',
+    'document_symbols',
+    'workspace_symbols'
+  ]),
   newName: z.string().trim().min(1).max(256).optional(),
+  /** workspace_symbols: the name, or part of it, to look for. */
+  query: z.string().trim().min(1).max(256).optional(),
   line: z.number().int().nonnegative().max(1_000_000).default(0),
   character: z.number().int().nonnegative().max(1_000_000).default(0)
 })
 export type WorkspaceLspRequest = z.infer<typeof WorkspaceLspRequestSchema>
+
+/** How many references or symbols a response carries at most. */
+export const LSP_LOCATION_LIST_MAX = 500
+
+const WorkspaceLspLocationSchema = z.object({
+  path: z.string().min(1).max(4_096),
+  line: z.number().int().nonnegative(),
+  character: z.number().int().nonnegative()
+})
+
+const WorkspaceLspSymbolSchema = z.object({
+  name: z.string().min(1).max(512),
+  /** LSP SymbolKind as a word: function, class, method… */
+  kind: z.string().min(1).max(32),
+  /** Null when the server named a file outside the workspace. */
+  path: z.string().max(4_096).nullable(),
+  line: z.number().int().nonnegative(),
+  character: z.number().int().nonnegative(),
+  container: z.string().max(512).nullable()
+})
 
 const WorkspaceLspDiagnosticSchema = z.object({
   line: z.number().int().nonnegative(),
@@ -293,6 +327,17 @@ export const WorkspaceLspResponseSchema = z.discriminatedUnion('kind', [
     path: z.string().max(4_096).nullable(),
     line: z.number().int().nonnegative(),
     character: z.number().int().nonnegative()
+  }),
+  z.object({
+    kind: z.literal('references'),
+    items: z.array(WorkspaceLspLocationSchema).max(LSP_LOCATION_LIST_MAX),
+    /** References the server returned in total, including any past the cap or outside the workspace. */
+    total: z.number().int().nonnegative()
+  }),
+  z.object({
+    kind: z.literal('symbols'),
+    items: z.array(WorkspaceLspSymbolSchema).max(LSP_LOCATION_LIST_MAX),
+    total: z.number().int().nonnegative()
   }),
   z.object({
     kind: z.literal('rename'),

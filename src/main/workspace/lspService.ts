@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'fs'
 import { dirname, extname, join, relative } from 'path'
 import { execFile as execFileCallback } from 'child_process'
 import spawn from 'cross-spawn'
+import treeKill from 'tree-kill'
 import { promisify } from 'util'
 import { fileURLToPath, pathToFileURL } from 'url'
 import type {
@@ -11,6 +12,7 @@ import type {
   WorkspaceLspServer,
   WorkspaceLspStatus
 } from '../../shared/ipc'
+import { LSP_LOCATION_LIST_MAX } from '../../shared/ipc'
 import {
   canonicalizeWorkspacePath,
   isSafeWorkspaceRelPath
@@ -203,6 +205,23 @@ async function detectServer(
   return null
 }
 
+/**
+ * Stop a server and everything it started. On Windows the server runs behind
+ * a .cmd shim (cross-spawn), so killing the child ends only cmd.exe; the
+ * server itself lingered until it noticed its stdin close, still holding the
+ * workspace folder open.
+ */
+function stopServerProcess(child: ReturnType<typeof spawn> | null): void {
+  if (!child) return
+  const pid = child.pid
+  try {
+    if (pid != null && child.exitCode === null) treeKill(pid)
+    else child.kill()
+  } catch {
+    // The process may already have exited.
+  }
+}
+
 type RpcMessage = {
   jsonrpc: '2.0'
   id?: number
@@ -294,7 +313,93 @@ function parseCapabilities(value: unknown): Set<WorkspaceLspCapability> {
   if (capabilities?.diagnosticProvider) output.add('diagnostics')
   if (capabilities?.definitionProvider) output.add('definition')
   if (capabilities?.renameProvider) output.add('rename')
+  if (capabilities?.referencesProvider) output.add('references')
+  if (capabilities?.documentSymbolProvider) output.add('document_symbols')
+  if (capabilities?.workspaceSymbolProvider) output.add('workspace_symbols')
   return output
+}
+
+/** LSP SymbolKind numbers as words (spec 3.17 §SymbolKind). */
+const SYMBOL_KINDS = [
+  '',
+  'file',
+  'module',
+  'namespace',
+  'package',
+  'class',
+  'method',
+  'property',
+  'field',
+  'constructor',
+  'enum',
+  'interface',
+  'function',
+  'variable',
+  'constant',
+  'string',
+  'number',
+  'boolean',
+  'array',
+  'object',
+  'key',
+  'null',
+  'enum member',
+  'struct',
+  'event',
+  'operator',
+  'type parameter'
+] as const
+
+function symbolKind(value: unknown): string {
+  return typeof value === 'number' ? SYMBOL_KINDS[value] || 'symbol' : 'symbol'
+}
+
+function rangeStart(value: unknown): { line: number; character: number } {
+  const start = record(record(value)?.start)
+  return {
+    line: typeof start?.line === 'number' ? start.line : 0,
+    character: typeof start?.character === 'number' ? start.character : 0
+  }
+}
+
+type LspSymbol = {
+  name: string
+  kind: string
+  path: string | null
+  line: number
+  character: number
+  container: string | null
+}
+
+/**
+ * Flatten documentSymbol / workspace/symbol results. Servers answer with
+ * either hierarchical DocumentSymbol trees (children, selectionRange) or flat
+ * SymbolInformation / WorkspaceSymbol rows (location, containerName).
+ */
+function parseSymbols(value: unknown, workspacePath: string, documentPath: string | null): LspSymbol[] {
+  const out: LspSymbol[] = []
+  const visit = (item: unknown, container: string | null): void => {
+    const object = record(item)
+    const name = stringValue(object?.name)
+    if (!object || !name) return
+    const location = record(object.location)
+    const uri = stringValue(location?.uri)
+    const path = uri ? fileUriToWorkspaceRel(uri, workspacePath) : documentPath
+    const at = rangeStart(object.selectionRange ?? object.range ?? location?.range)
+    out.push({
+      name: name.slice(0, 512),
+      kind: symbolKind(object.kind),
+      path,
+      line: at.line,
+      character: at.character,
+      container: stringValue(object.containerName)?.slice(0, 512) ?? container
+    })
+    if (Array.isArray(object.children)) {
+      for (const child of object.children) visit(child, name.slice(0, 512))
+    }
+  }
+  if (Array.isArray(value)) for (const item of value) visit(item, null)
+  return out
 }
 
 function markupText(value: unknown): string | null {
@@ -440,8 +545,11 @@ class LspClient {
         textDocument: {
           hover: { contentFormat: ['markdown', 'plaintext'] },
           completion: { completionItem: { snippetSupport: false } },
-          publishDiagnostics: {}
-        }
+          publishDiagnostics: {},
+          references: {},
+          documentSymbol: { hierarchicalDocumentSymbolSupport: true }
+        },
+        workspace: { symbol: {} }
       },
       workspaceFolders: [
         {
@@ -538,11 +646,7 @@ class LspClient {
       }
     }
     this.diagnosticWaiters.clear()
-    try {
-      this.child?.kill()
-    } catch {
-      // The process may already have exited.
-    }
+    stopServerProcess(this.child)
     this.child = null
   }
 
@@ -654,6 +758,33 @@ class LspClient {
         character: typeof start?.character === 'number' ? start.character : 0
       }
     }
+    if (request.action === 'references') {
+      const result = await this.request('textDocument/references', {
+        ...params,
+        context: { includeDeclaration: true }
+      })
+      const rows = Array.isArray(result) ? result : []
+      const items = rows
+        .map((item) => {
+          const object = record(item)
+          const path = fileUriToWorkspaceRel(stringValue(object?.uri), request.workspacePath)
+          return path ? { path, ...rangeStart(object?.range) } : null
+        })
+        .filter((item): item is { path: string; line: number; character: number } => item !== null)
+      return { kind: 'references', items: items.slice(0, LSP_LOCATION_LIST_MAX), total: rows.length }
+    }
+    if (request.action === 'document_symbols' || request.action === 'workspace_symbols') {
+      const result =
+        request.action === 'document_symbols'
+          ? await this.request('textDocument/documentSymbol', { textDocument: { uri } })
+          : await this.request('workspace/symbol', { query: request.query?.trim() ?? '' })
+      const symbols = parseSymbols(
+        result,
+        request.workspacePath,
+        request.action === 'document_symbols' ? request.path.split('\\').join('/') : null
+      )
+      return { kind: 'symbols', items: symbols.slice(0, LSP_LOCATION_LIST_MAX), total: symbols.length }
+    }
     if (request.action === 'rename') {
       const newName = request.newName?.trim()
       if (!newName) throw new Error('Rename requires a new name')
@@ -689,11 +820,7 @@ class LspClient {
     if (this.disposed) return
     this.disposed = true
     this.fail(new Error('LSP server disposed'))
-    try {
-      this.child?.kill()
-    } catch {
-      // The process may already have exited.
-    }
+    stopServerProcess(this.child)
     this.child = null
   }
 }

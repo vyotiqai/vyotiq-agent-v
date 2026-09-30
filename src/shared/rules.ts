@@ -153,6 +153,13 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${escaped}$`)
 }
 
+/** True when a workspace-relative path matches any of a rule's globs. */
+export function ruleGlobsMatch(globs: readonly string[] | undefined, relPath: string): boolean {
+  if (!globs || globs.length === 0) return false
+  const path = relPath.replace(/\\/g, '/')
+  return globs.some((glob) => globToRegExp(glob).test(path))
+}
+
 /**
  * Auto-inject when alwaysApply is true/absent and there are no globs.
  * `alwaysApply: false` without globs is requestable only.

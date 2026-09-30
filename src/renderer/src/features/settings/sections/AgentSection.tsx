@@ -15,6 +15,7 @@ import { NumberField } from '../components/NumberField'
 import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { ModelRefField } from '../components/ModelRefField'
 import { SwitchField } from '../components/SwitchField'
 import { workspaceBadge } from '../components/WorkspaceBadge'
 import {
@@ -134,9 +135,11 @@ function AllowedTools({
 
 export function AgentSection({
   form,
+  secrets,
   onOpenMarketplace
 }: {
   form: SettingsFormState
+  secrets: SettingsViewProps['secrets']
   onOpenMarketplace?: SettingsViewProps['onOpenMarketplace']
 }) {
   const scoped = workspaceBadge(form.workspaceOverrideActive)
@@ -267,6 +270,30 @@ export function AgentSection({
             void form.runUpdate({ maxParallelInstances })
           }}
           {...form.defaultMark('maxParallelInstances')}
+        />
+        <ModelRefField
+          id="helper-model"
+          title="Helper model"
+          hint="What instances run on."
+          help="Same as the task runs each instance on the model its task was started with."
+          value={form.settings.helperModel ?? null}
+          form={form}
+          secrets={secrets}
+          onChange={(helperModel) => {
+            void form.runUpdate({ helperModel })
+          }}
+        />
+        <ModelRefField
+          id="utility-model"
+          title="Utility model"
+          hint="Writes compaction summaries and commit messages."
+          help="A cheaper model is enough for these. Compaction still decides what to keep by the task's model. If this provider has no key, the task's model is used."
+          value={form.settings.utilityModel ?? null}
+          form={form}
+          secrets={secrets}
+          onChange={(utilityModel) => {
+            void form.runUpdate({ utilityModel })
+          }}
         />
         <NumberField
           id="task-spend-limit"

@@ -125,6 +125,7 @@ const STRIPPABLE_BODY_FIELDS = new Set([
   'prompt_cache_key',
   'prompt_cache_options',
   'prompt_cache_breakpoint',
+  'cache_control',
   'stream_options',
   'service_tier',
   'parallel_tool_calls'

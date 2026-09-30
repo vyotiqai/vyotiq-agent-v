@@ -224,6 +224,18 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'agent'
   },
   {
+    id: 'helper-model',
+    title: 'Helper model',
+    keywords: ['helper', 'instance', 'sub-agent', 'subagent', 'child', 'model', 'cheaper'],
+    section: 'agent'
+  },
+  {
+    id: 'utility-model',
+    title: 'Utility model',
+    keywords: ['utility', 'compaction', 'summary', 'commit message', 'cheap', 'cheaper', 'model', 'side'],
+    section: 'agent'
+  },
+  {
     id: 'show-thinking',
     title: 'Show reasoning',
     keywords: ['thinking', 'reasoning', 'display', 'show thinking'],

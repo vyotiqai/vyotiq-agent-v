@@ -73,6 +73,7 @@ import {
   volatileSessionMessage,
   supportsExplicitPromptCache,
   markOpenAiChatCacheBreakpoint,
+  markOpenAiChatCacheControl,
   attachTrailingHistoryCacheBreakpoint
 } from './systemZones'
 
@@ -637,6 +638,12 @@ export function toOpenAiMessages(
     systemVolatile?: string
     /** GPT-5.6+: mark the end of the stable system prefix for explicit cache mode. */
     explicitPromptCache?: boolean
+    /**
+     * Claude through OpenRouter: Anthropic `cache_control` breakpoints on the
+     * stable system and the last reusable history turn. Without them every
+     * step is billed as fresh input.
+     */
+    anthropicCacheControl?: boolean
   } = {}
 ) {
   const zones = resolveSystemZones({
@@ -646,7 +653,12 @@ export function toOpenAiMessages(
   })
   const out: Array<Record<string, unknown>> = []
   if (zones.stable) {
-    if (opts.explicitPromptCache) {
+    if (opts.anthropicCacheControl) {
+      out.push({
+        role: 'system',
+        content: [{ type: 'text', text: zones.stable, cache_control: { type: 'ephemeral' } }]
+      })
+    } else if (opts.explicitPromptCache) {
       out.push({
         role: 'system',
         content: [
@@ -710,6 +722,9 @@ export function toOpenAiMessages(
   if (opts.explicitPromptCache) {
     // Second breakpoint: longest reusable prefix = stable system + history (before volatile).
     attachTrailingHistoryCacheBreakpoint(out, markOpenAiChatCacheBreakpoint)
+  } else if (opts.anthropicCacheControl) {
+    // Same placement for Claude: the volatile session turn stays after it, uncached.
+    attachTrailingHistoryCacheBreakpoint(out, markOpenAiChatCacheControl)
   }
   if (zones.volatile) {
     out.push(volatileSessionMessage(zones.volatile))
@@ -1189,6 +1204,27 @@ async function listOpenAiCompatModels(
   }
 }
 
+/**
+ * Claude reached through OpenRouter — the OpenRouter provider, or a custom
+ * endpoint pointed at openrouter.ai. Anthropic caches only at explicit
+ * `cache_control` breakpoints, and OpenRouter passes them through.
+ */
+export function usesAnthropicCacheControlViaOpenRouter(
+  providerId: ProviderId | undefined,
+  model: string,
+  baseUrl: string | undefined
+): boolean {
+  if (!/(^|\/)(anthropic\/|claude)/i.test(model.trim())) return false
+  if (providerId === 'openrouter') return true
+  if (!baseUrl) return false
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase()
+    return host === 'openrouter.ai' || host.endsWith('.openrouter.ai')
+  } catch {
+    return false
+  }
+}
+
 /** Exported for tests — build OpenAI-compat chat request body. */
 export function buildOpenAiCompatBody(
   req: ProviderChatRequest,
@@ -1221,6 +1257,8 @@ export function buildOpenAiCompatBody(
     providerId === 'mistral' ? 'think_chunks' : undefined
   const explicitCache =
     Boolean(opts.enablePromptCache) && supportsExplicitPromptCache(req.model)
+  const anthropicCacheControl =
+    !explicitCache && usesAnthropicCacheControlViaOpenRouter(providerId, req.model, req.baseUrl ?? opts.defaultBaseUrl)
   const body: Record<string, unknown> = {
     model: req.model,
     messages: toOpenAiMessages(req.messages, req.system, {
@@ -1229,7 +1267,8 @@ export function buildOpenAiCompatBody(
       reasoningReplayFormat,
       systemStable: req.systemStable,
       systemVolatile: req.systemVolatile,
-      explicitPromptCache: explicitCache
+      explicitPromptCache: explicitCache,
+      anthropicCacheControl
     }),
     tools: tools.length ? tools : undefined,
     ...(tools.length

@@ -545,6 +545,13 @@ export function dropLegacyCustomProviderSeed(
   )
 }
 
+/** A provider and one of its models, for the helper and utility model settings. */
+export const ModelRefSchema = z.object({
+  provider: ProviderIdSchemaAny,
+  model: z.string().min(1)
+})
+export type ModelRef = z.infer<typeof ModelRefSchema>
+
 export const SettingsSchema = z.object({
   provider: ProviderIdSchemaAny,
   model: z.string().min(1),
@@ -643,6 +650,17 @@ export const SettingsSchema = z.object({
    * Priced models only: a step with no billed or published price adds nothing.
    */
   taskSpendLimitUsd: z.number().int().min(0).max(TASK_SPEND_LIMIT_MAX_USD).default(0),
+  /**
+   * Model helper instances run on. Null: the task's own model — the one the
+   * task was started with, not the workspace default.
+   */
+  helperModel: ModelRefSchema.nullable().default(null),
+  /**
+   * Cheaper model for side calls — compaction summaries and commit messages.
+   * Null: the task's model. Compaction still sizes what it keeps by the task's
+   * model; only the summary is written by this one.
+   */
+  utilityModel: ModelRefSchema.nullable().default(null),
   /**
    * Maximum simultaneously visible chat panes (split session view). 0 = Auto:
    * derived from the viewport (min 280px per pane, hard cap 6). 1–6 is a fixed
@@ -746,6 +764,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoResumeInterruptedRuns: true,
   maxParallelInstances: DEFAULT_MAX_PARALLEL_INSTANCES,
   taskSpendLimitUsd: 0,
+  helperModel: null,
+  utilityModel: null,
   maxChatPanes: 0,
   autoCheckUpdates: true,
   googleMcpClientId: '',

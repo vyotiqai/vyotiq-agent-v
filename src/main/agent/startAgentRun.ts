@@ -41,6 +41,7 @@ import {
   registerQuestionSender
 } from './agentQuestion'
 import { publishLifecycleNotification } from '../notifications/bus'
+import { fireNotificationHooks } from './hooks'
 import { approvalNoticeFor, finishedNoticeFor, questionNoticeFor } from '../notifications/runNotices'
 import {
   clearRunAbort,
@@ -158,6 +159,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       batcher.flush()
       sendToWebContents(IPC.toolApprovalRequest, request, wc)
       const notice = approvalNoticeFor(workspacePath, runId, request)
+      fireNotificationHooks(workspacePath, runId, notice.body ? `${notice.title}: ${notice.body}` : notice.title)
       publishLifecycleNotification({
         source: 'agent',
         kind: 'needs_you',
@@ -171,6 +173,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       batcher.flush()
       sendToWebContents(IPC.agentQuestionRequest, request, wc)
       const notice = questionNoticeFor(workspacePath, runId, request)
+      fireNotificationHooks(workspacePath, runId, notice.body ? `${notice.title}: ${notice.body}` : notice.title)
       publishLifecycleNotification({
         source: 'agent',
         kind: 'needs_you',

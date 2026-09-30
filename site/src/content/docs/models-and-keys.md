@@ -51,6 +51,23 @@ If your system has no secure storage, keys cannot be saved at all: the field rea
 
 Agent V has no price table for custom endpoints, so their tasks show tokens but no cost. See [Usage and cost](/docs/usage-and-cost).
 
+Some local models write a tool call as text in their own template syntax (`<tool_call>…`, `[TOOL_CALLS]…`, `<|python_tag|>…`) instead of as a real tool call. Agent V recognises these and runs the call, but only for tools the model was offered, and a reply that just shows what a call looks like in the middle of an explanation is left as a reply.
+
+## Claude through OpenRouter
+
+For Claude models through OpenRouter, or through a custom endpoint pointed at `openrouter.ai`, Agent V marks where the provider may cache the prompt, so each step after the first bills most of its input at the cached rate.
+
+## Helper and utility models
+
+Settings, "Agent" has two more model choices. Both start as "Same as the task".
+
+| Setting | What it runs |
+| --- | --- |
+| "Helper model" | [Instances](/docs/instances). "Same as the task" runs each instance on the model its task was started with. |
+| "Utility model" | Compaction summaries and commit messages. A cheaper model is enough for these. Compaction still decides what to keep by the task's model. If this provider has no key, the task's model is used. |
+
+Pick a provider, then one of its models. Choosing a provider alone saves nothing.
+
 ## Ollama: local or cloud
 
 Ollama is the default provider. It points at `http://127.0.0.1:11434`, the local Ollama daemon, and needs no key.

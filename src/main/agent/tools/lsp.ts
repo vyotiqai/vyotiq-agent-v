@@ -10,17 +10,25 @@ import {
 } from '../../workspace/lspService'
 import type { WorkspaceLspResponse } from '../../../shared/ipc'
 
-export const LSP_ACTIONS = ['hover', 'completion', 'diagnostics', 'definition', 'rename'] as const
+export const LSP_ACTIONS = [
+  'hover',
+  'completion',
+  'diagnostics',
+  'definition',
+  'rename',
+  'references',
+  'document_symbols',
+  'workspace_symbols'
+] as const
 export type LspToolAction = (typeof LSP_ACTIONS)[number]
 
 export const LSP_COMPLETION_LIST_CAP = 20
+/** References and symbols shown to the model; the rest is counted, not listed. */
+export const LSP_LOCATION_SHOW_CAP = 100
 
 export function lspActionFromArgs(args?: Record<string, unknown>): LspToolAction {
   const raw = typeof args?.action === 'string' ? args.action : 'diagnostics'
-  if (raw === 'hover' || raw === 'completion' || raw === 'definition' || raw === 'rename') {
-    return raw
-  }
-  return 'diagnostics'
+  return (LSP_ACTIONS as readonly string[]).includes(raw) ? (raw as LspToolAction) : 'diagnostics'
 }
 
 function lspOffset(text: string, line: number, character: number): number {
@@ -84,6 +92,33 @@ function formatLspResponse(response: WorkspaceLspResponse): string {
     case 'definition':
       if (!response.path) return 'No definition.'
       return `${response.path}:${response.line + 1}:${response.character + 1}`
+    case 'references': {
+      if (response.items.length === 0) {
+        return response.total > 0
+          ? `${response.total} references, none inside the workspace.`
+          : 'No references.'
+      }
+      const shown = response.items.slice(0, LSP_LOCATION_SHOW_CAP)
+      const rest = response.total - shown.length
+      return (
+        shown.map((item) => `${item.path}:${item.line + 1}:${item.character + 1}`).join('\n') +
+        (rest > 0 ? `\n… ${rest} more` : '')
+      )
+    }
+    case 'symbols': {
+      if (response.items.length === 0) return 'No symbols.'
+      const shown = response.items.slice(0, LSP_LOCATION_SHOW_CAP)
+      const rest = response.total - shown.length
+      return (
+        shown
+          .map((item) => {
+            const where = item.path ? `${item.path}:${item.line + 1}:${item.character + 1}` : '(outside the workspace)'
+            const inside = item.container ? ` in ${item.container}` : ''
+            return `${item.kind} ${item.name}${inside} — ${where}`
+          })
+          .join('\n') + (rest > 0 ? `\n… ${rest} more` : '')
+      )
+    }
     case 'rename':
       if (response.edits.length === 0) return 'Rename produced no edits.'
       return response.edits
@@ -147,12 +182,17 @@ export async function toolLsp(
       : typeof args.newName === 'string'
         ? args.newName.trim()
         : undefined
+  const query = typeof args.query === 'string' ? args.query.trim() : ''
+  if (action === 'workspace_symbols' && !query) {
+    return { ok: false, summary: rel, content: 'workspace_symbols requires query', mutatedPaths: [] }
+  }
   const response = await workspaceLspRequest({
     workspacePath: workspaceRoot,
     path: rel,
     content,
     action,
     newName,
+    ...(query ? { query } : {}),
     line,
     character
   })

@@ -87,6 +87,35 @@ export function markOpenAiChatCacheBreakpoint(msg: Record<string, unknown>): boo
   return false
 }
 
+const EPHEMERAL_CACHE_CONTROL = { type: 'ephemeral' as const }
+
+/**
+ * Anthropic-style breakpoint on a Chat Completions message's last text part —
+ * the `cache_control` shape OpenRouter forwards to Claude. Tool rows are
+ * skipped: their content is a plain string on this wire, and a part array
+ * there is not accepted by every upstream OpenRouter routes to.
+ */
+export function markOpenAiChatCacheControl(msg: Record<string, unknown>): boolean {
+  if (msg.role === 'tool') return false
+  const content = msg.content
+  if (typeof content === 'string') {
+    if (!content) return false
+    msg.content = [{ type: 'text', text: content, cache_control: EPHEMERAL_CACHE_CONTROL }]
+    return true
+  }
+  if (!Array.isArray(content)) return false
+  for (let i = content.length - 1; i >= 0; i--) {
+    const part = content[i]
+    if (!part || typeof part !== 'object') continue
+    const p = part as Record<string, unknown>
+    if (p.type === 'text' && typeof p.text === 'string' && p.text) {
+      p.cache_control = EPHEMERAL_CACHE_CONTROL
+      return true
+    }
+  }
+  return false
+}
+
 /**
  * Mark a Responses API input item with an explicit cache breakpoint.
  * Skips function_call / function_call_output — breakpoints there are accepted but do not

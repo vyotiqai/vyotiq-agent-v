@@ -4,6 +4,7 @@ import type { WebContents } from 'electron'
 import type { AgentEvent, AgentInteractionMode, ChatMessage, RunReceipt } from '../../shared/ipc'
 import { contentDisplayText, DEFAULT_MAX_PARALLEL_INSTANCES, RunReceiptSchema } from '../../shared/ipc'
 import { getSettings } from '@main/settings/settings'
+import { recallRunModelSelection } from './runModelSelection'
 import { IPC } from '../../shared/channels'
 import { formatAgentInstanceLabel } from '../../shared/utils/agentInstance'
 import {
@@ -997,6 +998,10 @@ export async function spawnAgentInstance(
     sendLiveParentInstanceEvent(input.parentRunId, startedUpdate)
   }
 
+  // The helper model when one is set; otherwise the model this task runs on.
+  // Without either the child fell back to the workspace default, so a task
+  // started on one model quietly fanned its helpers out to another.
+  const childModel = getSettings().helperModel ?? recallRunModelSelection(input.parentRunId)
   startAgentRunInBackground({
     runId: childRunId,
     workspacePath: input.workspacePath,
@@ -1007,7 +1012,8 @@ export async function spawnAgentInstance(
       runId: childRunId,
       messages: [childMessage],
       workspacePath: input.workspacePath,
-      mode
+      mode,
+      ...(childModel ? { provider: childModel.provider, model: childModel.model } : {})
     }
   })
 

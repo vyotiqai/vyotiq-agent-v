@@ -8,6 +8,7 @@ import { providerNeedsKey, resolveProviderChatBaseUrl } from '../../shared/domai
 import { logger } from '../../shared/logger'
 import { findWorkspaceSettingsOverride, readWorkspacesState } from '../workspace/workspaces'
 import { getSecret } from '../settings/secrets'
+import { usableUtilityModel } from '../agent/sideModels'
 import { getSettings } from '../settings/settings'
 import { readGitDiff, readGitLog, readGitStatus } from './git'
 import { getProvider } from '../agent/providers'
@@ -241,6 +242,9 @@ export async function generateCommitMessage(
   let apiKey: string | null
   try {
     settings = resolveChatSettings(workspacePath)
+    // A one-line subject is the textbook side call: the utility model, when set.
+    const utility = usableUtilityModel(settings)
+    if (utility) settings = { ...settings, provider: utility.provider, model: utility.model }
     apiKey = getSecret(settings.provider)
   } catch {
     return fallbackResult('Could not read agent settings')

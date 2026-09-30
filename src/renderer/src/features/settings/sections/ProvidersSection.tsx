@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { MAX_CUSTOM_PROVIDERS, type ProviderIdAny, type SecretProvider } from '@shared/ipc'
 import { providerLabel, providerOptionsForConfigured } from '@shared/providers'
 import { findByWorkspacePath } from '@shared/workspacePathMatch'
-import { Button, IconButton, Menu, selectTriggerClass, cn, type MenuOption } from '@renderer/lib/ui'
+import { Button, IconButton, Menu, selectTriggerClass, cn } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import { SelectField } from '../components/SelectField'
@@ -10,39 +10,8 @@ import { SettingsField, SettingsGroup, SettingsStack } from '../components/Setti
 import { SettingsNotice } from '../components/SettingsNotice'
 import { AddEndpointRow, ProviderKeys } from '../components/ProviderKeys'
 import { PROVIDER_KEY_ORDER } from '../constants'
+import { useModelOptions } from '../hooks/useModelOptions'
 import { workspaceShort } from '../utils/settingsHelpers'
-
-/**
- * The provider's model list as the composer's picker has it, with the model
- * in use kept in it even when the list does not (yet) name it.
- */
-function useModelOptions(
-  provider: ProviderIdAny,
-  baseUrl: string | undefined,
-  current: string,
-  reloadKey: unknown
-): MenuOption[] {
-  const [ids, setIds] = useState<string[]>([])
-  useEffect(() => {
-    let cancelled = false
-    const list = window.vyotiq?.listModels
-    if (!list) return undefined
-    void list({ provider, baseUrl, forceRefresh: false })
-      .then((res) => {
-        if (!cancelled) setIds(res.ok ? res.data.models.map((m) => m.id) : [])
-      })
-      .catch(() => {
-        if (!cancelled) setIds([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [provider, baseUrl, reloadKey])
-  return useMemo(() => {
-    const all = ids.includes(current) || !current ? ids : [current, ...ids]
-    return all.map((id) => ({ value: id, label: id }))
-  }, [ids, current])
-}
 
 export function ProvidersSection({
   secrets,

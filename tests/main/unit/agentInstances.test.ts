@@ -203,6 +203,42 @@ describe('agentInstances', () => {
     clearRunAbort(result.runId)
   })
 
+  it('runs a helper on the task’s own model, or on the helper model once one is set', async () => {
+    const { rememberRunModelSelection } = await import('@main/agent/runModelSelection')
+    rememberRunModelSelection(parentRunId, 'anthropic', 'claude-opus-5-5')
+    const spawnOne = () =>
+      spawnAgentInstance({
+        parentRunId,
+        workspacePath,
+        goal: 'child task',
+        outcome: 'child task outcome',
+        subTasks: ['child task step'],
+        doneWhen: 'child task complete',
+        pathScope: ['src/main/']
+      })
+
+    const onTaskModel = await spawnOne()
+    expect(onTaskModel.ok).toBe(true)
+    expect(vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0].agentInput).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-opus-5-5'
+    })
+    if (onTaskModel.ok) clearRunAbort(onTaskModel.runId)
+
+    setSettings({ helperModel: { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' } })
+    try {
+      const onHelperModel = await spawnOne()
+      expect(onHelperModel.ok).toBe(true)
+      expect(vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0].agentInput).toMatchObject({
+        provider: 'openrouter',
+        model: 'anthropic/claude-haiku-4.5'
+      })
+      if (onHelperModel.ok) clearRunAbort(onHelperModel.runId)
+    } finally {
+      setSettings({ helperModel: null })
+    }
+  })
+
   it('appends the multi-line goal verbatim at the end of the composed child prompt', async () => {
     const goal = [
       'Fix auth token refresh in src/main/auth',

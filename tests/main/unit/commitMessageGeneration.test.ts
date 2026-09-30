@@ -103,6 +103,29 @@ describe('generateCommitMessage', () => {
     expect(mocks.readGitDiff).toHaveBeenCalledTimes(1)
   })
 
+  it('writes the subject with the utility model when one is set, and with the task model when its provider has no key', async () => {
+    const models: string[] = []
+    mocks.streamChat.mockImplementation(async function* (request: { model: string }) {
+      models.push(request.model)
+      yield { type: 'text', text: 'feat(cli): add shell execution helper' }
+      yield { type: 'done' }
+    })
+    const base = {
+      provider: 'ollama',
+      model: 'qwen2.5-coder',
+      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1'
+    }
+
+    mocks.getSettings.mockReturnValue({ ...base, utilityModel: { provider: 'ollama', model: 'llama3.2:1b' } })
+    await generateCommitMessage('/ws', 'all', true)
+    // A keyed provider without its key: the side call stays on the task model.
+    mocks.getSettings.mockReturnValue({ ...base, utilityModel: { provider: 'anthropic', model: 'claude-haiku-4-5' } })
+    await generateCommitMessage('/ws', 'all', true)
+
+    expect(models).toEqual(['llama3.2:1b', 'qwen2.5-coder'])
+  })
+
   it('falls back without preventing commit when the provider returns an error', async () => {
     // The fallback choke point logs a warn with the reason for every branch —
     // asserted here once; every other fallback test below routes through it.

@@ -13,6 +13,7 @@ Agent V keeps its data on your computer. Nearly all of it lives in one app data 
 | --- | --- |
 | Settings | `userData/settings.json` |
 | Repositories allowed to run their git programs | `userData/git-command-trust.json` |
+| Your hooks, and which workspace hooks you allowed | `userData/hooks.json`, `userData/hook-trust.json` |
 | API keys and the GitHub sign-in | `userData/secrets.json`, each value encrypted with your system's secure storage |
 | Task records | `userData/workspaces/<id>/sessions/<runId>/`, one folder per task |
 | Undo points (checkpoints) | `checkpoints/` inside the task's folder |

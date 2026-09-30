@@ -26,9 +26,12 @@ import {
   isFileMutationToolName,
   isInspectToolName,
   isRunArtifactEditPath,
+  readPathFromToolCall,
   toolArgsFromCall,
   unreadExistingEditPaths
 } from './loopPolicy'
+import { formatAttachedInstructions, type NestedInstructions } from './context/nestedInstructions'
+import type { RunHooks } from './hooks'
 import { isConcreteWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 import { searchHitPathsFromResult } from './tools/search'
 import { codebaseSearchHitPathsFromResult } from './codeindex/query'
@@ -168,6 +171,10 @@ export type ToolStepContext = {
   appendEvent: (ev: AgentEvent, at?: string) => void
   /** Session-scoped paths already inspected or edited (read-before-edit soft warn). */
   knownPaths?: Set<string>
+  /** Sub-folder instruction files and path rules, attached on first work under them. */
+  nestedInstructions?: NestedInstructions
+  /** The person's hooks, and the workspace's once allowed (hooks.ts). */
+  hooks?: RunHooks
   /** Run-scoped paths the agent actually changed (scopes git_commit staging). */
   mutationPaths?: Set<string>
   /** Present when tool approval is on, or MCP tools protection is on. */
@@ -431,6 +438,26 @@ async function runSingleTool(
     }
 
     const toolArgs = toolArgsFromCall(call.arguments)
+    if (ctx.hooks) {
+      const blocked = await ctx.hooks.preToolUse(call.name, toolArgs, ctx.signal)
+      if (blocked) {
+        const reason = `Blocked by a PreToolUse hook: ${blocked}`
+        events.push({
+          type: 'tool_result',
+          runId: ctx.runId,
+          toolCallId: call.id,
+          name: call.name,
+          summary: summarizeToolArgs(call.name, call.arguments) || call.name,
+          ok: false,
+          content: reason
+        })
+        return {
+          ok: false,
+          events,
+          message: { role: 'tool', toolCallId: call.id, toolName: call.name, content: reason, ok: false }
+        }
+      }
+    }
     const rereadNote = recentRereadNote(
       ctx.recentReadPaths,
       ctx.readStampStep,
@@ -511,6 +538,22 @@ async function runSingleTool(
       isWorkspaceCodeEdit(call)
     ) {
       content = `${content}\n\n${SOFT_WARN_MUTATION_WITHOUT_DIAGNOSTICS}`
+    }
+    if (result.ok && ctx.nestedInstructions) {
+      const read = readPathFromToolCall(call.name, toolArgs)
+      const touched = [...(read ? [read] : []), ...editPathsFromToolCall(call.name, toolArgs)]
+      if (touched.length > 0) {
+        try {
+          const attached = await ctx.nestedInstructions.forPaths(touched)
+          if (attached.length > 0) content = `${content}\n\n${formatAttachedInstructions(attached)}`
+        } catch {
+          // An unreadable instruction file never fails the tool call it rides on.
+        }
+      }
+    }
+    if (ctx.hooks) {
+      const note = await ctx.hooks.postToolUse(call.name, toolArgs, { ok: result.ok, content: result.content }, ctx.signal)
+      if (note) content = `${content}\n\n[PostToolUse hook]\n${note}`
     }
     if (ctx.knownPaths) {
       applyToolCallToKnownPaths(

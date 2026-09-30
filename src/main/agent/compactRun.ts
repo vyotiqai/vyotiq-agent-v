@@ -31,6 +31,7 @@ import {
 } from './context/compact'
 import { estimateStepCost, resolveModelPrice } from '../../shared/pricing/modelPrices'
 import { recordAuxUsage } from './usageLedger'
+import { usableUtilityModel } from './sideModels'
 import { estimateMessagesTokensAsync, estimateTextTokensAsync } from './context/estimate'
 import { extractFoldFacts } from './context/foldFacts'
 import {
@@ -144,6 +145,18 @@ export type CompactPlan = {
   existing: CompactionRecord | null
   /** Whether the unchunked message-shape fork may be used for this plan. */
   allowMessageFork: boolean
+  /**
+   * Who writes the summary, when that is the utility model rather than the
+   * task's. `model` above stays the task's: it decides what is kept and that
+   * the result fits.
+   */
+  summarizer?: {
+    providerId: ProviderIdAny
+    provider: LlmProvider
+    model: ModelInfo
+    apiKey: string | null | undefined
+    baseUrl: string | undefined
+  }
   /**
    * Billed compaction streams collected during this plan's LLM calls, drained
    * by `drainAuxUsageEvents` once the awaited call returns. An accumulator
@@ -269,6 +282,27 @@ export async function planCompact(input: {
     )
   }
 
+  const utility = usableUtilityModel(settings)
+  let summarizer: CompactPlan['summarizer']
+  if (utility && !(utility.provider === providerId && utility.model === model.id)) {
+    try {
+      summarizer = {
+        providerId: utility.provider,
+        provider: getProvider(utility.provider),
+        model: await resolveModelInfo(utility.provider, utility.model, utility.apiKey, utility.baseUrl, abort.signal),
+        apiKey: utility.apiKey,
+        baseUrl: utility.baseUrl
+      }
+    } catch (err) {
+      logger.warn('Could not resolve the utility model; compacting with the task model', {
+        scope: 'agent',
+        code: 'COMPACTION',
+        correlationId: input.runId,
+        err
+      })
+    }
+  }
+
   return {
     runDir,
     runId: input.runId,
@@ -284,7 +318,10 @@ export async function planCompact(input: {
     toSummarize,
     baseFolded,
     existing,
-    allowMessageFork: true,
+    // The fork replays this conversation to the model that has it cached; a
+    // different summarizer has neither the cache nor, maybe, the window.
+    allowMessageFork: !summarizer,
+    ...(summarizer ? { summarizer } : {}),
     auxUsage: []
   }
 }
@@ -297,20 +334,21 @@ async function invokeCompactionLlm(
   opts?: { allowFork?: boolean }
 ): Promise<Awaited<ReturnType<typeof compactMessages>>> {
   const allowFork = opts?.allowFork !== false
+  const writer = plan.summarizer ?? plan
   return compactMessages({
-    provider: plan.provider,
-    model: plan.model.id,
-    apiKey: plan.apiKey,
-    baseUrl: plan.baseUrl,
+    provider: writer.provider,
+    model: writer.model.id,
+    apiKey: writer.apiKey,
+    baseUrl: writer.baseUrl,
     signal: abort.signal,
     messages: plan.toSummarize,
     supportsStructuredOutput,
-    contextWindow: contentWindow(plan.model, catalogProviderId(plan.providerId)),
+    contextWindow: contentWindow(writer.model, catalogProviderId(writer.providerId)),
     priorSummary: plan.existing?.summary,
     focus,
     allowMessageFork: allowFork && plan.allowMessageFork,
     promptCacheKey: plan.runId,
-    modelInfo: plan.model,
+    modelInfo: writer.model,
     onAuxUsage: (sample) => plan.auxUsage?.push(sample)
   })
 }
@@ -328,7 +366,9 @@ function drainAuxUsageEvents(plan: CompactPlan, invokeId: number | undefined): A
   const samples = plan.auxUsage
   if (!samples?.length) return []
   const drained = samples.splice(0, samples.length)
-  const price = resolveModelPrice(plan.providerId, plan.model.id)
+  // Billed to whoever wrote the summary.
+  const writer = plan.summarizer ?? plan
+  const price = resolveModelPrice(writer.providerId, writer.model.id)
   const events: AgentEvent[] = []
   for (const sample of drained) {
     const { usage } = sample
@@ -338,8 +378,8 @@ function drainAuxUsageEvents(plan: CompactPlan, invokeId: number | undefined): A
       type: 'aux_usage',
       runId: plan.runId,
       site: sample.site,
-      provider: plan.providerId,
-      model: plan.model.id,
+      provider: writer.providerId,
+      model: writer.model.id,
       attempt: sample.attempt,
       ...(usage.inputTokens != null ? { inputTokens: usage.inputTokens } : {}),
       ...(usage.outputTokens != null ? { outputTokens: usage.outputTokens } : {}),
@@ -497,7 +537,7 @@ export async function* executeCompactEvents(
   ]
     .filter(Boolean)
     .join('\n\n') || undefined
-  const structured = plan.model.supportsStructuredOutput ?? false
+  const structured = (plan.summarizer ?? plan).model.supportsStructuredOutput ?? false
 
   // Manual compact is IPC — persist start so hydrate/UI can recover.
   // Auto yields `compaction_started` from `autoCompactLlmEvents` after plan succeeds.

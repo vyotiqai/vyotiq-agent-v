@@ -558,8 +558,23 @@ const PROMPT_SECTION_ECHO_RE =
  * the whole `<live_session>` session/workspace context back as assistant text).
  */
 function stripPromptSectionEchoes(content: string): string {
-  if (!/<live_session/i.test(content)) return content
-  return content.replace(PROMPT_SECTION_ECHO_RE, '')
+  const noTemplateCalls = stripTemplateToolCalls(content)
+  if (!/<live_session/i.test(noTemplateCalls)) return noTemplateCalls
+  return noTemplateCalls.replace(PROMPT_SECTION_ECHO_RE, '')
+}
+
+const TEMPLATE_TOOL_CALL_RE =
+  /<tool_call>[\s\S]*?(?:<\/tool_call>|$)|<function=[A-Za-z0-9_.:-]+>[\s\S]*?(?:<\/function>|$)|\[TOOL_CALLS\][\s\S]*$|<\|python_tag\|>[\s\S]*$/g
+
+/**
+ * A local model's chat-template tool call written as text — `<tool_call>…`,
+ * `[TOOL_CALLS]…`, `<|python_tag|>…`, `<function=…>…`. The loop recovers
+ * these into real calls (main/agent/textToolCalls.ts); the syntax itself is
+ * never something to show.
+ */
+function stripTemplateToolCalls(content: string): string {
+  if (!/<tool_call>|<function=|\[TOOL_CALLS\]|<\|python_tag\|>/.test(content)) return content
+  return content.replace(TEMPLATE_TOOL_CALL_RE, '')
 }
 
 /**

@@ -20,7 +20,13 @@ Agent V reads these from the workspace root, in this order:
 2. `CLAUDE.md`
 3. `.cursorrules`
 
-Only root-level copies count. A file such as `packages/app/AGENTS.md` is an ordinary file. Root files are always added in full, with or without frontmatter.
+Root files are always added in full, with or without frontmatter.
+
+### Files in sub-folders
+
+The same three names also count in sub-folders, for the part of the project under them. When the agent first reads or edits a file under `packages/api/`, `packages/api/AGENTS.md` is attached to that tool result, and so is any `AGENTS.md`, `CLAUDE.md` or `.cursorrules` in the folders between it and the root. Each one is attached once per task. Folders holding other people's code, such as `node_modules`, `vendor`, `dist` and `.git`, are skipped.
+
+They arrive with the tool result rather than in the instructions the agent starts with, so the part of each request that the provider caches doesn't change mid-task.
 
 ### Rule folders
 
@@ -52,7 +58,7 @@ Every migration needs a down step...
 | Key | Effect |
 | --- | --- |
 | `alwaysApply: true` | The rule is added on every step |
-| `globs` | The rule is added while a file matching one of the patterns is in focus. Write several on one line, separated by commas, with or without square brackets: `globs: src/**, db/**`. |
+| `globs` | The rule is added while a file matching one of the patterns is in focus, and attached the first time the agent reads or edits a matching file. Write several on one line, separated by commas, with or without square brackets: `globs: src/**, db/**`. |
 | `alwaysApply: false` (no `globs`) | Not added to every step. The agent can ask for the rule when it needs it, and you can run it as a slash command. |
 | `description` | A short summary shown with the rule |
 

@@ -1090,12 +1090,33 @@ const editNotebookArgs = z.object({
 })
 
 const lspArgs = z.object({
-  path: z.string().min(1).describe('Workspace-relative file. Cite as [[path]] or [[path:line]].'),
+  path: z
+    .string()
+    .min(1)
+    .describe(
+      'Workspace-relative file. For workspace_symbols, any file in the language to search — it picks the language server. Cite as [[path]] or [[path:line]].'
+    ),
   action: z
-    .enum(['hover', 'completion', 'diagnostics', 'definition', 'rename'])
-    .describe('Default diagnostics. rename is Agent-only and applies workspace edits.')
+    .enum([
+      'hover',
+      'completion',
+      'diagnostics',
+      'definition',
+      'rename',
+      'references',
+      'document_symbols',
+      'workspace_symbols'
+    ])
+    .describe(
+      'Default diagnostics. references lists every use of the symbol at line/character; document_symbols outlines the file; workspace_symbols finds symbols by name across the project. rename is Agent-only and applies workspace edits.'
+    )
     .optional(),
-  line: z.number().int().nonnegative().describe('0-based line for hover/definition/rename/completion.').optional(),
+  line: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe('0-based line for hover/definition/references/rename/completion.')
+    .optional(),
   character: z
     .number()
     .int()
@@ -1108,6 +1129,13 @@ const lspArgs = z.object({
     .min(1)
     .max(256)
     .describe('Required for rename.')
+    .optional(),
+  query: z
+    .string()
+    .trim()
+    .min(1)
+    .max(256)
+    .describe('Required for workspace_symbols: a symbol name or part of one.')
     .optional()
 })
 
@@ -1445,7 +1473,7 @@ export const TOOL_REGISTRY = {
   },
   lsp: {
     description:
-      'Language-server hover, completions, diagnostics, definition, or rename for a workspace file when a server is on PATH. rename applies edits (Agent-only). Cite as [[path]] or [[path:line]].',
+      'Language-server hover, completions, diagnostics, definition, references, document symbols, workspace symbol search, or rename for a workspace file when a server is on PATH. Prefer references over grep to find every use of a symbol. rename applies edits (Agent-only). Cite as [[path]] or [[path:line]].',
     schema: lspArgs
   },
   spawn_agent_instance: {

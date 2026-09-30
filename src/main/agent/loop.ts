@@ -213,6 +213,9 @@ import {
 import { toolResultEventForIpc, toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import { AGENT_TOOLS } from './types'
 import { canonicalizeAgentToolName } from './schemas/tools'
+import { recoverTextToolCalls } from './textToolCalls'
+import { attachedInstructionSources, NestedInstructions } from './context/nestedInstructions'
+import { loadRunHooks } from './hooks'
 import { agentBuiltToolDefinitions } from './agentTools/loader'
 import {
   getMcpServerStatus,
@@ -1698,6 +1701,41 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       commandGuard: commandGuardFor(workspace, settings.terminalShell)
     })
 
+    // Hooks (hooks.ts). The workspace's own file is a question the first time
+    // it is seen, and after any change; a helper instance never asks.
+    const runHooks = await loadRunHooks(
+      toolWorkspace,
+      runId,
+      isInlineInstance
+        ? null
+        : async (commands, path) => {
+            const allow = 'Run them'
+            const shown = commands.slice(0, 8).map((c) => `• ${c.length > 160 ? `${c.slice(0, 159)}…` : c}`)
+            const more = commands.length > shown.length ? `\n…and ${commands.length - shown.length} more` : ''
+            const request: AgentQuestionRequest = {
+              requestId: randomUUID(),
+              runId,
+              toolCallId: `workspace-hooks-${randomUUID()}`,
+              title: 'Workspace hooks',
+              questions: [
+                {
+                  id: 'hooks',
+                  type: 'single',
+                  prompt: `This workspace's ${path.replace(/\\/g, '/').split('/').slice(-2).join('/')} runs commands around the agent's work:\n${shown.join('\n')}${more}\nRun them? A change to the file asks again.`,
+                  options: [allow, "Don't run them"]
+                }
+              ]
+            }
+            try {
+              const answers = await askQuestionThroughRenderer(request, controller.signal, invokeId)
+              return answers.find((a) => a.questionId === 'hooks')?.values[0] === allow ? 'allow' : 'deny'
+            } catch {
+              // No window to ask in, or the run was stopped: don't run them, and ask next time.
+              return 'unavailable'
+            }
+          }
+    )
+
     /** Persist compaction; `saved` is false only when a write was required and failed. */
     const emitCompaction = (
       record: CompactionRecord | null
@@ -2019,6 +2057,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       costTotals.inputTokens > 0 ? costTotals.inputTokens : null
     let lastCompactVerifyFailed = false
     const knownPaths = seedKnownPathsFromMessages(messages)
+    const nestedInstructions = new NestedInstructions(
+      toolWorkspace,
+      input.focusedFile,
+      attachedInstructionSources(messages)
+    )
     const mutationPaths = seedMutationPathsFromMessages(messages)
     /**
      * Run-scoped recency map for the re-read soft note: successful inspect
@@ -2030,6 +2073,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     let planQualityNudges = 0
     /** Reminders to mark unmarked done-when checks before finishing (cap 1). */
     let doneWhenNudges = 0
+    /** Stop hooks that kept this invoke going; capped so a hook that always objects can't loop forever. */
+    let stopHookContinues = 0
     /**
      * Consecutive empty-response retries. The retry re-sends a byte-identical
      * request, so a deterministic empty turn would loop at full generation cost
@@ -3659,6 +3704,28 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         }
       }
 
+      // A local model that wrote its call in its chat template's syntax, as
+      // text: recover it, or this step reads as the final answer and the run
+      // ends mid-task. Only tools this step offered are recovered.
+      if (toolCalls.length === 0 && streamedToolCalls.size === 0 && toolDefs.length > 0 && assistantText) {
+        const recovered = recoverTextToolCalls(
+          assistantText,
+          new Set(toolDefs.map((t) => t.name)),
+          canonicalizeAgentToolName
+        )
+        if (recovered) {
+          assistantText = recovered.text
+          for (const call of recovered.calls) toolCalls.push({ id: '', ...call })
+          logger.info('Recovered tool calls the model wrote as text', {
+            scope: 'agent',
+            runId,
+            step,
+            count: recovered.calls.length,
+            tool: recovered.calls.map((c) => c.name).join(',')
+          })
+        }
+      }
+
       const uniqueToolCalls = resolveStepToolCalls(toolCalls, streamedToolCalls, step)
 
       if (uniqueToolCalls.length > 0) {
@@ -3894,6 +3961,30 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               role: 'user',
               content: reminder,
               // Loop-injected protocol turn — must never render as a user bubble.
+              synthetic: true
+            }
+            messages.push(nudge)
+            appendMessage(runDir, nudge)
+            continue
+          }
+        }
+
+        // A Stop hook may say the work isn't done. Its reason goes to the agent
+        // as a turn, like the other nudges, up to three times per invoke.
+        if (
+          !incomplete &&
+          !isInlineInstance &&
+          stopHookContinues < 3 &&
+          runHooks.has('Stop') &&
+          !hasPendingFollowUps(runId)
+        ) {
+          const reason = await runHooks.stop(stopHookContinues > 0, controller.signal)
+          if (reason) {
+            stopHookContinues += 1
+            logger.info('Stop hook kept the run going', { scope: 'agent', correlationId: runId, reason: reason.slice(0, 300) })
+            const nudge: ChatMessage = {
+              role: 'user',
+              content: `A Stop hook says the work isn't finished:\n${reason}`,
               synthetic: true
             }
             messages.push(nudge)
@@ -4169,6 +4260,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         runSignal: controller.signal,
         invokeId,
         knownPaths,
+        nestedInstructions,
+        hooks: runHooks,
         mutationPaths,
         recentReadPaths,
         readStampStep: step,

@@ -154,7 +154,7 @@ export function SettingsView(props: SettingsViewProps) {
           />
         )
       case 'agent':
-        return <AgentSection form={form} onOpenMarketplace={onOpenMarketplace} />
+        return <AgentSection form={form} secrets={secrets} onOpenMarketplace={onOpenMarketplace} />
       case 'tools':
         return <ToolsSection form={form} onOpenMarketplace={onOpenMarketplace} />
       case 'indexing':
