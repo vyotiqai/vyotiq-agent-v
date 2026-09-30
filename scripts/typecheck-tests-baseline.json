@@ -84,7 +84,6 @@
     "tests/shared/effectiveSettings.test.ts": 2,
     "tests/shared/ipcSchemas.test.ts": 24,
     "tests/shared/modelContextWindows.test.ts": 6,
-    "tests/shared/modelsDevRegistry.test.ts": 9,
     "tests/shared/serviceTier.test.ts": 1
   },
   "tsconfig.tests-web.json": {

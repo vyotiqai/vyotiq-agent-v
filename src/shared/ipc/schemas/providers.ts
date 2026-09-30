@@ -11,7 +11,9 @@ export const ProviderIdSchema = z.enum([
   'xai',
   'mistral',
   'custom',
-  'opencode'
+  'opencode',
+  'bedrock',
+  'vertex'
 ])
 export type ProviderId = z.infer<typeof ProviderIdSchema>
 
@@ -76,7 +78,9 @@ export const ThinkingApiSchema = z.enum([
   'responses',
   'interactions',
   'messages',
-  'chat_completions'
+  'chat_completions',
+  /** Vertex AI generateContent `thinkingConfig`. */
+  'generate_content'
 ])
 export type ThinkingApi = z.infer<typeof ThinkingApiSchema>
 

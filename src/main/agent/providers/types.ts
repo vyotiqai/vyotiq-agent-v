@@ -73,6 +73,10 @@ export interface StreamChunk {
 export interface ListModelsRequest {
   apiKey?: string | null
   baseUrl?: string
+  /** Extra headers for a custom endpoint (sanitized when resolved). */
+  headers?: Record<string, string>
+  /** Send the key in this header instead of `Authorization: Bearer` (Azure). */
+  apiKeyHeader?: 'api-key'
   signal?: AbortSignal
 }
 
@@ -102,6 +106,10 @@ export interface ProviderChatRequest {
   signal: AbortSignal
   apiKey?: string | null
   baseUrl?: string
+  /** Extra headers for a custom endpoint (sanitized when resolved). */
+  headers?: Record<string, string>
+  /** Send the key in this header instead of `Authorization: Bearer` (Azure). */
+  apiKeyHeader?: 'api-key'
   /** Optional max output tokens from model metadata. */
   maxOutputTokens?: number
   /** Sampling temperature. Unset leaves the provider default. */

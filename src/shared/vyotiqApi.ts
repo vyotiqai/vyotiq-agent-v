@@ -165,6 +165,7 @@ import type {
   NotificationMutateRequest,
   NotificationAction
 } from './ipc'
+import type { GoogleAdcStatus, ProxyStatus } from './domain/network'
 
 /** Host OS from preload `process.platform`. */
 export type HostPlatform = 'darwin' | 'win32' | 'linux' | string
@@ -258,6 +259,10 @@ export interface VyotiqApi {
   setSecret: (provider: SecretProvider, key: string) => Promise<IpcResult<true>>
   clearSecret: (provider: SecretProvider) => Promise<IpcResult<true>>
   secretStatus: () => Promise<IpcResult<SecretsStatus>>
+  /** Whether this computer has a gcloud login Vertex AI can use. */
+  googleAdcStatus: () => Promise<IpcResult<GoogleAdcStatus>>
+  /** The proxy main is using right now. */
+  networkProxyStatus: () => Promise<IpcResult<ProxyStatus>>
   listModels: (payload: {
     provider: ProviderIdAny
     baseUrl?: string

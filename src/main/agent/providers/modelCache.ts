@@ -60,11 +60,15 @@ export function normalizeModelCacheBaseUrl(
 export function modelCacheKey(
   provider: ProviderIdAny,
   baseUrl: string | undefined,
-  apiKey: string | null | undefined
+  apiKey: string | null | undefined,
+  /** A custom endpoint's headers: a different gateway route is a different catalog. */
+  headers?: Record<string, string>
 ): string {
-  const fingerprint = apiKey
-    ? createHash('sha256').update(apiKey).digest('hex').slice(0, 12)
-    : 'nokey'
+  const headerPart = headers && Object.keys(headers).length ? `\n${JSON.stringify(headers)}` : ''
+  const fingerprint =
+    apiKey || headerPart
+      ? createHash('sha256').update(`${apiKey ?? ''}${headerPart}`).digest('hex').slice(0, 12)
+      : 'nokey'
   const normalizedBaseUrl = normalizeModelCacheBaseUrl(provider, baseUrl)
   return `${provider}|${normalizedBaseUrl}|${fingerprint}`
 }

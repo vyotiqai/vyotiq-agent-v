@@ -880,8 +880,8 @@ describe('settings', () => {
     )
     openSection('Providers')
     // The builtin Custom row lives under Custom endpoints, so API keys counts
-    // the other ten.
-    expect(screen.getByText(/1 of 10 saved/i)).toBeTruthy()
+    // the other twelve.
+    expect(screen.getByText(/1 of 12 saved/i)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^Refresh the .+ model list$/ }))
     expect(
       await screen.findByText(/seed models for Ollama.*Cannot reach Ollama/i)
@@ -1946,7 +1946,9 @@ describe('settings', () => {
         settings={{
           ...baseSettings,
           // The allowlist row only exists once a tool has been allowed.
-          toolApproval: { ...baseSettings.toolApproval, allowlist: ['read_file'] }
+          toolApproval: { ...baseSettings.toolApproval, allowlist: ['read_file'] },
+          // The proxy address rows only exist for a manual proxy.
+          network: { proxyMode: 'manual', proxyUrl: '', proxyBypass: '' }
         }}
         secrets={emptySecrets}
         onClose={vi.fn()}

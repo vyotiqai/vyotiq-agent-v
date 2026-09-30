@@ -35,6 +35,7 @@ import { getSettings } from '@main/settings/settings'
 import { assertBrowserActionAllowed, resolveBrowserUploadPath } from './browserActionPolicy'
 import type { ToolImageRef } from '../../shared/ipc'
 import { clampSnipFrames, clampSnipInterval } from './snipLimits'
+import { applyProxyToSession } from '../net/proxy'
 
 export {
   DEFAULT_NAV_TIMEOUT_MS,
@@ -894,6 +895,7 @@ function createTab(workspacePath?: string, allowLocalHosts = true): BrowserTab {
   const ses = session.fromPartition(partitionForWorkspace(workspacePath))
   denyPartitionDownloads(ses, partitionForWorkspace(workspacePath), workspacePath)
   guardPartitionEgress(ses, partitionForWorkspace(workspacePath))
+  void applyProxyToSession(ses)
   const id = nextTabId()
   const view = new WebContentsView({
     webPreferences: {

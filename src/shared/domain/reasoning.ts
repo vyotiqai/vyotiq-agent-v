@@ -81,11 +81,32 @@ const OpenAiCompatReasoningStateSchema = z.object({
   thinkChunks: z.array(OpenAiCompatThinkChunkSchema).optional()
 })
 
+/**
+ * Bedrock Converse `reasoningContent` blocks (text + signature, or redacted
+ * bytes), replayed verbatim ahead of the step's text and tool calls — Claude
+ * on Bedrock rejects a tool-use turn whose thinking comes back altered.
+ */
+const BedrockConverseStateSchema = z.object({
+  kind: z.literal('bedrock_converse'),
+  blocks: z.array(z.record(z.string(), z.unknown()))
+})
+
+/**
+ * Gemini `generateContent` thought signatures, by function-call id. Gemini 3
+ * rejects a tool-use history whose calls come back without them.
+ */
+const GeminiPartsStateSchema = z.object({
+  kind: z.literal('gemini_parts'),
+  signatures: z.record(z.string(), z.string())
+})
+
 export const ProviderReasoningStateSchema = z.discriminatedUnion('kind', [
   OpenAiResponsesStateSchema,
   GeminiInteractionsStateSchema,
   AnthropicReasoningStateSchema,
-  OpenAiCompatReasoningStateSchema
+  OpenAiCompatReasoningStateSchema,
+  BedrockConverseStateSchema,
+  GeminiPartsStateSchema
 ])
 export type ProviderReasoningState = z.infer<typeof ProviderReasoningStateSchema>
 
@@ -286,6 +307,12 @@ export function modelSupportsThinking(id: string, provider?: ProviderIdAny): boo
       // The models.dev `opencode-go` registry marks every Go model
       // reasoning-capable (`reasoning: true`, all 29 entries).
       return true
+    case 'bedrock':
+      // Thinking is wired for Claude on Bedrock (additionalModelRequestFields).
+      return /anthropic\.claude/i.test(lower) && sharedThinkingModelMatch(id)
+    case 'vertex':
+      // Claude through rawPredict, Gemini 3 through thinkingConfig.
+      return /^(?:anthropic\/)?claude-|gemini-3/i.test(lower) && sharedThinkingModelMatch(id)
     default: {
       const _exhaustive: never = providerId
       void _exhaustive
@@ -325,6 +352,10 @@ export function thinkingApiFor(
       if (transport === 'messages') return 'messages'
       return 'chat_completions'
     }
+    case 'bedrock':
+      return 'messages'
+    case 'vertex':
+      return /claude-/i.test(id) ? 'messages' : 'generate_content'
     default: {
       const _exhaustive: never = providerId
       void _exhaustive
@@ -485,8 +516,19 @@ export function thinkingFromReasoningState(
         .trim()
       return text || undefined
     }
+    case 'bedrock_converse': {
+      const text = state.blocks
+        .map((b) => {
+          const r = (b.reasoningContent as { reasoningText?: { text?: unknown } } | undefined)?.reasoningText
+          return typeof r?.text === 'string' ? r.text : ''
+        })
+        .join('')
+        .trim()
+      return text || undefined
+    }
     case 'openai_responses':
     case 'gemini_interactions':
+    case 'gemini_parts':
       return undefined
   }
 }

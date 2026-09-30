@@ -326,6 +326,9 @@ function brandGuess(model: string): string {
   const vendor = openRouterSubProvider(model)
   if (vendor) return vendor
   const name = model.toLowerCase()
+  // Bedrock: `[profile.]vendor.model` — `global.anthropic.claude-sonnet-5-5`.
+  const bedrock = /^(?:(?:global|us|eu|apac|jp|au|ca|us-gov)\.)?(anthropic|amazon|meta|mistral|cohere|deepseek|openai|qwen|xai)\./.exec(name)
+  if (bedrock) return bedrock[1]!
   return MODEL_FAMILY_BRAND.find(([family]) => family.test(name))?.[1] ?? name.split(/[-_.:/\s]/)[0]!
 }
 

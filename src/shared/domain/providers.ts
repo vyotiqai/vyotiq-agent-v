@@ -7,6 +7,16 @@ import {
 import type { CustomProvider } from '../ipc/schemas/settings'
 import type { SecretProvider } from '../ipc/types/secrets'
 import { knownContextWindow } from './modelContextWindows'
+import {
+  BEDROCK_DEFAULT_REGION,
+  BEDROCK_REGION_RE,
+  bedrockRuntimeBaseUrl,
+  VERTEX_DEFAULT_LOCATION,
+  VERTEX_LOCATION_RE,
+  VERTEX_PROJECT_RE,
+  vertexBaseUrl
+} from './cloudProviders'
+import { sanitizeCustomHeaders } from './network'
 import { idSuggestsVision } from './modelVision'
 import {
   getCachedOpenCodeGoEffortLadder,
@@ -42,7 +52,10 @@ const SEED_MODEL_IDS: Record<ProviderId, string[]> = {
   // OpenCode Go model ids are NOT hardcoded: they come from the live models.dev
   // `opencode-go` registry (see opencodeGoCatalog). `seedIdsFor` resolves them
   // from the cached catalog, which `preloadOpenCodeGoCatalog()` warms at startup.
-  opencode: []
+  opencode: [],
+  // Inference-profile ids — newer Claude models on Bedrock only run through one.
+  bedrock: ['global.anthropic.claude-sonnet-5-5', 'global.anthropic.claude-opus-5-5', 'us.amazon.nova-pro-v1:0'],
+  vertex: ['claude-sonnet-5-5', 'gemini-3.6-flash', 'gemini-2.5-pro']
 }
 
 /** Resolve seed model ids for a provider; OpenCode Go is sourced live. */
@@ -117,7 +130,9 @@ export const PROVIDER_DEFAULTS: ProviderDefault[] = [
   { id: 'xai', label: 'xAI', models: SEED_MODEL_IDS.xai },
   { id: 'mistral', label: 'Mistral', models: SEED_MODEL_IDS.mistral },
   { id: 'custom', label: 'Custom OpenAI-compatible', models: SEED_MODEL_IDS.custom },
-  { id: 'opencode', label: 'OpenCode Go', models: seedIdsFor('opencode') }
+  { id: 'opencode', label: 'OpenCode Go', models: seedIdsFor('opencode') },
+  { id: 'bedrock', label: 'Amazon Bedrock', models: SEED_MODEL_IDS.bedrock },
+  { id: 'vertex', label: 'Google Vertex AI', models: SEED_MODEL_IDS.vertex }
 ]
 
 export function seedModelsFor(provider: ProviderIdAny): ModelInfo[] {
@@ -327,6 +342,81 @@ type ProviderBaseUrlSettings = {
   customOpenAiBaseUrl?: string
   /** Saved dynamic `custom:<slug>` provider entries (resolved before legacy). */
   customProviders?: readonly CustomProvider[]
+  bedrockRegion?: string
+  vertexProject?: string
+  vertexLocation?: string
+}
+
+/**
+ * Azure OpenAI / Foundry v1 base: the resource host plus `/openai/v1`,
+ * whatever was pasted (bare host, a deployment URL, an `api-version` query).
+ */
+export function normalizeAzureOpenAiBaseUrl(raw: string): string {
+  const input = extractPastedEndpoint(raw)
+  const withScheme = /^https?:\/\//i.test(input) ? input : `https://${input}`
+  try {
+    const url = new URL(withScheme)
+    return `https://${url.host}/openai/v1`
+  } catch {
+    return withScheme.replace(/\/+$/, '')
+  }
+}
+
+/** Validate + normalize an Azure OpenAI resource endpoint. */
+export function validateAzureOpenAiBaseUrl(raw: string): ParsedBaseUrl {
+  const input = extractPastedEndpoint(raw)
+  if (!input) return { ok: false, error: 'Paste the resource endpoint, like https://my-resource.openai.azure.com.' }
+  if (/^http:\/\//i.test(input)) return { ok: false, error: 'Azure OpenAI endpoints use https.' }
+  if (!/^https:\/\//i.test(input) && !schemelessHostLooksSane(input)) {
+    return { ok: false, error: 'That is not an Azure endpoint. Paste https://<resource>.openai.azure.com.' }
+  }
+  const url = normalizeAzureOpenAiBaseUrl(input)
+  const reason = hostSanityError(url)
+  if (reason) return { ok: false, error: `The endpoint ${reason}` }
+  return { ok: true, url }
+}
+
+/** A custom endpoint's base URL, normalized for its kind. */
+export function customEndpointBaseUrl(entry: Pick<CustomProvider, 'baseUrl' | 'kind'>): string {
+  return entry.kind === 'azure'
+    ? normalizeAzureOpenAiBaseUrl(entry.baseUrl)
+    : normalizeCustomOpenAiBaseUrl(entry.baseUrl)
+}
+
+/** How a request to a custom endpoint carries its key, plus its extra headers. */
+export type ProviderRequestExtras = {
+  headers?: Record<string, string>
+  /** Send the key in this header instead of `Authorization: Bearer` (Azure). */
+  apiKeyHeader?: 'api-key'
+}
+
+/** Extras for a provider's requests: custom endpoints only. */
+export function resolveProviderRequestExtras(
+  providerId: ProviderIdAny,
+  settings: ProviderBaseUrlSettings
+): ProviderRequestExtras {
+  if (!isCustomProviderId(providerId)) return {}
+  const entry = settings.customProviders?.find((e) => e.id === providerId)
+  if (!entry) return {}
+  const headers = sanitizeCustomHeaders(entry.headers)
+  return {
+    ...(headers ? { headers } : {}),
+    ...(entry.kind === 'azure' ? { apiKeyHeader: 'api-key' as const } : {})
+  }
+}
+
+/** Bedrock runtime host for the saved region (never a host a caller names). */
+function resolveBedrockBaseUrl(settings: ProviderBaseUrlSettings): string {
+  const region = settings.bedrockRegion?.trim() ?? ''
+  return bedrockRuntimeBaseUrl(BEDROCK_REGION_RE.test(region) ? region : BEDROCK_DEFAULT_REGION)
+}
+
+/** Vertex project/location base, or undefined until a project is set. */
+function resolveVertexBaseUrl(settings: ProviderBaseUrlSettings): string | undefined {
+  const project = settings.vertexProject?.trim() ?? ''
+  if (!VERTEX_PROJECT_RE.test(project)) return undefined
+  const location = settings.vertexLocation?.trim() ?? ''
+  return vertexBaseUrl(project, VERTEX_LOCATION_RE.test(location) ? location : VERTEX_DEFAULT_LOCATION)
 }
 
 /**
@@ -443,6 +533,8 @@ export function resolveProviderChatBaseUrl(
   if (isCustomProviderId(providerId)) {
     return resolveCustomProviderBaseUrl(providerId, settings)
   }
+  if (providerId === 'bedrock') return resolveBedrockBaseUrl(settings)
+  if (providerId === 'vertex') return resolveVertexBaseUrl(settings)
   return undefined
 }
 
@@ -457,7 +549,7 @@ function resolveCustomProviderBaseUrl(
 ): string | undefined {
   if (!isCustomProviderId(providerId)) return undefined
   const entry = settings.customProviders?.find((e) => e.id === providerId)
-  if (entry) return normalizeCustomOpenAiBaseUrl(entry.baseUrl)
+  if (entry) return customEndpointBaseUrl(entry)
   return normalizeCustomOpenAiBaseUrl(settings.customOpenAiBaseUrl ?? CUSTOM_OPENAI_DEFAULT)
 }
 
@@ -478,10 +570,13 @@ export function resolveProviderListBaseUrl(
   }
   if (isCustomProviderId(providerId)) {
     // Explicit request base wins; otherwise list entry, then legacy fallback.
+    const entry = settings.customProviders?.find((e) => e.id === providerId)
     return reqBase
-      ? normalizeCustomOpenAiBaseUrl(reqBase)
+      ? customEndpointBaseUrl({ baseUrl: reqBase, kind: entry?.kind })
       : resolveCustomProviderBaseUrl(providerId, settings)
   }
+  if (providerId === 'bedrock') return resolveBedrockBaseUrl(settings)
+  if (providerId === 'vertex') return resolveVertexBaseUrl(settings)
   // First-party providers have a fixed base. Returning `reqBase` here sent the
   // stored API key, as `Authorization: Bearer`, to whatever host the caller
   // named. Their base is not user-configurable — that is what `customProviders`
@@ -510,7 +605,7 @@ function resolveProviderBaseUrlForKey(
     // Saved list entry wins; `custom:default` and missing entries fall back to
     // the legacy single-provider field, then the product default.
     const entry = opts?.customProviders?.find((e) => e.id === provider)
-    if (entry) return normalizeCustomOpenAiBaseUrl(entry.baseUrl)
+    if (entry) return customEndpointBaseUrl(entry)
     return opts?.customOpenAiBaseUrl
   }
   return undefined

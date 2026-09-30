@@ -22,6 +22,9 @@ Agent V does not ship its own model. You connect a provider, and the agent sends
 | Mistral | Yes |
 | Custom OpenAI-compatible | Only for public hosts |
 | OpenCode Go | Yes |
+| Amazon Bedrock | An API key or AWS access keys |
+| Google Vertex AI | A service-account key or this computer's gcloud login |
+| Azure OpenAI | Yes (added as a custom endpoint) |
 
 The "Model" group at the top of the page sets the "Provider for new tasks" and the "Model". You can refresh the model list from there. The brief on the "New task" page also has a model and effort menu; see [Writing a task](/docs/writing-a-task).
 
@@ -51,7 +54,37 @@ If your system has no secure storage, keys cannot be saved at all: the field rea
 
 Agent V has no price table for custom endpoints, so their tasks show tokens but no cost. See [Usage and cost](/docs/usage-and-cost).
 
+### Azure OpenAI
+
+In "Add endpoint", pick "Azure OpenAI" and paste the resource endpoint from the Azure portal, like `https://my-resource.openai.azure.com`. A deployment URL works too; Agent V keeps only the resource and uses Azure's v1 API (`/openai/v1`), which needs no `api-version`. The key goes in an `api-key` header. Pick models by their deployment names.
+
+### Extra headers
+
+An endpoint's row has an "Extra headers" field, one `Name: value` per line, for gateways that route on a header or want an organisation id. Headers the request owns (`Host`, `Content-Type`, `Content-Length` and the like) can't be set. The headers are stored in settings, not the key vault, so put secrets in the API key.
+
 Some local models write a tool call as text in their own template syntax (`<tool_call>…`, `[TOOL_CALLS]…`, `<|python_tag|>…`) instead of as a real tool call. Agent V recognises these and runs the call, but only for tools the model was offered, and a reply that just shows what a call looks like in the middle of an explanation is left as a reply.
+
+## Amazon Bedrock
+
+Open the "Amazon Bedrock" row and set the "AWS region". Calls go only to `bedrock-runtime.<region>.amazonaws.com`. Then sign in one of two ways:
+
+- "API key": a Bedrock API key, sent as a bearer token.
+- "Access keys": an access key ID, a secret access key and, for temporary keys, a session token. Requests are signed with AWS Signature Version 4.
+
+Every model goes through Bedrock's Converse API. The model list shows your account's system inference profiles (the `global.` and `us.` ids newer Claude models require) and the on-demand text models. For Claude, thinking and prompt caching are passed through; for other models, only what Converse supports.
+
+## Google Vertex AI
+
+Open the "Google Vertex AI" row and set the "Google Cloud project" and the "Vertex location": `global`, `us`, `eu`, or a region like `us-east5`. Then sign in:
+
+- "Key file": paste a service-account key (the whole JSON file).
+- "gcloud login": use the login `gcloud auth application-default login` wrote on this computer. "Check this computer" shows what it found. Nothing is copied; the file is read when a task starts.
+
+Gemini models go through `streamGenerateContent`, Claude models through `streamRawPredict`. Models from other publishers on Vertex are not supported yet. Vertex has no endpoint that lists the models a project can use, so the list comes from the models.dev registry, after Agent V checks your sign-in works.
+
+Agent V has no price table for Bedrock, Vertex AI or Azure, so their tasks show tokens but no cost, and the per-task spend limit can't count them.
+
+Bedrock and Vertex AI are new. They were tested against the published request and stream formats with local stand-ins, not yet against a live account.
 
 ## Claude through OpenRouter
 
@@ -77,6 +110,18 @@ If you save an Ollama API key, the provider moves to Ollama Cloud at `https://ol
 ## OpenCode Go
 
 "OpenCode Go is a $10/month subscription. Subscribe, then paste the API key from its console." The "Subscribe" link opens the OpenCode Go page. Its model list is not fixed in the app: Agent V reads the current list from the public models.dev registry.
+
+## Behind a proxy
+
+Settings, "General", "Network" sets the proxy for everything the app sends: provider calls, MCP servers, updates, downloads, the agent's browser, and the `git`, `npm` and other commands the agent runs.
+
+| "Proxy" | What it does |
+| --- | --- |
+| "System" | Uses `HTTPS_PROXY`/`NO_PROXY` when they are set, otherwise the operating system's proxy. |
+| "Manual" | Uses the "Proxy address" for everything except the hosts in "Skip the proxy for". This computer is always skipped. |
+| "None" | Connects directly. |
+
+The line under the choice shows the proxy in use and where it came from. A proxy that needs a password can't be typed in; set `HTTPS_PROXY=http://user:password@host:port` before starting the app instead. A SOCKS system proxy reaches the agent's browser and updates, but not provider calls. With a PAC file, provider calls follow the proxy it picks for `https://api.openai.com`.
 
 ## If the provider does not connect
 

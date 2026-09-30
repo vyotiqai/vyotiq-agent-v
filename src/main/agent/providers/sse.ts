@@ -68,7 +68,7 @@ export type IterateSseOptions = {
  * Race one body read against the idle deadline. Any resolved chunk (including
  * SSE comment lines) resets the caller’s next deadline.
  */
-function readWithIdleTimeout(
+export function readWithIdleTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   idleTimeoutMs: number,
   signal: AbortSignal

@@ -302,7 +302,7 @@ describe('ipc schemas', () => {
     expect(contentToText(msg.content)).toContain('look')
   })
 
-  it('accepts all eleven providers', () => {
+  it('accepts all thirteen providers', () => {
     for (const id of [
       'openai',
       'anthropic',
@@ -313,11 +313,14 @@ describe('ipc schemas', () => {
       'openrouter',
       'xai',
       'mistral',
-      'custom'
+      'custom',
+      'opencode',
+      'bedrock',
+      'vertex'
     ]) {
       expect(ProviderIdSchema.parse(id)).toBe(id)
     }
-    expect(PROVIDER_DEFAULTS).toHaveLength(11)
+    expect(PROVIDER_DEFAULTS).toHaveLength(13)
     expect(ListModelsRequestSchema.parse({ provider: 'groq' }).provider).toBe('groq')
     expect(ListModelsRequestSchema.parse({ provider: 'ollama', model: 'glm-5.2' }).model).toBe(
       'glm-5.2'
@@ -325,8 +328,8 @@ describe('ipc schemas', () => {
     expect(IPC.listModels).toBe('models:list')
   })
 
-  it('lists eleven secret providers including ollama and custom', () => {
-    expect(SECRET_PROVIDERS).toHaveLength(11)
+  it('lists thirteen secret providers including ollama and custom', () => {
+    expect(SECRET_PROVIDERS).toHaveLength(13)
     expect(SECRET_PROVIDERS).toContain('ollama')
     expect(SECRET_PROVIDERS).toContain('custom')
     expect(SecretProviderSchema.safeParse('ollama').success).toBe(true)

@@ -68,6 +68,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   setSecret: IPC.setSecret,
   clearSecret: IPC.clearSecret,
   secretStatus: IPC.secretStatus,
+  googleAdcStatus: IPC.googleAdcStatus,
+  networkProxyStatus: IPC.networkProxyStatus,
   listModels: IPC.listModels,
   chatStart: IPC.chatStart,
   chatUiSubscribe: IPC.chatUiSubscribe,

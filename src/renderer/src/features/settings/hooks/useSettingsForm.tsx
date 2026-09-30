@@ -19,11 +19,12 @@ import {
   defaultModelFor,
   providerLabel,
   validateCustomOpenAiBaseUrl,
+  validateAzureOpenAiBaseUrl,
+  customEndpointBaseUrl,
   validateOllamaBaseUrl,
   providerNeedsKey,
   isLocalOllamaHost,
   isOllamaCloudHost,
-  normalizeCustomOpenAiBaseUrl,
   OLLAMA_CLOUD_BASE_URL,
   OLLAMA_LOCAL_DEFAULT
 } from '@shared/providers'
@@ -543,8 +544,12 @@ export function useSettingsForm({
     }
   }
 
-  const saveKey = async (): Promise<void> => {
-    let value = keyDraft.trim()
+  /**
+   * Save the open row's key — the typed draft, or a value the row built
+   * itself (Bedrock's access key pair, a Vertex key file or its gcloud marker).
+   */
+  const saveKey = async (built?: string): Promise<void> => {
+    let value = (built ?? keyDraft).trim()
     if (!value) {
       setFieldError('apikey', 'API key cannot be empty.')
       return
@@ -597,7 +602,7 @@ export function useSettingsForm({
    * collapse into one on load (normalizeCustomProviders), dropping a key.
    */
   const endpointFieldError = (
-    field: { name?: string; baseUrl?: string },
+    field: { name?: string; baseUrl?: string; kind?: CustomProvider['kind'] },
     exceptId?: CustomProviderId
   ): string | null => {
     if (field.name !== undefined) {
@@ -606,11 +611,10 @@ export function useSettingsForm({
       if (name.length > 60) return 'Keep the name to 60 characters.'
     }
     if (field.baseUrl !== undefined) {
-      const parsed = validateCustomOpenAiBaseUrl(field.baseUrl)
+      const parsed = validateEndpointUrl(field.baseUrl, field.kind)
       if (!parsed.ok) return parsed.error
       const clash = customProviders.find(
-        (entry) =>
-          entry.id !== exceptId && normalizeCustomOpenAiBaseUrl(entry.baseUrl) === parsed.url
+        (entry) => entry.id !== exceptId && customEndpointBaseUrl(entry) === parsed.url
       )
       if (clash) return `${clash.name} already uses this URL.`
     }
@@ -618,12 +622,16 @@ export function useSettingsForm({
   }
 
   /** Add an endpoint and open its row, so the key can be pasted next. */
-  const addEndpoint = async (name: string, rawUrl: string): Promise<boolean> => {
+  const addEndpoint = async (
+    name: string,
+    rawUrl: string,
+    kind: NonNullable<CustomProvider['kind']> = 'openai'
+  ): Promise<boolean> => {
     if (customProviders.length >= MAX_CUSTOM_PROVIDERS) {
       setError(`Up to ${MAX_CUSTOM_PROVIDERS} custom endpoints can be saved.`)
       return false
     }
-    const parsed = validateCustomOpenAiBaseUrl(rawUrl)
+    const parsed = validateEndpointUrl(rawUrl, kind)
     if (!parsed.ok) return false
     const entry: CustomProvider = {
       id: newCustomProviderId(
@@ -631,7 +639,8 @@ export function useSettingsForm({
         customProviders.map((e) => e.id)
       ),
       name: name.trim(),
-      baseUrl: parsed.url
+      baseUrl: parsed.url,
+      ...(kind === 'azure' ? { kind } : {})
     }
     const ok = await runUpdate({ customProviders: [...customProviders, entry] })
     if (!ok) return false
@@ -642,22 +651,27 @@ export function useSettingsForm({
 
   const updateEndpoint = async (
     id: CustomProviderId,
-    patch: { name?: string; baseUrl?: string }
+    patch: { name?: string; baseUrl?: string; headers?: Record<string, string> }
   ): Promise<boolean> => {
     const current = customProviders.find((entry) => entry.id === id)
     if (!current) return false
     let baseUrl = current.baseUrl
     if (patch.baseUrl !== undefined) {
-      const parsed = validateCustomOpenAiBaseUrl(patch.baseUrl)
+      const parsed = validateEndpointUrl(patch.baseUrl, current.kind)
       if (!parsed.ok) return false
       baseUrl = parsed.url
     }
     const name = patch.name !== undefined ? patch.name.trim() : current.name
-    if (name === current.name && baseUrl === current.baseUrl) return true
+    const headers = patch.headers !== undefined ? patch.headers : current.headers
+    const sameHeaders = JSON.stringify(headers ?? {}) === JSON.stringify(current.headers ?? {})
+    if (name === current.name && baseUrl === current.baseUrl && sameHeaders) return true
     return runUpdate({
-      customProviders: customProviders.map((entry) =>
-        entry.id === id ? { ...entry, name, baseUrl } : entry
-      )
+      customProviders: customProviders.map((entry) => {
+        if (entry.id !== id) return entry
+        const { headers: _old, ...rest } = entry
+        void _old
+        return { ...rest, name, baseUrl, ...(headers && Object.keys(headers).length ? { headers } : {}) }
+      })
     })
   }
 
@@ -888,7 +902,12 @@ export function useSettingsForm({
 }
 
 /** Settings that are objects of their own, whose fields are rows. */
-type NestedSettingKey = 'notifications' | 'storage' | 'codeIndex' | 'dictation'
+/** An endpoint URL checked the way its kind is normalized. */
+function validateEndpointUrl(raw: string, kind: CustomProvider['kind']) {
+  return kind === 'azure' ? validateAzureOpenAiBaseUrl(raw) : validateCustomOpenAiBaseUrl(raw)
+}
+
+type NestedSettingKey = 'notifications' | 'storage' | 'codeIndex' | 'dictation' | 'network'
 
 /** Settings a workspace override can own (see `runAgentUpdate`). */
 type AgentSettingKey = keyof AgentSettingsPatch & keyof Settings

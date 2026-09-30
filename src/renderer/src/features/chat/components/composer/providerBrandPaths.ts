@@ -31,6 +31,10 @@ const PROVIDER_BRAND_LOADERS = {
     () => import('@lobehub/icons/es/Arcee/components/Mono'),
     () => import('@lobehub/icons/es/Arcee/style')
   ),
+  bedrock: loadBrand(
+    () => import('@lobehub/icons/es/Bedrock/components/Mono'),
+    () => import('@lobehub/icons/es/Bedrock/style')
+  ),
   cohere: loadBrand(
     () => import('@lobehub/icons/es/Cohere/components/Mono'),
     () => import('@lobehub/icons/es/Cohere/style')
@@ -90,6 +94,10 @@ const PROVIDER_BRAND_LOADERS = {
   qwen: loadBrand(
     () => import('@lobehub/icons/es/Qwen/components/Mono'),
     () => import('@lobehub/icons/es/Qwen/style')
+  ),
+  vertex: loadBrand(
+    () => import('@lobehub/icons/es/VertexAI/components/Mono'),
+    () => import('@lobehub/icons/es/VertexAI/style')
   ),
   xai: loadBrand(
     () => import('@lobehub/icons/es/XAI/components/Mono'),

@@ -150,8 +150,11 @@ describe('endpoint keys and adapters', () => {
 
   it('routes endpoint ids through the Custom adapter', async () => {
     const { getProvider } = await import('@main/agent/providers')
-    expect(getProvider('custom:lab')).toBe(getProvider('custom'))
-    expect(getProvider('openai')).not.toBe(getProvider('custom'))
+    // The Custom adapter serves every endpoint; the wrapper only adds that
+    // endpoint's own headers (see customEndpointAzureHeaders.test.ts).
+    expect(getProvider('custom:lab').id).toBe('custom')
+    expect(getProvider('custom')).toBe(getProvider('custom'))
+    expect(getProvider('openai').id).toBe('openai')
   })
 
   it('preflight refuses a chat whose endpoint was removed', async () => {

@@ -33,6 +33,8 @@ export const IPC = {
   setSecret: 'secrets:set',
   clearSecret: 'secrets:clear',
   secretStatus: 'secrets:status',
+  googleAdcStatus: 'providers:google-adc-status',
+  networkProxyStatus: 'network:proxy-status',
   listModels: 'models:list',
   chatStart: 'chat:start',
   chatCancel: 'chat:cancel',

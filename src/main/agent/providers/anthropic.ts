@@ -384,21 +384,36 @@ function applySampling(body: Record<string, unknown>, req: ProviderChatRequest):
   if (req.stop && req.stop.length > 0) body.stop_sequences = req.stop.slice(0, 4)
 }
 
+/**
+ * How a Messages call is carried when it isn't api.anthropic.com with an
+ * `x-api-key`: Claude on Vertex AI authenticates with a Google access token,
+ * takes the model from the URL, and wants `anthropic_version` in the body.
+ */
+export type AnthropicTransport = {
+  /** Replaces the `x-api-key` header. */
+  authHeaders: Record<string, string>
+  vertex?: boolean
+}
+
+type AnthropicStream = (
+  req: ProviderChatRequest,
+  messagesUrl?: string,
+  extraHeaders?: Record<string, string>,
+  transport?: AnthropicTransport
+) => AsyncGenerator<StreamChunk>
+
 /** OpenAI-compatible-style entry point that posts to a caller-supplied Messages URL. */
 export function streamAnthropicMessages(
   req: ProviderChatRequest,
   messagesUrl = 'https://api.anthropic.com/v1/messages',
-  extraHeaders?: Record<string, string>
+  extraHeaders?: Record<string, string>,
+  transport?: AnthropicTransport
 ): AsyncGenerator<StreamChunk> {
   // LlmProvider.streamChat is typed with a single argument; anthropic's implementation
-  // accepts an optional messages URL and extra headers that callers (e.g. OpenCode Go)
-  // supply.
-  const stream = anthropicProvider.streamChat as (
-    req: ProviderChatRequest,
-    messagesUrl?: string,
-    extraHeaders?: Record<string, string>
-  ) => AsyncGenerator<StreamChunk>
-  return stream(req, messagesUrl, extraHeaders)
+  // accepts an optional messages URL, extra headers and transport that callers
+  // (OpenCode Go, Vertex AI) supply.
+  const stream = anthropicProvider.streamChat as AnthropicStream
+  return stream(req, messagesUrl, extraHeaders, transport)
 }
 
 export const anthropicProvider: LlmProvider = {
@@ -464,27 +479,33 @@ export const anthropicProvider: LlmProvider = {
   async *streamChat(
     req: ProviderChatRequest,
     messagesUrl = 'https://api.anthropic.com/v1/messages',
-    extraHeaders?: Record<string, string>
+    extraHeaders?: Record<string, string>,
+    transport?: AnthropicTransport
   ): AsyncGenerator<StreamChunk> {
-    if (!req.apiKey) {
+    if (!transport && !req.apiKey) {
       yield { type: 'error', error: 'Anthropic API key not set' }
       return
     }
 
     const body = buildAnthropicBody(req)
+    if (transport?.vertex) {
+      delete body.model
+      body.anthropic_version = 'vertex-2023-10-16'
+    }
 
     // No server-side context edits: `clear_tool_uses` / `compact` are not sent.
     // LLM summarization (context/compact.ts) is the only shrink path, and the
     // client's own tool-result trim (context/toolTrim.ts) is the only elision.
-    const betas = ['prompt-caching-2024-07-31']
+    // Prompt caching is generally available on Vertex and needs no beta there.
+    const betas = transport?.vertex ? [] : ['prompt-caching-2024-07-31']
     if (req.responseFormat) {
       betas.push('structured-outputs-2025-11-13')
     }
 
     const baseHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      'x-api-key': req.apiKey,
-      'anthropic-version': '2023-06-01',
+      ...(transport ? transport.authHeaders : { 'x-api-key': req.apiKey! }),
+      ...(transport?.vertex ? {} : { 'anthropic-version': '2023-06-01' }),
       ...(extraHeaders ?? {})
     }
 

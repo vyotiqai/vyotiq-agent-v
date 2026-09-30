@@ -8,6 +8,7 @@ import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { WorkspaceOverrideList } from '../components/WorkspaceOverrideList'
+import { NetworkGroup } from '../components/NetworkGroup'
 
 export function GeneralSection({
   secrets,
@@ -101,6 +102,8 @@ export function GeneralSection({
           </Button>
         </div>
       ) : null}
+
+      <NetworkGroup form={form} />
     </SettingsStack>
   )
 }

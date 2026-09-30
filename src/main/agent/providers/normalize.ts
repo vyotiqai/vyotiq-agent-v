@@ -70,6 +70,9 @@ export function wireCapsForProvider(providerId?: ProviderId): {
     case 'openai':
       // Chat Completions: audio when catalog lists it; native file via Responses path.
       return { image: true, audio: true, fileNative: true }
+    case 'bedrock':
+      // Converse takes inline images and PDF documents.
+      return { image: true, audio: false, fileNative: true }
     case 'ollama':
     case 'mistral':
       return { image: true, audio: false, fileNative: false }
@@ -405,6 +408,21 @@ function providerThinkingDefaults(
       supportedThinkingEfforts = opencodeGoEffortsFor(transport)
       break
     }
+    case 'bedrock':
+      // Claude only (modelSupportsThinking): the Anthropic policy, sent as
+      // additionalModelRequestFields.
+      thinkingMode = anthropicUsesAdaptiveThinking(id) ? 'adaptive' : 'manual'
+      break
+    case 'vertex':
+      if (/claude-/i.test(id)) {
+        thinkingMode = anthropicUsesAdaptiveThinking(id) ? 'adaptive' : 'manual'
+      } else {
+        // Gemini 3 thinkingLevel: the two levels every Gemini 3 model takes.
+        thinkingMode = 'effort'
+        supportedThinkingEfforts = ['low', 'high']
+        thinkingDefaultEffort = 'high'
+      }
+      break
     default:
       thinkingMode = 'effort'
   }

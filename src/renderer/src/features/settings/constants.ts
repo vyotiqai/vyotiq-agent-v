@@ -246,6 +246,8 @@ export const PROVIDER_KEY_ORDER: readonly ProviderId[] = [
   'xai',
   'mistral',
   'groq',
+  'bedrock',
+  'vertex',
   'custom'
 ]
 

@@ -339,6 +339,9 @@ import {
   deleteWorkspaceStorageDir
 } from '@main/storage/retention'
 import { collectHomeActivity } from '../agent/activityStats'
+import { applyNetworkSettings, proxyStatus } from '@main/net/proxy'
+import { readAdcCredentials } from '@main/agent/providers/google/googleAuth'
+import type { GoogleAdcStatus, ProxyStatus } from '../../shared/domain/network'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
@@ -1266,6 +1269,9 @@ export function registerIpc(): void {
       if (partial.telemetryEnabled !== undefined) {
         applySentryTelemetry(next.telemetryEnabled)
       }
+      if (partial.network !== undefined) {
+        await applyNetworkSettings(next.network)
+      }
       if (partial.autoCheckUpdates !== undefined) {
         // Arm/disarm the background checks now instead of at the next launch,
         // so switching it off stops network calls immediately.
@@ -1365,6 +1371,28 @@ export function registerIpc(): void {
       }
     }
   )
+
+  ipcMain.handle(IPC.googleAdcStatus, async (event): Promise<IpcResult<GoogleAdcStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const adc = readAdcCredentials()
+      if ('error' in adc) return ok({ found: false, path: adc.path, error: adc.error })
+      const account =
+        adc.credentials.type === 'service_account' ? adc.credentials.client_email : undefined
+      return ok({ found: true, path: adc.path, kind: adc.credentials.type, ...(account ? { account } : {}) })
+    } catch (err) {
+      return failFrom(err, IPC.googleAdcStatus)
+    }
+  })
+
+  ipcMain.handle(IPC.networkProxyStatus, async (event): Promise<IpcResult<ProxyStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(proxyStatus())
+    } catch (err) {
+      return failFrom(err, IPC.networkProxyStatus)
+    }
+  })
 
   ipcMain.handle(
     IPC.listModels,

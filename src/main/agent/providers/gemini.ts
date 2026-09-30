@@ -130,6 +130,8 @@ function toGeminiContents(messages: ChatMessage[]): Array<Record<string, unknown
       const parts: Array<Record<string, unknown>> = []
       const text = typeof m.content === 'string' ? m.content : contentToText(m.content)
       if (text) parts.push({ text })
+      const state = m.reasoningState as { kind?: string; signatures?: Record<string, unknown> } | undefined
+      const signatures = state?.kind === 'gemini_parts' ? (state.signatures ?? {}) : {}
       for (const t of m.toolCalls) {
         let args: unknown = {}
         try {
@@ -137,12 +139,14 @@ function toGeminiContents(messages: ChatMessage[]): Array<Record<string, unknown
         } catch {
           args = {}
         }
+        const signature = t.id ? signatures[t.id] : undefined
         parts.push({
           functionCall: {
             name: t.name,
             args,
             ...(t.id ? { id: t.id } : {})
-          }
+          },
+          ...(typeof signature === 'string' ? { thoughtSignature: signature } : {})
         })
       }
       contents.push({ role: 'model', parts })
@@ -369,77 +373,97 @@ export const geminiProvider: LlmProvider = {
       return
     }
 
-    let toolIndex = 0
-    // Id-less calls get one made up — unique to this stream, not just to this
-    // step: `gemini_0` in every step sent a later step's events and results to
-    // an earlier step's call.
-    const streamTag = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`
-    let lastUsage: TokenUsage | undefined
-    let stopReason: StopReason | undefined
-    const pendingCalls = new Map<string, ToolCall>()
-    const drops = { dropped: 0 }
+    yield* consumeGeminiStream(res, req, 'gemini')
+  }
+}
 
-    for await (const event of iterateSseJson(res, req.signal, drops)) {
-      if (event.error) {
-        const errObj = event.error as { message?: string } | string
-        const raw =
-          typeof errObj === 'string' ? errObj : (errObj.message ?? 'Gemini stream error')
-        const message = scrubProviderErrorText(raw)
-        logProviderFailure('gemini', 'stream', {})
-        yield {
-          type: 'error',
-          error: message,
-          errorCode: 'PROVIDER_STREAM'
+/**
+ * Read a `streamGenerateContent?alt=sse` body into stream chunks. Shared by
+ * the Gemini API and Vertex AI, which answer in the same shape.
+ */
+export async function* consumeGeminiStream(
+  res: Response,
+  req: ProviderChatRequest,
+  logAs: 'gemini' | 'vertex'
+): AsyncGenerator<StreamChunk> {
+  let toolIndex = 0
+  // Id-less calls get one made up — unique to this stream, not just to this
+  // step: `gemini_0` in every step sent a later step's events and results to
+  // an earlier step's call.
+  const streamTag = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`
+  let lastUsage: TokenUsage | undefined
+  let stopReason: StopReason | undefined
+  const pendingCalls = new Map<string, ToolCall>()
+  // Gemini 3 signs its function calls and refuses a history that drops them.
+  const signatures: Record<string, string> = {}
+  const drops = { dropped: 0 }
+
+  for await (const event of iterateSseJson(res, req.signal, drops)) {
+    if (event.error) {
+      const errObj = event.error as { message?: string } | string
+      const raw =
+        typeof errObj === 'string' ? errObj : (errObj.message ?? 'Gemini stream error')
+      const message = scrubProviderErrorText(raw)
+      logProviderFailure(logAs, 'stream', {})
+      yield {
+        type: 'error',
+        error: message,
+        errorCode: 'PROVIDER_STREAM'
+      }
+      return
+    }
+
+    const um = event.usageMetadata as Record<string, unknown> | undefined
+    if (um) {
+      lastUsage = parseGeminiUsage(um)
+    }
+
+    const candidates = event.candidates as Array<Record<string, unknown>> | undefined
+    const finishReason = candidates?.[0]?.finishReason
+    if (finishReason) stopReason = normalizeStopReason(finishReason)
+    const parts = (candidates?.[0]?.content as Record<string, unknown>)?.parts as
+      | Array<Record<string, unknown>>
+      | undefined
+    if (!parts) continue
+
+    for (const part of parts) {
+      const fc = part.functionCall as { name?: string; args?: unknown; id?: string } | undefined
+      if (fc?.name) {
+        const id =
+          typeof fc.id === 'string' && fc.id ? fc.id : `gemini_${streamTag}_${toolIndex++}`
+        if (typeof part.thoughtSignature === 'string' && part.thoughtSignature) {
+          signatures[id] = part.thoughtSignature
         }
-        return
-      }
-
-      const um = event.usageMetadata as Record<string, unknown> | undefined
-      if (um) {
-        lastUsage = parseGeminiUsage(um)
-      }
-
-      const candidates = event.candidates as Array<Record<string, unknown>> | undefined
-      const finishReason = candidates?.[0]?.finishReason
-      if (finishReason) stopReason = normalizeStopReason(finishReason)
-      const parts = (candidates?.[0]?.content as Record<string, unknown>)?.parts as
-        | Array<Record<string, unknown>>
-        | undefined
-      if (!parts) continue
-
-      for (const part of parts) {
-        const fc = part.functionCall as { name?: string; args?: unknown; id?: string } | undefined
-        if (fc?.name) {
-          const id =
-            typeof fc.id === 'string' && fc.id ? fc.id : `gemini_${streamTag}_${toolIndex++}`
-          const argsJson = JSON.stringify(fc.args ?? {})
-          const existing = pendingCalls.get(id)
-          if (existing) {
-            existing.arguments = argsJson
-            // Mid-stream update: live-forward so chrome/args appear before stream end.
-            yield { type: 'tool_call', toolCall: { ...existing } }
-          } else {
-            const call = { id, name: fc.name, arguments: argsJson }
-            pendingCalls.set(id, call)
-            yield { type: 'tool_call', toolCall: { ...call } }
-          }
-        }
-      }
-      for (const part of parts) {
-        // `thought: true` rows are model reasoning, not answer text — the plain
-        // path has no thinking channel, so they must never reach the transcript.
-        if (part.thought === true) continue
-        if (typeof part.text === 'string' && part.text) {
-          yield { type: 'text', text: part.text }
+        const argsJson = JSON.stringify(fc.args ?? {})
+        const existing = pendingCalls.get(id)
+        if (existing) {
+          existing.arguments = argsJson
+          // Mid-stream update: live-forward so chrome/args appear before stream end.
+          yield { type: 'tool_call', toolCall: { ...existing } }
+        } else {
+          const call = { id, name: fc.name, arguments: argsJson }
+          pendingCalls.set(id, call)
+          yield { type: 'tool_call', toolCall: { ...call } }
         }
       }
     }
-
-    yield {
-      type: 'done',
-      usage: lastUsage,
-      stopReason,
-      ...(drops.dropped > 0 ? { droppedFrames: drops.dropped } : {})
+    for (const part of parts) {
+      // `thought: true` rows are model reasoning, not answer text — the plain
+      // path has no thinking channel, so they must never reach the transcript.
+      if (part.thought === true) continue
+      if (typeof part.text === 'string' && part.text) {
+        yield { type: 'text', text: part.text }
+      }
     }
+  }
+
+  yield {
+    type: 'done',
+    usage: lastUsage,
+    stopReason,
+    ...(drops.dropped > 0 ? { droppedFrames: drops.dropped } : {}),
+    ...(Object.keys(signatures).length
+      ? { reasoningState: { kind: 'gemini_parts' as const, signatures } }
+      : {})
   }
 }

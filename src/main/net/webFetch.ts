@@ -18,6 +18,7 @@ import {
   sleepAbortable
 } from '../agent/providers/fetchWithRetry'
 import { abortError } from '../../shared/errors'
+import { proxyAppliesTo } from './proxy'
 import type { IncomingMessage, RequestOptions } from 'http'
 
 /**
@@ -105,7 +106,19 @@ export async function resolveAllowedUrl(
     throw new Error(`Refusing to fetch a private or loopback address: ${url.hostname}`)
   }
 
-  const resolved = await resolveHost(host, { all: true, verbatim: true })
+  let resolved: Array<{ address: string; family: number }>
+  try {
+    resolved = await resolveHost(host, { all: true, verbatim: true })
+  } catch (err) {
+    // Behind a proxy the proxy resolves names, and some networks only resolve
+    // through it. The request goes to the proxy, never to an address of ours,
+    // so there is nothing to pin: let it through.
+    const code = (err as NodeJS.ErrnoException)?.code
+    if ((code === 'ENOTFOUND' || code === 'EAI_AGAIN') && proxyAppliesTo(url)) {
+      return { url, addresses: [] }
+    }
+    throw err
+  }
   if (resolved.length === 0) {
     throw new Error(`Could not resolve host: ${host}`)
   }
@@ -598,11 +611,15 @@ async function fetchPinnedPublic(
   allowLocal = false,
   request?: PinnedFetchRequest
 ): Promise<Response> {
-  let lookup: NonNullable<RequestOptions['lookup']>
-  try {
-    lookup = createPinnedLookup(addresses, allowLocal)
-  } catch {
-    throw new Error(`Refusing to fetch a private or loopback address: ${url.hostname}`)
+  // No addresses: the name only resolves through the proxy (resolveAllowedUrl),
+  // which is where this request goes — there is no connect of ours to pin.
+  let lookup: RequestOptions['lookup'] | undefined
+  if (addresses.length > 0) {
+    try {
+      lookup = createPinnedLookup(addresses, allowLocal)
+    } catch {
+      throw new Error(`Refusing to fetch a private or loopback address: ${url.hostname}`)
+    }
   }
 
   const defaultPort = url.protocol === 'https:' ? 443 : 80
@@ -847,13 +864,16 @@ function downloadPinnedHop(
   signal: AbortSignal,
   maxBytes: number
 ): Promise<DownloadHopResult> {
-  let lookup: NonNullable<RequestOptions['lookup']>
-  try {
-    lookup = createPinnedLookup(addresses)
-  } catch {
-    return Promise.reject(
-      new Error(`Refusing to fetch a private or loopback address: ${url.hostname}`)
-    )
+  // No addresses: resolved by the proxy (see resolveAllowedUrl).
+  let lookup: RequestOptions['lookup'] | undefined
+  if (addresses.length > 0) {
+    try {
+      lookup = createPinnedLookup(addresses)
+    } catch {
+      return Promise.reject(
+        new Error(`Refusing to fetch a private or loopback address: ${url.hostname}`)
+      )
+    }
   }
   const defaultPort = url.protocol === 'https:' ? 443 : 80
   const port = url.port ? Number(url.port) : defaultPort

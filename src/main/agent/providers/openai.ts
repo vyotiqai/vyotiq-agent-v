@@ -1483,9 +1483,10 @@ export function createOpenAiCompatibleProvider(
       const raw = (req.baseUrl || opts.defaultBaseUrl).replace(/\/$/, '')
       const base = opts.ollamaVision ? `${ollamaNativeHost(raw)}/v1` : raw
       await validateProviderBaseUrl(base, opts.allowLocal === true || id === 'ollama')
-      const headers: Record<string, string> = { ...(opts.extraHeaders ?? {}) }
+      const headers: Record<string, string> = { ...(opts.extraHeaders ?? {}), ...(req.headers ?? {}) }
       if (req.apiKey?.trim()) {
-        headers.Authorization = `Bearer ${req.apiKey.trim()}`
+        if (req.apiKeyHeader) headers[req.apiKeyHeader] = req.apiKey.trim()
+        else headers.Authorization = `Bearer ${req.apiKey.trim()}`
       }
       return listOpenAiCompatModels(base, headers, opts, req.signal, id)
     },
@@ -1510,7 +1511,8 @@ export function createOpenAiCompatibleProvider(
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        ...(opts.extraHeaders ?? {})
+        ...(opts.extraHeaders ?? {}),
+        ...(req.headers ?? {})
       }
       // xAI cache affinity: routes the conversation to the same cache server
       // (official docs: "Always set x-grok-conv-id … maximizing cache hits").
@@ -1523,7 +1525,8 @@ export function createOpenAiCompatibleProvider(
         headers[opts.sessionHeader] = req.promptCacheKey.trim()
       }
       if (req.apiKey?.trim()) {
-        headers.Authorization = `Bearer ${req.apiKey.trim()}`
+        if (req.apiKeyHeader) headers[req.apiKeyHeader] = req.apiKey.trim()
+        else headers.Authorization = `Bearer ${req.apiKey.trim()}`
       }
 
       let maxOutputTokens = req.maxOutputTokens

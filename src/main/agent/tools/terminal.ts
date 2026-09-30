@@ -7,6 +7,7 @@ import { parseTerminalOutput } from '../../../shared/utils/terminalFormat'
 import { logger } from '../../../shared/logger'
 import { lowerProcessPriority } from '../processPriority'
 import { TERMINAL_DEFAULT_TIMEOUT_MS } from '../../../shared/agentTimeouts'
+import { childProxyEnv } from '../../net/proxy'
 
 const KILL_TREE_WAIT_MS = 5_000
 
@@ -1060,6 +1061,9 @@ export function sanitizedTerminalEnv(
     env.PATH = source.PATH ?? source.Path ?? ''
   }
   applyWindowsFolderDefaults(env, source)
+  // git, npm and pip behind a proxy need it too: the app's own proxy
+  // decision (Settings → General → Network), not whatever the parent had.
+  Object.assign(env, childProxyEnv())
   return env
 }
 

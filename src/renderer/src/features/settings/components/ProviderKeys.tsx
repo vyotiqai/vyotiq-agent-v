@@ -11,13 +11,19 @@ import {
   providerNeedsKey
 } from '@shared/providers'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Input, pushToast } from '@renderer/lib/ui'
+import { Button, Input, Segmented, Textarea, pushToast } from '@renderer/lib/ui'
+import { MAX_CUSTOM_HEADERS, customHeaderError } from '@shared/domain/network'
+import { BedrockFields, VertexFields } from './CloudProviderFields'
 import { ProviderLogo } from '@renderer/features/chat/components/composer/ProviderLogo'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { PROVIDER_KEY_URLS } from '../constants'
 
 const ENDPOINT_URL_HINT =
   "An OpenAI-compatible base ending in /v1 or a vendor's mount. Public hosts need a key; loopback and a private LAN can go without."
+const AZURE_URL_HINT =
+  'The resource endpoint from the Azure portal, like https://my-resource.openai.azure.com. It is used through Azure’s v1 API.'
+
+type EndpointKind = NonNullable<CustomProvider['kind']>
 
 type KeyState = 'saved' | 'local' | 'none' | 'unavailable'
 
@@ -97,6 +103,64 @@ function ProviderKeyRow({
         : 'unavailable'
   // Without OS secure storage a provider with no base URL has nothing to open.
   const manageable = form.encryptionAvailable || hasBaseUrl
+  // Bedrock and Vertex sign in more ways than a pasted key; their panels clear it themselves.
+  const cloud = id === 'bedrock' || id === 'vertex'
+  const detail =
+    id === 'bedrock'
+      ? form.settings.bedrockRegion
+      : id === 'vertex'
+        ? form.settings.vertexProject
+          ? `${form.settings.vertexProject} · ${form.settings.vertexLocation}`
+          : ''
+        : url
+          ? hostPreview(url)
+          : ''
+
+  const keyInput = (placeholder: string): ReactNode => (
+    <div className="flex items-center gap-2">
+      <span className="min-w-0 flex-1">
+        <Input
+          id="apikey"
+          size="sm"
+          mono
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={`API key (${label})`}
+          aria-invalid={form.errorField === 'apikey' ? true : undefined}
+          aria-describedby={form.errorField === 'apikey' ? 'apikey-error' : undefined}
+          value={form.keyDraft}
+          placeholder={!form.encryptionAvailable ? 'Secure storage unavailable' : placeholder}
+          disabled={!form.encryptionAvailable || form.savingKey || form.clearingKey}
+          onChange={(e) => form.setKeyDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && form.keyDraft.trim() && !form.savingKey) {
+              e.preventDefault()
+              void form.saveKey()
+            }
+          }}
+        />
+      </span>
+      <Button
+        size="sm"
+        variant="primary"
+        pending={form.savingKey}
+        disabled={!form.encryptionAvailable || !form.keyDraft.trim() || form.clearingKey}
+        onClick={() => {
+          void form.saveKey()
+        }}
+      >
+        {form.savingKey ? 'Saving…' : 'Save key'}
+      </Button>
+      {cloud ? null : saved ? (
+        <Button size="sm" variant="ghost" pending={form.clearingKey} disabled={form.savingKey} onClick={onClearKey}>
+          {form.clearingKey ? 'Clearing…' : 'Clear'}
+        </Button>
+      ) : PROVIDER_KEY_URLS[id] ? (
+        <ExternalLink href={PROVIDER_KEY_URLS[id]!}>Get a key</ExternalLink>
+      ) : null}
+    </div>
+  )
 
   return (
     <div data-settings-field={id === 'custom' ? 'custom-url' : id === 'ollama' ? 'ollama-url' : undefined}>
@@ -105,9 +169,9 @@ function ProviderKeyRow({
           <ProviderLogo id={id} size={14} tone="current" />
         </span>
         <span className="min-w-0 truncate text-sm text-fg">{label}</span>
-        {url ? (
-          <span className="min-w-0 truncate font-mono text-caption text-tertiary" title={url}>
-            {hostPreview(url)}
+        {detail ? (
+          <span className="min-w-0 truncate font-mono text-caption text-tertiary" title={url || detail}>
+            {detail}
           </span>
         ) : null}
         <span className="flex-1" />
@@ -180,61 +244,31 @@ function ProviderKeyRow({
               <ExternalLink href="https://opencode.ai/go">Subscribe</ExternalLink>
             </p>
           ) : null}
-          <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1">
-              <Input
-                id="apikey"
-                size="sm"
-                mono
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                aria-label={`API key (${label})`}
-                aria-invalid={form.errorField === 'apikey' ? true : undefined}
-                aria-describedby={form.errorField === 'apikey' ? 'apikey-error' : undefined}
-                value={form.keyDraft}
-                placeholder={
-                  !form.encryptionAvailable
-                    ? 'Secure storage unavailable'
-                    : saved
-                      ? '•••••••• (saved)'
-                      : `Paste a ${label} API key`
-                }
-                disabled={!form.encryptionAvailable || form.savingKey || form.clearingKey}
-                onChange={(e) => form.setKeyDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && form.keyDraft.trim() && !form.savingKey) {
-                    e.preventDefault()
-                    void form.saveKey()
-                  }
-                }}
-              />
-            </span>
-            <Button
-              size="sm"
-              variant="primary"
-              pending={form.savingKey}
-              disabled={!form.encryptionAvailable || !form.keyDraft.trim() || form.clearingKey}
-              onClick={() => {
-                void form.saveKey()
-              }}
-            >
-              {form.savingKey ? 'Saving…' : 'Save key'}
-            </Button>
-            {saved ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                pending={form.clearingKey}
-                disabled={form.savingKey}
-                onClick={onClearKey}
-              >
-                {form.clearingKey ? 'Clearing…' : 'Clear'}
+          {endpoint?.kind === 'azure' && !saved ? (
+            <p className="m-0 text-xs leading-[18px] text-muted">
+              Paste one of the resource’s keys. Pick models by their deployment names.
+            </p>
+          ) : null}
+          {id === 'bedrock' ? (
+            <BedrockFields form={form} saved={saved} keyInput={keyInput} />
+          ) : id === 'vertex' ? (
+            <VertexFields form={form} />
+          ) : (
+            keyInput(
+              saved
+                ? '•••••••• (saved)'
+                : endpoint?.kind === 'azure'
+                  ? 'Paste a key for this resource'
+                  : `Paste a ${label} API key`
+            )
+          )}
+          {saved && (id === 'bedrock' || id === 'vertex') ? (
+            <div>
+              <Button size="xs" variant="ghost" pending={form.clearingKey} disabled={form.savingKey} onClick={onClearKey}>
+                {form.clearingKey ? 'Clearing…' : 'Sign out'}
               </Button>
-            ) : PROVIDER_KEY_URLS[id] ? (
-              <ExternalLink href={PROVIDER_KEY_URLS[id]!}>Get a key</ExternalLink>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
           {form.errorField === 'apikey' && form.displayError ? (
             <p id="apikey-error" className="m-0 text-xs text-danger" role="alert">
               {form.displayError}
@@ -327,7 +361,7 @@ function EndpointFields({ endpoint, form }: { endpoint: CustomProvider; form: Se
       setUrlError(null)
       return
     }
-    const error = form.endpointFieldError({ baseUrl: url }, endpoint.id)
+    const error = form.endpointFieldError({ baseUrl: url, kind: endpoint.kind }, endpoint.id)
     setUrlError(error)
     if (!error) void form.updateEndpoint(endpoint.id, { baseUrl: url })
   }
@@ -359,7 +393,7 @@ function EndpointFields({ endpoint, form }: { endpoint: CustomProvider; form: Se
       <BaseUrlField
         inputId="endpoint-url"
         ariaLabel="Endpoint base URL"
-        hint={ENDPOINT_URL_HINT}
+        hint={endpoint.kind === 'azure' ? AZURE_URL_HINT : ENDPOINT_URL_HINT}
         value={url}
         disabled={form.formLocked}
         invalid={Boolean(urlError)}
@@ -374,7 +408,81 @@ function EndpointFields({ endpoint, form }: { endpoint: CustomProvider; form: Se
         onChange={setUrl}
         onCommit={commitUrl}
       />
+      <EndpointHeadersField endpoint={endpoint} form={form} />
     </>
+  )
+}
+
+/** `Name: value` lines ↔ a header map. */
+function headersToText(headers: Record<string, string> | undefined): string {
+  return Object.entries(headers ?? {})
+    .map(([name, value]) => `${name}: ${value}`)
+    .join('\n')
+}
+
+/** Parse `Name: value` lines, or say which line is wrong. */
+export function parseHeaderLines(text: string): { headers: Record<string, string> } | { error: string } {
+  const headers: Record<string, string> = {}
+  const lines = text.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim()
+    if (!line) continue
+    const colon = line.indexOf(':')
+    if (colon <= 0) return { error: `Line ${i + 1} needs the form Name: value.` }
+    const name = line.slice(0, colon).trim()
+    const value = line.slice(colon + 1).trim()
+    const why = customHeaderError(name, value)
+    if (why) return { error: `Line ${i + 1}: ${why}` }
+    if (Object.keys(headers).some((n) => n.toLowerCase() === name.toLowerCase())) {
+      return { error: `Line ${i + 1}: ${name} is already set above.` }
+    }
+    headers[name] = value
+  }
+  if (Object.keys(headers).length > MAX_CUSTOM_HEADERS) return { error: `Keep it to ${MAX_CUSTOM_HEADERS} headers.` }
+  return { headers }
+}
+
+/**
+ * Extra headers an endpoint's gateway wants (a routing key, an org id). They
+ * live in settings, not the key vault, so the hint steers secrets to the key.
+ */
+function EndpointHeadersField({ endpoint, form }: { endpoint: CustomProvider; form: SettingsFormState }) {
+  const [text, setText] = useState(() => headersToText(endpoint.headers))
+  const [error, setError] = useState<string | null>(null)
+  const commit = (): void => {
+    const parsed = parseHeaderLines(text)
+    if ('error' in parsed) {
+      setError(parsed.error)
+      return
+    }
+    setError(null)
+    void form.updateEndpoint(endpoint.id, { headers: parsed.headers })
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <Textarea
+        size="sm"
+        mono
+        rows={2}
+        spellCheck={false}
+        aria-label="Extra headers"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? 'endpoint-headers-error' : undefined}
+        placeholder="X-Header: value"
+        disabled={form.formLocked}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+      />
+      <p className="m-0 text-xs leading-[18px] text-muted">
+        Extra headers, one Name: value per line. Stored in settings, not the key vault — put secrets in the API key.
+      </p>
+      {error ? (
+        <p id="endpoint-headers-error" className="m-0 text-xs text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -387,6 +495,7 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
+  const [kind, setKind] = useState<EndpointKind>('openai')
   const [nameError, setNameError] = useState<string | null>(null)
   const [urlError, setUrlError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -402,18 +511,19 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
     setOpen(false)
     setName('')
     setUrl('')
+    setKind('openai')
     setNameError(null)
     setUrlError(null)
   }
 
   const submit = async (): Promise<void> => {
     const nextNameError = form.endpointFieldError({ name })
-    const nextUrlError = form.endpointFieldError({ baseUrl: url })
+    const nextUrlError = form.endpointFieldError({ baseUrl: url, kind })
     setNameError(nextNameError)
     setUrlError(nextUrlError)
     if (nextNameError || nextUrlError) return
     setAdding(true)
-    const ok = await form.addEndpoint(name, url)
+    const ok = await form.addEndpoint(name, url, kind)
     setAdding(false)
     if (ok) reset()
   }
@@ -447,6 +557,21 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
             void submit()
           }}
         >
+          <div>
+            <Segmented
+              label="Endpoint kind"
+              value={kind}
+              items={[
+                { id: 'openai', label: 'OpenAI-compatible' },
+                { id: 'azure', label: 'Azure OpenAI' }
+              ]}
+              disabled={adding}
+              onChange={(next) => {
+                setKind(next)
+                setUrlError(null)
+              }}
+            />
+          </div>
           <div className="flex flex-col gap-1">
             <Input
               ref={nameRef}
@@ -475,7 +600,7 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
               aria-label="New endpoint base URL"
               aria-invalid={urlError ? true : undefined}
               aria-describedby={urlError ? 'new-endpoint-url-error' : undefined}
-              placeholder="http://localhost:1234/v1"
+              placeholder={kind === 'azure' ? 'https://my-resource.openai.azure.com' : 'http://localhost:1234/v1'}
               spellCheck={false}
               value={url}
               disabled={adding}
@@ -486,7 +611,7 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
                 {urlError}
               </p>
             ) : null}
-            <p className="m-0 text-xs leading-[18px] text-muted">{ENDPOINT_URL_HINT}</p>
+            <p className="m-0 text-xs leading-[18px] text-muted">{kind === 'azure' ? AZURE_URL_HINT : ENDPOINT_URL_HINT}</p>
           </div>
           <div className="flex items-center gap-2">
             <Button type="submit" size="sm" variant="primary" pending={adding} disabled={form.formLocked}>

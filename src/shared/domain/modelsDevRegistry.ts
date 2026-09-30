@@ -32,7 +32,26 @@ const REGISTRY_TTL_MS = 24 * 60 * 60 * 1000
 /** Run-start lookups await this fetch — never let a hung request stall a turn. */
 const REGISTRY_FETCH_TIMEOUT_MS = 15_000
 
-type ModelsDevModel = { id?: string; limit?: { context?: number } }
+type ModelsDevModel = {
+  id?: string
+  name?: string
+  reasoning?: boolean
+  tool_call?: boolean
+  modalities?: { input?: string[]; output?: string[] }
+  limit?: { context?: number; output?: number }
+}
+
+/** One model as a registry provider lists it — what a model picker needs. */
+export type ModelsDevListing = {
+  id: string
+  name: string
+  contextWindow?: number
+  maxOutputTokens?: number
+  reasoning: boolean
+  toolCall: boolean
+  inputModalities: string[]
+  outputModalities: string[]
+}
 type ModelsDevProvider = {
   id?: string
   api?: string
@@ -46,6 +65,8 @@ type RegistryProvider = {
   /** Core id (vendor prefix stripped) → context window. Skipped when a
    *  provider lists two different windows under one core id (ambiguous). */
   core: Map<string, number>
+  /** Every listed model, in registry order (ids keep their case). */
+  listings: ModelsDevListing[]
 }
 
 type RegistryIndex = {
@@ -69,7 +90,9 @@ const REGISTRY_ID_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
   mistral: 'mistral',
   // The app's `opencode` provider is OpenCode Go; models.dev keeps that under
   // `opencode-go` (`opencode` is the separate Zen catalog).
-  opencode: 'opencode-go'
+  opencode: 'opencode-go',
+  bedrock: 'amazon-bedrock',
+  vertex: 'google-vertex'
 }
 
 let index: RegistryIndex | null = null
@@ -91,8 +114,20 @@ function buildIndex(json: Record<string, ModelsDevProvider>): RegistryIndex {
   for (const [pid, provider] of Object.entries(json)) {
     const models = new Map<string, number>()
     const core = new Map<string, number>()
+    const listings: ModelsDevListing[] = []
     for (const raw of Object.values(provider.models ?? {})) {
       if (!raw?.id) continue
+      const out = raw.limit?.output
+      listings.push({
+        id: raw.id.trim(),
+        name: raw.name?.trim() || raw.id.trim(),
+        ...(typeof raw.limit?.context === 'number' && raw.limit.context > 0 ? { contextWindow: raw.limit.context } : {}),
+        ...(typeof out === 'number' && out > 0 ? { maxOutputTokens: out } : {}),
+        reasoning: raw.reasoning === true,
+        toolCall: raw.tool_call === true,
+        inputModalities: raw.modalities?.input ?? ['text'],
+        outputModalities: raw.modalities?.output ?? ['text']
+      })
       const ctx = raw.limit?.context
       if (typeof ctx !== 'number' || !Number.isFinite(ctx) || ctx <= 0) continue
       const full = raw.id.trim().toLowerCase()
@@ -114,8 +149,8 @@ function buildIndex(json: Record<string, ModelsDevProvider>): RegistryIndex {
       }
       values.add(ctx)
     }
-    if (models.size === 0) continue
-    providersById.set(pid, { id: pid, models, core })
+    if (models.size === 0 && listings.length === 0) continue
+    providersById.set(pid, { id: pid, models, core, listings })
     const host = hostOf(provider.api)
     if (host) {
       const ids = byHost.get(host)
@@ -223,10 +258,25 @@ export async function resolveModelsDevContextWindow(
   return lookupContextWindow(registry, modelId, opts)
 }
 
+/**
+ * The models a registry provider lists (for a fixed provider id), awaiting the
+ * load. Throws when the registry can't be reached — a caller showing it as a
+ * catalog must say so rather than show an empty list.
+ */
+export async function modelsDevListings(
+  providerId: ProviderId,
+  opts?: { signal?: AbortSignal }
+): Promise<ModelsDevListing[]> {
+  const registryId = REGISTRY_ID_BY_PROVIDER[providerId]
+  if (!registryId) return []
+  const registry = await loadModelsDevRegistry({ signal: opts?.signal })
+  return registry.providersById.get(registryId)?.listings ?? []
+}
+
 /** Test hook — replace the registry index with a fixture (prevents network). */
 export type ModelsDevRegistryFixture = Record<
   string,
-  { api?: string; models?: Record<string, { limit?: { context?: number } }> } | undefined
+  { api?: string; models?: Record<string, ModelsDevModel> } | undefined
 >
 
 export function __setModelsDevRegistryForTests(providers: ModelsDevRegistryFixture | null): void {

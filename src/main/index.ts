@@ -11,6 +11,7 @@ import { initCustomCssWatchFromSettings } from '@main/appearance/customCss'
 import { configureChromiumDiskCache } from '@main/app/chromiumProfile'
 import { applyCertificateLogging, applyCsp } from '@main/app/security'
 import { widenHappyEyeballsWindow } from '@main/net/happyEyeballs'
+import { applyEarlyNodeProxy, applyNetworkSettings } from '@main/net/proxy'
 import { closeAgentBrowser } from '@main/app/agentBrowser'
 import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptySessions'
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
@@ -236,6 +237,12 @@ if (!gotLock) {
   // is shorter than a transcontinental round trip, which stops a multi-homed
   // host being reachable at all rather than merely being slow.
   widenHappyEyeballsWindow()
+  // A manual or environment proxy needs no Chromium; the OS proxy follows at ready.
+  try {
+    applyEarlyNodeProxy(getSettings().network)
+  } catch {
+    // Settings unreadable this early: the ready-time apply below reports it.
+  }
 
   app.whenReady().then(async () => {
     // Accessibility is no longer forced on: Chromium auto-detects assistive
@@ -260,6 +267,7 @@ if (!gotLock) {
     electronApp.setAppUserModelId('com.vyotiq.agent')
     applyCsp()
     applyCertificateLogging()
+    await applyNetworkSettings(getSettings().network)
     // Recover the user's real PATH before any MCP server is spawned. A macOS app
     // launched from Finder inherits only /usr/bin:/bin:/usr/sbin:/sbin, which
     // hides nvm's node and uv. Bounded and best-effort; no-op off macOS.

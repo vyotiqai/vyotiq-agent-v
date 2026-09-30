@@ -265,7 +265,16 @@ function isRedirect(res: Response): boolean {
 export async function fetchWithRetry(
   url: string,
   init: RequestInit & { signal?: AbortSignal },
-  opts?: { maxAttempts?: number; circuitKey?: string | false; connectTimeoutMs?: number }
+  opts?: {
+    maxAttempts?: number
+    circuitKey?: string | false
+    connectTimeoutMs?: number
+    /**
+     * Fresh headers for each attempt. AWS SigV4 signatures expire five minutes
+     * after their timestamp, so a retry after a long backoff must re-sign.
+     */
+    headersForAttempt?: () => Record<string, string>
+  }
 ): Promise<Response> {
   const maxAttempts = opts?.maxAttempts ?? DEFAULT_FETCH_MAX_ATTEMPTS
   const connectTimeoutMs = opts?.connectTimeoutMs ?? CONNECT_TIMEOUT_MS
@@ -284,7 +293,12 @@ export async function fetchWithRetry(
     const deadline = connectDeadlineSignal(init.signal, connectTimeoutMs)
     try {
       // One await on the hot path; redirects are followed only when one arrives.
-      const attemptInit = { ...init, redirect: 'manual' as const, signal: deadline.signal }
+      const attemptInit = {
+        ...init,
+        ...(opts?.headersForAttempt ? { headers: opts.headersForAttempt() } : {}),
+        redirect: 'manual' as const,
+        signal: deadline.signal
+      }
       const first = await fetch(url, attemptInit)
       const response = isRedirect(first)
         ? await followSameOriginRedirects(url, attemptInit, first)

@@ -37,6 +37,24 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     keywords: ['workspace', 'override', 'per-workspace', 'folder', 'project', 'add workspace'],
     section: 'general'
   },
+  {
+    id: 'proxy-mode',
+    title: 'Proxy',
+    keywords: ['proxy', 'network', 'https_proxy', 'corporate', 'firewall', 'direct', 'pac'],
+    section: 'general'
+  },
+  {
+    id: 'proxy-url',
+    title: 'Proxy address',
+    keywords: ['proxy', 'host', 'port', 'manual proxy'],
+    section: 'general'
+  },
+  {
+    id: 'proxy-bypass',
+    title: 'Skip the proxy for',
+    keywords: ['no_proxy', 'bypass', 'proxy exceptions', 'direct hosts'],
+    section: 'general'
+  },
 
   // Appearance
   {
@@ -134,7 +152,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   {
     id: 'active-provider',
     title: 'Provider for new tasks',
-    keywords: ['provider', 'openai', 'anthropic', 'gemini', 'ollama', 'openrouter', 'custom'],
+    keywords: ['provider', 'openai', 'anthropic', 'gemini', 'ollama', 'openrouter', 'custom', 'bedrock', 'aws', 'vertex', 'google cloud', 'azure'],
     section: 'providers'
   },
   {
@@ -146,7 +164,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   {
     id: 'api-keys',
     title: 'API keys',
-    keywords: ['secret', 'key', 'token', 'credentials', 'secure storage'],
+    keywords: ['secret', 'key', 'token', 'credentials', 'secure storage', 'access key', 'service account', 'gcloud', 'region', 'headers'],
     section: 'providers'
   },
   {
@@ -583,7 +601,10 @@ function cssEscape(value: string): string {
 const FIELD_SCROLL_FALLBACK: Record<string, string> = {
   'ollama-url': 'api-keys',
   'custom-url': 'custom-endpoints',
-  'tool-approval-allowlist': 'tool-approval'
+  'tool-approval-allowlist': 'tool-approval',
+  // Shown only for a manual proxy; otherwise the mode row is where to start.
+  'proxy-url': 'proxy-mode',
+  'proxy-bypass': 'proxy-mode'
 }
 
 function querySettingsField(fieldId: string): HTMLElement | null {

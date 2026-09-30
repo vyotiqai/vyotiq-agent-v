@@ -25,8 +25,17 @@ import {
 import { DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO } from '../../domain/contextBudget'
 import {
   CUSTOM_OPENAI_DEFAULT,
+  customEndpointBaseUrl,
   normalizeCustomOpenAiBaseUrl
 } from '../../domain/providers'
+import { sanitizeCustomHeaders } from '../../domain/network'
+import {
+  BEDROCK_DEFAULT_REGION,
+  BEDROCK_REGION_RE,
+  VERTEX_DEFAULT_LOCATION,
+  VERTEX_LOCATION_RE,
+  VERTEX_PROJECT_RE
+} from '../../domain/cloudProviders'
 import {
   DEFAULT_MARKETPLACE_SETTINGS,
   MarketplaceSettingsSchema,
@@ -217,6 +226,29 @@ export const NotificationSettingsSchema = z.object({
   system: z.boolean().default(true)
 })
 export type NotificationSettings = z.infer<typeof NotificationSettingsSchema>
+
+/**
+ * How main-process traffic (providers, MCP, updates, downloads) reaches the
+ * internet. `system` follows HTTPS_PROXY/NO_PROXY when set, else the OS proxy;
+ * `manual` uses `proxyUrl` for everything but `proxyBypass`; `direct` uses none.
+ */
+export const ProxyModeSchema = z.enum(['system', 'manual', 'direct'])
+export type ProxyMode = z.infer<typeof ProxyModeSchema>
+
+export const NetworkSettingsSchema = z.object({
+  proxyMode: ProxyModeSchema.catch('system').default('system'),
+  /** `http(s)://host:port`, no credentials (see validateProxyUrl). */
+  proxyUrl: z.string().trim().max(500).catch('').default(''),
+  /** Hosts that skip the manual proxy, comma-separated (`localhost, *.corp`). */
+  proxyBypass: z.string().trim().max(2000).catch('').default('')
+})
+export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>
+
+export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
+  proxyMode: 'system',
+  proxyUrl: '',
+  proxyBypass: ''
+}
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   enabled: true,
@@ -456,7 +488,19 @@ export const SETTINGS_FORMAT_VERSION = 6
 export const CustomProviderSchema = z.object({
   id: CustomProviderIdSchema,
   name: z.string().trim().min(1).max(60),
-  baseUrl: z.string().trim().min(1)
+  baseUrl: z.string().trim().min(1),
+  /**
+   * `azure`: an Azure OpenAI / Foundry resource on its v1 API — the key goes
+   * in an `api-key` header and models are deployment names. Unset: plain
+   * OpenAI-compatible with a Bearer key.
+   */
+  kind: z.enum(['openai', 'azure']).optional(),
+  /**
+   * Extra request headers (gateway routing, org ids). Kept in settings, not
+   * the key vault — secrets belong in the API key. Sanitized on use
+   * (sanitizeCustomHeaders), so one bad entry never costs the endpoint.
+   */
+  headers: z.record(z.string(), z.string()).optional()
 })
 export type CustomProvider = z.infer<typeof CustomProviderSchema>
 
@@ -514,11 +558,13 @@ export function normalizeCustomProviders(
     if (!parsed.success) continue
     const slug = customProviderSlug(parsed.data.id)
     if (!slug || seenIds.has(slug)) continue
-    const base = normalizeCustomOpenAiBaseUrl(parsed.data.baseUrl)
+    const base = customEndpointBaseUrl(parsed.data)
     if (seenBases.has(base)) continue
     seenIds.add(slug)
     seenBases.add(base)
-    out.push(parsed.data)
+    const { headers: rawHeaders, ...entry } = parsed.data
+    const headers = sanitizeCustomHeaders(rawHeaders)
+    out.push(headers ? { ...entry, headers } : entry)
   }
   return out
 }
@@ -564,6 +610,18 @@ export const SettingsSchema = z.object({
    * builtin `custom` provider and `customOpenAiBaseUrl` stay alongside them.
    */
   customProviders: z.array(CustomProviderSchema).default([]),
+  /** Amazon Bedrock region (the key's calls go only to that region's host). */
+  bedrockRegion: z.string().trim().regex(BEDROCK_REGION_RE).catch(BEDROCK_DEFAULT_REGION).default(BEDROCK_DEFAULT_REGION),
+  /** Google Cloud project Vertex AI bills; empty until set up. */
+  vertexProject: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || VERTEX_PROJECT_RE.test(v))
+    .catch('')
+    .default(''),
+  /** Vertex AI location: `global`, `us`/`eu`, or a region like `us-east5`. */
+  vertexLocation: z.string().trim().regex(VERTEX_LOCATION_RE).catch(VERTEX_DEFAULT_LOCATION).default(VERTEX_DEFAULT_LOCATION),
+  network: NetworkSettingsSchema.default(DEFAULT_NETWORK_SETTINGS),
   theme: ThemeIdSchema,
   navigationMode: NavigationModeSchema.default(DEFAULT_NAVIGATION_MODE),
   fontScale: FontScaleSchema.default(DEFAULT_FONT_SCALE),
@@ -732,6 +790,10 @@ export const DEFAULT_SETTINGS: Settings = {
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1',
   customProviders: [],
+  bedrockRegion: BEDROCK_DEFAULT_REGION,
+  vertexProject: '',
+  vertexLocation: VERTEX_DEFAULT_LOCATION,
+  network: DEFAULT_NETWORK_SETTINGS,
   theme: 'system',
   navigationMode: DEFAULT_NAVIGATION_MODE,
   fontScale: DEFAULT_FONT_SCALE,

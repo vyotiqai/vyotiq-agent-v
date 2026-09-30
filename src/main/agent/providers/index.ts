@@ -1,5 +1,6 @@
 import {
   catalogProviderId,
+  isCustomProviderId,
   type ModelInfo,
   type ProviderId,
   type ProviderIdAny
@@ -7,6 +8,11 @@ import {
 import { formatError } from '../../../shared/errors'
 import { withResolvedContextWindow } from '../../../shared/domain/modelContextWindows'
 import { providerLabel, providerNeedsKey, seedModelsFor } from '../../../shared/providers'
+import {
+  resolveProviderRequestExtras,
+  type ProviderRequestExtras
+} from '../../../shared/domain/providers'
+import { getSettings } from '../../settings/settings'
 import { isChatFixtureReplayEnabled } from '../../e2e/chatFixtureReplay'
 import { anthropicProvider } from './anthropic'
 import { geminiProvider } from './gemini'
@@ -35,6 +41,8 @@ import {
   xaiProvider
 } from './openai'
 import { opencodeProvider } from './opencode'
+import { bedrockProvider } from './bedrock'
+import { vertexProvider } from './vertex'
 import type { ListModelsRequest, LlmProvider } from './types'
 import { preloadOpenCodeGoCatalog } from '../../../shared/domain/opencodeGoCatalog'
 import { preloadModelsDevRegistry } from '../../../shared/domain/modelsDevRegistry'
@@ -57,12 +65,34 @@ const providers: Record<ProviderId, LlmProvider> = {
   xai: xaiProvider,
   mistral: mistralProvider,
   custom: customProvider,
-  opencode: opencodeProvider
+  opencode: opencodeProvider,
+  bedrock: bedrockProvider,
+  vertex: vertexProvider
+}
+
+/**
+ * A custom endpoint's own request extras (headers, Azure's `api-key` style),
+ * read from settings at call time so every caller — the loop, compaction,
+ * commit messages, side models, the catalog — sends them without threading.
+ */
+function endpointExtras(id: ProviderIdAny): ProviderRequestExtras {
+  if (!isCustomProviderId(id)) return {}
+  try {
+    return resolveProviderRequestExtras(id, getSettings())
+  } catch {
+    return {}
+  }
 }
 
 /** Adapter for a provider; every `custom:<slug>` endpoint shares the `custom` one. */
 export function getProvider(id: ProviderIdAny): LlmProvider {
-  return providers[catalogProviderId(id)]
+  const adapter = providers[catalogProviderId(id)]
+  if (!isCustomProviderId(id)) return adapter
+  return {
+    id: adapter.id,
+    listModels: (req) => adapter.listModels({ ...endpointExtras(id), ...req }),
+    streamChat: (req) => adapter.streamChat({ ...endpointExtras(id), ...req })
+  }
 }
 
 /** Providers whose model catalog endpoint is public (no API key required). */
@@ -171,7 +201,7 @@ export async function listProviderModels(input: {
   forceRefresh?: boolean
   model?: string
 }): Promise<{ models: ModelInfo[]; warning?: string }> {
-  const key = modelCacheKey(input.provider, input.baseUrl, input.apiKey)
+  const key = modelCacheKey(input.provider, input.baseUrl, input.apiKey, endpointExtras(input.provider).headers)
   if (!input.forceRefresh) {
     const cached = getCachedModels(key)
     if (cached) {
