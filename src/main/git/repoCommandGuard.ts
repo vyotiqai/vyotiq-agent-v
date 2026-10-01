@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'child_process'
 import { createHash } from 'crypto'
-import { readFileSync, statSync } from 'fs'
+import { readFileSync, realpathSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { promisify } from 'util'
 import { app } from 'electron'
@@ -155,8 +155,21 @@ function repoFiles(dirs: GitDirs): string[] {
   return [join(dirs.commonDir, 'config'), join(dirs.gitDir, 'config.worktree'), join(dirs.gitDir, 'HEAD')]
 }
 
+/**
+ * One key per repository, whichever way its path is spelled. A repository
+ * found from the caller's path keeps that spelling, while a worktree's git
+ * dir comes from the pointer git wrote, which is the real path: /var against
+ * /private/var on macOS, a long name against an 8.3 short one on Windows.
+ * Without the real path a worktree would not share its repository's allowance.
+ */
 function trustKeyOf(dir: string): string {
-  const normalized = resolve(dir).replace(/[\\/]+$/, '')
+  let real = resolve(dir)
+  try {
+    real = realpathSync.native(real)
+  } catch {
+    // A directory that is gone keeps its resolved spelling.
+  }
+  const normalized = real.replace(/[\\/]+$/, '')
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized
 }
 
