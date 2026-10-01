@@ -32,6 +32,12 @@ export type StartElementPickOpts = {
   refs: () => ReadonlyArray<{ id: string; selector: string }>
   onPick: (element: BrowserPickedElement) => void
   onEnd: (reason: PickEndReason) => void
+  /**
+   * A click landed on something that could not be read from the page's own
+   * document — in practice an element inside a same-origin frame, which the
+   * overlay reports but the top document's isolated world cannot resolve.
+   */
+  onMiss?: () => void
 }
 
 type NodeRef = { backendNodeId: number } | { nodeId: number }
@@ -341,7 +347,18 @@ export async function startElementPick(opts: StartElementPickOpts): Promise<Elem
     if (ended) return
     if (method === 'Overlay.inspectNodeRequested') {
       const backendNodeId = params?.backendNodeId
-      if (typeof backendNodeId === 'number') enqueue(() => pick({ backendNodeId }))
+      if (typeof backendNodeId === 'number') {
+        enqueue(async () => {
+          // A node that will not resolve here (inside a frame) says so, rather
+          // than the click looking ignored; page data that fails the checks
+          // is dropped quietly, as before.
+          try {
+            await pick({ backendNodeId })
+          } catch {
+            if (!ended) opts.onMiss?.()
+          }
+        })
+      }
     } else if (method === 'Overlay.nodeHighlightRequested') {
       const nodeId = params?.nodeId
       if (typeof nodeId === 'number') current = { nodeId }

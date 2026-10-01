@@ -51,8 +51,8 @@ function SearchableMenu(): JSX.Element {
   )
 }
 
-/** The field's height lives on its wrapper: `h-8` at md, `h-7` at sm — one of them, never both. */
-const WRAPPER_H = ['h-8', 'h-7']
+/** The field's height lives on its wrapper: `h-8` at md, `h-7` at sm, `h-6` at xs — one of them, never two. */
+const WRAPPER_H = ['h-8', 'h-7', 'h-6']
 
 function wrapper(): HTMLElement {
   const el = input().parentElement
@@ -72,6 +72,12 @@ describe('SearchInput size classes', () => {
     render(<SearchInput aria-label="Search" size="sm" value="" onChange={vi.fn()} />)
     expect(onlyOneOf(wrapper(), WRAPPER_H)).toBe('h-7')
     expect(onlyOneOf(input(), MIN_H)).toBe(null)
+    expect(onlyOneOf(input(), TEXT_SIZE)).toBe('text-xs')
+  })
+
+  it('size="xs" sits in a pane row beside xs buttons: h-6 and text-xs, one of each', () => {
+    render(<SearchInput aria-label="Search" size="xs" value="" onChange={vi.fn()} />)
+    expect(onlyOneOf(wrapper(), WRAPPER_H)).toBe('h-6')
     expect(onlyOneOf(input(), TEXT_SIZE)).toBe('text-xs')
   })
 

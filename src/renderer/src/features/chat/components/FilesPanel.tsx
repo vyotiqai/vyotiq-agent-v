@@ -3678,7 +3678,7 @@ export const FilesPanel = memo(function FilesPanel({
             <IconButton
               icon="close"
               label="Close find in files"
-              size="sm"
+              size="xs"
               tone="muted"
               onClick={() => {
                 setFindInFilesOpen(false)
@@ -3805,7 +3805,7 @@ export const FilesPanel = memo(function FilesPanel({
           >
             <SearchInput
               aria-label="Filter workspace files"
-              size="sm"
+              size="xs"
               className="min-w-0 flex-1"
               placeholder="Filter files"
               value={treeFilter}
@@ -3827,7 +3827,7 @@ export const FilesPanel = memo(function FilesPanel({
               <IconButton
                 icon="diff"
                 label={changedOnly ? 'Show every file' : 'Only files this task changed'}
-                size="sm"
+                size="xs"
                 tone="muted"
                 active={changedOnly}
                 onClick={() => setChangedOnly((value) => !value)}
@@ -3848,7 +3848,7 @@ export const FilesPanel = memo(function FilesPanel({
             <IconButton
               icon="fileNew"
               label="Create file"
-              size="sm"
+              size="xs"
               tone="muted"
               disabled={busy}
               onClick={() => void createEntry('file')}
@@ -3895,7 +3895,7 @@ export const FilesPanel = memo(function FilesPanel({
                   icon="more"
                   label="Workspace actions"
                   title="More — find, new folder, sort"
-                  size="sm"
+                  size="xs"
                   tone="muted"
                   disabled={busy}
                   aria-expanded={props['aria-expanded']}
@@ -4204,7 +4204,7 @@ export const FilesPanel = memo(function FilesPanel({
                   <div
                     key={tab.id}
                     className={cn(
-                      'group inline-flex h-7 max-w-[12rem] shrink-0 items-center rounded-md vy-transition',
+                      'group inline-flex h-6 max-w-[12rem] shrink-0 items-center rounded-md vy-transition',
                       selected ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface hover:text-fg'
                     )}
                   >

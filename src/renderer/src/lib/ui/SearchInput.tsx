@@ -13,7 +13,8 @@ export const SearchInput = forwardRef<
     trailing?: ReactNode
     /** Its shortcut, shown at rest so the key is learnt by looking. */
     keys?: readonly string[]
-    size?: 'sm' | 'md'
+    /** `xs` sits in a pane's 40px row beside xs buttons: the same 24px as Button xs. */
+    size?: 'xs' | 'sm' | 'md'
   }
 >(function SearchInput(
   {
@@ -36,7 +37,7 @@ export const SearchInput = forwardRef<
       className={cn(
         'flex items-center gap-2 rounded-md border border-border bg-bg focus-within:vy-focus-ring vy-transition',
         'hover:border-border-strong focus-within:border-border-strong',
-        size === 'md' ? 'h-8 px-2.5' : 'h-7 px-2',
+        size === 'md' ? 'h-8 px-2.5' : size === 'sm' ? 'h-7 px-2' : 'h-6 px-2',
         className
       )}
     >
@@ -46,7 +47,7 @@ export const SearchInput = forwardRef<
         data-vy-text-entry
         className={cn(
           'w-full min-w-0 border-none bg-transparent text-fg outline-none placeholder:text-tertiary',
-          size === 'sm' ? 'text-xs' : 'text-sm',
+          size === 'md' ? 'text-sm' : 'text-xs',
           inputClassName
         )}
         value={value}

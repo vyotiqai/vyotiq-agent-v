@@ -322,12 +322,12 @@ export function MentionMenu({
       }}
     >
       {/* Quiet header: what this list is, and how much of it there is. */}
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border pl-1 pr-2">
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
         {view !== 'root' && onBack ? (
           <IconButton
             icon="chevronLeft"
             label="Back"
-            size="sm"
+            size="xs"
             tone="muted"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onBack()}

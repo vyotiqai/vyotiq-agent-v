@@ -325,6 +325,7 @@ function WhereItWorks({
   if (git.result?.kind !== 'ok' || !git.status?.branch || !git.status.hasCommits) return null
   return (
     <Segmented
+      size="xs"
       label="Where it works"
       value={worktree ? 'worktree' : 'here'}
       onChange={(where) => onWorktreeChange(where === 'worktree')}

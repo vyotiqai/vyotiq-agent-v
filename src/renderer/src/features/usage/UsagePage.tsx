@@ -65,6 +65,7 @@ export function UsagePage({
         />
         <span className="flex-1" />
         <Segmented
+          size="xs"
           label="Days"
           value={windowDays === 7 ? '7d' : '30d'}
           items={[

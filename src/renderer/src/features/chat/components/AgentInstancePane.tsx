@@ -482,7 +482,7 @@ export function AgentInstancePane({
         <IconButton
           icon="arrowLeft"
           label={parentTitle ? `Back to ${parentTitle}` : 'Back to the parent task'}
-          size="sm"
+          size="xs"
           onClick={onClose}
         />
         {parentTitle ? (
@@ -538,7 +538,7 @@ export function AgentInstancePane({
           <IconButton
             icon="inspector"
             label={`${inspectorToggle.open ? 'Hide' : 'Show'} inspector (${shortcutLabel('inspector')})`}
-            size="sm"
+            size="xs"
             tone="muted"
             active={inspectorToggle.open}
             aria-expanded={inspectorToggle.open}
@@ -548,7 +548,7 @@ export function AgentInstancePane({
             data-inspector-toggle
           />
         ) : null}
-        {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={onClosePane} /> : null}
+        {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="xs" tone="muted" onClick={onClosePane} /> : null}
       </header>
       {loadError ? (
         <div className="shrink-0 border-b border-border px-4 py-2 text-xs text-danger" role="alert">

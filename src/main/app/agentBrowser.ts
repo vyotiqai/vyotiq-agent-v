@@ -173,6 +173,8 @@ export type AgentBrowserState = {
   canGoForward?: boolean
   /** True while the Browser tab is picking an element for the composer. */
   picking?: boolean
+  /** When a click while picking added nothing (an element inside a frame); a new time each miss. */
+  pickMissAt?: number
 }
 
 const tabs = new Map<string, BrowserTab>()
@@ -2485,6 +2487,9 @@ export async function startBrowserElementPick(
         if (!main || main.isDestroyed()) return
         main.webContents.send(IPC.browserElementPicked, element)
       },
+      onMiss: () => {
+        if (pickSession?.session === holder.session) pushState({ pickMissAt: Date.now() })
+      },
       onEnd: (reason) => {
         if (!pickSession || pickSession.session !== holder.session) return
         pickSession = null
@@ -2507,7 +2512,8 @@ export async function startBrowserElementPick(
     return { error: 'The page left the Browser tab' }
   }
   pickSession = { tabId: tab.id, session }
-  pushState({ picking: true })
+  // A miss from an earlier picking is not this one's.
+  pushState({ picking: true, pickMissAt: undefined })
   tabContents(tab).focus()
   return { picking: true }
 }

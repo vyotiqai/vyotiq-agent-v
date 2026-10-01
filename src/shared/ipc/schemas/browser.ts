@@ -27,7 +27,9 @@ export const AgentBrowserStateSchema = z.object({
   canGoBack: z.boolean().optional(),
   canGoForward: z.boolean().optional(),
   /** True while the Browser tab is picking an element for the composer. */
-  picking: z.boolean().optional()
+  picking: z.boolean().optional(),
+  /** When a click while picking added nothing (an element inside a frame); a new time each miss. */
+  pickMissAt: z.number().optional()
 })
 export type AgentBrowserState = z.infer<typeof AgentBrowserStateSchema>
 

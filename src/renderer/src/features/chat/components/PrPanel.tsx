@@ -1102,7 +1102,7 @@ export function PrPanel({
               {pr.headRefName} <span className="text-tertiary">→</span> {pr.baseRefName}
             </span>
             <span className="flex-1" />
-            <IconButton icon="external" label="Open on GitHub" size="sm" tone="muted" onClick={() => void openExternal(pr.url)} />
+            <IconButton icon="external" label="Open on GitHub" size="xs" tone="muted" onClick={() => void openExternal(pr.url)} />
             <ActionMenu
               open={menuOpen}
               onOpenChange={setMenuOpen}
@@ -1115,7 +1115,7 @@ export function PrPanel({
                   ref={t.ref}
                   icon="more"
                   label="PR actions"
-                  size="sm"
+                  size="xs"
                   tone="muted"
                   aria-expanded={t['aria-expanded']}
                   aria-controls={t['aria-controls']}

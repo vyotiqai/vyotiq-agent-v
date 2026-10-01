@@ -112,7 +112,8 @@ export function Segmented<T extends string>({
   onChange,
   className,
   label,
-  disabled = false
+  disabled = false,
+  size = 'sm'
 }: {
   items: ReadonlyArray<{ id: T; label?: string; icon?: IconName; title?: string; disabled?: boolean }>
   value: T
@@ -121,6 +122,11 @@ export function Segmented<T extends string>({
   /** Accessible name for the group. */
   label?: string
   disabled?: boolean
+  /**
+   * `xs` sits in a pane's 40px row beside xs buttons: a 24px track whose 20px
+   * segments still hit at 24px (a plate past their top and bottom, as IconButton xs).
+   */
+  size?: 'xs' | 'sm'
 }) {
   const ids = items.filter((t) => !t.disabled).map((t) => t.id)
   return (
@@ -128,7 +134,12 @@ export function Segmented<T extends string>({
       role="radiogroup"
       aria-label={label}
       aria-disabled={disabled || undefined}
-      className={cn('inline-flex h-7 items-center rounded-md bg-surface p-0.5', disabled && 'vy-disabled-state', className)}
+      className={cn(
+        'inline-flex items-center rounded-md bg-surface p-0.5',
+        size === 'xs' ? 'h-6' : 'h-7',
+        disabled && 'vy-disabled-state',
+        className
+      )}
     >
       {items.map((it) => {
         const on = it.id === value
@@ -146,7 +157,8 @@ export function Segmented<T extends string>({
             onClick={() => onChange?.(it.id)}
             onKeyDown={(e) => moveFocus(e, ids, value, onChange)}
             className={cn(
-              'inline-flex h-6 items-center gap-1 rounded-[calc(var(--vy-radius-md)-2px)] px-2 text-xs font-medium vy-transition focus-visible:vy-focus-ring',
+              'inline-flex items-center gap-1 rounded-[calc(var(--vy-radius-md)-2px)] text-xs font-medium vy-transition focus-visible:vy-focus-ring',
+              size === 'xs' ? 'relative h-5 px-1.5 before:absolute before:inset-x-0 before:-inset-y-0.5' : 'h-6 px-2',
               on
                 ? 'bg-bg text-fg-strong shadow-[0_0_0_1px_var(--vy-border)]'
                 : it.disabled
@@ -154,7 +166,7 @@ export function Segmented<T extends string>({
                   : 'text-muted hover:text-fg'
             )}
           >
-            {it.icon ? <Icon name={it.icon} size={14} /> : null}
+            {it.icon ? <Icon name={it.icon} size={size === 'xs' ? 13 : 14} /> : null}
             {/* Its own element, so a narrow container can keep only the icons. */}
             {it.label ? <span data-segmented-label>{it.label}</span> : null}
           </button>

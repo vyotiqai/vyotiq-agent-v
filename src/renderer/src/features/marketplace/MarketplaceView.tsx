@@ -384,7 +384,7 @@ export function MarketplaceView({
             <span className="flex-1" />
             <SearchInput
               ref={searchRef}
-              size="sm"
+              size="xs"
               className="w-56"
               aria-label="Search extensions"
               placeholder="Search extensions"
@@ -400,7 +400,7 @@ export function MarketplaceView({
               }}
             />
             {addButton}
-            <IconButton icon="gear" label="Registry and trust" size="sm" tone="muted" onClick={() => setTrustOpen(true)} />
+            <IconButton icon="gear" label="Registry and trust" size="xs" tone="muted" onClick={() => setTrustOpen(true)} />
           </div>
 
           <div className="flex min-h-0 flex-1">

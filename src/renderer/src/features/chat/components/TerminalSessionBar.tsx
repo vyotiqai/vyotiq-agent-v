@@ -70,7 +70,7 @@ export function TerminalSessionBar({
             aria-selected={task.selected}
             tabIndex={task.selected ? 0 : -1}
             className={cn(
-              'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs vy-transition focus-visible:vy-focus-ring',
+              'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs vy-transition focus-visible:vy-focus-ring',
               task.selected ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface hover:text-fg'
             )}
             data-terminal-task-tab
@@ -102,7 +102,7 @@ export function TerminalSessionBar({
             <div
               key={s.id}
               className={cn(
-                'group inline-flex h-7 shrink-0 items-center rounded-md vy-transition',
+                'group inline-flex h-6 shrink-0 items-center rounded-md vy-transition',
                 emphasized ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface hover:text-fg'
               )}
               {...tabMiddleClickHandlers(() => onKill(s.id))}
@@ -151,13 +151,13 @@ export function TerminalSessionBar({
           )
         })}
       </div>
-      <IconButton icon="plus" label="New terminal" size="sm" tone="muted" onClick={onCreate} />
+      <IconButton icon="plus" label="New terminal" size="xs" tone="muted" onClick={onCreate} />
       <span className="flex-1" />
       {activeSession ? (
         <IconButton
           icon="columns"
           label={splitId ? 'Unsplit terminals' : 'Split terminal'}
-          size="sm"
+          size="xs"
           tone="muted"
           aria-pressed={splitId != null}
           onClick={onToggleSplit}

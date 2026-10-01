@@ -567,7 +567,7 @@ export const PlanPanel = memo(function PlanPanel({
         data-plan-header
       >
         {tab !== 'plan' ? (
-          <IconButton icon="arrowLeft" label="Back to the plan" size="sm" tone="muted" onClick={() => select('plan')} />
+          <IconButton icon="arrowLeft" label="Back to the plan" size="xs" tone="muted" onClick={() => select('plan')} />
         ) : null}
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg-strong" title={heading}>
           {heading}
@@ -576,7 +576,7 @@ export const PlanPanel = memo(function PlanPanel({
           <IconButton
             icon="external"
             label={`Open ${openName}`}
-            size="sm"
+            size="xs"
             tone="muted"
             onClick={() => void openArtifact()}
           />
@@ -598,7 +598,7 @@ export const PlanPanel = memo(function PlanPanel({
               ref={t.ref}
               icon="more"
               label="More — contract, receipt"
-              size="sm"
+              size="xs"
               tone="muted"
               aria-expanded={t['aria-expanded']}
               aria-controls={t['aria-controls']}

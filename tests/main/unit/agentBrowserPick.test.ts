@@ -6,6 +6,8 @@ import type { BrowserPickedElement } from '@shared/ipc'
 
 type Handler = (method: string, params: Record<string, unknown>) => unknown
 
+const FRAME_NODE = 999
+
 /** A WebContents whose debugger answers the protocol calls a pick makes. */
 function fakeContents(handler: Handler = () => ({})) {
   const dbg = new EventEmitter() as EventEmitter & {
@@ -27,6 +29,8 @@ function fakeContents(handler: Handler = () => ({})) {
     calls.push({ method, params })
     if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } }
     if (method === 'Page.createIsolatedWorld') return { executionContextId: 7 }
+    // A node in a same-origin frame does not resolve in the top document's world.
+    if (method === 'DOM.resolveNode' && params.backendNodeId === FRAME_NODE) throw new Error('Node is not in this context')
     if (method === 'DOM.resolveNode') return { object: { objectId: `obj-${JSON.stringify(params)}` } }
     const answer = handler(method, params)
     return answer ?? {}
@@ -60,6 +64,7 @@ function start(handler?: Handler) {
   const fake = fakeContents(handler)
   const picks: BrowserPickedElement[] = []
   const ends: PickEndReason[] = []
+  let misses = 0
   const session = startElementPick({
     wc: fake.wc as unknown as WebContents,
     refs: () => [
@@ -67,9 +72,12 @@ function start(handler?: Handler) {
       { id: 'e2', selector: '#plans > button:nth-of-type(2)' }
     ],
     onPick: (el) => picks.push(el),
-    onEnd: (reason) => ends.push(reason)
+    onEnd: (reason) => ends.push(reason),
+    onMiss: () => {
+      misses += 1
+    }
   })
-  return { ...fake, picks, ends, session }
+  return { ...fake, picks, ends, session, misses: () => misses }
 }
 
 describe('startElementPick', () => {
@@ -125,6 +133,21 @@ describe('startElementPick', () => {
     dbg.emit('message', {}, 'Overlay.inspectNodeRequested', { backendNodeId: 1 })
     await flush()
     expect(picks).toEqual([])
+  })
+
+  it('says when a click added nothing (an element inside a frame), and only then', async () => {
+    const { dbg, picks, misses, session } = start((method) =>
+      method === 'Runtime.callFunctionOn' ? { result: { value: described } } : undefined
+    )
+    await session
+    dbg.emit('message', {}, 'Overlay.inspectNodeRequested', { backendNodeId: FRAME_NODE })
+    await flush()
+    expect(picks).toEqual([])
+    expect(misses()).toBe(1)
+    dbg.emit('message', {}, 'Overlay.inspectNodeRequested', { backendNodeId: 42 })
+    await flush()
+    expect(picks).toHaveLength(1)
+    expect(misses()).toBe(1)
   })
 
   it('walks the tree with the arrow keys and picks with Enter', async () => {

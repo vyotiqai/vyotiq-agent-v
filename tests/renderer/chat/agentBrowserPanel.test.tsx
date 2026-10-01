@@ -455,3 +455,56 @@ describe('splitBrowserUrl', () => {
     expect(splitBrowserUrl('')).toBeNull()
   })
 })
+
+describe('AgentBrowserPanel picking', () => {
+  const page = {
+    open: true,
+    url: 'https://example.com',
+    title: 'Example',
+    navigating: false,
+    tabs: [{ id: 't1', title: 'Example', url: 'https://example.com', active: true }],
+    canGoBack: false,
+    canGoForward: false
+  }
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('says when a click inside a frame added nothing, until the next pick', async () => {
+    let push: (s: unknown) => void = () => {}
+    let picked: (el: unknown) => void = () => {}
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        browserGetState: vi.fn().mockResolvedValue({ ok: true, data: page }),
+        onBrowserState: vi.fn().mockImplementation((cb: (s: unknown) => void) => {
+          push = cb
+          return () => {}
+        }),
+        onBrowserElementPicked: vi.fn().mockImplementation((cb: (el: unknown) => void) => {
+          picked = cb
+          return () => {}
+        }),
+        browserSetBounds: vi.fn().mockResolvedValue({ ok: true, data: true }),
+        browserPickStart: vi.fn().mockResolvedValue({ ok: true, data: { picking: true } }),
+        browserPickStop: vi.fn().mockResolvedValue({ ok: true, data: true })
+      }
+    })
+    const { container } = render(<AgentBrowserPanel visible={true} />)
+    const button = await waitFor(() => {
+      const b = container.querySelector('[data-browser-pick]') as HTMLButtonElement
+      expect(b.disabled).toBe(false)
+      return b
+    })
+    fireEvent.click(button)
+    push({ ...page, picking: true })
+    await waitFor(() => expect(container.querySelector('[data-browser-picking]')).toBeTruthy())
+    expect(container.querySelector('[data-browser-pick-missed]')).toBeNull()
+    push({ ...page, picking: true, pickMissAt: 2 })
+    await waitFor(() => expect(container.querySelector('[data-browser-pick-missed]')?.textContent).toContain('inside a frame'))
+    picked({ selector: 'button', tag: 'button', role: 'button', name: 'Sign in', text: 'Sign in', url: page.url, bounds: { x: 0, y: 0, width: 1, height: 1 } })
+    await waitFor(() => expect(container.querySelector('[data-browser-pick-missed]')).toBeNull())
+  })
+})

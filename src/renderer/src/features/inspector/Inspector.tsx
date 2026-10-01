@@ -109,14 +109,14 @@ export function Inspector({
                 ? `Back to the record (${shortcutLabel('inspectorExpand')})`
                 : `Expand to full width (${shortcutLabel('inspectorExpand')})`
             }
-            size="sm"
+            size="xs"
             tone="muted"
             onClick={onToggleExpanded}
           />
           <IconButton
             icon="close"
             label={`Hide inspector (${shortcutLabel('inspector')})`}
-            size="sm"
+            size="xs"
             tone="muted"
             onClick={onHide}
           />

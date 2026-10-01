@@ -1329,13 +1329,14 @@ export const ChangesPanel = memo(function ChangesPanel({
           <IconButton
             icon="arrowLeft"
             label="Back to the record"
-            size="sm"
+            size="xs"
             onClick={onReviewBack}
             data-review-back
           />
           <h2 className="min-w-0 truncate text-sm font-semibold text-fg-strong">{reviewTitle}</h2>
           <span className="flex-1" />
           <Segmented
+            size="xs"
             label="Diff layout"
             value={reviewLayout}
             onChange={setReviewLayout}
@@ -1356,7 +1357,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                 ref={t.ref}
                 icon="more"
                 label="Scope, wrap, whitespace, undo all"
-                size="sm"
+                size="xs"
                 tone="muted"
                 aria-expanded={t['aria-expanded']}
                 aria-controls={t['aria-controls']}
@@ -1723,6 +1724,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         ) : null}
         <span className="flex-1" />
         <Segmented
+          size="xs"
           label="Diff layout"
           value={layout}
           onChange={setLayout}
@@ -1744,7 +1746,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               icon="more"
               label="More changes actions"
               title="More — wrap, whitespace, find"
-              size="sm"
+              size="xs"
               tone="muted"
               aria-expanded={t['aria-expanded']}
               aria-controls={t['aria-controls']}

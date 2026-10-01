@@ -170,7 +170,7 @@ export function PaneHeaderActions({
         <IconButton
           icon="inspector"
           label={`${inspectorToggle.open ? 'Hide' : 'Show'} inspector (${shortcutLabel('inspector')})`}
-          size="sm"
+          size="xs"
           tone="muted"
           active={inspectorToggle.open}
           aria-expanded={inspectorToggle.open}
@@ -180,7 +180,7 @@ export function PaneHeaderActions({
           data-inspector-toggle
         />
       ) : null}
-      {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={onClosePane} /> : null}
+      {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="xs" tone="muted" onClick={onClosePane} /> : null}
     </>
   )
 }
@@ -588,7 +588,7 @@ export function TaskPane(props: TaskPaneProps) {
                     ref={t.ref}
                     icon="more"
                     label={`More — ${menuItems.map((item) => item.label.toLowerCase()).join(', ')}`}
-                    size="sm"
+                    size="xs"
                     aria-expanded={t['aria-expanded']}
                     aria-controls={t['aria-controls']}
                     aria-haspopup={t['aria-haspopup']}
@@ -783,7 +783,7 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (next: stri
         }
       }}
       onBlur={() => finish(value.trim() || null)}
-      className="h-7 min-w-0 flex-1 rounded-md bg-surface px-2 text-sm font-semibold text-fg-strong outline-none focus-visible:vy-focus-ring"
+      className="h-6 min-w-0 flex-1 rounded-md bg-surface px-2 text-sm font-semibold text-fg-strong outline-none focus-visible:vy-focus-ring"
     />
   )
 }

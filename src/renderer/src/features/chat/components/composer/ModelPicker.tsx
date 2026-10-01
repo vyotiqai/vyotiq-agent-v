@@ -348,7 +348,7 @@ export function ModelPicker(props: ModelPickerProps) {
           <IconButton
             icon="retry"
             label={props.catalogLoading ? 'Refreshing the catalog…' : 'Refresh the catalog'}
-            size="sm"
+            size="xs"
             tone="muted"
             disabled={props.catalogLoading}
             onClick={props.onRefreshCatalog}

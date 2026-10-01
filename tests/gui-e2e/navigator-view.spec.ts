@@ -75,7 +75,8 @@ test('a resting pointer shows the task card, with its worktree branch', async ()
   const { window } = launched
   await rowFor('Alpha in a worktree').hover()
   const card = window.locator('[data-task-hover-card]')
-  await expect(card).toBeVisible({ timeout: 3_000 })
+  // The card waits 500ms on purpose; a loaded machine stretches that well past 3s.
+  await expect(card).toBeVisible({ timeout: 10_000 })
   await expect(card).toContainText('task/fix-login')
   // Beside the navigator, not over it.
   const nav = await window.locator('nav[data-navigator]').boundingBox()

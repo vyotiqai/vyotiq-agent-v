@@ -53,7 +53,7 @@ export function TaskHeader({
         </span>
       ))}
       <span className="flex-1" />
-      {actions ? <div className="flex shrink-0 items-center gap-0.5">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
       {plan ? <PlanLine steps={plan} /> : null}
     </header>
   )

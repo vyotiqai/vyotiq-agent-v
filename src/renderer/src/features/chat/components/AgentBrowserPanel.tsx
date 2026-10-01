@@ -259,6 +259,8 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   const picking = Boolean(state.picking)
   /** The last element this picking added, named in the picking row. */
   const [lastPicked, setLastPicked] = useState<string | null>(null)
+  /** A click that added nothing (an element inside a frame), until the next pick. */
+  const [missed, setMissed] = useState(false)
   const pickTargetRef = useRef({ workspacePath, activeRunId })
   pickTargetRef.current = { workspacePath, activeRunId }
 
@@ -272,8 +274,18 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         mention: { kind: 'element', element }
       })
       setLastPicked(pickedElementLabel(element))
+      setMissed(false)
     })
   }, [])
+
+  // Main reports a miss as a new time on the state; only one reported while
+  // this panel's picking runs counts.
+  const missAtRef = useRef(state.pickMissAt)
+  useEffect(() => {
+    if (state.pickMissAt === missAtRef.current) return
+    missAtRef.current = state.pickMissAt
+    if (picking && pickOwnerRef.current) setMissed(true)
+  }, [state.pickMissAt, picking])
 
   // Picking ended (Esc in the page, a navigation, the tab hidden): with the
   // keyboard handed back to the app and nowhere to be, it lands on the button.
@@ -286,6 +298,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
     if (!wasPicking.current) return
     wasPicking.current = false
     setLastPicked(null)
+    setMissed(false)
     const owned = pickOwnerRef.current
     pickOwnerRef.current = false
     const active = document.activeElement
@@ -560,7 +573,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         <IconButton
           icon="arrowLeft"
           label="Back"
-          size="sm"
+          size="xs"
           tone="muted"
           disabled={!state.canGoBack}
           onClick={() =>
@@ -572,7 +585,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         <IconButton
           icon="arrowRight"
           label="Forward"
-          size="sm"
+          size="xs"
           tone="muted"
           disabled={!state.canGoForward}
           onClick={() =>
@@ -584,7 +597,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         <IconButton
           icon="retry"
           label="Reload"
-          size="sm"
+          size="xs"
           tone="muted"
           disabled={!hasPage || state.navigating}
           onClick={() =>
@@ -596,7 +609,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
 
         <div className="relative ml-1 min-w-0 flex-1" ref={historyRef}>
           <form onSubmit={handleNavigate}>
-            <div className="relative flex h-7 min-w-0 items-center gap-1.5 rounded-md bg-surface px-2 focus-within:vy-focus-ring">
+            <div className="relative flex h-6 min-w-0 items-center gap-1.5 rounded-md bg-surface px-2 focus-within:vy-focus-ring">
               {state.navigating ? (
                 <span className="inline-grid size-3 shrink-0 place-items-center text-tertiary">
                   <AgentVSpinner size={11} />
@@ -717,13 +730,13 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         </div>
 
         {canFocusPage ? (
-          <IconButton icon="keyboard" label="Type in the page" size="sm" tone="muted" onClick={focusPage} />
+          <IconButton icon="keyboard" label="Type in the page" size="xs" tone="muted" onClick={focusPage} />
         ) : null}
         <IconButton
           ref={pickButtonRef}
           icon="target"
           label={picking ? 'Stop picking (Esc)' : 'Pick an element to ask about'}
-          size="sm"
+          size="xs"
           tone="muted"
           active={picking}
           disabled={!picking && (!hasPage || Boolean(state.pip) || Boolean(state.agentBusy))}
@@ -731,6 +744,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           data-browser-pick
         />
         <Segmented
+          size="xs"
           label="Viewport size"
           value={viewportFitted ? 'fit' : fixedPreset.id}
           onChange={(id) => setViewport(id)}
@@ -751,7 +765,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
               ref={t.ref}
               icon="more"
               label="More actions"
-              size="sm"
+              size="xs"
               tone="muted"
               aria-expanded={t['aria-expanded']}
               aria-controls={t['aria-controls']}
@@ -828,7 +842,12 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       {picking ? (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs" role="status" data-browser-picking>
           <Icon name="target" size={12} className="shrink-0 text-accent" />
-          {lastPicked ? (
+          {missed ? (
+            <span className="min-w-0 flex-1 truncate text-muted" data-browser-pick-missed>
+              <span className="text-fg">That one is inside a frame, which can’t be picked</span>
+              {' · pick the frame itself, or something outside it'}
+            </span>
+          ) : lastPicked ? (
             <span className="min-w-0 flex-1 truncate text-muted">
               Added <span className="font-mono text-caption text-fg">{lastPicked}</span>
               {' · pick another, or Esc to stop'}

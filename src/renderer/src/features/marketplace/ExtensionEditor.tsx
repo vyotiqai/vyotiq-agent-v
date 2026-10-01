@@ -144,7 +144,7 @@ function EditorFrame({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-extension-editor>
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
-        <IconButton icon="arrowLeft" label="Back to extensions" size="sm" tone="muted" onClick={onBack} />
+        <IconButton icon="arrowLeft" label="Back to extensions" size="xs" tone="muted" onClick={onBack} />
         <h2 className="min-w-0 truncate text-sm font-medium text-fg-strong">{title}</h2>
         {path ? <span className="min-w-0 truncate font-mono text-caption text-tertiary">{path}</span> : null}
         <span className="flex-1" />
