@@ -63,3 +63,14 @@ overrides:
   # to the 6.x line so the 7.x and 8.x copies (already patched) stay put;
   # 6.28.1 (2026-09-04) is past minimumReleaseAge.
   'undici@>=6.7.0 <6.28.1': '^6.28.1'
+  # GHSA-qhr7-859c-m2p7 and its parseCommaParts sibling (high, 2026-09): DoS by
+  # uncontrolled recursion in brace-expansion. Build tooling only - minimatch
+  # under electron-builder, @electron/asar and eslint, which expands our own
+  # globs, never input an outsider controls - but the audit gate is high. One
+  # range per major line in the lockfile (1.x, 2.x, 5.x), each moved to the
+  # first release patched against both advisories and so the same API:
+  # 1.1.20, 2.1.6 and 5.0.11 were all published 2026-09-14, past
+  # minimumReleaseAge.
+  'brace-expansion@<1.1.20': '^1.1.20'
+  'brace-expansion@>=2.0.0 <2.1.6': '^2.1.6'
+  'brace-expansion@>=4.0.0 <5.0.11': '^5.0.11'
