@@ -1624,7 +1624,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                       icon="undo"
                       label="Undo this file"
                       title={resolveBlockedReason ?? 'Put this file back as it was before the agent wrote it'}
-                      size="sm"
+                      size="xs"
                       tone="muted"
                       disabled={resolveLocked}
                       onClick={() => void onDiscardWriteFile(selected.path)}

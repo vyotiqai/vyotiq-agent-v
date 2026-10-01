@@ -517,7 +517,7 @@ export function Navigator(props: NavigatorProps) {
         <div className={cn('flex h-10 shrink-0 items-center border-b px-2', BORDER_DIVIDER)} data-navigator-search>
           <SearchInput
             ref={searchInputRef}
-            size="sm"
+            size="xs"
             aria-label="Search tasks"
             placeholder={props.searchRuns ? 'Search titles and what was said' : 'Search titles'}
             value={query}
