@@ -13,16 +13,23 @@ directories:
 asar: true
 compression: maximum
 # Electron fuses, flipped in the packaged binary. Without them the installed
-# app could be started as plain Node (ELECTRON_RUN_AS_NODE), have code
-# injected through NODE_OPTIONS or a --inspect debugger, or run an edited
-# app.asar. Nothing here runs the app binary as Node: child processes use
-# utilityProcess or real node/npx. grantFileProtocolExtraPrivileges stays on
-# because the renderer loads from file://. resetAdHocDarwinSignature re-signs
-# an unsigned macOS arm64 build, which flipping a fuse would otherwise leave
-# unlaunchable.
+# app could be started with a --inspect debugger or run an edited app.asar.
+# grantFileProtocolExtraPrivileges stays on because the renderer loads from
+# file://. resetAdHocDarwinSignature re-signs an unsigned macOS arm64 build,
+# which flipping a fuse would otherwise leave unlaunchable.
+#
+# Two fuses are left ON because turning either off breaks the packaged app
+# (measured on Electron 44 with the same node-pty, against a stock runtime):
+#  - runAsNode: node-pty's Windows kill() forks a helper through
+#    child_process.fork, which Electron then refuses, and the unhandled
+#    rejection ends the app. Closing a terminal tab quit Vyotiq.
+#  - enableNodeOptionsEnvironmentVariable: Electron then also drops
+#    NODE_EXTRA_CA_CERTS, so every provider call behind a proxy that
+#    re-signs TLS fails with UNABLE_TO_VERIFY_LEAF_SIGNATURE.
+# Turn either off only together with a fix for its cause.
 electronFuses:
-  runAsNode: false
-  enableNodeOptionsEnvironmentVariable: false
+  runAsNode: true
+  enableNodeOptionsEnvironmentVariable: true
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true

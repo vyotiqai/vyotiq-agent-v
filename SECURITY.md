@@ -31,7 +31,7 @@ We aim to acknowledge reports within **3 business days** and will coordinate dis
 ## Secure development
 
 - API keys are stored with Electron `safeStorage`; never commit secrets.
-- Packaged builds flip Electron fuses: the app binary cannot run as plain Node, ignores `NODE_OPTIONS` and `--inspect`, and refuses an `app.asar` whose contents changed.
+- Packaged builds flip Electron fuses: the app ignores the `--inspect` switches and, on Windows and macOS, refuses an `app.asar` whose contents changed.
 - CI runs `pnpm audit --audit-level high` on every change.
 - Secret scanning and push protection are enabled on this repository.
 - Dependabot security updates are enabled.
