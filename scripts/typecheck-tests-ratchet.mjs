@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Type errors in tests/ can only go down.
  *
@@ -14,6 +13,10 @@
  *
  *   node scripts/typecheck-tests-ratchet.mjs            check
  *   node scripts/typecheck-tests-ratchet.mjs --update   rewrite the baseline
+ *
+ * No shebang on purpose: tests/main/unit/typecheckTestsRatchet.test.ts imports
+ * this file, and Vite only strips a hashbang that ends in a bare LF, so on a
+ * CRLF checkout (Windows) the import dies with a SyntaxError.
  */
 import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
