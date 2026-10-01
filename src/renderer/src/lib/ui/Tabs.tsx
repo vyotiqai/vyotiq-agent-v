@@ -55,7 +55,11 @@ export function Tabs<T extends string>({
   value: T
   onChange?: (id: T) => void
   className?: string
-  size?: 'sm' | 'md'
+  /**
+   * `row` fills a pane's 40px row so the current tab's underline sits on the
+   * row's hairline; its ring is drawn inside, since a scrolling strip clips one outside.
+   */
+  size?: 'row' | 'sm' | 'md'
   /** Accessible name for the tab list. */
   label?: string
   /** Each tab controls the element `${panelIdPrefix}${id}`. */
@@ -63,7 +67,13 @@ export function Tabs<T extends string>({
 }) {
   const ids = items.map((t) => t.id)
   return (
-    <div role="tablist" aria-label={label} className={cn('flex min-w-0 items-stretch gap-4', className)}>
+    <div
+      role="tablist"
+      aria-label={label}
+      // At `row` each tab carries 4px either side for its ring, so the gap
+      // shrinks to keep 16px between labels.
+      className={cn('flex min-w-0 items-stretch', size === 'row' ? 'gap-2 self-stretch' : 'gap-4', className)}
+    >
       {items.map((t) => {
         const on = t.id === value
         return (
@@ -79,8 +89,12 @@ export function Tabs<T extends string>({
             onClick={() => onChange?.(t.id)}
             onKeyDown={(e) => moveFocus(e, ids, value, onChange)}
             className={cn(
-              'relative inline-flex shrink-0 items-center gap-1.5 font-medium vy-transition focus-visible:vy-focus-ring',
-              size === 'sm' ? 'h-8 text-xs' : 'h-10 text-sm',
+              'relative inline-flex shrink-0 items-center gap-1.5 font-medium vy-transition',
+              size === 'row'
+                ? 'px-1 text-xs focus-visible:vy-focus-ring-inset'
+                : size === 'sm'
+                  ? 'h-8 text-xs focus-visible:vy-focus-ring'
+                  : 'h-10 text-sm focus-visible:vy-focus-ring',
               on ? 'text-fg-strong' : 'text-muted hover:text-fg'
             )}
           >
@@ -96,7 +110,12 @@ export function Tabs<T extends string>({
             {t.trailing}
             <span
               aria-hidden="true"
-              className={cn('absolute inset-x-0 -bottom-px h-[2px] rounded-full', on ? 'bg-fg-strong' : 'bg-transparent')}
+              className={cn(
+                'absolute h-[2px] rounded-full',
+                // At `row` the tab ends on the row's hairline, so the line sits just on it, under the label.
+                size === 'row' ? 'inset-x-1 bottom-0' : 'inset-x-0 -bottom-px',
+                on ? 'bg-fg-strong' : 'bg-transparent'
+              )}
             />
           </button>
         )

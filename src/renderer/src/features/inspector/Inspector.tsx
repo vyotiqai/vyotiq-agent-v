@@ -90,17 +90,17 @@ export function Inspector({
       data-dock-expanded={expanded ? '1' : '0'}
     >
       {bare ? null : (
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2" data-inspector-tabs>
+        // pl-3: each row-size tab pads its label 4px for the ring, so labels start at 16px.
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2" data-inspector-tabs>
           <Tabs
             items={items}
             value={tab}
             onChange={onSelect}
-            size="sm"
+            size="row"
             label="Inspector"
             panelIdPrefix="dock-panel-"
-            // A narrow inspector scrolls its strip sideways; the padding keeps
-            // the current tab's underline inside the scroller.
-            className="min-w-0 flex-1 overflow-x-auto pb-px [scrollbar-width:none]"
+            // A narrow inspector scrolls its strip sideways.
+            className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none]"
           />
           <IconButton
             icon={expanded ? 'collapse' : 'expand'}

@@ -372,9 +372,10 @@ export function MarketplaceView({
         />
       ) : (
         <>
-          <div className="flex h-10 shrink-0 items-center gap-3 border-b border-border pl-4 pr-2">
+          {/* pl-3: row-size tabs pad their labels 4px, so the first label starts at 16px. */}
+          <div className="flex h-10 shrink-0 items-center gap-3 border-b border-border pl-3 pr-2">
             <Tabs
-              size="sm"
+              size="row"
               label="Extension kinds"
               value={tab}
               onChange={setTab}

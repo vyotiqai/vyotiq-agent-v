@@ -564,6 +564,12 @@
   outline-offset: 2px;
 }
 
+/* The same ring drawn inside: for a control that fills a clipping row (a tab in a scrolling strip). */
+@utility vy-focus-ring-inset {
+  outline: 2px solid var(--vy-focus);
+  outline-offset: -2px;
+}
+
 @utility tnum {
   font-variant-numeric: tabular-nums;
 }
