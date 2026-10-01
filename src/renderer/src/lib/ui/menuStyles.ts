@@ -45,15 +45,18 @@ export const MENU_SEPARATOR = '-mx-1 my-1 h-px bg-border'
 
 /**
  * A select's closed state. `bare` drops the outline until hover (toolbars,
- * inline sentences); `quiet` marks a value left at its default.
+ * inline sentences); `quiet` marks a value left at its default. `xs` sits in
+ * a pane's 40px row beside xs buttons.
  */
 export function selectTriggerClass({
   bare = false,
   quiet = false,
-  mono = false
-}: { bare?: boolean; quiet?: boolean; mono?: boolean } = {}): string {
+  mono = false,
+  size = 'sm'
+}: { bare?: boolean; quiet?: boolean; mono?: boolean; size?: 'xs' | 'sm' } = {}): string {
   return cn(
-    'inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 text-xs vy-transition hover:bg-surface focus-visible:vy-focus-ring disabled:vy-disabled-state',
+    'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 text-xs vy-transition hover:bg-surface focus-visible:vy-focus-ring disabled:vy-disabled-state',
+    size === 'xs' ? 'h-6' : 'h-7',
     bare ? '' : 'border border-border bg-bg hover:border-border-strong',
     quiet ? 'text-secondary' : 'text-fg',
     mono && 'font-mono'

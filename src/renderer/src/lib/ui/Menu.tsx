@@ -48,6 +48,7 @@ export function Menu({
   bare = false,
   quiet = false,
   mono = false,
+  size = 'sm',
   icon,
   title
 }: {
@@ -66,6 +67,8 @@ export function Menu({
   /** The value is the default: readable, but not asking to be read. */
   quiet?: boolean
   mono?: boolean
+  /** `xs` for a trigger in a pane's 40px row, beside xs buttons. */
+  size?: 'xs' | 'sm'
   icon?: IconName
   /** Hover text for the trigger, when its value can truncate (a long model id). */
   title?: string
@@ -338,7 +341,7 @@ export function Menu({
       <button
         ref={triggerRef}
         type="button"
-        className={triggerClassName ?? selectTriggerClass({ bare, quiet, mono })}
+        className={triggerClassName ?? selectTriggerClass({ bare, quiet, mono, size })}
         aria-label={ariaLabel}
         title={title}
         aria-haspopup="listbox"
@@ -355,7 +358,7 @@ export function Menu({
           }
         }}
       >
-        {icon ? <Icon name={icon} size={14} className="text-muted" /> : null}
+        {icon ? <Icon name={icon} size={size === 'xs' ? 13 : 14} className="text-muted" /> : null}
         <span className="min-w-0 flex-1 truncate text-left">{label}</span>
         <Icon name="chevron" size={12} className="text-tertiary" />
       </button>

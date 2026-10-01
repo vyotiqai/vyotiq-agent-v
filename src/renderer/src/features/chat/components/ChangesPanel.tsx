@@ -1687,6 +1687,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           }}
           aria-label="Change scope"
           placement="down"
+          size="xs"
           bare
           quiet={displayScope === 'agent'}
           className="shrink-0"
@@ -1702,6 +1703,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             placement="down"
             searchable={branchOptions.length > 8}
             searchPlaceholder="Find a branch"
+            size="xs"
             bare
             quiet
             mono

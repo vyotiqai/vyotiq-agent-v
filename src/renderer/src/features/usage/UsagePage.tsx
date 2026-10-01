@@ -60,6 +60,7 @@ export function UsagePage({
           onChange={setScope}
           aria-label="Workspaces"
           placement="down"
+          size="xs"
           bare
           quiet
         />

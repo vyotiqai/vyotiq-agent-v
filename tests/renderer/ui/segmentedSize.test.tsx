@@ -3,7 +3,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { Segmented } from '@renderer/lib/ui'
+import { Menu, Segmented, selectTriggerClass } from '@renderer/lib/ui'
 
 afterEach(cleanup)
 
@@ -29,5 +29,13 @@ describe('Segmented sizes', () => {
     render(<Segmented label="Viewport" value="a" items={ITEMS} />)
     expect(heights(screen.getByRole('radiogroup', { name: 'Viewport' }))).toEqual(['h-7'])
     expect(heights(screen.getByRole('radio', { name: 'Fit' }))).toEqual(['h-6'])
+  })
+})
+
+describe('Menu trigger sizes', () => {
+  it('is 24px at xs, for a 40px pane row, and 28px by default', () => {
+    render(<Menu aria-label="Scope" value="a" options={[{ value: 'a', label: 'This task' }]} onChange={() => {}} size="xs" bare />)
+    expect(heights(screen.getByRole('button', { name: 'Scope' }))).toEqual(['h-6'])
+    expect(selectTriggerClass().split(' ').filter((c) => /^h-\d+$/.test(c))).toEqual(['h-7'])
   })
 })

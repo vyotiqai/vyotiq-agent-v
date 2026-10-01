@@ -298,6 +298,7 @@ function WorkspaceSelect({
       }}
       aria-label="Workspace"
       placement="down"
+      size="xs"
       bare
     />
   )
@@ -389,6 +390,7 @@ function BranchSelect({ workspacePath }: { workspacePath: string }) {
         placement="down"
         searchable={options.length > 8}
         searchPlaceholder="Find a branch"
+        size="xs"
         bare
         mono
       />
