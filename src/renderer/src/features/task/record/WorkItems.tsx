@@ -5,6 +5,7 @@ import { isRetryableTurnFailure } from '@shared/errors'
 import { inferFileWriteAction, parseArgsRecord, summarizeToolArgs } from '@shared/toolSummary'
 import { parseTerminalOutput } from '@shared/utils/terminalFormat'
 import { formatElapsed } from '@shared/utils/timeFormat'
+import { mockServiceInstruction } from '@shared/utils/unreachableService'
 import {
   formatAgentInstanceShortId,
   parseAgentInstanceRunId,
@@ -45,6 +46,14 @@ export type RecordActions = {
    */
   retryableErrorId?: string | null
   onRetry?: () => void
+  /**
+   * What the latest failed turn could not reach ("Redis", "the service on
+   * :8081"), read from its error and failed commands; the row that offers
+   * Retry offers to mock it too.
+   */
+  mockTarget?: string | null
+  /** Send an instruction to the task, as the line would. */
+  onFollowUp?: (instruction: string) => void
   /** Hide one error row for good (kept with the run's reader state). */
   onDismissRunError?: (itemId: string) => void
 }
@@ -345,20 +354,32 @@ export function sameWork(a: WorkItem, b: WorkItem): boolean {
 
 export const WorkItemView = memo(WorkItemViewImpl, (prev, next) => sameWork(prev.item, next.item))
 
-/** A turn's failure, with Retry on the latest one and a way to put it away. */
+/**
+ * A turn's failure, with Retry on the latest one and a way to put it away.
+ * When that one could not reach something it needed, it also offers to have
+ * the task mock it — quieter than Retry, beside it.
+ */
 function ErrorItem({ id, message, code }: { id: string; message: string; code?: string | undefined }) {
-  const { retryableErrorId, onRetry, onDismissRunError } = useContext(RecordActionsContext)
-  const canRetry = Boolean(onRetry) && id === retryableErrorId && isRetryableTurnFailure({ errorCode: code })
+  const { retryableErrorId, onRetry, mockTarget, onFollowUp, onDismissRunError } = useContext(RecordActionsContext)
+  const latest = id === retryableErrorId
+  const canRetry = Boolean(onRetry) && latest && isRetryableTurnFailure({ errorCode: code })
+  const mock = latest && mockTarget && onFollowUp ? mockTarget : null
   return (
-    <div role="alert" className="flex items-start gap-2 text-xs text-danger">
+    // Wraps when the pane is narrow: the actions then keep the right edge.
+    <div role="alert" className="flex flex-wrap items-start gap-x-2 gap-y-1 text-xs text-danger">
       <Icon name="xCircle" size={14} className="mt-px shrink-0" />
-      <p className="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</p>
+      <p className="min-w-0 grow basis-48 [overflow-wrap:anywhere]">{message}</p>
       {code ? <code className="shrink-0 font-mono text-caption text-tertiary">{code}</code> : null}
-      {canRetry || onDismissRunError ? (
-        <div className="-my-1 flex shrink-0 items-center gap-1">
+      {canRetry || mock || onDismissRunError ? (
+        <div className="-my-1 ml-auto flex shrink-0 items-center gap-1">
           {canRetry ? (
             <Button size="xs" onClick={onRetry}>
               Retry
+            </Button>
+          ) : null}
+          {mock ? (
+            <Button size="xs" variant="ghost" onClick={() => onFollowUp!(mockServiceInstruction(mock))}>
+              Ask it to mock {mock}
             </Button>
           ) : null}
           {onDismissRunError ? (
@@ -376,7 +397,7 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
       return <ExploreItem tools={item.tools} />
     case 'card':
       return (
-        <WithApproval grant={item.tool.tool.approvedBy}>
+        <WithApproval id={item.tool.id} grant={item.tool.tool.approvedBy}>
           {item.tool.tool.name === 'terminal' ? <TerminalCard item={item.tool} /> : <EditCard item={item.tool} />}
         </WithApproval>
       )
@@ -384,7 +405,7 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
       return <InstanceItem item={item.tool} />
     case 'tool':
       return (
-        <WithApproval grant={item.tool.tool.approvedBy}>
+        <WithApproval id={item.tool.id} grant={item.tool.tool.approvedBy}>
           <ToolLine item={item.tool} />
         </WithApproval>
       )
@@ -548,14 +569,23 @@ function ApprovedLine({ grant }: { grant: ToolApprovalGrant }) {
 }
 
 /**
+ * The one call per run whose rule grant is said: after "Always allow edit",
+ * every later edit would otherwise repeat "Allowed by a rule". Undefined outside
+ * a run (every grant is said); null in a run no rule let anything through.
+ */
+export const FirstRuleGrantContext = createContext<string | null | undefined>(undefined)
+
+/**
  * A call's row, with the decision that let it run above it when there was one.
  * Always the same wrapper, so the row under it is not remounted when the
  * decision lands.
  */
-function WithApproval({ grant, children }: { grant: ToolApprovalGrant | undefined; children: ReactNode }) {
+function WithApproval({ id, grant, children }: { id: string; grant: ToolApprovalGrant | undefined; children: ReactNode }) {
+  const firstRuleGrant = useContext(FirstRuleGrantContext)
+  const said = grant && (grant.by !== 'rule' || firstRuleGrant === undefined || firstRuleGrant === id)
   return (
     <div>
-      {grant ? <ApprovedLine grant={grant} /> : null}
+      {said ? <ApprovedLine grant={grant} /> : null}
       {children}
     </div>
   )

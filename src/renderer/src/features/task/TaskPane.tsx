@@ -12,6 +12,7 @@ import {
 import type { RunFeedbackRating, RunGoal, RunLoop, RunSummary, ToolApprovalDecision } from '@shared/ipc'
 import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
+import { unreachableServiceInTurn } from '@shared/utils/unreachableService'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
 import { ActionMenu, Button, IconButton, ImageLightbox, Tooltip, pushToast } from '@renderer/lib/ui'
@@ -111,6 +112,8 @@ export type TaskPaneProps = {
   mcpServerNames?: ReadonlyMap<string, string>
   /** Continue the run from its failed latest turn. */
   onRetry?: () => void
+  /** Send an instruction to the task, as the line would ("Ask it to mock Redis"). */
+  onFollowUp?: (instruction: string) => void
   /** Hide one error row for good. */
   onDismissRunError?: (itemId: string) => void
   goal?: RunGoal | null
@@ -504,6 +507,8 @@ export function TaskPane(props: TaskPaneProps) {
 
   const [lightbox, setLightbox] = useState<string | null>(null)
   const retryableErrorId = useMemo(() => latestRetryableErrorId(items, live), [items, live])
+  // Read only once the latest turn has failed and settled: never while live.
+  const mockTarget = useMemo(() => (retryableErrorId ? unreachableServiceInTurn(items) : null), [retryableErrorId, items])
   const recordActions = useMemo(
     () => ({
       onOpenChanges: props.onOpenChanges,
@@ -511,6 +516,8 @@ export function TaskPane(props: TaskPaneProps) {
       mcpServerNames: props.mcpServerNames,
       retryableErrorId,
       onRetry: props.onRetry,
+      mockTarget,
+      onFollowUp: props.onFollowUp,
       onDismissRunError: props.onDismissRunError
     }),
     [
@@ -519,6 +526,8 @@ export function TaskPane(props: TaskPaneProps) {
       props.mcpServerNames,
       retryableErrorId,
       props.onRetry,
+      mockTarget,
+      props.onFollowUp,
       props.onDismissRunError
     ]
   )

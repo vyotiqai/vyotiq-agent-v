@@ -89,6 +89,32 @@ describe('useCycleModeShortcut', () => {
     expect(onModeChange).toHaveBeenCalledWith('ask')
   })
 
+  it('flips with Shift+Tab only in an empty message box', () => {
+    const onModeChange = vi.fn()
+    const { getByRole } = render(
+      <div data-composer-shell="">
+        <div role="combobox" aria-label="Instruction" aria-controls="l" aria-expanded="false" contentEditable tabIndex={0} data-composer-input="" />
+        <input aria-label="Done when" />
+        <Host mode="agent" onModeChange={onModeChange} />
+      </div>
+    )
+    const box = getByRole('combobox', { name: 'Instruction' })
+    expect(fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(onModeChange).toHaveBeenCalledWith('ask')
+
+    // With text in the box, Shift+Tab moves focus back as usual.
+    onModeChange.mockClear()
+    box.textContent = 'Fix the queue'
+    expect(fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })).toBe(true)
+    expect(onModeChange).not.toHaveBeenCalled()
+
+    // Another empty field in the composer keeps Shift+Tab, and so does plain Tab.
+    box.textContent = ''
+    expect(fireEvent.keyDown(getByRole('textbox', { name: 'Done when' }), { key: 'Tab', shiftKey: true })).toBe(true)
+    expect(fireEvent.keyDown(box, { key: 'Tab' })).toBe(true)
+    expect(onModeChange).not.toHaveBeenCalled()
+  })
+
   it('answers the command palette’s cycleMode command', () => {
     const onModeChange = vi.fn()
     render(<Host mode="ask" onModeChange={onModeChange} />)

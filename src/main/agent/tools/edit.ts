@@ -1,6 +1,7 @@
 import { resolveInsideWorkspace, assertResolvedInsideWorkspace } from '../../workspace/safePath'
 import { mkdirSync, readFileSync, existsSync, statSync } from 'fs'
 import { dirname } from 'path'
+import { lineDiffStat } from '@shared/utils/lineDiffStat'
 import { atomicWriteFile } from '@main/storage/atomicWrite'
 import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
 import { assertWritablePath } from './writeGuard'
@@ -284,10 +285,14 @@ export function toolEdit(
       )
     }
     assertWritablePath(path)
+    // A rewrite's real line change: its args only hold the new text, so
+    // without this a two-line fix to a long file reads as every line added.
+    const stat = existed ? lineDiffStat(readFileSync(resolved, 'utf8'), contents) : null
     atomicWriteFile(resolved, contents)
-    return existed
-      ? `Wrote ${path} (${contents.length} chars)`
-      : `Created ${path} (${contents.length} chars)`
+    if (!existed) return `Created ${path} (${contents.length} chars)`
+    return stat
+      ? `Wrote ${path} (${contents.length} chars; +${stat.add} -${stat.del} lines)`
+      : `Wrote ${path} (${contents.length} chars)`
   }
 
   if (typeof diff === 'string' && diff.trim()) {

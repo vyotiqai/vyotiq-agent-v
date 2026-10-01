@@ -1,7 +1,13 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { AgentInteractionMode } from '@shared/ipc'
 import { Segmented } from '@renderer/lib/ui'
-import { isMainComposerTarget, matchShortcut, shortcutLabel, shouldBlockAppShortcut } from '@renderer/lib/shortcuts'
+import {
+  COMPOSER_MESSAGE_SELECTOR,
+  isMainComposerTarget,
+  matchShortcut,
+  shortcutLabel,
+  shouldBlockAppShortcut
+} from '@renderer/lib/shortcuts'
 
 /** The two modes, Agent first: it is what a task usually is. */
 export const MODES: { value: AgentInteractionMode; label: string; note: string }[] = [
@@ -11,7 +17,8 @@ export const MODES: { value: AgentInteractionMode; label: string; note: string }
 
 /**
  * Agent | Ask, first in the composer's control row. Both words show, so the
- * other mode is one press away and never hidden in a menu; Ctrl+. flips it.
+ * other mode is one press away and never hidden in a menu; Ctrl+. flips it,
+ * and so does Shift+Tab in an empty box.
  */
 export function ModeSwitch({
   mode,
@@ -30,7 +37,7 @@ export function ModeSwitch({
       <Segmented
         label="Mode"
         value={mode}
-        items={MODES.map((m) => ({ id: m.value, label: m.label, title: `${m.note} (${chord} switches)` }))}
+        items={MODES.map((m) => ({ id: m.value, label: m.label, title: `${m.note} (${chord}, or ⇧Tab in an empty box, switches)` }))}
         onChange={onChange}
         disabled={disabled}
       />
@@ -50,9 +57,27 @@ export function nextMode(current: AgentInteractionMode, reverse: boolean): Agent
 }
 
 /**
+ * Shift+Tab in this composer's empty box. Only empty: once there is text,
+ * Shift+Tab moves focus back as everywhere else, so the key never stops
+ * someone leaving the box by keyboard while they are writing.
+ */
+function isShiftTabInEmptyBox(e: KeyboardEvent, shell: Element | null): boolean {
+  if (e.key !== 'Tab' || !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return false
+  const target = e.target instanceof Element ? e.target : null
+  if (!target || !shell?.contains(target)) return false
+  // The message box only: a brief's empty "Done when" field keeps Shift+Tab.
+  const box = target.closest<HTMLElement>(COMPOSER_MESSAGE_SELECTOR)
+  if (!box) return false
+  // Its text, chips included: a mention or a picked element counts as typing.
+  const text = box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement ? box.value : box.textContent
+  return !text?.trim()
+}
+
+/**
  * Ctrl+. cycles the mode (Shift for previous) — in this composer when focus is
- * inside it, otherwise in the focused pane's composer. The command palette's
- * "cycleMode" command lands here too.
+ * inside it, otherwise in the focused pane's composer; Shift+Tab does it in
+ * this composer's empty box. The command palette's "cycleMode" command lands
+ * here too.
  */
 export function useCycleModeShortcut(
   rootRef: RefObject<HTMLElement | null>,
@@ -62,6 +87,11 @@ export function useCycleModeShortcut(
   useEffect(() => {
     if (locked) return undefined
     const onKey = (e: KeyboardEvent): void => {
+      if (isShiftTabInEmptyBox(e, rootRef.current?.closest('[data-composer-shell]') ?? null)) {
+        e.preventDefault()
+        advance(false)
+        return
+      }
       if (!matchShortcut(e, 'cycleMode')) return
       if (shouldBlockAppShortcut(e.target)) return
       const root = rootRef.current

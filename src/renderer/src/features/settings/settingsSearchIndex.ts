@@ -665,7 +665,8 @@ const HIGHLIGHT = ['ring-1', 'ring-border-strong', 'rounded-md']
 
 /**
  * Scroll to a row that may not exist yet. From outside Settings (the palette)
- * the view loads lazily and its rows wait for settings, so this waits for the
+ * the view loads lazily and its rows wait for settings, and in the column a
+ * section mounts only as it nears the visible part, so this waits for the
  * row — or its fallback — to mount, and gives up after `timeoutMs`.
  */
 export function revealSettingsFieldWhenMounted(fieldId: string, timeoutMs = 3000): void {
@@ -680,9 +681,21 @@ export function revealSettingsFieldWhenMounted(fieldId: string, timeoutMs = 3000
   window.requestAnimationFrame(tick)
 }
 
+/**
+ * Fired (bubbling) from a row just before it is scrolled to, so the settings
+ * column lets go of a section it was holding at the top for a jump.
+ */
+export const SETTINGS_REVEAL_EVENT = 'vyotiq:settings-reveal'
+
+/** Whether a row (or the row a result falls back to) is in the DOM now. */
+export function isSettingsFieldMounted(fieldId: string): boolean {
+  return (querySettingsField(fieldId) ?? querySettingsField(FIELD_SCROLL_FALLBACK[fieldId] ?? '')) !== null
+}
+
 export function scrollToSettingsField(fieldId: string): void {
   const el = querySettingsField(fieldId) ?? querySettingsField(FIELD_SCROLL_FALLBACK[fieldId] ?? '')
   if (!el) return
+  el.dispatchEvent(new Event(SETTINGS_REVEAL_EVENT, { bubbles: true }))
   if (typeof el.scrollIntoView === 'function') {
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }

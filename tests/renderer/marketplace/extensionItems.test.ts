@@ -13,9 +13,12 @@ import {
   extensionMatchesQuery,
   extensionSections,
   extensionStateLabel,
+  extensionSwitch,
   extensionTabCounts,
   isNeedsState,
   mcpLaunchLine,
+  rowStateShown,
+  scopedToWorkspace,
   whereValue,
   wherePlan,
   type ExtensionInputs,
@@ -485,6 +488,82 @@ describe('where it can run', () => {
     expect(wherePlan({ globalEnabled: true, override: undefined }, 'off', false)).toEqual({ global: false })
     expect(wherePlan({ globalEnabled: false, override: undefined }, 'all', false)).toEqual({ global: true })
     expect(wherePlan({ globalEnabled: true, override: undefined }, 'all', false)).toEqual({})
+  })
+})
+
+describe('the row switch', () => {
+  const ws = { hasWorkspace: true, overrides: null }
+
+  it('is on wherever the item runs in this workspace, and off for Off and Off here alike', () => {
+    expect(extensionSwitch(installedMcp({ status: { connected: true, toolCount: 2 } }), ws)).toEqual({
+      on: true,
+      locked: false
+    })
+    expect(extensionSwitch(installedMcp({ enabled: false }), ws)).toEqual({ on: false, locked: false })
+    const offHere = installedMcp({ overrides: { mcp: { srv: false } } })
+    expect(offHere.state).toEqual({ kind: 'off-here' })
+    expect(extensionSwitch(offHere, ws)?.on).toBe(false)
+    const onlyHere = installedMcp({ enabled: false, overrides: { mcp: { srv: true } } })
+    expect(extensionSwitch(onlyHere, ws)?.on).toBe(true)
+    expect(scopedToWorkspace(onlyHere, true)).toBe(true)
+    // With no workspace there is nothing to scope to.
+    expect(scopedToWorkspace(onlyHere, false)).toBe(false)
+    expect(scopedToWorkspace(installedMcp({}), true)).toBe(false)
+  })
+
+  it('follows a user rule’s own flag, and leaves rows with nothing to switch alone', () => {
+    const items = build({
+      catalog: [entry({ id: 'fresh', kind: 'skill' })],
+      userRules: [{ id: 'r1', name: 'Terse', body: 'Be brief.', enabled: false }],
+      projectRules: [{ path: '.vyotiq/rules/a.md', alwaysApply: true }],
+      localSkills: [
+        {
+          id: 'skill:local:personal:x',
+          name: 'x',
+          description: '',
+          source: 'personal',
+          skillPath: '/home/x/SKILL.md',
+          relativePath: 'x/SKILL.md'
+        }
+      ]
+    })
+    expect(extensionSwitch(only(items, 'user-rule:r1'), ws)).toEqual({ on: false, locked: false })
+    expect(extensionSwitch(only(items, 'rule:.vyotiq/rules/a.md'), ws)).toBeNull()
+    expect(extensionSwitch(only(items, 'local:/home/x/SKILL.md'), ws)).toBeNull()
+    expect(extensionSwitch(only(items, 'skill:fresh'), ws)).toBeNull()
+  })
+
+  it('lets a server in a package switch only its own Off here', () => {
+    const nested = (plugin: Partial<MarketplaceInstalledItem>, overrides: ExtensionInputs['overrides']) =>
+      only(
+        build({
+          installed: [installed({ id: 'devtools', kind: 'plugin', ...plugin })],
+          servers: [server({ id: 'plugin-devtools-a', source: 'marketplace', packageId: 'devtools' })],
+          overrides
+        }),
+        'server:plugin-devtools-a'
+      )
+    const ctx = (overrides: ExtensionInputs['overrides']) => ({ hasWorkspace: true, overrides })
+    expect(extensionSwitch(nested({}, null), ctx(null))).toEqual({ on: true, locked: false })
+    const ownOff = { mcp: { 'plugin-devtools-a': false } }
+    expect(extensionSwitch(nested({}, ownOff), ctx(ownOff))).toEqual({ on: false, locked: false })
+    // Off because its package is: only the package can bring it back.
+    const pluginOff = { plugins: { devtools: false } }
+    expect(extensionSwitch(nested({}, pluginOff), ctx(pluginOff))).toEqual({ on: false, locked: true })
+    expect(extensionSwitch(nested({ enabled: false }, null), ctx(null))).toEqual({ on: false, locked: true })
+    // Without a workspace it has no switch of its own to write.
+    expect(extensionSwitch(nested({}, null), { hasWorkspace: false })).toEqual({ on: true, locked: true })
+  })
+
+  it('drops the word the switch already says, and keeps the ones it cannot', () => {
+    expect(rowStateShown({ state: { kind: 'off' } }, true)).toBe(false)
+    expect(rowStateShown({ state: { kind: 'off-here' } }, true)).toBe(false)
+    expect(rowStateShown({ state: { kind: 'installed' } }, true)).toBe(false)
+    expect(rowStateShown({ state: { kind: 'connected', tools: 2 } }, true)).toBe(true)
+    expect(rowStateShown({ state: { kind: 'failed' } }, true)).toBe(true)
+    expect(rowStateShown({ state: { kind: 'rule', applies: 'empty' } }, true)).toBe(true)
+    expect(rowStateShown({ state: { kind: 'signin' } }, false)).toBe(false)
+    expect(rowStateShown({ state: { kind: 'local' } }, false)).toBe(true)
   })
 })
 

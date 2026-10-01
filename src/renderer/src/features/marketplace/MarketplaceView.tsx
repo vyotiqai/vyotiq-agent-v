@@ -417,11 +417,19 @@ export function MarketplaceView({
                   catalogById={catalogById}
                   addingId={controller.busyTargetId}
                   disabled={controller.formLocked}
+                  hasWorkspace={controller.canOverrideWorkspace}
+                  overrides={controller.workspaceOverrides}
                   onSelect={select}
                   onAdd={(item) => {
                     if (!item.entry) return
                     select(item.key)
                     void controller.installFromCatalog(item.entry)
+                  }}
+                  onSwitch={(item, on) => void controller.setRowOn(item, on)}
+                  onWhere={(item, next) => void controller.applyWhere(item, next)}
+                  onSignIn={(item) => {
+                    select(item.key)
+                    controller.openConnectWizard(item.server?.id ?? item.id)
                   }}
                 />
               ) : controller.catalogLoading && items.length === 0 ? (

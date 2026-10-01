@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   inferFileWriteAction,
+  reportedRewriteStat,
   isUnresolvedToolName,
   summarizeToolArgs
 } from '@shared/utils/toolSummary'
@@ -168,5 +169,14 @@ describe('toolSummary', () => {
     expect(inferFileWriteAction('edit', '')).toBe(null)
     expect(inferFileWriteAction('edit', 'Cancelled')).toBe(null)
     expect(inferFileWriteAction('str_replace', 'Created src/a.ts (12 chars)')).toBe(null)
+    expect(inferFileWriteAction('edit', 'Wrote src/a.ts (12 chars; +3 -1 lines)')).toBe('modified')
+  })
+
+  it('reads the line change main reports for a rewrite', () => {
+    expect(reportedRewriteStat('Wrote src/a.ts (12 chars; +3 -1 lines)')).toEqual({ add: 3, del: 1 })
+    expect(reportedRewriteStat('Wrote src/a.ts (12 chars; +0 -0 lines)\nDiagnostics: clean')).toEqual({ add: 0, del: 0 })
+    expect(reportedRewriteStat('Wrote src/a.ts (12 chars)')).toBeNull()
+    expect(reportedRewriteStat('Created src/a.ts (12 chars)')).toBeNull()
+    expect(reportedRewriteStat(undefined)).toBeNull()
   })
 })

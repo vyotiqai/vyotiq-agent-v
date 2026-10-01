@@ -26,7 +26,10 @@ describe('tools', () => {
 
     expect(toolEdit(dir, 'b/new.txt', 'hello', undefined)).toBe('Created b/new.txt (5 chars)')
     expect(readFileSync(join(dir, 'b', 'new.txt'), 'utf8')).toBe('hello')
-    expect(toolEdit(dir, 'b/new.txt', 'hello!', undefined)).toBe('Wrote b/new.txt (6 chars)')
+    // A rewrite reports its real line change, not every line as added.
+    expect(toolEdit(dir, 'b/new.txt', 'hello!', undefined)).toBe('Wrote b/new.txt (6 chars; +1 -1 lines)')
+    writeFileSync(join(dir, 'long.txt'), 'a\nb\nc\nd\ne\n', 'utf8')
+    expect(toolEdit(dir, 'long.txt', 'a\nb\nC\nd\ne\nf\n', undefined)).toBe('Wrote long.txt (12 chars; +2 -1 lines)')
     expect(() => toolEdit(dir, 'a.txt', '', undefined)).toThrow(/refuses.*empty contents/i)
     expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toContain('line2-changed')
     expect(toolEdit(dir, 'b/empty.txt', '', undefined)).toBe('Created b/empty.txt (0 chars)')

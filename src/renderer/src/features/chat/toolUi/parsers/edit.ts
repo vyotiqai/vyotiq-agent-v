@@ -1,5 +1,5 @@
 import type { UiToolRow } from '@shared/transcript'
-import { inferFileWriteAction } from '@shared/toolSummary'
+import { inferFileWriteAction, reportedRewriteStat } from '@shared/toolSummary'
 import { extractPartialEditArgs } from '@shared/utils/partialJson'
 import { countLines, splitLines, splitLinesTail } from './common'
 
@@ -295,14 +295,18 @@ export function parseEditCardData(tool: UiToolRow): EditCardData {
   }
 
   if (typeof args?.contents === 'string') {
-    const added = countLines(args.contents)
+    // A rewrite of a file that existed: main reports the real line change, so
+    // a small fix to a long file does not read as every line added.
+    const reported = reportedRewriteStat(tool.content)
+    const added = reported ? reported.add : countLines(args.contents)
+    const removed = reported ? reported.del : 0
     return {
       path,
       iconPath,
       fileCount,
       added,
-      removed: 0,
-      changeLabel: changeLabelFor(added, 0),
+      removed,
+      changeLabel: changeLabelFor(added, removed),
       changedLine: null
     }
   }

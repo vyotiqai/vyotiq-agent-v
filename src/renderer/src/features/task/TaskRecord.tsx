@@ -23,7 +23,7 @@ import { ReceiptLine } from './record/Receipt'
 import { RecordRow, RunDivider } from './record/RecordLayout'
 import { RecordProse } from './record/RecordProse'
 import { Steps, instancesOf, placeKey } from './record/Steps'
-import { LooseWork, NowLine, RecordActionsContext, workIsLive } from './record/WorkItems'
+import { FirstRuleGrantContext, LooseWork, NowLine, RecordActionsContext, workIsLive } from './record/WorkItems'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
 
@@ -404,8 +404,10 @@ function RunBody({
   const afterActivity = tail?.kind === 'after' && looseActivity(run.after)
   // A settled run with an answer folds its loose work; without one, the work is the record.
   const foldLoose = !live && run.result != null
+  // A rule's grant is said once per run, on the first call it let through.
+  const firstRuleGrant = useMemo(() => runTools(run).find((t) => t.tool.approvedBy?.by === 'rule')?.id ?? null, [run])
   return (
-    <>
+    <FirstRuleGrantContext.Provider value={firstRuleGrant}>
       {(run.text || run.command || run.images.length > 0) && !(props.omitFirstBrief && run.n === 1) ? (
         <Brief
           run={run}
@@ -479,7 +481,7 @@ function RunBody({
           ) : undefined
         }
       />
-    </>
+    </FirstRuleGrantContext.Provider>
   )
 }
 

@@ -71,12 +71,15 @@ test('Index opens Settings on Indexing, and Tools on Tools', async () => {
   await openNewTask()
   const sees = page.getByRole('complementary', { name: 'What the agent will see' })
   await sees.getByRole('button', { name: /^Index\s*:.*change in Settings$/ }).click({ timeout: 20_000 })
-  await expect(nav.getByRole('button', { name: 'Indexing' })).toHaveAttribute('aria-current', 'page', { timeout: 20_000 })
+  await expect(nav.getByRole('button', { name: 'Indexing' })).toHaveAttribute('aria-current', 'location', { timeout: 20_000 })
+  // Settings is one column: the link scrolls it to the section.
+  await expect(page.locator('[data-settings-anchor="indexing"] > h2')).toBeInViewport()
 
   // Settings' way back is to the brief it came from.
   await nav.getByRole('button', { name: 'Back to the task' }).click()
   await expect(page.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 20_000 })
   await expect(sees).toContainText('built-in', { timeout: 20_000 })
   await sees.getByRole('button', { name: /^Tools\s*:.*change in Settings$/ }).click()
-  await expect(nav.getByRole('button', { name: 'Tools' })).toHaveAttribute('aria-current', 'page', { timeout: 20_000 })
+  await expect(nav.getByRole('button', { name: 'Tools' })).toHaveAttribute('aria-current', 'location', { timeout: 20_000 })
+  await expect(page.locator('[data-settings-anchor="tools"] > h2')).toBeInViewport()
 })

@@ -1,14 +1,20 @@
-import type { MarketplaceCatalogEntry } from '@shared/ipc'
+import { useState } from 'react'
+import type { MarketplaceCatalogEntry, MarketplaceOverrides } from '@shared/ipc'
 import type { IconName } from '@renderer/lib/icons'
-import { Button, cn } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, Switch, cn } from '@renderer/lib/ui'
 import { ROW_HOVER, SECTION_LABEL, SELECTED } from '@renderer/lib/utils/layout'
 import { BrandTile } from './BrandTile'
 import {
   extensionKindLabel,
   extensionStateLabel,
+  extensionSwitch,
+  rowStateShown,
+  scopedToWorkspace,
+  whereValue,
   type ExtensionItem,
   type ExtensionSection,
-  type ExtensionState
+  type ExtensionState,
+  type WhereValue
 } from './extensionItems'
 
 export type TileProps = { name: string; iconUrl?: string; iconMono?: boolean; icon?: IconName }
@@ -35,8 +41,13 @@ export function ExtensionList({
   catalogById,
   addingId,
   disabled,
+  hasWorkspace,
+  overrides,
   onSelect,
-  onAdd
+  onAdd,
+  onSwitch,
+  onWhere,
+  onSignIn
 }: {
   sections: readonly ExtensionSection[]
   selectedKey: string | null
@@ -44,8 +55,15 @@ export function ExtensionList({
   /** The catalog id being added right now. */
   addingId: string | null
   disabled: boolean
+  /** A workspace is open that can override the global flags. */
+  hasWorkspace: boolean
+  /** That workspace's Force on/off map. */
+  overrides: MarketplaceOverrides | null
   onSelect: (key: string) => void
   onAdd: (item: ExtensionItem) => void
+  onSwitch: (item: ExtensionItem, on: boolean) => void
+  onWhere: (item: ExtensionItem, next: WhereValue) => void
+  onSignIn: (item: ExtensionItem) => void
 }) {
   return (
     <>
@@ -67,8 +85,13 @@ export function ExtensionList({
                 selected={item.key === selectedKey}
                 adding={addingId != null && item.entry?.id === addingId}
                 disabled={disabled}
+                rowSwitch={extensionSwitch(item, { hasWorkspace, overrides })}
+                hasWorkspace={hasWorkspace}
                 onSelect={onSelect}
                 onAdd={onAdd}
+                onSwitch={onSwitch}
+                onWhere={onWhere}
+                onSignIn={onSignIn}
               />
             ))}
           </ul>
@@ -78,29 +101,52 @@ export function ExtensionList({
   )
 }
 
+const WHERE_CHOICES: readonly { id: WhereValue; label: string }[] = [
+  { id: 'all', label: 'All workspaces' },
+  { id: 'this', label: 'This workspace only' },
+  { id: 'off', label: 'Off here' }
+]
+
 function ExtensionRow({
   item,
   tile,
   selected,
   adding,
   disabled,
+  rowSwitch,
+  hasWorkspace,
   onSelect,
-  onAdd
+  onAdd,
+  onSwitch,
+  onWhere,
+  onSignIn
 }: {
   item: ExtensionItem
   tile: TileProps
   selected: boolean
   adding: boolean
   disabled: boolean
+  rowSwitch: { on: boolean; locked: boolean } | null
+  hasWorkspace: boolean
   onSelect: (key: string) => void
   onAdd: (item: ExtensionItem) => void
+  onSwitch: (item: ExtensionItem, on: boolean) => void
+  onWhere: (item: ExtensionItem, next: WhereValue) => void
+  onSignIn: (item: ExtensionItem) => void
 }) {
-  // Add is its own button, so it sits beside the row's button rather than in it.
+  const [menuOpen, setMenuOpen] = useState(false)
+  // Add, Sign in, the switch and the ⋯ menu are buttons of their own, so they
+  // sit beside the row's button rather than in it.
   const addable = item.state.kind === 'available'
+  const signIn = item.state.kind === 'signin'
+  const control = signIn || rowSwitch != null
+  // "This workspace only" is the one choice a switch cannot say.
+  const scope = hasWorkspace && control ? item.scope : undefined
+  const where = scope ? whereValue(scope) : null
   return (
     <li
       data-extension-key={item.key}
-      className={cn('-mx-2 flex items-center rounded-md', selected ? SELECTED : ROW_HOVER)}
+      className={cn('group -mx-2 flex items-center rounded-md', selected ? SELECTED : ROW_HOVER)}
     >
       <button
         type="button"
@@ -108,7 +154,7 @@ function ExtensionRow({
         onClick={() => onSelect(item.key)}
         className={cn(
           'flex min-w-0 flex-1 items-center gap-3 rounded-md py-2.5 text-left focus-visible:vy-focus-ring',
-          addable ? 'pl-2' : 'px-2'
+          addable || control ? 'pl-2' : 'px-2'
         )}
       >
         <BrandTile {...tile} size={32} />
@@ -125,8 +171,72 @@ function ExtensionRow({
             {item.line}
           </span>
         </span>
-        {addable ? null : <RowState state={item.state} />}
+        {rowStateShown(item, rowSwitch != null) ? <RowState state={item.state} /> : null}
+        {scopedToWorkspace(item, hasWorkspace) ? (
+          <span className="shrink-0 text-xs text-muted">this workspace</span>
+        ) : null}
       </button>
+      {control ? (
+        <span className="flex shrink-0 items-center gap-2 pl-3 pr-2">
+          {scope && where ? (
+            // Shown on hover or focus, but it keeps its width so every switch
+            // ends on the same edge.
+            <span className={menuOpen ? 'visible' : 'invisible group-hover:visible group-focus-within:visible'}>
+              <ActionMenu
+                aria-label={`Where ${item.name} can run`}
+                open={menuOpen}
+                onOpenChange={setMenuOpen}
+                placement="down"
+                align="end"
+                items={WHERE_CHOICES.map((choice) => ({
+                  id: choice.id,
+                  label: choice.label,
+                  checked: where === choice.id,
+                  disabled,
+                  onSelect: () => {
+                    if (where !== choice.id) onWhere(item, choice.id)
+                  }
+                }))}
+                trigger={(t) => (
+                  <IconButton
+                    ref={t.ref}
+                    icon="more"
+                    label={`Where ${item.name} can run`}
+                    // An open menu would sit under its own tooltip.
+                    title={menuOpen ? '' : undefined}
+                    size="xs"
+                    tone="onSurface"
+                    aria-expanded={t['aria-expanded']}
+                    aria-controls={t['aria-controls']}
+                    aria-haspopup={t['aria-haspopup']}
+                    onClick={t.onClick}
+                  />
+                )}
+              />
+            </span>
+          ) : (
+            <span aria-hidden="true" className="w-5" />
+          )}
+          {signIn ? (
+            <Button
+              size="xs"
+              variant="primary"
+              aria-label={`Sign in to ${item.name}`}
+              disabled={disabled}
+              onClick={() => onSignIn(item)}
+            >
+              Sign in
+            </Button>
+          ) : rowSwitch ? (
+            <Switch
+              checked={rowSwitch.on}
+              disabled={disabled || rowSwitch.locked}
+              label={`Enable ${item.name}`}
+              onCheckedChange={(on) => onSwitch(item, on)}
+            />
+          ) : null}
+        </span>
+      ) : null}
       {addable ? (
         <span className="shrink-0 pl-3 pr-2">
           <Button

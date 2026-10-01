@@ -822,6 +822,8 @@ export function useSettingsForm({
   return {
     section,
     navigateSection,
+    /** Record the section in view without clearing anything — the column's scroll-spy. */
+    setSection: onSectionChange,
     settings,
     keyProvider,
     keyDraft,

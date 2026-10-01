@@ -1,5 +1,5 @@
 import type { UiToolRow } from '@shared/transcript'
-import { inferFileWriteAction, parseArgsRecord } from '@shared/toolSummary'
+import { inferFileWriteAction, parseArgsRecord, reportedRewriteStat } from '@shared/toolSummary'
 import { lineDiffStat, splitLines } from '@shared/utils/lineDiffStat'
 
 /**
@@ -12,9 +12,10 @@ import { lineDiffStat, splitLines } from '@shared/utils/lineDiffStat'
  * - `str_replace` diffs its old text against its new text;
  * - `edit` with a unified diff counts the +/- rows inside its hunks;
  * - `edit` that created a file counts every line it wrote;
- * - a whole-file overwrite, a `replace_all` and a delete are not countable
- *   from their arguments (the old text is not there), so they report the path
- *   and no numbers.
+ * - a whole-file overwrite counts what main reported for it, when it did;
+ * - an older overwrite, a `replace_all` and a delete are not countable from
+ *   their arguments (the old text is not there), so they report the path and
+ *   no numbers.
  */
 export type EditStat = { path: string; exact: true; add: number; del: number } | { path: string; exact: false }
 
@@ -38,6 +39,8 @@ export function editStatOf(tool: UiToolRow): EditStat | null {
     if (typeof args?.contents === 'string' && inferFileWriteAction(tool.name, tool.content) === 'created') {
       return { path, exact: true, add: splitLines(args.contents).length, del: 0 }
     }
+    const reported = reportedRewriteStat(tool.content)
+    if (reported) return { path, exact: true, ...reported }
     return { path, exact: false }
   }
 

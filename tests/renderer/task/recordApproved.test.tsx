@@ -74,6 +74,20 @@ describe('the decision on a command card', () => {
     expect(line.nextElementSibling).toBe(card)
   })
 
+  it('says a rule once per run, on the first call it let through; your own answers every time', () => {
+    const rule: ToolApprovalGrant = { by: 'rule', scope: 'workspace' }
+    const { container } = show([
+      user('Edit two files and test'),
+      call('e1', 'edit', { path: 'a.ts', diff: '@@\n-a\n+b\n' }, 'Applied diff to a.ts', rule),
+      call('t1', 'terminal', { command: 'pnpm test' }, 'exit_code: 0', { by: 'you', scope: 'once' }),
+      // Three calls: from four, a settled run's loose work folds to one line.
+      call('e2', 'edit', { path: 'b.ts', diff: '@@\n-a\n+b\n' }, 'Applied diff to b.ts', rule),
+      said('Done.')
+    ])
+    const lines = [...container.querySelectorAll('[data-record-approved]')].map((l) => l.getAttribute('data-record-approved'))
+    expect(lines).toEqual(['rule:workspace', 'you:once'])
+  })
+
   it('says nothing for a call the gate never held', () => {
     const { container } = show([user('Look'), call('t1', 'terminal', { command: 'ls' }, 'exit_code: 0'), said('Done.')])
     expect(container.querySelector('[data-record-approved]')).toBeNull()

@@ -20,7 +20,7 @@ import type { MarketplaceOverrideKind } from '@shared/domain/marketplaceEnableme
 import { findByWorkspacePath } from '@shared/workspacePathMatch'
 import { pushToast } from '@renderer/lib/ui'
 import { indexMcpStatusById } from './mcpStatus'
-import type { ProjectRuleItem } from './extensionItems'
+import { wherePlan, type ExtensionItem, type ProjectRuleItem, type WhereValue } from './extensionItems'
 
 const REMOTE_INSTALL_SOURCES = new Set(['registry', 'git', 'npm', 'zip', 'remote', 'path'])
 /** How often to look again while a server is still dialling, and for how long. */
@@ -501,6 +501,53 @@ export function useMarketplaceController({
     [workspacePath, onSetSettingsOverride, workspaceOverride, beginBusy, endBusy, loadMcpStatus]
   )
 
+  const canOverrideWorkspace = Boolean(workspacePath && onSetSettingsOverride)
+
+  /** Where an item can run: the global flag first, then this workspace's override — `wherePlan`'s order. */
+  const applyWhere = useCallback(
+    async (item: ExtensionItem, next: WhereValue): Promise<boolean> => {
+      const scope = item.scope
+      if (!scope) return false
+      const plan = wherePlan(scope, next, canOverrideWorkspace)
+      if (plan.global !== undefined) {
+        const ok = item.installed
+          ? await setEnabled(item.installed, plan.global)
+          : item.server
+            ? await setServerEnabled(item.server.id, plan.global)
+            : false
+        if (!ok) return false
+      }
+      if (plan.override !== undefined) {
+        return setWorkspaceOverride(scope.overrideKind, scope.overrideId, plan.override)
+      }
+      return true
+    },
+    [canOverrideWorkspace, setEnabled, setServerEnabled, setWorkspaceOverride]
+  )
+
+  /**
+   * A row's switch. It means what the detail's on and off mean in the scope
+   * the list shows: All workspaces or Off here for an item a workspace can
+   * override, the global flag for a user rule, and Off here for a server that
+   * runs with its package.
+   */
+  const setRowOn = useCallback(
+    async (item: ExtensionItem, on: boolean): Promise<boolean> => {
+      if (item.userRule) {
+        const id = item.userRule.id
+        return runUpdate({
+          userRules: (settings.userRules ?? []).map((r) => (r.id === id ? { ...r, enabled: on } : r))
+        })
+      }
+      if (item.scope) return applyWhere(item, on ? 'all' : 'off')
+      if (item.plugin && item.server) {
+        return setWorkspaceOverride('mcp', item.server.id, on ? null : false)
+      }
+      return false
+    },
+    [applyWhere, runUpdate, settings.userRules, setWorkspaceOverride]
+  )
+
   /**
    * Parse what was pasted. Only a git URL reaches out (it clones), so only it
    * asks for the install acknowledgement first.
@@ -595,7 +642,7 @@ export function useMarketplaceController({
     openConnectWizard: setConnectWizardId,
     closeConnectWizard: () => setConnectWizardId(null),
     workspaceOverrides: workspaceOverride?.marketplaceOverrides ?? null,
-    canOverrideWorkspace: Boolean(workspacePath && onSetSettingsOverride),
+    canOverrideWorkspace,
     loadMcpStatus,
     loadProjectRules,
     runUpdate,
@@ -610,6 +657,8 @@ export function useMarketplaceController({
     removeServer,
     uninstall,
     setWorkspaceOverride,
+    applyWhere,
+    setRowOn,
     detectMcp,
     applyDetectedMcp,
     scanExternalMcp,

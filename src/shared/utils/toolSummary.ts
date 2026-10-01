@@ -37,6 +37,16 @@ export function inferFileWriteAction(
   return null
 }
 
+/**
+ * The line change main reported for a whole-file rewrite of a file that
+ * existed (`Wrote a.ts (120 chars; +3 -1 lines)`) — the args hold only the new
+ * text, so this is the one place the real count lives. Null when not reported.
+ */
+export function reportedRewriteStat(content?: string | null): { add: number; del: number } | null {
+  const m = /^Wrote .*; \+(\d+) -(\d+) lines\)/m.exec(content ?? '')
+  return m ? { add: Number(m[1]), del: Number(m[2]) } : null
+}
+
 export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   read: { running: 'Reading', done: 'Read' },
   edit: { running: 'Editing', done: 'Edited' },

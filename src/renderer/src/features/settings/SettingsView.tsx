@@ -4,10 +4,12 @@ import { useNavigatorSlot } from '@renderer/lib/context/NavigatorSlot'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
 import { Alert, Button, FormChangesContext, type FormChange } from '@renderer/lib/ui'
+import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { FeedbackDialog } from '@renderer/features/feedback'
 import type { SettingsSection, SettingsViewProps } from './types'
 import { useSettingsForm, type SettingReset } from './hooks/useSettingsForm'
-import { SECTION_DESCRIPTIONS, SECTION_LABELS } from './constants'
+import { SECTION_ANCHOR_ATTRIBUTE, useSectionScroll } from './hooks/useSectionScroll'
+import { SECTION_DESCRIPTIONS, SECTION_GROUPS, SECTION_LABELS } from './constants'
 import { SettingsIndex, SettingsIndexStrip, type SettingsIssues } from './components/SettingsNav'
 import { SettingsSearch } from './components/SettingsSearch'
 import { GeneralSection } from './sections/GeneralSection'
@@ -27,24 +29,46 @@ function isSettingReset(token: unknown): token is SettingReset {
   return typeof token === 'object' && token !== null && 'scope' in token && 'key' in token
 }
 
+/** Every section, top to bottom of the column — the index's order. */
+const SECTION_ORDER: readonly SettingsSection[] = SECTION_GROUPS.flatMap((group) => group.sections)
+
+type ChangesRegistry = { report: (id: string, read: (() => FormChange) | null) => void }
+
 /**
- * The rows changed from their default in the section on screen. Rows report
- * themselves (`FormRow`), so the count can never disagree with the marks.
+ * The rows changed from their default, per section, so the header can count
+ * and reset the section in view. Rows report themselves (`FormRow`), so the
+ * count can never disagree with the marks.
  */
 function useChangedRows() {
-  const rows = useRef(new Map<string, () => FormChange>())
-  const [count, setCount] = useState(0)
-  const registry = useMemo(
-    () => ({
-      report: (id: string, read: (() => FormChange) | null) => {
-        if (read) rows.current.set(id, read)
-        else rows.current.delete(id)
-        setCount(rows.current.size)
-      }
-    }),
+  const rows = useRef(new Map<SettingsSection, Map<string, () => FormChange>>())
+  const [counts, setCounts] = useState<Partial<Record<SettingsSection, number>>>({})
+  const registries = useMemo(
+    () =>
+      Object.fromEntries(
+        SECTION_ORDER.map((section): [SettingsSection, ChangesRegistry] => [
+          section,
+          {
+            report: (id, read) => {
+              let map = rows.current.get(section)
+              if (!map) {
+                map = new Map()
+                rows.current.set(section, map)
+              }
+              if (read) map.set(id, read)
+              else map.delete(id)
+              const size = map.size
+              setCounts((prev) => (prev[section] === size ? prev : { ...prev, [section]: size }))
+            }
+          }
+        ])
+      ) as Record<SettingsSection, ChangesRegistry>,
     []
   )
-  return { registry, count, read: () => [...rows.current.values()].map((row) => row()) }
+  return {
+    registries,
+    count: (section: SettingsSection) => counts[section] ?? 0,
+    read: (section: SettingsSection) => [...(rows.current.get(section)?.values() ?? [])].map((row) => row())
+  }
 }
 
 function sectionDescription(section: SettingsSection): string {
@@ -57,9 +81,11 @@ function sectionDescription(section: SettingsSection): string {
 
 /**
  * Settings: its own index in the navigator's column (see NavigatorSlot), and
- * the section beside it. The header says how many rows are set away from
- * their default and resets them together; every control shows its value, but
- * only those rows carry a mark, so defaults read quiet.
+ * every section beside it in one scrolling column. The index is the column's
+ * table of contents and marks the section in view; the header follows that
+ * section, says how many of its rows are set away from their default and
+ * resets them together. Every control shows its value, but only those rows
+ * carry a mark, so defaults read quiet.
  */
 export function SettingsView(props: SettingsViewProps) {
   const {
@@ -80,6 +106,8 @@ export function SettingsView(props: SettingsViewProps) {
   const form = useSettingsForm(props)
   const slot = useNavigatorSlot()
   const changes = useChangedRows()
+  const scroll = useSectionScroll(form.section, form.setSection)
+  const section = scroll.active
   const searchRef = useRef<HTMLInputElement>(null)
 
   // The dialog lives here, not in a section, so the command palette can open
@@ -109,7 +137,7 @@ export function SettingsView(props: SettingsViewProps) {
     : {}
 
   const resetSection = (): void => {
-    const rows = changes.read()
+    const rows = changes.read(section)
     const merged = rows.map((row) => row.token).filter(isSettingReset)
     if (merged.length > 0) form.resetToDefaults(merged)
     for (const row of rows) {
@@ -117,8 +145,15 @@ export function SettingsView(props: SettingsViewProps) {
     }
   }
 
-  const renderSection = () => {
-    switch (form.section) {
+  // The index jumps the column; like a page change used to, it drops a
+  // message about a save elsewhere.
+  const goToSection = (id: SettingsSection): void => {
+    scroll.goTo(id)
+    form.navigateSection(id)
+  }
+
+  const renderSection = (id: SettingsSection) => {
+    switch (id) {
       case 'general':
         return (
           <GeneralSection
@@ -168,7 +203,7 @@ export function SettingsView(props: SettingsViewProps) {
       case 'about':
         return <AboutSection form={form} onOpenFeedback={() => setFeedbackOpen(true)} />
       default: {
-        const _exhaustive: never = form.section
+        const _exhaustive: never = id
         return _exhaustive
       }
     }
@@ -177,8 +212,7 @@ export function SettingsView(props: SettingsViewProps) {
   const search = (
     <SettingsSearch
       inputRef={searchRef}
-      section={form.section}
-      onSectionChange={form.navigateSection}
+      onSectionChange={goToSection}
       onRevealField={(id) => {
         if (id === 'custom-url') form.selectKeyProvider('custom')
         else if (id === 'ollama-url') form.selectKeyProvider('ollama')
@@ -187,8 +221,8 @@ export function SettingsView(props: SettingsViewProps) {
     />
   )
   const indexProps = {
-    section: form.section,
-    onSectionChange: form.navigateSection,
+    section,
+    onSectionChange: goToSection,
     backLabel,
     backRef,
     onBack: onClose,
@@ -203,30 +237,57 @@ export function SettingsView(props: SettingsViewProps) {
         className="flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2"
         data-settings-header
       >
-        <h1 className="m-0 shrink-0 text-sm font-semibold text-fg-strong">{SECTION_LABELS[form.section]}</h1>
-        <p className="m-0 min-w-0 truncate text-xs text-tertiary">{sectionDescription(form.section)}</p>
+        <h1 className="m-0 shrink-0 text-sm font-semibold text-fg-strong">{SECTION_LABELS[section]}</h1>
+        <p className="m-0 min-w-0 truncate text-xs text-tertiary">{sectionDescription(section)}</p>
         <span className="flex-1" />
-        {changes.count > 0 ? (
+        {changes.count(section) > 0 ? (
           <span className="flex shrink-0 items-center gap-2 text-xs text-muted" data-settings-changed>
             <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
-            {changes.count} changed from default
+            {changes.count(section)} changed from default
             <Button size="xs" variant="ghost" disabled={form.formLocked} onClick={resetSection}>
               Reset section
             </Button>
           </span>
         ) : null}
       </header>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto" data-settings-content>
-        <div className="w-full max-w-[800px] px-5 pb-16 pt-2 sm:px-10">
-          {/* Pinned while scrolling: a failed save several screens down a long
-              section used to report at the very bottom of the page, where
-              nobody was looking. */}
+      <div
+        ref={scroll.scrollerRef}
+        onScroll={scroll.onScroll}
+        className="scroll-thin min-h-0 flex-1 overflow-y-auto"
+        data-settings-content
+      >
+        {/* The bottom gap lets the last, short sections still reach the top. */}
+        <div ref={scroll.contentRef} className="w-full max-w-[800px] px-5 pb-[40vh] pt-2 sm:px-10">
+          {/* Pinned while scrolling: a failed save several screens down the
+              column would otherwise report where nobody is looking. */}
           {form.displayError && !form.errorField ? (
             <div className="sticky top-0 z-sticky bg-bg pt-4">
               <Alert onDismiss={form.clearErrors}>{form.displayError}</Alert>
             </div>
           ) : null}
-          <FormChangesContext.Provider value={changes.registry}>{renderSection()}</FormChangesContext.Provider>
+          {SECTION_ORDER.map((id) => (
+            <section
+              key={id}
+              {...{ [SECTION_ANCHOR_ATTRIBUTE]: id }}
+              aria-labelledby={`settings-section-${id}`}
+              className="pt-12 first-of-type:pt-4"
+            >
+              <h2 id={`settings-section-${id}`} className="m-0 text-md font-semibold text-fg-strong">
+                {SECTION_LABELS[id]}
+              </h2>
+              {scroll.mounted.has(id) ? (
+                // One section failing keeps the rest of the column working.
+                <ErrorBoundary panel={SECTION_LABELS[id]}>
+                  <FormChangesContext.Provider value={changes.registries[id]}>
+                    {renderSection(id)}
+                  </FormChangesContext.Provider>
+                </ErrorBoundary>
+              ) : (
+                // Holds the section's place until it nears the visible column.
+                <div aria-hidden="true" className="h-[60vh]" data-settings-placeholder />
+              )}
+            </section>
+          ))}
         </div>
       </div>
       <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />

@@ -263,6 +263,14 @@ export function SessionChatColumn({
     onRevertToUserMessage
   })
 
+  // A follow-up the record offers ("Ask it to mock Redis"), sent like any other.
+  const sendFollowUp = useCallback(
+    (instruction: string) => {
+      void onSend(instruction)
+    },
+    [onSend]
+  )
+
   const onEditLastUserMessage = useCallback((): boolean => {
     if (!onEditAndResend) return false
     const index = lastUserMessageIndex(messages)
@@ -477,6 +485,7 @@ export function SessionChatColumn({
             onOpenChanges={onOpenChanges}
             onLoadToolContent={onLoadToolContent}
             onRetry={onContinue}
+            onFollowUp={sendFollowUp}
             onDismissRunError={onDismissRunError}
             mcpServerNames={mcpServerNames}
             goal={runGoal.goal}

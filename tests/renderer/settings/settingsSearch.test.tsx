@@ -37,7 +37,7 @@ afterEach(() => {
 
 describe('SettingsSearch', () => {
   it('moves active option with arrow keys', () => {
-    render(<SettingsSearch section="agent" onSectionChange={vi.fn()} />)
+    render(<SettingsSearch onSectionChange={vi.fn()} />)
     const input = screen.getByRole('textbox', { name: 'Search settings' })
     fireEvent.change(input, { target: { value: 'model' } })
     expect(screen.getByRole('listbox', { name: 'Settings search results' })).toBeTruthy()
@@ -45,16 +45,10 @@ describe('SettingsSearch', () => {
     expect(input.getAttribute('aria-activedescendant')).toMatch(/providers-openai/)
   })
 
-  it('reveals the target field before scrolling', () => {
+  it('reveals the target field, going by its section when the row has not mounted', () => {
     const onRevealField = vi.fn()
     const onSectionChange = vi.fn()
-    render(
-      <SettingsSearch
-        section="agent"
-        onSectionChange={onSectionChange}
-        onRevealField={onRevealField}
-      />
-    )
+    render(<SettingsSearch onSectionChange={onSectionChange} onRevealField={onRevealField} />)
     fireEvent.change(screen.getByRole('textbox', { name: 'Search settings' }), {
       target: { value: 'openai' }
     })
@@ -63,9 +57,24 @@ describe('SettingsSearch', () => {
     expect(onSectionChange).toHaveBeenCalledWith('providers')
   })
 
+  it('scrolls straight to a row already in the column', () => {
+    const onSectionChange = vi.fn()
+    render(
+      <>
+        <div data-settings-field="providers-openai" />
+        <SettingsSearch onSectionChange={onSectionChange} />
+      </>
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings' }), {
+      target: { value: 'openai' }
+    })
+    fireEvent.click(screen.getByRole('option', { name: /OpenAI API key/i }))
+    expect(onSectionChange).not.toHaveBeenCalled()
+  })
+
   it('clears a query on Escape, then closes on the next Escape', () => {
     const onClose = vi.fn()
-    render(<SettingsSearch section="agent" onSectionChange={vi.fn()} onClose={onClose} />)
+    render(<SettingsSearch onSectionChange={vi.fn()} onClose={onClose} />)
     const input = screen.getByRole('textbox', { name: 'Search settings' })
     fireEvent.change(input, { target: { value: 'model' } })
     fireEvent.keyDown(input, { key: 'Escape' })

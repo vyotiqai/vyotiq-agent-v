@@ -3,12 +3,12 @@
  */
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { SettingsView } from '@renderer/features/settings'
 import { SETTINGS_SEARCH_INDEX } from '@renderer/features/settings/settingsSearchIndex'
 import { SECTION_GROUPS, SECTION_LABELS } from '@renderer/features/settings/constants'
 import { emptySecretStatus, type Settings } from '@shared/ipc'
-import { DEFAULT_SETTINGS } from '@shared/ipc'
+import { DEFAULT_NOTIFICATION_SETTINGS, DEFAULT_SETTINGS } from '@shared/ipc'
 
 afterEach(() => {
   cleanup()
@@ -1634,7 +1634,7 @@ describe('settings', () => {
     expect(row.textContent).toMatch(/Audio is sent to OpenAI with your key/)
     expect(within(row as HTMLElement).getByRole('alert').textContent).toMatch(/No OpenAI key yet/)
     fireEvent.click(within(row as HTMLElement).getByRole('button', { name: /Add key/ }))
-    await waitFor(() => expect(document.querySelector('[data-settings-section="providers"][aria-current="page"]')).toBeTruthy())
+    await waitFor(() => expect(document.querySelector('[data-settings-section="providers"][aria-current="location"]')).toBeTruthy())
   })
 
   it('Enter action and hold-to-talk patch their dictation fields', async () => {
@@ -1864,8 +1864,10 @@ describe('settings', () => {
       expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeTruthy()
     }
     // Approval and run behavior moved to Agent; pane count is layout (General).
+    // General is in the column too, so the check is within Tools' own block.
+    const tools = document.querySelector('[data-settings-anchor="tools"]')!
     for (const id of ['tool-approval', 'auto-resume-interrupted', 'auto-mode-switch', 'max-chat-panes']) {
-      expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeNull()
+      expect(tools.querySelector(`[data-settings-field="${id}"]`)).toBeNull()
     }
   })
 
@@ -2398,5 +2400,115 @@ describe('Effort beside the model', () => {
       )
     )
     expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ thinkingEffort: 'high' }))
+  })
+})
+
+describe('settings column', () => {
+  const view = (extra: Partial<Parameters<typeof SettingsView>[0]> = {}) => (
+    <SettingsView
+      settings={baseSettings}
+      secrets={emptySecrets}
+      onClose={vi.fn()}
+      onUpdate={vi.fn(async () => ({ ok: true as const }))}
+      onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+      onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      {...extra}
+    />
+  )
+  const blockIds = () =>
+    [...document.querySelectorAll<HTMLElement>('[data-settings-anchor]')].map((el) => el.dataset.settingsAnchor)
+  const isMounted = (id: string) =>
+    document.querySelector(`[data-settings-anchor="${id}"] [data-settings-placeholder]`) === null
+  const header = () => document.querySelector('[data-settings-header] h1')?.textContent
+
+  it('lays every section out in one column, in the index order, each under its heading', () => {
+    render(view())
+    const order = SECTION_GROUPS.flatMap((group) => group.sections)
+    expect(blockIds()).toEqual(order)
+    for (const id of order) {
+      const block = document.querySelector(`[data-settings-anchor="${id}"]`)!
+      expect(within(block as HTMLElement).getByRole('heading', { level: 2, name: SECTION_LABELS[id] })).toBeTruthy()
+    }
+    // Only the section it opened on has mounted; the rest wait to be near.
+    expect(order.filter(isMounted)).toEqual(['general'])
+  })
+
+  it('an index entry jumps to its section, marks it, and the header follows', () => {
+    const onSectionChange = vi.fn()
+    render(view({ onSectionChange }))
+    openSection('Voice')
+    expect(isMounted('voice')).toBe(true)
+    expect(header()).toBe('Voice')
+    expect(onSectionChange).toHaveBeenLastCalledWith('voice')
+    const nav = screen.getByRole('navigation', { name: 'Settings' })
+    expect(within(nav).getByRole('button', { name: /^Voice\b/ }).getAttribute('aria-current')).toBe('location')
+    expect(within(nav).getByRole('button', { name: /^General\b/ }).hasAttribute('aria-current')).toBe(false)
+  })
+
+  it('a section set from outside is a jump to it', () => {
+    const { rerender } = render(view({ section: 'general' }))
+    rerender(view({ section: 'storage' }))
+    expect(isMounted('storage')).toBe(true)
+    expect(header()).toBe('Storage')
+  })
+
+  it('scrolling reports the section in view', async () => {
+    const onSectionChange = vi.fn()
+    render(view({ onSectionChange }))
+    const box = document.querySelector<HTMLElement>('[data-settings-content]')!
+    const tops: Record<string, number> = { general: -900, appearance: -300, notifications: 20, shortcuts: 700 }
+    for (const el of document.querySelectorAll<HTMLElement>('[data-settings-anchor]')) {
+      const top = tops[el.dataset.settingsAnchor!] ?? 2000
+      el.getBoundingClientRect = () => ({ top, bottom: top + 400, left: 0, right: 0, width: 0, height: 400, x: 0, y: top, toJSON: () => ({}) })
+    }
+    // The jump that opened the column holds its section until the user scrolls.
+    fireEvent.wheel(box)
+    fireEvent.scroll(box)
+    await waitFor(() => expect(header()).toBe('Notifications'))
+    expect(onSectionChange).toHaveBeenLastCalledWith('notifications')
+  })
+
+  it('mounts a section as it nears the visible column', async () => {
+    const observed: { cb: IntersectionObserverCallback; els: Element[] }[] = []
+    const original = globalThis.IntersectionObserver
+    globalThis.IntersectionObserver = class {
+      els: Element[] = []
+      constructor(cb: IntersectionObserverCallback) {
+        observed.push({ cb, els: this.els })
+      }
+      observe(el: Element) {
+        this.els.push(el)
+      }
+      disconnect() {}
+      unobserve() {}
+      takeRecords() {
+        return []
+      }
+      root = null
+      rootMargin = ''
+      thresholds = []
+    } as unknown as typeof IntersectionObserver
+    try {
+      window.vyotiq.storageReport = vi.fn(async () => ({ ok: false as const, error: 'not used' }))
+      render(view())
+      expect(isMounted('storage')).toBe(false)
+      expect(window.vyotiq.storageReport).not.toHaveBeenCalled()
+      const { cb, els } = observed[0]!
+      const storage = els.find((el) => (el as HTMLElement).dataset.settingsAnchor === 'storage')!
+      act(() => cb([{ target: storage, isIntersecting: true } as unknown as IntersectionObserverEntry], {} as IntersectionObserver))
+      expect(isMounted('storage')).toBe(true)
+      await waitFor(() => expect(window.vyotiq.storageReport).toHaveBeenCalled())
+    } finally {
+      globalThis.IntersectionObserver = original
+    }
+  })
+
+  it('counts and resets changed rows for the section in view only', () => {
+    render(view({ settings: { ...baseSettings, notifications: { ...DEFAULT_NOTIFICATION_SETTINGS, enabled: false } } }))
+    expect(document.querySelector('[data-settings-changed]')).toBeNull()
+    openSection('Notifications')
+    expect(document.querySelector('[data-settings-changed]')?.textContent).toMatch(/1 changed from default/)
+    openSection('General')
+    expect(document.querySelector('[data-settings-changed]')).toBeNull()
   })
 })

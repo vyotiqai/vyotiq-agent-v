@@ -14,23 +14,23 @@ import type { SettingsSection } from '../types'
 import { SECTION_LABELS } from '../constants'
 import {
   filterSettingsSearch,
-  scrollToSettingsField,
+  isSettingsFieldMounted,
+  revealSettingsFieldWhenMounted,
   type SettingsSearchEntry
 } from '../settingsSearchIndex'
 
 /**
  * "Search settings" at the top of the index. `/` focuses it (see
  * SettingsView); the results drop over the section list, and picking one
- * opens its section and flashes the row.
+ * scrolls the column to its row and flashes it. A row whose section has not
+ * mounted yet goes by its section first, which mounts it.
  */
 export function SettingsSearch({
-  section,
   onSectionChange,
   onRevealField,
   onClose,
   inputRef
 }: {
-  section: SettingsSection
   onSectionChange: (section: SettingsSection) => void
   /** Expand a nested control (e.g. provider accordion) before scrolling to it. */
   onRevealField?: (fieldId: string) => void
@@ -57,12 +57,8 @@ export function SettingsSearch({
 
   const goTo = (entry: SettingsSearchEntry): void => {
     onRevealField?.(entry.id)
-    if (entry.section !== section) {
-      onSectionChange(entry.section)
-      window.setTimeout(() => scrollToSettingsField(entry.id), 100)
-    } else {
-      scrollToSettingsField(entry.id)
-    }
+    if (!isSettingsFieldMounted(entry.id)) onSectionChange(entry.section)
+    revealSettingsFieldWhenMounted(entry.id)
     setQuery('')
   }
 

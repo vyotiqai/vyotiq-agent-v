@@ -125,6 +125,16 @@ describe('parseEditCardData', () => {
         })
       )
     ).toEqual([{ path: 'src/foo.ts', added: 3, removed: 0, action: 'modified' }])
+    // A rewrite whose result reports the real change counts that, not every line.
+    expect(
+      collectWritingChanges(
+        tool({
+          name: 'edit',
+          argsPreview: JSON.stringify({ path: 'src/foo.ts', contents: 'a\nb\nc\n' }),
+          content: 'Wrote src/foo.ts (6 chars; +1 -1 lines)\nDiagnostics: clean'
+        })
+      )
+    ).toEqual([{ path: 'src/foo.ts', added: 1, removed: 1, action: 'modified' }])
     expect(
       collectWritingChanges(
         tool({

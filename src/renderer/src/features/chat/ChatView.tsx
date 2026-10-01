@@ -410,17 +410,21 @@ export function ChatView({
   const { confirm, dialog: confirmDialog } = useConfirm()
 
   const discardAllWrites = useCallback(async () => {
-    const files = writeCheckpointFiles ?? []
-    const ok = await confirm(
-      'Undo all agent edits? Every listed file is restored to its state before the agent ran. Files you edited yourself are untouched.',
-      {
-        title: 'Undo all agent edits',
-        confirmLabel: 'Undo all',
-        danger: true,
-        ...(files.length > 0 ? { details: <ConfirmFileList files={files} /> } : {})
-      }
-    )
-    if (!ok) return
+    // With the task's settle store, Undo all is taken back from its toast, like
+    // Keep all and Commit — so it does not ask first. Without it, it cannot be.
+    if (!settle) {
+      const files = writeCheckpointFiles ?? []
+      const ok = await confirm(
+        'Undo all agent edits? Every listed file is restored to its state before the agent ran. Files you edited yourself are untouched.',
+        {
+          title: 'Undo all agent edits',
+          confirmLabel: 'Undo all',
+          danger: true,
+          ...(files.length > 0 ? { details: <ConfirmFileList files={files} /> } : {})
+        }
+      )
+      if (!ok) return
+    }
     if (settle) {
       const undone = await settle.undoAll()
       if (undone === false) return

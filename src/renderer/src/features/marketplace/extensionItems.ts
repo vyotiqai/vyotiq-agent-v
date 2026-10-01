@@ -492,6 +492,50 @@ export function whereValue(scope: Pick<ExtensionScope, 'globalEnabled' | 'overri
   return scope.globalEnabled ? 'all' : 'off'
 }
 
+/* ─── The row's switch ─────────────────────────────────────────────────── */
+
+/** States the switch says on its own, so the row prints no word for them. */
+const ENABLEMENT_STATES = new Set<ExtensionState['kind']>(['installed', 'off', 'off-here', 'only-here'])
+
+/** A row with a switch drops the word its switch already says. */
+export function rowStateShown(item: Pick<ExtensionItem, 'state'>, hasSwitch: boolean): boolean {
+  // Add and Sign in are buttons on the row, so they need no word as well.
+  if (item.state.kind === 'available' || item.state.kind === 'signin') return false
+  return !(hasSwitch && ENABLEMENT_STATES.has(item.state.kind))
+}
+
+/**
+ * The row's on/off, and whether it can be flipped from here. `on` is whether
+ * it runs in the scope the list shows — this workspace when one is open — so
+ * it agrees with the state the row would otherwise print. Null for rows with
+ * nothing to switch: catalog entries, skill files, project rules.
+ */
+export function extensionSwitch(
+  item: ExtensionItem,
+  ctx: { hasWorkspace: boolean; overrides?: MarketplaceOverrides | null }
+): { on: boolean; locked: boolean } | null {
+  if (item.group === 'discover') return null
+  const on = !(item.state.kind === 'off' || item.state.kind === 'off-here')
+  if (item.userRule) return { on: item.userRule.enabled, locked: false }
+  if (item.scope) return { on, locked: false }
+  if (item.plugin && item.server) {
+    // A server shipped in a package follows it; only this workspace's Off here
+    // is its own, so that is all its switch can write.
+    if (!ctx.hasWorkspace) return { on, locked: true }
+    if (on) return { on, locked: false }
+    const pluginOn =
+      workspaceOverrideForId(ctx.overrides, 'plugins', item.plugin.id) ?? item.plugin.enabled
+    const ownOff = workspaceOverrideForId(ctx.overrides, 'mcp', item.server.id) === false
+    return { on, locked: !(pluginOn && ownOff) }
+  }
+  return null
+}
+
+/** Switched on in this workspace alone — what the row's "this workspace" marks. */
+export function scopedToWorkspace(item: Pick<ExtensionItem, 'scope'>, hasWorkspace: boolean): boolean {
+  return hasWorkspace && item.scope != null && whereValue(item.scope) === 'this'
+}
+
 /**
  * The writes that make `next` true, applied in order: the global flag, then
  * this workspace's override (`null` clears it). Empty when nothing changes.

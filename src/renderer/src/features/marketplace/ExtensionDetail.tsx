@@ -19,7 +19,6 @@ import {
   extensionKindLabel,
   mcpLaunchLine,
   whereValue,
-  wherePlan,
   type ExtensionItem,
   type McpLaunch,
   type WhereValue
@@ -235,24 +234,11 @@ function WhereControl({
   )
 }
 
-/** Global flag first, then this workspace's override — the order `wherePlan` returns. */
+/** The same writes as the row's switch and ⋯ menu, through the controller. */
 function useWhere(item: ExtensionItem, controller: MarketplaceController) {
   const hasWorkspace = controller.canOverrideWorkspace
   const apply = async (next: WhereValue): Promise<void> => {
-    const scope = item.scope
-    if (!scope) return
-    const plan = wherePlan(scope, next, hasWorkspace)
-    if (plan.global !== undefined) {
-      const ok = item.installed
-        ? await controller.setEnabled(item.installed, plan.global)
-        : item.server
-          ? await controller.setServerEnabled(item.server.id, plan.global)
-          : false
-      if (!ok) return
-    }
-    if (plan.override !== undefined) {
-      await controller.setWorkspaceOverride(scope.overrideKind, scope.overrideId, plan.override)
-    }
+    await controller.applyWhere(item, next)
   }
   return { hasWorkspace, apply }
 }

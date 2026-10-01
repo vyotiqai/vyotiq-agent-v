@@ -92,7 +92,8 @@ async function selectRow(key: string): Promise<void> {
     if (!found) throw new Error(`no row ${key}`)
     return found
   })
-  fireEvent.click(within(row).getByRole('button'))
+  // The row's own button comes first; Sign in and the ⋯ menu sit beside it.
+  fireEvent.click(within(row).getAllByRole('button')[0]!)
 }
 
 /** Pushed to whatever the wizard subscribed with, to finish a device flow. */

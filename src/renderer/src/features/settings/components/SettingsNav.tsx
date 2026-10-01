@@ -1,7 +1,7 @@
 import type { KeyboardEvent, ReactNode, Ref } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui'
-import { SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { CONTROL_HOVER, SECTION_LABEL, SELECTED } from '@renderer/lib/utils/layout'
 import { SECTION_GROUPS, SECTION_ICONS, SECTION_LABELS } from '../constants'
 import type { SettingsSection } from '../types'
 
@@ -67,7 +67,9 @@ function IssueMark({ reason }: { reason: string }) {
 
 /**
  * Settings' own index, in the navigator's column while Settings is open:
- * Back to wherever you came from, search, the sections in three groups, and
+ * Back to wherever you came from, search, the sections in three groups (the
+ * column's table of contents: an entry scrolls to its section, and the one in
+ * view is marked), and
  * the one fact the whole page shares — nothing here waits for a Save.
  */
 export function SettingsIndex({
@@ -105,10 +107,10 @@ export function SettingsIndex({
                   key={id}
                   type="button"
                   data-settings-section={id}
-                  aria-current={on ? 'page' : undefined}
+                  aria-current={on ? 'location' : undefined}
                   className={cn(
                     'flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-sm vy-transition focus-visible:vy-focus-ring',
-                    on ? 'bg-surface-2 font-medium text-fg-strong' : 'text-secondary hover:bg-surface hover:text-fg-strong'
+                    on ? cn(SELECTED, 'font-medium') : cn(CONTROL_HOVER, 'text-secondary hover:text-fg-strong')
                   )}
                   onClick={() => onSectionChange(id)}
                   onKeyDown={moveBetweenSections}
@@ -163,10 +165,10 @@ export function SettingsIndexStrip({
               key={id}
               type="button"
               data-settings-section={id}
-              aria-current={on ? 'page' : undefined}
+              aria-current={on ? 'location' : undefined}
               className={cn(
                 'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm vy-transition focus-visible:vy-focus-ring',
-                on ? 'bg-surface-2 font-medium text-fg-strong' : 'text-secondary hover:bg-surface hover:text-fg-strong'
+                on ? cn(SELECTED, 'font-medium') : cn(CONTROL_HOVER, 'text-secondary hover:text-fg-strong')
               )}
               onClick={() => onSectionChange(id)}
             >

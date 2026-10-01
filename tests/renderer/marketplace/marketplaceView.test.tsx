@@ -293,7 +293,9 @@ describe('Extensions list', () => {
     })
     renderView()
     const needs = await screen.findByRole('heading', { level: 2, name: /^Needs you/ })
-    expect(within(needs.closest('section')!).getByText('Needs sign-in')).toBeTruthy()
+    // Sign in takes the switch's place on the row.
+    expect(within(needs.closest('section')!).getByRole('button', { name: 'Sign in to Linear' })).toBeTruthy()
+    expect(within(row('mcp:linear')).queryByRole('switch')).toBeNull()
     const headings = within(screen.getByRole('tabpanel', { name: 'All' })).getAllByRole('heading', { level: 2 })
     expect(headings[0]).toBe(needs)
     // The first row is the one shown beside the list.
@@ -411,7 +413,9 @@ describe('Extensions list', () => {
     }
     renderView({ settings })
     await screen.findByRole('heading', { level: 2, name: /^Installed/ })
-    expect(within(row('mcp:memory')).getByText('Off')).toBeTruthy()
+    expect(within(row('mcp:memory')).getByRole('switch', { name: 'Enable Memory' }).getAttribute('aria-checked')).toBe(
+      'false'
+    )
     expect(screen.queryByText(/2 tools/)).toBeNull()
 
     fireEvent.click(within(row('mcp:memory')).getByRole('button'))
@@ -550,6 +554,120 @@ describe('Extensions list', () => {
     expect((search as HTMLInputElement).value).toBe('')
     fireEvent.keyDown(search, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Row switches', () => {
+  const WS = 'C:/work/acme'
+
+  function installMemory(opts: { enabled?: boolean } = {}): void {
+    const index = (enabled: boolean) => ({
+      schemaVersion: 1 as const,
+      items: [installedItem({ id: 'memory', name: 'Memory', enabled })]
+    })
+    installBridge({
+      marketplaceListInstalled: vi.fn(async () => ok(index(opts.enabled ?? true))),
+      marketplaceSetEnabled: vi.fn(async (_id: string, enabled: boolean) => ok(index(enabled)))
+    })
+  }
+
+  function renderInWorkspace(override: Record<string, boolean> | null = null) {
+    const onSetSettingsOverride = vi.fn(async () => ({ ok: true as const }))
+    renderView({
+      activeWorkspacePath: WS,
+      settingsOverridesByPath: override
+        ? { [WS]: { useOverride: false, marketplaceOverrides: { mcp: override } } }
+        : {},
+      onSetSettingsOverride
+    })
+    return onSetSettingsOverride
+  }
+
+  const memorySwitch = () => within(row('mcp:memory')).getByRole('switch', { name: 'Enable Memory' })
+
+  it('flips the global flag when no workspace is open', async () => {
+    installMemory()
+    renderView()
+    await waitFor(() => expect(memorySwitch().getAttribute('aria-checked')).toBe('true'))
+    // With nowhere to scope to, there is no ⋯ menu either.
+    expect(within(row('mcp:memory')).queryByRole('button', { name: 'Where Memory can run' })).toBeNull()
+    fireEvent.click(memorySwitch())
+    await waitFor(() => expect(bridge.marketplaceSetEnabled).toHaveBeenCalledWith('memory', false))
+  })
+
+  it('switches off in this workspace only, the way the detail’s Off here does', async () => {
+    installMemory()
+    const onSetSettingsOverride = renderInWorkspace()
+    await waitFor(() => expect(memorySwitch().getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(memorySwitch())
+    await waitFor(() =>
+      expect(onSetSettingsOverride).toHaveBeenCalledWith(WS, {
+        useOverride: false,
+        marketplaceOverrides: { mcp: { memory: false } }
+      })
+    )
+    expect(bridge.marketplaceSetEnabled).not.toHaveBeenCalled()
+  })
+
+  it('switches a server that is off here back on by clearing the override', async () => {
+    installMemory()
+    installBridge({
+      ...bridge,
+      mcpStatus: vi.fn(async () => ok({ servers: [{ ...memoryConnected, enabled: false }] }))
+    })
+    const onSetSettingsOverride = renderInWorkspace({ memory: false })
+    await waitFor(() => expect(memorySwitch().getAttribute('aria-checked')).toBe('false'))
+    fireEvent.click(memorySwitch())
+    await waitFor(() =>
+      expect(onSetSettingsOverride).toHaveBeenCalledWith(WS, {
+        useOverride: false,
+        marketplaceOverrides: { mcp: {} }
+      })
+    )
+    expect(bridge.marketplaceSetEnabled).not.toHaveBeenCalled()
+  })
+
+  it('marks a row scoped to this workspace and keeps the scope in its ⋯ menu', async () => {
+    installMemory({ enabled: false })
+    const onSetSettingsOverride = renderInWorkspace({ memory: true })
+    await waitFor(() => expect(within(row('mcp:memory')).getByText('this workspace')).toBeTruthy())
+    expect(memorySwitch().getAttribute('aria-checked')).toBe('true')
+    expect(within(row('mcp:memory')).getByText('2 tools')).toBeTruthy()
+
+    fireEvent.click(within(row('mcp:memory')).getByRole('button', { name: 'Where Memory can run' }))
+    const menu = screen.getByRole('menu', { name: 'Where Memory can run' })
+    const choice = (name: string) => within(menu).getByRole('menuitemcheckbox', { name })
+    expect(choice('This workspace only').getAttribute('aria-checked')).toBe('true')
+    expect(choice('All workspaces').getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(choice('All workspaces'))
+    await waitFor(() => expect(bridge.marketplaceSetEnabled).toHaveBeenCalledWith('memory', true))
+    await waitFor(() =>
+      expect(onSetSettingsOverride).toHaveBeenCalledWith(WS, {
+        useOverride: false,
+        marketplaceOverrides: { mcp: {} }
+      })
+    )
+  })
+
+  it('turns a user rule on and off through its own flag', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    const rule = { id: 'r1', name: 'Terse', body: 'Be brief.', enabled: true }
+    renderView({ settings: { ...baseSettings, userRules: [rule] }, onUpdate })
+    const toggle = await waitFor(() => within(row('user-rule:r1')).getByRole('switch', { name: 'Enable Terse' }))
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    // What the switch cannot say still shows.
+    expect(within(row('user-rule:r1')).getByText('Always applied')).toBeTruthy()
+    fireEvent.click(toggle)
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ userRules: [{ ...rule, enabled: false }] }))
+  })
+
+  it('gives no switch to what has no on and off to keep', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    const skill = row('local:C:/tmp/.vyotiq/skills/ship-notes/SKILL.md')
+    expect(within(skill).queryByRole('switch')).toBeNull()
+    expect(within(skill).getByText('Local')).toBeTruthy()
+    expect(within(row('mcp:filesystem')).queryByRole('switch')).toBeNull()
   })
 })
 

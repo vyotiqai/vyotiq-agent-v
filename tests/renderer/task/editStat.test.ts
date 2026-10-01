@@ -56,6 +56,10 @@ describe('editStatOf', () => {
       path: 'old.ts',
       exact: false
     })
+    // Main reports a rewrite's real change: that is exact.
+    expect(
+      editStatOf(row('edit', { path: 'old.ts', contents: 'one\n' }, 'Wrote old.ts (4 chars; +1 -3 lines)'))
+    ).toEqual({ path: 'old.ts', exact: true, add: 1, del: 3 })
   })
 
   it('ignores tools that write nothing', () => {
