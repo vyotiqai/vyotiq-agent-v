@@ -79,8 +79,9 @@ test('search finds a task by what was said in it, and shows the line', async () 
 
 test('Ctrl-click selects several tasks; Archive puts them away in one go, and Undo brings them back', async () => {
   const page = launched.window
-  await rowFor(page, 'Write docs').click({ modifiers: ['Control'] })
-  await rowFor(page, 'Ship release').click({ modifiers: ['Control'] })
+  // Ctrl-click is a right-click on macOS, where Command selects.
+  await rowFor(page, 'Write docs').click({ modifiers: ['ControlOrMeta'] })
+  await rowFor(page, 'Ship release').click({ modifiers: ['ControlOrMeta'] })
   const bar = page.getByRole('group', { name: 'Selected tasks' })
   await expect(bar).toContainText('2 selected')
   await bar.getByRole('button', { name: 'Archive' }).click()
