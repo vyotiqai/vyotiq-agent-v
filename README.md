@@ -5,7 +5,7 @@
 
 Vyotiq ("Agent V") is an Electron desktop app for handing real work on a real repository to a coding agent. You give it a task; it works in your checkout with terminal, file, git and browser tools, and the app keeps a record of the work — every step, every change, the checks it was held to and whether they held — beside the files, terminal, browser and pull request it worked in. It works with many model providers, and voice dictation transcribes on-device with Whisper.
 
-This is version 1.0.0, the rebuilt app. Release notes: [release-notes/v1.0.0.md](release-notes/v1.0.0.md).
+This is version 1.1.0. Release notes: [release-notes/v1.1.0.md](release-notes/v1.1.0.md).
 
 ## Features
 

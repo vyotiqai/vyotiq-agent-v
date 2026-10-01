@@ -75,6 +75,10 @@ in-app updater chain never breaks.**
 ## 1. Before every commit
 
 - [ ] `pnpm typecheck` — exit 0.
+- [ ] `node scripts/typecheck-tests-ratchet.mjs` — exit 0. `pnpm typecheck`
+      does not cover `tests/`; CI runs this on Linux only, and a release
+      waits for CI, so a fixture that drifts from a changed type holds the
+      release up (22 new errors across 8 files before 1.1.0).
 - [ ] `pnpm lint` — exit 0.
 - [ ] `pnpm test` — green. Known-allowed failures are listed in
       `RELEASE-RUNBOOK.md` §7; confirm the failure set has not grown, and
@@ -120,6 +124,18 @@ dependency's file layout:
       (title `Vyotiq`, not `Error`), 4+ processes, and that
       `%APPDATA%\Vyotiq\logs\vyotiq.log` is created with fresh entries.
       An "Error"-titled window = main-process crash = **do not ship**.
+- [ ] **Flipped an Electron fuse (`electronFuses:`)? A launch is not enough.**
+      A fuse breaks what runs later, not at startup. Measured on Electron 44
+      against a stock runtime: `runAsNode: false` makes `child_process.fork`
+      throw, and node-pty's Windows `kill()` forks, so closing a terminal tab
+      raised an unhandled rejection that ended the app;
+      `enableNodeOptionsEnvironmentVariable: false` also drops
+      `NODE_EXTRA_CA_CERTS`, so provider calls behind a proxy that re-signs
+      TLS failed with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. Before flipping one,
+      run a minimal packaged probe for the paths it can touch, then close a
+      terminal in the real packaged build (launch it with
+      `--remote-debugging-port` and drive `window.vyotiq.ptyCreate` and
+      `ptyKill` over CDP). Both fuses above are left on in `electron-builder.yml`.
 - [ ] **Release candidates: verify the installer without running it.** SHA512
       against `latest.yml`, then unpack the payload with the bundled 7z
       (`7z l <setup.exe>`) to confirm it carries the expected version. The
@@ -227,6 +243,15 @@ dependency's file layout:
   (title `Error` = crash), screenshot for the message, or check
   `%APPDATA%\Vyotiq\logs\vyotiq.log` + `crash-history.json`. The missing
   module name tells you which trim/filter to fix.
+- **Packaged Windows app exits when a terminal tab is closed**, with
+  `Unhandled rejection` and `child_process.fork() is not supported when the
+  runAsNode fuse is disabled` in the log: the `runAsNode` fuse is off. The
+  same build passes a plain launch, which is why the launch test alone does
+  not catch it.
+- **`UNABLE_TO_VERIFY_LEAF_SIGNATURE` from providers in the packaged app
+  only**, behind a proxy that re-signs TLS: `NODE_EXTRA_CA_CERTS` never
+  reaches the process because the `enableNodeOptionsEnvironmentVariable`
+  fuse is off.
 - **App runs but no `%APPDATA%\Vyotiq`**: it died before
   `initMainLogging()` — expect a top-level import/require failure in the
   packaged `out/main/index.js`.
