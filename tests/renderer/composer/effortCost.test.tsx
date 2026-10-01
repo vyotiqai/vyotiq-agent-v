@@ -66,14 +66,15 @@ describe('effortFootNote', () => {
 })
 
 describe('Model popover effort note', () => {
-  const chatSettings: EffectiveChatSettings = {
+  // Only the fields the popover reads; the rest of the settings are not its business.
+  const chatSettings = {
     provider: 'anthropic',
     model: 'claude-sonnet-4-5',
     keepRecentTurns: DEFAULT_SETTINGS.keepRecentTurns,
     thinkingEnabled: true,
     thinkingEffort: 'medium',
     showThinking: DEFAULT_SETTINGS.showThinking
-  }
+  } as EffectiveChatSettings
 
   beforeEach(() => {
     window.vyotiq = {

@@ -88,7 +88,7 @@
   },
   "tsconfig.tests-web.json": {
     "tests/renderer/app/appPaneIdentity.test.tsx": 4,
-    "tests/renderer/app/appShell.test.tsx": 35,
+    "tests/renderer/app/appShell.test.tsx": 4,
     "tests/renderer/chat/agentContextCard.test.tsx": 1,
     "tests/renderer/chat/app.sessionDrop.test.tsx": 2,
     "tests/renderer/chat/autoResume.test.tsx": 1,
@@ -102,7 +102,6 @@
     "tests/renderer/chat/perfMatrixCaps.test.ts": 1,
     "tests/renderer/chat/planHandoffAndDiffs.test.ts": 3,
     "tests/renderer/chat/prPanelChecksWatch.test.tsx": 1,
-    "tests/renderer/chat/rightPanels.changes.test.tsx": 10,
     "tests/renderer/chat/rightPanels.prPanel.test.tsx": 1,
     "tests/renderer/chat/terminalPanelAgentMirror.test.tsx": 1,
     "tests/renderer/chat/toolUi/registry.test.ts": 3,
@@ -125,7 +124,7 @@
     "tests/renderer/marketplace/connectWizard.test.tsx": 6,
     "tests/renderer/marketplace/extensionItems.test.ts": 1,
     "tests/renderer/marketplace/marketplaceView.test.tsx": 1,
-    "tests/renderer/settings/settings-view.test.tsx": 8,
+    "tests/renderer/settings/settings-view.test.tsx": 6,
     "tests/renderer/settings/storageSection.test.tsx": 4,
     "tests/renderer/settings/toolCatalog.test.tsx": 2,
     "tests/renderer/task/recordModel.test.ts": 1

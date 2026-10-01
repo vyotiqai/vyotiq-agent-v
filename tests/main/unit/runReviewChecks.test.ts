@@ -77,7 +77,7 @@ describe('listRuns: a run in review carries its checks', () => {
   })
 
   it('reads no checks for a run that is not in review', async () => {
-    vi.mocked(pendingReviewSummary).mockResolvedValue(null)
+    vi.mocked(pendingReviewSummary).mockResolvedValue(undefined)
     writeRun(workspace, 'settled', ['met'])
     const { runs } = await listRuns(workspace)
     expect(runs[0]?.review).toBeUndefined()

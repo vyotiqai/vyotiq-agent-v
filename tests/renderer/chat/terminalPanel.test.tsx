@@ -298,14 +298,14 @@ describe('TerminalPanel — what this task ran', () => {
       at: '2026-09-30T10:00:00.000Z',
       endedAt: '2026-09-30T10:00:02.000Z',
       tool: {
-        toolCallId: 't1',
+        id: 't1',
         name: 'terminal',
         status: 'done',
         summary: 'pnpm test',
         argsPreview: JSON.stringify({ command: 'pnpm test' }),
         content: 'cwd: /ws\n3 passed\nexit_code: 0'
       }
-    } as UiItem
+    }
   ]
 
   const stubPty = (): void => {

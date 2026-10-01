@@ -10,14 +10,15 @@ import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
 import { resetComposerAttachmentStoreForTests } from '@renderer/lib/hooks/composerAttachmentStore'
 
-const chatSettings: EffectiveChatSettings = {
+// Only the fields the composer reads; the rest of the settings are not its business.
+const chatSettings = {
   provider: 'ollama',
   model: 'qwen2.5',
   keepRecentTurns: DEFAULT_SETTINGS.keepRecentTurns,
   thinkingEnabled: DEFAULT_SETTINGS.thinkingEnabled,
   thinkingEffort: DEFAULT_SETTINGS.thinkingEffort,
   showThinking: DEFAULT_SETTINGS.showThinking
-}
+} as EffectiveChatSettings
 
 const SHOT = 'data:image/jpeg;base64,/9j/AAAA'
 

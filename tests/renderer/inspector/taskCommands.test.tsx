@@ -23,7 +23,7 @@ const call = (
   at: '2026-09-30T10:00:00.000Z',
   endedAt: status === 'running' ? undefined : '2026-09-30T10:00:04.000Z',
   tool: {
-    toolCallId: id,
+    id,
     name: 'terminal',
     status,
     summary: command,
@@ -36,19 +36,27 @@ const call = (
 describe('collectTaskCommands', () => {
   it('reads each terminal call the way its card in the record does', () => {
     const items: UiItem[] = [
-      { kind: 'message', id: 'u', role: 'user', content: 'go', at: 1 } as UiItem,
+      { kind: 'message', id: 'u', role: 'user', content: 'go', at: '2026-09-30T09:59:00.000Z' },
       call('ok', 'pnpm test', 'done', 'cwd: /ws\n1 passed\nexit_code: 0'),
       call('bad', 'pnpm lint', 'done', 'cwd: /ws\nstderr:\nsrc/a.ts: 2 problems\nexit_code: 1'),
       call('stop', 'pnpm build', 'fail', 'Interrupted'),
       call('no', 'rm -rf out', 'fail', 'The user denied permission to run terminal'),
       call('live', 'pnpm dev', 'running'),
-      call('ask', 'git push', 'running', undefined, { approval: { id: 'a1' } } as Partial<ToolItem>),
+      call('ask', 'git push', 'running', undefined, {
+        approval: {
+          requestId: 'a1',
+          toolName: 'terminal',
+          summary: 'git push',
+          argsPreview: JSON.stringify({ command: 'git push' }),
+          mutating: true
+        }
+      }),
       {
         kind: 'tool',
         id: 'edit',
-        at: 3,
-        tool: { toolCallId: 'edit', name: 'edit', status: 'done', summary: 'a.ts' }
-      } as UiItem
+        at: '2026-09-30T10:00:05.000Z',
+        tool: { id: 'edit', name: 'edit', status: 'done', summary: 'a.ts' }
+      }
     ]
     const commands = collectTaskCommands(items)
     expect(commands.map((c) => [c.command, c.state])).toEqual([

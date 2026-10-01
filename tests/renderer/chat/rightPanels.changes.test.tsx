@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ChangesPanel } from '@renderer/features/chat/components/ChangesPanel'
+import type { UiItem } from '@shared/transcript'
 
 beforeEach(() => {
   Object.defineProperty(window, 'vyotiq', {
@@ -223,16 +224,16 @@ async function compose(intent: RegExp): Promise<HTMLInputElement> {
 }
 
 /** One finished edit the agent made, as the transcript records it. */
-const agentEdit = (path: string) => [
-  { kind: 'message' as const, id: 'u1', role: 'user' as const, content: 'edit', at: 1 },
+const agentEdit = (path: string): UiItem[] => [
+  { kind: 'message', id: 'u1', role: 'user', content: 'edit', at: '2026-09-30T10:00:00.000Z' },
   {
-    kind: 'tool' as const,
+    kind: 'tool',
     id: 'e1',
-    at: 2,
+    at: '2026-09-30T10:00:01.000Z',
     tool: {
-      toolCallId: 'e1',
+      id: 'e1',
       name: 'edit',
-      status: 'done' as const,
+      status: 'done',
       summary: path,
       argsPreview: JSON.stringify({ path, contents: 'hello\n' })
     }
@@ -240,16 +241,16 @@ const agentEdit = (path: string) => [
 ]
 
 /** One settled replacement: one line added above an unchanged one. */
-const agentReplace = (path: string) => [
-  { kind: 'message' as const, id: 'u1', role: 'user' as const, content: 'fix', at: 1 },
+const agentReplace = (path: string): UiItem[] => [
+  { kind: 'message', id: 'u1', role: 'user', content: 'fix', at: '2026-09-30T10:00:00.000Z' },
   {
-    kind: 'tool' as const,
+    kind: 'tool',
     id: 'r1',
-    at: 2,
+    at: '2026-09-30T10:00:01.000Z',
     tool: {
-      toolCallId: 'r1',
+      id: 'r1',
       name: 'str_replace',
-      status: 'done' as const,
+      status: 'done',
       summary: path,
       argsPreview: JSON.stringify({
         path,

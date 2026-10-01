@@ -3,6 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { AppShell } from '@renderer/app/AppShell'
 import { getToasts, resetToastStoreForTests } from '@renderer/lib/ui/toastStore'
 
@@ -10,7 +11,7 @@ const baseProps = {
   view: 'chat' as const,
   workspacePath: '/ws/demo',
   openWorkspaces: ['/ws/demo'],
-  activeRuns: [] as { runId: string; workspacePath: string }[],
+  activeRuns: [] as NonNullable<ComponentProps<typeof AppShell>['activeRuns']>,
   runsByWorkspacePath: {
     '/ws/demo': {
       runs: [
@@ -28,6 +29,8 @@ const baseProps = {
   },
   onOpenSettings: vi.fn(),
   onOpenMarketplace: vi.fn(),
+  onOpenHome: vi.fn(),
+  onOpenUsage: vi.fn(),
   onOpenChat: vi.fn(),
   onNewChat: vi.fn(),
   onNewChatInWorkspace: vi.fn(),

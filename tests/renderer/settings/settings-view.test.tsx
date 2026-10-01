@@ -934,6 +934,7 @@ describe('settings', () => {
           model: 'local',
           ollamaBaseUrl: DEFAULT_SETTINGS.ollamaBaseUrl,
           customOpenAiBaseUrl: 'http://192.168.1.50:9000/v1',
+          customProviders: DEFAULT_SETTINGS.customProviders,
           keepRecentTurns: DEFAULT_SETTINGS.keepRecentTurns,
           autoCompactThresholdRatio: DEFAULT_SETTINGS.autoCompactThresholdRatio,
           thinkingEnabled: DEFAULT_SETTINGS.thinkingEnabled,
@@ -942,6 +943,7 @@ describe('settings', () => {
           toolApproval: DEFAULT_SETTINGS.toolApproval,
           agentPersona: DEFAULT_SETTINGS.agentPersona,
           agentTone: DEFAULT_SETTINGS.agentTone,
+          agentIdentity: DEFAULT_SETTINGS.agentIdentity,
           responseLanguage: DEFAULT_SETTINGS.responseLanguage,
           responseVerbosity: DEFAULT_SETTINGS.responseVerbosity
         }}
@@ -1383,9 +1385,11 @@ describe('settings', () => {
           thinkingEnabled: DEFAULT_SETTINGS.thinkingEnabled,
           thinkingEffort: DEFAULT_SETTINGS.thinkingEffort,
           showThinking: DEFAULT_SETTINGS.showThinking,
+          customProviders: DEFAULT_SETTINGS.customProviders,
           toolApproval: DEFAULT_SETTINGS.toolApproval,
           agentPersona: 'OverrideBot',
           agentTone: '',
+          agentIdentity: DEFAULT_SETTINGS.agentIdentity,
           responseLanguage: '',
           responseVerbosity: 'concise'
         }}
@@ -2376,12 +2380,14 @@ describe('Effort beside the model', () => {
           customOpenAiBaseUrl: DEFAULT_SETTINGS.customOpenAiBaseUrl,
           keepRecentTurns: DEFAULT_SETTINGS.keepRecentTurns,
           autoCompactThresholdRatio: DEFAULT_SETTINGS.autoCompactThresholdRatio,
+          customProviders: DEFAULT_SETTINGS.customProviders,
           thinkingEnabled: true,
           thinkingEffort: 'medium',
           showThinking: DEFAULT_SETTINGS.showThinking,
           toolApproval: DEFAULT_SETTINGS.toolApproval,
           agentPersona: '',
           agentTone: '',
+          agentIdentity: DEFAULT_SETTINGS.agentIdentity,
           responseLanguage: '',
           responseVerbosity: 'concise'
         }}
