@@ -101,10 +101,12 @@ function ProviderKeyRow({
       : form.encryptionAvailable
         ? 'none'
         : 'unavailable'
-  // Without OS secure storage a provider with no base URL has nothing to open.
-  const manageable = form.encryptionAvailable || hasBaseUrl
   // Bedrock and Vertex sign in more ways than a pasted key; their panels clear it themselves.
   const cloud = id === 'bedrock' || id === 'vertex'
+  // Without OS secure storage a key-only provider with no base URL has nothing to open. A cloud
+  // provider still has a region, project and login check to set, so its panel opens and only
+  // the controls that store a secret stay off.
+  const manageable = form.encryptionAvailable || hasBaseUrl || cloud
   const detail =
     id === 'bedrock'
       ? form.settings.bedrockRegion
