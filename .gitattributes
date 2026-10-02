@@ -21,3 +21,8 @@ resources/marketplace/**/*.sh text eol=lf
 # The PNGs are binary; the manifest is emitted with LF, so pin it.
 resources/tray/**/*.png binary
 resources/tray/manifest.json text eol=lf
+
+# Headless launchers (docs/headless.md): the sh script needs LF for its
+# shebang, the batch file CRLF for cmd.
+bin/vyotiq text eol=lf
+bin/*.cmd text eol=crlf

@@ -34,8 +34,8 @@ surfaces as a runtime failure, or not at all.
 pnpm typecheck:tests
 ```
 
-It is not part of `pnpm typecheck`: as of 2026-09-30 the suites carry **581
-pre-existing type errors across 135 files**, none of them in production `src/`.
+It is not part of `pnpm typecheck`: as of 2026-10-01 the suites carry **529
+pre-existing type errors across 133 files**, none of them in production `src/`.
 CI runs a ratchet instead, so the count can only go down:
 
 ```

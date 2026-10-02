@@ -135,7 +135,9 @@ dependency's file layout:
       run a minimal packaged probe for the paths it can touch, then close a
       terminal in the real packaged build (launch it with
       `--remote-debugging-port` and drive `window.vyotiq.ptyCreate` and
-      `ptyKill` over CDP). Both fuses above are left on in `electron-builder.yml`.
+      `ptyKill` over CDP). Both fuses above are off since their causes were
+      fixed in code (`src/main/app/conptyKill.ts`,
+      `src/main/net/caCertificates.ts`); keep those fixes with the fuses.
 - [ ] **Release candidates: verify the installer without running it.** SHA512
       against `latest.yml`, then unpack the payload with the bundled 7z
       (`7z l <setup.exe>`) to confirm it carries the expected version. The
@@ -245,13 +247,17 @@ dependency's file layout:
   module name tells you which trim/filter to fix.
 - **Packaged Windows app exits when a terminal tab is closed**, with
   `Unhandled rejection` and `child_process.fork() is not supported when the
-  runAsNode fuse is disabled` in the log: the `runAsNode` fuse is off. The
-  same build passes a plain launch, which is why the launch test alone does
-  not catch it.
+  runAsNode fuse is disabled` in the log: the `runAsNode` fuse is off and
+  something forked that `conptyKill.ts` / `pipeErrors.ts` do not cover (a
+  node-pty upgrade, or new code using `child_process.fork` instead of
+  `utilityProcess`). The same build passes a plain launch, which is why the
+  launch test alone does not catch it.
 - **`UNABLE_TO_VERIFY_LEAF_SIGNATURE` from providers in the packaged app
-  only**, behind a proxy that re-signs TLS: `NODE_EXTRA_CA_CERTS` never
-  reaches the process because the `enableNodeOptionsEnvironmentVariable`
-  fuse is off.
+  only**, behind a proxy that re-signs TLS: Electron strips
+  `NODE_EXTRA_CA_CERTS` because the `enableNodeOptionsEnvironmentVariable`
+  fuse is off, and `caCertificates.ts` did not get the root back. Look for
+  `NODE_EXTRA_CA_CERTS not loaded` in the log; a variable set only in the
+  launching shell (not the user or machine environment) cannot be recovered.
 - **App runs but no `%APPDATA%\Vyotiq`**: it died before
   `initMainLogging()` — expect a top-level import/require failure in the
   packaged `out/main/index.js`.

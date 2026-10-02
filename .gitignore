@@ -138,6 +138,15 @@ venv/
 # to do, and what bounds it; a security boundary documented only on one machine
 # is no boundary at all.
 !/docs/agent-tools.md
+# Hand-authored, no .docx source: how to run and extend the coding eval
+# (scripts/eval-coding.mjs), which has no other documentation.
+!/docs/evals.md
+# Hand-authored, no .docx source: what the command sandbox confines per OS
+# (a security boundary, as above), headless mode's flags and exit codes, and
+# the helper agent-type file format. Each is the only description of its feature.
+!/docs/sandbox.md
+!/docs/headless.md
+!/docs/agent-types.md
 .cursorrules
 AGENTS.md
 scripts/remove-coauthors-from-history.sh

@@ -202,5 +202,32 @@ export default [
         }
       ]
     }
+  },
+  {
+    // loop.ts importing the ./tools barrel closes loop -> tools/index ->
+    // instanceTools -> agentInstances -> loop, and ESM cycle init leaves
+    // AGENT_TOOLS empty: every builtin drops off the wire and ~111 agentLoop*
+    // tests fail without naming the import. executeStepTools.ts is imported
+    // only by loop.ts, so the barrel closes the same cycle from there. This
+    // block replaces the one above for these files, so it repeats @renderer.
+    files: ['src/main/agent/loop.ts', 'src/main/agent/executeStepTools.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['./tools', './tools/index', './tools/index.ts'].map((name) => ({
+            name,
+            message:
+              'The ./tools barrel closes a cycle back to loop.ts that empties AGENT_TOOLS at init. Import the leaf module (./tools/<file>) instead.'
+          })),
+          patterns: [
+            {
+              group: ['@renderer', '@renderer/*'],
+              message: 'Main/preload must not import renderer code (@renderer/*).'
+            }
+          ]
+        }
+      ]
+    }
   }
 ]

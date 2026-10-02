@@ -12,6 +12,16 @@
       "port": 5207
     },
     {
+      "name": "redesign-rail",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--config",
+        "src/redesign/rail/vite.config.ts"
+      ],
+      "port": 5203
+    },
+    {
       "name": "redesign-voice",
       "runtimeExecutable": "node",
       "runtimeArgs": [

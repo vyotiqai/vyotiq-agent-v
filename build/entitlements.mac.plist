@@ -4,6 +4,30 @@
   <dict>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
+    <!--
+      The next two came from electron-builder's template
+      (app-builder-lib/templates/entitlements.mac.plist). Release builds are
+      unsigned today, so electron-builder skips codesign and neither is applied;
+      they only matter once a Developer ID identity is present.
+
+      allow-unsigned-executable-memory: V8 needs only allow-jit (it maps code
+      with MAP_JIT). @electron/osx-sign's own default.darwin.plist ships allow-jit
+      without it. Remove it once a signed macOS build has been run through
+      dictation (onnxruntime-node in a utilityProcess), a terminal (node-pty),
+      code-index embedding and an agent-built tool with it absent.
+
+      disable-library-validation: at pack time @electron/osx-sign walks all of
+      Contents/ (Resources/app.asar.unpacked included) and signs every Mach-O
+      file with the one identity, so the shipped .node/.dylib files (node-pty,
+      onnxruntime-node, sharp/libvips under @huggingface/transformers) carry the
+      app's team ID and would load with validation on. It stays because two
+      loads are not ours to sign: an agent-built tool runs in a utilityProcess
+      (it inherits this file) and may require a native addon from the user's
+      workspace, and a .node left inside app.asar is extracted to a temp file
+      by Electron before dlopen, unsigned. Remove it only after deciding that
+      agent-built tools may not load workspace native addons, and with a test
+      that every .node/.dylib in node_modules is matched by asarUnpack.
+    -->
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
