@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'node:fs'
+import { statSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserWindow } from 'electron'
 import { IPC } from '../../../shared/channels'
@@ -95,6 +95,8 @@ type Watch = {
   /** The exact path the renderer asked about — echoed back so it can filter. */
   workspacePath: string
   handles: Map<TargetKey, FSWatcher>
+  /** The folder each handle watches, by inode, to tell it from a folder made again in its place. */
+  armedIno: Map<TargetKey, number>
   timer: ReturnType<typeof setTimeout> | null
   /** When the open coalescing window started; 0 when none is pending. */
   windowOpenedAt: number
@@ -167,15 +169,47 @@ function schedule(w: Watch, gitChanged: boolean): void {
   }, waitMs)
 }
 
+/** Close one target's watch so the next armTargets starts it again. */
+function disarm(w: Watch, key: TargetKey): void {
+  const handle = w.handles.get(key)
+  if (!handle) return
+  try {
+    handle.close()
+  } catch {
+    /* already closed */
+  }
+  w.handles.delete(key)
+  w.armedIno.delete(key)
+}
+
 /**
  * Arm every target that is not watched yet. Re-run on each rebuild: a missing
  * `.git` or `.vyotiq/memory` is armed the moment its parent reports it
  * appearing, without a second code path for "directory created later".
+ *
+ * Look before watching. On Linux a recursive watch is Node's own, and from
+ * Node 24 (Electron 44) watching a path that does not exist returns a watcher
+ * on nothing instead of throwing ENOENT, so a folder made after the workspace
+ * opened was counted as armed and never heard. A watched folder that is
+ * deleted, or deleted and made again, is just as deaf: its watch is dropped
+ * when the folder is gone, and replaced when the inode under the path changed.
  */
 function armTargets(w: Watch): void {
   for (const target of TARGETS) {
-    if (w.handles.has(target.key)) continue
     const dir = join(w.workspacePath, ...target.rel)
+    let ino: number
+    try {
+      ino = statSync(dir).ino
+    } catch {
+      if (w.handles.has(target.key)) trace(`${target.key} is gone; disarmed`)
+      disarm(w, target.key)
+      continue
+    }
+    if (w.handles.has(target.key)) {
+      if (w.armedIno.get(target.key) === ino) continue
+      trace(`${target.key} was made again; re-arming`)
+      disarm(w, target.key)
+    }
     try {
       trace(`arming ${target.key}`)
       const handle = watch(dir, { recursive: target.recursive }, (event, filename) => {
@@ -203,10 +237,12 @@ function armTargets(w: Watch): void {
           /* already closed */
         }
         w.handles.delete(target.key)
+        w.armedIno.delete(target.key)
       })
       // Never hold the event loop open at quit.
       handle.unref()
       w.handles.set(target.key, handle)
+      w.armedIno.set(target.key, ino)
       trace(`armed ${target.key}`)
     } catch (err) {
       // A directory that does not exist yet is expected: its parent is watched,
@@ -297,6 +333,7 @@ export function armAgentContextWatch(
   const w: Watch = {
     workspacePath,
     handles: new Map(),
+    armedIno: new Map(),
     timer: null,
     windowOpenedAt: 0,
     gitDirty: false,
@@ -328,6 +365,7 @@ export function stopAgentContextWatch(workspacePath: string): void {
     }
   }
   w.handles.clear()
+  w.armedIno.clear()
   if (watches.size === 0 && codeIndexUnsubscribe) {
     codeIndexUnsubscribe()
     codeIndexUnsubscribe = null
