@@ -41,7 +41,7 @@ Installers are published to the companion repository [vyotiqai/vyotiq-agent-v-re
 
 Prerequisites:
 
-- Node.js `>=22.18.0` (see `engines` in `package.json`)
+- Node.js `>=24.14.0` (see `engines` in `package.json`)
 - pnpm 12.4.2, pinned by the `packageManager` field — enable it once with `corepack enable`
 
 ```bash

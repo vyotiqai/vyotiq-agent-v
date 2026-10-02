@@ -3,12 +3,6 @@ import http from 'http'
 import net from 'net'
 import type { NetworkSettings } from '@shared/ipc'
 
-// Node's own proxy support is `http.setGlobalProxyFromEnv`, which the Node in Electron 44 has.
-// CI also runs the suite on Node 22, which does not; the module then reports that instead, so
-// only the tests that send real traffic through a proxy need it.
-const hasBuiltInProxy =
-  typeof (http as unknown as { setGlobalProxyFromEnv?: unknown }).setGlobalProxyFromEnv === 'function'
-
 // Chromium sessions, as far as the proxy module touches them.
 const sessionCalls: Array<{ partition: string; config: unknown }> = []
 let resolveAnswer = 'DIRECT'
@@ -135,13 +129,7 @@ describe('proxy decisions', () => {
 })
 
 describe('proxy traffic', () => {
-  it.runIf(!hasBuiltInProxy)('says so, and leaves Node direct, when the runtime has no built-in proxy support', () => {
-    applyEarlyNodeProxy(settings({ proxyMode: 'manual', proxyUrl: 'http://proxy.corp:8080' }))
-    expect(proxyStatus()).toMatchObject({ source: 'none', note: expect.stringMatching(/no built-in proxy support/) })
-    expect(childProxyEnv()).toEqual({})
-  })
-
-  it.runIf(hasBuiltInProxy)('sends fetch and http.request through a manual proxy, and lets bypassed hosts go direct', async () => {
+  it('sends fetch and http.request through a manual proxy, and lets bypassed hosts go direct', async () => {
     applyEarlyNodeProxy(settings({ proxyMode: 'manual', proxyUrl: `http://127.0.0.1:${proxyPort}`, proxyBypass: 'direct.test' }))
     expect(proxyStatus()).toMatchObject({ source: 'manual' })
 
@@ -168,7 +156,7 @@ describe('proxy traffic', () => {
     expect(proxied).toEqual([])
   })
 
-  it.runIf(hasBuiltInProxy)('lets a name the local resolver cannot find through when a proxy will resolve it', async () => {
+  it('lets a name the local resolver cannot find through when a proxy will resolve it', async () => {
     await expect(resolveAllowedUrl('https://only-behind-the-proxy.invalid/x')).rejects.toThrow()
     applyEarlyNodeProxy(settings({ proxyMode: 'manual', proxyUrl: `http://127.0.0.1:${proxyPort}` }))
     await expect(resolveAllowedUrl('https://only-behind-the-proxy.invalid/x')).resolves.toMatchObject({ addresses: [] })
@@ -176,7 +164,7 @@ describe('proxy traffic', () => {
     await expect(resolveAllowedUrl('http://127.0.0.1/x')).rejects.toThrow(/private or loopback/)
   })
 
-  it.runIf(hasBuiltInProxy)('gives child processes the proxy in both spellings, and nothing when direct', () => {
+  it('gives child processes the proxy in both spellings, and nothing when direct', () => {
     applyEarlyNodeProxy(settings({ proxyMode: 'manual', proxyUrl: 'http://proxy.corp:8080' }))
     expect(childProxyEnv()).toMatchObject({ HTTPS_PROXY: 'http://proxy.corp:8080', https_proxy: 'http://proxy.corp:8080' })
     expect(sanitizedTerminalEnv({ PATH: '/bin' })).toMatchObject({ HTTP_PROXY: 'http://proxy.corp:8080', no_proxy: 'localhost,127.0.0.1,::1' })
@@ -187,7 +175,7 @@ describe('proxy traffic', () => {
 })
 
 describe('applyNetworkSettings', () => {
-  it.runIf(hasBuiltInProxy)('reads the OS proxy through Chromium when nothing else is set, and configures every session', async () => {
+  it('reads the OS proxy through Chromium when nothing else is set, and configures every session', async () => {
     const saved = { HTTPS_PROXY: process.env.HTTPS_PROXY, https_proxy: process.env.https_proxy, HTTP_PROXY: process.env.HTTP_PROXY, http_proxy: process.env.http_proxy }
     for (const k of Object.keys(saved)) delete process.env[k]
     try {

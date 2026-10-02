@@ -20,7 +20,7 @@ does automatically, and how to confirm a release actually works.
 
 ## 2. Prerequisites
 
-- Node 22 and pnpm 12.4.2 (the workflows activate it via
+- Node 24 and pnpm 12.4.2 (the workflows activate it via
   `corepack prepare pnpm@12.4.2 --activate`, release.yml:32-35).
 - `gh` CLI authenticated against `vyotiqai/vyotiq-agent-v` (for
   `gh run watch` and release inspection).

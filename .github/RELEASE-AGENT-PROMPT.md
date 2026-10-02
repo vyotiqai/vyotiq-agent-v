@@ -93,7 +93,7 @@ Read this instead of rediscovering it.
 
 **The app.** `vyotiq` — an Electron desktop app. TypeScript main process, React
 19 + Tailwind v4 renderer, pnpm workspace, electron-vite + electron-builder +
-electron-updater. Node ≥ 22.18, pnpm 12.4.2 via corepack.
+electron-updater. Node ≥ 24.14, pnpm 12.4.2 via corepack.
 
 **Two repositories.**
 

@@ -2,7 +2,7 @@
 
 ## Setup
 
-- Node >= 22.18 (see `engines` in `package.json`)
+- Node >= 24.14, the line Electron 44 ships (see `engines` in `package.json`)
 - pnpm is pinned by `packageManager` — enable corepack once: `corepack enable`
 - `pnpm install` (postinstall fetches Electron, rebuilds native deps, and runs the sync scripts)
 

@@ -36,7 +36,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Verify tag matches package.json version
@@ -86,7 +86,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           # pnpm is not installed in this job (node scripts + gh only); the
           # v5 default package-manager-cache would try to resolve pnpm.
           package-manager-cache: false
@@ -173,7 +173,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Verify tag matches package.json version
@@ -267,7 +267,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           # pnpm is not installed in this job (node scripts + gh only); the
           # v5 default package-manager-cache would try to resolve pnpm.
           package-manager-cache: false

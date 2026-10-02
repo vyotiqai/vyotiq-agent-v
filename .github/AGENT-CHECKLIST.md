@@ -278,10 +278,11 @@ dependency's file layout:
   the last line says `Everything up-to-date`. Retry with
   `git -c http.postBuffer=524288000 -c http.version=HTTP/1.1 push` and confirm
   with `git ls-remote origin refs/heads/main`.
-- **CI red on every OS, local green**: CI runs Node 22, this machine and
-  Electron 44 run 24. `http.setGlobalProxyFromEnv` is missing on 22, so the
-  proxy traffic tests must be gated on it. Test the other branch locally by
-  deleting that property in a vitest setup file.
+- **CI red on every OS, local green**: check the Node line first. CI, the
+  release workflow and `engines` are on Node 24 (24.14 or later), the line
+  Electron 44 ships; move them together. In 1.1.0 CI was still on Node 22,
+  which has no `http.setGlobalProxyFromEnv`, and four proxy tests failed on
+  every OS while passing here.
 - **`SyntaxError: Invalid or unexpected token` loading a test, Windows CI
   only**: a script with a shebang that a test imports. Vite strips a hashbang
   only when it ends in a bare LF, and Windows checks files out as CRLF. Leave

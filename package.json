@@ -4,7 +4,7 @@
   "description": "Agent V — coding workspace for real repositories",
   "packageManager": "pnpm@12.4.2",
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=24.14.0"
   },
   "main": "./out/main/index.js",
   "author": "Vyotiq",
