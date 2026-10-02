@@ -97,6 +97,12 @@ type Watch = {
   handles: Map<TargetKey, FSWatcher>
   /** The folder each handle watches, by inode, to tell it from a folder made again in its place. */
   armedIno: Map<TargetKey, number>
+  /**
+   * Targets whose folder a parent's watch saw renamed — deleted or made. ext4
+   * often gives a folder made again the inode of the one just deleted, so the
+   * inode alone misses it.
+   */
+  stale: Set<TargetKey>
   timer: ReturnType<typeof setTimeout> | null
   /** When the open coalescing window started; 0 when none is pending. */
   windowOpenedAt: number
@@ -169,6 +175,17 @@ function schedule(w: Watch, gitChanged: boolean): void {
   }, waitMs)
 }
 
+/** Targets at or below `<parent>/<name>`, or every one below `parent` when the name is unknown. */
+function targetsUnder(parent: Target, name: string | null): TargetKey[] {
+  const depth = parent.rel.length
+  return TARGETS.filter(
+    (t) =>
+      t.rel.length > depth &&
+      parent.rel.every((segment, i) => t.rel[i] === segment) &&
+      (name == null || t.rel[depth]!.toLowerCase() === name.toLowerCase())
+  ).map((t) => t.key)
+}
+
 /** Close one target's watch so the next armTargets starts it again. */
 function disarm(w: Watch, key: TargetKey): void {
   const handle = w.handles.get(key)
@@ -180,6 +197,7 @@ function disarm(w: Watch, key: TargetKey): void {
   }
   w.handles.delete(key)
   w.armedIno.delete(key)
+  w.stale.delete(key)
 }
 
 /**
@@ -206,10 +224,11 @@ function armTargets(w: Watch): void {
       continue
     }
     if (w.handles.has(target.key)) {
-      if (w.armedIno.get(target.key) === ino) continue
+      if (!w.stale.has(target.key) && w.armedIno.get(target.key) === ino) continue
       trace(`${target.key} was made again; re-arming`)
       disarm(w, target.key)
     }
+    w.stale.delete(target.key)
     try {
       trace(`arming ${target.key}`)
       const handle = watch(dir, { recursive: target.recursive }, (event, filename) => {
@@ -224,6 +243,11 @@ function armTargets(w: Watch): void {
         // row frozen on its boot reading.
         const name = reported == null ? null : (reported.split(/[\\/]/).pop() ?? reported)
         trace(`event ${target.key} ${event} ${name ?? '(no name)'}${reported != null && reported !== name ? ' (reported as a path)' : ''}`)
+        // A rename here deleted or made a folder another target watches: its
+        // watch is on the old folder, so re-arm it on the next rebuild.
+        if (event === 'rename' && !target.recursive) {
+          for (const key of targetsUnder(target, name)) w.stale.add(key)
+        }
         if (target.names && name != null && !nameMatches(target.names, name)) return
         const gitChanged =
           target.gitNames != null && (name == null || nameMatches(target.gitNames, name))
@@ -334,6 +358,7 @@ export function armAgentContextWatch(
     workspacePath,
     handles: new Map(),
     armedIno: new Map(),
+    stale: new Set(),
     timer: null,
     windowOpenedAt: 0,
     gitDirty: false,
@@ -366,6 +391,7 @@ export function stopAgentContextWatch(workspacePath: string): void {
   }
   w.handles.clear()
   w.armedIno.clear()
+  w.stale.clear()
   if (watches.size === 0 && codeIndexUnsubscribe) {
     codeIndexUnsubscribe()
     codeIndexUnsubscribe = null

@@ -8,7 +8,10 @@
  * first note showed up (its parent reported it), every later one did not.
  *
  * `watch` here behaves like that Node on every platform: a missing path gets
- * a silent watcher. Everything else is the real code, real disk and real timers.
+ * a silent watcher, a recursive watch whose folder is deleted goes quiet
+ * instead of reporting an error, and `.vyotiq/memory` always reports the same
+ * inode, as a folder deleted and made again often does on ext4. Everything
+ * else is the real code, real disk and real timers.
  */
 import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -26,9 +29,25 @@ vi.mock('node:fs', async (importOriginal) => {
       // A watcher on nothing, as Node 24's Linux recursive watch returns.
       return Object.assign(new EventEmitter(), { close() {}, unref() {}, ref() {} })
     }
-    return (real.watch as (...args: unknown[]) => unknown)(path, ...rest)
+    const handle = (real.watch as (...args: unknown[]) => import('node:fs').FSWatcher)(path, ...rest)
+    if (!(rest[0] as { recursive?: boolean } | undefined)?.recursive) return handle
+    // Node's Linux recursive watch goes quiet when its folder is deleted; it
+    // never reports an error the way Windows does.
+    handle.on('error', () => {})
+    return Object.assign(new EventEmitter(), {
+      close: () => handle.close(),
+      unref: () => handle.unref(),
+      ref: () => handle.ref()
+    })
   }) as typeof real.watch
-  return { ...real, default: { ...real, watch }, watch }
+  // ext4 often hands a folder made again the inode of the one just deleted, so
+  // the inode alone cannot tell them apart; pin it to show that on any disk.
+  const statSync = ((path: string, ...rest: unknown[]) => {
+    const st = (real.statSync as (...args: unknown[]) => import('node:fs').Stats)(path, ...rest)
+    if (st && String(path).endsWith('memory')) st.ino = 4242
+    return st
+  }) as typeof real.statSync
+  return { ...real, default: { ...real, watch, statSync }, watch, statSync }
 })
 
 vi.mock('electron', () => ({
