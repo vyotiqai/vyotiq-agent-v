@@ -1,5 +1,7 @@
 import type { FontScale } from '@shared/appearance'
 import type {
+  AgentSandboxMode,
+  AgentSandboxNetwork,
   AutonomousSkipQuestions,
   DesktopNotificationMode,
   DictationEnterAction,
@@ -79,6 +81,16 @@ export const TERMINAL_SCREEN_READER_OPTIONS: SettingsOption<'auto' | 'on' | 'off
   { value: 'auto', label: 'Auto' },
   { value: 'on', label: 'Always on' },
   { value: 'off', label: 'Off' }
+]
+
+export const AGENT_SANDBOX_MODE_OPTIONS: SettingsOption<AgentSandboxMode>[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'workspace-write', label: 'Workspace only' }
+]
+
+export const AGENT_SANDBOX_NETWORK_OPTIONS: SettingsOption<AgentSandboxNetwork>[] = [
+  { value: 'allow', label: 'Allow' },
+  { value: 'deny', label: 'Deny' }
 ]
 
 export const SEARCH_ENGINE_OPTIONS: SettingsOption<SearchEngineId>[] = [

@@ -12,6 +12,7 @@ import { AddEndpointRow, ProviderKeys } from '../components/ProviderKeys'
 import { PROVIDER_KEY_ORDER } from '../constants'
 import { modelMenuOptions, useModelList } from '../hooks/useModelOptions'
 import { EffortField } from '../components/EffortField'
+import { FallbackModelsField } from '../components/FallbackModelsField'
 import { workspaceShort } from '../utils/settingsHelpers'
 
 export function ProvidersSection({
@@ -181,6 +182,7 @@ export function ProvidersSection({
           </div>
         </SettingsField>
         <EffortField form={form} models={models} />
+        <FallbackModelsField form={form} secrets={secrets} />
       </SettingsGroup>
 
       <SettingsGroup

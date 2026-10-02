@@ -393,9 +393,11 @@ describe('New task brief', () => {
     expect(onOpenSettings).toHaveBeenLastCalledWith('indexing')
     fireEvent.click(within(sees).getByRole('button', { name: /^Tools:.*change in Settings$/ }))
     expect(onOpenSettings).toHaveBeenLastCalledWith('tools')
-    // The branch is picked in the header, and memory has no page: those stay facts.
+    // Memory is kept and cleared in Settings → Agent.
+    fireEvent.click(within(sees).getByRole('button', { name: /^Memory:\s*2 notes.*change in Settings$/ }))
+    expect(onOpenSettings).toHaveBeenLastCalledWith('agent')
+    // The branch is picked in the header: it stays a fact.
     expect(sees.querySelector('[data-fact="Branch"] button')).toBeNull()
-    expect(sees.querySelector('[data-fact="Memory"] button')).toBeNull()
   })
 
   it('leaves the facts as facts with nowhere to send them', async () => {
@@ -411,5 +413,37 @@ describe('New task brief', () => {
     const note = document.querySelector<HTMLElement>('[data-approval-note]')!
     fireEvent.click(within(note).getByRole('button', { name: 'Change' }))
     expect(onOpenSettings).toHaveBeenCalledWith('agent')
+  })
+
+  it('adds a folder through main, lists it, sends it with the start, and removes it', async () => {
+    const pickExtraRoot = vi.fn(async () => ({ ok: true as const, data: { path: '/ws/backend' } }))
+    window.vyotiq.pickExtraRoot = pickExtraRoot as unknown as typeof window.vyotiq.pickExtraRoot
+    const { props } = renderBrief()
+    fireEvent.click(screen.getByRole('button', { name: 'Add folder…' }))
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Added folders' }).textContent).toContain('/ws/backend'))
+    expect(pickExtraRoot).toHaveBeenCalledWith({ workspacePath: '/ws/app', current: [] })
+    expect(briefStateFor('/ws/app').extraRoots).toEqual(['/ws/backend'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove /ws/backend' }))
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Added folders' })).toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add folder…' }))
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Added folders' })).toBeTruthy())
+    typeBrief('Wire the API')
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ extraRoots: ['/ws/backend'] })
+  })
+
+  it('says why main refused a folder and keeps the list as it was', async () => {
+    window.vyotiq.pickExtraRoot = vi.fn(async () => ({
+      ok: true as const,
+      data: { path: null, refused: '/ws/app/sub: already part of the workspace' }
+    })) as unknown as typeof window.vyotiq.pickExtraRoot
+    renderBrief()
+    fireEvent.click(screen.getByRole('button', { name: 'Add folder…' }))
+    await waitFor(() => expect(window.vyotiq.pickExtraRoot).toHaveBeenCalled())
+    expect(screen.queryByRole('list', { name: 'Added folders' })).toBeNull()
+    expect(briefStateFor('/ws/app').extraRoots).toBeUndefined()
   })
 })

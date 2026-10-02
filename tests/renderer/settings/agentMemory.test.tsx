@@ -3,7 +3,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryField } from '@renderer/features/settings/sections/AgentSection'
+import { MemoryField, RulesField } from '@renderer/features/settings/sections/AgentSection'
+import { ruleSummary } from '@renderer/features/task/ruleSummary'
 
 const context = (memoryNotes: number) => ({
   workspaceName: 'acme',
@@ -56,5 +57,51 @@ describe('Settings → Agent → Memory', () => {
     render(<MemoryField workspacePath={null} />)
     expect(screen.getByText('No workspace is open.')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Clear…' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('Settings → Agent → Rules', () => {
+  const GENERIC = 'AGENTS.md, CLAUDE.md, .cursorrules, .vyotiq/rules/, and your own.'
+
+  function withRules(rules: { agentsMd: boolean; claudeMd: boolean; cursorrules: boolean; ruleFileCount: number }): void {
+    window.vyotiq.agentContext = vi.fn(async () => ({
+      ok: true as const,
+      data: { ...context(0), rules }
+    })) as unknown as typeof window.vyotiq.agentContext
+  }
+
+  it('says which rules apply in the workspace', async () => {
+    withRules({ agentsMd: true, claudeMd: false, cursorrules: false, ruleFileCount: 2 })
+    const onOpenMarketplace = vi.fn()
+    render(<RulesField workspacePath="/ws/acme" onOpenMarketplace={onOpenMarketplace} />)
+    // The generic list stands in while the workspace is read.
+    expect(screen.getByText(GENERIC)).toBeTruthy()
+    expect(await screen.findByText('AGENTS.md and 2 rule files')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage rules' }))
+    expect(onOpenMarketplace).toHaveBeenCalledWith('rules')
+  })
+
+  it('names a lone root file, and says when there are none', async () => {
+    withRules({ agentsMd: false, claudeMd: true, cursorrules: false, ruleFileCount: 0 })
+    render(<RulesField workspacePath="/ws/acme" />)
+    expect(await screen.findByText('CLAUDE.md')).toBeTruthy()
+    cleanup()
+    withRules({ agentsMd: false, claudeMd: false, cursorrules: false, ruleFileCount: 0 })
+    render(<RulesField workspacePath="/ws/acme" />)
+    expect(await screen.findByText('No rules yet')).toBeTruthy()
+  })
+
+  it('keeps the generic list with no workspace', () => {
+    render(<RulesField workspacePath={null} />)
+    expect(screen.getByText(GENERIC)).toBeTruthy()
+  })
+})
+
+describe('ruleSummary', () => {
+  it('joins the root files and the rule-file count', () => {
+    expect(ruleSummary({ agentsMd: true, claudeMd: true, cursorrules: false, ruleFileCount: 1 })).toBe(
+      'AGENTS.md, CLAUDE.md and 1 rule file'
+    )
+    expect(ruleSummary({ agentsMd: false, claudeMd: false, cursorrules: false, ruleFileCount: 3 })).toBe('3 rule files')
   })
 })

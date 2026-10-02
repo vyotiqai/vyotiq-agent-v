@@ -2,15 +2,16 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { TaskOutcome } from '@shared/ipc'
 import type { UiItem } from '@shared/transcript'
 import { buildRecordModel, type BuildOptions } from '@renderer/features/task/recordModel'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
 import { RecordActionsContext } from '@renderer/features/task/record/WorkItems'
-import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
+import { RunSessionProvider, type RunSessionValue } from '@renderer/features/chat/RunSessionContext'
 import { bumpTaskOutcome, outcomeMarks, summarizeOutcome } from '@renderer/features/task/taskOutcomeStore'
 import { createChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
+import { takeCommitRequest } from '@renderer/features/chat/commitRequest'
 
 /**
  * Once a task's edits are settled, the record says how on one line, and each
@@ -72,7 +73,11 @@ const run: UiItem[] = [
   { kind: 'message', id: 'a-1', role: 'assistant', content: 'Fixed.', at: at(5) }
 ]
 
-function showRecord(outcome: TaskOutcome, pending = 0) {
+function showRecord(
+  outcome: TaskOutcome,
+  pending = 0,
+  inspector: { onOpenPanel?: RunSessionValue['onOpenPanel']; onOpenChanges?: () => void } = {}
+) {
   window.vyotiq = { taskOutcome: vi.fn().mockResolvedValue({ ok: true, data: outcome }) } as unknown as typeof window.vyotiq
   const options: BuildOptions = { running: false }
   return render(
@@ -80,10 +85,11 @@ function showRecord(outcome: TaskOutcome, pending = 0) {
       value={{
         workspacePath: '/ws',
         runId: 'r1',
-        pendingWrites: pending > 0 ? { runId: 'r1', count: pending, onUndo: vi.fn() } : undefined
+        pendingWrites: pending > 0 ? { runId: 'r1', count: pending, onUndo: vi.fn() } : undefined,
+        onOpenPanel: inspector.onOpenPanel
       }}
     >
-      <RecordActionsContext.Provider value={{ onOpenChanges: vi.fn() }}>
+      <RecordActionsContext.Provider value={{ onOpenChanges: inspector.onOpenChanges ?? vi.fn() }}>
         <TaskRecord model={buildRecordModel(run, options)} options={options} messageCount={run.length} />
       </RecordActionsContext.Provider>
     </RunSessionProvider>
@@ -108,16 +114,18 @@ describe('the result once its edits are settled', () => {
     expect([...container.querySelectorAll('[data-result-file-mark]')].map((m) => m.textContent)).toEqual(['Kept', 'Kept'])
   })
 
-  it('says Kept, not committed; Undone; or counts a mix, and strikes an undone file', async () => {
+  it('says Kept, not committed yet; Undone; or counts a mix, and strikes an undone file', async () => {
     const kept = showRecord({ files: [{ path: 'src/a.ts', mark: 'kept' }, { path: 'src/b.ts', mark: 'kept' }] })
     await waitFor(() => {
-      expect(kept.container.querySelector('[data-result-outcome="kept"]')?.textContent).toBe('Kept, not committed')
+      expect(kept.container.querySelector('[data-result-outcome="kept"]')?.textContent).toBe('Kept, not committed yet')
     })
     kept.unmount()
     bumpTaskOutcome()
     const mixed = showRecord({ files: [{ path: 'src/a.ts', mark: 'kept' }, { path: 'src/b.ts', mark: 'undone' }] })
     await waitFor(() => {
-      expect(mixed.container.querySelector('[data-result-outcome="mixed"]')?.textContent).toBe('1 kept, 1 undone')
+      expect(mixed.container.querySelector('[data-result-outcome="mixed"]')?.textContent).toBe(
+        '1 kept, 1 undone, not committed yet'
+      )
     })
     const undoneRow = mixed.container.querySelector('[data-result-file-mark="undone"]')!.closest('button')!
     expect(undoneRow.textContent).toContain('Undone')
@@ -126,8 +134,45 @@ describe('the result once its edits are settled', () => {
     bumpTaskOutcome()
     const undone = showRecord({ files: [{ path: 'src/a.ts', mark: 'undone' }, { path: 'src/b.ts', mark: 'undone' }] })
     await waitFor(() => {
-      expect(undone.container.querySelector('[data-result-outcome="undone"]')?.textContent).toBe('Undone')
+      expect(undone.container.querySelector('[data-result-outcome="undone"]')?.textContent).toBe(
+        'Undone — the files are back as they were'
+      )
     })
+  })
+
+  it('offers the next step on the inspector’s own run: Commit… for kept edits, Pull request after a commit', async () => {
+    const onOpenPanel = vi.fn()
+    const onOpenChanges = vi.fn()
+    const kept = showRecord({ files: [{ path: 'src/a.ts', mark: 'kept' }, { path: 'src/b.ts', mark: 'kept' }] }, 0, {
+      onOpenPanel,
+      onOpenChanges
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Commit…' }))
+    expect(onOpenChanges).toHaveBeenCalledTimes(1)
+    // The ask waits for that task's Changes to take it, and only once.
+    expect(takeCommitRequest('other-run')).toBe(false)
+    expect(takeCommitRequest('r1')).toBe(true)
+    expect(takeCommitRequest('r1')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Pull request' })).toBeNull()
+    kept.unmount()
+    bumpTaskOutcome()
+
+    showRecord(
+      { files: [{ path: 'src/a.ts', mark: 'kept' }], commit: { sha: SHA, branch: 'main', at: at(9), pushed: true } },
+      0,
+      { onOpenPanel, onOpenChanges }
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Pull request' }))
+    expect(onOpenPanel).toHaveBeenCalledWith('pr')
+    expect(screen.queryByRole('button', { name: 'Commit…' })).toBeNull()
+  })
+
+  it('offers neither where the inspector shows another run', async () => {
+    showRecord({ files: [{ path: 'src/a.ts', mark: 'kept' }] })
+    await waitFor(() => {
+      expect(document.querySelector('[data-result-outcome="kept"]')).not.toBeNull()
+    })
+    expect(screen.queryByRole('button', { name: 'Commit…' })).toBeNull()
   })
 
   it('says nothing settled while a file still waits on review', async () => {

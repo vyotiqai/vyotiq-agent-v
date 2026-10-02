@@ -10,6 +10,7 @@ import {
   Segmented,
   StatusGlyph,
   cn,
+  pushToast,
   type ActionMenuItem,
   type MenuOption
 } from '@renderer/lib/ui'
@@ -34,17 +35,21 @@ import {
   type ChangesListFile,
   type FileDiffSource
 } from '@renderer/features/inspector/ChangesList'
-import type { AskTarget } from '@renderer/features/inspector/ReviewDiffTable'
+import type { AskTarget, HunkActions, HunkTarget } from '@renderer/features/inspector/ReviewDiffTable'
 import { ChangesColumn } from '@renderer/features/inspector/ChangesColumn'
 import { lineLabel } from '@renderer/features/inspector/reviewDiff'
 import { reviewSignature, useReviewViewed } from '@renderer/features/inspector/reviewViewed'
 import { sessionEditTotals, settledWriteCount } from '@renderer/features/inspector/taskCounts'
 import { checksRevisionOf, useRunChecks } from '@renderer/features/task/useRunChecks'
-import { outcomeMarks, useTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
+import { outcomeMarks, summarizeOutcome, useTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
+import { onCommitRequest, takeCommitRequest } from '../commitRequest'
 import { FileBadge } from './FileBadge'
 import { RepoCommandsNotice } from './RepoCommandsNotice'
 import { ReviewChecks } from './ReviewChecks'
+import { CommitMessageField } from './CommitMessageField'
+import { latestResultText, prBodyFrom, prTitleFrom } from './prDraft'
 import { ConflictResolver } from './ConflictResolver'
+import { GitSyncControls } from './GitSyncControls'
 import {
   collectSessionChangedFiles,
   collectSessionFileDiffs,
@@ -201,7 +206,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   reviewTitle = 'Review',
   onReviewBack,
   onAskAboutLine,
-  onHandToAgent
+  onHandToAgent,
+  taskTitle = null
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
@@ -253,6 +259,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   onAskAboutLine?: (instruction: string) => void
   /** Sends an instruction to the task, as a follow-up: an open check's "Ask it to cover this". */
   onHandToAgent?: (instruction: string) => void
+  /** The task's name, as the navigator has it: Commit & Create PR titles the PR with it. */
+  taskTitle?: string | null
 }) {
   // Prefer parent-shared chrome; fall back for tests that mount the panel alone.
   const localChrome = useGitChrome(
@@ -292,19 +300,29 @@ export const ChangesPanel = memo(function ChangesPanel({
   // Asked again when a write settles, git moves, or a file is kept or undone.
   const settledWrites = useMemo(() => settledWriteCount(sourceItems), [sourceItems])
   const statsKey = workspacePath && runId ? `${workspacePath}\u0000${runId}` : null
-  const [taskStats, setTaskStats] = useState<{ key: string; files: Map<string, TaskFileStat> } | null>(null)
+  const [taskStats, setTaskStats] = useState<{
+    key: string
+    files: Map<string, TaskFileStat>
+    /** Added folders the task wrote under: their files group under the folder. */
+    extraRoots: readonly string[]
+  } | null>(null)
   useEffect(() => {
     if (!active || !statsKey || !workspacePath || !runId || !window.vyotiq?.taskFileStats) return undefined
     let cancelled = false
     void window.vyotiq.taskFileStats({ workspacePath, runId }).then((res) => {
       if (cancelled || !res.ok) return
-      setTaskStats({ key: statsKey, files: new Map(res.data.files.map((f) => [normalizeRelPath(f.path), f])) })
+      setTaskStats({
+        key: statsKey,
+        files: new Map(res.data.files.map((f) => [normalizeRelPath(f.path), f])),
+        extraRoots: res.data.extraRoots ?? []
+      })
     })
     return () => {
       cancelled = true
     }
   }, [active, statsKey, workspacePath, runId, gitRevision, settledWrites, writeFileResolutions])
   const liveStats = taskStats && taskStats.key === statsKey ? taskStats.files : null
+  const taskExtraRoots = taskStats && taskStats.key === statsKey ? taskStats.extraRoots : undefined
   const [scope, setScope] = useState<ChangeScope>(preferredScope)
   const [menuOpen, setMenuOpen] = useState(false)
   const [commitMenuOpen, setCommitMenuOpen] = useState(false)
@@ -328,6 +346,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [generationNotice, setGenerationNotice] = useState<string | null>(null)
   /** Commit… filled in the line's message but main could not confirm it for the changes as they are now. */
   const [draftMayBeStale, setDraftMayBeStale] = useState(false)
+  /** The message exactly as the agent wrote it; the field says so while it still reads that way. */
+  const [agentMessage, setAgentMessage] = useState<string | null>(null)
   const [branches, setBranches] = useState<GitBranchEntry[]>([])
   const [commits, setCommits] = useState<GitLogEntry[]>([])
   const [selectedCommit, setSelectedCommit] = useState<GitLogEntry | null>(null)
@@ -335,7 +355,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [commitsBusy, setCommitsBusy] = useState(false)
   const [commitFilesBusy, setCommitFilesBusy] = useState(false)
   const findInputRef = useRef<HTMLInputElement>(null)
-  const commitInputRef = useRef<HTMLInputElement>(null)
+  const commitInputRef = useRef<HTMLTextAreaElement>(null)
   const commitsSeqRef = useRef(0)
   const commitFilesSeqRef = useRef(0)
   const branchesSeqRef = useRef(0)
@@ -594,9 +614,14 @@ export const ChangesPanel = memo(function ChangesPanel({
     [chrome, message, commitMode, runId, onTaskCommitted, onGitMutated, refreshCommits]
   )
 
+  /** What Commit & Create PR writes the PR from — the PR tab's draft; set where the checks are read. */
+  const prTextRef = useRef<{ title: string; body: string } | null>(null)
   const sendCreatePr = useCallback(() => {
-    void chrome.createPr(message, commitMode, true).then(async (ok) => {
+    const text = prTextRef.current
+    void chrome.createPr(message, commitMode, true, { runId, ...(text ?? {}) }).then(async (ok) => {
       if (!ok) return
+      // It took this task's edits: main kept them, as a plain Commit does.
+      if (ok.task) onTaskCommitted?.(ok.task, true)
       setMessage('')
       setMessageGenerating(false)
       messageGenerationSeqRef.current += 1
@@ -610,7 +635,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       setSelectedCommit(list[0] ?? null)
       onViewPr?.()
     })
-  }, [chrome, message, commitMode, onGitMutated, onViewPr, refreshCommits])
+  }, [chrome, message, commitMode, runId, onTaskCommitted, onGitMutated, onViewPr, refreshCommits])
 
   // `git init`, offered only where git itself says there is no repository.
   // Never automatic: this runs from the empty-state button and nowhere else.
@@ -630,6 +655,10 @@ export const ChangesPanel = memo(function ChangesPanel({
 
   const onMessageChange = useCallback((value: string) => {
     messageEditedRef.current = true
+    // Your own words end the wait for the agent's: its draft would be dropped
+    // anyway, and Commit must not stay locked behind it.
+    messageGenerationSeqRef.current += 1
+    setMessageGenerating(false)
     setMessage(value)
   }, [])
 
@@ -658,6 +687,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
           if (result.ok && result.data.source === 'agent' && result.data.message) {
             setMessage(result.data.message)
+            setAgentMessage(result.data.message)
             setGenerationNotice(null)
             if (force) setDrafted((prev) => (prev ? { ...prev, message: result.data.message! } : prev))
           } else {
@@ -693,6 +723,7 @@ export const ChangesPanel = memo(function ChangesPanel({
     // at once with no model call, different ones get their own message.
     const drafted = draftedMessageRef.current
     setMessage(drafted ?? (workspacePath ? '' : fallback))
+    setAgentMessage(drafted)
 
     if (!workspacePath) return
     setMessageGenerating(true)
@@ -702,6 +733,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
         if (result.ok && result.data.source === 'agent' && result.data.message) {
           setMessage(result.data.message)
+          setAgentMessage(result.data.message)
           setGenerationNotice(null)
         } else if (drafted) {
           // Main could not answer for the changes as they are now: keep the
@@ -992,8 +1024,10 @@ export const ChangesPanel = memo(function ChangesPanel({
       ) : null
     if (displayScope === 'agent') {
       const decidable = canResolve && resolvableOf(file.path) && !resolutionOf(file.path) && !conflictedOf(file.path)
-      // A kept file can go back to review while the run is stopped; an undone one is back as it was.
+      // A kept file can go back to review while the run is stopped; an undone one
+      // can come back, with the agent's version, while nothing has changed it since.
       const unkeepable = Boolean(onReopenWriteFile) && !running && resolutionOf(file.path) === 'kept'
+      const bringable = Boolean(onReopenWriteFile) && !running && resolutionOf(file.path) === 'discarded'
       return (
         <>
           {decidable && onDiscardWriteFile ? (
@@ -1026,6 +1060,17 @@ export const ChangesPanel = memo(function ChangesPanel({
               size="xs"
               tone="muted"
               active
+              disabled={Boolean(resolveBusy || chrome.busy)}
+              onClick={() => void onReopenWriteFile?.(file.path)}
+            />
+          ) : null}
+          {bringable ? (
+            <IconButton
+              icon="redo"
+              label={`Bring back ${name}`}
+              title="Put the agent's version back; it waits on review again"
+              size="xs"
+              tone="muted"
               disabled={Boolean(resolveBusy || chrome.busy)}
               onClick={() => void onReopenWriteFile?.(file.path)}
             />
@@ -1099,6 +1144,12 @@ export const ChangesPanel = memo(function ChangesPanel({
   // what is still open first, the met ones folded to a count.
   const checksRevision = useMemo(() => checksRevisionOf(sourceItems, running), [sourceItems, running])
   const checks = useRunChecks(workspacePath ?? null, runId ?? null, checksRevision)
+  // Commit & Create PR writes the pull request as the PR tab drafts it: the
+  // task's title, its result and its done-when checks. No result: gh's --fill.
+  const prSummary = useMemo(() => (running || !runId ? '' : latestResultText(sourceItems)), [running, runId, sourceItems])
+  const prSource = prSummary ? { title: taskTitle, summary: prSummary, checks } : null
+  const prTitle = prSource ? prTitleFrom(prSource) : ''
+  prTextRef.current = prSource && prTitle ? { title: prTitle, body: prBodyFrom(prSource) } : null
   const checksBlock =
     displayScope === 'agent' && !running && checks.length > 0 ? (
       <ReviewChecks checks={checks} inset={variant === 'review' ? 'px-4' : 'px-3'} onAsk={onHandToAgent} />
@@ -1126,16 +1177,75 @@ export const ChangesPanel = memo(function ChangesPanel({
         }
       : undefined
 
+  // One hunk of a waiting file, undone on its own. The write stays waiting on
+  // Keep or Undo; the diff and counts are asked for again. The toast's Restore
+  // puts the hunk back while nothing has changed where it was.
+  const [hunkBusy, setHunkBusy] = useState(false)
+  const hunkViewed = useReviewViewed(workspacePath && runId ? `${workspacePath}::${runId}::hunks` : null)
+  const hunkViewedKey = (target: HunkTarget): string => `${target.path}#${target.hunk.hash}`
+  const restoreHunk = useCallback(
+    async (restoreToken: string, path: string) => {
+      if (!workspacePath || !runId || !window.vyotiq?.restoreHunk) return
+      const res = await window.vyotiq.restoreHunk({ workspacePath, runId, restoreToken })
+      if (!res.ok) chrome.reportNotice(`${path}: ${res.error}`, true)
+      onGitMutated?.()
+    },
+    [workspacePath, runId, chrome, onGitMutated]
+  )
+  const undoHunk = useCallback(
+    async (target: HunkTarget) => {
+      if (!workspacePath || !runId || !window.vyotiq?.undoHunk) return
+      setHunkBusy(true)
+      try {
+        const res = await window.vyotiq.undoHunk({
+          workspacePath,
+          runId,
+          path: target.path,
+          hunk: target.hunk,
+          diffHash: target.diffHash
+        })
+        // Refused or done, the diff on screen is out of date either way.
+        onGitMutated?.()
+        if (!res.ok) {
+          chrome.reportNotice(`${target.path}: ${res.error}`, true)
+          return
+        }
+        const { restoreToken, path } = res.data
+        pushToast('Undid one hunk', {
+          icon: 'undo',
+          detail: path,
+          action: { label: 'Restore', onClick: () => void restoreHunk(restoreToken, path) }
+        })
+      } finally {
+        setHunkBusy(false)
+      }
+    },
+    [workspacePath, runId, chrome, onGitMutated, restoreHunk]
+  )
+  /** Only where the file's own Undo is offered: a modified file still waiting on review. */
+  const hunkActionsFor = (file: ChangesListFile): HunkActions | undefined => {
+    if (displayScope !== 'agent' || !runId || !workspacePath || file.status !== 'M') return undefined
+    if (!canResolve || !resolvableOf(file.path) || resolutionOf(file.path) || conflictedOf(file.path)) return undefined
+    return {
+      onUndo: (target) => void undoHunk(target),
+      busy: hunkBusy || Boolean(resolveBusy || chrome.busy),
+      blockedReason: resolveBlockedReason ?? (running ? 'Stop the run to undo part of a file' : null),
+      isViewed: (target) => hunkViewed.isViewed(hunkViewedKey(target), 'viewed'),
+      onViewed: (target, next) => hunkViewed.setViewed(hunkViewedKey(target), 'viewed', next)
+    }
+  }
+
   const fileArea = (
     <ChangesColumn
       files={listFiles}
+      extraRoots={displayScope === 'agent' ? taskExtraRoots : undefined}
       selectedPath={selected?.path ?? null}
       revealToken={revealToken}
       onSelect={setSelectedPath}
       actions={rowActions}
       source={(file) =>
         displayScope === 'agent'
-          ? { lines: taskLinesOf(file.path), fetchDiff: fetchTaskDiff }
+          ? { lines: taskLinesOf(file.path), fetchDiff: fetchTaskDiff, hunks: hunkActionsFor(file) }
           : { fetchDiff: fetchGitDiff, binary: browserFiles.find((f) => f.path === file.path)?.binary }
       }
       layout={layout}
@@ -1187,7 +1297,11 @@ export const ChangesPanel = memo(function ChangesPanel({
     displayScope !== 'commits' &&
     (commitMode === 'staged' ? gitFiles.some((f) => f.staged) : gitFiles.length > 0)
   const pendingTask = unresolvedTask.length > 0 && Boolean(onKeepAllWrites || onDiscardAllWrites)
-  const showFooter = Boolean(workspacePath) && (pendingTask || canCommit || composing)
+  // How this task's edits were settled, once nothing waits on review — the
+  // record's line, said here too.
+  const settled =
+    displayScope === 'agent' && !running && !pendingTask && !composing ? summarizeOutcome(settledOutcome) : null
+  const showFooter = Boolean(workspacePath) && (pendingTask || canCommit || composing || settled != null)
 
   // The mockup's commit line: a message the agent wrote for these changes,
   // drafted once while Changes is on screen over uncommitted work (a
@@ -1222,9 +1336,82 @@ export const ChangesPanel = memo(function ChangesPanel({
   }, [active, running, composing, workspacePath, draftFingerprint, commitMode])
   const draftedMessage = drafted && drafted.fingerprint === draftFingerprint ? drafted.message : null
   draftedMessageRef.current = draftedMessage
+
+  // "Commit…" from the record's line for kept edits: the box opens once this
+  // task's Changes is on screen with something to commit.
+  useEffect(() => {
+    if (!active || running || composing || !canCommit) return undefined
+    const take = (): void => {
+      if (takeCommitRequest(runId)) openCompose('commit')
+    }
+    take()
+    return onCommitRequest(take)
+  }, [active, running, composing, canCommit, runId, openCompose])
+
+  const settledLine = settled ? (
+    <div className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted" data-changes-settled={settled.kind}>
+      <Icon
+        name={settled.kind === 'committed' ? 'gitCommit' : settled.kind === 'undone' ? 'undo' : 'check'}
+        size={13}
+        className="shrink-0 text-tertiary"
+      />
+      <span className="min-w-0 flex-1 truncate">
+        {settled.kind === 'committed' ? (
+          <>
+            Committed <span className="font-mono">{settled.sha.slice(0, 7)}</span>
+            {settled.branch ? (
+              <>
+                {' '}
+                to <span className="font-mono">{settled.branch}</span>
+              </>
+            ) : null}
+          </>
+        ) : settled.kind === 'undone' ? (
+          'Undone — the files are back as they were'
+        ) : (
+          <>
+            {settled.kind === 'kept' ? 'Kept' : `${settled.kept} kept, ${settled.undone} undone`}
+            {canCommit ? ' · not committed yet' : null}
+          </>
+        )}
+      </span>
+      {settled.kind === 'committed' && onViewPr ? (
+        <Button size="xs" variant="ghost" icon="pullRequest" onClick={onViewPr}>
+          Pull request
+        </Button>
+      ) : null}
+    </div>
+  ) : null
   const commitLabel =
     commitIntent === 'push' ? 'Commit & Push' : commitIntent === 'pr' ? 'Commit & Create PR' : 'Commit'
   const commitBusy = chrome.busy || Boolean(resolveBusy) || messageGenerating
+  const submitCommit = (): void => {
+    if (commitIntent === 'pr') sendCreatePr()
+    else sendCommit(commitIntent === 'push')
+  }
+  const commitFileCount = commitMode === 'staged' ? gitFiles.filter((f) => f.staged).length : gitFiles.length
+  // Where the words came from: the agent's draft, untouched, or why they may be wrong.
+  const commitNote = generationNotice
+    ? `No drafted message: ${generationNotice} — a plain one is in its place`
+    : draftMayBeStale
+      ? STALE_DRAFT_NOTE
+      : agentMessage && message === agentMessage
+        ? 'Drafted from the diff · edit freely'
+        : null
+  const commitField = (
+    <CommitMessageField
+      value={message}
+      onChange={onMessageChange}
+      onSubmit={submitCommit}
+      onCancel={cancelCompose}
+      fieldRef={commitInputRef}
+      generating={messageGenerating}
+      canSubmit={Boolean(message.trim()) && !commitBusy}
+      branch={currentBranch}
+      files={commitFileCount}
+      note={commitNote}
+    />
+  )
   const showCounts = Boolean(workspacePath) && listFiles.length > 0 && !(displayScope === 'commits' && !selectedCommit)
   // One file without numbers leaves the total without numbers too.
   const shownTotals =
@@ -1403,53 +1590,19 @@ export const ChangesPanel = memo(function ChangesPanel({
         </div>
 
         {composing ? (
-          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2" data-review-compose>
-            <input
-              ref={commitInputRef}
-              type="text"
-              value={message}
-              className="min-w-0 flex-1 rounded-sm bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-tertiary focus-visible:vy-focus-ring"
-              placeholder={messageGenerating ? 'The agent is writing a commit message…' : 'Commit message'}
-              aria-label="Commit message"
-              title="Commit message, written by the agent — edit it here"
-              onChange={(e) => onMessageChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && message.trim() && !commitBusy) {
-                  e.preventDefault()
-                  if (commitIntent === 'pr') sendCreatePr()
-                  else sendCommit(commitIntent === 'push')
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  cancelCompose()
-                }
-              }}
-            />
-            {generationNotice ? (
-              <span className="max-w-[40%] truncate text-caption text-muted" title={generationNotice} aria-live="polite">
-                No drafted message: {generationNotice}
-              </span>
-            ) : draftMayBeStale ? (
-              <span className="max-w-[40%] truncate text-caption text-muted" title={STALE_DRAFT_NOTE} aria-live="polite">
-                {STALE_DRAFT_NOTE}
-              </span>
-            ) : null}
+          <div className="flex shrink-0 items-start gap-2 border-b border-border py-2 pl-4 pr-2" data-review-compose>
+            <div className="min-w-0 flex-1 pt-0.5">{commitField}</div>
             <Button size="xs" variant="ghost" onClick={cancelCompose}>
               Cancel
             </Button>
-            <Button
-              size="xs"
-              variant="primary"
-              disabled={commitBusy || !message.trim()}
-              onClick={() => {
-                if (commitIntent === 'pr') sendCreatePr()
-                else sendCommit(commitIntent === 'push')
-              }}
-            >
+            <Button size="xs" variant="primary" disabled={commitBusy || !message.trim()} onClick={submitCommit}>
               {commitLabel}
             </Button>
           </div>
+        ) : null}
+
+        {settledLine ? (
+          <div className="flex h-9 shrink-0 items-center border-b border-border pl-4 pr-2">{settledLine}</div>
         ) : null}
 
         {running && (pendingTask || canCommit) ? (
@@ -1650,6 +1803,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                     numbers="both"
                     added={selected.status === 'A' || selected.status === '?'}
                     onAsk={askAboutLine}
+                    hunkActions={hunkActionsFor(selected)}
                   />
                 </div>
               </>
@@ -1711,6 +1865,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             className="min-w-0 shrink"
           />
         ) : null}
+        {gitView && repoOk ? <GitSyncControls chrome={chrome} running={running} /> : null}
         {showCounts ? (
           <>
             <span className="shrink-0 text-xs text-muted">
@@ -1914,38 +2069,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             </div>
           ) : composing ? (
             <div className="space-y-2.5">
-              <input
-                ref={commitInputRef}
-                type="text"
-                value={message}
-                className="w-full rounded-sm bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-tertiary focus-visible:vy-focus-ring"
-                placeholder={messageGenerating ? 'The agent is writing a commit message…' : 'Commit message'}
-                aria-label="Commit message"
-                title="Commit message, written by the agent — edit it here"
-                onChange={(e) => onMessageChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && message.trim() && !commitBusy) {
-                    e.preventDefault()
-                    if (commitIntent === 'pr') sendCreatePr()
-                    else sendCommit(commitIntent === 'push')
-                  }
-                  if (e.key === 'Escape') {
-                    // Esc here cancels the commit only — never the running agent.
-                    e.preventDefault()
-                    e.stopPropagation()
-                    cancelCompose()
-                  }
-                }}
-              />
-              {generationNotice ? (
-                <p className="m-0 truncate text-caption text-muted" title={generationNotice} aria-live="polite">
-                  No drafted message: {generationNotice} — a plain one is in its place
-                </p>
-              ) : draftMayBeStale ? (
-                <p className="m-0 truncate text-caption text-muted" title={STALE_DRAFT_NOTE} aria-live="polite">
-                  {STALE_DRAFT_NOTE}
-                </p>
-              ) : null}
+              {commitField}
               <div className="flex items-center gap-1.5">
                 <Button size="sm" variant="ghost" onClick={cancelCompose}>
                   Cancel
@@ -1963,21 +2087,14 @@ export const ChangesPanel = memo(function ChangesPanel({
                   </Button>
                 ) : null}
                 <span className="flex-1" />
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={commitBusy || !message.trim()}
-                  onClick={() => {
-                    if (commitIntent === 'pr') sendCreatePr()
-                    else sendCommit(commitIntent === 'push')
-                  }}
-                >
+                <Button size="sm" variant="primary" disabled={commitBusy || !message.trim()} onClick={submitCommit}>
                   {commitLabel}
                 </Button>
               </div>
             </div>
           ) : (
             <div className="space-y-2.5">
+              {settledLine ? <div className="flex min-h-6 items-center">{settledLine}</div> : null}
               {canCommit && (draftedMessage || drafting === draftFingerprint) ? (
                 draftedMessage ? (
                   <button
@@ -1995,6 +2112,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                   </p>
                 )
               ) : null}
+            {pendingTask || canCommit ? (
             <div className="flex items-center gap-1.5">
               {pendingTask && onDiscardAllWrites ? (
                 <Button
@@ -2053,6 +2171,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                 />
               ) : null}
             </div>
+            ) : null}
             </div>
           )}
         </div>

@@ -3,8 +3,8 @@ import type { HomeActivityResult } from '@shared/ipc'
 import { formatUsdCost, windowCostDisplay } from '@shared/utils/costDisplay'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Menu, ProgressBar, Segmented, cn, type MenuOption } from '@renderer/lib/ui'
-import { DIVIDER_FILL, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { Button, Input, Menu, ProgressBar, Segmented, cn, pushToast, type MenuOption } from '@renderer/lib/ui'
+import { BORDER_DIVIDER, DIVIDER_FILL, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { UNTITLED_TASK, taskTitleFromGoal } from '@shared/utils/taskTitle'
 import { ProviderLogo } from '@renderer/features/chat/components/composer/ProviderLogo'
@@ -19,7 +19,17 @@ import {
   formatCount,
   weekdayShort
 } from '@renderer/features/home/activityView'
-import { useHomeActivity, type ActivityWindowDays } from '@renderer/features/home/useHomeActivity'
+import { ACTIVITY_WORKSPACE_CAP, useHomeActivity } from '@renderer/features/home/useHomeActivity'
+import {
+  FIXED_RANGE_DAYS,
+  dayLabel,
+  rangeEndDate,
+  resolveCustomRange,
+  shiftDay,
+  todayKey,
+  type UsageRangeChoice
+} from './usageRange'
+import { usageBreakdown, type BreakdownGroup, type BreakdownTask } from './usageBreakdown'
 
 const ALL = 'all'
 
@@ -39,16 +49,57 @@ export function UsagePage({
   refreshVersion?: number
 }) {
   const [scope, setScope] = useState<string>(ALL)
-  const [windowDays, setWindowDays] = useState<ActivityWindowDays>(7)
+  const [choice, setChoice] = useState<UsageRangeChoice>('7d')
+  // The custom range as typed, and the last valid one, which is what is read.
+  const [customFrom, setCustomFrom] = useState(() => shiftDay(todayKey(), -29))
+  const [customTo, setCustomTo] = useState(() => todayKey())
+  const custom = resolveCustomRange(customFrom, customTo)
+  const [lastValid, setLastValid] = useState<{ windowDays: number; endDay?: string }>({ windowDays: 30 })
+  const setCustom = (from: string, to: string): void => {
+    setCustomFrom(from)
+    setCustomTo(to)
+    const next = resolveCustomRange(from, to)
+    if (next.ok) setLastValid({ windowDays: next.windowDays, ...(next.endDay ? { endDay: next.endDay } : {}) })
+  }
+  const range = choice === 'custom' ? lastValid : { windowDays: FIXED_RANGE_DAYS[choice] }
+  const windowDays = range.windowDays
+  const endDay = range.endDay
+
   const scoped = scope !== ALL ? openWorkspaces.find((path) => workspacePathsEqual(path, scope)) : undefined
   const paths = useMemo(() => (scoped ? [scoped] : [...openWorkspaces]), [scoped, openWorkspaces])
-  const activity = useHomeActivity(paths, windowDays, refreshVersion)
+  const activity = useHomeActivity(paths, windowDays, refreshVersion, { endDay, breakdown: true })
   const data = activity.data
+  const [exporting, setExporting] = useState(false)
 
   const scopeOptions: MenuOption[] = [
     { value: ALL, label: 'All workspaces' },
     ...openWorkspaces.map((path) => ({ value: path, label: formatWorkspaceName(path) }))
   ]
+
+  const exportCsv = (): void => {
+    const api = window.vyotiq?.usageExportCsv
+    if (!api || exporting) return
+    setExporting(true)
+    void api({
+      workspacePaths: [...new Set(paths)].slice(0, ACTIVITY_WORKSPACE_CAP),
+      windowDays,
+      ...(endDay ? { endDay } : {})
+    })
+      .then((res) => {
+        if (!res.ok) pushToast(`Usage couldn’t be exported: ${res.error}`, 'error')
+        else if (res.data.saved) {
+          const rows = res.data.rows ?? 0
+          pushToast(`Exported ${formatCount(rows)} ${rows === 1 ? 'row' : 'rows'}`, 'success')
+        }
+      })
+      .catch((err: unknown) => pushToast(`Usage couldn’t be exported: ${err instanceof Error ? err.message : String(err)}`, 'error'))
+      .finally(() => setExporting(false))
+  }
+
+  const emptyTitle =
+    choice === 'custom' && endDay
+      ? `No tasks from ${dayLabel(shiftDay(endDay, 1 - windowDays))} to ${dayLabel(endDay)}`
+      : `No tasks in the last ${windowDays} days`
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-usage>
@@ -65,16 +116,36 @@ export function UsagePage({
           quiet
         />
         <span className="flex-1" />
+        {choice === 'custom' ? (
+          <CustomRange
+            from={customFrom}
+            to={customTo}
+            error={custom.ok ? null : custom.error}
+            onFrom={(from) => setCustom(from, customTo)}
+            onTo={(to) => setCustom(customFrom, to)}
+          />
+        ) : null}
         <Segmented
           size="xs"
-          label="Days"
-          value={windowDays === 7 ? '7d' : '30d'}
+          label="Range"
+          value={choice}
           items={[
             { id: '7d', label: '7 days' },
-            { id: '30d', label: '30 days' }
+            { id: '30d', label: '30 days' },
+            { id: '90d', label: '90 days' },
+            { id: 'custom', label: 'Custom' }
           ]}
-          onChange={(id) => setWindowDays(id === '7d' ? 7 : 30)}
+          onChange={setChoice}
         />
+        <Button
+          size="xs"
+          variant="ghost"
+          icon="download"
+          disabled={!data || data.totals.runs === 0 || exporting || !window.vyotiq?.usageExportCsv}
+          onClick={exportCsv}
+        >
+          Export CSV
+        </Button>
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="@container mx-auto w-full max-w-[1040px] px-8 pb-12 pt-6">
@@ -90,7 +161,7 @@ export function UsagePage({
           ) : data.totals.runs === 0 ? (
             <Notice
               icon="chart"
-              title={`No tasks in the last ${windowDays} days`}
+              title={emptyTitle}
               body="Tasks you run show up here with what they cost and how they went."
             />
           ) : (
@@ -108,10 +179,11 @@ function UsageBody({
   onOpenTask
 }: {
   data: HomeActivityResult
-  windowDays: ActivityWindowDays
+  windowDays: number
   onOpenTask: (workspacePath: string, runId: string) => void
 }) {
   const span = data.windowDays ?? windowDays
+  const end = useMemo(() => rangeEndDate(data.endDay), [data.endDay])
   const totals = data.totals
   const tokens = totals.billedInputTokens + totals.outputTokens
   const cost = windowCostDisplay(totals)
@@ -175,7 +247,7 @@ function UsageBody({
       </div>
 
       <div className="mt-8">
-        <ByDayChart data={data} span={span} />
+        <ByDayChart data={data} span={span} end={end} />
       </div>
 
       <div className="mt-10 grid gap-10 @3xl:grid-cols-3">
@@ -183,6 +255,12 @@ function UsageBody({
         <ToolFailuresChart data={data} span={span} />
         <UncheckedChart data={data} span={span} onOpenTask={onOpenTask} />
       </div>
+
+      {data.tasks ? (
+        <div className="mt-10">
+          <BreakdownChart data={data} onOpenTask={onOpenTask} />
+        </div>
+      ) : null}
     </>
   )
 }
@@ -205,10 +283,13 @@ function measureText(measure: Measure, value: number): string {
  * cost or tokens for is a gap, never a zero, and every bar's tooltip carries
  * all three for its day.
  */
-function ByDayChart({ data, span }: { data: HomeActivityResult; span: number }) {
+function ByDayChart({ data, span, end }: { data: HomeActivityResult; span: number; end: Date }) {
   const [chosen, setChosen] = useState<Measure | null>(null)
-  const series = useMemo(() => activitySpendSeries(data.days, span), [data.days, span])
-  const bars = useMemo(() => activityDayBars(data.days, span), [data.days, span])
+  const series = useMemo(() => activitySpendSeries(data.days, span, end), [data.days, span, end])
+  const bars = useMemo(() => activityDayBars(data.days, span, end), [data.days, span, end])
+  // Ninety and more bars share the width: a hairline gap, and a dated tick every couple of weeks.
+  const gap = span > 60 ? 'gap-px' : span > 10 ? 'gap-1' : 'gap-2'
+  const tickEvery = span <= 120 ? 14 : 30
   const hasCost = series.some((point) => point.cost != null)
   const measure = chosen ?? (hasCost ? 'cost' : 'tasks')
   const values = series.map((point, i) =>
@@ -274,7 +355,7 @@ function ByDayChart({ data, span }: { data: HomeActivityResult; span: number }) 
                 return `${point.dateLabel} ${value}`
               })
               .join(', ')}`}
-            className={cn('flex h-36 items-end', span > 10 ? 'gap-1' : 'gap-2')}
+            className={cn('flex h-36 items-end', gap)}
           >
             {values.map((value, i) => (
               <div
@@ -298,13 +379,34 @@ function ByDayChart({ data, span }: { data: HomeActivityResult; span: number }) 
               </div>
             ))}
           </div>
-          <div className={cn('mt-1.5 flex text-caption text-tertiary', span > 10 ? 'gap-1' : 'gap-2')} aria-hidden="true">
-            {series.map((point, i) => (
-              <span key={point.date} className="min-w-0 flex-1 text-center" title={point.dateLabel}>
-                {span <= 7 ? weekdayShort(point.date) : i % 5 === 0 || i === last ? point.label : '\u00a0'}
-              </span>
-            ))}
-          </div>
+          {span <= 31 ? (
+            <div className={cn('mt-1.5 flex text-caption text-tertiary', gap)} aria-hidden="true">
+              {series.map((point, i) => (
+                <span key={point.date} className="min-w-0 flex-1 text-center" title={point.dateLabel}>
+                  {span <= 7 ? weekdayShort(point.date) : i % 5 === 0 || i === last ? point.label : '\u00a0'}
+                </span>
+              ))}
+            </div>
+          ) : (
+            // Too many days for a label each: dated ticks placed under their bar,
+            // the first and last held inside the chart's edges.
+            <div className="relative mt-1.5 h-4 text-caption text-tertiary" aria-hidden="true">
+              {series.map((point, i) =>
+                (i % tickEvery === 0 && last - i >= tickEvery / 2) || i === last ? (
+                  <span
+                    key={point.date}
+                    className={cn(
+                      'absolute top-0 whitespace-nowrap',
+                      i === 0 ? '' : i === last ? '-translate-x-full' : '-translate-x-1/2'
+                    )}
+                    style={{ left: i === 0 ? 0 : i === last ? '100%' : `${((i + 0.5) / span) * 100}%` }}
+                  >
+                    {point.dateLabel}
+                  </span>
+                ) : null
+              )}
+            </div>
+          )}
         </>
       )}
     </Chart>
@@ -436,6 +538,204 @@ function UncheckedChart({
         </>
       )}
     </Chart>
+  )
+}
+
+/** Tasks listed under a workspace before the rest fold behind "Show more". */
+const TASKS_PER_GROUP = 8
+
+/** Task · Model · Tokens · Spend — one grid for the header, the anchors and the rows. */
+const BREAKDOWN_COLUMNS = 'grid grid-cols-[minmax(0,1fr)_minmax(0,9rem)_4.5rem_5.5rem] items-center gap-3'
+
+function costText(cost: number | null, estimated: boolean): ReactNode {
+  if (cost == null) {
+    return (
+      <span className="text-tertiary" title="No cost reported">
+        —
+      </span>
+    )
+  }
+  return (
+    <>
+      {formatUsdCost(cost)}
+      {estimated ? <span className="text-tertiary"> est.</span> : null}
+    </>
+  )
+}
+
+function tokensTitle(entry: { billedInputTokens?: number; outputTokens?: number; cachedInputTokens?: number; tokens: number }): string {
+  const parts = [`${formatCount(entry.tokens)} tokens`]
+  if (entry.billedInputTokens != null && entry.outputTokens != null) {
+    parts.push(`${formatCompactCount(entry.billedInputTokens)} in · ${formatCompactCount(entry.outputTokens)} out`)
+  }
+  if (entry.cachedInputTokens) parts.push(`${formatCompactCount(entry.cachedInputTokens)} from cache`)
+  return parts.join(' · ')
+}
+
+/**
+ * Where the range's spend went: each workspace as an anchor row with its
+ * share of the whole, and under it its tasks, costliest first. A task opens
+ * on click. Spend is the measure when anything reported one, else tokens.
+ */
+function BreakdownChart({
+  data,
+  onOpenTask
+}: {
+  data: HomeActivityResult
+  onOpenTask: (workspacePath: string, runId: string) => void
+}) {
+  const breakdown = useMemo(() => usageBreakdown(data), [data])
+  if (breakdown.groups.length === 0) return null
+  return (
+    <Chart title="Where it went" note={breakdown.measure === 'cost' ? 'spend by workspace and task' : 'tokens by workspace and task'}>
+      <div className={cn(BREAKDOWN_COLUMNS, 'border-b pb-1.5 text-caption text-tertiary', BORDER_DIVIDER)} aria-hidden="true">
+        <span>Task</span>
+        <span>Model</span>
+        <span className="text-right">Tokens</span>
+        <span className="text-right">Spend</span>
+      </div>
+      {breakdown.groups.map((group) => (
+        <BreakdownGroupRows key={group.path} group={group} measure={breakdown.measure} onOpenTask={onOpenTask} />
+      ))}
+      {breakdown.omitted > 0 ? (
+        <p className="mt-3 text-xs text-tertiary">
+          {formatCount(breakdown.omitted)} smaller {breakdown.omitted === 1 ? 'task is' : 'tasks are'} not listed; Export CSV has every one.
+        </p>
+      ) : null}
+    </Chart>
+  )
+}
+
+function BreakdownGroupRows({
+  group,
+  measure,
+  onOpenTask
+}: {
+  group: BreakdownGroup
+  measure: 'cost' | 'tokens'
+  onOpenTask: (workspacePath: string, runId: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const name = formatWorkspaceName(group.path)
+  const shown = expanded ? group.tasks : group.tasks.slice(0, TASKS_PER_GROUP)
+  const folded = group.tasks.length - shown.length
+  return (
+    <div role="group" aria-label={name} data-usage-workspace={group.path} className="mt-4">
+      <div className={cn(BREAKDOWN_COLUMNS, 'py-1.5')}>
+        <span className="flex min-w-0 items-center gap-2">
+          <Icon name="workspace" size={13} className="shrink-0 text-muted" />
+          <span className="truncate text-sm font-medium text-fg-strong" title={group.path}>
+            {name}
+          </span>
+          <span className="shrink-0 text-xs text-tertiary">
+            {formatCount(group.runs)} {group.runs === 1 ? 'task' : 'tasks'}
+          </span>
+        </span>
+        <span />
+        <span className="text-right font-mono text-caption text-muted tnum" title={tokensTitle(group)}>
+          {formatCompactCount(group.tokens)}
+        </span>
+        <span className="text-right font-mono text-caption text-fg tnum">{costText(group.cost, group.estimated)}</span>
+      </div>
+      <ProgressBar
+        value={group.share}
+        className="mb-1 w-full"
+        label={`${name}: share of ${measure === 'cost' ? 'spend' : 'tokens'}`}
+      />
+      {shown.map((task) => (
+        <BreakdownTaskRow key={task.runId} task={task} onOpenTask={onOpenTask} />
+      ))}
+      {folded > 0 ? (
+        <button
+          type="button"
+          className={cn('w-full rounded-sm py-1.5 pl-[21px] text-left text-xs text-muted vy-transition focus-visible:vy-focus-ring', ROW_HOVER)}
+          onClick={() => setExpanded(true)}
+        >
+          Show {formatCount(folded)} more
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function BreakdownTaskRow({
+  task,
+  onOpenTask
+}: {
+  task: BreakdownTask
+  onOpenTask: (workspacePath: string, runId: string) => void
+}) {
+  const title = (task.goal && taskTitleFromGoal(task.goal)) || UNTITLED_TASK
+  return (
+    <button
+      type="button"
+      data-usage-task={task.runId}
+      title={`Open ${title}`}
+      className={cn(BREAKDOWN_COLUMNS, 'w-full border-b py-1.5 text-left text-xs vy-transition focus-visible:vy-focus-ring', BORDER_DIVIDER, ROW_HOVER)}
+      onClick={() => onOpenTask(task.workspacePath, task.runId)}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="w-[13px] shrink-0" aria-hidden="true" />
+        <span className="truncate text-fg">{title}</span>
+      </span>
+      <span className="truncate font-mono text-caption text-tertiary">{task.model ?? ''}</span>
+      <span className="text-right font-mono text-caption text-muted tnum" title={tokensTitle(task)}>
+        {formatCompactCount(task.tokens)}
+      </span>
+      <span className="text-right font-mono text-caption text-fg tnum">{costText(task.cost, task.estimated)}</span>
+    </button>
+  )
+}
+
+/** Two dates for a custom range, with why a pair can't be read. */
+function CustomRange({
+  from,
+  to,
+  error,
+  onFrom,
+  onTo
+}: {
+  from: string
+  to: string
+  error: string | null
+  onFrom: (value: string) => void
+  onTo: (value: string) => void
+}) {
+  const today = todayKey()
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      {error ? (
+        <span role="alert" className="truncate text-xs text-danger">
+          {error}
+        </span>
+      ) : null}
+      <div className="w-[8.5rem] shrink-0">
+        <Input
+          type="date"
+          size="sm"
+          aria-label="From"
+          value={from}
+          max={to && to < today ? to : today}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => onFrom(e.target.value)}
+        />
+      </div>
+      <span className="text-xs text-tertiary" aria-hidden="true">
+        –
+      </span>
+      <div className="w-[8.5rem] shrink-0">
+        <Input
+          type="date"
+          size="sm"
+          aria-label="To"
+          value={to}
+          min={from || undefined}
+          max={today}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => onTo(e.target.value)}
+        />
+      </div>
+    </div>
   )
 }
 

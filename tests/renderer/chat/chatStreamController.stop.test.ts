@@ -29,13 +29,14 @@ describe('createChatStreamController', () => {
 
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     try {
-      await controller.stop()
+      // Kept the follow-ups: nothing stopped, and it says so.
+      expect(await controller.stop()).toBe(false)
       expect(confirm).toHaveBeenCalledWith('Stop this run and discard 1 queued follow-up?')
       expect(chatCancel).not.toHaveBeenCalled()
       expect(controller.pendingFollowUps).toHaveLength(1)
 
       confirm.mockReturnValue(true)
-      await controller.stop()
+      expect(await controller.stop()).toBe(true)
       expect(chatCancel).toHaveBeenCalledWith('r1')
       expect(controller.pendingFollowUps).toHaveLength(0)
     } finally {
@@ -82,6 +83,18 @@ describe('createChatStreamController', () => {
       expect.objectContaining({ runId: 'r1', incremental: true })
     )
   })
+  it('says nothing stopped when main refused the cancel of a run it had started', async () => {
+    const chatStart = vi.fn().mockResolvedValue({ ok: true, data: { runId: 'r1', invokeId: 7 } })
+    const chatCancel = vi.fn().mockResolvedValue({ ok: false, error: 'Cancel refused' })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatStart, chatCancel, listActiveRuns: vi.fn().mockResolvedValue({ ok: true, data: [] }) }
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    controller.hydrateTranscript([{ role: 'user', content: 'hi' }])
+    expect(await controller.send('go')).toBe(true)
+    expect(await controller.stop()).toBe(false)
+    expect(chatCancel).toHaveBeenCalledWith('r1')
+  })
+
   it('stop with pending follow-ups does not wipe agentInstances', async () => {
     const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: undefined })
     // @ts-expect-error test bridge

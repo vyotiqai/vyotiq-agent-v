@@ -149,6 +149,8 @@ export type BriefState = {
   checks: string[]
   /** Start it in a new worktree rather than in this folder. */
   worktree?: boolean
+  /** Folders outside the workspace the task may also work in (absolute, checked by main). */
+  extraRoots?: string[]
 }
 
 /**
@@ -170,8 +172,9 @@ export function useNewTaskWorktreeDefault(): boolean {
 }
 
 /** Stored per workspace: `worktree` is present only when the page chose against the default. */
-type StoredBrief = { draftId: string | null; checks: string[]; worktree?: boolean }
+type StoredBrief = { draftId: string | null; checks: string[]; worktree?: boolean; extraRoots?: string[] }
 const NO_CHECKS: string[] = Object.freeze([]) as unknown as string[]
+const NO_ROOTS: string[] = Object.freeze([]) as unknown as string[]
 const briefs = new Map<string, StoredBrief>()
 
 function briefKeyOf(workspacePath: string): string {
@@ -184,21 +187,52 @@ export function briefStateFor(workspacePath: string | null | undefined): BriefSt
   return {
     draftId: stored?.draftId ?? null,
     checks: stored?.checks ?? NO_CHECKS,
-    worktree: stored?.worktree ?? worktreeDefault
+    worktree: stored?.worktree ?? worktreeDefault,
+    // Only when there are some, so a page without added folders reads as before.
+    ...(stored?.extraRoots?.length ? { extraRoots: stored.extraRoots } : {})
   }
+}
+
+/** The brief's added folders, a stable empty list when there are none. */
+export function briefExtraRootsOf(state: BriefState): string[] {
+  return state.extraRoots ?? NO_ROOTS
 }
 
 export function setBriefState(workspacePath: string, next: BriefState | null): void {
   const key = briefKeyOf(workspacePath)
   const chosen = next?.worktree != null && next.worktree !== worktreeDefault ? next.worktree : undefined
-  if (next == null || (next.draftId == null && next.checks.length === 0 && chosen === undefined)) briefs.delete(key)
+  const roots = next?.extraRoots ?? []
+  if (next == null || (next.draftId == null && next.checks.length === 0 && chosen === undefined && roots.length === 0))
+    briefs.delete(key)
   else
     briefs.set(key, {
       draftId: next.draftId,
       checks: [...next.checks],
-      ...(chosen !== undefined ? { worktree: chosen } : {})
+      ...(chosen !== undefined ? { worktree: chosen } : {}),
+      ...(roots.length > 0 ? { extraRoots: [...roots] } : {})
     })
   emit()
+}
+
+export function setBriefExtraRoots(workspacePath: string, extraRoots: string[]): void {
+  setBriefState(workspacePath, { ...briefStateFor(workspacePath), extraRoots })
+}
+
+/**
+ * A brief that did not start (New worktree made the worktree, then the send
+ * failed or waits on a choice) put back on that workspace's New task page:
+ * its checks and its added folders, beside whatever the page already holds.
+ */
+export function putBriefBack(workspacePath: string, brief: { checks?: string[]; extraRoots?: string[] }): void {
+  const checks = brief.checks ?? []
+  const roots = brief.extraRoots ?? []
+  if (checks.length === 0 && roots.length === 0) return
+  const current = briefStateFor(workspacePath)
+  setBriefState(workspacePath, {
+    ...current,
+    ...(checks.length > 0 ? { checks: [...checks] } : {}),
+    ...(roots.length > 0 ? { extraRoots: [...roots] } : {})
+  })
 }
 
 export function setBriefWorktree(workspacePath: string, worktree: boolean): void {

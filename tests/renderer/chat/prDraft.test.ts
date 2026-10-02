@@ -52,3 +52,11 @@ describe('prTitleFrom', () => {
     expect(prTitleFrom({ summary: 'x'.repeat(400), checks: [] }).length).toBe(256)
   })
 })
+
+describe('prTitleFrom, from the summary', () => {
+  it('reads its first line as words, never its markdown', () => {
+    expect(prTitleFrom({ summary: '**Bound** `maxForks` by RAM, see [[vitest.config.ts:12]]\n\nMore.', checks: [] })).toBe(
+      'Bound maxForks by RAM, see vitest.config.ts:12'
+    )
+  })
+})

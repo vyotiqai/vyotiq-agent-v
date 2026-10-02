@@ -3,13 +3,11 @@ import { IconButton } from './IconButton'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { cn } from './cn'
 
-export function CodeBlockCopyButton({
-  text,
-  className
-}: {
-  text: string
-  className?: string
-}) {
+/**
+ * Copy with a word back: "Copied" for a moment, or "Copy failed". The state
+ * a copy button shows, and the copy itself.
+ */
+export function useCopyFeedback(): { copied: boolean; copyError: boolean; copy: (text: string) => void } {
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const timersRef = useRef<number[]>([])
@@ -34,6 +32,33 @@ export function CodeBlockCopyButton({
     timersRef.current.push(id)
   }
 
+  const copy = (text: string): void => {
+    void copyText(text).then((ok) => {
+      clearTimers()
+      if (ok) {
+        setCopied(true)
+        setCopyError(false)
+        schedule(() => setCopied(false), 1200)
+      } else {
+        setCopied(false)
+        setCopyError(true)
+        schedule(() => setCopyError(false), 1600)
+      }
+    })
+  }
+
+  return { copied, copyError, copy }
+}
+
+export function CodeBlockCopyButton({
+  text,
+  className
+}: {
+  text: string
+  className?: string
+}) {
+  const { copied, copyError, copy } = useCopyFeedback()
+
   // The well's own colour behind the icon, so it never sits on a line of code;
   // the button keeps its muted tone and hover fill. No shadow: blocks are flush.
   return (
@@ -50,20 +75,7 @@ export function CodeBlockCopyButton({
         label={copied ? 'Copied' : copyError ? 'Copy failed' : 'Copy code'}
         size="xs"
         tone="muted"
-        onClick={() => {
-          void copyText(text).then((ok) => {
-            clearTimers()
-            if (ok) {
-              setCopied(true)
-              setCopyError(false)
-              schedule(() => setCopied(false), 1200)
-            } else {
-              setCopied(false)
-              setCopyError(true)
-              schedule(() => setCopyError(false), 1600)
-            }
-          })
-        }}
+        onClick={() => copy(text)}
       />
     </span>
   )

@@ -160,7 +160,11 @@ function ExtensionRow({
         <BrandTile {...tile} size={32} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-fg-strong" title={item.name}>
+            {/* Switched off, the name goes quiet: what is on is what you read first. */}
+            <span
+              className={cn('truncate text-sm font-medium', rowSwitch && !rowSwitch.on ? 'text-muted' : 'text-fg-strong')}
+              title={item.name}
+            >
               {item.name}
             </span>
             <span className="shrink-0 text-caption text-tertiary">

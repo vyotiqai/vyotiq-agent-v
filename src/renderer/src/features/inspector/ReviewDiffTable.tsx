@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { cn } from '@renderer/lib/ui'
+import { IconButton, cn } from '@renderer/lib/ui'
 import type { CodeToken } from '@renderer/lib/markdown/markdownHighlight'
+import { diffFingerprint, hunkIdentity, parseUnifiedHunks, type HunkIdentity } from '@shared/utils/hunkPatch'
 import { useDiffHighlight } from '@renderer/features/chat/components/useDiffHighlight'
 import type { DiffLayout } from '@renderer/features/chat/components/DiffPreview'
+import { changedCount, linesLeftOut } from '@renderer/features/chat/components/linesLeftOut'
 import {
   lineLabel,
   parseReviewDiff,
@@ -16,6 +18,29 @@ import {
 
 /** A line someone asked about: which file, which line, and on which side of the change. */
 export type AskTarget = { path: string; line: ReviewLine; side: 'old' | 'new' }
+
+/**
+ * One hunk of the diff on screen, named so main can find it again: where it
+ * sits and what it says, and the fingerprint of the whole diff it was read in.
+ */
+export type HunkTarget = { path: string; hunk: HunkIdentity; diffHash: string }
+
+/**
+ * What a hunk header row offers. Undo takes the hunk back out of the file;
+ * Viewed is a mark of your own, as a file's is (a hunk has no Keep: Keep
+ * settles a whole write, and a hunk left in is simply kept with its file).
+ */
+export type HunkActions = {
+  onUndo: (target: HunkTarget) => void
+  busy?: boolean
+  /** Why Undo cannot run now (a live run); the button stays, disabled, and says so. */
+  blockedReason?: string | null
+  isViewed?: (target: HunkTarget) => boolean
+  onViewed?: (target: HunkTarget, viewed: boolean) => void
+}
+
+/** Shown on hover or when focus is inside the row; still in the tab order while hidden. */
+const REVEAL = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
 
 const ROW_BG: Record<ReviewLine['kind'], string> = { ctx: '', add: 'diff-row-add', del: 'diff-row-del' }
 const SIGN: Record<ReviewLine['kind'], string> = { ctx: '', add: '+', del: '−' }
@@ -41,7 +66,8 @@ function matches(line: ReviewLine | null, q: string): boolean {
  * A file's diff as a table: hunk headers as rows, numbers in the gutter and a
  * +/− sign beside every changed line (tint is never the only cue). Split sets
  * removed lines against the lines that replaced them. With `onAsk`, a line's
- * number opens a line under it to ask the agent about that line.
+ * number opens a line under it to ask the agent about that line. With
+ * `hunkActions`, each hunk header offers Undo (and Viewed) on hover or focus.
  *
  * A new file is all additions, so the tint would say the same thing on every
  * row: it drops the wash and the old side (split and the old numbers), and
@@ -55,7 +81,8 @@ export function ReviewDiffTable({
   numbers: numbersAsked = 'new',
   findQuery = '',
   added: addedFile = false,
-  onAsk
+  onAsk,
+  hunkActions
 }: {
   path: string
   diff: string
@@ -67,8 +94,16 @@ export function ReviewDiffTable({
   /** The file is new; git's `@@ -0,0` header says so too when this is left out. */
   added?: boolean
   onAsk?: (target: AskTarget, question: string) => void
+  /** Per-hunk Undo and Viewed on each hunk header; a new file is one hunk and gets none. */
+  hunkActions?: HunkActions
 }) {
   const parsed = useMemo(() => parseReviewDiff(diff), [diff])
+  // Past the cap, the changed lines it dropped: parsed again without one, and
+  // only when there is a cut to count.
+  const hiddenChanged = useMemo(
+    () => (parsed.truncated ? changedCount(parseReviewDiff(diff, Infinity).flat) - changedCount(parsed.flat) : 0),
+    [diff, parsed]
+  )
   const tokens = useDiffHighlight(parsed.flat, path)
   const [asking, setAsking] = useState<{ rowKey: string; target: AskTarget } | null>(null)
   const [sent, setSent] = useState<string | null>(null)
@@ -87,6 +122,16 @@ export function ReviewDiffTable({
   const added = addedFile || (parsed.hunks.length > 0 && parsed.hunks.every((h) => h.header.startsWith('@@ -0,0 ')))
   const split = layout === 'split' && !added
   const numbers = added ? 'new' : numbersAsked
+  // Each hunk named from the whole diff, not the capped parse: a hunk the cap
+  // cut short is still named by all of its lines. Keys follow the same order.
+  const withHunkActions = Boolean(hunkActions) && !added
+  const hunkTargets = useMemo(() => {
+    if (!withHunkActions) return null
+    const diffHash = diffFingerprint(diff)
+    return new Map<string, HunkTarget>(
+      parseUnifiedHunks(diff).map((hunk, index) => [`h${index}`, { path, hunk: hunkIdentity(hunk), diffHash }])
+    )
+  }, [withHunkActions, diff, path])
   const rows = useMemo(() => {
     const all: Array<SplitRow | UnifiedRow> = split ? splitRows(parsed) : unifiedRows(parsed)
     if (!q) return all
@@ -184,11 +229,59 @@ export function ReviewDiffTable({
         <tbody>
           {rows.map((row) => {
             if (row.type === 'hunk') {
+              const target = hunkTargets?.get(row.key)
+              const headerText = split || wordWrap ? 'truncate' : 'whitespace-pre'
+              if (!target || !hunkActions) {
+                return (
+                  <tr key={row.key} className="bg-surface">
+                    <td colSpan={cols} className="px-3 py-0.5 text-muted">
+                      <div className={headerText} title={row.header}>
+                        {row.header}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+              const viewed = hunkActions.isViewed?.(target) ?? false
+              const at = target.hunk.newStart
               return (
-                <tr key={row.key} className="bg-surface">
-                  <td colSpan={cols} className="px-3 py-0.5 text-muted">
-                    <div className={split || wordWrap ? 'truncate' : 'whitespace-pre'} title={row.header}>
-                      {row.header}
+                <tr key={row.key} className="group bg-surface" data-hunk={row.key}>
+                  <td colSpan={cols} className="py-0 pl-3 pr-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div
+                        className={cn('min-w-0 flex-1 py-0.5', headerText, viewed ? 'text-tertiary' : 'text-muted')}
+                        title={row.header}
+                      >
+                        {row.header}
+                      </div>
+                      {/* Pinned to the visible right edge while a long unified line scrolls sideways. */}
+                      <span className="sticky right-0 flex shrink-0 items-center gap-1 bg-surface pl-1 font-sans">
+                        <span className={cn('flex', REVEAL)}>
+                          <IconButton
+                            icon="undo"
+                            label={`Undo the hunk at line ${at}`}
+                            title={hunkActions.blockedReason ?? 'Undo this hunk — put these lines back as they were'}
+                            size="xs"
+                            tone="onSurface"
+                            disabled={Boolean(hunkActions.busy || hunkActions.blockedReason)}
+                            onClick={() => hunkActions.onUndo(target)}
+                          />
+                        </span>
+                        {hunkActions.onViewed ? (
+                          <span className={viewed ? 'flex' : cn('flex', REVEAL)}>
+                            <IconButton
+                              icon="check"
+                              label={`Mark the hunk at line ${at} viewed`}
+                              title={viewed ? 'Viewed — mark as not viewed' : 'Mark this hunk viewed'}
+                              size="xs"
+                              tone="onSurface"
+                              active={viewed}
+                              aria-pressed={viewed}
+                              onClick={() => hunkActions.onViewed?.(target, !viewed)}
+                            />
+                          </span>
+                        ) : null}
+                      </span>
                     </div>
                   </td>
                 </tr>
@@ -261,7 +354,13 @@ export function ReviewDiffTable({
         </tbody>
       </table>
       {parsed.truncated ? (
-        <p className="m-0 px-3 py-2 font-sans text-xs text-muted">Only the first {parsed.flat.length} lines are shown.</p>
+        <p className="m-0 px-3 py-2 font-sans text-xs text-muted" data-review-cut>
+          {/* What the cut leaves out that matters is the changed lines; a cut
+              into the last few lines of context leaves out nothing changed. */}
+          {hiddenChanged > 0
+            ? linesLeftOut(hiddenChanged, 'more', 'changed')
+            : `Only the first ${parsed.flat.length} lines are shown.`}
+        </p>
       ) : null}
     </>
   )

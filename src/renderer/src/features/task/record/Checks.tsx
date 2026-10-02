@@ -2,8 +2,14 @@ import type { DoneWhenCheck } from '@shared/doneWhenChecks'
 import { checksTally } from '@shared/doneWhenChecks'
 import { StatusGlyph, cn } from '@renderer/lib/ui'
 import { RecordRow } from './RecordLayout'
+import { TickedText } from './TickedText'
 
 const VERDICT_WORD = { met: 'Met', not_met: 'Not met', open: 'Not checked yet' } as const
+
+/** A check names commands and files in ticks: the markdown chip, on the record's own plane. */
+const CHECK_CODE = 'rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em]'
+/** Evidence is already small and quiet: mono at the caption step, no chip. */
+const EVIDENCE_CODE = 'font-mono text-caption'
 
 function CheckLine({ check, showPending }: { check: DoneWhenCheck; showPending: boolean }) {
   const state = check.verdict === 'met' ? 'review' : check.verdict === 'not_met' ? 'failed' : 'queued'
@@ -13,13 +19,14 @@ function CheckLine({ check, showPending }: { check: DoneWhenCheck; showPending: 
         <StatusGlyph state={state} size={14} />
         <span className="sr-only">{VERDICT_WORD[check.verdict ?? 'open']}:</span>
       </span>
-      <div className="min-w-0 flex-1">
+      {/* The record prose's reading measure: evidence ran 150 characters a line. */}
+      <div className="min-w-0 max-w-[80ch] flex-1">
         <p className={cn('m-0 [overflow-wrap:anywhere]', check.verdict === 'met' ? 'text-secondary' : 'text-fg')}>
-          {check.text}
+          <TickedText text={check.text} code={CHECK_CODE} />
         </p>
         {check.evidence ? (
           <p className="m-0 mt-0.5 text-xs text-tertiary [overflow-wrap:anywhere]" title="The agent's evidence">
-            {check.evidence}
+            <TickedText text={check.evidence} code={EVIDENCE_CODE} />
           </p>
         ) : null}
       </div>

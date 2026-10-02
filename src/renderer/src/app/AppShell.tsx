@@ -36,11 +36,17 @@ import {
 import { SETTINGS_SEARCH_INDEX, revealSettingsFieldWhenMounted } from '@renderer/features/settings/settingsSearchIndex'
 import { useUpdaterState } from '@renderer/features/updates/updaterStore'
 import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
+import { ShortcutsHelpDialog } from '@renderer/features/help/ShortcutsHelpDialog'
+import { RepeatTaskDialog } from '@renderer/features/schedules/RepeatTaskDialog'
+import { ScheduledTasksDialog } from '@renderer/features/schedules/ScheduledTasksDialog'
+import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
+import { exportTaskJson } from '@renderer/features/task/taskBundle'
 import { TitleBar } from './TitleBar'
 import { FirstRunNavigator, Navigator, type NavigatorPlace, type NavigatorProps } from './navigator/Navigator'
 import { requestUpdatePanel } from './navigator/UpdateChip'
 import { NavigatorRail } from './navigator/NavigatorRail'
 import { buildNavigatorSections, type NavRow, type NavSection } from './navigator/navigatorModel'
+import type { WaitingTask } from './navigator/NotificationsRow'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 import { useNavigatorView } from './navigator/useNavigatorView'
 
@@ -59,8 +65,8 @@ export type AppShellProps = {
   onDismissRunsError?: (path?: string) => void
   activeRuns?: ActiveRun[]
   activeRunsLoaded?: boolean
-  /** The task in the focused pane. */
-  focusedRun?: { workspacePath: string; runId: string } | null
+  /** The task in the focused pane, and the instance open in place of its record. */
+  focusedRun?: { workspacePath: string; runId: string; instanceRunId?: string | null } | null
   /** True for a task open in any pane (split view). */
   isRunOpenInPane?: (workspacePath: string, runId: string) => boolean
   onOpenSettings: () => void
@@ -85,6 +91,8 @@ export type AppShellProps = {
   onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
   onDeleteRunInWorkspace?: (path: string, runId: string) => void
   onExportRunInWorkspace?: (path: string, runId: string) => void
+  /** Import task…: a task bundle into this workspace, as a new read-only task. */
+  onImportTask?: (path: string) => void
   onCopyRunLinkInWorkspace?: (path: string, runId: string) => void
   onStopRunInWorkspace?: (path: string, runId: string) => void
   onResumeRunInWorkspace?: (path: string, runId: string) => void
@@ -412,11 +420,12 @@ function AppShellInner(props: AppShellProps) {
         canOpenExtensions: true,
         canAddWorkspace: Boolean(props.onAddWorkspace),
         appearance: props.onAppearanceChange ? (props.appearance ?? null) : null,
-        hasTask: view === 'chat' && focusedRun != null
+        hasTask: view === 'chat' && focusedRun != null,
+        canImportTask: Boolean(props.onImportTask && workspacePath)
       })
     ]
   },
-    [update, openWorkspaces, workspacePath, props.onOpenFeedback, props.onAddWorkspace, props.onAppearanceChange, props.appearance, view, focusedRun, shortcutsVersion]
+    [update, openWorkspaces, workspacePath, props.onOpenFeedback, props.onAddWorkspace, props.onAppearanceChange, props.appearance, view, focusedRun, shortcutsVersion, props.onImportTask]
   )
 
   const openSettingsField = useCallback(
@@ -471,9 +480,28 @@ function AppShellInner(props: AppShellProps) {
     [openTask, onOpenSettingsSection, onOpenSettings]
   )
 
+  // Every task waiting on you across the open workspaces, in the list's order:
+  // the Inbox's Needs you, whatever was notified.
+  const waitingTasks = useMemo<WaitingTask[]>(
+    () =>
+      allTasks
+        .filter((row) => row.state === 'needs')
+        .map((row) => ({
+          workspacePath: row.workspacePath,
+          runId: row.runId,
+          title: row.title,
+          since:
+            activeRuns.find((run) => run.runId === row.runId && workspacePathsEqual(run.workspacePath, row.workspacePath))
+              ?.waiting?.since ?? null
+        })),
+    [allTasks, activeRuns]
+  )
+
   const inbox: NavigatorProps['notifications'] = {
     items: notifications.items,
     unreadCount: notifications.unreadCount,
+    waiting: waitingTasks,
+    onOpenTask: openTask,
     onMarkRead: (req) => void notifications.markRead(req),
     onDismiss: (req) => void notifications.dismiss(req),
     onOpenItem: onOpenNotification,
@@ -534,6 +562,14 @@ function AppShellInner(props: AppShellProps) {
       }}
       onOpenSettings={props.onOpenSettings}
       onAddWorkspace={() => props.onAddWorkspace?.()}
+      onImportTask={
+        props.onImportTask
+          ? (path) => {
+              const target = path ?? workspacePath
+              if (target) props.onImportTask?.(target)
+            }
+          : undefined
+      }
       recentPaths={props.recentWorkspaces}
       onOpenRecentWorkspace={props.onOpenRecentWorkspace}
       onCloseWorkspace={(path) => {
@@ -547,6 +583,7 @@ function AppShellInner(props: AppShellProps) {
         onRename: (path, runId, goal) => props.onRenameRunInWorkspace?.(path, runId, goal),
         onDelete: (path, runId) => props.onDeleteRunInWorkspace?.(path, runId),
         onExport: props.onExportRunInWorkspace,
+        onExportJson: (path, runId) => void exportTaskJson(path, runId),
         onCopyLink: props.onCopyRunLinkInWorkspace,
         onStop: props.onStopRunInWorkspace,
         onResume: props.onResumeRunInWorkspace,
@@ -556,7 +593,8 @@ function AppShellInner(props: AppShellProps) {
         onStopLoop: props.onStopLoopInWorkspace,
         onTogglePin: props.onTogglePinnedRun,
         onToggleArchive: props.onToggleArchivedRun,
-        onRespondApproval: props.onRespondApproval
+        onRespondApproval: props.onRespondApproval,
+        onRepeat: (path, runId, title) => void requestRepeatTask({ workspacePath: path, runId, title })
       }}
       pinnedKeys={pinnedKeys}
       archivedKeys={archivedKeys}
@@ -701,11 +739,19 @@ function AppShellInner(props: AppShellProps) {
             onOpenSettingsField: openSettingsField,
             onOpenExtensions: props.onOpenMarketplace,
             onAddWorkspace: props.onAddWorkspace,
-            onAppearanceChange: props.onAppearanceChange
+            onAppearanceChange: props.onAppearanceChange,
+            onImportTask: () => {
+              if (workspacePath) props.onImportTask?.(workspacePath)
+            }
           })
         }
       />
       <WhatsNewModal />
+      <ShortcutsHelpDialog
+        onOpenShortcutSettings={onOpenSettingsSection ? () => onOpenSettingsSection('shortcuts') : undefined}
+      />
+      <RepeatTaskDialog />
+      <ScheduledTasksDialog onOpenTask={openTask} />
     </div>
   )
 }

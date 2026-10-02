@@ -23,8 +23,19 @@ import { ReceiptLine } from './record/Receipt'
 import { RecordRow, RunDivider } from './record/RecordLayout'
 import { RecordProse } from './record/RecordProse'
 import { Steps, instancesOf, placeKey } from './record/Steps'
-import { FirstRuleGrantContext, LooseWork, NowLine, RecordActionsContext, workIsLive } from './record/WorkItems'
+import {
+  BrokeAtContext,
+  EditMarksContext,
+  FirstRuleGrantContext,
+  LooseWork,
+  NowLine,
+  RecordActionsContext,
+  counted,
+  plainLine,
+  workIsLive
+} from './record/WorkItems'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
+import { requestCommitBox } from '@renderer/features/chat/commitRequest'
 import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
 
 export type TaskRecordProps = {
@@ -160,6 +171,19 @@ function runTools(run: RecordRun): ToolItem[] {
   return out
 }
 
+/**
+ * Where a stopped run got to and what it left: "at step 2 of 4 · 3 files
+ * changed". Undefined when it stopped before a step or a file.
+ */
+function stoppedDetail(run: RecordRun, tools: readonly ToolItem[]): string | undefined {
+  const plan = run.steps.filter((s) => s.n > 0)
+  const at = plan.find((s) => s.state === 'stopped' && !s.superseded)
+  const files = collectSessionChangedFiles(tools as ToolItem[]).length
+  const parts = [at ? `at step ${at.n} of ${plan.length}` : null, files > 0 ? `${counted(files, 'file')} changed` : null]
+  const said = parts.filter((p): p is string => p != null)
+  return said.length > 0 ? said.join(' · ') : undefined
+}
+
 /** Past this many, the rest are one line into Changes. */
 const RESULT_FILES_SHOWN = 8
 
@@ -235,13 +259,17 @@ function ResultFiles({
   )
 }
 
-/** How the task's edits were settled after review, on one quiet line. */
-function SettledLine({ settled }: { settled: OutcomeSummary }) {
+/**
+ * How the task's edits were settled after review, on one quiet line, with the
+ * step after it: kept edits can be committed, a commit can become a pull request.
+ */
+function SettledLine({ settled, onCommit, onPullRequest }: { settled: OutcomeSummary; onCommit?: () => void; onPullRequest?: () => void }) {
   const icon = settled.kind === 'committed' ? 'gitCommit' : settled.kind === 'undone' ? 'undo' : 'check'
+  const commitable = settled.kind === 'kept' || settled.kind === 'mixed'
   return (
     <div className="mt-3 flex min-w-0 items-center gap-2 text-xs text-tertiary" data-result-outcome={settled.kind}>
       <Icon name={icon} size={13} className="shrink-0" />
-      <span className="min-w-0 truncate">
+      <span className="min-w-0 flex-1 truncate">
         {settled.kind === 'committed' ? (
           <>
             Committed <span className="font-mono text-muted">{settled.sha.slice(0, 7)}</span>
@@ -249,13 +277,23 @@ function SettledLine({ settled }: { settled: OutcomeSummary }) {
             {settled.undone > 0 ? `, ${settled.undone} undone` : null}
           </>
         ) : settled.kind === 'kept' ? (
-          'Kept, not committed'
+          'Kept, not committed yet'
         ) : settled.kind === 'undone' ? (
-          'Undone'
+          'Undone — the files are back as they were'
         ) : (
-          `${settled.kept} kept, ${settled.undone} undone`
+          `${settled.kept} kept, ${settled.undone} undone, not committed yet`
         )}
       </span>
+      {commitable && onCommit ? (
+        <Button size="xs" variant="ghost" icon="gitCommit" onClick={onCommit}>
+          Commit…
+        </Button>
+      ) : null}
+      {settled.kind === 'committed' && onPullRequest ? (
+        <Button size="xs" variant="ghost" icon="pullRequest" onClick={onPullRequest}>
+          Pull request
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -269,7 +307,9 @@ function ResultRow({
   onOpenFile,
   review,
   marks,
-  settled
+  settled,
+  onCommit,
+  onPullRequest
 }: {
   text: string
   streaming?: boolean
@@ -283,15 +323,18 @@ function ResultRow({
   marks?: ReadonlyMap<string, 'kept' | 'undone'>
   /** How the task's edits were settled, once nothing waits on review. */
   settled?: OutcomeSummary | null
+  /** The settled line's next step: open the commit box, or the PR tab. */
+  onCommit?: () => void
+  onPullRequest?: () => void
 }) {
   return (
     <RecordRow label="Result">
-      <RecordProse text={text} streaming={streaming} size="md" tone="strong" />
+      <RecordProse text={text} streaming={streaming} size="md" tone="strong" sectionCopy />
       {files && files.length > 0 && onOpenFile && !streaming ? (
         <ResultFiles files={files} onOpen={onOpenFile} marks={marks} />
       ) : null}
       <CheckedBlock checks={checks} />
-      {settled && !review ? <SettledLine settled={settled} /> : null}
+      {settled && !review ? <SettledLine settled={settled} onCommit={onCommit} onPullRequest={onPullRequest} /> : null}
       {review ? (
         <div className="mt-3 flex items-center gap-2" data-result-review>
           <span className="min-w-0 flex-1 text-xs text-tertiary">
@@ -333,7 +376,7 @@ function NeedCard({ need, quoteWhy, props }: { need: NeedsYou; quoteWhy: boolean
 function InstanceGateCard({ gate, onOpen }: { gate: InlineInstanceGate; onOpen?: (runId: string) => void }) {
   const label = `Instance ${formatAgentInstanceShortId(gate.runId)}`
   return (
-    <section aria-label="Needs you" data-needs-you className={QUESTION_GATE_SURFACE}>
+    <section aria-label="Needs you" data-needs-you className={cn(QUESTION_GATE_SURFACE, 'vy-rise')}>
       <div className={QUESTION_GATE_HEADER}>
         <StatusGlyph state="needs" size={12} />
         <span className="min-w-0 truncate font-semibold text-accent">
@@ -382,7 +425,7 @@ function RunBody({
   const afterNeeds = needs?.get(placeKey({ kind: 'after' })) ?? null
   const state = live ? null : runStateOf(run, isLast, props.options)
   // The latest run's edits still open in the inspector, and what the record offers for them.
-  const { pendingWrites, workspacePath: sessionWorkspace, runId: sessionRunId } = useRunSession()
+  const { pendingWrites, onOpenPanel, workspacePath: sessionWorkspace, runId: sessionRunId } = useRunSession()
   const { onOpenChanges, onRetry, retryableErrorId } = useContext(RecordActionsContext)
   const unkept = isLast && !live ? (pendingWrites?.count ?? 0) : 0
   const changedFiles = useMemo(
@@ -405,9 +448,18 @@ function RunBody({
   // A settled run with an answer folds its loose work; without one, the work is the record.
   const foldLoose = !live && run.result != null
   // A rule's grant is said once per run, on the first call it let through.
-  const firstRuleGrant = useMemo(() => runTools(run).find((t) => t.tool.approvedBy?.by === 'rule')?.id ?? null, [run])
+  const tools = useMemo(() => runTools(run), [run])
+  const firstRuleGrant = useMemo(() => tools.find((t) => t.tool.approvedBy?.by === 'rule')?.id ?? null, [tools])
+  // A failed run opens the command it broke on: its last one, if that one failed.
+  const brokeAt = useMemo(
+    () => (state === 'failed' ? ([...tools].reverse().find((t) => t.tool.name === 'terminal')?.id ?? null) : null),
+    [state, tools]
+  )
+  const stopped = useMemo(() => (state === 'stopped' ? stoppedDetail(run, tools) : undefined), [state, run, tools])
   return (
     <FirstRuleGrantContext.Provider value={firstRuleGrant}>
+    <BrokeAtContext.Provider value={brokeAt}>
+    <EditMarksContext.Provider value={marks}>
       {(run.text || run.command || run.images.length > 0) && !(props.omitFirstBrief && run.n === 1) ? (
         <Brief
           run={run}
@@ -453,6 +505,16 @@ function RunBody({
           review={unkept > 0 && onOpenChanges ? { count: unkept, open: () => onOpenChanges() } : undefined}
           marks={marks}
           settled={settled}
+          // Only the inspector's own run gets onOpenPanel: its tabs are that run's.
+          onCommit={
+            onOpenChanges && onOpenPanel && sessionRunId
+              ? () => {
+                  requestCommitBox(sessionRunId)
+                  onOpenChanges()
+                }
+              : undefined
+          }
+          onPullRequest={onOpenPanel ? () => onOpenPanel('pr') : undefined}
         />
       ) : null}
       <ReceiptLine
@@ -464,6 +526,7 @@ function RunBody({
         checks={checks}
         summary={run.result && !run.result.streaming ? run.result.text : undefined}
         outcome={state === 'stopped' || state === 'failed' ? state : undefined}
+        outcomeDetail={stopped}
         actions={
           state === 'stopped' && isLast && (resume || (unkept > 0 && pendingWrites)) ? (
             <>
@@ -481,6 +544,8 @@ function RunBody({
           ) : undefined
         }
       />
+    </EditMarksContext.Provider>
+    </BrokeAtContext.Provider>
     </FirstRuleGrantContext.Provider>
   )
 }
@@ -505,7 +570,9 @@ function HistoryRun({
   const usage = props.turnUsage?.[run.n - 1] ?? null
   const cost = usage ? turnCost(usage) : null
   const duration = runDuration(run)
-  const title = run.result?.text.split('\n').find((l) => l.trim())?.replace(/^#+\s*/, '') ?? (run.text || (run.command ? `/${run.command}` : ''))
+  // The answer's first line, as words: "Checks recorded: **4 met**" showed its asterisks.
+  const answerLine = run.result?.text.split('\n').find((l) => l.trim())
+  const title = answerLine != null ? plainLine(answerLine) : run.text || (run.command ? `/${run.command}` : '')
   return (
     <div data-history-run={run.n}>
       <button
@@ -533,11 +600,11 @@ function HistoryRun({
             {run.steps.length} {run.steps.length === 1 ? 'step' : 'steps'}
           </span>
         ) : null}
-        <span className="w-14 shrink-0 text-right font-mono text-caption text-tertiary tnum">
+        <span className="min-w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
           {duration != null && duration >= 1000 ? formatElapsed(duration) : ''}
         </span>
         {costColumn ? (
-          <span className="w-12 shrink-0 text-right font-mono text-caption text-tertiary tnum">
+          <span className="min-w-12 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
             {cost ? `${cost.estimated ? '~' : ''}${formatUsdCost(cost.cost)}` : ''}
           </span>
         ) : null}

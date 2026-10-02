@@ -380,6 +380,9 @@ export function SessionChatColumn({
   // The inspector's edits are one run's; another pane's record must not offer them.
   const pendingWrites =
     sameWorkspace && activeRunId != null && inspector.pendingWrites?.runId === activeRunId ? inspector.pendingWrites : undefined
+  // The inspector's tabs show its run: only that run's record may open them (Commit…, Pull request).
+  const onOpenPanel =
+    sameWorkspace && activeRunId != null && inspector.runId === activeRunId ? inspector.onOpenPanel : undefined
   const runSession = useMemo(
     () => ({
       workspacePath: workspacePath ?? null,
@@ -390,6 +393,7 @@ export function SessionChatColumn({
         workspacePath != null ? (instanceRunId: string) => openInstancePane(instanceRunId) : undefined,
       onOpenWorkspaceFile,
       onOpenAgentTerminal,
+      onOpenPanel,
       pendingWrites
     }),
     [
@@ -400,6 +404,7 @@ export function SessionChatColumn({
       openInstancePane,
       onOpenWorkspaceFile,
       onOpenAgentTerminal,
+      onOpenPanel,
       pendingWrites
     ]
   )

@@ -3,10 +3,10 @@ import type { ActiveRun } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { useWaitingAsks } from '@renderer/features/home/usePendingAsks'
 import { IconButton, StatusGlyph, Tooltip, cn } from '@renderer/lib/ui'
-import { BORDER_DIVIDER, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import type { NavigatorPlace } from './Navigator'
-import type { NavSection, NavSectionKey } from './navigatorModel'
+import type { NavRow, NavSection, NavSectionKey } from './navigatorModel'
 import { NotificationsRow } from './NotificationsRow'
 
 /** The navigator's width below the desktop breakpoint: one glyph per task. */
@@ -17,6 +17,42 @@ const RAIL_SECTIONS: ReadonlySet<NavSectionKey> = new Set(['needs', 'running', '
 
 export function railSections(sections: readonly NavSection[]): NavSection[] {
   return sections.filter((section) => RAIL_SECTIONS.has(section.key) && section.rows.length > 0)
+}
+
+/**
+ * The task you are on when its group is not one the rail keeps (a done or
+ * pinned task): the rail still shows where you are, after the live groups.
+ */
+export function railOpenRow(
+  sections: readonly NavSection[],
+  selected: { workspacePath: string; runId: string } | null
+): NavRow | null {
+  if (!selected) return null
+  for (const section of sections) {
+    const row = section.rows.find(
+      (r) => r.runId === selected.runId && workspacePathsEqual(r.workspacePath, selected.workspacePath)
+    )
+    if (row) return RAIL_SECTIONS.has(section.key) ? null : row
+  }
+  return null
+}
+
+/** Words an initial would waste: "Update the docs" is UD, not UT. */
+const FILLER = new Set(['a', 'an', 'and', 'for', 'in', 'of', 'on', 'the', 'to', 'with'])
+
+/**
+ * One or two initials that tell same-state tasks apart at a glance: the first
+ * letters of the title's first two words that carry meaning ("Hey What can we
+ * do?" → HW), or one initial for a one-word title.
+ */
+export function railInitials(title: string): string {
+  const words = title.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w))
+  const kept = words.filter((w, i) => i === 0 || !FILLER.has(w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')))
+  const initial = (w: string): string => (w.match(/[\p{L}\p{N}]/u)?.[0] ?? '').toLocaleUpperCase()
+  return kept
+    .slice(0, 2)
+    .map(initial)
+    .join('')
 }
 
 /**
@@ -57,8 +93,11 @@ export function NavigatorRail({
   onRespondApproval?: ComponentProps<typeof NotificationsRow>['onRespondApproval']
 }) {
   const groups = railSections(sections)
+  const openRow = place === 'task' ? railOpenRow(sections, selected) : null
   // The rail's Inbox answers in place too: Needs you first, with Allow once and Deny.
   const { asks, respond } = useWaitingAsks(activeRuns, openPaths, onRespondApproval)
+  const isCurrent = (row: NavRow): boolean =>
+    place === 'task' && selected?.runId === row.runId && workspacePathsEqual(selected.workspacePath, row.workspacePath)
   return (
     <nav
       aria-label="Tasks"
@@ -66,7 +105,7 @@ export function NavigatorRail({
       style={{ width: NAVIGATOR_RAIL_WIDTH_PX }}
       data-navigator-rail
     >
-      <div className={cn('flex h-10 w-full shrink-0 items-center justify-center border-b', BORDER_DIVIDER)}>
+      <div className="flex h-10 w-full shrink-0 items-center justify-center border-b border-border">
         <IconButton icon="plus" label={`New task (${shortcutLabel('newChat')})`} size="md" onClick={onNewTask} />
       </div>
       <div className="flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto py-2">
@@ -77,32 +116,20 @@ export function NavigatorRail({
             className={cn('flex flex-col items-center gap-1', i > 0 ? cn('mt-2 border-t pt-2', BORDER_DIVIDER) : null)}
             data-rail-section={section.key}
           >
-            {section.rows.map((row) => {
-              const current =
-                place === 'task' && selected?.runId === row.runId && workspacePathsEqual(selected.workspacePath, row.workspacePath)
-              const doing = row.activity ?? row.stateLabel
-              return (
-                <li key={`${row.workspacePath}\u0000${row.runId}`}>
-                  <Tooltip content={`${row.title} · ${doing}`} side="bottom" describeChild={false}>
-                    <button
-                      type="button"
-                      aria-label={`${row.title}, ${doing}`}
-                      aria-current={current ? 'page' : undefined}
-                      onClick={() => onSelect(row.workspacePath, row.runId)}
-                      className={cn(
-                        'grid size-9 place-items-center rounded-md vy-transition focus-visible:vy-focus-ring',
-                        current ? SELECTED : ROW_HOVER
-                      )}
-                      data-rail-task={row.runId}
-                    >
-                      <StatusGlyph state={row.state} size={16} />
-                    </button>
-                  </Tooltip>
-                </li>
-              )
-            })}
+            {section.rows.map((row) => (
+              <RailTask key={`${row.workspacePath}\u0000${row.runId}`} row={row} current={isCurrent(row)} onSelect={onSelect} />
+            ))}
           </ul>
         ))}
+        {openRow ? (
+          <ul
+            aria-label="Open task"
+            className={cn('flex flex-col items-center gap-1', groups.length > 0 ? cn('mt-2 border-t pt-2', BORDER_DIVIDER) : null)}
+            data-rail-section="open"
+          >
+            <RailTask row={openRow} current onSelect={onSelect} />
+          </ul>
+        ) : null}
       </div>
       <div
         className={cn('flex w-full shrink-0 flex-col items-center gap-0.5 border-t py-1.5', BORDER_DIVIDER)}
@@ -121,6 +148,67 @@ export function NavigatorRail({
         />
       </div>
     </nav>
+  )
+}
+
+/**
+ * One task: its initials, so tasks in the same state are still told apart,
+ * with its state glyph as a badge on the corner. Initials stay muted until the
+ * task is the one you are on or has finished unseen; the badge carries the hue.
+ */
+function RailTask({
+  row,
+  current,
+  onSelect
+}: {
+  row: NavRow
+  current: boolean
+  onSelect: (workspacePath: string, runId: string) => void
+}) {
+  const doing = row.activity ?? row.stateLabel
+  const initials = railInitials(row.title)
+  return (
+    <li>
+      <Tooltip content={`${row.title}\n${doing}`} side="right" describeChild={false}>
+        <button
+          type="button"
+          aria-label={`${row.title}, ${doing}`}
+          aria-current={current ? 'page' : undefined}
+          onClick={() => onSelect(row.workspacePath, row.runId)}
+          className={cn(
+            'group relative grid size-9 place-items-center rounded-md vy-transition focus-visible:vy-focus-ring',
+            current ? SELECTED : CONTROL_HOVER
+          )}
+          data-rail-task={row.runId}
+        >
+          {initials ? (
+            // Nudged up and left by the badge's overlap, so the pair sits centred.
+            <span
+              aria-hidden
+              className={cn(
+                'pb-1.5 pr-1.5 text-xs font-semibold leading-none tracking-[var(--vy-tracking-tight)]',
+                current || row.unread ? 'text-fg-strong' : 'text-muted'
+              )}
+              data-rail-initials
+            >
+              {initials}
+            </span>
+          ) : null}
+          <span
+            aria-hidden
+            className={cn(
+              'absolute grid place-items-center rounded-full vy-transition',
+              initials ? 'bottom-0.5 right-0.5 p-px' : 'inset-0',
+              // The badge's disc is cut from the button's own fill, so it reads
+              // as one piece at rest, on hover and when selected.
+              !initials ? null : current ? 'bg-surface-2' : 'bg-chrome group-hover:bg-surface'
+            )}
+          >
+            <StatusGlyph state={row.state} size={initials ? 12 : 16} />
+          </span>
+        </button>
+      </Tooltip>
+    </li>
   )
 }
 

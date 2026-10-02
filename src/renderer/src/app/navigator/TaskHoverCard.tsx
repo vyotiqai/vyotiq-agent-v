@@ -83,6 +83,12 @@ export function TaskHoverCard({ row, anchor }: { row: NavRow; anchor: TaskHoverC
             <span className="text-tertiary"> · worktree</span>
           </Line>
         ) : null}
+        {run.scheduled ? (
+          <Line icon={<Icon name="repeat" size={13} className="text-tertiary" />}>
+            <span data-hover-scheduled>{run.scheduled.label}</span>
+            {run.scheduled.catchUpFrom ? <span className="text-tertiary"> · made up a missed run</span> : null}
+          </Line>
+        ) : null}
         <Line icon={<Icon name="folder" size={13} className="text-tertiary" />}>{row.workspaceName}</Line>
         {review ? (
           <Line icon={<Icon name="diff" size={13} className="text-tertiary" />}>
@@ -98,7 +104,7 @@ export function TaskHoverCard({ row, anchor }: { row: NavRow; anchor: TaskHoverC
         {checks ? (
           <Line icon={<Icon name="checklist" size={13} className="text-tertiary" />}>
             <span className={checksShort ? 'text-warning' : 'text-muted'} data-hover-checks>
-              {checks.met} of {checks.total} checks met
+              {checks.met} of {checks.total} {checks.total === 1 ? 'check' : 'checks'} met
             </span>
           </Line>
         ) : null}

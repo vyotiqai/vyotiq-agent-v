@@ -14,6 +14,7 @@ import {
   ArrowsClockwiseIcon,
   ArrowsInSimpleIcon,
   ArrowsOutIcon,
+  AsteriskIcon,
   AtIcon,
   BellIcon,
   BookOpenTextIcon,
@@ -117,14 +118,18 @@ import {
   StopIcon,
   StorefrontIcon,
   SunIcon,
+  SwapIcon,
   TargetIcon,
   TerminalWindowIcon,
+  TextAaIcon,
+  TextAUnderlineIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
   TimerIcon,
   TrashIcon,
   TrayIcon,
   TreeStructureIcon,
+  UploadSimpleIcon,
   UsersThreeIcon,
   WarningCircleIcon,
   WarningIcon,
@@ -212,6 +217,7 @@ const ICONS = {
   keyboard: KeyboardIcon,
   listTodo: ListChecksIcon,
   download: DownloadSimpleIcon,
+  upload: UploadSimpleIcon,
   flag: FlagIcon,
   thumbsUp: ThumbsUpIcon,
   thumbsDown: ThumbsDownIcon,
@@ -289,7 +295,12 @@ const ICONS = {
   question: QuestionIcon,
   warningCircle: WarningCircleIcon,
   checkCircle: CheckCircleIcon,
-  xCircle: XCircleIcon
+  xCircle: XCircleIcon,
+  /** Find options: match case, whole word, regular expression; and replace. */
+  matchCase: TextAaIcon,
+  wholeWord: TextAUnderlineIcon,
+  regex: AsteriskIcon,
+  replace: SwapIcon
 } as const satisfies Record<string, PhosphorIcon>
 
 export type IconName = keyof typeof ICONS

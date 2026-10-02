@@ -7,6 +7,7 @@ import type { TaskDraft } from '@shared/ipc'
 import {
   briefStateFor,
   deleteTaskDraftFor,
+  putBriefBack,
   refreshTaskDrafts,
   resetTaskDraftStoreForTests,
   saveTaskDraftFor,
@@ -128,5 +129,16 @@ describe('task draft store', () => {
     setBriefChecks('/ws', ['A check'])
     setNewTaskWorktreeDefault(false)
     expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: ['A check'], worktree: false })
+  })
+
+  it('puts a brief that did not start back with its checks and its added folders', () => {
+    setBriefWorktree('/wt', true)
+    putBriefBack('/wt', { checks: ['Tests pass'], extraRoots: ['/srv/api'] })
+    expect(briefStateFor('/wt')).toEqual({ draftId: null, checks: ['Tests pass'], worktree: true, extraRoots: ['/srv/api'] })
+    // Folders alone come back too, and nothing to put back leaves the page alone.
+    putBriefBack('/wt2', { extraRoots: ['/srv/api'] })
+    expect(briefStateFor('/wt2').extraRoots).toEqual(['/srv/api'])
+    putBriefBack('/wt3', {})
+    expect(briefStateFor('/wt3')).toEqual({ draftId: null, checks: [], worktree: false })
   })
 })

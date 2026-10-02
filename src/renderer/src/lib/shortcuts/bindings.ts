@@ -24,6 +24,7 @@ export type ShortcutId =
   | 'splitPane'
   | 'findInFiles'
   | 'commandPalette'
+  | 'shortcutsHelp'
   | 'workspace1'
   | 'workspace2'
   | 'workspace3'
@@ -85,6 +86,8 @@ export const SHORTCUT_BINDINGS: Record<ShortcutId, ShortcutBinding> = {
   splitPane: { id: 'splitPane', key: '\\', mod: true },
   findInFiles: { id: 'findInFiles', key: 'f', mod: true, shift: 'require' },
   commandPalette: { id: 'commandPalette', key: 'p', mod: true, shift: 'require' },
+  // `?` opens the same list outside a text field (referenceShortcutCatalog).
+  shortcutsHelp: { id: 'shortcutsHelp', key: '/', mod: true },
   workspace1: { id: 'workspace1', key: '1', mod: true },
   workspace2: { id: 'workspace2', key: '2', mod: true },
   workspace3: { id: 'workspace3', key: '3', mod: true },

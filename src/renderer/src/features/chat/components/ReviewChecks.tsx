@@ -2,17 +2,11 @@ import { useState } from 'react'
 import type { DoneWhenCheck } from '@shared/doneWhenChecks'
 import { Icon } from '@renderer/lib/icons'
 import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
+import { coverCheckInstruction } from '@renderer/features/task/followUps'
+
+export { coverCheckInstruction }
 
 const OPEN_WORD = { not_met: 'Not met', open: 'Not checked' } as const
-
-/** What "Ask it to cover this" sends: the check, what the agent saw, and what to do. */
-export function coverCheckInstruction(check: DoneWhenCheck): string {
-  if (check.verdict === 'not_met') {
-    const seen = check.evidence ? ` It saw: ${check.evidence}` : ''
-    return `The done-when check ${check.id} "${check.text}" is not met.${seen} Make it pass, then check it again with its evidence.`
-  }
-  return `The done-when check ${check.id} "${check.text}" was never checked. Check it now and mark it met or not met, with the evidence.`
-}
 
 /**
  * Review leads with what is still open: a done-when check the agent marked
@@ -38,9 +32,16 @@ export function ReviewChecks({
   return (
     <section aria-label="Done-when checks" className={cn('shrink-0 border-b border-border py-2', inset)} data-review-checks>
       {open.length ? (
-        <ul className="m-0 list-none space-y-2 p-0">
+        <ul className="m-0 list-none space-y-1.5 p-0">
           {open.map((c) => (
-            <li key={c.id} className="flex items-start gap-2.5" data-check={c.id} data-check-verdict={c.verdict ?? 'open'}>
+            // The one block that asks something of you here: tinted, bled past the text's edge so
+            // the glyph and words stay on the met rows' line.
+            <li
+              key={c.id}
+              className="-mx-2 flex items-start gap-2.5 rounded-md bg-warning-soft px-2 py-2"
+              data-check={c.id}
+              data-check-verdict={c.verdict ?? 'open'}
+            >
               <span className="mt-px shrink-0">
                 <StatusGlyph state={c.verdict === 'not_met' ? 'failed' : 'queued'} size={14} />
               </span>

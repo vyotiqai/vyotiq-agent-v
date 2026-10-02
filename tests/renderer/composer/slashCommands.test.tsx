@@ -3,6 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { Composer } from '@renderer/features/chat/components/composer/Composer'
 import { mentionMarker } from '@renderer/features/chat/components/composer/mentionModel'
 import { emptySecretStatus } from '@shared/ipc'
@@ -597,5 +598,48 @@ describe('Composer slash commands', () => {
       key: 'Escape'
     })
     expect(onCancelEdit).not.toHaveBeenCalled()
+  })
+})
+
+describe('/add-dir on a started task', () => {
+  it('adds the folder to the task through main instead of sending', async () => {
+    const addDir = {
+      id: 'builtin:add-dir',
+      trigger: 'add-dir',
+      label: 'Add folder',
+      description: 'Let this task also work in another folder',
+      kind: 'builtin' as const,
+      group: 'App',
+      availability: 'ready' as const
+    }
+    window.vyotiq.slashCommandsList = vi.fn().mockResolvedValue({ ok: true, data: { commands: [addDir] } })
+    window.vyotiq.slashCommandsResolve = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { action: 'client', clientAction: 'add_dir', trailingText: '/srv/api' }
+    })
+    const setRunExtraRoots = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { extraRoots: ['/srv/api'], live: false, added: '/srv/api' }
+    })
+    window.vyotiq.setRunExtraRoots = setRunExtraRoots
+    const pickExtraRoot = vi.fn()
+    window.vyotiq.pickExtraRoot = pickExtraRoot
+    const onSend = vi.fn()
+    const props = {
+      ...baseProps,
+      workspacePath: '/ws',
+      activeRunId: 'r1',
+      draft: '/add-dir /srv/api',
+      onSend
+    } as unknown as ComponentProps<typeof Composer>
+    const { rerender } = render(<Composer {...props} />)
+    await waitFor(() => expect(window.vyotiq.slashCommandsList).toHaveBeenCalled())
+    rerender(<Composer {...props} />)
+    fireEvent.submit(screen.getByRole('combobox', { name: 'Instruction' }).closest('form')!)
+    await waitFor(() =>
+      expect(setRunExtraRoots).toHaveBeenCalledWith({ action: 'add', workspacePath: '/ws', runId: 'r1', path: '/srv/api' })
+    )
+    expect(pickExtraRoot).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
   })
 })

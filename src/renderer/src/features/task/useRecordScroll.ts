@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isEditableShortcutTarget } from '@renderer/lib/shortcuts'
+import { scrollMotion } from '@renderer/lib/utils/motion'
 
 /** Within this of the bottom, a reader scrolling down picks the live run up again. */
 const NEAR_BOTTOM_PX = 80
@@ -26,6 +27,8 @@ const UP_KEYS = new Set(['ArrowUp', 'PageUp', 'Home'])
  * end picks the run up again. When the run you were following ends, the view
  * stays on its end, where the answer is.
  * Home and End (and the palette's "jump" commands) move to either end.
+ * `away` says a live run is going on below what you are reading, for the
+ * pane's "Jump to now".
  */
 export function useRecordScroll({
   restoreScrollTop,
@@ -45,6 +48,8 @@ export function useRecordScroll({
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(false)
+  /** A live run carries on below the view: the reader let go of it. */
+  const [away, setAway] = useState(false)
   /** A saved position still waiting for the content to be tall enough. */
   const pendingRef = useRef<number | null>(null)
   /** Scroll events our own `scrollTop` writes will fire, still to be seen. */
@@ -58,6 +63,27 @@ export function useRecordScroll({
   const liveRef = useRef(live)
   liveRef.current = live
 
+  /**
+   * Away: a live run, not followed, and its end more than a glance below the
+   * view — a reader a few pixels short of it is reading the live work already.
+   * Re-read whenever any of the three moves (React drops an unchanged value).
+   */
+  const syncAway = useCallback(() => {
+    const el = scrollRef.current
+    setAway(liveRef.current && !pinnedRef.current && el != null && distanceFromBottom(el) > NEAR_BOTTOM_PX)
+  }, [])
+  const setPinned = useCallback(
+    (pinned: boolean) => {
+      pinnedRef.current = pinned
+      syncAway()
+    },
+    [syncAway]
+  )
+  // A run that starts or ends while you read changes whether there is a "now" to go back to.
+  useEffect(() => {
+    syncAway()
+  }, [live, syncAway])
+
   const setTop = useCallback((top: number) => {
     const el = scrollRef.current
     if (!el) return
@@ -66,8 +92,8 @@ export function useRecordScroll({
     // Only a write that moved the view fires a scroll event to skip; flagging
     // one that did not would swallow the reader's next scroll.
     if (el.scrollTop !== before) programmaticRef.current = true
-    pinnedRef.current = distanceFromBottom(el) <= NEAR_BOTTOM_PX
-  }, [])
+    setPinned(distanceFromBottom(el) <= NEAR_BOTTOM_PX)
+  }, [setPinned])
 
   const followToEnd = useCallback(() => {
     const el = scrollRef.current
@@ -75,8 +101,8 @@ export function useRecordScroll({
     const before = el.scrollTop
     el.scrollTop = el.scrollHeight
     if (el.scrollTop !== before) programmaticRef.current = true
-    pinnedRef.current = true
-  }, [])
+    setPinned(true)
+  }, [setPinned])
 
   // Apply the saved position once per restore token, when the record is ready.
   useLayoutEffect(() => {
@@ -108,8 +134,8 @@ export function useRecordScroll({
     const el = scrollRef.current
     jumpingRef.current = null
     pendingRef.current = null
-    if (!el || liveRef.current || distanceFromBottom(el) > AT_BOTTOM_PX) pinnedRef.current = false
-  }, [])
+    if (!el || liveRef.current || distanceFromBottom(el) > AT_BOTTOM_PX) setPinned(false)
+  }, [setPinned])
 
   // Growth — of the record or of the pane around it: finish a pending
   // restore, or keep a live run you are at the end of in view. Re-attached
@@ -126,11 +152,13 @@ export function useRecordScroll({
         return
       }
       if (liveRef.current && pinnedRef.current && typeof jumpingRef.current !== 'number') followToEnd()
+      // The run grew below a reader who let go of it.
+      else syncAway()
     })
     ro.observe(content)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [setTop, followToEnd, ready])
+  }, [setTop, followToEnd, syncAway, ready])
 
   // A wheel turned up lets go before a smooth scroll has travelled far enough
   // for its scroll events to say so; a press on the scrollbar (the element
@@ -171,17 +199,18 @@ export function useRecordScroll({
     } else {
       // The reader moved: a stale saved position no longer applies.
       pendingRef.current = null
-      if (distance <= AT_BOTTOM_PX) pinnedRef.current = true
-      else if (distance > NEAR_BOTTOM_PX) pinnedRef.current = false
+      if (distance <= AT_BOTTOM_PX) setPinned(true)
+      else if (distance > NEAR_BOTTOM_PX) setPinned(false)
       // In between it keeps what it was: a reader easing down from far above
       // is not grabbed early, and one who let go is not grabbed back.
     }
+    syncAway()
     if (reportTimerRef.current != null) window.clearTimeout(reportTimerRef.current)
     reportTimerRef.current = window.setTimeout(() => {
       reportTimerRef.current = null
       if (scrollRef.current) onScrollTopChangeRef.current?.(scrollRef.current.scrollTop)
     }, REPORT_DELAY_MS)
-  }, [])
+  }, [setPinned, syncAway])
 
   useEffect(
     () => () => {
@@ -194,13 +223,13 @@ export function useRecordScroll({
   const glideTo = useCallback((top: number) => {
     const el = scrollRef.current
     pendingRef.current = null
-    pinnedRef.current = false
+    setPinned(false)
     if (!el) return
     const to = Math.max(0, Math.min(Math.round(top), el.scrollHeight - el.clientHeight))
     // Already there: no scroll event will come to say it arrived.
     jumpingRef.current = Math.abs(el.scrollTop - to) <= 1 ? null : to
-    el.scrollTo({ top: to, behavior: 'smooth' })
-  }, [])
+    el.scrollTo({ top: to, behavior: scrollMotion() })
+  }, [setPinned])
 
   const jumpTop = useCallback(() => glideTo(0), [glideTo])
 
@@ -220,10 +249,10 @@ export function useRecordScroll({
     if (!el) return
     pendingRef.current = null
     // Following from now on: growth during the glide re-aims it at the new end.
-    pinnedRef.current = true
+    setPinned(true)
     jumpingRef.current = 'bottom'
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [])
+    el.scrollTo({ top: el.scrollHeight, behavior: scrollMotion() })
+  }, [setPinned])
 
   /** Whether the record is following the live run right now. */
   const isFollowing = useCallback(() => pinnedRef.current, [])
@@ -269,5 +298,5 @@ export function useRecordScroll({
     }
   }, [jumpBottom, jumpTop, letGo])
 
-  return { scrollRef, contentRef, onScroll, jumpTop, jumpTo, jumpBottom, isFollowing }
+  return { scrollRef, contentRef, onScroll, jumpTop, jumpTo, jumpBottom, isFollowing, away }
 }

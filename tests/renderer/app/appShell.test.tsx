@@ -187,6 +187,49 @@ describe('AppShell', () => {
     expect(kept.getAttribute('aria-current')).toBe('page')
   })
 
+  it('tells same-state tasks apart in the rail and keeps the open task there when it is done', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: () => ({ matches: false, media: '', addEventListener: () => {}, removeEventListener: () => {} })
+    })
+    const WS = '/ws/demo'
+    const at = new Date().toISOString()
+    render(
+      <AppShell
+        {...baseProps}
+        workspacePath={WS}
+        openWorkspaces={[WS]}
+        runsByWorkspacePath={{
+          [WS]: {
+            runs: [
+              { runId: 'run-a', goal: 'Update the docs', status: 'done' as const, updatedAt: at, review: { files: 1, add: 1, del: 0 } },
+              { runId: 'run-b', goal: 'Bump deps', status: 'done' as const, updatedAt: at, review: { files: 1, add: 2, del: 0 } },
+              { runId: 'run-open', goal: 'Hey What can we do?', status: 'done' as const, updatedAt: at }
+            ],
+            runsCapped: false,
+            runsError: null,
+            activeRunId: null
+          }
+        }}
+        focusedRun={{ workspacePath: WS, runId: 'run-open' }}
+        activeRunsLoaded
+      >
+        <p>Main content</p>
+      </AppShell>
+    )
+    const rail = document.querySelector('[data-navigator-rail]') as HTMLElement
+    const initials = (name: RegExp): string | null =>
+      within(rail).getByRole('button', { name }).querySelector('[data-rail-initials]')?.textContent ?? null
+    expect(initials(/^Update the docs/)).toBe('UD')
+    expect(initials(/^Bump deps/)).toBe('BD')
+    // Done tasks are the drawer's, except the one you are on.
+    const open = rail.querySelector('[data-rail-section="open"]') as HTMLElement
+    const current = within(open).getByRole('button', { name: /^Hey What can we do\?/ })
+    expect(current.getAttribute('aria-current')).toBe('page')
+    expect(current.classList.contains('bg-surface-2')).toBe(true)
+    expect(current.classList.contains('hover:bg-surface')).toBe(false)
+  })
+
   it('keeps no rail beside the full navigator', () => {
     render(
       <AppShell {...baseProps}>

@@ -10,10 +10,12 @@ import { Icon } from '@renderer/lib/icons'
 import { Button, Input, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
+import { ruleSummary } from '@renderer/features/task/ruleSummary'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import { AutoTextarea } from '../components/AutoTextarea'
 import { NumberField } from '../components/NumberField'
+import { PermissionRulesEditor } from '../components/PermissionRulesEditor'
 import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
@@ -216,6 +218,40 @@ export function MemoryField({ workspacePath }: { workspacePath: string | null })
   )
 }
 
+/**
+ * The rules that reach the prompt in the workspace Settings is showing —
+ * "AGENTS.md and 2 rule files" — and a way to where they are managed. The
+ * generic list stands in while that is read, or with no workspace open.
+ */
+export function RulesField({
+  workspacePath,
+  onOpenMarketplace
+}: {
+  workspacePath: string | null
+  onOpenMarketplace?: SettingsViewProps['onOpenMarketplace']
+}) {
+  const { context } = useAgentContext(workspacePath)
+  const hint = workspacePath && context ? ruleSummary(context.rules) : 'AGENTS.md, CLAUDE.md, .cursorrules, .vyotiq/rules/, and your own.'
+  return (
+    <SettingsField
+      id="workspace-rules"
+      title="Rules"
+      hint={hint}
+      help="Rules set to alwaysApply: false are not added to every step; the agent can request them, and you can run them as slash commands. Create one from a task with /create-rule."
+    >
+      <Button
+        size="sm"
+        variant="secondary"
+        trailingIcon="arrowRight"
+        disabled={!onOpenMarketplace}
+        onClick={() => onOpenMarketplace?.('rules')}
+      >
+        Manage rules
+      </Button>
+    </SettingsField>
+  )
+}
+
 export function AgentSection({
   form,
   secrets,
@@ -237,6 +273,7 @@ export function AgentSection({
   // other scope's value instead of carrying the previous scope's text.
   const scopeKey = String(form.workspaceOverrideActive)
   const allowed = toolApproval.allowlist
+  const permissionRules = toolApproval.rules ?? []
 
   return (
     <SettingsStack>
@@ -274,6 +311,26 @@ export function AgentSection({
                 onRemoveAll={() => patchApproval({ allowlist: [] })}
               />
             ) : null
+          }
+        />
+        {/* Rules are what the user wrote, not a default: no changed mark,
+            and Reset leaves them, like the allowlist above. */}
+        <SettingsField
+          id="permission-rules"
+          title="Permission rules"
+          hint={
+            permissionRules.length > 0
+              ? 'Checked before Ask before and Always allowed. Deny beats ask, ask beats allow.'
+              : 'Deny or ask before a path, command or tool, whatever Ask before says.'
+          }
+          help="Paths are globs from the workspace root, absolute, or from ~/. A command matches its first words; deny and ask also catch it inside a chain. A workspace's .vyotiq/permissions.json adds its deny and ask rules here; its allow rules are ignored."
+          badge={scoped}
+          below={
+            <PermissionRulesEditor
+              rules={permissionRules}
+              disabled={form.formLocked}
+              onChange={(rules) => patchApproval({ rules })}
+            />
           }
         />
         <SwitchField
@@ -585,22 +642,7 @@ export function AgentSection({
       </SettingsGroup>
 
       <SettingsGroup title="Rules and memory">
-        <SettingsField
-          id="workspace-rules"
-          title="Rules"
-          hint="AGENTS.md, CLAUDE.md, .cursorrules, .vyotiq/rules/, and your own."
-          help="Rules set to alwaysApply: false are not added to every step; the agent can request them, and you can run them as slash commands. Create one from a task with /create-rule."
-        >
-          <Button
-            size="sm"
-            variant="secondary"
-            trailingIcon="arrowRight"
-            disabled={!onOpenMarketplace}
-            onClick={() => onOpenMarketplace?.('rules')}
-          >
-            Manage rules
-          </Button>
-        </SettingsField>
+        <RulesField workspacePath={form.activeWorkspacePath ?? null} onOpenMarketplace={onOpenMarketplace} />
         <MemoryField workspacePath={form.activeWorkspacePath ?? null} />
       </SettingsGroup>
     </SettingsStack>

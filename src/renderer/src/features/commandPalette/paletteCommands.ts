@@ -10,6 +10,9 @@ import { filterSettingsSearch } from '@renderer/features/settings/settingsSearch
 import { downloadUpdate, installUpdate } from '@renderer/features/updates/updaterStore'
 import { requestWhatsNew } from '@renderer/features/whats-new/useWhatsNew'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
+import { requestOpenInbox } from '@renderer/app/navigator/NotificationsRow'
+import { requestScheduledTasks } from '@renderer/features/schedules/scheduleRequests'
+import { openDocumentation, requestShortcutsHelp } from '@renderer/features/help/helpRequests'
 import type { PaletteCommand } from './CommandPalette'
 
 /**
@@ -47,7 +50,8 @@ const ICON: Record<string, IconName> = {
   inspectorExpand: 'expand',
   'jump-latest': 'arrowDown',
   'jump-top': 'arrowUp',
-  sendFeedback: 'note'
+  sendFeedback: 'note',
+  shortcutsHelp: 'keyboard'
 }
 
 /** "Ctrl+Shift+E" → ["Ctrl", "Shift", "E"]; "⌘⇧E" stays one cap. */
@@ -68,6 +72,7 @@ const TASK_COMMANDS: PaletteCommand[] = [
   { id: 'renameTask', title: 'Rename task', icon: 'edit' },
   { id: 'archiveTask', title: 'Archive or unarchive task', icon: 'archive' },
   { id: 'forkTask', title: 'Fork task', icon: 'fork' },
+  { id: 'toggleReasoning', title: 'Show or hide reasoning', icon: 'eye' },
   { id: 'deleteTask', title: 'Delete task…', icon: 'trash' }
 ]
 
@@ -78,7 +83,8 @@ export function paletteCommands({
   canOpenExtensions = false,
   canAddWorkspace = false,
   appearance = null,
-  hasTask = false
+  hasTask = false,
+  canImportTask = false
 }: {
   workspaces: readonly string[]
   activePath: string | null
@@ -89,6 +95,8 @@ export function paletteCommands({
   appearance?: { theme: ThemeId; skinId: SkinId } | null
   /** A task view is showing, so the task commands have something to act on. */
   hasTask?: boolean
+  /** A workspace is active to import a task bundle into. */
+  canImportTask?: boolean
 }): PaletteCommand[] {
   const base: PaletteCommand[] = shortcutCatalog()
     // One tab per Alt chord would repeat the panel commands; the chords are listed in Settings.
@@ -117,9 +125,13 @@ export function paletteCommands({
 
   const extras: PaletteCommand[] = [
     { id: 'goUsage', title: 'Usage', icon: 'chart' },
+    { id: 'openInbox', title: 'Inbox', icon: 'inbox' },
+    { id: 'scheduledTasks', title: 'Scheduled tasks', icon: 'repeat' },
     ...(canOpenExtensions ? [{ id: 'openExtensions', title: 'Extensions', icon: 'extensions' as const }] : []),
     ...(canAddWorkspace ? [{ id: 'addWorkspace', title: 'Add workspace…', icon: 'folderPlus' as const }] : []),
+    ...(canImportTask ? [{ id: 'importTask', title: 'Import task…', icon: 'upload' as const }] : []),
     { id: 'whatsNew', title: 'What’s new', icon: 'sparkles' },
+    { id: 'openDocs', title: 'Open documentation', icon: 'book' },
     ...(canSendFeedback ? [{ id: 'sendFeedback', title: 'Send feedback', icon: ICON.sendFeedback }] : [])
   ]
   const look: PaletteCommand[] = appearance
@@ -196,6 +208,8 @@ export type PaletteHandlers = {
   onOpenSettingsField: (fieldId: string) => void
   onOpenExtensions?: () => void
   onAddWorkspace?: () => void
+  /** Import task…, into the active workspace. */
+  onImportTask?: () => void
   onAppearanceChange?: (partial: Partial<AppearanceSettings>) => void
 }
 
@@ -203,6 +217,17 @@ export function runPaletteCommand(id: string, h: PaletteHandlers): void {
   if (id === 'settings') return h.onOpenSettings()
   if (id === 'goHome') return h.onOpenHome()
   if (id === 'goUsage') return h.onOpenUsage()
+  if (id === 'openInbox') {
+    // The Inbox on screen opens; with the list hidden there is none, so show the list, then open its.
+    if (requestOpenInbox()) return
+    h.onToggleNavigator()
+    requestAnimationFrame(() => requestAnimationFrame(() => requestOpenInbox()))
+    return
+  }
+  if (id === 'scheduledTasks') {
+    requestScheduledTasks()
+    return
+  }
   if (id === 'newChat') return h.onNewTask()
   if (id === 'sidebar') return h.onToggleNavigator()
   if (id === 'nextNeedsYou') return h.onNextNeedsYou()
@@ -213,6 +238,15 @@ export function runPaletteCommand(id: string, h: PaletteHandlers): void {
   if (id === 'splitPane') return h.onSplitPane?.()
   if (id === 'openExtensions') return h.onOpenExtensions?.()
   if (id === 'addWorkspace') return h.onAddWorkspace?.()
+  if (id === 'importTask') return h.onImportTask?.()
+  if (id === 'shortcutsHelp') {
+    requestShortcutsHelp()
+    return
+  }
+  if (id === 'openDocs') {
+    openDocumentation()
+    return
+  }
   if (id === 'whatsNew') {
     requestWhatsNew()
     return

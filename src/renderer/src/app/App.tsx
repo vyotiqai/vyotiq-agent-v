@@ -7,10 +7,13 @@ import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/
 import { ARCHIVED_RUNS_CAP, archiveRuns, toggleArchivedRun } from './navigator/archivedRuns'
 import { requestNavigatorScope } from './navigator/useNavigatorScope'
 import { requestUpdatePanel } from './navigator/UpdateChip'
+import { exportTaskJson, importTaskInto } from '../features/task/taskBundle'
 import { ChatView, type SettleActions } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
 import { runTitle } from './navigator/runTitle'
+import { PLACEHOLDER_GOAL } from '@shared/utils/taskTitle'
+import { onOpenSettingsRequest } from './openSettings'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import type { ChatPane } from '@renderer/lib/chat/chatPaneLayout'
 import type { PaneRenderOptions } from '../features/chat/ChatPaneHost'
@@ -76,11 +79,12 @@ import type {
 import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
 import { RELOAD_RUN_EVENT, announceRewound, redoRewindAndReload, type ReloadRunDetail } from '@renderer/features/task/rewindRedo'
 import { DISCARD_TASK_WORKTREE_EVENT, type DiscardTaskWorktreeDetail } from '@renderer/features/task/taskWorktree'
+import { useScheduledWorktreeOpener } from '@renderer/features/schedules/useScheduledWorktreeOpener'
 import { isFirstRun, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
 import {
   briefStateFor,
-  setBriefChecks,
   deleteTaskDraftFor,
+  putBriefBack,
   draftTitle,
   saveTaskDraftFor,
   setBriefState,
@@ -138,6 +142,33 @@ function ViewSuspenseFallback() {
 
 /** Sent as a visible user turn when resuming a run that was cut short. */
 const CONTINUE_PROMPT = 'Continue from where you stopped.'
+/** How long Resume waits for a just-stopped run to finish ending. */
+const RESUME_WAIT_MS = 5000
+
+/** True once the run is neither running nor starting; false if it still is after `ms`. */
+function whenRunIdle(
+  controller: { readonly running: boolean; readonly pendingRun: boolean; subscribe: (listener: () => void) => () => void },
+  ms: number
+): Promise<boolean> {
+  const idle = (): boolean => !controller.running && !controller.pendingRun
+  if (idle()) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let unsubscribe = (): void => {}
+    const timer = window.setTimeout(() => {
+      unsubscribe()
+      resolve(idle())
+    }, ms)
+    const settle = (): void => {
+      if (!idle()) return
+      window.clearTimeout(timer)
+      unsubscribe()
+      resolve(true)
+    }
+    unsubscribe = controller.subscribe(settle)
+    // It may have gone idle between the first check and subscribing.
+    settle()
+  })
+}
 
 /** Settings' Back names the view it returns to. */
 const SETTINGS_BACK_LABELS = {
@@ -298,6 +329,17 @@ function App() {
 
   const focusedParentRunId = chat.runId ?? activeContext?.activeRunId ?? null
   contextsForModelRef.current = contexts
+  /**
+   * A task as the navigator names it, for a toast about it. `instance` is true
+   * for a sub-agent's run, which has no Resume or Archive of its own.
+   */
+  const taskNameOf = useCallback((path: string, runId: string): { title: string | null; instance: boolean } => {
+    const ctx = findByWorkspacePath(contextsForModelRef.current, path)
+    const run = ctx?.runs.find((r) => r.runId === runId)
+    if (run) return { title: runTitle(run) || null, instance: false }
+    const child = ctx?.instanceRuns?.find((r) => r.runId === runId)
+    return { title: child ? runTitle(child) || null : null, instance: Boolean(child) }
+  }, [])
   const focusedOpenInstance =
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
@@ -578,7 +620,10 @@ function App() {
         archivedRuns: toggleArchivedRun(before.archivedRuns, key),
         ...(wasPinned ? { pinnedRuns: before.pinnedRuns.filter((k) => k !== key) } : {})
       })
+      const title = taskNameOf(path, runId).title
       pushToast('Task archived', {
+        ...(title ? { detail: title } : {}),
+        icon: 'archive',
         action: {
           label: 'Undo',
           onClick: () => {
@@ -591,7 +636,7 @@ function App() {
         }
       })
     },
-    [update]
+    [taskNameOf, update]
   )
 
   // Several at once (a selection, or "Archive all done"): one settings write,
@@ -715,6 +760,16 @@ function App() {
     setOpenInstanceForParent,
     setSettingsError
   ])
+
+  // "Settings › Agent" from a toast or a card in the record.
+  useEffect(
+    () =>
+      onOpenSettingsRequest((section) => {
+        setSettingsSection(section)
+        setView('settings')
+      }),
+    [setView]
+  )
 
   useEffect(() => {
     const unsub = window.vyotiq?.onNotificationActivate?.((action) => {
@@ -1184,7 +1239,8 @@ function App() {
     // task page, and the draft it came from is kept until a task spends it.
     if (!sent) {
       setComposerDraftForPane(path, null, text)
-      if (rest.doneWhen?.length) setBriefChecks(path, rest.doneWhen)
+      // Its checks and its added folders too: the brief was all of them.
+      putBriefBack(path, { checks: rest.doneWhen, extraRoots: rest.extraRoots })
       const key = composerAttachmentKey(path, null)
       if (key) {
         setComposerAttachments(key, {
@@ -1244,6 +1300,9 @@ function App() {
     return () => window.removeEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
   }, [addWorkspace, removeWorkspace, switchWorkspace])
 
+  // A scheduled run set to a new worktree: open the worktree main made, as above.
+  useScheduledWorktreeOpener(addWorkspace)
+
   const { confirm, dialog: confirmDialog } = useConfirm()
   const { askRewind, dialog: rewindDialog } = useRewindDialog()
 
@@ -1301,9 +1360,44 @@ function App() {
     [askRewind, refreshWorkspaceRuns]
   )
 
+  // Resume from the Stopped toast: the record's Resume, from outside the task.
+  const resumeRunRef = useRef<(path: string, runId: string) => Promise<void>>(async () => {})
+  /**
+   * A task you stopped says so, with the way to carry on: Resume sends what the
+   * record's Resume sends. An instance's stop is its parent's business, so it
+   * says nothing.
+   */
+  const sayStopped = useCallback(
+    (path: string, runId: string): void => {
+      const { title, instance } = taskNameOf(path, runId)
+      if (instance) return
+      pushToast('Stopped', {
+        ...(title ? { detail: title } : {}),
+        state: 'stopped',
+        action: { label: 'Resume', onClick: () => void resumeRunRef.current(path, runId) }
+      })
+    },
+    [taskNameOf]
+  )
+
+  const chatStopTargetRef = useRef<{ path: string | null; runId: string | null; live: boolean }>({
+    path: null,
+    runId: null,
+    live: false
+  })
+  chatStopTargetRef.current = {
+    path: focusedWorkspacePath ?? activeWorkspace,
+    runId: chat.runId,
+    live: chat.running || chat.pendingRun
+  }
   const onChatStop = useCallback(() => {
-    void chatActionsRef.current?.stop()
-  }, [])
+    const { path, runId, live } = chatStopTargetRef.current
+    const stopping = chatActionsRef.current?.stop()
+    if (!stopping || !live || !path || !runId) return
+    void stopping.then((stopped) => {
+      if (stopped) sayStopped(path, runId)
+    })
+  }, [sayStopped])
 
   const activeRunId = chat.runId
   const [undoBusy, setUndoBusy] = useState(false)
@@ -1487,7 +1581,10 @@ function App() {
     const run =
       ctx?.runs.find((r) => r.runId === focusedParentRunId) ??
       ctx?.instanceRuns?.find((r) => r.runId === focusedParentRunId)
-    return run ? runTitle(run) || null : null
+    // A task with no words of its own is called "Untitled task" or by its id
+    // in the navigator; a review or pull request is better named by its summary.
+    const goal = run?.goal?.trim()
+    return run && goal && goal.toLowerCase() !== PLACEHOLDER_GOAL ? runTitle(run) || null : null
   }, [contexts, chatWorkspacePath, focusedParentRunId])
 
   const createSlashHandlers = useCallback(
@@ -2098,7 +2195,12 @@ function App() {
             )
           }
           onStop={() => {
-            void paneCtrl?.stop()
+            const live = snap.running || snap.pendingRun
+            const path = pane.workspacePath
+            const runId = pane.runId
+            void paneCtrl?.stop().then((stopped) => {
+              if (stopped && live && path && runId) sayStopped(path, runId)
+            })
           }}
           onEditAndResend={(editMessageIndex, text, images, files, extras) =>
             paneCtrl?.editAndResend(editMessageIndex, text, images, files, extras) ?? false
@@ -2177,6 +2279,7 @@ function App() {
             onExport: pane.runId
               ? () => void paneRunActionsRef.current.exportRun(pane.workspacePath, pane.runId!)
               : undefined,
+            onExportJson: pane.runId ? () => void exportTaskJson(pane.workspacePath, pane.runId!) : undefined,
             onCopyLink: pane.runId ? () => onCopyRunLinkInWorkspace(pane.workspacePath, pane.runId!) : undefined,
             onFork: pane.runId ? () => void paneRunActionsRef.current.fork(pane.workspacePath, pane.runId!) : undefined,
             onTogglePin: pane.runId ? () => paneRunActionsRef.current.togglePin(pane.workspacePath, pane.runId!) : undefined,
@@ -2241,7 +2344,8 @@ function App() {
       onChatSettingsChangeForWorkspace,
       onProviderModelForWorkspace,
       onToggleFavorite,
-      newTaskTargets
+      newTaskTargets,
+      sayStopped
     ]
   )
 
@@ -2407,6 +2511,14 @@ function App() {
     pushToast('Forked — a copy of the task to take another way', { kind: 'success', icon: 'fork' })
   }
 
+  /** Import task…: a task bundle as a new, finished, read-only task, opened where you are. */
+  const onImportTaskInWorkspace = async (path: string): Promise<void> => {
+    const runId = await importTaskInto(path)
+    if (!runId) return
+    refreshWorkspaceRuns(path)
+    await onSelectRunInWorkspace(path, runId)
+  }
+
   paneRunActionsRef.current = {
     rename: onRenameRunInWorkspace,
     exportRun: onExportRunInWorkspace,
@@ -2418,11 +2530,13 @@ function App() {
     isArchived: (path, runId) => settings.archivedRuns.includes(pinnedRunKey(path, runId))
   }
 
+  /** `quiet`: a stop that is part of something else (pausing a goal) says nothing of its own. */
   const onStopRunInWorkspace = useCallback(
-    async (path: string, runId: string): Promise<void> => {
+    async (path: string, runId: string, opts?: { quiet?: boolean }): Promise<void> => {
       const controller = getRunController(runId, path)
+      let stopped = true
       if (controller) {
-        await controller.stop()
+        stopped = await controller.stop()
       } else {
         const result = await window.vyotiq.chatCancel(runId)
         if (!result.ok) {
@@ -2430,11 +2544,12 @@ function App() {
           return
         }
       }
+      if (stopped && !opts?.quiet) sayStopped(path, runId)
       await refreshWorkspaceRuns(path)
       await refreshActiveRuns()
       setHomeRefreshVersion((version) => version + 1)
     },
-    [getRunController, refreshActiveRuns, refreshWorkspaceRuns]
+    [getRunController, refreshActiveRuns, refreshWorkspaceRuns, sayStopped]
   )
 
   /**
@@ -2484,6 +2599,13 @@ function App() {
     },
     [getRunController, onSelectRunInWorkspace, refreshActiveRuns, refreshWorkspaceRuns]
   )
+  // The toast can be pressed while the stop is still landing (main accepted
+  // the cancel; the stream has not ended): wait for the run to go idle first.
+  resumeRunRef.current = async (path, runId) => {
+    const controller = getRunController(runId, path)
+    if (controller && !(await whenRunIdle(controller, RESUME_WAIT_MS))) return
+    await onRetryRunInWorkspace(path, runId)
+  }
 
   /**
    * Pause a task's standing goal, then stop the run it launched — the goal
@@ -2498,7 +2620,7 @@ function App() {
         pushToast(res.error, 'error')
         return
       }
-      if (live) await onStopRunInWorkspace(path, runId)
+      if (live) await onStopRunInWorkspace(path, runId, { quiet: true })
       else await refreshWorkspaceRuns(path)
     },
     [onStopRunInWorkspace, refreshWorkspaceRuns]
@@ -2719,7 +2841,12 @@ function App() {
 
   const focusedRun =
     focusedRunId && (focusedWorkspacePath ?? activeWorkspace)
-      ? { workspacePath: (focusedWorkspacePath ?? activeWorkspace)!, runId: focusedRunId }
+      ? {
+          workspacePath: (focusedWorkspacePath ?? activeWorkspace)!,
+          runId: focusedRunId,
+          // The instance open in place of its record, marked under its task in the list.
+          instanceRunId: focusedRunId === focusedParentRunId ? focusedOpenInstance : null
+        }
       : null
 
   const shellWorkspaceProps = {
@@ -2822,6 +2949,7 @@ function App() {
       onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
       onRetryRunInWorkspace={(path, runId) => void onRetryRunInWorkspace(path, runId)}
       onForkRunInWorkspace={(path, runId) => void paneRunActionsRef.current.fork(path, runId)}
+      onImportTask={(path) => void onImportTaskInWorkspace(path)}
       onPauseGoalInWorkspace={(path, runId, live) => void onPauseGoalInWorkspace(path, runId, live)}
       onStopLoopInWorkspace={(path, runId) => void onStopLoopInWorkspace(path, runId)}
       onReviewTask={(path, runId) => void onReviewTask(path, runId)}

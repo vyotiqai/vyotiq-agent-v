@@ -158,4 +158,20 @@ describe('FeedbackDialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('saves a diagnostics bundle to attach, and says where', async () => {
+    const exportDiagnostics = vi.fn(async () => ({
+      ok: true as const,
+      data: { saved: true as const, fileName: 'vyotiq-diagnostics-20261002-1430.zip', bytes: 1200, files: [] }
+    }))
+    ;(window as unknown as { vyotiq: unknown }).vyotiq = { feedback: { compose: vi.fn() }, exportDiagnostics }
+    render(<FeedbackDialog open onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export diagnostics' }))
+
+    expect(exportDiagnostics).toHaveBeenCalledTimes(1)
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Saved vyotiq-diagnostics-20261002-1430.zip. Attach it to the email.'
+    )
+  })
 })

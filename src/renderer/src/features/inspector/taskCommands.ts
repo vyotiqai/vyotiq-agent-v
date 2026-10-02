@@ -1,4 +1,6 @@
 import type { UiItem } from '@shared/transcript'
+import { workspacePathIsInside } from '@shared/workspacePathMatch'
+import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { approvalRefusalOf, isInterruptedToolContent } from '@renderer/features/chat/toolUi'
 import { parseTerminalCardData } from '@renderer/features/chat/toolUi/parsers/terminal'
 import { toolDurationMs } from '@renderer/features/task/record/WorkItems'
@@ -23,15 +25,21 @@ export type TaskCommand = {
   refusal: string | null
   /** The last lines it printed, stdout then stderr. */
   tail: string[]
+  /** Lines it printed before those, left out of `tail`. */
+  earlier: number
+  /** When the call started (ISO): a running command's time counts up from it. */
+  startedAt: string | null
+  /** The directory it ran in, as the call reported it; empty until it says. */
+  cwd: string
 }
 
 /** How many of a command's last lines the list shows under it. */
 export const COMMAND_TAIL_LINES = 6
 
-function tailOf(text: string, max: number): string[] {
+function tailOf(text: string, max: number): { tail: string[]; earlier: number } {
   const lines = text.replace(/\s+$/, '').split(/\r?\n/)
-  if (lines.length === 1 && lines[0] === '') return []
-  return lines.slice(-max)
+  if (lines.length === 1 && lines[0] === '') return { tail: [], earlier: 0 }
+  return { tail: lines.slice(-max), earlier: Math.max(0, lines.length - max) }
 }
 
 /** One `terminal` call as the list shows it, classified exactly as its card in the record. */
@@ -56,6 +64,7 @@ export function taskCommandOf(item: ToolItem): TaskCommand {
             ? 'failed'
             : 'done'
   const printed = [data.output, data.stderr].filter((part) => part.trim()).join('\n')
+  const { tail, earlier } = refusal || stopped ? { tail: [], earlier: 0 } : tailOf(printed, COMMAND_TAIL_LINES)
   return {
     id: item.id,
     command: data.command,
@@ -63,8 +72,27 @@ export function taskCommandOf(item: ToolItem): TaskCommand {
     exitCode: exit,
     durationMs: running || awaiting ? null : toolDurationMs(item),
     refusal,
-    tail: refusal || stopped ? [] : tailOf(printed, COMMAND_TAIL_LINES)
+    tail,
+    earlier,
+    startedAt: item.at ?? null,
+    cwd: data.cwd
   }
+}
+
+/**
+ * Where the task's commands ran, named by its folder: the workspace, unless
+ * they ran outside it (a task worktree), and then the first directory they
+ * reported. Null when neither is known.
+ */
+export function commandsRanIn(
+  commands: readonly TaskCommand[],
+  workspacePath: string | null | undefined
+): { name: string; path: string } | null {
+  const cwd = commands.find((command) => command.cwd)?.cwd ?? ''
+  const elsewhere = Boolean(cwd) && (!workspacePath || !workspacePathIsInside(workspacePath, cwd))
+  const path = elsewhere ? cwd : (workspacePath ?? '')
+  const name = formatWorkspaceName(path, '')
+  return name ? { name, path } : null
 }
 
 /** Every command this task ran, oldest first. */

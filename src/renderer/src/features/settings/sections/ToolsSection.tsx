@@ -1,8 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import type { McpServerStatus, SandboxCapability } from '@shared/ipc'
+import { DEFAULT_AGENT_SANDBOX } from '@shared/ipc'
 import { Button, Input } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import {
+  AGENT_SANDBOX_MODE_OPTIONS,
+  AGENT_SANDBOX_NETWORK_OPTIONS,
   SEARCH_ENGINE_OPTIONS,
   TERMINAL_SCREEN_READER_OPTIONS,
   TERMINAL_SHELL_OPTIONS
@@ -28,6 +32,78 @@ function useFlushOnUnmount(flush: () => void): void {
   useEffect(() => () => ref.current(), [])
 }
 
+/** "GitHub", "GitHub and Linear", or a count past two. */
+function namesOrCount(servers: readonly McpServerStatus[]): string {
+  return servers.length <= 2 ? servers.map((s) => s.name).join(' and ') : String(servers.length)
+}
+
+/**
+ * How the MCP servers stand, in one line, from main's live status: which are
+ * connected and which need something. Null when none is installed, so the
+ * field keeps its plain words.
+ */
+export function mcpServersSummary(servers: readonly McpServerStatus[]): string | null {
+  if (servers.length === 0) return null
+  const on = servers.filter((s) => s.enabled)
+  if (on.length === 0) return servers.length === 1 ? 'Its one server is off.' : `All ${servers.length} are off.`
+  const idle = on.filter((s) => !s.connected && !s.connecting)
+  const connected = on.filter((s) => s.connected)
+  const connecting = on.filter((s) => s.connecting && !s.connected)
+  const signIn = idle.filter((s) => s.errorKind === 'sign-in')
+  const failing = idle.filter((s) => s.error && s.errorKind !== 'sign-in')
+  const parts: string[] = []
+  if (connected.length) parts.push(`${namesOrCount(connected)} connected`)
+  if (connecting.length) parts.push(`${namesOrCount(connecting)} connecting`)
+  if (signIn.length) parts.push(`${namesOrCount(signIn)} ${signIn.length === 1 ? 'needs' : 'need'} sign-in`)
+  if (failing.length) parts.push(`${namesOrCount(failing)} can’t connect`)
+  return parts.length ? parts.join(' · ') : `${namesOrCount(on)} on, not connected yet`
+}
+
+/** Main's MCP status for the open workspace, read when the section opens; null until it answers. */
+function useMcpServers(): readonly McpServerStatus[] | null {
+  const [servers, setServers] = useState<readonly McpServerStatus[] | null>(null)
+  useEffect(() => {
+    const read = window.vyotiq?.mcpStatus
+    if (!read) return undefined
+    let cancelled = false
+    void read({})
+      .then((res) => {
+        if (!cancelled && res.ok) setServers(res.data.servers)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return servers
+}
+
+/** Whether main can sandbox commands on this machine; null until it answers. */
+function useSandboxCapability(): SandboxCapability | null {
+  const [capability, setCapability] = useState<SandboxCapability | null>(null)
+  useEffect(() => {
+    const read = window.vyotiq?.getSandboxCapability
+    if (!read) return undefined
+    let cancelled = false
+    void read()
+      .then((res) => {
+        if (!cancelled && res.ok) setCapability(res.data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return capability
+}
+
+/** The sandbox row's line: what it confines, or why it can't here. */
+export function sandboxHint(capability: SandboxCapability | null): string {
+  if (!capability) return 'Checking whether this machine can sandbox commands…'
+  if (!capability.available) return capability.reason ?? 'This machine cannot sandbox commands.'
+  return 'Agent commands write only to the workspace, temp and package caches.'
+}
+
 /** "Only example.com, *.corp.internal and 2 more." */
 function allowlistHint(hosts: readonly string[]): string {
   if (hosts.length === 0) return 'Empty: the agent’s browser may open any site.'
@@ -46,7 +122,18 @@ export function ToolsSection({
 }) {
   const settings = form.settings
   const catalog = useToolCatalog()
+  const mcpServers = useMcpServers()
+  const sandboxCapability = useSandboxCapability()
   const allowlistPanelId = useId()
+
+  const sandbox = settings.agentSandbox ?? DEFAULT_AGENT_SANDBOX
+  const sandboxOn = sandbox.mode !== 'off'
+  const sandboxAvailable = sandboxCapability?.available === true
+  // Unavailable: "Workspace only" can't be picked, but a sandbox already on
+  // (a settings file from another machine) can still be turned off.
+  const sandboxModeOptions = AGENT_SANDBOX_MODE_OPTIONS.map((option) =>
+    option.value === 'off' ? option : { ...option, disabled: !sandboxAvailable }
+  )
 
   const persistedAllowlist = settings.browserDomainAllowlist ?? []
   const allowlistKey = persistedAllowlist.join('\n')
@@ -144,6 +231,38 @@ export function ToolsSection({
         />
       </SettingsGroup>
 
+      <SettingsGroup title="Sandbox">
+        <SegmentedField
+          id="agent-sandbox"
+          title="Sandbox commands"
+          label="Sandbox agent commands"
+          hint={sandboxHint(sandboxCapability)}
+          help="Covers the agent's terminal, run_tests and diagnostics — never the terminal panel you type into. Sandboxed commands can read the disk except the app's data and ~/.ssh, and write only the workspace (its git folder included, hooks and config excepted), temp and existing package caches. macOS uses sandbox-exec, Linux bubblewrap. Agent-built tools are refused while it is on."
+          value={sandbox.mode}
+          options={sandboxModeOptions}
+          disabled={form.formLocked || (!sandboxAvailable && !sandboxOn)}
+          {...form.nestedDefaultMark('agentSandbox', 'mode')}
+          onChange={(mode) => {
+            void form.runUpdate({ agentSandbox: { ...sandbox, mode } })
+          }}
+        />
+        <SegmentedField
+          id="agent-sandbox-network"
+          title="Network"
+          label="Sandboxed command network"
+          hint="Deny cuts sandboxed commands off the internet."
+          help="On macOS localhost stays reachable. On Linux the command gets its own empty network, so the host's localhost is unreachable too."
+          nested
+          value={sandbox.network}
+          options={AGENT_SANDBOX_NETWORK_OPTIONS}
+          disabled={form.formLocked || !sandboxOn || !sandboxAvailable}
+          {...form.nestedDefaultMark('agentSandbox', 'network')}
+          onChange={(network) => {
+            void form.runUpdate({ agentSandbox: { ...sandbox, network } })
+          }}
+        />
+      </SettingsGroup>
+
       <SettingsGroup title="Browser">
         <SegmentedField
           id="search-engine"
@@ -208,7 +327,7 @@ export function ToolsSection({
         <SettingsField
           id="mcp-servers"
           title="Servers"
-          hint="Connect servers and choose which of their tools the agent gets."
+          hint={(mcpServers && mcpServersSummary(mcpServers)) ?? 'Connect servers and choose which of their tools the agent gets.'}
         >
           <Button
             size="sm"

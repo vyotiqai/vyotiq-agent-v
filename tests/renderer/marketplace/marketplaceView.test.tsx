@@ -538,6 +538,17 @@ describe('Extensions list', () => {
     expect(await within(panel).findByText('Filesystem')).toBeTruthy()
   })
 
+  it('says what the page is for, above the groups, naming the workspace', async () => {
+    renderView({ activeWorkspacePath: 'C:/work/acme' })
+    const list = screen.getByRole('tabpanel', { name: 'All' })
+    const line = list.querySelector<HTMLElement>('[data-extensions-subtitle]')!
+    expect(line.textContent).toBe('What every task in acme can use')
+    expect(list.firstElementChild).toBe(line)
+    cleanup()
+    renderView()
+    expect(document.querySelector('[data-extensions-subtitle]')?.textContent).toBe('What every task can use')
+  })
+
   it('focuses search on mount', async () => {
     renderView({ onClose: vi.fn() })
     const search = await screen.findByRole('textbox', { name: 'Search extensions' })
@@ -659,6 +670,32 @@ describe('Row switches', () => {
     expect(within(row('user-rule:r1')).getByText('Always applied')).toBeTruthy()
     fireEvent.click(toggle)
     await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ userRules: [{ ...rule, enabled: false }] }))
+  })
+
+  it('quiets the name of a row that is switched off, and only that', async () => {
+    installMemory()
+    installBridge({
+      ...bridge,
+      mcpStatus: vi.fn(async () => ok({ servers: [{ ...memoryConnected, enabled: false }] }))
+    })
+    renderInWorkspace({ memory: false })
+    await waitFor(() => expect(memorySwitch().getAttribute('aria-checked')).toBe('false'))
+    const name = within(row('mcp:memory')).getByText('Memory')
+    expect(name.classList.contains('text-muted')).toBe(true)
+    expect(name.classList.contains('text-fg-strong')).toBe(false)
+    // A row with no switch keeps its name strong.
+    const fetchName = within(row('mcp:fetch')).getByText('Fetch')
+    expect(fetchName.classList.contains('text-fg-strong')).toBe(true)
+    expect(fetchName.classList.contains('text-muted')).toBe(false)
+  })
+
+  it('keeps the name strong on a row that is switched on', async () => {
+    installMemory()
+    renderView()
+    await waitFor(() => expect(memorySwitch().getAttribute('aria-checked')).toBe('true'))
+    const name = within(row('mcp:memory')).getByText('Memory')
+    expect(name.classList.contains('text-fg-strong')).toBe(true)
+    expect(name.classList.contains('text-muted')).toBe(false)
   })
 
   it('gives no switch to what has no on and off to keep', async () => {

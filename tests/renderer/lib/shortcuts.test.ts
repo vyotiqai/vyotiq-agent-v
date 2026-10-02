@@ -173,7 +173,8 @@ describe('shortcutLabel', () => {
       'approval-deny',
       'font-smaller',
       'font-larger',
-      'font-reset'
+      'font-reset',
+      'shortcuts-help-key'
     ])
     expect(reference.find((row) => row.id === 'font-reset')?.label).toBe('Ctrl+0')
     expect(reference.find((row) => row.id === 'approval-allow')?.label).toBe('Alt+A')

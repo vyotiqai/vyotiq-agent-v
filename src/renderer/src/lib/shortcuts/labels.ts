@@ -44,7 +44,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   settings: 'Settings',
   focusComposer: 'Focus the instruction line',
   stop: 'Stop the run',
-  find: 'Find in record, changes, or PR',
+  find: 'Find in record, changes, PR, or open file',
   refresh: 'Refresh changes or PR',
   dictation: 'Dictation',
   cycleMode: 'Switch Ask / Agent mode',
@@ -58,6 +58,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   splitPane: 'Open a second task pane',
   findInFiles: 'Find in files',
   commandPalette: 'Search and commands (alternate)',
+  shortcutsHelp: 'Show keyboard shortcuts',
   workspace1: 'Switch to workspace 1',
   workspace2: 'Switch to workspace 2',
   workspace3: 'Switch to workspace 3',
@@ -106,7 +107,8 @@ export function referenceShortcutCatalog(): ShortcutCatalogEntry[] {
     { id: 'approval-deny', title: 'Deny the pending approval', label: altChordLabel('d') },
     { id: 'font-smaller', title: 'Smaller text', label: `${mod}-` },
     { id: 'font-larger', title: 'Larger text', label: `${mod}=` },
-    { id: 'font-reset', title: 'Reset text size', label: `${mod}0` }
+    { id: 'font-reset', title: 'Reset text size', label: `${mod}0` },
+    { id: 'shortcuts-help-key', title: 'Show keyboard shortcuts, outside a text field', label: '?' }
   ]
 }
 

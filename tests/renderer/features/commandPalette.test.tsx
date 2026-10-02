@@ -14,6 +14,7 @@ import {
 } from '@renderer/features/commandPalette/paletteCommands'
 import { resetUpdaterStoreForTests } from '@renderer/features/updates/updaterStore'
 import { buildNavigatorSections } from '@renderer/app/navigator/navigatorModel'
+import { NotificationsRow } from '@renderer/app/navigator/NotificationsRow'
 
 afterEach(() => cleanup())
 
@@ -239,6 +240,38 @@ describe('paletteCommands', () => {
     runPaletteCommand('panelChanges', h)
     window.removeEventListener('vyotiq:command', onCommand)
     expect(seen).toEqual(['panelChanges'])
+  })
+})
+
+describe('the palette’s Inbox', () => {
+  const handlers = () => ({
+    workspaces: [WS],
+    onOpenSettings: vi.fn(),
+    onOpenHome: vi.fn(),
+    onOpenUsage: vi.fn(),
+    onNewTask: vi.fn(),
+    onToggleNavigator: vi.fn(),
+    onNextNeedsYou: vi.fn(),
+    onSwitchWorkspaceByIndex: vi.fn(),
+    onFocusInstructionLine: vi.fn(),
+    onOpenSettingsField: vi.fn()
+  })
+
+  it('is listed, and opens the Inbox on screen', () => {
+    expect(paletteCommands({ workspaces: [WS], activePath: WS, canSendFeedback: false }).map((c) => c.id)).toContain('openInbox')
+    render(
+      <NotificationsRow items={[]} unreadCount={0} onMarkRead={vi.fn()} onDismiss={vi.fn()} onOpenItem={vi.fn()} onOpenSettings={vi.fn()} />
+    )
+    const h = handlers()
+    act(() => runPaletteCommand('openInbox', h))
+    expect(screen.getByRole('dialog', { name: 'Inbox' })).toBeTruthy()
+    expect(h.onToggleNavigator).not.toHaveBeenCalled()
+  })
+
+  it('shows the list first when no Inbox is on screen', () => {
+    const h = handlers()
+    runPaletteCommand('openInbox', h)
+    expect(h.onToggleNavigator).toHaveBeenCalledTimes(1)
   })
 })
 

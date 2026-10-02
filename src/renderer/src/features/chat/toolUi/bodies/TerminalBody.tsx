@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, type ReactElement, type ReactNode, type UIE
 import { cn } from '@renderer/lib/ui'
 import { TOOL_TERMINAL_VIEWPORT } from '@renderer/lib/utils/layout'
 import { sanitizeTerminalDisplayText } from '@shared/utils/terminalFormat'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
+import { useRunSession } from '../../RunSessionContext'
 import type { ToolBodyProps } from '../types'
 import { parseTerminalCardData } from '../parsers/terminal'
 import { TruncatedBanner } from '../primitives'
@@ -57,7 +59,9 @@ export function TerminalBody({ tool, loading, loadFailed, inGroup }: ToolBodyPro
     return {
       ...parsed,
       command: sanitizeTerminalDisplayText(parsed.command),
-      output: sanitizeTerminalDisplayText(parsed.output),
+      // Blank lines a shell prints before its first output are not output; a
+      // first line's own indent is kept.
+      output: sanitizeTerminalDisplayText(parsed.output).replace(/^(?:[ \t]*\n)+/, ''),
       stderr: sanitizeTerminalDisplayText(parsed.stderr)
     }
   }, [tool])
@@ -84,11 +88,19 @@ export function TerminalBody({ tool, loading, loadFailed, inGroup }: ToolBodyPro
       el.scrollHeight - el.scrollTop - el.clientHeight <= VIEWPORT_PIN_PX
   }
 
-  // The card header carries the duration; the body names where it ran.
+  // The card header carries the exit code and duration; the body says where
+  // it ran only when that is not the workspace itself (a subfolder, a worktree),
+  // with the shell beside it, and a session status only when the header has no
+  // word for it ("timeout"). Three lines of `cwd / shell / status: done` above
+  // every output said nothing new and pushed the output down.
+  const { workspacePath } = useRunSession()
+  const elsewhere = Boolean(data.cwd) && !(workspacePath && workspacePathsEqual(workspacePath, data.cwd))
   const metaLines: string[] = []
-  if (data.cwd) metaLines.push(`cwd: ${data.cwd}`)
-  if (data.shell) metaLines.push(`shell: ${data.shell}`)
-  if (data.sessionStatus) metaLines.push(`status: ${data.sessionStatus}`)
+  if (elsewhere) metaLines.push(`cwd: ${data.cwd}`)
+  if (elsewhere && data.shell) metaLines.push(`shell: ${data.shell}`)
+  if (data.sessionStatus && data.sessionStatus !== 'done' && data.sessionStatus !== 'running') {
+    metaLines.push(`status: ${data.sessionStatus}`)
+  }
 
   const hasMeta = metaLines.length > 0
   // The record's terminal card already heads the output with `$ command`; only

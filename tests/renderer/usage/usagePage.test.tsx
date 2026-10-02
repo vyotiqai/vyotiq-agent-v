@@ -179,14 +179,96 @@ describe('Usage', () => {
   it('reads again for thirty days, or for one workspace', async () => {
     renderUsage()
     await screen.findByText('Spend per day')
-    expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [ALPHA, BETA], windowDays: 7 })
+    expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [ALPHA, BETA], windowDays: 7, breakdown: true })
 
     fireEvent.click(screen.getByRole('radio', { name: '30 days' }))
-    await waitFor(() => expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [ALPHA, BETA], windowDays: 30 }))
+    await waitFor(() =>
+      expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [ALPHA, BETA], windowDays: 30, breakdown: true })
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
     fireEvent.click(await screen.findByRole('option', { name: 'repo-beta' }))
-    await waitFor(() => expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [BETA], windowDays: 30 }))
+    await waitFor(() =>
+      expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [BETA], windowDays: 30, breakdown: true })
+    )
+
+    fireEvent.click(screen.getByRole('radio', { name: '90 days' }))
+    await waitFor(() =>
+      expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [BETA], windowDays: 90, breakdown: true })
+    )
+  })
+
+  it('reads a custom range by its last day, and refuses one that runs backwards or past a year', async () => {
+    renderUsage()
+    await screen.findByText('Spend per day')
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }))
+    const from = screen.getByLabelText('From') as HTMLInputElement
+    const to = screen.getByLabelText('To') as HTMLInputElement
+    // Opens on the last thirty days, ending today.
+    expect(from.value).toBe(dayKey(29))
+    expect(to.value).toBe(dayKey(0))
+    await waitFor(() =>
+      expect(homeActivity).toHaveBeenLastCalledWith({ workspacePaths: [ALPHA, BETA], windowDays: 30, breakdown: true })
+    )
+
+    fireEvent.change(from, { target: { value: dayKey(20) } })
+    fireEvent.change(to, { target: { value: dayKey(11) } })
+    await waitFor(() =>
+      expect(homeActivity).toHaveBeenLastCalledWith({
+        workspacePaths: [ALPHA, BETA],
+        windowDays: 10,
+        endDay: dayKey(11),
+        breakdown: true
+      })
+    )
+
+    const calls = homeActivity.mock.calls.length
+    fireEvent.change(from, { target: { value: dayKey(5) } })
+    expect(screen.getByRole('alert').textContent).toBe('The start is after the end.')
+    fireEvent.change(from, { target: { value: dayKey(400) } })
+    expect(screen.getByRole('alert').textContent).toBe('A range can span at most 365 days.')
+    // An unreadable pair keeps the last good range on screen rather than reading again.
+    expect(homeActivity.mock.calls.length).toBe(calls)
+  })
+
+  it('groups spend under each workspace, costliest first, and opens a task from its row', async () => {
+    homeActivity = vi.fn(async () => ({
+      ok: true as const,
+      data: result({
+        workspaces: [
+          { path: ALPHA, runs: 2, billedInputTokens: 300_000, outputTokens: 100_000, billedCost: 1 },
+          { path: BETA, runs: 1, billedInputTokens: 600_000, outputTokens: 240_000, billedCost: 3, estimatedCost: 0.21 }
+        ],
+        tasks: [
+          { runId: 'b1', workspacePath: BETA, goal: 'Port the **updater**', model: 'claude-sonnet-5', days: 2, billedInputTokens: 600_000, outputTokens: 240_000, billedCost: 3, estimatedCost: 0.21 },
+          { runId: 'a1', workspacePath: ALPHA, goal: 'Fix lint', days: 1, billedInputTokens: 200_000, outputTokens: 60_000, billedCost: 1 },
+          { runId: 'a2', workspacePath: ALPHA, days: 1, billedInputTokens: 100_000, outputTokens: 40_000 }
+        ]
+      })
+    }))
+    renderUsage()
+    const where = await screen.findByRole('region', { name: 'Where it went' })
+    const groups = within(where).getAllByRole('group')
+    expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['repo-beta', 'repo-alpha'])
+    expect(groups[0]!.textContent).toContain('repo-beta1 task840K$3.21 est.')
+    expect(groups[0]!.textContent).toContain('Port the updaterclaude-sonnet-5840K$3.21 est.')
+    // A task nobody priced says so instead of $0.
+    expect(groups[1]!.querySelector('[data-usage-task="a2"]')!.textContent).toBe('Untitled task140K—')
+    fireEvent.click(within(groups[1]!).getByRole('button', { name: /Fix lint/ }))
+    expect(onOpenTask).toHaveBeenCalledWith(ALPHA, 'a1')
+  })
+
+  it('exports the same window as CSV through main', async () => {
+    const usageExportCsv = vi.fn(async () => ({ ok: true as const, data: { saved: true, path: 'C:\\u.csv', rows: 12 } }))
+    window.vyotiq = {
+      homeActivity: (payload: unknown) => homeActivity(payload),
+      usageExportCsv
+    } as unknown as typeof window.vyotiq
+    renderUsage()
+    await screen.findByText('Spend per day')
+    fireEvent.click(screen.getByRole('radio', { name: '30 days' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }))
+    await waitFor(() => expect(usageExportCsv).toHaveBeenCalledWith({ workspacePaths: [ALPHA, BETA], windowDays: 30 }))
   })
 
   it('says when there were no tasks, and when the receipts could not be read', async () => {

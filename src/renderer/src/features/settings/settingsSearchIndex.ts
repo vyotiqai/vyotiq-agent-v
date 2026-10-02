@@ -168,6 +168,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'providers'
   },
   {
+    id: 'model-fallback',
+    title: 'Fall back when the provider is down',
+    keywords: ['fallback', 'fallback models', 'backup', 'outage', 'down', 'unavailable', 'overloaded', 'failover', 'model', 'provider', '503', '529'],
+    section: 'providers'
+  },
+  {
     id: 'api-keys',
     title: 'API keys',
     keywords: ['secret', 'key', 'token', 'credentials', 'secure storage', 'access key', 'service account', 'gcloud', 'region', 'headers'],
@@ -203,6 +209,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'tool-approval-allowlist',
     title: 'Always allowed',
     keywords: ['approval', 'allowlist', 'always allow', 'allowed tools', 'permissions'],
+    section: 'agent'
+  },
+  {
+    id: 'permission-rules',
+    title: 'Permission rules',
+    keywords: ['permissions', 'deny', 'block', 'ask', 'allow', 'rules', 'protected paths', 'secrets', '.env', 'ssh', 'command', 'path', 'glob', 'permissions.json'],
     section: 'agent'
   },
   {
@@ -343,6 +355,18 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'terminal-screen-reader',
     title: 'Screen reader mode',
     keywords: ['screen reader', 'accessibility', 'a11y', 'terminal', 'assistive'],
+    section: 'tools'
+  },
+  {
+    id: 'agent-sandbox',
+    title: 'Sandbox commands',
+    keywords: ['sandbox', 'confine', 'isolation', 'bubblewrap', 'bwrap', 'sandbox-exec', 'seatbelt', 'security', 'write'],
+    section: 'tools'
+  },
+  {
+    id: 'agent-sandbox-network',
+    title: 'Network',
+    keywords: ['sandbox', 'network', 'offline', 'internet', 'deny network'],
     section: 'tools'
   },
   {
@@ -525,6 +549,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'logs',
     title: 'Logs',
     keywords: ['logs', 'folder', 'troubleshooting', 'diagnostics'],
+    section: 'diagnostics'
+  },
+  {
+    id: 'diagnostics-export',
+    title: 'Diagnostics bundle',
+    keywords: ['export', 'diagnostics', 'zip', 'bundle', 'bug report', 'support', 'logs', 'redacted'],
     section: 'diagnostics'
   },
   {

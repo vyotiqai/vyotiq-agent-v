@@ -11,6 +11,7 @@ import { Icon, type IconName } from '../icons'
 import { prefersReducedMotion } from '../utils/motion'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { cn } from './cn'
+import { Keys } from './Kbd'
 import {
   MENU_ROW,
   MENU_ROW_ACTIVE,
@@ -43,6 +44,10 @@ export type ActionMenuItem = {
   disabled?: boolean
   /** Why it is disabled — the tooltip, and what a screen reader hears. */
   disabledReason?: string
+  /** A quieter second part after the label: where a recent folder lives. Its full text is the row's title. */
+  detail?: string
+  /** Keys that do the same thing, as keycaps at the row's end ("@" types a mention). */
+  keys?: readonly string[]
   onSelect: () => void
 }
 
@@ -174,9 +179,13 @@ export function ActionMenu({
               aria-checked={item.checked != null ? item.checked : undefined}
               aria-disabled={item.disabled || undefined}
               aria-describedby={
-                item.disabled && item.disabledReason ? `${menuId}-reason-${item.id}` : undefined
+                item.disabled && item.disabledReason
+                  ? `${menuId}-reason-${item.id}`
+                  : item.detail
+                    ? `${menuId}-detail-${item.id}`
+                    : undefined
               }
-              title={item.disabled ? item.disabledReason : undefined}
+              title={item.disabled ? item.disabledReason : item.detail}
               disabled={item.disabled}
               className={cn(
                 MENU_ROW,
@@ -204,11 +213,26 @@ export function ActionMenu({
                 <span className="inline-block w-[15px] shrink-0" aria-hidden />
               ) : null}
               {item.label}
+              {item.detail ? (
+                // Seen beside the name, heard as its description (below): the name stays the label.
+                <span aria-hidden="true" className="min-w-0 max-w-64 truncate text-caption text-tertiary" data-menu-item-detail>
+                  {item.detail}
+                </span>
+              ) : null}
+              {item.keys ? (
+                <span aria-hidden="true" className="ml-auto pl-4">
+                  <Keys keys={item.keys} />
+                </span>
+              ) : null}
             </button>
             {/* Outside the button, so it is the row's description and not also part of its name. */}
             {item.disabled && item.disabledReason ? (
               <span id={`${menuId}-reason-${item.id}`} hidden>
                 Unavailable: {item.disabledReason}
+              </span>
+            ) : item.detail ? (
+              <span id={`${menuId}-detail-${item.id}`} hidden>
+                {item.detail}
               </span>
             ) : null}
           </li>

@@ -605,7 +605,7 @@ export function TerminalPanel({
           </p>
         ) : null}
         {onTask ? (
-          <TaskCommandList commands={commands} />
+          <TaskCommandList commands={commands} workspacePath={workspacePath} />
         ) : null}
         {/* Hidden, not unmounted, under the list: a shell keeps its screen. */}
         <div className={onTask ? 'hidden' : 'relative min-h-0 min-w-0 flex-1 bg-sunken p-1'}>

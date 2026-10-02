@@ -38,9 +38,10 @@ import {
 } from './navigatorModel'
 import { NavigatorTaskRow, type NavigatorRowActions } from './NavigatorTaskRow'
 import { WHERE_WORDS, highlightMatch, type RowSnippet } from './searchSnippet'
-import { NotificationsRow } from './NotificationsRow'
+import { NotificationsRow, type WaitingTask } from './NotificationsRow'
 import { UpdateChip } from './UpdateChip'
 import { DEFAULT_NAVIGATOR_VIEW, isCollapsed, type NavigatorView } from './useNavigatorView'
+import { requestScheduledTasks } from '@renderer/features/schedules/scheduleRequests'
 
 export type NavigatorPlace = 'home' | 'extensions' | 'usage' | 'settings' | 'task' | 'other'
 
@@ -65,7 +66,7 @@ type ViewUpdate = (update: (prev: NavigatorView) => NavigatorView) => void
 export type NavigatorProps = {
   place: NavigatorPlace
   /** The task open in the focused pane, if any. */
-  selected: { workspacePath: string; runId: string } | null
+  selected: { workspacePath: string; runId: string; instanceRunId?: string | null } | null
   /** True for a task open in any pane (split view). */
   isRunOpen?: (workspacePath: string, runId: string) => boolean
   openPaths: readonly string[]
@@ -95,6 +96,8 @@ export type NavigatorProps = {
   onOpenUsage: () => void
   onOpenSettings: () => void
   onAddWorkspace: () => void
+  /** Import task… from the workspace menu: into the workspace it shows, null for all of them. */
+  onImportTask?: (path: string | null) => void
   /** Folders opened before and closed since, newest first — the workspace menu's Recent. */
   recentPaths?: readonly string[]
   onOpenRecentWorkspace?: (path: string) => void
@@ -126,6 +129,9 @@ export type NavigatorProps = {
     onRetry?: (workspacePath: string, runId: string) => void
     /** The task still stands failed. */
     canRetry?: (workspacePath: string, runId: string) => boolean
+    /** The tasks waiting on you now: the Inbox's Needs you. */
+    waiting?: readonly WaitingTask[]
+    onOpenTask?: (workspacePath: string, runId: string) => void
   }
   widthPx: number
   /** New task briefs put aside, and what their rows can do. */
@@ -457,12 +463,14 @@ export function Navigator(props: NavigatorProps) {
       className="app-region-no-drag flex h-full shrink-0 flex-col bg-chrome"
       style={{ width: props.widthPx }}
     >
-      <div className={cn('flex h-10 shrink-0 items-center border-b px-2', BORDER_DIVIDER)} data-navigator-head>
+      {/* The pane's 40px row ends on the full hairline every pane's does, so the line runs level across the window. */}
+      <div className="flex h-10 shrink-0 items-center border-b border-border px-2" data-navigator-head>
         <WorkspaceScope
           openPaths={openPaths}
           scopePath={scopePath}
           onScopeChange={props.onScopeChange}
           onAddWorkspace={props.onAddWorkspace}
+          onImportTask={openPaths.length > 0 ? props.onImportTask : undefined}
           recentPaths={props.recentPaths ?? []}
           onOpenRecent={props.onOpenRecentWorkspace}
           onCloseWorkspace={props.onCloseWorkspace}
@@ -514,7 +522,7 @@ export function Navigator(props: NavigatorProps) {
       </div>
 
       {searchOpen ? (
-        <div className={cn('flex h-10 shrink-0 items-center border-b px-2', BORDER_DIVIDER)} data-navigator-search>
+        <div className="flex h-10 shrink-0 items-center border-b border-border px-2" data-navigator-search>
           <SearchInput
             ref={searchInputRef}
             size="xs"
@@ -758,7 +766,7 @@ function WorkspaceBlock({
   openDraft: { workspacePath: string; draftId: string } | null
   capped: boolean
   onLoadOlder: () => void
-  selected: { workspacePath: string; runId: string } | null
+  selected: { workspacePath: string; runId: string; instanceRunId?: string | null } | null
   isRunOpen?: (workspacePath: string, runId: string) => boolean
   actions: NavigatorRowActions
   onNavKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void
@@ -1035,6 +1043,12 @@ function ViewMenu({
           }
         ]
       : []),
+    {
+      id: 'scheduled',
+      label: 'Scheduled tasks…',
+      separatorBefore: true,
+      onSelect: () => void requestScheduledTasks()
+    },
     ...(filterOn
       ? [
           {
@@ -1095,6 +1109,13 @@ function GroupHeading({ id, glyph, label, count }: { id: string; glyph: TaskStat
   )
 }
 
+function isSelectedRow(
+  selected: { workspacePath: string; runId: string } | null,
+  row: NavRow
+): boolean {
+  return selected != null && selected.runId === row.runId && workspacePathsEqual(selected.workspacePath, row.workspacePath)
+}
+
 function TaskSection({
   id,
   section,
@@ -1110,7 +1131,7 @@ function TaskSection({
   section: NavSection
   /** Set for one of Earlier's days. */
   date?: string
-  selected: { workspacePath: string; runId: string } | null
+  selected: { workspacePath: string; runId: string; instanceRunId?: string | null } | null
   isRunOpen?: (workspacePath: string, runId: string) => boolean
   actions: NavigatorRowActions
   onNavKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void
@@ -1131,11 +1152,8 @@ function TaskSection({
             key={`${row.workspacePath}::${row.runId}`}
             row={row}
             groupState={group.rows}
-            selected={
-              selected != null &&
-              selected.runId === row.runId &&
-              workspacePathsEqual(selected.workspacePath, row.workspacePath)
-            }
+            selected={isSelectedRow(selected, row)}
+            openInstance={isSelectedRow(selected, row) ? (selected?.instanceRunId ?? null) : null}
             open={isRunOpen?.(row.workspacePath, row.runId) ?? false}
             actions={actions}
             onNavKeyDown={onNavKeyDown}
@@ -1189,6 +1207,7 @@ function WorkspaceScope({
   scopePath,
   onScopeChange,
   onAddWorkspace,
+  onImportTask,
   recentPaths,
   onOpenRecent,
   onCloseWorkspace
@@ -1197,6 +1216,7 @@ function WorkspaceScope({
   scopePath: string | null
   onScopeChange: (path: string | null) => void
   onAddWorkspace: () => void
+  onImportTask?: (path: string | null) => void
   recentPaths: readonly string[]
   onOpenRecent?: (path: string) => void
   onCloseWorkspace: (path: string) => void
@@ -1220,12 +1240,16 @@ function WorkspaceScope({
       ? recentPaths.map((path, i) => ({
           id: `recent:${path}`,
           label: formatWorkspaceName(path),
+          // Two folders can share a name; where each lives tells them apart.
+          detail: path,
           heading: i === 0 ? 'Recent' : undefined,
           separatorBefore: i === 0,
           onSelect: () => onOpenRecent(path)
         }))
       : []),
     { id: 'add', label: 'Add workspace…', separatorBefore: true, onSelect: onAddWorkspace },
+    // A task bundle (Export as JSON) into the workspace shown, else the active one.
+    ...(onImportTask ? [{ id: 'import', label: 'Import task…', onSelect: () => onImportTask(shown) }] : []),
     ...(shown ? [{ id: 'close', label: `Close ${formatWorkspaceName(shown)}`, onSelect: () => onCloseWorkspace(shown) }] : [])
   ]
   return (

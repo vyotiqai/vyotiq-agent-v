@@ -5,6 +5,7 @@ import { isRetryableTurnFailure } from '@shared/errors'
 import { inferFileWriteAction, parseArgsRecord, summarizeToolArgs } from '@shared/toolSummary'
 import { parseTerminalOutput } from '@shared/utils/terminalFormat'
 import { formatElapsed } from '@shared/utils/timeFormat'
+import { stripModelNotes } from '@shared/utils/modelNotes'
 import { mockServiceInstruction } from '@shared/utils/unreachableService'
 import {
   formatAgentInstanceShortId,
@@ -15,25 +16,41 @@ import {
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { Button, DiffStat, IconButton, MarkdownContent, STATE_LABEL, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { Button, DiffStat, IconButton, STATE_LABEL, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
 import { BORDER_DIVIDER, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { ToolRowOutput } from '@renderer/features/chat/components/ToolRow'
 import { useFullToolContent } from '@renderer/features/chat/components/useFullToolContent'
 import { CompactSummaryBlock } from '@renderer/features/chat/components/CompactSummaryBlock'
 import { mapToolGroupProps } from '@renderer/features/chat/utils/toolGroupAdapter'
-import { approvalRefusalOf, isInterruptedToolContent, toolLabel } from '@renderer/features/chat/toolUi'
+import { approvalRefusalOf, isInterruptedToolContent, toolHasBody, toolLabel } from '@renderer/features/chat/toolUi'
+import { readerTool } from '@renderer/features/chat/toolUi/presentation'
 import { ToolFileBadge } from '@renderer/features/chat/toolUi/chrome'
 import { parseEditCardData } from '@renderer/features/chat/toolUi/parsers/edit'
 import { parseStatusMessageData } from '@renderer/features/chat/toolUi/parsers/status'
 import { toolImagesOf } from '@renderer/features/chat/toolUi/parsers/browser'
 import { ToolImageStrip } from '@renderer/features/chat/toolUi/ToolImageStrip'
+import { normalizeRelPath } from '@renderer/features/chat/utils/turnFileDiffs'
 import { editStatOf } from '../editStat'
-import { RecordOpenContext, thoughtOpenKey } from '../recordFind'
+import { RecordOpenContext, repeatOpenKey, thoughtOpenKey } from '../recordFind'
 import type { WorkItem } from '../recordModel'
 import { RecordProse } from './RecordProse'
+import { foldRepeats, type RepeatRun } from './repeats'
+import { TickedText } from './TickedText'
+import { plainLine } from './plainText'
+
+export { plainLine, plainProse } from './plainText'
 
 type ToolItem = Extract<UiItem, { kind: 'tool' }>
+
+/**
+ * The command a failed run broke on: its last command, opened on its output so
+ * the failure shows where it happened. Null for any other run.
+ */
+export const BrokeAtContext = createContext<string | null>(null)
+
+/** Each settled file's Kept or Undone, by workspace-relative path, for the edits in the steps. */
+export const EditMarksContext = createContext<ReadonlyMap<string, 'kept' | 'undone'>>(new Map())
 
 /** Actions the record needs that the run session does not carry. */
 export type RecordActions = {
@@ -97,7 +114,8 @@ function spanMs(tools: readonly ToolItem[]): number | null {
 
 function Duration({ ms, className }: { ms: number | null; className?: string }) {
   if (ms == null) return null
-  return <span className={cn('shrink-0 font-mono text-caption text-tertiary tnum', className)}>{formatElapsed(ms)}</span>
+  // "1h 9m 23s" is wider than the column most rows keep for it: it grows left, never onto two lines.
+  return <span className={cn('shrink-0 whitespace-nowrap font-mono text-caption text-tertiary tnum', className)}>{formatElapsed(ms)}</span>
 }
 
 function Chevron({ open }: { open: boolean }) {
@@ -154,13 +172,15 @@ function WorkLine({
   )
 }
 
-function isSpawn(w: WorkItem): w is Extract<WorkItem, { kind: 'instance' }> {
+function isSpawn(w: WorkItem | RepeatRun): w is Extract<WorkItem, { kind: 'instance' }> {
   return w.kind === 'instance' && w.tool.tool.name === 'spawn_agent_instance'
 }
 
+type InstancesRow = { kind: 'instances'; spawns: ToolItem[] }
+
 /** Rows of a work list: one per item, except spawns made together, which are one block. */
-export function groupWork(items: readonly WorkItem[]): (WorkItem | { kind: 'instances'; spawns: ToolItem[] })[] {
-  const out: (WorkItem | { kind: 'instances'; spawns: ToolItem[] })[] = []
+export function groupWork<T extends WorkItem | RepeatRun>(items: readonly T[]): (T | InstancesRow)[] {
+  const out: (T | InstancesRow)[] = []
   for (let i = 0; i < items.length; ) {
     let j = i
     while (j < items.length && isSpawn(items[j]!)) j += 1
@@ -175,7 +195,14 @@ export function groupWork(items: readonly WorkItem[]): (WorkItem | { kind: 'inst
   return out
 }
 
-export function WorkList({ items }: { items: readonly WorkItem[] }) {
+export function WorkList({
+  items,
+  foldRepeated = true
+}: {
+  items: readonly WorkItem[]
+  /** Fold a call repeated unchanged to one line; off inside that line's own list. */
+  foldRepeated?: boolean
+}) {
   // A provider that reuses call ids across steps can give two rows one id; a
   // repeated key would make React drop or merge one of them.
   const seen = new Map<string, number>()
@@ -184,15 +211,63 @@ export function WorkList({ items }: { items: readonly WorkItem[] }) {
     seen.set(id, count + 1)
     return count === 0 ? id : `${id}#${count}`
   }
+  const rows: readonly (WorkItem | RepeatRun)[] = foldRepeated ? foldRepeats(items) : items
   return (
     <div className="space-y-2">
-      {groupWork(items).map((w) =>
+      {groupWork(rows).map((w) =>
         w.kind === 'instances' ? (
           <InstancesBlock key={keyOf(`instances:${rowKeyOf(w.spawns[0]!)}`)} spawns={w.spawns} />
+        ) : w.kind === 'repeats' ? (
+          <RepeatsLine key={keyOf(w.id)} run={w} />
         ) : (
           <WorkItemView key={keyOf(w.id)} item={w} />
         )
       )}
+    </div>
+  )
+}
+
+/** A call failed for real: not stopped with the run, not refused at approval. */
+function brokeCall(t: ToolItem): boolean {
+  const tool = t.tool
+  if (isInterruptedToolContent(tool.content)) return false
+  if (tool.status === 'fail') return !approvalRefusalOf(tool.content)
+  if (tool.name !== 'terminal' || !tool.content) return false
+  const exit = parseTerminalOutput(tool.content).exitCode
+  return exit != null && exit !== 0 && exit !== -1
+}
+
+/**
+ * The earlier calls of a run of one call repeated unchanged, as one line above
+ * the last: how many, how many of them failed, how long they took. Opens onto
+ * them, with the reasoning that was between them.
+ */
+function RepeatsLine({ run }: { run: RepeatRun }) {
+  const [userOpen, setOpen] = useState(false)
+  // Find in record opens the line when one of the folded rows holds a match.
+  const forced = useContext(RecordOpenContext).has(repeatOpenKey(run.id))
+  const open = userOpen || forced
+  const n = run.calls.length
+  const failed = run.calls.filter(brokeCall).length
+  return (
+    <div data-record-repeats={n}>
+      <WorkLine
+        verb={`${n} earlier ${run.command ? (n === 1 ? 'run' : 'runs') : n === 1 ? 'call' : 'calls'}`}
+        detail={run.command ? 'of the same command' : 'with the same arguments'}
+        open={open}
+        onToggle={() => setOpen(!open)}
+        trailing={
+          <>
+            {failed > 0 ? <span className="shrink-0 text-caption text-danger">{failed} failed</span> : null}
+            <Duration ms={spanMs(run.calls)} />
+          </>
+        }
+      />
+      {open ? (
+        <div className="mt-1 border-l border-border pl-3" data-record-repeats-list>
+          <WorkList items={run.earlier} foldRepeated={false} />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -294,13 +369,14 @@ export function LooseWork({ items, fold, openKey }: { items: readonly WorkItem[]
         >
           <span className="min-w-0 flex-1 truncate text-secondary">{summary}</span>
           {errors.length > 0 ? <span className="shrink-0 text-xs text-danger">{counted(errors.length, 'error')}</span> : null}
-          <span className="w-14 shrink-0 text-right font-mono text-caption text-tertiary tnum">
+          <span className="min-w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
             {spanned != null && spanned >= 1000 ? formatElapsed(spanned) : ''}
           </span>
+          {/* Sized and pulled in like the History row's, so this time shares the work rows' right edge. */}
           <Icon
             name={open ? 'chevron' : 'chevronRight'}
-            size={12}
-            className={cn('shrink-0 text-tertiary', !open && 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
+            size={11}
+            className={cn('-ml-0.5 shrink-0 text-tertiary', !open && 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
           />
         </button>
       </div>
@@ -344,6 +420,7 @@ export function sameWork(a: WorkItem, b: WorkItem): boolean {
     case 'error':
       return a.message === (b as typeof a).message && a.code === (b as typeof a).code
     case 'compaction':
+    case 'notice':
       return a.item === (b as typeof a).item
     default: {
       const _exhaustive: never = a
@@ -428,7 +505,27 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
           verifyCoverage={item.item.verifyCoverage}
         />
       )
+    case 'notice':
+      return <NoticeItem text={item.item.text} />
   }
+}
+
+/**
+ * A note from the run itself — "Switched to gpt-5 — Anthropic unavailable
+ * (HTTP 529)". Laid out like a work line: what happened, then why, muted.
+ */
+function NoticeItem({ text }: { text: string }) {
+  const cut = text.indexOf(' — ')
+  const what = cut > 0 ? text.slice(0, cut) : text
+  const why = cut > 0 ? text.slice(cut + 3) : ''
+  return (
+    <div className="flex min-h-6 items-center gap-2 text-xs">
+      <span className="min-w-0 truncate font-medium text-fg">{what}</span>
+      {why ? <span className="min-w-0 truncate text-muted">{why}</span> : null}
+      <span className="flex-1" />
+      <span aria-hidden className="w-[11px] shrink-0" />
+    </div>
+  )
 }
 
 /** Lookups whose failure is said by the error's first line, not by their body. */
@@ -443,6 +540,18 @@ const ERROR_LINE_LOOKUPS: ReadonlySet<string> = new Set([
 
 function ExploreItem({ tools }: { tools: ToolItem[] }) {
   const [open, setOpen] = useState(false)
+  // The list mounts on first open and stays, so it folds by height both ways;
+  // `expanded` trails `open` by a frame so the first opening animates too.
+  const [mounted, setMounted] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    if (!open) {
+      setExpanded(false)
+      return undefined
+    }
+    const frame = requestAnimationFrame(() => setExpanded(true))
+    return () => cancelAnimationFrame(frame)
+  }, [open])
   const { onOpenWorkspaceFile } = useRunSession()
   const { onLoadToolContent, mcpServerNames } = useContext(RecordActionsContext)
   const group = mapToolGroupProps(tools.map((t) => t.tool))
@@ -452,13 +561,20 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
   const failed = tools.filter(broke).length
   // Screenshots stay in view with the line closed: seeing the page is the point.
   const images = tools.flatMap((t) => toolImagesOf(t.tool))
+  // One lookup names what it looked at ("Read vitest.config.ts 105-121"); a
+  // count ("1 file") would make you open it to find out.
+  const only = tools.length === 1 ? group.nestedTools[0]?.subtitle : ''
+  const detail = only && only !== '…' && only !== tools[0]!.tool.name ? only : group.summary
   return (
     <div>
       <WorkLine
         verb={running ? group.runningLabel : group.doneLabel}
-        detail={group.summary}
+        detail={detail}
         open={open}
-        onToggle={() => setOpen((v) => !v)}
+        onToggle={() => {
+          setMounted(true)
+          setOpen((v) => !v)
+        }}
         trailing={
           <>
             {failed > 0 ? <span className="text-caption text-danger">{failed} failed</span> : null}
@@ -467,7 +583,16 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
         }
       />
       {images.length > 0 ? <ToolImageStrip images={images} className="mt-1" /> : null}
-      {open ? (
+      {mounted ? (
+        // Folded, it is out of reach as well as out of sight — and out of Find in record.
+        <div
+          className="tool-expand"
+          data-open={open && expanded ? 'true' : 'false'}
+          inert={!open}
+          aria-hidden={open ? undefined : 'true'}
+          data-explore-list
+        >
+        <div className="tool-expand-inner">
         <ul className="mt-1 space-y-px border-l border-border pl-3">
           {group.nestedTools.map((nested, i) => {
             const t = tools[i]!
@@ -526,6 +651,8 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
             )
           })}
         </ul>
+        </div>
+        </div>
       ) : null}
     </div>
   )
@@ -540,6 +667,9 @@ function AwaitingApproval() {
 export function approvedByText(grant: ToolApprovalGrant): { lead: string; allow?: string; tail?: string } {
   if (grant.by === 'rule') {
     return { lead: grant.scope === 'task' ? 'Allowed by a rule for this task' : 'Allowed by a rule for this workspace' }
+  }
+  if (grant.by === 'skill') {
+    return grant.allow ? { lead: 'Allowed by skill ', allow: grant.allow } : { lead: 'Allowed by a skill' }
   }
   if (grant.scope === 'task') return { lead: 'Allowed by you · always for this task' }
   if (grant.scope === 'workspace') {
@@ -607,8 +737,10 @@ function TerminalCard({ item }: { item: ToolItem }) {
   const failed = !refused && !stopped && (item.tool.status === 'fail' || (exit != null && exit !== 0 && exit !== -1))
   const hasOutput = Boolean(item.tool.content?.trim()) || (item.toolProgress?.length ?? 0) > 0
   // A running command opens once it has output to show — never onto an empty
-  // box — and stays open when it finishes, unless you close it.
-  const autoOpen = running && hasOutput
+  // box — and stays open when it finishes, unless you close it. The command a
+  // failed run broke on opens too, so the failure is in sight where it happened.
+  const brokeHere = useContext(BrokeAtContext) === item.id && failed && hasOutput
+  const autoOpen = (running && hasOutput) || brokeHere
   const [open, setOpen] = useState(autoOpen)
   useEffect(() => {
     if (autoOpen) setOpen(true)
@@ -667,6 +799,8 @@ function TerminalCard({ item }: { item: ToolItem }) {
             mcpServerNames={mcpServerNames}
             indent={false}
           />
+          {/* Still running: the cursor waits where its next output lands. */}
+          {running ? <span aria-hidden="true" className="vy-caret mb-2 ml-2" data-record-command-caret /> : null}
         </div>
       ) : null}
     </div>
@@ -684,6 +818,8 @@ function EditCard({ item }: { item: ToolItem }) {
   const refused = item.tool.status === 'fail' ? approvalRefusalOf(item.tool.content) : null
   const failed = item.tool.status === 'fail' && !refused
   const running = item.tool.status === 'running'
+  // Once reviewed, the file's decision, as the result's rows say it.
+  const mark = useContext(EditMarksContext).get(normalizeRelPath(path))
   return (
     <div className="overflow-hidden rounded-lg border border-border" data-record-edit>
       <div className="flex h-8 items-center gap-2 bg-bg px-3 text-xs">
@@ -697,10 +833,21 @@ function EditCard({ item }: { item: ToolItem }) {
           onClick={() => setOpen((v) => !v)}
           className="group flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:vy-focus-ring"
         >
-          <span className={cn('min-w-0 truncate font-mono text-caption', failed ? 'text-danger' : 'text-fg')} title={path}>
+          <span
+            className={cn(
+              'min-w-0 truncate font-mono text-caption',
+              failed ? 'text-danger' : mark === 'undone' && !running ? 'text-muted line-through decoration-tertiary' : 'text-fg'
+            )}
+            title={path}
+          >
             {path}
           </span>
           {created ? <span className="shrink-0 text-caption text-success">new</span> : null}
+          {mark && !running && !failed && !refused ? (
+            <span className="shrink-0 text-caption text-tertiary" data-edit-mark={mark}>
+              {mark === 'kept' ? 'Kept' : 'Undone'}
+            </span>
+          ) : null}
           {failed ? <span className="shrink-0 text-caption text-danger">failed</span> : null}
           {refused ? <span className="shrink-0 text-caption text-muted">{refused}</span> : null}
           <span className="flex-1" />
@@ -737,6 +884,22 @@ function EditCard({ item }: { item: ToolItem }) {
 }
 
 /**
+ * What a call's line names after its verb. A summary that only repeats the
+ * tool's name — `spawn_detached (agent-built)` under the verb "Spawn Detached"
+ * — keeps just what it adds: "agent-built".
+ */
+export function targetOf(name: string, summary: string | null | undefined): string {
+  const said = summary?.trim() ?? ''
+  if (!said || said === name) return ''
+  if (!said.startsWith(`${name} `)) return said
+  return said
+    .slice(name.length)
+    .trim()
+    .replace(/^\((.*)\)$/, '$1')
+    .trim()
+}
+
+/**
  * A call that is neither a lookup nor a card: a delete, an MCP call, a
  * question, an unknown tool. One line — verb, target, status — and, when it
  * failed, the reason under it without having to open it.
@@ -756,7 +919,7 @@ function ToolLine({ item }: { item: ToolItem }) {
   const verb = toolLabel(tool.name, refused ? 'running' : tool.status, tool.content)
   // A stopped or refused call's summary is only why; what it was doing is in its args.
   const summary = stopped || refused ? summarizeToolArgs(tool.name, tool.argsPreview) : tool.summary
-  const target = summary?.trim() && summary.trim() !== tool.name ? summary.trim() : ''
+  const target = targetOf(tool.name, summary)
   const status = tool.name === 'ask_question' || tool.name === 'switch_mode' ? parseStatusMessageData(tool) : null
   // An answered question says what you answered, under it; "Answered" alone
   // would make you open it to find out.
@@ -772,12 +935,21 @@ function ToolLine({ item }: { item: ToolItem }) {
         detail={target || undefined}
         tone={failed ? 'danger' : undefined}
         open={open}
-        // The answer under it is all its body would show.
-        onToggle={tool.content && answers.length === 0 ? () => setOpen((v) => !v) : undefined}
+        // The answer under it is all its body would show; and a call whose
+        // body would only repeat its line ("Deleted a.ts") does not open onto it.
+        onToggle={
+          answers.length === 0 && toolHasBody(readerTool(tool), { toolProgress: item.toolProgress })
+            ? () => setOpen((v) => !v)
+            : undefined
+        }
         trailing={
           <>
             {chip && chip !== verb ? (
               <span className={cn('shrink-0 text-caption', failed ? 'text-danger' : 'text-tertiary')}>{chip}</span>
+            ) : failed && verb !== 'Failed' ? (
+              // A tool the labels do not know keeps its own name as the verb:
+              // the word says it failed, not only the colour.
+              <span className="shrink-0 text-caption text-danger">failed</span>
             ) : null}
             {running && item.approval ? (
               <AwaitingApproval />
@@ -835,15 +1007,20 @@ function YouAnswered({ answers }: { answers: readonly string[] }) {
   )
 }
 
-/** The protocol line the instance tools prefix their output with. */
+/**
+ * The protocol line the instance tools prefix their output with, and the notes
+ * a pulled transcript carries from the child's own tool results, dropped.
+ */
 function displayInstanceContent(content: string | undefined): string {
-  return (content ?? '').replace(/^Agent V Instance id;[^\r\n]*(?:\r?\n)?/i, '').trim()
+  return stripModelNotes(content ?? '')
+    .replace(/^Agent V Instance id;[^\r\n]*(?:\r?\n)?/i, '')
+    .trim()
 }
 
-/** An await's report: its output without the protocol, phase and branch lines. */
+/** An await's report: its output without the protocol line and the header lines under it. */
 function instanceReport(content: string | undefined): string {
   return displayInstanceContent(content)
-    .replace(/^(?:phase|worktree_branch):[^\r\n]*(?:\r?\n)?/gim, '')
+    .replace(/^(?:(?:phase|worktree_branch|status):[^\r\n]*|showing \d+ of \d+ messages|messages: \d+)(?:\r?\n)?/gim, '')
     .trim()
 }
 
@@ -851,12 +1028,46 @@ function firstLine(text: string | undefined): string {
   return (text ?? '').split('\n').find((l) => l.trim())?.trim() ?? ''
 }
 
+/** A pulled transcript's role marker (`[user]`, `[tool]`): a divider, never a title. */
+const ROLE_TAG = /^\[(?:user|assistant|tool|system)\]$/i
+
 /** A report's first line, as a title: its heading marks and emphasis dropped. */
 function reportTitle(report: string): string {
-  return firstLine(report)
-    .replace(/^#+\s*/, '')
-    .replace(/[*_`]/g, '')
-    .trim()
+  const line =
+    report
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l && !ROLE_TAG.test(l)) ?? ''
+  return plainLine(line)
+}
+
+const CHILD_STATUS = /status:\s*(running|done|error|failed|cancelled|stopped|interrupted|queued|unknown)/i
+
+/**
+ * How a pulled child stood and how much came back: "running · 36 messages".
+ * Read from the header, which older pulls wrote without line breaks
+ * ("…(short ab12)status: runningshowing 36 of 36 messages").
+ */
+function pullFacts(content: string | undefined): string {
+  const text = content ?? ''
+  const status = CHILD_STATUS.exec(text)?.[1]?.toLowerCase() ?? ''
+  const count = /showing \d+ of (\d+) messages|messages: (\d+)/i.exec(text)
+  const total = count ? Number(count[1] ?? count[2]) : null
+  return [status, total != null ? counted(total, 'message') : ''].filter(Boolean).join(' · ')
+}
+
+/** The same words, ignoring case and punctuation: "Instance cancelled." says what "Instance cancelled" does. */
+function sameWords(a: string, b: string): boolean {
+  const words = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  return words(a) === words(b)
+}
+
+/** An await that hit its time limit while the child was still at work: how long it waited. */
+function awaitTimeout(tool: ToolItem['tool']): string | null {
+  if (tool.name !== 'await_agent_instance' || tool.status !== 'fail') return null
+  const m = /^Timed out waiting for .*? after (\d+) ms/i.exec(tool.content?.trim() ?? '')
+  if (!m) return null
+  return `Timed out after ${formatElapsed(Number(m[1]))}, still running then`
 }
 
 /** A report under its row: its heading is already the row's title. */
@@ -910,6 +1121,17 @@ type SpawnFacts = {
   doing: string
   /** Why it failed, when it did. */
   reason: string
+  /** The user-defined helper type it runs as; empty for a general helper. */
+  agentType: string
+}
+
+/**
+ * The deliverable a child's brief names, its label dropped: "Outcome: X" or
+ * "## Outcome" over X gives X. Empty when the text names none.
+ */
+export function outcomeLine(text: string | undefined): string {
+  const m = /(?:^|\n)[ \t]*(?:#+[ \t]*)?Outcome\b:?[ \t]*\n*[ \t]*([^\n]+)/i.exec(text ?? '')
+  return m?.[1]?.trim() ?? ''
 }
 
 /**
@@ -923,13 +1145,14 @@ function spawnFacts(item: ToolItem, agentInstances: Record<string, AgentInstance
   const shortId = runId ? formatAgentInstanceShortId(runId) : ''
   const args = parseArgsRecord(tool.argsPreview)
   // The one deliverable reads at a glance; the goal is the child's background
-  // and often opens with boilerplate ("Read-only task in this workspace…").
+  // and often opens with boilerplate ("Vyotiq is an Electron coding agent…").
+  // The args preview is cut, often before `outcome`, so the child's own brief
+  // ("Outcome: …" first) is the next place to find it.
   const goal =
-    typeof args?.outcome === 'string' && args.outcome.trim()
-      ? args.outcome
-      : typeof args?.goal === 'string'
-        ? args.goal
-        : (instance?.goal ?? '')
+    (typeof args?.outcome === 'string' && args.outcome.trim()) ||
+    outcomeLine(instance?.goal) ||
+    outcomeLine(typeof args?.goal === 'string' ? args.goal : undefined) ||
+    (typeof args?.goal === 'string' ? args.goal : (instance?.goal ?? ''))
   const failed = tool.status === 'fail'
   const phase = tool.status === 'running' ? null : (instance?.phase ?? null)
   const verb =
@@ -961,6 +1184,7 @@ function spawnFacts(item: ToolItem, agentInstances: Record<string, AgentInstance
       ? [instance?.step ? `Step ${instance.step}` : '', instance?.activity ?? ''].filter(Boolean).join(' · ')
       : ''
   const reason = failed ? firstLine(tool.content) : phase === 'error' ? firstLine(instance?.summary) : ''
+  const agentType = instance?.agentType || (typeof args?.agent_type === 'string' ? args.agent_type.trim() : '')
   return {
     runId,
     shortId,
@@ -972,20 +1196,37 @@ function spawnFacts(item: ToolItem, agentInstances: Record<string, AgentInstance
     startedAt: instance?.startedAt ?? item.endedAt,
     ranMs: ranMs != null && Number.isFinite(ranMs) && ranMs >= 0 ? ranMs : null,
     doing,
-    reason
+    reason,
+    agentType
   }
 }
 
 function SpawnRow({ item }: { item: ToolItem }) {
   const { agentInstances } = useRunSession()
   const tool = item.tool
-  const { runId, shortId, goal, failed, phase, verb, startedAt, ranMs, doing, reason } = spawnFacts(item, agentInstances)
+  const { runId, shortId, goal, failed, phase, verb, startedAt, ranMs, doing, reason, agentType } = spawnFacts(
+    item,
+    agentInstances
+  )
   return (
     <div data-record-instance={shortId || undefined} data-instance-phase={phase ?? undefined}>
       <WorkLine
         verb={verb}
         tone={failed || phase === 'error' ? 'danger' : undefined}
-        detail={goal || undefined}
+        detail={
+          goal || agentType ? (
+            <>
+              {/* The helper type it runs as, quieter than what it was asked. */}
+              {agentType ? (
+                <span className="text-tertiary" data-agent-type>
+                  {agentType}
+                  {goal ? ' · ' : ''}
+                </span>
+              ) : null}
+              {goal ? <TickedText text={goal} code={QUIET_CODE} /> : null}
+            </>
+          ) : undefined
+        }
         trailing={
           <>
             {/* Ahead of the time, so every row's time keeps one right edge. */}
@@ -1049,6 +1290,11 @@ function InstancesBlock({ spawns }: { spawns: readonly ToolItem[] }) {
                   facts.verb
                 )}
               </span>
+              {facts.agentType ? (
+                <span className="max-w-[12ch] shrink-0 truncate text-caption text-tertiary" data-agent-type>
+                  {facts.agentType}
+                </span>
+              ) : null}
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate',
@@ -1060,7 +1306,7 @@ function InstancesBlock({ spawns }: { spawns: readonly ToolItem[] }) {
                 {facts.state === 'failed' || facts.state === 'stopped' ? (
                   <span className="sr-only">{STATE_LABEL[facts.state]}:</span>
                 ) : null}{' '}
-                {detail}
+                <TickedText text={detail} code={QUIET_CODE} />
               </span>
               {running ? (
                 facts.phase === 'started' ? (
@@ -1124,31 +1370,44 @@ function InstanceCallRow({ item }: { item: ToolItem }) {
   // status decides the row; the call only explains the wait.
   const phase = instance?.phase
   const finished = failed && phase === 'done'
-  const stopped = phase === 'error' || phase === 'cancelled'
+  // A wait that ran out of time is the waiter's verdict, said as it was then:
+  // what the child did later (cancelled by the parent, say) belongs to its own rows.
+  const timedOut = finished ? null : awaitTimeout(tool)
+  const stopped = !timedOut && (phase === 'error' || phase === 'cancelled')
   const content = displayInstanceContent(tool.content)
   const report = tool.name === 'await_agent_instance' || tool.name === 'pull_agent_instance' ? instanceReport(tool.content) : ''
   // The spawn row above already says the child finished; a returned await is
   // where its report is.
   const verb = finished
     ? 'Instance finished'
-    : stopped && tool.name === 'await_agent_instance'
-      ? `Instance ${phase === 'cancelled' ? 'cancelled' : 'failed'}`
-      : tool.name === 'await_agent_instance' && tool.status === 'done' && report
-        ? 'Report from'
-        : toolLabel(tool.name, tool.status, tool.content)
+    : timedOut
+      ? 'Waited for instance'
+      : stopped && tool.name === 'await_agent_instance'
+        ? `Instance ${phase === 'cancelled' ? 'cancelled' : 'failed'}`
+        : tool.name === 'await_agent_instance' && tool.status === 'done' && report
+          ? 'Report from'
+          : toolLabel(tool.name, tool.status, tool.content)
   // Why the call failed, said under the row so it needs no opening: the child's
   // own words once it has settled one way or the other, else the call's output.
-  const reason = failed && !finished ? firstLine(stopped ? instance?.summary || content : content) : ''
-  const canOpen = !running && !reason && report.length > 0
+  // Words that only repeat the line ("Instance cancelled.") are not said twice.
+  const why = failed && !finished && !timedOut ? firstLine(stopped ? instance?.summary || content : content) : ''
+  const reason = why && !sameWords(why, verb) ? why : ''
+  // Cancelled is how the child stopped, not a fault: muted, like any stopped call.
+  const broke = failed && !finished && !timedOut && phase !== 'cancelled'
+  // A failed call's output is why it failed, never a report: "Timed out waiting
+  // for Agent V Instance id; …" read as the title of a finished child's report.
+  const canOpen = !running && !failed && report.length > 0
   // The live preview of a long report is cut: opened, it loads the whole.
   const { onLoadToolContent } = useContext(RecordActionsContext)
   const full = useFullToolContent(tool, open, onLoadToolContent)
+  // A pull is a look at the child's transcript: the line says how it stood, not its first message.
+  const detail = canOpen ? (tool.name === 'pull_agent_instance' && pullFacts(tool.content)) || reportTitle(report) : undefined
   return (
     <div data-record-tool={tool.name}>
       <WorkLine
         verb={runId ? `${verb} ${shortId}` : verb}
-        tone={failed && !finished ? 'danger' : undefined}
-        detail={canOpen ? reportTitle(report) : undefined}
+        tone={broke ? 'danger' : undefined}
+        detail={detail}
         open={open}
         onToggle={canOpen ? () => setOpen((v) => !v) : undefined}
         trailing={
@@ -1165,10 +1424,14 @@ function InstanceCallRow({ item }: { item: ToolItem }) {
       {finished ? (
         <p className="m-0 mt-0.5 line-clamp-2 text-caption text-muted">Finished, but the await did not return.</p>
       ) : null}
-      {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
+      {timedOut ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-muted">{timedOut}</p> : null}
+      {reason ? (
+        <p className={cn('m-0 mt-0.5 line-clamp-2 text-caption', broke ? 'text-danger' : 'text-muted')}>{reason}</p>
+      ) : null}
       {open ? (
         <div className="mt-1 border-l border-border pl-3" data-instance-report>
-          <MarkdownContent content={reportBody(report)} tone="secondary" />
+          {/* The record's prose: its file mentions and [[citations]] open, at a reading measure. */}
+          <RecordProse text={reportBody(report)} tone="secondary" />
           {full.loading ? <p className="m-0 mt-1 text-caption text-tertiary">Loading the full report…</p> : null}
         </div>
       ) : null}
@@ -1201,6 +1464,31 @@ function PlanItem({ title, running }: { title: string | null; running: boolean }
 const THOUGHT_LINE_MAX = 160
 
 /**
+ * "Let me", "Now let's", "OK, time to"… — the opening of a next move. Not
+ * "I'll" or "I will": "So I will ask once." is a decision, not a filler.
+ */
+const INTENT_OPENING =
+  /^(?:(?:ok(?:ay)?|alright|right|good|great|now|so|then|first|next|also|and|actually|wait|finally)[,.!]?\s+)*(?:let me|let's|lets|time to)\b/i
+
+/** "Good.", "OK.", "Hmm." — a nod, not a thought. */
+const NOD = /^(?:good|ok(?:ay)?|fine|done|right|great|hmm+|alright|yes|no|perfect|sure)[.!]?$/i
+
+/**
+ * A next move too short to say what or why — "Let me go.", "Let me read.",
+ * "Now let me check." — or a nod. A quarter of the thought lines across ~4,600
+ * real steps (2026-10-01) ended on one; the call it announces is the next row anyway. Up to
+ * five words, every sentence of it, so "Let me poll it. The log stopped at 252
+ * bytes." is not one.
+ */
+export function isBareIntent(text: string): boolean {
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean)
+  return (
+    sentences.length > 0 &&
+    sentences.every((s) => NOD.test(s) || (INTENT_OPENING.test(s) && s.split(/\s+/).filter(Boolean).length <= 5))
+  )
+}
+
+/**
  * The one line a settled thought shows: where it ended up — its last
  * paragraph, or that paragraph's last sentence when it runs long. That is the
  * line the Now line showed while it streamed, and it says more than the first
@@ -1209,20 +1497,39 @@ const THOUGHT_LINE_MAX = 160
  * "ask.…".
  */
 export function thoughtLine(text: string, max = THOUGHT_LINE_MAX): string {
+  // Code in a fence is what it looked at, not what it thought: never the line.
+  let fenced = false
   const paragraphs = text
     .split('\n')
     .map((l) => l.trim())
-    .filter(Boolean)
-  let line = paragraphs[paragraphs.length - 1] ?? ''
+    .filter((l) => {
+      if (l.startsWith('```')) {
+        fenced = !fenced
+        return false
+      }
+      return l !== '' && !fenced
+    })
+  // A closing "Let me go." says nothing the row after it does not: the line
+  // is the last paragraph that says something more, when one does.
+  let at = paragraphs.length - 1
+  while (at > 0 && isBareIntent(paragraphs[at]!)) at -= 1
+  let line = paragraphs[at] ?? ''
   if (line.length > max) {
     const sentences = line.split(/(?<=[.!?])\s+/).filter(Boolean)
-    line = sentences[sentences.length - 1] ?? line
+    const said = sentences.filter((s) => !isBareIntent(s))
+    line = said[said.length - 1] ?? sentences[sentences.length - 1] ?? line
   }
   if (line.length <= max) return line
   const cut = line.slice(0, max)
   const space = cut.lastIndexOf(' ')
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s.,;:!?…—–-]+$/, '')}…`
 }
+
+/**
+ * A `name` inside a one-line row — a thought, a child's outcome: mono a step
+ * down with no chip, so the line stays quiet.
+ */
+const QUIET_CODE = 'font-mono text-caption'
 
 /** Reasoning, settled: one line of where it ended up, the rest on request. */
 function Thought({ id, text }: { id: string; text: string }) {
@@ -1240,10 +1547,18 @@ function Thought({ id, text }: { id: string; text: string }) {
         className="group flex min-h-6 w-full items-center gap-2 rounded-sm text-left text-xs focus-visible:vy-focus-ring"
       >
         <span className="sr-only">Reasoning: </span>
-        <span className="min-w-0 flex-1 truncate italic text-muted">{line}</span>
+        {/* The quietest line in the record: an aside beside the work, never set
+            in italics, which read poorly at this size and pulled the eye. */}
+        <span className="min-w-0 flex-1 truncate text-tertiary group-hover:text-muted">
+          <TickedText text={line} code={QUIET_CODE} />
+        </span>
         <Chevron open={open} />
       </button>
-      {open ? <p className="m-0 mt-1 whitespace-pre-wrap border-l border-border pl-3 text-xs italic text-muted">{text}</p> : null}
+      {open ? (
+        <p className="m-0 mt-1 max-w-[80ch] whitespace-pre-wrap border-l border-border pl-3 text-xs leading-relaxed text-muted [overflow-wrap:anywhere]">
+          <TickedText text={text} code={QUIET_CODE} />
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -1267,6 +1582,7 @@ export function workIsLive(w: WorkItem): boolean {
       return w.tools.some((t) => t.tool.status === 'running')
     case 'error':
     case 'compaction':
+    case 'notice':
       return false
     default: {
       const _exhaustive: never = w

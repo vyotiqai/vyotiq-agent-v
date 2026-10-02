@@ -282,7 +282,7 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
     <form
       ref={rootRef}
       data-needs-you
-      className={cn(QUESTION_GATE_SURFACE, 'w-full scroll-mt-4')}
+      className={cn(QUESTION_GATE_SURFACE, 'w-full scroll-mt-4 vy-rise')}
       aria-labelledby={`ask-q-title-${question.requestId}`}
       aria-busy={phase === 'pending' ? true : undefined}
       onSubmit={onFormSubmit}

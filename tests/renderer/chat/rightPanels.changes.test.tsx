@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ChangesPanel } from '@renderer/features/chat/components/ChangesPanel'
 import type { UiItem } from '@shared/transcript'
+import { requestCommitBox, takeCommitRequest } from '@renderer/features/chat/commitRequest'
 
 beforeEach(() => {
   Object.defineProperty(window, 'vyotiq', {
@@ -502,7 +503,7 @@ describe('ChangesPanel', () => {
     })
   })
 
-  it('commits on Enter, and Esc drops the commit without touching the run', async () => {
+  it('commits on Ctrl+Enter — Enter starts the body — and Esc drops the commit without touching the run', async () => {
     renderGit()
     await screen.findByText('a.ts')
     let input = await compose(/^Commit…$/)
@@ -510,11 +511,36 @@ describe('ChangesPanel', () => {
     expect(screen.queryByRole('textbox', { name: /Commit message/i })).toBeNull()
 
     input = await compose(/^Commit…$/)
-    fireEvent.change(input, { target: { value: 'commit only' } })
+    fireEvent.change(input, { target: { value: 'commit only\n\nWith a body.' } })
     fireEvent.keyDown(input, { key: 'Enter' })
+    expect(window.vyotiq.gitCommit).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
     await waitFor(() => {
-      expect(window.vyotiq.gitCommit).toHaveBeenCalledWith('/ws', 'commit only', false, 'all')
+      expect(window.vyotiq.gitCommit).toHaveBeenCalledWith('/ws', 'commit only\n\nWith a body.', false, 'all')
     })
+  })
+
+  it('commits what you typed without waiting for the agent’s draft', async () => {
+    // The agent's message never arrives.
+    window.vyotiq.gitGenerateCommitMessage = vi.fn(() => new Promise(() => {})) as never
+    renderGit()
+    await screen.findByText('a.ts')
+    const input = await compose(/^Commit…$/)
+    fireEvent.change(input, { target: { value: 'mine' } })
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
+    await waitFor(() => {
+      expect(window.vyotiq.gitCommit).toHaveBeenCalledWith('/ws', 'mine', false, 'all')
+    })
+  })
+
+  it('says where the commit goes and how many files it takes, under the message', async () => {
+    renderGit()
+    await screen.findByText('a.ts')
+    const input = await compose(/^Commit…$/)
+    expect(input.tagName).toBe('TEXTAREA')
+    const facts = document.querySelector('[data-commit-facts]') as HTMLElement
+    expect(facts.textContent).toContain('Commit to main')
+    expect(facts.textContent).toMatch(/\d+ files?/)
   })
 
   it('commits and creates a draft PR through the end-to-end action', async () => {
@@ -817,6 +843,9 @@ describe('ChangesPanel', () => {
     })
     expect(within(row('src/a.ts')).getByRole('button', { name: 'Unkeep a.ts' })).toBeTruthy()
     expect(within(row('src/b.ts')).queryByRole('button', { name: 'Unkeep b.ts' })).toBeNull()
+    // An undone file can come back with the agent's version; a kept one has nothing to bring back.
+    expect(within(row('src/b.ts')).getByRole('button', { name: 'Bring back b.ts' })).toBeTruthy()
+    expect(within(row('src/a.ts')).queryByRole('button', { name: 'Bring back a.ts' })).toBeNull()
   })
 
   it('commits from a task’s Changes with its run, and says what the commit settled', async () => {
@@ -837,6 +866,102 @@ describe('ChangesPanel', () => {
       expect(onTaskCommitted).toHaveBeenCalledWith(task, false)
     })
     expect(window.vyotiq.gitCommit).toHaveBeenCalledWith('/ws', expect.any(String), false, 'all', 'run-1')
+  })
+
+  it('commits and opens a PR from a task’s Changes with its run, so the commit settles its edits', async () => {
+    const task = { sha: 'b'.repeat(40), branch: 'vyotiq/changes-abc', kept: ['src/a.ts'], undoable: false }
+    window.vyotiq.prCreate = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        url: 'https://github.com/ex/repo/pull/12',
+        branch: 'vyotiq/changes-abc',
+        baseBranch: 'main',
+        draft: true,
+        detail: 'Draft pull request created',
+        task
+      }
+    })
+    const onTaskCommitted = vi.fn()
+    renderGit({ runId: 'run-1', onTaskCommitted })
+    await screen.findByText('a.ts')
+    const input = await compose(/^Commit & Create PR…$/)
+    fireEvent.change(input, { target: { value: 'ship it' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Commit & Create PR$/ }))
+    await waitFor(() => {
+      expect(onTaskCommitted).toHaveBeenCalledWith(task, true)
+    })
+    expect(window.vyotiq.prCreate).toHaveBeenCalledWith('/ws', { message: 'ship it', mode: 'all', draft: true, runId: 'run-1' })
+  })
+
+  it('writes the PR from the task’s title and result when it has one', async () => {
+    const items = [
+      { kind: 'message' as const, id: 'user-0', role: 'user' as const, content: 'Fix it', at: '2026-10-01T09:00:00.000Z' },
+      { kind: 'message' as const, id: 'a-1', role: 'assistant' as const, content: 'Fixed the parser.', at: '2026-10-01T09:00:05.000Z' }
+    ]
+    render(
+      <ChangesPanel
+        items={items}
+        workspacePath="/ws"
+        gitRevision={1}
+        preferredScope="uncommitted"
+        runId="run-1"
+        taskTitle="Fix the parser"
+      />
+    )
+    await screen.findByText('a.ts')
+    const input = await compose(/^Commit & Create PR…$/)
+    fireEvent.change(input, { target: { value: 'ship it' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Commit & Create PR$/ }))
+    await waitFor(() => {
+      expect(window.vyotiq.prCreate).toHaveBeenCalledWith(
+        '/ws',
+        expect.objectContaining({ runId: 'run-1', title: 'Fix the parser', body: expect.stringContaining('Fixed the parser.') })
+      )
+    })
+  })
+
+  it('opens the commit box when the record’s Commit… asked for this task, and only for it', async () => {
+    requestCommitBox('run-other')
+    const first = renderGit({ runId: 'run-1' })
+    await screen.findByText('a.ts')
+    expect(screen.queryByRole('textbox', { name: /Commit message/i })).toBeNull()
+    first.unmount()
+
+    requestCommitBox('run-1')
+    renderGit({ runId: 'run-1' })
+    expect(await screen.findByRole('textbox', { name: /Commit message/i })).toBeTruthy()
+    // Taken once: it never opens the box again on a later visit.
+    expect(takeCommitRequest('run-1')).toBe(false)
+  })
+
+  it('says how this task’s edits were settled, with Pull request after a commit', async () => {
+    window.vyotiq.taskOutcome = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        files: [{ path: 'src/a.ts', mark: 'kept' }],
+        commit: { sha: 'c'.repeat(40), branch: 'main', at: '2026-10-01T09:00:00.000Z', pushed: true }
+      }
+    })
+    const onViewPr = vi.fn()
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="agent" runId="run-settled" onViewPr={onViewPr} />)
+    const line = await waitFor(() => {
+      const el = document.querySelector('[data-changes-settled="committed"]') as HTMLElement | null
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(line.textContent).toContain('Committed cccccc')
+    fireEvent.click(within(line).getByRole('button', { name: 'Pull request' }))
+    expect(onViewPr).toHaveBeenCalled()
+  })
+
+  it('says Undone, and that the files are back, once every edit was undone', async () => {
+    window.vyotiq.taskOutcome = vi.fn().mockResolvedValue({ ok: true, data: { files: [{ path: 'src/a.ts', mark: 'undone' }] } })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="agent" runId="run-undone" />)
+    await waitFor(() => {
+      expect(document.querySelector('[data-changes-settled="undone"]')?.textContent).toBe(
+        'Undone — the files are back as they were'
+      )
+    })
   })
 
   it('sums what was kept and undone beside the counts, and folds an undone file', async () => {

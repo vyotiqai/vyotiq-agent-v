@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 import type { McpServerStatus, ToolApprovalMode, ToolApprovalSettings, ToolCatalogResult } from '@shared/ipc'
 import { relativeTimeAgo } from '@shared/utils/timeFormat'
+import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
 import { Button, IconButton, Menu, Segmented, StatusGlyph, cn, type MenuOption } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { BORDER_DIVIDER, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
@@ -9,6 +10,7 @@ import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
 import { useGitInit } from '@renderer/features/chat/components/useGitInit'
 import { useGitStatus } from '@renderer/features/chat/components/useGitStatus'
+import { ruleFileCountLabel, ruleRootFiles } from './ruleSummary'
 
 /** Where a new task can be moved to: the open workspaces. */
 export type NewTaskTargets = {
@@ -69,7 +71,10 @@ export function NewTaskBrief({
   clearToken,
   draft,
   worktree = false,
-  onWorktreeChange
+  onWorktreeChange,
+  extraRoots = NO_FOLDERS,
+  onAddFolder,
+  onExtraRootsChange
 }: {
   workspacePath: string | null
   targets?: NewTaskTargets
@@ -111,6 +116,11 @@ export function NewTaskBrief({
   /** Start it in a new worktree of this workspace instead of in this folder. */
   worktree?: boolean
   onWorktreeChange?: (worktree: boolean) => void
+  /** Folders outside the workspace the task may also read and edit (absolute). */
+  extraRoots?: readonly string[]
+  /** Add folder…: the OS picker, checked by main. Absent hides the row. */
+  onAddFolder?: () => void
+  onExtraRootsChange?: (next: string[]) => void
 }) {
   const [draftCheck, setDraftCheck] = useState('')
 
@@ -213,8 +223,9 @@ export function NewTaskBrief({
                   </ul>
                 ) : null}
                 {checks.length < MAX_CHECKS ? (
-                  <label className="flex h-7 cursor-text items-center gap-2.5">
-                    <Icon name="plus" size={14} className="shrink-0 text-tertiary" />
+                  <label className="group/check flex h-7 cursor-text items-center gap-2.5">
+                    {/* The field has no box of its own inside the brief's: its + says where focus is. */}
+                    <Icon name="plus" size={14} className="shrink-0 text-tertiary group-focus-within/check:text-fg" />
                     <input
                       value={draftCheck}
                       maxLength={CHECK_MAX_CHARS}
@@ -227,6 +238,13 @@ export function NewTaskBrief({
                   </label>
                 ) : null}
               </div>
+              {onAddFolder ? (
+                <AddedFolders
+                  roots={extraRoots}
+                  onAdd={onAddFolder}
+                  onRemove={(root) => onExtraRootsChange?.(extraRoots.filter((r) => r !== root))}
+                />
+              ) : null}
               <div className="pb-1 pl-4 pr-3 @container">{controls}</div>
             </div>
             {menus}
@@ -267,6 +285,60 @@ export function NewTaskBrief({
           ) : null}
         </div>
       </div>
+    </div>
+  )
+}
+
+const NO_FOLDERS: readonly string[] = []
+
+/**
+ * The folders outside the workspace the task may also work in, one row each
+ * on the checks' left edge, and the way to add one. The workspace stays where
+ * the task runs; these are reached by absolute path.
+ */
+function AddedFolders({
+  roots,
+  onAdd,
+  onRemove
+}: {
+  roots: readonly string[]
+  onAdd: () => void
+  onRemove: (root: string) => void
+}) {
+  return (
+    <div className={cn('border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-added-folders>
+      {roots.length > 0 ? (
+        <ul className="m-0 list-none p-0" aria-label="Added folders">
+          {roots.map((root) => (
+            <li key={root} className="group flex h-7 items-center gap-2.5">
+              <Icon name="folder" size={14} className="shrink-0 text-muted" />
+              <span className="shrink-0 text-xs text-fg">{extraRootLabel(root)}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary" title={root}>
+                {root}
+              </span>
+              <IconButton
+                icon="close"
+                label={`Remove ${root}`}
+                size="xs"
+                tone="muted"
+                className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                onClick={() => onRemove(root)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {roots.length < MAX_EXTRA_ROOTS ? (
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex h-7 items-center gap-2.5 rounded-sm text-xs text-tertiary vy-transition hover:text-fg focus-visible:vy-focus-ring"
+          title="Also let the task read and edit another folder, by absolute path"
+        >
+          <Icon name="folderPlus" size={14} className="shrink-0" />
+          Add folder…
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -523,11 +595,7 @@ function WhatTheAgentSees({
     : []
 
   const rules = context?.rules
-  const ruleFiles = rules
-    ? [rules.agentsMd ? 'AGENTS.md' : null, rules.claudeMd ? 'CLAUDE.md' : null, rules.cursorrules ? '.cursorrules' : null].filter(
-        (n): n is string => Boolean(n)
-      )
-    : []
+  const ruleFiles = ruleRootFiles(rules)
 
   return (
     <aside className="min-w-0 pt-1" aria-label="What the agent will see" data-agent-sees>
@@ -592,6 +660,7 @@ function WhatTheAgentSees({
                 : null
             }
             d={context?.memoryNotes ? (context.memoryNoteNames?.join(', ') ?? null) : null}
+            open={onOpenSettings ? { label: 'Settings', run: () => onOpenSettings('agent') } : undefined}
           />
           <Fact
             k="Index"
@@ -610,10 +679,6 @@ function WhatTheAgentSees({
       )}
     </aside>
   )
-}
-
-function ruleFileCountLabel(n: number): string {
-  return `${n} rule ${n === 1 ? 'file' : 'files'}`
 }
 
 /** "12,408 files · updated 4m ago" — this workspace's own index, when it has one. */

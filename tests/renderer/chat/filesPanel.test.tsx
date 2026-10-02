@@ -31,6 +31,7 @@ const api = {
   workspaceFormatFile: vi.fn(),
   workspaceLspStatus: vi.fn(),
   workspaceLspRequest: vi.fn(),
+  workspaceGrep: vi.fn(),
   gitDiff: vi.fn(),
   gitBlame: vi.fn(),
   writeClipboard: vi.fn(() => true),
@@ -1056,6 +1057,70 @@ describe('FilesPanel', () => {
     expect(screen.queryByPlaceholderText('Find in files')).toBeNull()
     view.rerender(<FilesPanel workspacePath={workspacePath} active findInFilesNonce={1} />)
     expect(await screen.findByPlaceholderText('Find in files')).toBeTruthy()
+  })
+
+  it('replaces across files after a confirm, through the versioned save', async () => {
+    api.workspaceGrep.mockResolvedValue({
+      ok: true,
+      data: {
+        hits: [
+          { path: 'src/a.ts', line: 1, text: 'foo Foo' },
+          { path: 'src/a.ts', line: 2, text: 'foo' },
+          { path: 'src/b.ts', line: 1, text: 'FOO' }
+        ],
+        truncated: false
+      }
+    })
+    const fallbackRead = api.workspaceFileRead.getMockImplementation()
+    const fileText: Record<string, string> = { 'src/a.ts': 'foo Foo\nfoo\n', 'src/b.ts': 'FOO\n' }
+    api.workspaceFileRead.mockImplementation((req: { path: string }) => {
+      const content = fileText[req.path]
+      if (content === undefined) return fallbackRead?.(req)
+      return Promise.resolve({
+        ok: true,
+        data: {
+          path: req.path,
+          kind: 'text',
+          content,
+          encoding: 'utf8',
+          eol: 'lf',
+          bom: false,
+          size: content.length,
+          version: { size: content.length, mtimeMs: 1, sha256: 'c'.repeat(64) },
+          truncated: false
+        }
+      })
+    })
+    const view = render(<FilesPanel workspacePath={workspacePath} active findInFilesNonce={0} />)
+    await screen.findByText('README.md')
+    view.rerender(<FilesPanel workspacePath={workspacePath} active findInFilesNonce={1} />)
+    fireEvent.change(await screen.findByPlaceholderText('Find in files'), { target: { value: 'foo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Match case' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in files' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Replace with' }), { target: { value: 'bar' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+
+    expect(await screen.findByText('Replace 2 matches in 1 file?')).toBeTruthy()
+    expect(api.workspaceFileSave).not.toHaveBeenCalled()
+    const dialogConfirm = screen
+      .getAllByRole('button', { name: 'Replace all' })
+      .find((button) => button.closest('[role="dialog"]'))!
+    fireEvent.click(dialogConfirm)
+
+    await waitFor(() => expect(api.workspaceFileSave).toHaveBeenCalledTimes(1))
+    expect(api.workspaceFileSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspacePath,
+        path: 'src/a.ts',
+        content: 'bar Foo\nbar\n',
+        expectedVersion: { size: 12, mtimeMs: 1, sha256: 'c'.repeat(64) },
+        replaceExisting: false
+      })
+    )
+    expect(api.workspaceGrep).toHaveBeenCalledWith(
+      expect.objectContaining({ workspacePath, query: 'foo', maxResults: 500 })
+    )
+    expect(await screen.findByText('Replaced 2 matches in 1 file.')).toBeTruthy()
   })
 
   it('opens a PNG as an image preview', async () => {

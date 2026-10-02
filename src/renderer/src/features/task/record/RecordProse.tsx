@@ -17,12 +17,15 @@ export function RecordProse({
   text,
   streaming = false,
   size,
-  tone
+  tone,
+  sectionCopy = false
 }: {
   text: string
   streaming?: boolean
   size?: 'sm' | 'md'
   tone?: 'secondary' | 'strong'
+  /** Each heading copies its own section: the Result, an answer you take parts of. */
+  sectionCopy?: boolean
 }) {
   const { onOpenWorkspaceFile } = useRunSession()
   const scope = useId()
@@ -36,6 +39,8 @@ export function RecordProse({
       onOpenWorkspaceFile={onOpenWorkspaceFile}
       headingIds={FRAGMENT_LINK.test(text)}
       headingIdScope={scope}
+      sectionCopy={sectionCopy}
+      className="record-prose"
     />
   )
 }

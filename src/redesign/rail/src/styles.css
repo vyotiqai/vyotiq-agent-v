@@ -1,0 +1,127 @@
+/*
+  The renderer's own stylesheet — tokens, skins, @theme, @utility helpers —
+  imported whole, so every class here resolves exactly as it does in the app.
+  Tailwind's source detection starts at this Vite root, which does not reach
+  the renderer, so the primitives' classes need an explicit @source.
+*/
+@import '../../../renderer/src/styles.css';
+
+@source '../../../renderer/src/lib';
+@source '.';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/*
+  Proposed additions — the only new CSS the Rail needs. Each reads existing
+  tokens; porting means moving these into styles.css.
+*/
+
+/* The strip scrolls sideways; its bar is the sheet map in the title bar. */
+@utility rail-strip {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* A lit sheet sits on --vy-bg; the rest recede to --vy-chrome. */
+@utility sheet-recessed {
+  background: var(--vy-chrome);
+}
+
+/* The work strip under the instruction line: done steps are ink, the live one breathes. */
+@keyframes rail-live-seg {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@utility rail-live {
+  animation: rail-live-seg 1.6s var(--vy-ease) infinite;
+}
+
+/* Where a steer lands: a notch that eases in beside the live step. */
+@keyframes rail-notch-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility rail-notch {
+  animation: rail-notch-in 180ms var(--vy-ease) both;
+}
+
+/*
+  Sheets and spines glide to their new place; the lens slides under the lit
+  sheet. Only once the rail has measured itself — never on first paint.
+*/
+.rail-ready .rail-slot {
+  transition:
+    left 260ms var(--vy-ease),
+    width 260ms var(--vy-ease),
+    background-color var(--vy-duration) var(--vy-ease);
+}
+
+.rail-ready .rail-plate {
+  transition:
+    left 320ms var(--vy-ease),
+    width 320ms var(--vy-ease);
+}
+
+.rail-ready .rail-pad {
+  transition: padding-bottom 200ms var(--vy-ease);
+}
+
+.rail-dragging .rail-slot,
+.rail-dragging .rail-plate {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-ready .rail-slot,
+  .rail-ready .rail-plate,
+  .rail-ready .rail-pad {
+    transition: none;
+  }
+}
+
+/* A sheet sliding onto the rail. */
+@keyframes rail-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility rail-sheet-in {
+  animation: rail-sheet-in 220ms var(--vy-ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-live,
+  .rail-notch,
+  .rail-sheet-in {
+    animation: none;
+  }
+}

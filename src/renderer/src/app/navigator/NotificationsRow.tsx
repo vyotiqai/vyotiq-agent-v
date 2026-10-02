@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { NotificationItem, NotificationMutateRequest, ToolApprovalDecision } from '@shared/ipc'
 import { relativeTime } from '@shared/utils/timeFormat'
@@ -8,7 +8,21 @@ import { Badge, Button, IconButton, MENU_SURFACE, StatusGlyph, cn } from '@rende
 import { ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import type { PendingAsk } from '@renderer/features/home/usePendingAsks'
 import { questionAsk } from '@shared/needsYouText'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { RowDecision, commandOf } from './NavigatorTaskRow'
+
+const OPEN_INBOX_EVENT = 'vyotiq:open-inbox'
+
+/**
+ * Opens the Inbox that is on screen (the list's, or the rail's), from outside
+ * it — the palette. False when none is showing, so the caller can show the
+ * list first.
+ */
+export function requestOpenInbox(): boolean {
+  const event = new CustomEvent(OPEN_INBOX_EVENT, { cancelable: true })
+  window.dispatchEvent(event)
+  return event.defaultPrevented
+}
 
 function unreadLabel(count: number): string {
   if (count <= 0) return 'Inbox'
@@ -41,6 +55,41 @@ export function NotificationGlyph({ item }: { item: Pick<NotificationItem, 'kind
 
 type InboxGroup = { key: 'asks' | 'review' | 'earlier'; label: string; items: NotificationItem[] }
 
+/** A task waiting on you right now, as the list has it: what the Inbox's Needs you is made of. */
+export type WaitingTask = { workspacePath: string; runId: string; title: string; since: string | null }
+
+function sameTask(item: NotificationItem, task: Pick<WaitingTask, 'workspacePath' | 'runId'>): boolean {
+  return (
+    item.action?.type === 'open_run' &&
+    item.action.runId === task.runId &&
+    workspacePathsEqual(item.action.workspacePath, task.workspacePath)
+  )
+}
+
+/** The notices a waiting task's row stands for, so answering or opening it reads them. */
+function noticesFor(items: readonly NotificationItem[], task: Pick<WaitingTask, 'workspacePath' | 'runId'>): NotificationItem[] {
+  return items.filter((item) => item.kind === 'needs_you' && sameTask(item, task))
+}
+
+/**
+ * A waiting task drawn as an Inbox row. It is read once its notice is (you
+ * opened it), and stays until it is answered — Clear never takes it.
+ */
+function liveItem(task: WaitingTask, items: readonly NotificationItem[]): NotificationItem {
+  const notice = noticesFor(items, task)[0]
+  return {
+    id: `waiting:${task.workspacePath}:${task.runId}`,
+    createdAt: task.since ?? notice?.createdAt ?? new Date().toISOString(),
+    read: notice?.read ?? false,
+    source: 'agent',
+    kind: 'needs_you',
+    title: task.title,
+    body: notice?.body ?? 'Waiting on you',
+    dedupeKey: `waiting:${task.runId}`,
+    action: { type: 'open_run', workspacePath: task.workspacePath, runId: task.runId }
+  }
+}
+
 /**
  * The state a group says once, on its heading (the heading's words name it, so the
  * glyph stays silent); Earlier mixes kinds, so its rows say their own.
@@ -61,12 +110,26 @@ function openAsk(item: NotificationItem, asks: Readonly<Record<string, PendingAs
  * Asks still open first, then finished work waiting on review, then the rest.
  * An ask already answered is history, so it goes to Earlier.
  */
-function inboxGroups(items: NotificationItem[], asks: Readonly<Record<string, PendingAsk | null>> | undefined): InboxGroup[] {
+function inboxGroups(
+  items: NotificationItem[],
+  asks: Readonly<Record<string, PendingAsk | null>> | undefined,
+  waiting: readonly WaitingTask[] | undefined
+): InboxGroup[] {
   const groups: InboxGroup[] = [
     { key: 'asks', label: 'Needs you', items: [] },
     { key: 'review', label: 'Ready for review', items: [] },
     { key: 'earlier', label: 'Earlier', items: [] }
   ]
+  if (waiting) {
+    // Needs you is the tasks that wait on you now, whatever was notified; the
+    // notice for one is its row, not a second one.
+    groups[0]!.items.push(...waiting.map((task) => liveItem(task, items)))
+    for (const item of items) {
+      if (item.kind === 'needs_you' && waiting.some((task) => sameTask(item, task))) continue
+      groups[item.kind === 'run_done' && item.reviewFiles ? 1 : 2]!.items.push(item)
+    }
+    return groups.filter((group) => group.items.length > 0)
+  }
   for (const item of items) {
     const at = openAsk(item, asks) ? 0 : item.kind === 'run_done' && item.reviewFiles ? 1 : 2
     groups[at]!.items.push(item)
@@ -92,7 +155,9 @@ export function NotificationsRow({
   asks,
   onRespondApproval,
   onRetry,
-  canRetry
+  canRetry,
+  waiting,
+  onOpenTask
 }: {
   items: NotificationItem[]
   unreadCount: number
@@ -107,6 +172,14 @@ export function NotificationsRow({
   onRetry?: (workspacePath: string, runId: string) => void
   /** The task still stands failed: not going again, not gone. */
   canRetry?: (workspacePath: string, runId: string) => boolean
+  /**
+   * The tasks waiting on you now. Given, Needs you is made of them rather than
+   * of notices — Clear, Mark all read or a notification setting can't hide one —
+   * and the unread count keeps them in until they are answered.
+   */
+  waiting?: readonly WaitingTask[]
+  /** Open a waiting task (its row, or Answer). */
+  onOpenTask?: (workspacePath: string, runId: string) => void
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -122,8 +195,29 @@ export function NotificationsRow({
     trapFocus: true,
     autoFocusFirst: true
   })
-  const label = unreadLabel(unreadCount)
-  const groups = open ? inboxGroups(items, asks) : []
+  // A waiting task counts until it is answered; its own unread notice is not counted twice.
+  const doubled = waiting
+    ? items.filter((item) => !item.read && item.kind === 'needs_you' && waiting.some((task) => sameTask(item, task))).length
+    : 0
+  const shownUnread = Math.max(0, unreadCount - doubled) + (waiting?.length ?? 0)
+  const label = unreadLabel(shownUnread)
+  const groups = open ? inboxGroups(items, asks, waiting) : []
+  const empty = items.length === 0 && (waiting?.length ?? 0) === 0
+
+  // A request from outside: one Inbox answers it. The list and the rail mount
+  // only while they show; with the drawer open over the rail, the drawer's does.
+  useEffect(() => {
+    const onRequest = (event: Event): void => {
+      const trigger = triggerRef.current
+      if (event.defaultPrevented || !trigger?.isConnected || trigger.closest('[inert]')) return
+      const modal = document.querySelector('[aria-modal="true"]')
+      if (modal && !modal.contains(trigger)) return
+      event.preventDefault()
+      setOpen(true)
+    }
+    window.addEventListener(OPEN_INBOX_EVENT, onRequest)
+    return () => window.removeEventListener(OPEN_INBOX_EVENT, onRequest)
+  }, [])
 
   const panel =
     open && position ? (
@@ -146,7 +240,7 @@ export function NotificationsRow({
       >
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2">
           <h2 className="text-sm font-semibold text-fg-strong">Inbox</h2>
-          {unreadCount > 0 ? <Badge tone="accent">{unreadCount} new</Badge> : null}
+          {shownUnread > 0 ? <Badge tone="accent">{shownUnread} new</Badge> : null}
           <span className="flex-1" />
           <Button size="xs" variant="ghost" disabled={unreadCount === 0} onClick={() => onMarkRead({ all: true })}>
             Mark all read
@@ -155,7 +249,7 @@ export function NotificationsRow({
             Clear
           </Button>
         </div>
-        {items.length === 0 ? (
+        {empty ? (
           <p className="px-3 py-6 text-center text-xs text-tertiary">Nothing new.</p>
         ) : (
           <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -169,24 +263,32 @@ export function NotificationsRow({
                   {GROUP_GLYPH[group.key] ? <span className="flex shrink-0 normal-case">{GROUP_GLYPH[group.key]}</span> : null}
                 </h3>
                 <ul className="m-0 list-none divide-y divide-border/60 p-0">
-                  {group.items.map((item) => (
+                  {group.items.map((item) => {
+                    // A waiting task's row: its notices are read with it, and it is never dismissed.
+                    const target = item.action?.type === 'open_run' ? item.action : null
+                    const live = waiting != null && group.key === 'asks' && target != null
+                    const markRead = (): void => {
+                      if (!live) onMarkRead({ id: item.id })
+                      else for (const notice of noticesFor(items, target)) if (!notice.read) onMarkRead({ id: notice.id })
+                    }
+                    return (
                     <InboxItem
                       key={item.id}
                       item={item}
-                      ask={openAsk(item, asks)}
+                      ask={live ? (asks?.[target.runId] ?? null) : openAsk(item, asks)}
                       showGlyph={group.key === 'earlier'}
                       onOpen={() => {
-                        onMarkRead({ id: item.id })
-                        onOpenItem(item)
+                        markRead()
+                        if (live && onOpenTask) onOpenTask(target.workspacePath, target.runId)
+                        else onOpenItem(item)
                         close(true)
                       }}
-                      onDismiss={() => onDismiss({ id: item.id })}
+                      onDismiss={live ? undefined : () => onDismiss({ id: item.id })}
                       onDecide={
-                        onRespondApproval && item.action?.type === 'open_run'
+                        onRespondApproval && target
                           ? async (requestId: string, decision: ToolApprovalDecision) => {
-                              const { workspacePath, runId } = item.action as { workspacePath: string; runId: string }
-                              await onRespondApproval(workspacePath, runId, requestId, decision)
-                              onMarkRead({ id: item.id })
+                              await onRespondApproval(target.workspacePath, target.runId, requestId, decision)
+                              markRead()
                             }
                           : undefined
                       }
@@ -204,7 +306,8 @@ export function NotificationsRow({
                           : undefined
                       }
                     />
-                  ))}
+                    )
+                  })}
                 </ul>
               </section>
             ))}
@@ -241,7 +344,7 @@ export function NotificationsRow({
           data-place="inbox"
           onClick={() => setOpen((prev) => !prev)}
         />
-        {unreadCount > 0 ? (
+        {shownUnread > 0 ? (
           <span
             aria-hidden="true"
             data-unread-dot
@@ -273,7 +376,8 @@ function InboxItem({
   ask: PendingAsk | null
   showGlyph: boolean
   onOpen: () => void
-  onDismiss: () => void
+  /** Absent for a task still waiting on you: it leaves once answered. */
+  onDismiss?: () => void
   onDecide?: (requestId: string, decision: ToolApprovalDecision) => Promise<void>
   onRetry?: () => void
 }): ReactNode {
@@ -318,9 +422,11 @@ function InboxItem({
           {relativeTime(item.createdAt)}
         </span>
       </button>
-      <span className="absolute right-2 top-2 hidden group-focus-within:block group-hover:block">
-        <IconButton icon="close" label={`Dismiss ${item.title}`} size="xs" tone="muted" onClick={onDismiss} />
-      </span>
+      {onDismiss ? (
+        <span className="absolute right-2 top-2 hidden group-focus-within:block group-hover:block">
+          <IconButton icon="close" label={`Dismiss ${item.title}`} size="xs" tone="muted" onClick={onDismiss} />
+        </span>
+      ) : null}
       {ask?.kind === 'approval' && onDecide ? (
         <RowDecision
           // One per request: the next ask gets its buttons back.

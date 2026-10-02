@@ -4,7 +4,7 @@ import { ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import { FileBadge } from '@renderer/features/chat/components/FileBadge'
 import { DiffPreview, type DiffLayout } from '@renderer/features/chat/components/DiffPreview'
 import { basename, type DiffLine } from '@renderer/features/chat/toolUi'
-import { ReviewDiffTable, type AskTarget } from './ReviewDiffTable'
+import { ReviewDiffTable, type AskTarget, type HunkActions } from './ReviewDiffTable'
 
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'C' | '?'
 
@@ -195,7 +195,8 @@ export function FileDiffBody({
   findQuery,
   numbers = 'new',
   added,
-  onAsk
+  onAsk,
+  hunkActions
 }: {
   path: string
   diff: FileDiffState
@@ -206,6 +207,7 @@ export function FileDiffBody({
   findQuery: string
   numbers?: 'new' | 'both'
   onAsk?: (target: AskTarget, question: string) => void
+  hunkActions?: HunkActions
 }) {
   if (diff.state === 'loading') return <p className="m-0 px-3 py-2 font-sans text-xs text-muted">Loading diff…</p>
   if (diff.state === 'none') return <p className="m-0 px-3 py-2 font-sans text-xs text-muted">{diff.message}</p>
@@ -224,6 +226,7 @@ export function FileDiffBody({
       numbers={numbers}
       added={added}
       onAsk={onAsk}
+      hunkActions={hunkActions}
     />
   )
 }

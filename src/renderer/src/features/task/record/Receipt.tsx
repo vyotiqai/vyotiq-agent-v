@@ -67,6 +67,7 @@ export function ReceiptLine({
   feedback,
   checks = [],
   outcome,
+  outcomeDetail,
   actions,
   summary
 }: {
@@ -79,6 +80,8 @@ export function ReceiptLine({
   live: boolean
   /** How a run that did not finish ended; a finished run says nothing here. */
   outcome?: 'stopped' | 'failed'
+  /** Where it got to: "at step 2 of 4 · 3 files changed". */
+  outcomeDetail?: string
   feedback?: { value: RunFeedbackRating | null; onRate: (rating: RunFeedbackRating | null) => void }
   /** What to do about how it ended (a stopped run: undo, resume), at the line's end. */
   actions?: ReactNode
@@ -110,6 +113,7 @@ export function ReceiptLine({
           >
             <StatusGlyph state={outcome} size={12} />
             {STATE_LABEL[outcome]}
+            {outcomeDetail ? <span data-receipt-outcome-detail> {outcomeDetail}</span> : null}
             {parts.length > 0 ? <span aria-hidden="true" className="ml-0.5 font-mono text-tertiary">·</span> : null}
           </span>
         ) : null}

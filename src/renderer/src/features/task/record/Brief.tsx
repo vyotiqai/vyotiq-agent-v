@@ -1,16 +1,75 @@
-import { useState, type ReactNode } from 'react'
+import { useContext, useState, type ReactNode } from 'react'
 import { formatDisplayTime } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
 import { IconButton, cn } from '@renderer/lib/ui'
 import type { RecordRun } from '../recordModel'
+import { followUpOrigin, type FollowUpOrigin } from '../followUps'
+import { RecordOpenContext, briefOpenKey } from '../recordFind'
 import { RecordRow } from './RecordLayout'
+import { TickedText } from './TickedText'
 
 /** Past this many characters the brief folds to six lines until opened. */
 const FOLD_AT = 600
 
 function kb(chars: number): string {
   return chars >= 1024 ? `${Math.round(chars / 1024)}k chars` : `${chars} chars`
+}
+
+/**
+ * The brief as written — no markdown, it is your words — except that a
+ * `backticked` span reads as code, as it does everywhere else in the record.
+ * A check's follow-up quoted `pnpm exec vitest run …` with its ticks showing.
+ * The chip is a step up from the brief's own surface plane.
+ */
+export function BriefText({ text }: { text: string }) {
+  return <TickedText text={text} code="rounded-sm bg-surface-2 px-1 py-0.5 font-mono text-[0.85em]" />
+}
+
+/**
+ * A follow-up the app wrote and sent for you: what it asked, a step quieter
+ * than words you typed — the ask, and the check or failure it is about —
+ * with the instruction as sent behind "Show as sent".
+ */
+function AppFollowUp({
+  origin,
+  text,
+  title,
+  open,
+  onToggle
+}: {
+  origin: FollowUpOrigin
+  text: string
+  title?: string
+  open: boolean
+  onToggle: () => void
+}) {
+  return (
+    <div data-brief-origin={origin.kind}>
+      <p className="m-0 flex min-w-0 items-center gap-2 text-sm leading-[22px]" title={title}>
+        <Icon name={origin.icon} size={14} className="shrink-0 text-tertiary" />
+        <span className="min-w-0 font-medium text-fg-strong [overflow-wrap:anywhere]">{origin.ask}</span>
+      </p>
+      {origin.about ? (
+        <p className="m-0 whitespace-pre-wrap pl-[22px] text-sm text-secondary [overflow-wrap:anywhere]">
+          <BriefText text={origin.about} />
+        </p>
+      ) : null}
+      {open ? (
+        <p className="m-0 mt-1.5 whitespace-pre-wrap pl-[22px] text-xs leading-relaxed text-muted [overflow-wrap:anywhere]" data-brief-sent>
+          <BriefText text={text} />
+        </p>
+      ) : null}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="ml-[22px] mt-1 rounded-sm text-xs text-muted hover:text-fg focus-visible:vy-focus-ring"
+      >
+        {open ? 'Hide what was sent' : 'Show as sent'}
+      </button>
+    </div>
+  )
 }
 
 /**
@@ -38,11 +97,24 @@ export function Brief({
   onRewind?: () => void
   onImageClick?: (src: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [userOpen, setOpen] = useState(false)
+  // Find in record opens a brief whose folded words hold a match.
+  const forced = useContext(RecordOpenContext).has(briefOpenKey(run.n))
+  const open = userOpen || forced
   if (editing && editComposer) {
-    return <RecordRow className="pt-5">{editComposer}</RecordRow>
+    return (
+      <RecordRow className="pt-5">
+        {editComposer}
+        {/* What Rerun does before it starts, said before you press it. */}
+        <p className="m-0 mt-1.5 text-caption text-tertiary" data-rerun-note>
+          Rerunning undoes this task’s edits since this brief first, then starts again from it.
+        </p>
+      </RecordRow>
+    )
   }
-  const long = run.text.length > FOLD_AT
+  // A follow-up the app wrote for you reads as what it asked; the words it sent are a click away.
+  const origin = run.command ? null : followUpOrigin(run.text)
+  const long = !origin && run.text.length > FOLD_AT
   const when = run.at != null ? formatDisplayTime(new Date(run.at).toISOString()) : ''
   const title = when ? `${run.n === 1 ? 'Brief' : 'Follow-up'} · ${when}` : undefined
   return (
@@ -60,7 +132,9 @@ export function Brief({
               /{run.command}
             </p>
           ) : null}
-          {run.text ? (
+          {origin ? (
+            <AppFollowUp origin={origin} text={run.text} title={title} open={open} onToggle={() => setOpen(!open)} />
+          ) : run.text ? (
             <p
               className={cn(
                 'whitespace-pre-wrap text-md leading-[22px] text-fg-strong [overflow-wrap:anywhere]',
@@ -68,13 +142,13 @@ export function Brief({
               )}
               title={title}
             >
-              {run.text}
+              <BriefText text={run.text} />
             </p>
           ) : null}
           {long ? (
             <button
               type="button"
-              onClick={() => setOpen((v) => !v)}
+              onClick={() => setOpen(!open)}
               className="mt-1 rounded-sm text-xs text-muted hover:text-fg focus-visible:vy-focus-ring"
             >
               {open ? 'Show less' : 'Show all'}

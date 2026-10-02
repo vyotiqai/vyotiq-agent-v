@@ -2,6 +2,7 @@ import type { UiToolProgressEntry, UiToolRow } from '@shared/transcript'
 import { cn } from '@renderer/lib/ui'
 import { toolHasBody } from '../toolUi'
 import { ToolBodyView } from '../toolUi'
+import { readerTool } from '../toolUi/presentation'
 
 /** Output pane for an expanded compact tool. The caller owns the surrounding indent. */
 export function ToolRowOutput({
@@ -21,7 +22,7 @@ export function ToolRowOutput({
   /** Extra left pad; false when the parent group already indented. */
   indent?: boolean
 }) {
-  const hasDetails = toolHasBody(tool, { toolProgress })
+  const hasDetails = toolHasBody(readerTool(tool), { toolProgress })
   if (!hasDetails) return null
 
   return (

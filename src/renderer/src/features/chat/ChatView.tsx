@@ -57,6 +57,7 @@ import { focusComposerMessage, matchShortcut, shouldBlockPanelShortcut } from '@
 import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import type { ChatItemsStore } from './chatStores'
 import { RunSessionProvider } from './RunSessionContext'
+import { draftIntoComposer } from './components/composer/composerMentionEvent'
 import { ChatPaneHost, type PaneRenderOptions } from './ChatPaneHost'
 import type { PaneCapacityContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import type { ChatPane, PaneDropZone } from '@renderer/lib/chat/chatPaneLayout'
@@ -378,7 +379,15 @@ export function ChatView({
   const reopenWriteFile = useCallback(
     async (path: string) => {
       const result = await settle?.reopen({ paths: [path] })
-      if (result) notifyGitMutated()
+      if (!result) return
+      notifyGitMutated()
+      // Bringing back an undone file can be refused; say why rather than nothing.
+      if (result.reopened.length > 0) return
+      if (result.conflicted.length > 0) {
+        pushToast('Changed since it was undone, so it was left as it is', { detail: path, icon: 'undo' })
+      } else if (result.skipped.length > 0) {
+        pushToast('No copy of the agent’s version was kept to bring back', { detail: path, icon: 'undo' })
+      }
     },
     [settle, notifyGitMutated]
   )
@@ -848,12 +857,13 @@ export function ChatView({
       workspacePath,
       runId: activeRunId ?? null,
       onOpenAgentTerminal: openAgentTerminal,
+      onOpenPanel: setRightPanel,
       pendingWrites:
         activeRunId && unkeptWrites > 0 && onUndoWrites
           ? { runId: activeRunId, count: unkeptWrites, onUndo: undoAllWrites }
           : undefined
     }),
-    [workspacePath, activeRunId, openAgentTerminal, unkeptWrites, onUndoWrites, undoAllWrites]
+    [workspacePath, activeRunId, openAgentTerminal, setRightPanel, unkeptWrites, onUndoWrites, undoAllWrites]
   )
 
   /** The rightmost pane's header toggles the inspector, lit while it is open. */
@@ -905,6 +915,15 @@ export function ChatView({
       void onSend(instruction)
     },
     [onSend]
+  )
+  // An open check's "Ask it to cover this": drafted into the task's box to
+  // read and edit first. With no box to take it, it goes as before.
+  const draftForAgent = useCallback(
+    (instruction: string) => {
+      if (draftIntoComposer({ workspacePath: workspacePath ?? null, runId: activeRunId ?? null, text: instruction })) return
+      void onSend(instruction)
+    },
+    [onSend, workspacePath, activeRunId]
   )
 
   // A panel that fails to render says so in its own space; opening another
@@ -1043,9 +1062,10 @@ export function ChatView({
               runId={activeRunId}
               variant={reviewing ? 'review' : 'panel'}
               reviewTitle={taskTitle ?? 'Review'}
+              taskTitle={taskTitle ?? null}
               onReviewBack={toggleInspectorExpanded}
               onAskAboutLine={handToAgent}
-              onHandToAgent={handToAgent}
+              onHandToAgent={draftForAgent}
             />
           </ErrorBoundary>
         </div>

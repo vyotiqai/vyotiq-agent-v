@@ -371,6 +371,57 @@ describe('Tooltip', () => {
     expect(tip()?.classList.contains('pt-1.5')).toBe(true)
     spy.mockRestore()
   })
+
+  it('opens beside a trigger in a column, centred on it, so it never covers the one below', () => {
+    const spy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.getAttribute('role') === 'tooltip') return rect(46, 300, 160, 30)
+        if (this.textContent === 'Rail') return rect(10, 300, 36, 36)
+        return rect(0, 0, 0, 0)
+      })
+
+    render(
+      <Tooltip content="Beside" side="right" delayMs={50}>
+        <button type="button">Rail</button>
+      </Tooltip>
+    )
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Rail' }))
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+
+    // The wrapper sits on the trigger's right edge (46), at its middle (318); pl-1.5 is the gap.
+    expect(tip()?.style.left).toBe('46px')
+    expect(tip()?.style.top).toBe('318px')
+    expect(tip()?.classList.contains('pl-1.5')).toBe(true)
+    expect(tip()?.classList.contains('-translate-x-1/2')).toBe(false)
+    spy.mockRestore()
+  })
+
+  it('flips a side tip to the other side when its own side has no room', () => {
+    const spy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.getAttribute('role') === 'tooltip') return rect(820, 300, 160, 30)
+        if (this.textContent === 'Right edge') return rect(980, 300, 36, 36)
+        return rect(0, 0, 0, 0)
+      })
+
+    render(
+      <Tooltip content="Beside" side="right" delayMs={50}>
+        <button type="button">Right edge</button>
+      </Tooltip>
+    )
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Right edge' }))
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+
+    expect(tip()?.classList.contains('pr-1.5')).toBe(true)
+    expect(tip()?.style.left).toBe('980px')
+    spy.mockRestore()
+  })
 })
 
 describe('IconButton tooltip', () => {

@@ -49,6 +49,11 @@ const CHANGED_FILE_LIMIT = 3
  * the open task changed. `>` narrows to commands. Ctrl ↵ turns the query into
  * a new task in the active workspace.
  */
+/** The line a task row shows under its title: what it is doing now, else its workspace. */
+function taskLine(row: NavRow): string {
+  return row.state === 'running' && row.activity ? row.activity : row.workspaceName
+}
+
 export function CommandPalette({
   open,
   onClose,
@@ -154,10 +159,15 @@ export function CommandPalette({
   const groups = useMemo(() => {
     const lower = needle.toLowerCase()
     const matches = (text: string): boolean => !lower || text.toLowerCase().includes(lower)
+    // A task is found by its title, then by the line under it: what a running
+    // one is doing now, or the workspace it is in. Title matches come first.
+    const byTitle = lower ? tasks.filter((row) => matches(row.title)) : tasks
+    const byLine = lower
+      ? tasks.filter((row) => !matches(row.title) && matches(taskLine(row)))
+      : []
     const taskItems: Item[] = commandsOnly
       ? []
-      : tasks
-          .filter((row) => matches(row.title))
+      : [...byTitle, ...byLine]
           .slice(0, TASK_LIMIT)
           .map((row) => ({ kind: 'task' as const, key: `task:${row.workspacePath}:${row.runId}`, row }))
     const fileItems: Item[] = commandsOnly

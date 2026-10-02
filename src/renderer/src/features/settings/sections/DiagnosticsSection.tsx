@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { CrashSnippet, ProcessMetricsSnapshot } from '@shared/ipc'
 import { Button, StatusGlyph } from '@renderer/lib/ui'
+import { exportDiagnosticsBundle } from '@renderer/features/feedback/exportDiagnostics'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
@@ -65,6 +66,8 @@ export function DiagnosticsSection({ form }: { form: SettingsFormState }) {
   const [crashes, setCrashes] = useState<CrashSnippet[]>([])
   const [openingLogs, setOpeningLogs] = useState(false)
   const [traceDumping, setTraceDumping] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportedName, setExportedName] = useState<string | null>(null)
   const metrics = useProcessMetrics()
 
   useEffect(() => {
@@ -104,6 +107,17 @@ export function DiagnosticsSection({ form }: { form: SettingsFormState }) {
       })
       .catch(reportFailure)
       .finally(() => setOpeningLogs(false))
+  }
+
+  const exportBundle = (): void => {
+    form.clearErrors()
+    setExporting(true)
+    void exportDiagnosticsBundle()
+      .then((outcome) => {
+        if (outcome.kind === 'saved') setExportedName(outcome.fileName)
+        else if (outcome.kind === 'error') form.setErrorMessage(outcome.message)
+      })
+      .finally(() => setExporting(false))
   }
 
   const dumpTrace = (): void => {
@@ -155,6 +169,23 @@ export function DiagnosticsSection({ form }: { form: SettingsFormState }) {
             onClick={openLogs}
           >
             {openingLogs ? 'Opening…' : 'Open folder'}
+          </Button>
+        </SettingsField>
+        <SettingsField
+          id="diagnostics-export"
+          title="Diagnostics bundle"
+          hint={exportedName ? `Saved ${exportedName}` : 'Logs, crashes, memory and settings in one .zip.'}
+          help="For a bug report: attach it to your email. Keys, tokens, env and header values are taken out, your home folder reads as ~ and your username as <user>. Nothing is sent from here."
+        >
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="download"
+            pending={exporting}
+            disabled={form.formLocked}
+            onClick={exportBundle}
+          >
+            {exporting ? 'Exporting…' : 'Export diagnostics…'}
           </Button>
         </SettingsField>
         <SettingsField

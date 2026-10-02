@@ -17,6 +17,7 @@ import { isResumableInterruptedRun } from '@shared/runInterrupt'
 import { logger } from '@shared/logger'
 import { workspacePathsEqual, findByWorkspacePath } from '@shared/workspacePathMatch'
 import { ACTIVE_RUNS_CHANGED_EVENT, sameActiveRuns } from '@renderer/lib/chat/activeRunsSignal'
+import { RUN_LIST_CHANGED_EVENT, type RunListChangedDetail } from '@renderer/lib/chat/runListSignal'
 import {
   createChatStreamController,
   EMPTY_RUN_EXPANSIONS,
@@ -72,6 +73,8 @@ export type PaneCapacityContext = {
 }
 
 const ACTIVE_RUNS_POLL_MS = 5_000
+/** After a run's status event, when to look at the live list again: main lets go of a run just after its last event. */
+const ACTIVE_RUNS_SETTLE_MS = 600
 const ACTIVE_RUNS_WARN_INTERVAL_MS = 60_000
 const INTERRUPTED_RUNS_TOAST_KEY = 'vyotiq:interrupted-runs-toast'
 
@@ -1694,9 +1697,38 @@ export function useWorkspaceManager(options?: {
     }
   }, [flushPersistUiState])
 
+  // A run that starts or settles changes the live list at once. Left to the
+  // poll, the navigator showed it up to five seconds late: a new task under
+  // Today while its record ran, a finished one still "Running" beside its
+  // Result. A second look once main has let go of the run, which it does
+  // just after the run's last event.
+  //
+  // A run that settles gets only that second look. Main still lists it for a
+  // moment after its last event, and a poll in that window finds a finished
+  // controller for a "live" run — reattach then re-reads the record from disk,
+  // where secrets are redacted, over the live reply the person just watched.
+  const pollActiveRunsRef = useRef(pollActiveRuns)
+  pollActiveRunsRef.current = pollActiveRuns
+  const settlePollRef = useRef<number | null>(null)
+  const pollOnRunStatus = useCallback((starting: boolean) => {
+    if (starting) void pollActiveRunsRef.current()
+    if (settlePollRef.current != null) window.clearTimeout(settlePollRef.current)
+    settlePollRef.current = window.setTimeout(() => {
+      settlePollRef.current = null
+      void pollActiveRunsRef.current()
+    }, ACTIVE_RUNS_SETTLE_MS)
+  }, [])
+  useEffect(
+    () => () => {
+      if (settlePollRef.current != null) window.clearTimeout(settlePollRef.current)
+    },
+    []
+  )
+
   useEffect(() => {
     if (!window.vyotiq?.onChatEvent) return
     return window.vyotiq.onChatEvent((event) => {
+      if (event.type === 'status') pollOnRunStatus(event.status === 'running')
       if (event.type === 'goal_update' && event.notice) {
         pushToast(event.notice)
       }
@@ -1716,7 +1748,7 @@ export function useWorkspaceManager(options?: {
       }
       ctrl.handleEvent(event)
     })
-  }, [bufferOrphanEvent, isRunUiVisible])
+  }, [bufferOrphanEvent, isRunUiVisible, pollOnRunStatus])
 
   useEffect(() => {
     if (!window.vyotiq?.onToolApprovalRequest) return
@@ -2735,6 +2767,16 @@ export function useWorkspaceManager(options?: {
     }, LIST_RUNS_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
   }, [activeWorkspace, chatSnapshot.runTerminalTick, refreshRuns])
+
+  // A task's own record changed from this window (its added folders): re-read that workspace's list.
+  useEffect(() => {
+    const onChanged = (event: Event): void => {
+      const path = (event as CustomEvent<RunListChangedDetail>).detail?.workspacePath
+      if (path) void refreshRuns(path)
+    }
+    window.addEventListener(RUN_LIST_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(RUN_LIST_CHANGED_EVENT, onChanged)
+  }, [refreshRuns])
 
   const clearRunsError = useCallback((workspacePath?: string) => {
     const path = workspacePath ?? activeWorkspace

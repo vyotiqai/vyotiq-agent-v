@@ -411,6 +411,10 @@ export function MarketplaceView({
               aria-label={TAB_LABEL[tab]}
               className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 pb-8"
             >
+              {/* What the page is for, said once above the groups: the 40px row is full. */}
+              <p className="m-0 mt-4 text-caption text-tertiary" data-extensions-subtitle>
+                {workspaceName ? `What every task in ${workspaceName} can use` : 'What every task can use'}
+              </p>
               {sections.length > 0 ? (
                 <ExtensionList
                   sections={sections}

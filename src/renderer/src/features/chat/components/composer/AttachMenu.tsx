@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionMenu, IconButton, type ActionMenuItem } from '@renderer/lib/ui'
 import { MAX_IMAGES } from './useComposerImages'
 
@@ -13,6 +13,8 @@ export function browserSnapshotArtifactName(path: string): string {
 
 export type BrowserScreenshotAttach = {
   busy: boolean
+  /** The Browser tab has no page at all, so a capture can only fail. */
+  noPage: boolean
   take: () => void
 }
 
@@ -22,9 +24,11 @@ export type BrowserScreenshotAttach = {
  * then read back from the run like the @browser mention reads its snapshot —
  * so it needs a run: the New task page has none, and gets no entry.
  *
- * Nothing is asked before the capture: main's browser state is the page the
- * Browser panel shows, which can be another workspace's, while the capture
- * takes this workspace's own tab. The capture says when there is no page.
+ * Main's browser state is the page the Browser panel shows, which can be
+ * another workspace's, while the capture takes this workspace's own tab. So
+ * only its one sure answer is used: with no tab open anywhere there is
+ * nothing to capture, and the entry says so before it is picked. Otherwise
+ * the capture says when this workspace has no page.
  */
 export function useBrowserScreenshotAttach({
   workspacePath,
@@ -43,6 +47,30 @@ export function useBrowserScreenshotAttach({
   const available = Boolean(
     workspacePath && runId && api?.browserTakeScreenshot && api?.readRunArtifact
   )
+  // Unknown until main answers: the entry stays choosable rather than guess.
+  const [noPage, setNoPage] = useState(false)
+
+  useEffect(() => {
+    setNoPage(false)
+    if (!available) return undefined
+    let cancelled = false
+    // Push events always win over a late browserGetState resolve — the same
+    // guard as AgentBrowserPanel.
+    let pushed = false
+    void window.vyotiq.browserGetState?.().then((res) => {
+      if (cancelled || pushed || !res?.ok) return
+      setNoPage(!res.data.open)
+    })
+    const unsub = window.vyotiq.onBrowserState?.((next) => {
+      if (cancelled) return
+      pushed = true
+      setNoPage(!next.open)
+    })
+    return () => {
+      cancelled = true
+      unsub?.()
+    }
+  }, [available])
 
   const take = useCallback((): void => {
     if (!workspacePath || !runId || busyRef.current) return
@@ -77,13 +105,14 @@ export function useBrowserScreenshotAttach({
     })()
   }, [workspacePath, runId, onImage, onError])
 
-  return available ? { busy, take } : null
+  return available ? { busy, noPage, take } : null
 }
 
 /**
  * The paperclip as a small menu: Files (the picker for anything the box
- * reads), Image (the same picker, images only), and a screenshot of the
- * Browser tab when the task has a run to keep it with.
+ * reads), Image (the same picker, images only), a screenshot of the Browser
+ * tab when the task has a run to keep it with, and last, set apart, the way
+ * to an @ mention for someone who has not learnt the key.
  */
 export function AttachMenu({
   label,
@@ -91,6 +120,7 @@ export function AttachMenu({
   imagesFull,
   onPickFiles,
   onPickImage,
+  onMention,
   screenshot
 }: {
   /** The trigger's name — it carries the per-kind room left once something is full. */
@@ -99,6 +129,8 @@ export function AttachMenu({
   imagesFull: boolean
   onPickFiles: () => void
   onPickImage: () => void
+  /** Type `@` at the caret, so the mention menu opens as it does for a typed one. */
+  onMention?: () => void
   screenshot: BrowserScreenshotAttach | null
 }) {
   const [open, setOpen] = useState(false)
@@ -119,10 +151,17 @@ export function AttachMenu({
       id: 'screenshot',
       label: screenshot.busy ? 'Capturing the Browser tab…' : 'Screenshot of the Browser tab',
       icon: 'browser',
-      disabled: imagesFull || screenshot.busy,
-      disabledReason: imagesFull ? imagesFullReason : 'A capture is under way',
+      disabled: imagesFull || screenshot.busy || screenshot.noPage,
+      disabledReason: imagesFull
+        ? imagesFullReason
+        : screenshot.busy
+          ? 'A capture is under way'
+          : 'Open a page in the Browser tab first',
       onSelect: screenshot.take
     })
+  }
+  if (onMention) {
+    items.push({ id: 'mention', label: 'Mention a file', icon: 'at', keys: ['@'], separatorBefore: true, onSelect: onMention })
   }
 
   return (

@@ -13,10 +13,18 @@ import type { RunFeedbackRating, RunGoal, RunLoop, RunSummary, ToolApprovalDecis
 import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { unreachableServiceInTurn } from '@shared/utils/unreachableService'
+import { isRetryableTurnFailure } from '@shared/errors'
+import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { ActionMenu, Button, IconButton, ImageLightbox, Tooltip, pushToast } from '@renderer/lib/ui'
-import { isEditableShortcutTarget, isMainComposerTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
+import { ActionMenu, Button, IconButton, ImageLightbox, Tooltip, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
+import {
+  isCodeEditorTarget,
+  isEditableShortcutTarget,
+  isMainComposerTarget,
+  matchShortcut,
+  shortcutLabel
+} from '@renderer/lib/shortcuts'
 import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
@@ -31,13 +39,22 @@ import { taskHeaderState } from '@renderer/app/navigator/navigatorModel'
 import { runTitle } from '@renderer/app/navigator/runTitle'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
-import { buildRecordModel, type BuildOptions, type InstanceFacts } from './recordModel'
+import { buildRecordModel, runStateOf, type BuildOptions, type InstanceFacts } from './recordModel'
 import { RecordBody, TaskHeader } from './record/RecordLayout'
 import { useRewindRedo } from './rewindRedo'
+import { addTaskFolder, removeTaskFolder } from './taskFolders'
 import { TaskWorktreeStrip, useTaskWorktree } from './taskWorktree'
 import { RecordActionsContext, latestRetryableErrorId } from './record/WorkItems'
 import { TaskRecord } from './TaskRecord'
-import { clearMatches, findRanges, foldsToOpen, paintMatches, RecordOpenContext } from './recordFind'
+import {
+  clearMatches,
+  findRanges,
+  foldsToOpen,
+  paintMatches,
+  RecordOpenContext,
+  StepRevealContext,
+  type StepReveal
+} from './recordFind'
 import { useRecordScroll } from './useRecordScroll'
 import { checksRevisionOf, useRunChecks } from './useRunChecks'
 
@@ -46,12 +63,15 @@ const TASK_COMMAND_MENU_ITEMS: Record<string, string> = {
   renameTask: 'rename',
   archiveTask: 'archive',
   forkTask: 'fork',
-  deleteTask: 'delete'
+  deleteTask: 'delete',
+  toggleReasoning: 'reasoning'
 }
 
 export type TaskPaneRunActions = {
   onRename?: (title: string) => void | Promise<void>
   onExport?: () => void
+  /** The task as a JSON bundle that Import task… reads back. */
+  onExportJson?: () => void
   onCopyLink?: () => void
   onDelete?: () => void
   /** A copy of the task's conversation as a new task, to take another way. */
@@ -228,18 +248,23 @@ export function TaskPane(props: TaskPaneProps) {
   const instances = useInstanceFacts()
   // The last rewind, while it can still be redone.
   const { redo, busy: redoing, onRedo } = useRewindRedo(workspacePath, runId, items.length, live)
+  // Reasoning in this pane: the "Show thinking" setting until the task menu
+  // says otherwise. Thought lines are as many as the calls they lead to; a
+  // reader after the work alone hides them here without changing the setting.
+  const [reasoningChoice, setReasoningChoice] = useState<boolean | null>(null)
+  const showReasoning = reasoningChoice ?? showThinking
 
   const options: BuildOptions = useMemo(
     () => ({
       running: deferred.live,
       failed: deferred.turnFailed,
       stopped: deferred.turnStopped,
-      showThinking,
+      showThinking: showReasoning,
       liveTodos: deferred.todos?.items ?? null,
       liveTodosUpdatedAt: deferred.todos?.updatedAt ?? null,
       instances
     }),
-    [deferred, showThinking, instances]
+    [deferred, showReasoning, instances]
   )
   const model = useMemo(() => buildRecordModel(items, options), [items, options])
   const last = model.runs[model.runs.length - 1] ?? null
@@ -283,29 +308,108 @@ export function TaskPane(props: TaskPaneProps) {
   const branch = props.run?.worktreeBranch ?? git.status?.branch ?? null
   // A task started in a new worktree: its workspace is that worktree.
   const worktree = useTaskWorktree(draft ? null : workspacePath, gitRevision)
-  const facts = draft
+  const baseFacts = draft
     ? workspacePath
       ? [{ text: `in ${formatWorkspaceName(workspacePath)}`, title: workspacePath }]
       : []
     : branch
       ? [{ text: branch, mono: true, title: props.run?.worktreeBranch || worktree.info ? 'Worktree branch' : 'Branch' }]
       : []
+  // Folders outside the workspace the task may also work in: muted, after where it runs.
+  const extraRoots = props.run?.extraRoots ?? []
+  const facts =
+    extraRoots.length > 0
+      ? [
+          ...baseFacts,
+          {
+            text: (
+              <span className="inline-flex items-center gap-1" data-task-extra-roots>
+                <Icon name="folder" size={12} className="shrink-0" />
+                {extraRoots.map(extraRootLabel).join(', ')}
+              </span>
+            ),
+            title: `Also works in\n${extraRoots.join('\n')}`
+          }
+        ]
+      : baseFacts
 
   const [renaming, setRenaming] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const archived = props.actions.isArchived?.() ?? false
-  const menuItems = [
+  const retryableErrorId = useMemo(() => latestRetryableErrorId(items, live), [items, live])
+  // The record's own way on, offered here too: Retry where its error row
+  // offers Retry (a failure Retry can get past), Resume where its receipt
+  // offers Resume (stopped, with no error row saying how to carry on).
+  const retryError = retryableErrorId ? items.find((item) => item.id === retryableErrorId) : undefined
+  const retryable = retryError?.kind === 'run_error' && isRetryableTurnFailure({ errorCode: retryError.code })
+  const onRetry = props.onRetry
+  const runAction =
+    onRetry && runId && !liveNow && last
+      ? retryable
+        ? { id: 'retry', label: 'Retry', icon: 'retry' as const, onSelect: onRetry }
+        : !retryableErrorId && runStateOf(last, true, options) === 'stopped'
+          ? { id: 'resume', label: 'Resume', icon: 'play' as const, onSelect: onRetry }
+          : null
+      : null
+  // A helper works in its parent's folders, so only a task of its own offers these.
+  const foldersEditable =
+    Boolean(workspacePath && runId && !props.run?.inlineInstance) && typeof window.vyotiq?.setRunExtraRoots === 'function'
+  const folderItems: ActionMenuItem[] =
+    foldersEditable && workspacePath && runId
+      ? [
+          {
+            id: 'add-folder',
+            label: 'Add folder…',
+            icon: 'folderPlus' as const,
+            separatorBefore: true,
+            disabled: extraRoots.length >= MAX_EXTRA_ROOTS,
+            disabledReason: `A task can add at most ${MAX_EXTRA_ROOTS} folders`,
+            onSelect: () => void addTaskFolder(workspacePath, runId)
+          },
+          ...extraRoots.map((root) => ({
+            id: `remove-folder:${root}`,
+            label: `Remove ${extraRootLabel(root)}`,
+            icon: 'folderMinus' as const,
+            detail: root,
+            onSelect: () => void removeTaskFolder(workspacePath, runId, root)
+          }))
+        ]
+      : []
+  const taskItems: ActionMenuItem[] = [
     ...(props.actions.onRename && runId ? [{ id: 'rename', label: 'Rename', icon: 'edit' as const, onSelect: () => setRenaming(true) }] : []),
     // An archived task is out of the way; pinning it would pull it back.
     ...(props.actions.onTogglePin && runId && !archived
       ? [{ id: 'pin', label: props.actions.isPinned?.() ? 'Unpin' : 'Pin', icon: 'pin' as const, onSelect: props.actions.onTogglePin }]
       : []),
-    // A live task can't be put away, as in the navigator's row menu.
-    ...(props.actions.onToggleArchive && runId && (archived || !liveNow)
-      ? [{ id: 'archive', label: archived ? 'Unarchive' : 'Archive', icon: 'archive' as const, onSelect: props.actions.onToggleArchive }]
+    // A live task can't be put away, as in the navigator's row menu; it says why.
+    ...(props.actions.onToggleArchive && runId
+      ? [
+          {
+            id: 'archive',
+            label: archived ? 'Unarchive' : 'Archive',
+            icon: 'archive' as const,
+            disabled: liveNow && !archived,
+            disabledReason: 'Stop it or let it finish first',
+            onSelect: props.actions.onToggleArchive
+          }
+        ]
+      : []),
+    // What the record shows, not what is done to the task: last in its group.
+    ...(runId
+      ? [
+          {
+            id: 'reasoning',
+            label: showReasoning ? 'Hide reasoning' : 'Show reasoning',
+            icon: 'eye' as const,
+            onSelect: () => setReasoningChoice(!showReasoning)
+          }
+        ]
       : []),
     ...(props.actions.onExport && runId
       ? [{ id: 'export', label: 'Export as Markdown', icon: 'download' as const, onSelect: props.actions.onExport }]
+      : []),
+    ...(props.actions.onExportJson && runId
+      ? [{ id: 'export-json', label: 'Export as JSON', icon: 'download' as const, onSelect: props.actions.onExportJson }]
       : []),
     // Main forks only a stopped task ("Cancel run first").
     ...(props.actions.onFork && runId && !liveNow
@@ -317,11 +421,18 @@ export function TaskPane(props: TaskPaneProps) {
     ...(props.actions.onSplit && runId
       ? [{ id: 'split', label: 'Open a task beside', icon: 'columns' as const, onSelect: props.actions.onSplit }]
       : []),
+    // Folders outside the workspace it may also work in: add one, or take one
+    // away. A live run takes the change up when it next starts (taskFolders.ts).
+    ...folderItems,
     // A live run cannot be deleted (main refuses: "Cancel run first") — stop it first.
     ...(props.actions.onDelete && runId && !liveNow
       ? [{ id: 'delete', label: 'Delete', icon: 'trash' as const, danger: true, separatorBefore: true, onSelect: props.actions.onDelete }]
       : [])
   ]
+  // The run's own way on comes first, set apart from what is done to the task.
+  const menuItems: ActionMenuItem[] = runAction
+    ? [runAction, ...taskItems.map((item, i) => (i === 0 ? { ...item, separatorBefore: true } : item))]
+    : taskItems
 
   // ── Find in record ────────────────────────────────────────────────────
   const findId = useId()
@@ -415,7 +526,8 @@ export function TaskPane(props: TaskPaneProps) {
         findInputRef.current?.select()
         return
       }
-      if (findOpen && e.key === 'F3' && paneOwns(e.target)) {
+      // A code editor steps its own matches with F3.
+      if (findOpen && e.key === 'F3' && !isCodeEditorTarget(e.target) && paneOwns(e.target)) {
         e.preventDefault()
         setFindIndex((i) => i + (e.shiftKey ? -1 : 1))
       }
@@ -446,7 +558,8 @@ export function TaskPane(props: TaskPaneProps) {
       const pane = scroll.scrollRef.current?.closest('[data-chat-pane]')
       if (!scroll.scrollRef.current || pane?.getAttribute('data-chat-pane-focused') === '0') return
       const item = menuItemsRef.current.find((entry) => entry.id === itemId)
-      if (item) {
+      // A greyed-out item (Archive while it works) is as unavailable from the palette.
+      if (item && !item.disabled) {
         item.onSelect()
         return
       }
@@ -460,7 +573,29 @@ export function TaskPane(props: TaskPaneProps) {
   }, [scroll.scrollRef])
 
   // ── A new request for you comes into view in the focused pane ─────────
-  const { jumpTop, jumpTo, jumpBottom, isFollowing } = scroll
+  const { jumpTop, jumpTo, jumpBottom, isFollowing, contentRef: recordContentRef } = scroll
+
+  // ── The header's plan line goes to its step ───────────────────────────
+  const [reveal, setReveal] = useState<StepReveal | null>(null)
+  const lastRunN = last?.n ?? null
+  const onPlanStep = useCallback(
+    (index: number) => {
+      const step = planSteps[index]
+      if (!step || lastRunN == null) return
+      setReveal({ runN: lastRunN, key: step.key, nonce: Date.now() })
+      // Once it has opened: the step's top is where it was, but the room
+      // below it to scroll into is only there after it opens.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const row = recordContentRef.current?.querySelector<HTMLElement>(
+            `[data-steps-run="${lastRunN}"] > [data-step="${step.n}"]`
+          )
+          if (row) jumpTo(row)
+        })
+      )
+    },
+    [planSteps, lastRunN, jumpTo, recordContentRef]
+  )
   const needsKey = firstNeed ? (firstNeed.kind === 'approval' ? firstNeed.approval.requestId : firstNeed.question.requestId) : null
   const gateKey = props.instanceGates?.[0]?.runId ?? null
   const shownNeedRef = useRef<string | null>(null)
@@ -506,7 +641,6 @@ export function TaskPane(props: TaskPaneProps) {
             : formatRunActivityLabel({ kind: 'working' })
 
   const [lightbox, setLightbox] = useState<string | null>(null)
-  const retryableErrorId = useMemo(() => latestRetryableErrorId(items, live), [items, live])
   // Read only once the latest turn has failed and settled: never while live.
   const mockTarget = useMemo(() => (retryableErrorId ? unreachableServiceInTurn(items) : null), [retryableErrorId, items])
   const recordActions = useMemo(
@@ -566,6 +700,7 @@ export function TaskPane(props: TaskPaneProps) {
         }
         facts={facts}
         plan={planSteps}
+        onPlanStep={onPlanStep}
         actions={
           <>
             {liveNow ? (
@@ -658,6 +793,9 @@ export function TaskPane(props: TaskPaneProps) {
       ) : null}
       <RecordActionsContext.Provider value={recordActions}>
         <RecordOpenContext.Provider value={folds}>
+        <StepRevealContext.Provider value={reveal}>
+        {/* The record and, while a run goes on below what you read, the way back to it. */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
           <RecordBody
             scrollRef={scroll.scrollRef}
             contentRef={scroll.contentRef}
@@ -729,6 +867,24 @@ export function TaskPane(props: TaskPaneProps) {
               <TaskWorktreeStrip info={worktree.info} title={title} onChanged={worktree.refresh} />
             ) : null}
           </RecordBody>
+          {live && scroll.away && !loading ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+              <Button
+                size="xs"
+                variant="secondary"
+                icon="arrowDown"
+                // The record's own End key (useRecordScroll), not a rebindable chord.
+                kbd={['End']}
+                onClick={jumpBottom}
+                className="pointer-events-auto shadow-menu"
+                data-jump-to-now
+              >
+                Jump to now
+              </Button>
+            </div>
+          ) : null}
+        </div>
+        </StepRevealContext.Provider>
         </RecordOpenContext.Provider>
       </RecordActionsContext.Provider>
       {showGoal && props.goal ? (

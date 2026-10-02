@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { extraRootFor, extraRootLabel, isAbsolutePathLike, relativeToExtraRoot } from '@shared/extraRoots'
 import { Icon } from '@renderer/lib/icons'
 import { DiffStat, cn } from '@renderer/lib/ui'
 import { BORDER_DIVIDER, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
@@ -14,10 +15,18 @@ import {
   type ChangesListFile,
   type FileDiffSource
 } from './ChangesList'
-import type { AskTarget } from './ReviewDiffTable'
+import type { AskTarget, HunkActions } from './ReviewDiffTable'
 
-/** Where one file's diff comes from: lines already in hand, or a source to ask. */
-export type ColumnDiffSource = { lines?: DiffLine[] | null; fetchDiff?: FileDiffSource; binary?: boolean }
+/**
+ * Where one file's diff comes from: lines already in hand, or a source to ask.
+ * `hunks`, when this file's hunks can be undone one at a time.
+ */
+export type ColumnDiffSource = {
+  lines?: DiffLine[] | null
+  fetchDiff?: FileDiffSource
+  binary?: boolean
+  hunks?: HunkActions
+}
 
 /** How far ahead of the visible part of the column a file's diff is asked for. */
 const PRELOAD_MARGIN = '600px 0px'
@@ -47,6 +56,28 @@ function useSeen(ref: RefObject<HTMLElement | null>, root: RefObject<HTMLElement
   return seen
 }
 
+/** Files keyed by an absolute path in no listed added folder. */
+const OUTSIDE = 'Outside the workspace'
+
+type FileGroup = { root: string | null; files: ChangesListFile[] }
+
+/**
+ * Workspace files first, then one group per added folder (extraRoots.ts),
+ * whose files the task's checkpoints key by absolute path. A list with no
+ * such file is one group, drawn exactly as before.
+ */
+export function groupFilesByRoot(files: readonly ChangesListFile[], extraRoots: readonly string[] = []): FileGroup[] {
+  if (!files.some((f) => isAbsolutePathLike(f.path))) return [{ root: null, files: [...files] }]
+  const byRoot = new Map<string | null, ChangesListFile[]>([[null, []]])
+  for (const file of files) {
+    const root = isAbsolutePathLike(file.path) ? (extraRootFor(file.path, extraRoots) ?? OUTSIDE) : null
+    const list = byRoot.get(root) ?? []
+    list.push(file)
+    byRoot.set(root, list)
+  }
+  return [...byRoot].filter(([, list]) => list.length > 0).map(([root, list]) => ({ root, files: list }))
+}
+
 /**
  * The changed files as one scrolling column: each file's header — status,
  * name, its counts or what was decided — sticks while its diff scrolls under
@@ -66,9 +97,12 @@ export function ChangesColumn({
   findQuery,
   onAsk,
   slot,
-  className
+  className,
+  extraRoots
 }: {
   files: readonly ChangesListFile[]
+  /** The task's added folders: files in one are grouped under it, paths shown relative to it. */
+  extraRoots?: readonly string[]
   /** The file you are on: the one last opened, folded, or sent here from elsewhere. */
   selectedPath: string | null
   /** Bumped to bring the selected file into view and open it (Open in Changes). */
@@ -86,13 +120,12 @@ export function ChangesColumn({
   className?: string
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
-  return (
-    <div ref={rootRef} className={cn('scroll-thin min-h-0 flex-1 overflow-y-auto', className)} data-changes-column>
-      <ul className="m-0 list-none p-0" aria-label="Changed files" data-changes-list>
-        {files.map((file) => (
+  const groups = useMemo(() => groupFilesByRoot(files, extraRoots), [files, extraRoots])
+  const block = (file: ChangesListFile, root: string | null): ReactNode => (
           <FileBlock
             key={file.path}
             file={file}
+            root={root && root !== OUTSIDE ? root : undefined}
             on={file.path === selectedPath}
             revealToken={revealToken}
             onSelect={onSelect}
@@ -105,7 +138,33 @@ export function ChangesColumn({
             slot={slot?.(file) ?? null}
             rootRef={rootRef}
           />
-        ))}
+  )
+  return (
+    <div ref={rootRef} className={cn('scroll-thin min-h-0 flex-1 overflow-y-auto', className)} data-changes-column>
+      <ul className="m-0 list-none p-0" aria-label="Changed files" data-changes-list>
+        {groups.map((group) =>
+          group.root === null ? (
+            group.files.map((file) => block(file, null))
+          ) : (
+            <Fragment key={group.root}>
+              {/* An added folder's files, under its name: not part of the workspace's git. */}
+              <li
+                className={cn('flex h-8 min-w-0 items-center gap-2 border-b pl-3 pr-3', BORDER_DIVIDER)}
+                title={group.root === OUTSIDE ? undefined : group.root}
+                data-change-root={group.root}
+              >
+                <Icon name="folder" size={13} className="shrink-0 text-tertiary" />
+                <span className="shrink-0 text-xs font-semibold text-fg">
+                  {group.root === OUTSIDE ? OUTSIDE : extraRootLabel(group.root)}
+                </span>
+                {group.root === OUTSIDE ? null : (
+                  <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{group.root}</span>
+                )}
+              </li>
+              {group.files.map((file) => block(file, group.root))}
+            </Fragment>
+          )
+        )}
       </ul>
     </div>
   )
@@ -123,9 +182,12 @@ function FileBlock({
   findQuery,
   onAsk,
   slot,
-  rootRef
+  rootRef,
+  root
 }: {
   file: ChangesListFile
+  /** The added folder this file is in: its folder is shown relative to it. */
+  root?: string
   on: boolean
   revealToken: number
   onSelect: (path: string) => void
@@ -162,7 +224,7 @@ function FileBlock({
 
   const seen = useSeen(ref, rootRef)
   const diff = useFileDiff(file.path, source.lines, seen && open ? source.fetchDiff : undefined, source.binary)
-  const { name, dir } = splitPath(file.path)
+  const { name, dir } = splitPath(root ? relativeToExtraRoot(file.path, root) : file.path)
   const trailing = actions ? 'shrink-0 pr-3 group-focus-within:hidden group-hover:hidden' : 'shrink-0 pr-3'
 
   return (
@@ -232,6 +294,7 @@ function FileBlock({
                 findQuery={findQuery}
                 added={file.status === 'A' || file.status === '?'}
                 onAsk={onAsk}
+                hunkActions={source.hunks}
               />
             ) : (
               <div className="h-16" aria-hidden />

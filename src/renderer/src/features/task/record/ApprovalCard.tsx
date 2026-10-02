@@ -4,13 +4,15 @@ import type { UiToolApproval } from '@shared/transcript'
 import { TERMINAL_DEFAULT_TIMEOUT_MS, TOOL_APPROVAL_TIMEOUT_MS } from '@shared/agentTimeouts'
 import { parseArgsRecord, parseMcpToolDisplay } from '@shared/toolSummary'
 import { Icon } from '@renderer/lib/icons'
-import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
+import { Button, StatusGlyph, cn, pushToast } from '@renderer/lib/ui'
+import { requestOpenSettings } from '@renderer/app/openSettings'
 import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import { altChordLabel } from '@renderer/lib/shortcuts/labels'
 import { typingElsewhere } from '@renderer/lib/a11y'
 import { toolLabel } from '@renderer/features/chat/toolUi'
-import { RecordActionsContext } from './WorkItems'
+import { RecordActionsContext, plainProse } from './WorkItems'
+import { TickedText } from './TickedText'
 
 const FILE_TOOLS = new Set(['edit', 'str_replace', 'delete', 'edit_notebook', 'memory_write'])
 
@@ -23,6 +25,20 @@ export function approvalTitle(approval: UiToolApproval, serverNames?: ReadonlyMa
   const mcp = parseMcpToolDisplay(name)
   if (mcp) return `use ${serverNames?.get(mcp.serverId) ?? mcp.serverId} · ${mcp.toolName}?`
   return `use ${toolLabel(name, 'done').toLowerCase()}?`
+}
+
+/**
+ * "Always allowed pnpm vitest": a rule now runs it without asking, so say so
+ * once, and where that rule lives.
+ */
+function sayAlwaysAllowed(approval: UiToolApproval): void {
+  const what = approval.toolName === 'terminal' ? approval.alwaysAllowCommand : approval.toolName
+  if (!what) return
+  pushToast(`Always allowed ${what}`, {
+    detail: 'In this workspace · Settings › Agent',
+    icon: 'shield',
+    action: { label: 'Settings', onClick: () => requestOpenSettings('agent') }
+  })
 }
 
 function minutes(ms: number): string {
@@ -77,6 +93,7 @@ export const ApprovalCard = memo(function ApprovalCard({
       setError(null)
       void Promise.resolve(onDecide(approval.requestId, decision))
         .then(() => {
+          if (decision === 'always') sayAlwaysAllowed(approval)
           if (mounted.current) setPhase('done')
         })
         .catch((err: unknown) => {
@@ -86,7 +103,7 @@ export const ApprovalCard = memo(function ApprovalCard({
           setError(err instanceof Error ? err.message : 'Could not send your decision.')
         })
     },
-    [phase, onDecide, approval.requestId]
+    [phase, onDecide, approval]
   )
 
   const canDecide = Boolean(onDecide) && phase === 'idle'
@@ -147,7 +164,7 @@ export const ApprovalCard = memo(function ApprovalCard({
       data-needs-you
       data-tool-approval=""
       aria-busy={phase === 'pending' || undefined}
-      className={cn(QUESTION_GATE_SURFACE, '@container scroll-mt-4')}
+      className={cn(QUESTION_GATE_SURFACE, '@container scroll-mt-4 vy-rise')}
     >
       <div className={QUESTION_GATE_HEADER}>
         <StatusGlyph state="needs" size={12} />
@@ -159,7 +176,12 @@ export const ApprovalCard = memo(function ApprovalCard({
         ) : null}
       </div>
       <div className="space-y-3 px-3 py-3">
-        {why ? <p className="line-clamp-3 text-sm text-fg">{why}</p> : null}
+        {/* The agent's words are markdown; quoted here as text, without their asterisks. */}
+        {why ? (
+          <p className="line-clamp-3 whitespace-pre-line text-sm text-fg">
+            <TickedText text={plainProse(why)} code="rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em]" />
+          </p>
+        ) : null}
         <pre className="scroll-thin overflow-x-auto rounded-md border border-border bg-sunken px-3 py-2 font-mono text-xs leading-[18px] text-fg-strong">
           {command != null ? (
             <>

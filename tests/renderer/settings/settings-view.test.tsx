@@ -1259,7 +1259,7 @@ describe('settings', () => {
       <SettingsView
         settings={{
           ...baseSettings,
-          toolApproval: { mode: 'mutating', allowlist: ['edit', 'terminal', 'terminal:pnpm vitest'], mcpProtection: true }
+          toolApproval: { mode: 'mutating', allowlist: ['edit', 'terminal', 'terminal:pnpm vitest'], mcpProtection: true, rules: [] }
         }}
         secrets={emptySecrets}
         section="agent"
@@ -1380,12 +1380,12 @@ describe('settings', () => {
           model: 'gpt-5.6',
           ollamaBaseUrl: DEFAULT_SETTINGS.ollamaBaseUrl,
           customOpenAiBaseUrl: DEFAULT_SETTINGS.customOpenAiBaseUrl,
+          customProviders: DEFAULT_SETTINGS.customProviders,
           keepRecentTurns: DEFAULT_SETTINGS.keepRecentTurns,
           autoCompactThresholdRatio: DEFAULT_SETTINGS.autoCompactThresholdRatio,
           thinkingEnabled: DEFAULT_SETTINGS.thinkingEnabled,
           thinkingEffort: DEFAULT_SETTINGS.thinkingEffort,
           showThinking: DEFAULT_SETTINGS.showThinking,
-          customProviders: DEFAULT_SETTINGS.customProviders,
           toolApproval: DEFAULT_SETTINGS.toolApproval,
           agentPersona: 'OverrideBot',
           agentTone: '',
@@ -1875,6 +1875,34 @@ describe('settings', () => {
     }
   })
 
+  it('says how the MCP servers stand, from their live status', async () => {
+    const server = (name: string, over: Record<string, unknown> = {}) => ({ id: name.toLowerCase(), name, enabled: true, connected: false, toolCount: 0, ...over })
+    window.vyotiq.mcpStatus = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        servers: [
+          server('GitHub', { connected: true }),
+          server('Linear', { connected: true }),
+          server('Sentry', { error: 'Sign in to Sentry', errorKind: 'sign-in' }),
+          server('Old', { enabled: false })
+        ]
+      }
+    })) as never
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        section="tools"
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    const row = document.querySelector('[data-settings-field="mcp-servers"]') as HTMLElement
+    await waitFor(() => expect(row.textContent).toContain('GitHub and Linear connected · Sentry needs sign-in'))
+  })
+
   it('saves the diagnostics command trimmed on blur', async () => {
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     render(
@@ -2058,7 +2086,7 @@ describe('settings', () => {
     fireEvent.change(screen.getByLabelText(/Search settings/i), {
       target: { value: 'keyboard' }
     })
-    fireEvent.click(screen.getByRole('option', { name: /Keyboard shortcuts/i }))
+    fireEvent.click(screen.getByRole('option', { name: /^Keyboard shortcuts/i }))
     expect(screen.getByText('Search and commands')).toBeTruthy()
     expect(keycaps('search')).toEqual(['Ctrl', 'K'])
     expect(screen.getByText('Next task that needs you')).toBeTruthy()
@@ -2378,9 +2406,9 @@ describe('Effort beside the model', () => {
           model: 'gpt-5.6',
           ollamaBaseUrl: DEFAULT_SETTINGS.ollamaBaseUrl,
           customOpenAiBaseUrl: DEFAULT_SETTINGS.customOpenAiBaseUrl,
+          customProviders: DEFAULT_SETTINGS.customProviders,
           keepRecentTurns: DEFAULT_SETTINGS.keepRecentTurns,
           autoCompactThresholdRatio: DEFAULT_SETTINGS.autoCompactThresholdRatio,
-          customProviders: DEFAULT_SETTINGS.customProviders,
           thinkingEnabled: true,
           thinkingEffort: 'medium',
           showThinking: DEFAULT_SETTINGS.showThinking,

@@ -48,6 +48,15 @@ describe('ReviewChecks', () => {
     expect(screen.getByText('exit 0 · 71 tests')).toBeTruthy()
   })
 
+  it('tints only the open checks, the one block here that asks something of you', () => {
+    render(<ReviewChecks checks={CHECKS} inset="px-4" onAsk={vi.fn()} />)
+    for (const id of ['c2', 'c4']) {
+      expect(document.querySelector(`[data-check="${id}"]`)!.classList.contains('bg-warning-soft')).toBe(true)
+    }
+    fireEvent.click(screen.getByRole('button', { name: /checks met/ }))
+    expect(document.querySelector('[data-check="c1"]')!.classList.contains('bg-warning-soft')).toBe(false)
+  })
+
   it('hands an open check back to the agent as an instruction', () => {
     const onAsk = vi.fn()
     render(<ReviewChecks checks={CHECKS} inset="px-3" onAsk={onAsk} />)

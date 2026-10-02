@@ -63,6 +63,8 @@ export type WorkItem =
   | { kind: 'thought'; id: string; item: MessageItem; text: string; streaming: boolean }
   | { kind: 'error'; id: string; message: string; code?: string }
   | { kind: 'compaction'; id: string; item: Extract<UiItem, { kind: 'compaction' }> }
+  /** A one-line note from the run itself: the step moved to a fallback model. */
+  | { kind: 'notice'; id: string; item: Extract<UiItem, { kind: 'notice' }> }
 
 export type RecordStep = {
   /** The todo's canonical id when it has one, else its text. */
@@ -355,7 +357,7 @@ function lastStampOf(work: readonly WorkItem[]): number | null {
   }
   for (const w of work) {
     if (w.kind === 'note' || w.kind === 'thought') see(stamp(w.item.at))
-    else if (w.kind === 'compaction') see(stamp(w.item.at))
+    else if (w.kind === 'compaction' || w.kind === 'notice') see(stamp(w.item.at))
   }
   for (const tool of toolsOf(work)) {
     see(stamp(tool.at))
@@ -776,7 +778,7 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean, contin
     for (const bucket of b.buckets.values()) {
       const at = bucket.work.findIndex((w) => w.kind === 'note' && w.item.id === last.id)
       if (at < 0) continue
-      if (!bucket.work.slice(at + 1).every((w) => w.kind === 'thought' || w.kind === 'compaction')) break
+      if (!bucket.work.slice(at + 1).every((w) => w.kind === 'thought' || w.kind === 'compaction' || w.kind === 'notice')) break
       const note = bucket.work[at] as Extract<WorkItem, { kind: 'note' }>
       // A serialized payload is not an answer: it stays a visible note and
       // the run keeps no result, so the title falls back to the brief.
@@ -1008,6 +1010,12 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
       // Not work: the last thing said before a fold is still the closing answer.
       flush(current(run))
       current(run).work.push({ kind: 'compaction', id: item.id, item })
+      continue
+    }
+    if (item.kind === 'notice') {
+      // Not work either: the step carried on, on another model.
+      flush(current(run))
+      current(run).work.push({ kind: 'notice', id: item.id, item })
       continue
     }
 

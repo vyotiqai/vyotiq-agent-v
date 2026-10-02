@@ -1,6 +1,8 @@
 import { createContext } from 'react'
 import { parseArgsRecord } from '@shared/toolSummary'
 import type { RecordRun, WorkItem } from './recordModel'
+import { plainLine, untick } from './record/plainText'
+import { foldRepeats } from './record/repeats'
 import './recordFind.css'
 
 /**
@@ -10,26 +12,45 @@ import './recordFind.css'
  * search over the DOM alone would miss them. The model decides what has to be
  * open for a match to be seen; the DOM then gives the exact ranges to mark and
  * scroll to. Tool output is not searched: it loads only when a card opens.
+ * Text is matched as the record shows it — markdown marks and code ticks
+ * dropped — so a fold is opened only for a match the page then has.
  */
 
 /**
  * Keys of the folds a match needs open: `run:<n>` for an earlier run,
  * `step:<n>:<key>` for a step, `loose:<n>:<list>` for a settled run's work
- * outside its steps, `thought:<id>` for a thought shown as one line.
+ * outside its steps, `thought:<id>` for a thought shown as one line,
+ * `brief:<n>` for a brief whose words are folded, and
+ * `repeats:<id>` for the line a call repeated unchanged folds to.
  */
 export const RecordOpenContext = createContext<ReadonlySet<string>>(new Set())
+
+/**
+ * A step asked for by the header's plan line: it opens, once per ask (`nonce`),
+ * and stays as you leave it after that.
+ */
+export type StepReveal = { runN: number; key: string; nonce: number }
+export const StepRevealContext = createContext<StepReveal | null>(null)
 
 export const runOpenKey = (n: number): string => `run:${n}`
 export const stepOpenKey = (runN: number, stepKey: string): string => `step:${runN}:${stepKey}`
 export const looseOpenKey = (runN: number, list: 'setup' | 'after'): string => `loose:${runN}:${list}`
 export const thoughtOpenKey = (id: string): string => `thought:${id}`
+/** A brief folded to six lines, or a follow-up the app wrote, shown as its ask. */
+export const briefOpenKey = (runN: number): string => `brief:${runN}`
+/** A repeat line's id already reads `repeats:<its first row's id>`. */
+export const repeatOpenKey = (id: string): string => id
+
+/** Markdown — a note, a Result — as its words: what the page shows of it. */
+const shownProse = (text: string | null | undefined): string => (text ? plainLine(text) : '')
 
 /** The text a work item shows once its step is open. */
 function workText(w: WorkItem): string {
   switch (w.kind) {
     case 'note':
+      return shownProse(w.text)
     case 'thought':
-      return w.text
+      return untick(w.text)
     case 'card': {
       const args = parseArgsRecord(w.tool.tool.argsPreview)
       const command = typeof args?.command === 'string' ? args.command : ''
@@ -37,8 +58,10 @@ function workText(w: WorkItem): string {
       return `${command}\n${path}\n${w.tool.tool.summary ?? ''}`
     }
     case 'instance': {
+      // A spawn's row shows the outcome it asked for, else its goal.
       const args = parseArgsRecord(w.tool.tool.argsPreview)
-      return typeof args?.goal === 'string' ? args.goal : ''
+      const said = [args?.outcome, args?.goal].filter((v): v is string => typeof v === 'string')
+      return untick(said.join('\n'))
     }
     case 'tool':
       return `${w.tool.tool.summary ?? ''}\n${w.tool.tool.status === 'fail' ? (w.tool.tool.content ?? '') : ''}`
@@ -46,6 +69,8 @@ function workText(w: WorkItem): string {
       return w.title ?? ''
     case 'error':
       return w.message
+    case 'notice':
+      return w.item.text
     case 'explore':
     case 'compaction':
       return ''
@@ -67,14 +92,16 @@ export function foldsToOpen(runs: readonly RecordRun[], query: string): Set<stri
   if (!q) return open
   runs.forEach((run, i) => {
     const isLast = i === runs.length - 1
-    let inRun = has(run.text, q) || has(run.command, q) || has(run.result?.text, q)
+    const inBrief = has(untick(run.text), q)
+    if (inBrief) open.add(briefOpenKey(run.n))
+    let inRun = inBrief || has(run.command, q) || has(shownProse(run.result?.text), q)
     for (const [name, list] of [['setup', run.setup], ['after', run.after]] as const) {
       if (!list.some((w) => has(workText(w), q))) continue
       open.add(looseOpenKey(run.n, name))
       inRun = true
     }
     for (const step of run.steps) {
-      if (has(step.title, q)) inRun = true
+      if (has(plainLine(step.title), q)) inRun = true
       // Work between steps is never folded inside one: only its run must open.
       if (step.between.some((w) => has(workText(w), q))) inRun = true
       if (step.work.some((w) => has(workText(w), q))) {
@@ -83,9 +110,13 @@ export function foldsToOpen(runs: readonly RecordRun[], query: string): Set<stri
       }
     }
     if (inRun && !isLast) open.add(runOpenKey(run.n))
-    // A thought shows one line until opened; one that matches opens in full.
     for (const list of [run.setup, run.after, ...run.steps.flatMap((s) => [s.work, s.between])]) {
-      for (const w of list) if (w.kind === 'thought' && has(w.text, q)) open.add(thoughtOpenKey(w.id))
+      // A thought shows one line until opened; one that matches opens in full.
+      for (const w of list) if (w.kind === 'thought' && has(untick(w.text), q)) open.add(thoughtOpenKey(w.id))
+      // A call repeated unchanged folds its earlier rows to one line: that opens too.
+      for (const row of foldRepeats(list)) {
+        if (row.kind === 'repeats' && row.earlier.some((w) => has(workText(w), q))) open.add(repeatOpenKey(row.id))
+      }
     }
   })
   return open

@@ -215,3 +215,59 @@ describe('NotificationsRow', () => {
     expect((within(panel).getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('NotificationsRow, made of the tasks waiting on you', () => {
+  const WAITING = [{ workspacePath: WS, runId: 'r1', title: 'Add backpressure', since: new Date(Date.now() - 60_000).toISOString() }]
+
+  it('lists a waiting task with no notice at all, says it in the count, and has nothing to dismiss', () => {
+    const onOpenTask = vi.fn()
+    const { handlers, panel } = open({ items: [], unreadCount: 0, waiting: WAITING, asks: ASKS, onOpenTask, onRespondApproval: vi.fn() })
+    expect(screen.getByRole('button', { name: 'Inbox, 1 unread' })).toBeTruthy()
+    expect(within(panel).getByText('1 new')).toBeTruthy()
+    const asks = panel.querySelector('[data-inbox-group="asks"]') as HTMLElement
+    const row = within(asks).getByRole('button', { name: /^Add backpressure/ })
+    expect(row.querySelector('[data-inbox-command]')?.textContent).toBe('$pnpm vitest run')
+    expect(within(asks).queryByRole('button', { name: /^Dismiss/ })).toBeNull()
+    // Nothing to clear: the waiting task is not a notice.
+    expect((within(panel).getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(row)
+    expect(onOpenTask).toHaveBeenCalledWith(WS, 'r1')
+    expect(handlers.onOpenItem).not.toHaveBeenCalled()
+  })
+
+  it('draws a waiting task’s notice as its one row, counts it once, and reads it when answered', async () => {
+    const onRespondApproval = vi.fn().mockResolvedValue(undefined)
+    const { handlers, panel } = open({ waiting: WAITING, asks: ASKS, onRespondApproval })
+    // Two unread notices (a, b); a is r1's, which waits: still two, not three.
+    expect(within(panel).getByText('2 new')).toBeTruthy()
+    const kinds = [...panel.querySelectorAll<HTMLElement>('[data-inbox-group]')].map((group) => ({
+      key: group.getAttribute('data-inbox-group'),
+      rows: group.querySelectorAll('[data-notification-kind]').length
+    }))
+    expect(kinds).toEqual([
+      { key: 'asks', rows: 1 },
+      { key: 'review', rows: 1 },
+      { key: 'earlier', rows: 3 }
+    ])
+    const decision = within(panel).getByRole('group', { name: 'Answer Add backpressure' })
+    fireEvent.click(within(decision).getByRole('button', { name: 'Allow once' }))
+    expect(onRespondApproval).toHaveBeenCalledWith(WS, 'r1', 'req-1', 'once')
+    await waitFor(() => expect(handlers.onMarkRead).toHaveBeenCalledWith({ id: 'a' }))
+  })
+
+  it('keeps a waiting task in sight and in the dot after Mark all read and Clear', () => {
+    const { handlers, panel } = open({ items: ITEMS.map((i) => ({ ...i, read: true })), unreadCount: 0, waiting: WAITING, asks: ASKS })
+    expect(screen.getByRole('button', { name: 'Inbox, 1 unread' }).parentElement?.querySelector('[data-unread-dot]')).not.toBeNull()
+    expect((within(panel).getByRole('button', { name: 'Mark all read' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(panel).getByRole('button', { name: 'Clear' }))
+    expect(handlers.onDismiss).toHaveBeenCalledWith({ all: true })
+    expect(panel.querySelector('[data-inbox-group="asks"]')).not.toBeNull()
+  })
+
+  it('files a notice for a task no longer waiting under Earlier', () => {
+    const { panel } = open({ waiting: [], asks: {} })
+    expect(panel.querySelector('[data-inbox-group="asks"]')).toBeNull()
+    const earlier = panel.querySelector('[data-inbox-group="earlier"]') as HTMLElement
+    expect(within(earlier).getByRole('button', { name: /^Add backpressure/ })).toBeTruthy()
+  })
+})

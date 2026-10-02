@@ -989,6 +989,16 @@
     color: var(--vy-muted);
   }
 
+  /* Emphasis from contrast, not mass: one step up the text ramp at the
+     semibold every skin loads. Preflight's `bolder` drew Segoe's 700 and a
+     faked bold in Jakarta (no 700 is loaded), so a bold run outweighed the
+     sentence around it. */
+  strong,
+  b {
+    font-weight: 600;
+    color: var(--vy-fg-strong);
+  }
+
   code {
     font-family: var(--font-mono);
   }
@@ -1028,6 +1038,27 @@
     color: var(--vy-fg-strong);
     font-weight: 600;
   }
+}
+
+/* The agent's words in the record keep a reading measure. The column is sized
+   for rows and cards; a paragraph across all of it ran ~115 characters a line
+   at 13px. Running text stops near 90; code, tables and diagrams keep the
+   column, and the rows' right edge is untouched (prose has none of its own). */
+.record-prose > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) {
+  max-width: 80ch;
+}
+
+/* Inline code a step down the text ramp from the words around it. Mono at the
+   prose's own ink read as a spatter of heavy marks across a paragraph — a
+   Result named a dozen files and flags, each brighter than the sentence it sat
+   in. The chip and the face still say "code"; the ink no longer shouts it.
+   Prose already a step down (`secondary`) keeps its code at that step. */
+.markdown-body[data-tone='strong'] :is(:not(pre) > code, [data-code-chip]) {
+  color: var(--vy-fg);
+}
+
+.markdown-body[data-tone='default'] :is(:not(pre) > code, [data-code-chip]) {
+  color: var(--vy-secondary);
 }
 
 /* Plan dock: wide tables scroll horizontally (readable cells); task lists status-only. */
@@ -1186,6 +1217,62 @@
   .tool-expand {
     transition: grid-template-rows var(--vy-duration) var(--vy-ease);
   }
+}
+
+/* A block that asks something of you arrives: up 4px as it fades in. Its end
+   state is no transform at all, so nothing inside is left on a moved layer. */
+@keyframes vy-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .vy-rise {
+    animation: vy-rise 200ms var(--vy-ease) both;
+  }
+}
+
+/* The cursor of a command still running: a block that blinks, held still for reduced motion. */
+@keyframes vy-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.vy-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  background: var(--vy-fg);
+  vertical-align: text-bottom;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .vy-caret {
+    animation: vy-caret 1s steps(1) infinite;
+  }
+}
+
+/* Code, commands and paths are literal: "--env" or "=>" must never draw as one glyph. */
+.font-mono,
+code,
+kbd,
+samp,
+pre {
+  font-variant-ligatures: none;
 }
 
 /* Native <dialog> (useNativeDialog) has no entrance by default — showModal

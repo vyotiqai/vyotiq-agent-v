@@ -71,13 +71,28 @@ export function matchShortcut(e: ShortcutKeyEvent, id: ShortcutId): boolean {
   return true
 }
 
+/** A CodeMirror editor: its content, gutters and find panel. */
+export const CODE_EDITOR_SELECTOR = '.cm-editor'
+
+/**
+ * True when the event started inside a code editor. The editor owns its keys —
+ * Ctrl/Cmd F opens its own find panel, F3 steps its matches — even when it is
+ * read-only and its content is not contenteditable.
+ */
+export function isCodeEditorTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  if (!el || typeof el.closest !== 'function') return false
+  return el.closest(CODE_EDITOR_SELECTOR) !== null
+}
+
 /** True when the event target is a text field where app chords should not steal. */
 export function isEditableShortcutTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
   if (!el) return false
   const tag = el.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA') return true
-  return Boolean(el.isContentEditable)
+  if (el.isContentEditable) return true
+  return isCodeEditorTarget(el)
 }
 
 /**

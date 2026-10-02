@@ -63,7 +63,14 @@ export type NavRow = {
 }
 
 /** One instance under its task: what it is called, how it stands, what it is doing. */
-export type NavInstance = { runId: string; title: string; state: TaskState; activity?: string }
+export type NavInstance = {
+  runId: string
+  title: string
+  state: TaskState
+  activity?: string
+  /** The user-defined helper type it runs as. */
+  agentType?: string
+}
 
 export type NavSection = { key: NavSectionKey; label: string; rows: NavRow[] }
 
@@ -194,7 +201,8 @@ function instancesOf(
       runId: child.runId,
       title: runTitle(child),
       state,
-      ...(live?.activity && !live.waiting ? { activity: live.activity } : {})
+      ...(live?.activity && !live.waiting ? { activity: live.activity } : {}),
+      ...(child.agentType ? { agentType: child.agentType } : {})
     }
   })
   // Still going first, then by id: a row that moved every time a child

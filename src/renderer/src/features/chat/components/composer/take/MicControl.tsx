@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '@renderer/lib/icons'
 import { Badge, Button, IconButton, MENU_SURFACE, ProgressBar, cn } from '@renderer/lib/ui'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { DICTATION_LOCAL_CATALOG } from '@shared/dictation'
 import type { DictationEngine } from '@shared/ipc'
@@ -265,7 +266,7 @@ function SetupPanel({ take }: { take: TakeHandle }) {
       <CloudChoice take={take} engine="openai" label="OpenAI" />
       <CloudChoice take={take} engine="openrouter" label="OpenRouter" />
       {downloading || loading ? (
-        <div className="mx-1 mb-1 mt-1 border-t border-border/60 px-1 pt-2 text-xs text-tertiary">
+        <div className={cn('mx-1 mb-1 mt-1 border-t px-1 pt-2 text-xs text-tertiary', BORDER_DIVIDER)}>
           Keep typing. The mic opens by itself when the model is ready.
         </div>
       ) : null}
@@ -299,7 +300,7 @@ function BlockedPanel({ take }: { take: TakeHandle }) {
       </div>
       {rows ? (
         <div className="mt-3 overflow-hidden rounded-md border border-border bg-sunken">
-          <div className="flex h-7 items-center gap-1.5 border-b border-border/60 px-3 text-caption text-tertiary">
+          <div className={cn('flex h-7 items-center gap-1.5 border-b px-3 text-caption text-tertiary', BORDER_DIVIDER)}>
             <Icon name="gear" size={12} />
             {rows.path}
           </div>

@@ -31,7 +31,9 @@ import { RECORD_MAX } from '@renderer/lib/utils/layout'
 import {
   draftTitle,
   saveTaskDraftFor,
+  briefExtraRootsOf,
   setBriefChecks,
+  setBriefExtraRoots,
   setBriefState,
   setBriefWorktree,
   useBriefState,
@@ -67,6 +69,7 @@ import {
 import { clearComposerAttachments, composerAttachmentKey } from '@renderer/lib/hooks/composerAttachmentStore'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { NewTaskBrief, type NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
+import { addTaskFolder } from '@renderer/features/task/taskFolders'
 import { useSlashCommands } from './useSlashCommands'
 import { MentionMenu } from './MentionMenu'
 import { useComposerMentions } from './useComposerMentions'
@@ -74,8 +77,11 @@ import { draftHasImageMention, resolveComposerMentions } from './resolveMentions
 import { mentionMarker, type MentionMenuItem } from './mentionModel'
 import {
   ADD_COMPOSER_MENTION_EVENT,
+  COMPOSER_DRAFT_EVENT,
+  appendInstructionToDraft,
   appendMentionToDraft,
-  type AddComposerMentionDetail
+  type AddComposerMentionDetail,
+  type ComposerDraftDetail
 } from './composerMentionEvent'
 import {
   executeSlashResolveResult,
@@ -363,6 +369,42 @@ export function Composer({
   const briefWorktree = Boolean(briefState.worktree) && (!worktreeDefault || worktreeOffered)
   const briefWorktreeRef = useRef(briefWorktree)
   briefWorktreeRef.current = briefWorktree
+  // Folders outside the workspace the new task may also work in.
+  const briefExtraRoots = briefExtraRootsOf(briefState)
+  const briefExtraRootsRef = useRef(briefExtraRoots)
+  briefExtraRootsRef.current = briefExtraRoots
+  /**
+   * Add a folder to the task: the OS picker, or `path` as typed (`/add-dir`).
+   * Main checks it. On New task it joins the brief; on a started task it is
+   * saved on the run, which takes it up when it next starts (taskFolders.ts).
+   */
+  const addBriefFolder = useCallback(
+    async (path?: string): Promise<boolean> => {
+      if (!briefWorkspace) {
+        if (workspacePath && activeRunId) return addTaskFolder(workspacePath, activeRunId, path)
+        pushToast('Start the task first, or add folders on the New task page.', 'info')
+        return false
+      }
+      const pick = window.vyotiq?.pickExtraRoot
+      if (!pick) return false
+      const res = await pick({
+        workspacePath: briefWorkspace,
+        ...(path ? { path } : {}),
+        current: briefExtraRootsRef.current
+      })
+      if (!res.ok) {
+        pushToast(res.error, 'error')
+        return false
+      }
+      if (res.data.refused) {
+        pushToast(`Can’t add ${res.data.refused}`, 'error')
+        return false
+      }
+      if (res.data.path) setBriefExtraRoots(briefWorkspace, [...briefExtraRootsRef.current, res.data.path])
+      return true
+    },
+    [briefWorkspace, workspacePath, activeRunId]
+  )
   const [savingDraft, setSavingDraft] = useState(false)
   /** Bumped after a save empties the page, so a half-typed check goes too. */
   const [briefClearToken, setBriefClearToken] = useState(0)
@@ -435,6 +477,9 @@ export function Composer({
         // New worktree: App makes it and starts the task there.
         if (variant === 'brief' && briefWorktreeRef.current) {
           extras = { ...(extras ?? {}), worktree: true }
+        }
+        if (variant === 'brief' && briefExtraRootsRef.current.length > 0) {
+          extras = { ...(extras ?? {}), extraRoots: [...briefExtraRootsRef.current] }
         }
         const boundWorkspace = workspacePath
         const resolved = await resolveComposerMentions({
@@ -546,6 +591,7 @@ export function Composer({
 
       const outcome = await executeSlashResolveResult(res.data, {
         ...slashHandlers,
+        onAddDir: addBriefFolder,
         onCompact: async (focus?: string) => {
           if (slashHandlers?.onCompact) {
             const r = await slashHandlers.onCompact(focus)
@@ -589,7 +635,7 @@ export function Composer({
       if (outcome === 'failed') return false
       return true
     },
-    [workspacePath, activeRunId, slashHandlers, onCompactContext, sendWithMentions, slash, setFileError, running, agentMode]
+    [workspacePath, activeRunId, slashHandlers, onCompactContext, sendWithMentions, slash, setFileError, running, agentMode, addBriefFolder]
   )
 
   const onSlashAccept = useCallback(
@@ -870,6 +916,47 @@ export function Composer({
     window.addEventListener(ADD_COMPOSER_MENTION_EVENT, onAdd)
     return () => window.removeEventListener(ADD_COMPOSER_MENTION_EVENT, onAdd)
   }, [variant, workspacePath, activeRunId, setText])
+
+  // "Ask it to cover this" from Review: the instruction is drafted into this
+  // task's box, after anything already typed, and the box takes focus at its end.
+  useEffect(() => {
+    if (variant === 'inline') return undefined
+    const onDraft = (event: Event): void => {
+      const detail = (event as CustomEvent<ComposerDraftDetail>).detail
+      if (!detail || event.defaultPrevented || addLockedRef.current) return
+      if ((detail.workspacePath ?? null) !== (workspacePath ?? null)) return
+      if ((detail.runId ?? null) !== (activeRunId ?? null)) return
+      event.preventDefault()
+      const next = appendInstructionToDraft(addedTextRef.current, detail.text)
+      setText(next)
+      window.setTimeout(() => {
+        const handle = taRef.current
+        if (!handle) return
+        handle.focus()
+        handle.setSelectionStart(next.length)
+      }, 0)
+    }
+    window.addEventListener(COMPOSER_DRAFT_EVENT, onDraft)
+    return () => window.removeEventListener(COMPOSER_DRAFT_EVENT, onDraft)
+  }, [variant, workspacePath, activeRunId, setText])
+
+  // Attach → Mention a file: an @ typed at the caret, so the mention menu
+  // opens as for a typed one (a space first after a word, or it would not).
+  // It waits a turn past the attach menu's close, which hands focus back to
+  // the paperclip, then takes the field.
+  const mentionFromAttach = useCallback((): void => {
+    window.setTimeout(() => {
+      window.setTimeout(() => {
+        const handle = taRef.current
+        if (!handle || addLockedRef.current) return
+        const draft = addedTextRef.current
+        const at = Math.min(cursorRef.current, draft.length)
+        handle.focus()
+        handle.setSelectionStart(at)
+        handle.insertText(at > 0 && !/\s/.test(draft[at - 1]!) ? ' @' : '@')
+      }, 0)
+    }, 0)
+  }, [])
 
   preferNativePdfRef.current = Boolean(
     (
@@ -1305,6 +1392,7 @@ export function Composer({
               imagesFull={imagesFull}
               onPickFiles={() => fileRef.current?.click()}
               onPickImage={() => imageRef.current?.click()}
+              onMention={mentionFromAttach}
               screenshot={browserScreenshot}
             />
             <MicControl take={take} />
@@ -1365,6 +1453,11 @@ export function Composer({
         worktree={briefWorktree}
         onWorktreeChange={(on) => {
           if (briefWorkspace) setBriefWorktree(briefWorkspace, on)
+        }}
+        extraRoots={briefExtraRoots}
+        onAddFolder={() => void addBriefFolder()}
+        onExtraRootsChange={(next) => {
+          if (briefWorkspace) setBriefExtraRoots(briefWorkspace, next)
         }}
         draft={
           briefWorkspace

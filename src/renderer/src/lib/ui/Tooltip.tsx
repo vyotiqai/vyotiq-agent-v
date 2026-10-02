@@ -16,7 +16,7 @@ import {
 import { createPortal } from 'react-dom'
 import { cn } from './cn'
 
-type Side = 'top' | 'bottom'
+type Side = 'top' | 'bottom' | 'left' | 'right'
 type OpenedBy = 'hover' | 'focus'
 
 function assignRef<T>(ref: Ref<T> | undefined, node: T | null): void {
@@ -56,24 +56,61 @@ function recentAnyKeydown(): boolean {
   return Date.now() - lastAnyKeydownAt < KEY_FOCUS_MS
 }
 
+const OPPOSITE: Record<Side, Side> = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' }
+
+function isVertical(side: Side): boolean {
+  return side === 'top' || side === 'bottom'
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+/** The room between the trigger and the viewport edge on one side. */
+function spaceOn(rect: DOMRect, side: Side): number {
+  switch (side) {
+    case 'top':
+      return rect.top
+    case 'bottom':
+      return window.innerHeight - rect.bottom
+    case 'left':
+      return rect.left
+    case 'right':
+      return window.innerWidth - rect.right
+  }
+}
+
+/** Where the wrapper's anchor sits: the trigger's edge on that side, centred along it. */
+function anchorOn(rect: DOMRect, side: Side): { top: number; left: number } {
+  if (isVertical(side)) {
+    return {
+      top: side === 'top' ? rect.top : rect.bottom,
+      left: clamp(rect.left + rect.width / 2, VIEWPORT_PAD, window.innerWidth - VIEWPORT_PAD)
+    }
+  }
+  return {
+    top: clamp(rect.top + rect.height / 2, VIEWPORT_PAD, window.innerHeight - VIEWPORT_PAD),
+    left: side === 'left' ? rect.left : rect.right
+  }
+}
+
 function placeCoords(
   rect: DOMRect,
   preferred: Side
 ): { top: number; left: number; side: Side } {
-  const spaceAbove = rect.top
-  const spaceBelow = window.innerHeight - rect.bottom
-  let side = preferred
-  if (preferred === 'top' && spaceAbove < 40 && spaceBelow > spaceAbove) side = 'bottom'
-  if (preferred === 'bottom' && spaceBelow < 40 && spaceAbove > spaceBelow) side = 'top'
+  // A tip above or below needs one line of room; one beside needs its width.
+  const wants = isVertical(preferred) ? 40 : 160
+  const other = OPPOSITE[preferred]
+  const side = spaceOn(rect, preferred) < wants && spaceOn(rect, other) > spaceOn(rect, preferred) ? other : preferred
+  return { side, ...anchorOn(rect, side) }
+}
 
-  let left = rect.left + rect.width / 2
-  left = Math.min(window.innerWidth - VIEWPORT_PAD, Math.max(VIEWPORT_PAD, left))
-
-  return {
-    side,
-    top: side === 'top' ? rect.top : rect.bottom,
-    left
-  }
+/** The wrapper's offset from its anchor, with the gap drawn as padding on the trigger's side. */
+const SIDE_CLASS: Record<Side, string> = {
+  top: '-translate-x-1/2 -translate-y-full pb-1.5',
+  bottom: '-translate-x-1/2 pt-1.5',
+  left: '-translate-x-full -translate-y-1/2 pr-1.5',
+  right: '-translate-y-1/2 pl-1.5'
 }
 
 export function Tooltip({
@@ -248,8 +285,8 @@ export function Tooltip({
   }, [open, hideSoon])
 
   // placeCoords only knows the trigger rect, not the tip size — measure the
-  // mounted tip and clamp its actual box against the viewport: flip vertically
-  // when the other side fits, shift otherwise.
+  // mounted tip and clamp its actual box against the viewport: flip to the
+  // opposite side when it fits there, shift otherwise.
   useLayoutEffect(() => {
     if (!open || !coords) return
     const tip = tipRef.current
@@ -259,41 +296,41 @@ export function Tooltip({
     const innerWidth = window.innerWidth
     const innerHeight = window.innerHeight
     const tipSide = coords.side
+    const vertical = isVertical(tipSide)
 
+    // Across the tip's axis it only ever shifts: sideways for a tip above or
+    // below, up or down for one beside.
     let dx = 0
-    if (box.left < VIEWPORT_PAD) dx = VIEWPORT_PAD - box.left
-    else if (box.right > innerWidth - VIEWPORT_PAD) dx = innerWidth - VIEWPORT_PAD - box.right
+    let dy = 0
+    if (vertical) {
+      if (box.left < VIEWPORT_PAD) dx = VIEWPORT_PAD - box.left
+      else if (box.right > innerWidth - VIEWPORT_PAD) dx = innerWidth - VIEWPORT_PAD - box.right
+    } else if (box.top < VIEWPORT_PAD) dy = VIEWPORT_PAD - box.top
+    else if (box.bottom > innerHeight - VIEWPORT_PAD) dy = innerHeight - VIEWPORT_PAD - box.bottom
 
-    const otherFits = (other: Side): boolean => {
-      if (!trigger) return false
-      const space = other === 'bottom' ? innerHeight - trigger.bottom : trigger.top
+    // Along it, how far the box spills past the viewport edge it points at.
+    const spill =
+      tipSide === 'top'
+        ? VIEWPORT_PAD - box.top
+        : tipSide === 'bottom'
+          ? box.bottom - (innerHeight - VIEWPORT_PAD)
+          : tipSide === 'left'
+            ? VIEWPORT_PAD - box.left
+            : box.right - (innerWidth - VIEWPORT_PAD)
+
+    if (spill > 0) {
+      const other = OPPOSITE[tipSide]
       // The measured box already includes the gap (it is the wrapper's padding).
-      return space > box.height + TIP_GAP
-    }
-    const flip = (other: Side): void => {
-      setCoords((prev) =>
-        prev && trigger
-          ? {
-              side: other,
-              top: other === 'top' ? trigger.top : trigger.bottom,
-              left: prev.left
-            }
-          : prev
-      )
-      setAdjust(null)
-    }
-
-    if (tipSide === 'top' && box.top < VIEWPORT_PAD) {
-      if (otherFits('bottom')) flip('bottom')
-      else setAdjust({ dx, dy: VIEWPORT_PAD - box.top })
+      if (trigger && spaceOn(trigger, other) > (vertical ? box.height : box.width) + TIP_GAP) {
+        setCoords((prev) => (prev ? { side: other, ...anchorOn(trigger, other) } : prev))
+        setAdjust(null)
+        return
+      }
+      const back = tipSide === 'top' || tipSide === 'left' ? spill : -spill
+      setAdjust(vertical ? { dx, dy: back } : { dx: back, dy })
       return
     }
-    if (tipSide === 'bottom' && box.bottom > innerHeight - VIEWPORT_PAD) {
-      if (otherFits('top')) flip('top')
-      else setAdjust({ dx, dy: innerHeight - VIEWPORT_PAD - box.bottom })
-      return
-    }
-    if (dx !== 0) setAdjust((prev) => (prev?.dx === dx && prev?.dy === 0 ? prev : { dx, dy: 0 }))
+    if (dx !== 0 || dy !== 0) setAdjust((prev) => (prev?.dx === dx && prev?.dy === dy ? prev : { dx, dy }))
     else setAdjust(null)
   }, [open, coords])
 
@@ -357,10 +394,7 @@ export function Tooltip({
             id={tooltipId}
             role="tooltip"
             data-opened-by={openedBy ?? undefined}
-            className={cn(
-              'fixed z-tooltip max-w-xs -translate-x-1/2',
-              tipSide === 'top' ? '-translate-y-full pb-1.5' : 'pt-1.5'
-            )}
+            className={cn('fixed z-tooltip max-w-xs', SIDE_CLASS[tipSide])}
             style={style}
           >
             <div className="whitespace-pre-line break-words rounded-md border border-border bg-card px-2 py-1 text-xs text-fg shadow-menu animate-tip-in">

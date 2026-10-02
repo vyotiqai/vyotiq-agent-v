@@ -2,9 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HomeActivityResult } from '@shared/ipc'
 
 /** Request cap from `HomeActivityRequestSchema` — extra workspaces are dropped. */
-const WORKSPACE_CAP = 12
+export const ACTIVITY_WORKSPACE_CAP = 12
+const WORKSPACE_CAP = ACTIVITY_WORKSPACE_CAP
 
 export type ActivityWindowDays = 7 | 30
+
+export type HomeActivityOptions = {
+  /** Last local day (YYYY-MM-DD) of a custom range; absent ends the window today. */
+  endDay?: string
+  /** Per-workspace and per-task totals (the Usage page). */
+  breakdown?: boolean
+}
 
 export type HomeActivityState = {
   data: HomeActivityResult | null
@@ -22,9 +30,11 @@ export type HomeActivityState = {
  */
 export function useHomeActivity(
   openWorkspaces: readonly string[],
-  windowDays: ActivityWindowDays,
-  refreshVersion = 0
+  windowDays: number,
+  refreshVersion = 0,
+  options: HomeActivityOptions = {}
 ): HomeActivityState {
+  const { endDay, breakdown } = options
   const [data, setData] = useState<HomeActivityResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -64,7 +74,12 @@ export function useHomeActivity(
 
     const generation = ++generationRef.current
     setLoading(true)
-    void api({ workspacePaths: pathsRef.current, windowDays }).then((result) => {
+    void api({
+      workspacePaths: pathsRef.current,
+      windowDays,
+      ...(endDay ? { endDay } : {}),
+      ...(breakdown ? { breakdown: true } : {})
+    }).then((result) => {
       if (generation !== generationRef.current) return
       if (result.ok) {
         setData(result.data)
@@ -85,7 +100,7 @@ export function useHomeActivity(
     return () => {
       generationRef.current += 1
     }
-  }, [pathsKey, windowDays, refreshNonce, refreshVersion])
+  }, [pathsKey, windowDays, endDay, breakdown, refreshNonce, refreshVersion])
 
   return { data, loading, error, refresh }
 }

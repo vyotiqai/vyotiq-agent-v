@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { pushToast } from '@renderer/lib/ui'
 import type { UiItem } from '@shared/transcript'
 import type {
   AgentInteractionMode,
@@ -141,7 +142,11 @@ export function useComposerEditState(args: {
       if (editingUserMessageIndex == null || !onEditAndResend) return false
       const index = editingUserMessageIndex
       const ok = await onEditAndResend(index, text, images, files, extras)
-      if (ok !== false) cancelPromptEdit()
+      if (ok !== false) {
+        cancelPromptEdit()
+        // The record empties back to the brief at once; say why it did.
+        pushToast('Rerunning from the edited brief', { icon: 'retry' })
+      }
       return ok
     },
     [editingUserMessageIndex, onEditAndResend, cancelPromptEdit]

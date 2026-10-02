@@ -8,9 +8,11 @@ export {
   type ShortcutCatalogEntry
 } from './labels'
 export {
+  CODE_EDITOR_SELECTOR,
   COMPOSER_MESSAGE_SELECTOR,
   focusBrowserUrlIfOpen,
   focusComposerMessage,
+  isCodeEditorTarget,
   isEditableShortcutTarget,
   isMainComposerTarget,
   matchShortcut,

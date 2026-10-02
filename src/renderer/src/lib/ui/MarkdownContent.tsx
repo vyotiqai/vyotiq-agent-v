@@ -14,7 +14,8 @@ import {
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
-import { CodeBlockCopyButton } from './CodeBlockCopyButton'
+import { CodeBlockCopyButton, useCopyFeedback } from './CodeBlockCopyButton'
+import { IconButton } from './IconButton'
 import { MermaidDiagram } from './MermaidDiagram'
 import { ChartBlock } from './ChartBlock'
 import { parseChartSpec } from '@shared/chartSpec'
@@ -38,11 +39,13 @@ import {
 } from '@renderer/lib/markdown/markdownSanitize'
 import {
   autolinkWorkspacePathsInProse,
+  formatCitationsInProse,
   parseLinkableWorkspacePath,
   parseVyFileHref,
   VY_FILE_HREF_PREFIX
 } from '@shared/utils/linkableWorkspacePath'
 import { cn } from './cn'
+import { scrollMotion } from '@renderer/lib/utils/motion'
 import { useDocumentTheme } from './useDocumentTheme'
 
 export { trailingOpenFenceBody } from '@renderer/lib/markdown/fenceUtils'
@@ -277,20 +280,99 @@ function scopedHeadingId(scope: string | undefined, slug: string): string {
   return scope ? `${scope}-${slug}` : slug
 }
 
-function buildHeadingComponents(state: HeadingIdState, scope: string | undefined, blockStart: number) {
+function buildHeadingComponents(
+  state: HeadingIdState | null,
+  scope: string | undefined,
+  blockStart: number,
+  sections: ReadonlyMap<number, string> | null
+) {
   const make =
     (Tag: 'h1' | 'h2' | 'h3') =>
-    ({ children, node }: { children?: React.ReactNode; node?: { position?: { start?: { offset?: number } } } }) => {
-      const offset = node?.position?.start?.offset
-      const key = offset != null ? `${blockStart}:${offset}` : null
-      let slug = key ? state.assigned.get(key) : undefined
-      if (!slug) {
-        slug = allocateHeadingId(extractHeadingText(children), state.used)
-        if (key) state.assigned.set(key, slug)
+    ({
+      children,
+      node
+    }: {
+      children?: React.ReactNode
+      node?: { position?: { start?: { offset?: number; line?: number } } }
+    }) => {
+      let id: string | undefined
+      if (state) {
+        const offset = node?.position?.start?.offset
+        const key = offset != null ? `${blockStart}:${offset}` : null
+        let slug = key ? state.assigned.get(key) : undefined
+        if (!slug) {
+          slug = allocateHeadingId(extractHeadingText(children), state.used)
+          if (key) state.assigned.set(key, slug)
+        }
+        id = scopedHeadingId(scope, slug)
       }
-      return <Tag id={scopedHeadingId(scope, slug)}>{children}</Tag>
+      // The line it sits on in the whole document: its block's first line, plus its own.
+      const line = node?.position?.start?.line
+      const section = sections && line != null ? sections.get(blockStart + line - 1) : undefined
+      if (!section) return <Tag id={id}>{children}</Tag>
+      return (
+        <Tag id={id} className="group/heading">
+          {children}
+          <SectionCopyButton text={section} />
+        </Tag>
+      )
     }
   return { h1: make('h1'), h2: make('h2'), h3: make('h3') }
+}
+
+const HEADING_LINE = /^ {0,3}(#{1,6})[ \t]+\S/
+
+/**
+ * Each heading's section, by the line it is on: the heading and everything
+ * under it up to the next heading of its level or above, as written. Headings
+ * inside a fence are code, not sections.
+ */
+export function headingSections(markdown: string): Map<number, string> {
+  const lines = markdown.split('\n')
+  const heads: { line: number; level: number }[] = []
+  let open: Parameters<typeof isFenceCloser>[1] | null = null
+  lines.forEach((text, i) => {
+    if (open) {
+      if (isFenceCloser(text, open)) open = null
+      return
+    }
+    const fence = parseFenceLine(text)
+    if (fence) {
+      open = fence.open
+      return
+    }
+    const m = HEADING_LINE.exec(text)
+    if (m) heads.push({ line: i, level: m[1]!.length })
+  })
+  const out = new Map<number, string>()
+  heads.forEach((head, k) => {
+    const next = heads.slice(k + 1).find((h) => h.level <= head.level)
+    out.set(head.line, lines.slice(head.line, next ? next.line : lines.length).join('\n').trim())
+  })
+  return out
+}
+
+/**
+ * Copy one section of a long answer — the part you want to paste on — beside
+ * its heading, shown on hover like a code block's copy. In the heading, so
+ * keyboard focus reaches it right after the words it copies.
+ */
+function SectionCopyButton({ text }: { text: string }) {
+  const { copied, copyError, copy } = useCopyFeedback()
+  return (
+    <span
+      className="-my-1 ml-1.5 inline-flex align-middle vy-transition opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/heading:opacity-100 [@media(hover:hover)]:group-focus-within/heading:opacity-100"
+      data-section-copy
+    >
+      <IconButton
+        icon={copied ? 'check' : 'copy'}
+        label={copied ? 'Copied' : copyError ? 'Copy failed' : 'Copy this section'}
+        size="xs"
+        tone="muted"
+        onClick={() => copy(text)}
+      />
+    </span>
+  )
 }
 
 /**
@@ -313,7 +395,7 @@ function scrollToFragment(from: Element, scope: string | undefined, fragment: st
   for (const id of wanted) {
     const target = withIds.find((el) => el.id === id)
     if (target) {
-      target.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+      target.scrollIntoView?.({ block: 'start', behavior: scrollMotion() })
       return
     }
   }
@@ -335,13 +417,14 @@ function buildMarkdownComponents(
     blockStart?: number
     readOnlyTasks?: boolean
     onOpenWorkspaceFile?: (path: string, options?: { line?: number }) => void
+    sections?: ReadonlyMap<number, string> | null
   }
 ) {
   const headingIdScope = opts?.headingIdScope
+  const idState = opts?.headingIds && opts.headingState ? opts.headingState : null
+  const sections = opts?.sections ?? null
   const heading =
-    opts?.headingIds && opts.headingState
-      ? buildHeadingComponents(opts.headingState, headingIdScope, opts.blockStart ?? 0)
-      : null
+    idState || sections ? buildHeadingComponents(idState, headingIdScope, opts?.blockStart ?? 0, sections) : null
   const onOpenWorkspaceFile = opts?.onOpenWorkspaceFile
   return {
     ...(heading ?? {}),
@@ -371,6 +454,7 @@ function buildMarkdownComponents(
           <button
             type="button"
             className={CODE_CHIP}
+            data-code-chip
             onClick={() =>
               onOpenWorkspaceFile(
                 fileTarget.path,
@@ -382,7 +466,7 @@ function buildMarkdownComponents(
           </button>
         )
       }
-      if (heading && href?.startsWith('#') && href.length > 1 && !href.startsWith(VY_FILE_HREF_PREFIX)) {
+      if (idState && href?.startsWith('#') && href.length > 1 && !href.startsWith(VY_FILE_HREF_PREFIX)) {
         // An in-document link (a table of contents): scroll to the heading in
         // this body. As a new-window link it would open nothing.
         const fragment = href.slice(1)
@@ -437,6 +521,7 @@ function buildMarkdownComponents(
           <button
             type="button"
             className={CODE_CHIP}
+            data-code-chip
             onClick={() =>
               onOpenWorkspaceFile(
                 parsed.path,
@@ -469,7 +554,8 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
   blockStart,
   readOnlyTasks,
   linkWorkspacePaths,
-  onOpenWorkspaceFile
+  onOpenWorkspaceFile,
+  sections
 }: {
   source: string
   openFenceBody: string | null
@@ -480,10 +566,12 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
   readOnlyTasks?: boolean
   linkWorkspacePaths?: boolean
   onOpenWorkspaceFile?: (path: string, options?: { line?: number }) => void
+  sections?: ReadonlyMap<number, string> | null
 }) {
   const renderedSource = useMemo(() => {
-    if (!linkWorkspacePaths || parseFenceLine(source.split('\n')[0] ?? '')) return source
-    return autolinkWorkspacePathsInProse(source)
+    if (parseFenceLine(source.split('\n')[0] ?? '')) return source
+    // `[[path:line]]` citations read as code even where nothing opens files.
+    return linkWorkspacePaths ? autolinkWorkspacePathsInProse(source) : formatCitationsInProse(source)
   }, [linkWorkspacePaths, source])
   const components = useMemo(
     () =>
@@ -493,9 +581,10 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
         headingIdScope,
         blockStart,
         readOnlyTasks,
-        onOpenWorkspaceFile
+        onOpenWorkspaceFile,
+        sections
       }),
-    [openFenceBody, headingIds, headingState, headingIdScope, blockStart, readOnlyTasks, onOpenWorkspaceFile]
+    [openFenceBody, headingIds, headingState, headingIdScope, blockStart, readOnlyTasks, onOpenWorkspaceFile, sections]
   )
   return (
     <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
@@ -528,6 +617,7 @@ export function MarkdownContent({
   onOpenWorkspaceFile,
   size = 'sm',
   tone = 'default',
+  sectionCopy = false,
   className
 }: {
   content: string
@@ -558,6 +648,11 @@ export function MarkdownContent({
    * tab, a record note); `strong` is the one answer a surface exists to show.
    */
   tone?: 'default' | 'secondary' | 'strong'
+  /**
+   * A copy control on each heading for the section under it — for a long
+   * answer of several parts. Off while streaming: the sections are still moving.
+   */
+  sectionCopy?: boolean
   className?: string
 }) {
   const markdown = useMemo(
@@ -587,6 +682,12 @@ export function MarkdownContent({
     []
   )
   const blocks = useMemo(() => splitMarkdownBlocks(markdown), [markdown])
+  // Only an answer of more than one part: one heading's section is the whole of it.
+  const sections = useMemo(() => {
+    if (!sectionCopy || streaming) return null
+    const found = headingSections(markdown)
+    return found.size >= 2 ? found : null
+  }, [sectionCopy, streaming, markdown])
   const hasVisibleContent = content.trim().length > 0
 
   if (!hasVisibleContent) return null
@@ -606,6 +707,7 @@ export function MarkdownContent({
         headingIds && 'markdown-body--heading-ids',
         className
       )}
+      data-tone={tone}
     >
       {blocks.map((block, index) => {
         const isLast = index === blocks.length - 1
@@ -624,6 +726,7 @@ export function MarkdownContent({
             readOnlyTasks={readOnlyTasks}
             linkWorkspacePaths={linkWorkspacePaths}
             onOpenWorkspaceFile={linkWorkspacePaths ? openWorkspaceFileStable : undefined}
+            sections={sections}
           />
         )
       })}

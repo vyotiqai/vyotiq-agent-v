@@ -1,7 +1,9 @@
 import { memo, useMemo } from 'react'
 import { cn } from '@renderer/lib/ui'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import type { DiffLine } from '../toolUi'
 import { useDiffHighlight, type DiffTokens } from './useDiffHighlight'
+import { changedCount, linesLeftOut } from './linesLeftOut'
 
 /** Enough of the change to recognise it without turning the transcript into a file. */
 export const DIFF_COLLAPSED_LINES = 14
@@ -32,13 +34,6 @@ function LineText({
       ))}
     </>
   )
-}
-
-/** Added and removed lines: what "more changed lines" counts. */
-function changedCount(lines: readonly DiffLine[]): number {
-  let n = 0
-  for (const line of lines) if (line.kind === 'add' || line.kind === 'del') n += 1
-  return n
 }
 
 /**
@@ -108,7 +103,7 @@ function DiffLines({
     >
       {hiddenBefore && hidden > 0 ? (
         <p className="m-0 px-2 py-1 text-caption text-tertiary">
-          {hidden} earlier changed {hidden === 1 ? 'line' : 'lines'}
+          {linesLeftOut(hidden, 'earlier', 'changed')}
         </p>
       ) : null}
       {visible.map((line, index) => {
@@ -116,7 +111,7 @@ function DiffLines({
           return (
             <div
               key={line.rowKey ?? `gap-${hiddenBeforeCount + index}`}
-              className="h-3 border-y border-border/60 bg-surface"
+              className={cn('h-3 border-y bg-surface', BORDER_DIVIDER)}
               aria-hidden
             />
           )
@@ -157,7 +152,7 @@ function DiffLines({
       })}
       {!hiddenBefore && hidden > 0 ? (
         <p className="m-0 px-2 py-1 text-caption text-tertiary">
-          {hidden} more changed {hidden === 1 ? 'line' : 'lines'}
+          {linesLeftOut(hidden, 'more', 'changed')}
         </p>
       ) : null}
     </div>

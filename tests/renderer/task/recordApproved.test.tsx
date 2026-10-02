@@ -50,6 +50,7 @@ describe('approvedByText', () => {
     )
     expect(text({ by: 'rule', scope: 'task' })).toBe('Allowed by a rule for this task')
     expect(text({ by: 'rule', scope: 'workspace' })).toBe('Allowed by a rule for this workspace')
+    expect(text({ by: 'skill', scope: 'once', allow: 'git-helper' })).toBe('Allowed by skill git-helper')
   })
 })
 

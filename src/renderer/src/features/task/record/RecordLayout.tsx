@@ -1,6 +1,7 @@
-import type { ReactNode, Ref } from 'react'
+import { useState, type ReactNode, type Ref } from 'react'
 import { STATE_LABEL, StatusGlyph, Tooltip, cn, type TaskState } from '@renderer/lib/ui'
 import { DIVIDER_FILL, RECORD_MAX, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { plainLine } from './plainText'
 
 /**
  * The task header is one 40px row — the height of the inspector's tab strip,
@@ -15,7 +16,8 @@ export function TaskHeader({
   editor,
   facts,
   actions,
-  plan
+  plan,
+  onPlanStep
 }: {
   /** None for a task that has not started. */
   state?: TaskState | null
@@ -27,6 +29,8 @@ export function TaskHeader({
   actions?: ReactNode
   /** The latest plan's steps, drawn over the header's bottom rule. */
   plan?: ReadonlyArray<{ title: string; state: TaskState }>
+  /** Go to a plan step in the record, by its index in `plan`. */
+  onPlanStep?: (index: number) => void
 }) {
   return (
     <header
@@ -54,9 +58,17 @@ export function TaskHeader({
       ))}
       <span className="flex-1" />
       {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
-      {plan ? <PlanLine steps={plan} /> : null}
+      {plan ? <PlanLine steps={plan} onStep={onPlanStep} /> : null}
     </header>
   )
+}
+
+/** Keys that move along the plan line, and where each one goes. */
+const PLAN_KEYS: Record<string, (at: number, last: number) => number> = {
+  ArrowRight: (at, last) => Math.min(at + 1, last),
+  ArrowLeft: (at) => Math.max(at - 1, 0),
+  Home: () => 0,
+  End: (_at, last) => last
 }
 
 /**
@@ -64,23 +76,73 @@ export function TaskHeader({
  * costs no row. Done steps are quiet ink, the live one breathes in the
  * accent, one that needs you is solid accent, a failed one is the danger hue.
  * A plan with nothing left to do draws nothing.
+ *
+ * With `onStep`, each segment is the way to its step in a long record: one
+ * stop in the tab order (the live step's, else the first), the arrow keys
+ * along it, and a press a few pixels taller than the rule it draws.
  */
-export function PlanLine({ steps }: { steps: ReadonlyArray<{ title: string; state: TaskState }> }) {
+export function PlanLine({
+  steps,
+  onStep
+}: {
+  steps: ReadonlyArray<{ title: string; state: TaskState }>
+  onStep?: (index: number) => void
+}) {
+  const [focusAt, setFocusAt] = useState<number | null>(null)
   if (steps.length === 0 || steps.every((s) => s.state === 'done' || s.state === 'review')) return null
   const at = steps.findIndex((s) => s.state === 'running' || s.state === 'needs')
   const done = steps.filter((s) => s.state === 'done' || s.state === 'review').length
+  const summary = at >= 0 ? `Step ${at + 1} of ${steps.length}` : `${done} of ${steps.length} steps done`
+  const stop = Math.min(focusAt ?? Math.max(at, 0), steps.length - 1)
+  const line = 'absolute inset-x-0 -bottom-px z-sticky flex h-[3px] gap-[3px]'
+  const segments = steps.map((s, i) => {
+    // Words, not markdown: a step names `inputs` and **bold** the way its plan wrote them.
+    const label = `${i + 1}. ${plainLine(s.title)}`
+    return (
+      <Tooltip key={i} content={label} describeChild={false}>
+        {onStep ? (
+          <button
+            type="button"
+            tabIndex={i === stop ? 0 : -1}
+            aria-label={`Go to step ${label}, ${STATE_LABEL[s.state].toLowerCase()}`}
+            onClick={() => onStep(i)}
+            onFocus={() => setFocusAt(i)}
+            // The press reaches 6px above the rule it draws, short of the header's controls.
+            className={cn(
+              'relative h-full min-w-0 flex-1 rounded-full after:absolute after:inset-x-0 after:-top-1.5 after:bottom-0 focus-visible:vy-focus-ring',
+              planSegmentFill(s.state)
+            )}
+            data-plan-step={s.state}
+          />
+        ) : (
+          <span className={cn('h-full min-w-0 flex-1 rounded-full', planSegmentFill(s.state))} data-plan-step={s.state} />
+        )}
+      </Tooltip>
+    )
+  })
+  if (!onStep) {
+    return (
+      <div className={line} role="img" aria-label={summary} data-plan-line>
+        {segments}
+      </div>
+    )
+  }
   return (
     <div
-      className="absolute inset-x-0 -bottom-px z-sticky flex h-[3px] gap-[3px]"
-      role="img"
-      aria-label={at >= 0 ? `Step ${at + 1} of ${steps.length}` : `${done} of ${steps.length} steps done`}
+      className={line}
+      role="toolbar"
+      aria-label={`Plan · ${summary}`}
+      onKeyDown={(e) => {
+        const move = PLAN_KEYS[e.key]
+        if (!move) return
+        e.preventDefault()
+        const next = move(stop, steps.length - 1)
+        setFocusAt(next)
+        e.currentTarget.querySelectorAll<HTMLElement>('[data-plan-step]')[next]?.focus()
+      }}
       data-plan-line
     >
-      {steps.map((s, i) => (
-        <Tooltip key={i} content={`${i + 1}. ${s.title}`} describeChild={false}>
-          <span className={cn('h-full min-w-0 flex-1 rounded-full', planSegmentFill(s.state))} data-plan-step={s.state} />
-        </Tooltip>
-      ))}
+      {segments}
     </div>
   )
 }

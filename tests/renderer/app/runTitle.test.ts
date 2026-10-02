@@ -95,3 +95,18 @@ describe('runTitle', () => {
     expect(runTooltip(run('chat'))).toBe('Untitled task')
   })
 })
+
+describe('stripGoalMarkdown keeps what is not markdown', () => {
+  it('leaves identifiers, globs and code spans whole', () => {
+    expect(stripGoalMarkdown('Rename max_retry_count in loop.ts')).toBe('Rename max_retry_count in loop.ts')
+    expect(stripGoalMarkdown('Run `npm_config_cache` check')).toBe('Run npm_config_cache check')
+    expect(stripGoalMarkdown('Fix the glob src/*.ts and lib/*.js')).toBe('Fix the glob src/*.ts and lib/*.js')
+  })
+
+  it('drops emphasis, links, citations and a fence opener', () => {
+    expect(stripGoalMarkdown('Make it *really* fast and _now_')).toBe('Make it really fast and now')
+    expect(stripGoalMarkdown('See [the docs](https://x.dev) and [[src/a.ts:12]]')).toBe('See the docs and src/a.ts:12')
+    expect(stripGoalMarkdown('~~old~~ **new** plan')).toBe('old new plan')
+    expect(stripGoalMarkdown('```ts\nconst limit = 3')).toBe('const limit = 3')
+  })
+})

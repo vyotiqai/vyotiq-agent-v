@@ -3,6 +3,7 @@ import { FEEDBACK_MESSAGE_MAX, FEEDBACK_TITLE_MAX } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { Button, Checkbox, Input, Segmented, Textarea } from '@renderer/lib/ui'
+import { exportDiagnosticsBundle, type DiagnosticsExportOutcome } from './exportDiagnostics'
 
 export type FeedbackType = 'bug' | 'feature' | 'praise' | 'other'
 
@@ -110,7 +111,19 @@ export function FeedbackDialog({
   const [phase, setPhase] = useState<Phase>('idle')
   const [mailto, setMailto] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportOutcome, setExportOutcome] = useState<DiagnosticsExportOutcome | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
+
+  /** A mailto can't carry a file: save the redacted bundle for the person to attach. */
+  const exportBundle = (): void => {
+    setExporting(true)
+    void exportDiagnosticsBundle()
+      .then((outcome) => {
+        if (outcome.kind !== 'canceled') setExportOutcome(outcome)
+      })
+      .finally(() => setExporting(false))
+  }
 
   const formId = useId()
   const titleFieldId = useId()
@@ -134,6 +147,7 @@ export function FeedbackDialog({
     setPhase('idle')
     setMailto(null)
     setCopied(false)
+    setExportOutcome(null)
   }
 
   useEffect(
@@ -216,6 +230,17 @@ export function FeedbackDialog({
       </>
     ) : (
       <>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon="download"
+          className="mr-auto"
+          pending={exporting}
+          disabled={locked}
+          onClick={exportBundle}
+        >
+          {exporting ? 'Exporting…' : 'Export diagnostics'}
+        </Button>
         <Button size="sm" variant="ghost" onClick={close} disabled={locked}>
           Cancel
         </Button>
@@ -341,6 +366,15 @@ export function FeedbackDialog({
               onCheckedChange={setIncludeDiagnostics}
               label="Include basic diagnostics (app version, OS)"
             />
+            {exportOutcome?.kind === 'saved' ? (
+              <p className="m-0 text-xs text-secondary" role="status">
+                Saved {exportOutcome.fileName}. Attach it to the email.
+              </p>
+            ) : exportOutcome?.kind === 'error' ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                {exportOutcome.message}
+              </p>
+            ) : null}
           </form>
         )}
       </div>

@@ -169,4 +169,28 @@ describe('useRecordScroll', () => {
     box.el.dispatchEvent(new Event('scroll'))
     expect(api().isFollowing()).toBe(true)
   })
+
+  it('says a live run goes on below the view once the reader lets go, for "Jump to now"', () => {
+    const { box, api, rerender } = mount(true)
+    follow(box, api())
+    expect(api().away).toBe(false)
+    act(() => {
+      box.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }))
+      box.el.scrollTop = 200
+      box.el.dispatchEvent(new Event('scroll'))
+    })
+    expect(api().away).toBe(true)
+    // End (or the button) follows again.
+    act(() => api().jumpBottom())
+    expect(api().away).toBe(false)
+    act(() => {
+      box.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }))
+      box.el.scrollTop = 200
+      box.el.dispatchEvent(new Event('scroll'))
+    })
+    expect(api().away).toBe(true)
+    // A run that is over has no "now" to go back to.
+    rerender(false)
+    expect(api().away).toBe(false)
+  })
 })

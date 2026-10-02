@@ -4,6 +4,7 @@ import { shouldDeferAppEscapeStop } from './escape'
 import {
   COMPOSER_MESSAGE_SELECTOR,
   focusBrowserUrlIfOpen,
+  isCodeEditorTarget,
   isEditableShortcutTarget,
   isTypingIn,
   matchShortcut,
@@ -170,7 +171,8 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
       }
 
       if (matchShortcut(e, 'findInFiles')) {
-        if (shouldBlockAppShortcut(e.target)) return
+        // From a code editor too: the editor has no binding of its own for it.
+        if (shouldBlockAppShortcut(e.target) && !isCodeEditorTarget(e.target)) return
         if (!onFindInFiles) return
         e.preventDefault()
         onFindInFiles()

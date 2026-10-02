@@ -441,7 +441,8 @@ describe('a call waiting on you', () => {
     expect(before(container.querySelector('[data-brief="1"]')!, card)).toBe(true)
     // In the same row as the read before it, after it.
     const row = card.closest('section')!
-    expect(row.textContent).toMatch(/^Read1 file.*QUESTION_TEXT/)
+    // One lookup names its file, not a count of one.
+    expect(row.textContent).toMatch(/^Readdb\.ts.*QUESTION_TEXT/)
   })
 
   it('after a step settled and before the next, asks between them', () => {

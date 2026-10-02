@@ -233,6 +233,7 @@ function MarkdownBody({
             cursor={cursor}
             selections={selections}
             wordWrap
+            readOnly={disabled}
             onChange={(next) => {
               if (disabled) return false
               onChange(next)

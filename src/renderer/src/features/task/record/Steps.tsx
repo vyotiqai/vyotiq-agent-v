@@ -1,15 +1,16 @@
-import { useContext, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useState, type ReactNode } from 'react'
 import { parseAgentInstanceRunId, parseAgentInstanceRunIdFromArgs, formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { formatElapsed } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
 import { StepMarker, cn } from '@renderer/lib/ui'
 import { HOVER_ON_SURFACE, NUM, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
+import { scrollMotion } from '@renderer/lib/utils/motion'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import type { RecordStep, RecordTail } from '../recordModel'
-import { RecordOpenContext, stepOpenKey } from '../recordFind'
+import { RecordOpenContext, StepRevealContext, stepOpenKey } from '../recordFind'
 import { RecordRow } from './RecordLayout'
-import { NowLine, WorkList, counted, workCounts, workIsLive } from './WorkItems'
+import { NowLine, WorkList, counted, plainLine, workCounts, workIsLive } from './WorkItems'
 
 /**
  * The plan's steps; only the step the live work is going into is open, the
@@ -35,7 +36,7 @@ export function Steps({
   if (steps.length === 0) return null
   return (
     <RecordRow>
-      <ol className="-mx-2" aria-label="Steps">
+      <ol className="-mx-2" aria-label="Steps" data-steps-run={runN}>
         {steps.map((s) => (
           <StepRow
             key={s.key}
@@ -62,7 +63,7 @@ export function placeKey(place: RecordTail): string {
 function showNeedsYou(within: Element): void {
   const card = within.querySelector<HTMLElement>('[data-needs-you]')
   if (!card) return
-  card.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  card.scrollIntoView({ block: 'start', behavior: scrollMotion() })
   card.querySelector<HTMLElement>('button:not([disabled]), [href], input, textarea')?.focus({ preventScroll: true })
 }
 
@@ -125,6 +126,12 @@ function StepRow({
   const [open, setOpen] = useState<boolean | null>(null)
   // Find in record opens a step that holds a match, whatever you last chose.
   const forced = useContext(RecordOpenContext).has(stepOpenKey(runN, step.key))
+  // The header's plan line asked for this step: it opens, and is yours to fold again.
+  const reveal = useContext(StepRevealContext)
+  const revealed = reveal != null && reveal.runN === runN && reveal.key === step.key ? reveal.nonce : null
+  useEffect(() => {
+    if (revealed != null) setOpen(true)
+  }, [revealed])
   // A card waiting on you inside the step (an instance it started may ask
   // after the step itself settled).
   const waiting = needs != null
@@ -166,11 +173,13 @@ function StepRow({
           disabled={!canOpen}
           onClick={() => setOpen(!expanded)}
           className={cn(
-            'min-w-0 flex-1 truncate rounded-sm text-left text-sm after:absolute after:inset-0 after:rounded-lg focus-visible:vy-focus-ring disabled:cursor-default',
+            // The title keeps at least 40% of the row: the counts beside it give way first.
+            'min-w-[40%] flex-1 truncate rounded-sm text-left text-sm after:absolute after:inset-0 after:rounded-lg focus-visible:vy-focus-ring disabled:cursor-default',
             live ? 'font-medium text-fg-strong' : quiet || step.superseded ? 'text-muted' : 'text-secondary'
           )}
         >
-          {step.title}
+          {/* As words: a plan names `inputs` and **bold** the way its markdown does. */}
+          {plainLine(step.title)}
         </button>
         {step.superseded ? (
           <span className="shrink-0 text-xs text-tertiary" title="A later plan dropped or renamed this step">
@@ -213,20 +222,25 @@ function StepRow({
           >
             Waiting for you
           </button>
-        ) : waiting ? null : summary ? (
-          <span className="hidden shrink-0 text-xs text-tertiary @[640px]/record:inline">{summary}</span>
+        ) : waiting || expanded ? null : summary ? (
+          // A folded step says what it holds; an open one shows it, and its
+          // title gets the room ("p5: Make c14 pass — bound maxFor…" was cut for counts).
+          <span className="hidden min-w-0 truncate text-xs text-tertiary @[640px]/record:inline" title={summary}>
+            {summary}
+          </span>
         ) : null}
-        <span className="w-14 shrink-0 text-right font-mono text-caption text-tertiary tnum">
+        <span className="min-w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
           {durationMs != null && durationMs >= 1000 ? formatElapsed(durationMs) : ''}
         </span>
+        {/* Sized and pulled in like the History row's, so the time shares the work rows' right edge. */}
         {canOpen ? (
           <Icon
             name={expanded ? 'chevron' : 'chevronRight'}
-            size={12}
-            className={cn('shrink-0 text-tertiary', !expanded && 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
+            size={11}
+            className={cn('-ml-0.5 shrink-0 text-tertiary', !expanded && 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
           />
         ) : (
-          <span className="w-3 shrink-0" />
+          <span aria-hidden className="-ml-0.5 w-[11px] shrink-0" />
         )}
       </div>
       {expanded && canOpen ? (

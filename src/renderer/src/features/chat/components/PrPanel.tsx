@@ -23,8 +23,18 @@ import { copyText } from '@renderer/lib/markdown/copyText'
 import { MarkdownContent } from '@renderer/lib/ui'
 import { CHAT_RIGHT_PANEL_BODY, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { formatElapsed } from '@shared/utils/timeFormat'
-import type { GithubAuthStatus, PrCheck, PrFile, PrMergeMethod, PrReview, PrView } from '@shared/ipc'
+import type {
+  GithubAuthStatus,
+  PrCheck,
+  PrFile,
+  PrMergeMethod,
+  PrReview,
+  PrReviewThreadsResult,
+  PrView
+} from '@shared/ipc'
 import { EmptyPanel } from './PanelChrome'
+import { PrReviewThreads } from './PrReviewThreads'
+import { PrOpenList } from './PrOpenList'
 import { GithubAuthPanel } from './GithubAuthPanel'
 import { type DiffLayout } from './DiffPreview'
 import {
@@ -35,9 +45,9 @@ import {
 } from '@renderer/features/inspector/ChangesList'
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
 import type { UiItem } from '@shared/transcript'
-import { buildRecordModel } from '@renderer/features/task/recordModel'
 import { checksRevisionOf, useRunChecks } from '@renderer/features/task/useRunChecks'
-import { prBodyFrom, prTitleFrom } from './prDraft'
+import { latestResultText, prBodyFrom, prTitleFrom } from './prDraft'
+import { prCheckInstruction } from '@renderer/features/task/followUps'
 
 type PrTab = 'changes' | 'description' | 'commits' | 'checks' | 'reviews' | 'issues'
 
@@ -424,8 +434,15 @@ export function PrPanel({
     setMergeOpen(false)
   }, [])
 
-  const load = useCallback(async (opts?: { quiet?: boolean }) => {
+  /**
+   * Bumped by every load but the checks poll: review threads and the open PR
+   * list refresh on the same triggers as the PR (git activity, Refresh,
+   * sign-in), and a CI poll does not re-ask GitHub for them every 15 seconds.
+   */
+  const [loadTick, setLoadTick] = useState(0)
+  const load = useCallback(async (opts?: { quiet?: boolean; poll?: boolean }) => {
     const seq = ++loadSeqRef.current
+    if (!opts?.poll) setLoadTick((t) => t + 1)
     if (!workspacePath || !window.vyotiq?.prView) {
       if (seq !== loadSeqRef.current) return
       setPr(null)
@@ -516,6 +533,40 @@ export function PrPanel({
     void loadIssues()
   }, [tab, loadIssues])
 
+  // Inline review threads: fetched with the PR, kept for the PR they belong to.
+  const prNumber = pr?.number ?? null
+  const [threads, setThreads] = useState<PrReviewThreadsResult | null>(null)
+  const [threadsLoading, setThreadsLoading] = useState(false)
+  const [threadsError, setThreadsError] = useState<string | null>(null)
+  const threadsSeqRef = useRef(0)
+  useEffect(() => {
+    const seq = ++threadsSeqRef.current
+    const fetchThreads = window.vyotiq?.prReviewThreads
+    if (!workspacePath || prNumber == null || !fetchThreads) {
+      setThreads(null)
+      setThreadsError(null)
+      setThreadsLoading(false)
+      return
+    }
+    setThreadsLoading(true)
+    fetchThreads(workspacePath, prNumber)
+      .then((res) => {
+        if (seq !== threadsSeqRef.current) return
+        if (res.ok) {
+          setThreads(res.data)
+          setThreadsError(null)
+        } else {
+          setThreadsError(res.error)
+        }
+      })
+      .catch((err: unknown) => {
+        if (seq === threadsSeqRef.current) setThreadsError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (seq === threadsSeqRef.current) setThreadsLoading(false)
+      })
+  }, [workspacePath, prNumber, loadTick])
+
   const loadRef = useRef(load)
   loadRef.current = load
   /** Poll budget per head commit, so re-renders cannot extend it forever. */
@@ -547,7 +598,7 @@ export function PrPanel({
 
     const timer = window.setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-      void loadRef.current({ quiet: true })
+      void loadRef.current({ quiet: true, poll: true })
     }, PR_CHECKS_POLL_MS)
     return () => window.clearInterval(timer)
   }, [pr])
@@ -691,15 +742,7 @@ export function PrPanel({
   const draftRunId = !pr && !running && runId ? runId : null
   const checksRevision = useMemo(() => checksRevisionOf(items ?? [], running), [items, running])
   const draftChecks = useRunChecks(workspacePath ?? null, draftRunId, checksRevision)
-  const draftSummary = useMemo(() => {
-    if (!draftRunId || !items?.length) return ''
-    const runs = buildRecordModel(items, { running: false }).runs
-    for (let i = runs.length - 1; i >= 0; i -= 1) {
-      const result = runs[i]!.result
-      if (result && !result.streaming && result.text.trim()) return result.text
-    }
-    return ''
-  }, [draftRunId, items])
+  const draftSummary = useMemo(() => (draftRunId && items ? latestResultText(items) : ''), [draftRunId, items])
   const draftSource = useMemo(
     () => (draftSummary ? { title: taskTitle, summary: draftSummary, checks: draftChecks } : null),
     [draftSummary, taskTitle, draftChecks]
@@ -735,6 +778,11 @@ export function PrPanel({
       setCreateBusy(false)
     }
   }, [workspacePath, createBusy, load, draftSource, prTitle, prBody])
+
+  const showNotice = useCallback((message: string, failed: boolean) => {
+    setNotice(message)
+    setNoticeFailed(failed)
+  }, [])
 
   const openExternal = useCallback(async (url: string) => {
     if (!window.vyotiq?.shellOpenExternal) return
@@ -851,6 +899,39 @@ export function PrPanel({
       !signInRejected &&
       !/not a git repository/i.test(error ?? '')
   )
+  /** This branch has no PR, and gh can see the repository: offer the ones it has. */
+  const showOpenPrs =
+    canCreatePr && !showGhInstall && !showConnect && !auth?.pending && (!error || /no pull request/i.test(error))
+  /**
+   * Where a new pull request would go, before it exists: this branch and the
+   * default branch it is compared with — the same base git reads for the
+   * branch's diff. Only while the form shows.
+   */
+  const showNewPrForm = !loading && !pr && canCreatePr && Boolean(draftSource)
+  const [newPrBranches, setNewPrBranches] = useState<{ head: string; base: string | null } | null>(null)
+  useEffect(() => {
+    const read = window.vyotiq?.gitBranchDiff
+    if (!showNewPrForm || !workspacePath || !read) {
+      setNewPrBranches(null)
+      return undefined
+    }
+    let cancelled = false
+    read(workspacePath)
+      .then((res) => {
+        if (cancelled) return
+        setNewPrBranches(
+          res.ok && res.data.branch
+            ? { head: res.data.branch, base: res.data.base ? res.data.base.replace(/^origin\//, '') : null }
+            : null
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setNewPrBranches(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showNewPrForm, workspacePath, gitRevision])
 
   const ghInstallActions = (
     <Button size="sm"
@@ -1052,9 +1133,8 @@ export function PrPanel({
     : []
 
   const openState = pr ? pr.state.trim().toUpperCase() : ''
-  const handPrompt = (check: PrCheck): string =>
-    `The “${check.name}” check failed on pull request #${pr?.number ?? ''}${check.description ? ` (${check.description})` : ''}. ` +
-    `Read its log${check.url ? ` at ${check.url}` : ''}, find the cause and fix it.`
+  // Built where the record reads it back ("Fix the failing “build” check on #12").
+  const handPrompt = (check: PrCheck): string => prCheckInstruction(check, pr?.number ?? null)
 
   /** A sub-view's own row, fixed above its scroll area like Changes' commit row. */
   const back = (label: string, title: string) => (
@@ -1063,6 +1143,13 @@ export function PrPanel({
       <span className="min-w-0 flex-1 truncate text-fg">{title}</span>
     </div>
   )
+
+  // Reviews' count: the reviews, plus the inline threads still waiting on an answer.
+  const reviewCount = pr ? pr.latestReviews.length || pr.reviews.length : 0
+  const openThreads =
+    pr && threads?.number === pr.number ? threads.threads.filter((t) => !t.isResolved).length : 0
+  const reviewsTabCount =
+    openThreads > 0 ? (reviewCount > 0 ? `${reviewCount} · ${openThreads} open` : `${openThreads} open`) : reviewCount || undefined
 
   const prTabs: TabItem<PrTab>[] = pr
     ? [
@@ -1076,7 +1163,7 @@ export function PrPanel({
         {
           id: 'reviews',
           label: 'Reviews',
-          ...((pr.latestReviews.length || pr.reviews.length) ? { count: pr.latestReviews.length || pr.reviews.length } : {})
+          ...(reviewsTabCount != null ? { count: reviewsTabCount } : {})
         },
         { id: 'description', label: 'About' },
         // Issues opens from the menu; while it is open the strip says so.
@@ -1327,6 +1414,27 @@ export function PrPanel({
                 }}
               >
                 <h4 className={SECTION_LABEL}>New pull request</h4>
+                {newPrBranches && newPrBranches.head === newPrBranches.base ? (
+                  // Main refuses a PR from the default branch into itself: say so before Create does.
+                  <p className="m-0 text-caption text-muted" data-new-pr-branches="default">
+                    On <code className="font-mono">{newPrBranches.head}</code>, the default branch — a pull request needs a
+                    branch of its own. Commit & Create PR in Changes makes one.
+                  </p>
+                ) : newPrBranches ? (
+                  <p
+                    className="m-0 truncate font-mono text-caption text-muted"
+                    title={newPrBranches.base ? `${newPrBranches.head} → ${newPrBranches.base}` : newPrBranches.head}
+                    data-new-pr-branches
+                  >
+                    {newPrBranches.head}
+                    {newPrBranches.base ? (
+                      <>
+                        {' '}
+                        <span className="text-tertiary">→</span> {newPrBranches.base}
+                      </>
+                    ) : null}
+                  </p>
+                ) : null}
                 <Input
                   size="sm"
                   value={prTitle}
@@ -1380,6 +1488,16 @@ export function PrPanel({
               }
             />
           )}
+          {workspacePath && showOpenPrs ? (
+            <PrOpenList
+              workspacePath={workspacePath}
+              revision={loadTick}
+              running={running}
+              onCheckedOut={() => void load()}
+              onOpenExternal={(url) => void openExternal(url)}
+              onNotice={showNotice}
+            />
+          ) : null}
         </div>
       ) : tab === 'changes' ? (
         pr.files.length === 0 ? (
@@ -1477,6 +1595,20 @@ export function PrPanel({
                     ))}
                   </ul>
                 )}
+                <PrReviewThreads
+                  result={threads?.number === pr.number ? threads : null}
+                  loading={threadsLoading}
+                  error={threadsError}
+                  prNumber={pr.number}
+                  workspacePath={workspacePath ?? null}
+                  onOpenLocation={
+                    onOpenFile ? (path, line) => onOpenFile(path, line != null ? { line } : undefined) : undefined
+                  }
+                  onHandToAgent={onHandToAgent}
+                  onOpenExternal={(url) => void openExternal(url)}
+                  onResultChange={setThreads}
+                  onNotice={showNotice}
+                />
                 {workspacePath && window.vyotiq?.prReview ? (
                   <form
                     className="mt-5 space-y-2"

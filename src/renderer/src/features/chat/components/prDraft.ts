@@ -1,4 +1,7 @@
 import type { DoneWhenCheck } from '@shared/doneWhenChecks'
+import type { UiItem } from '@shared/transcript'
+import { stripGoalMarkdown } from '@shared/utils/taskTitle'
+import { buildRecordModel } from '@renderer/features/task/recordModel'
 
 /** What the PR panel writes a draft pull request from: the task's own words. */
 export type PrDraftSource = {
@@ -9,6 +12,17 @@ export type PrDraftSource = {
   checks: readonly DoneWhenCheck[]
 }
 
+/** The task's latest finished result — what a PR drafted from it summarises; '' when there is none. */
+export function latestResultText(items: readonly UiItem[]): string {
+  if (items.length === 0) return ''
+  const runs = buildRecordModel(items as UiItem[], { running: false }).runs
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    const result = runs[i]!.result
+    if (result && !result.streaming && result.text.trim()) return result.text
+  }
+  return ''
+}
+
 /** GitHub's title field; a longer one is refused by the create call. */
 const TITLE_MAX = 256
 
@@ -17,16 +31,13 @@ function oneLine(text: string): string {
 }
 
 /**
- * The PR title: the task's title, else the summary's first line without its
- * markdown heading marks. Empty when neither has words.
+ * The PR title: the task's title, else the summary's first line as words —
+ * its heading, bullet, bold, code ticks and `[[path]]` citations dropped, as
+ * the navigator drops them from a task's title. Empty when neither has words.
  */
 export function prTitleFrom(source: PrDraftSource): string {
   const fromTitle = oneLine(source.title ?? '')
-  const firstLine =
-    source.summary
-      .split(/\r?\n/)
-      .map((line) => line.replace(/^#+\s*/, '').replace(/^[-*]\s+/, '').trim())
-      .find((line) => line.length > 0) ?? ''
+  const firstLine = stripGoalMarkdown(source.summary)
   const title = fromTitle || oneLine(firstLine)
   return title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title
 }

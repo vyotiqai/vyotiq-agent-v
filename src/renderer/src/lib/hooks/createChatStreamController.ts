@@ -54,6 +54,7 @@ import {
   messagesToUiItems,
   applyEventTimestamps,
   applyCompactionItems,
+  applyNoticeItems,
   applyPersistedLiveTools,
   dropNeverStartedRunningTools,
   finalizeHydratedTranscript,
@@ -556,7 +557,7 @@ function promptItemIndex(priorMessages: readonly ChatMessage[], priorItems: read
 
 /**
  * An edit or rewind rebuilds the rows from messages, which hold no fold
- * summaries or error boxes. Carry the ones from before the cut — the prompt
+ * summaries, error boxes or notes. Carry the ones from before the cut — the prompt
  * being edited or rewound to — each back after the row it followed; the ones
  * after the cut belonged to the work that was dropped.
  */
@@ -564,7 +565,7 @@ function carryWovenItems(nextItems: UiItem[], priorItems: readonly UiItem[], cut
   const out = [...nextItems]
   for (let i = 0; i < cut && i < priorItems.length; i++) {
     const item = priorItems[i]!
-    if (item.kind !== 'compaction' && item.kind !== 'run_error') continue
+    if (item.kind !== 'compaction' && item.kind !== 'run_error' && item.kind !== 'notice') continue
     if (item.id === LIVE_COMPACTION_ID || out.some((row) => row.id === item.id)) continue
     let anchor = -1
     for (let j = i - 1; j >= 0 && anchor < 0; j--) {
@@ -1041,16 +1042,19 @@ function hydrateFromDisk(
     runNotice: null,
     compacting: compactingFromEvents(events, opts?.idle === true),
     costHint: costHintFromEvents(events),
-    items: applyCompactionItems(
-      weaveRunErrorItems(
-        finalizeHydratedTranscript(
-          items,
+    items: applyNoticeItems(
+      applyCompactionItems(
+        weaveRunErrorItems(
+          finalizeHydratedTranscript(
+            items,
+            events,
+            opts?.idle ? { treatRunningAs: 'cancelled' } : undefined
+          ),
           events,
-          opts?.idle ? { treatRunningAs: 'cancelled' } : undefined
+          dismissedErrorMessage,
+          opts?.dismissedRunErrorIds
         ),
-        events,
-        dismissedErrorMessage,
-        opts?.dismissedRunErrorIds
+        events
       ),
       events
     ),
@@ -1371,7 +1375,12 @@ export type ChatStreamController = ChatStreamState & {
   editFollowUp: (id: string, text: string) => Promise<boolean>
   /** Move a queued follow-up to the front of the drain order. */
   sendFollowUpNow: (id: string) => Promise<boolean>
-  stop: () => Promise<void>
+  /**
+   * Stop the run. True once a stop is on its way — main accepted the cancel,
+   * or one is armed for a start still in flight; false when nothing stopped
+   * (you kept the queued follow-ups, or the cancel failed).
+   */
+  stop: () => Promise<boolean>
   /** Resume an interrupted run from disk without adding a user turn. */
   resumeInterrupted: () => Promise<boolean>
   reset: () => void
@@ -2975,6 +2984,17 @@ export function createChatStreamController(
       notifyAgentMode(event.mode)
     } else if (event.type === 'goal_update' || event.type === 'loop_update') {
       // Banner and sidebar poll artifacts / subscribe via onChatEvent.
+    } else if (event.type === 'model_fallback') {
+      // A one-line note in the record; a reload rebuilds it from events.jsonl.
+      const at = new Date().toISOString()
+      patch({
+        items: prependClosed(state.items, {
+          kind: 'notice',
+          id: `notice:live:${event.seq ?? at}:${event.step ?? 0}`,
+          text: event.message,
+          at
+        })
+      })
     } else if (event.type === 'error') {
       lastRunErrorMessage = event.message
       lastRunErrorCode = event.code ?? null
@@ -3491,6 +3511,7 @@ export function createChatStreamController(
           provider: turnProviderModel?.provider,
           model: turnProviderModel?.model,
           ...(extras?.doneWhen?.length ? { doneWhen: extras.doneWhen } : {}),
+          ...(extras?.extraRoots?.length ? { extraRoots: extras.extraRoots } : {}),
           ...(extras?.draftId ? { draftId: extras.draftId } : {})
         }
     let res = await window.vyotiq.chatStart(startPayload)
@@ -4300,7 +4321,7 @@ export function createChatStreamController(
     onTerminal?.()
   }
 
-  const stop = async (): Promise<void> => {
+  const stop = async (): Promise<boolean> => {
     const queuedFollowUpCount = state.pendingFollowUps.length
     if (queuedFollowUpCount > 0) {
       const noun = queuedFollowUpCount === 1 ? 'follow-up' : 'follow-ups'
@@ -4309,7 +4330,7 @@ export function createChatStreamController(
           `Stop this run and discard ${queuedFollowUpCount} queued ${noun}?`
         )
       ) {
-        return
+        return false
       }
     }
     const id = runId
@@ -4322,8 +4343,9 @@ export function createChatStreamController(
       pendingCancel = true
       if (state.pendingRun || state.running || awaitingRun) {
         patch({ runNotice: 'Stopping…' })
+        return true
       }
-      return
+      return false
     }
     if (awaitingStart) {
       pendingCancel = true
@@ -4339,13 +4361,14 @@ export function createChatStreamController(
         err: toLogErr(res.error)
       })
       // pendingCancel still covers an in-flight chatStart that has not registered yet.
-      if (awaitingStart) return
+      if (awaitingStart) return true
       await recoverAfterCancelFailure(id, res.error)
-      return
+      return false
     }
     // Successful cancel: terminal status clears follow-ups; clear optimistically
     // only after main accepted cancel so a failed cancel cannot lose UI state.
     clearPendingFollowUps(true)
+    return true
   }
 
   const reset = (): void => {

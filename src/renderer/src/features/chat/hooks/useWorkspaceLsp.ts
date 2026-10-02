@@ -18,6 +18,11 @@ export function useWorkspaceLsp({
   status: WorkspaceLspStatus | null
   diagnostics: LspDiagnosticItem[]
   fetchHover: (line: number, character: number) => Promise<string | null>
+  fetchCompletion: (
+    line: number,
+    character: number,
+    content?: string
+  ) => Promise<Array<{ label: string; detail: string | null }> | null>
 } {
   const [status, setStatus] = useState<WorkspaceLspStatus | null>(null)
   const [diagnostics, setDiagnostics] = useState<LspDiagnosticItem[]>([])
@@ -106,5 +111,53 @@ export function useWorkspaceLsp({
     [path, status, workspacePath]
   )
 
-  return { status, diagnostics, fetchHover }
+  // Whether the server answers completion: unknown (null) until a client has
+  // started and reported its capabilities. Main drops the client when asked
+  // for something it lacks, so never ask before this says yes.
+  const completionCapableRef = useRef<boolean | null>(null)
+  useEffect(() => {
+    completionCapableRef.current = null
+  }, [path, status, workspacePath])
+
+  const fetchCompletion = useCallback(
+    async (
+      line: number,
+      character: number,
+      content?: string
+    ): Promise<Array<{ label: string; detail: string | null }> | null> => {
+      if (!workspacePath || !path || !window.vyotiq?.workspaceLspRequest) return null
+      if (status?.kind !== 'available') return null
+      try {
+        let capable = completionCapableRef.current
+        if (capable == null) {
+          let capabilities = status.server.capabilities
+          if (capabilities.length === 0 && window.vyotiq.workspaceLspStatus) {
+            // The status from open time predates the client; ask again now that diagnostics started it.
+            const fresh = await window.vyotiq.workspaceLspStatus({ workspacePath, path })
+            capabilities = fresh.ok && fresh.data.kind === 'available' ? fresh.data.server.capabilities : []
+          }
+          if (capabilities.length === 0) return null
+          capable = capabilities.includes('completion')
+          completionCapableRef.current = capable
+        }
+        if (!capable) return null
+        const response = await window.vyotiq.workspaceLspRequest({
+          workspacePath,
+          path,
+          // The editor's text at the keystroke; the tab's copy can be a render behind.
+          content: content ?? contentRef.current,
+          action: 'completion',
+          line,
+          character
+        })
+        if (response.ok && response.data.kind === 'completion') return response.data.items
+      } catch {
+        // Completion is optional; the editor still offers words from the file.
+      }
+      return null
+    },
+    [path, status, workspacePath]
+  )
+
+  return { status, diagnostics, fetchHover, fetchCompletion }
 }

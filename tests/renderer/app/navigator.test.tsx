@@ -234,6 +234,27 @@ describe('Navigator', () => {
     expect(actions.onTogglePin).toHaveBeenCalledWith(WS, 'loop')
   })
 
+  it('offers Resume on a task you stopped that has edits to review, and counts one check as one', () => {
+    // A task you stopped carries on through Retry's path, as the record's Resume does.
+    const actions = { onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), onRetry: vi.fn() }
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: { runs: [run('cut', { status: 'cancelled', review: { files: 2, add: 3, del: 1 }, checks: { met: 1, total: 1 } })] }
+          },
+          rowActions: actions
+        })}
+      />
+    )
+    // "Stopped · edits to review" was read as not stopped, and Resume went missing.
+    fireEvent.contextMenu(row('Task cut'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Resume' }))
+    expect(actions.onRetry).toHaveBeenCalledWith(WS, 'cut')
+    expect(document.body.textContent).toContain('1 of 1 check met')
+    expect(document.body.textContent).not.toContain('1 of 1 checks')
+  })
+
   it('retries a failed task and forks a settled one from its menu; a live one has neither', () => {
     const actions = { onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), onRetry: vi.fn(), onFork: vi.fn(), onExport: vi.fn() }
     render(
@@ -282,6 +303,39 @@ describe('Navigator', () => {
     const live = menuFor('Task live')
     expect(live).not.toContain('Fork')
     expect(live).not.toContain('Retry')
+  })
+
+  it('resumes a task you stopped with the Retry path’s continue, and an interrupted one with Resume', () => {
+    const actions = { onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), onResume: vi.fn(), onRetry: vi.fn() }
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [
+                run('stopped', { status: 'cancelled' }),
+                run('cut', { status: 'cancelled', resumable: true, error: RUN_INTERRUPTED_ERROR }),
+                run('ok')
+              ]
+            }
+          },
+          rowActions: actions
+        })}
+      />
+    )
+    fireEvent.contextMenu(row('Task stopped'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Resume' }))
+    expect(actions.onRetry).toHaveBeenCalledWith(WS, 'stopped')
+    expect(actions.onResume).not.toHaveBeenCalled()
+
+    fireEvent.contextMenu(row('Task cut'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Resume' }))
+    expect(actions.onResume).toHaveBeenCalledWith(WS, 'cut')
+    expect(actions.onRetry).toHaveBeenCalledTimes(1)
+
+    // A finished task has nothing to carry on.
+    fireEvent.contextMenu(row('Task ok'))
+    expect(screen.queryByRole('menuitem', { name: 'Resume' })).toBeNull()
   })
 
   it('lists pinned tasks in their own group, and offers to unpin them', () => {
@@ -752,8 +806,13 @@ describe('Navigator — View menu, workspace headings, archive, hover card, rece
     fireEvent.contextMenu(row('Task old'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
     expect(onToggleArchive).toHaveBeenCalledWith(WS, 'old')
+    // A live task's Archive is there, greyed out with why — never choosable.
     fireEvent.contextMenu(row('Task go'))
-    expect(screen.queryByRole('menuitem', { name: 'Archive' })).toBeNull()
+    const live = screen.getByRole('menuitem', { name: 'Archive' }) as HTMLButtonElement
+    expect(live.disabled).toBe(true)
+    expect(live.getAttribute('title')).toBe('Stop it or let it finish first')
+    fireEvent.click(live)
+    expect(onToggleArchive).toHaveBeenCalledTimes(1)
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
 
     fireEvent.click(screen.getByRole('button', { name: 'View' }))
@@ -850,7 +909,11 @@ describe('Navigator — View menu, workspace headings, archive, hover card, rece
     render(<Navigator {...p} />)
     fireEvent.click(screen.getByRole('button', { name: /^alpha/ }))
     expect(screen.getByText('Recent')).toBeTruthy()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'gamma' }))
+    // Where it lives, so two folders of one name can be told apart: seen, and heard as its description.
+    const recent = screen.getByRole('menuitem', { name: 'gamma' })
+    expect(recent.querySelector('[data-menu-item-detail]')?.textContent).toBe('C:\\work\\gamma')
+    expect(document.getElementById(recent.getAttribute('aria-describedby')!)?.textContent).toBe('C:\\work\\gamma')
+    fireEvent.click(recent)
     expect(p.onOpenRecentWorkspace).toHaveBeenCalledWith('C:\\work\\gamma')
   })
 })
@@ -1005,6 +1068,28 @@ describe('Navigator row lines', () => {
     fireEvent.click(fold)
     expect(fold.getAttribute('aria-expanded')).toBe('false')
     expect(document.querySelector('[data-nav-instances] ul')).toBeNull()
+  })
+
+  it('marks the instance open in place of its task’s record, and keeps the task selected', () => {
+    const p = props({
+      runsByWorkspacePath: {
+        [WS]: {
+          runs: [run('parent', { status: 'running' })],
+          instanceRuns: [
+            run('a-live', { parentRunId: 'parent', status: 'running', goal: 'Read the docs' }),
+            run('b-live', { parentRunId: 'parent', status: 'running', goal: 'Write the tests' })
+          ]
+        }
+      },
+      activeRuns: [live('parent'), live('a-live'), live('b-live')],
+      selected: { workspacePath: WS, runId: 'parent', instanceRunId: 'b-live' }
+    })
+    render(<Navigator {...p} />)
+    expect(row('Task parent').getAttribute('aria-current')).toBe('page')
+    const list = document.querySelector('[data-nav-instances] ul') as HTMLElement
+    const open = within(list).getByTitle('Write the tests')
+    expect(open.getAttribute('aria-current')).toBe('true')
+    expect(within(list).getByTitle('Read the docs').getAttribute('aria-current')).toBeNull()
   })
 
   it('drops a task’s instances once it has settled', () => {

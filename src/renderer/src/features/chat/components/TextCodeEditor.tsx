@@ -33,20 +33,44 @@ import {
   mapLspDiagnosticsToCm,
   type LspDiagnosticItem
 } from '@shared/utils/lspDiagnostics'
+import {
+  BUNDLED_EDITOR_LANGUAGES,
+  editorLanguageFor,
+  loadLegacyEditorLanguage,
+  type EditorLanguageId
+} from './editor/editorLanguages'
+import { editingExtensions, editorSearchExtensions } from './editor/editorSearch'
+import type { LspCompletionFetch } from './editor/editorCompletion'
 
-function languageExtension(path: string): Extension {
-  const lower = path.toLowerCase()
-  if (lower.endsWith('.tsx')) return javascript({ jsx: true, typescript: true })
-  if (lower.endsWith('.ts')) return javascript({ typescript: true })
-  if (lower.endsWith('.jsx')) return javascript({ jsx: true })
-  if (/\.(js|mjs|cjs)$/.test(lower)) return javascript()
-  if (lower.endsWith('.json')) return json()
-  if (/\.(md|mdc)$/.test(lower)) return markdown()
-  if (lower.endsWith('.py')) return python()
-  if (/\.(css|scss)$/.test(lower)) return css()
-  if (/\.(html|htm|vue)$/.test(lower)) return html()
-  if (/\.(yaml|yml)$/.test(lower)) return yaml()
-  return []
+/**
+ * The grammar a bundled language builds synchronously; a legacy mode starts as
+ * plain text and is swapped in when its chunk lands (see editorLanguages).
+ */
+function bundledLanguageExtension(id: EditorLanguageId | null): Extension {
+  switch (id) {
+    case 'tsx':
+      return javascript({ jsx: true, typescript: true })
+    case 'typescript':
+      return javascript({ typescript: true })
+    case 'jsx':
+      return javascript({ jsx: true })
+    case 'javascript':
+      return javascript()
+    case 'json':
+      return json()
+    case 'markdown':
+      return markdown()
+    case 'python':
+      return python()
+    case 'css':
+      return css()
+    case 'html':
+      return html()
+    case 'yaml':
+      return yaml()
+    default:
+      return []
+  }
 }
 
 /**
@@ -192,6 +216,120 @@ function wrapStyleTheme(enabled: boolean): Extension {
   })
 }
 
+/** `vy-focus-ring`, spelled out: the panel's controls are the library's DOM, not ours to class. */
+const FOCUS_RING = { outline: '2px solid var(--vy-focus)', outlineOffset: '2px' }
+
+/** A panel button: CONTROL_HOVER's fill on a ghost control. */
+const PANEL_BUTTON = {
+  backgroundImage: 'none',
+  backgroundColor: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--vy-radius-sm)',
+  height: '24px',
+  padding: '0 8px',
+  verticalAlign: 'middle',
+  fontFamily: 'var(--font-sans)',
+  fontSize: 'var(--text-xs)',
+  color: 'var(--vy-secondary)',
+  cursor: 'pointer',
+  '&:hover': { backgroundColor: 'var(--vy-surface)', color: 'var(--vy-fg-strong)' },
+  '&:active': { backgroundImage: 'none' },
+  '&:focus-visible': FOCUS_RING
+}
+
+/**
+ * The find panel and the completion list on the app's tokens and type scale:
+ * the panel is a flush band under a hairline like a pane row, the list is a
+ * vy-menu surface (the `.cm-tooltip` rule) with SELECTED for the active row.
+ * Every match is tinted; the current one also gets an outline, so it is not
+ * told apart by hue alone.
+ */
+const SEARCH_AND_COMPLETION_THEME = {
+  '.cm-panels': { backgroundColor: 'var(--vy-bg)', color: 'var(--vy-fg)' },
+  '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--vy-border)' },
+  '.cm-panel.cm-search': {
+    padding: '6px 36px 6px 8px',
+    fontFamily: 'var(--font-sans)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    '& input, & button, & label': { margin: '2px 4px 2px 0' },
+    '& label': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '4px',
+      height: '24px',
+      padding: '0 4px',
+      verticalAlign: 'middle',
+      fontSize: 'var(--text-caption)',
+      color: 'var(--vy-muted)',
+      whiteSpace: 'pre',
+      cursor: 'pointer'
+    },
+    '& input[type=checkbox]': {
+      margin: '0',
+      accentColor: 'var(--vy-accent)',
+      '&:focus-visible': FOCUS_RING
+    },
+    '& [name=close]': {
+      ...PANEL_BUTTON,
+      top: '6px',
+      right: '6px',
+      width: '24px',
+      padding: '0',
+      margin: '0',
+      fontSize: 'var(--text-md)',
+      color: 'var(--vy-tertiary)'
+    }
+  },
+  '.cm-textfield': {
+    boxSizing: 'border-box',
+    height: '24px',
+    width: '15rem',
+    maxWidth: '100%',
+    padding: '0 6px',
+    verticalAlign: 'middle',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 'var(--text-xs)',
+    color: 'var(--vy-fg)',
+    backgroundColor: 'transparent',
+    border: '1px solid var(--vy-border)',
+    borderRadius: 'var(--vy-radius-sm)',
+    '&::placeholder': { color: 'var(--vy-tertiary)' },
+    '&:focus-visible': FOCUS_RING
+  },
+  '.cm-button': PANEL_BUTTON,
+  '.cm-searchMatch': { backgroundColor: 'var(--vy-warning-soft)' },
+  '.cm-searchMatch.cm-searchMatch-selected': {
+    backgroundColor: 'var(--vy-accent-soft)',
+    outline: '1px solid var(--vy-accent)'
+  },
+  '.cm-selectionMatch': { backgroundColor: 'var(--vy-surface-2)' },
+  '.cm-searchMatch .cm-selectionMatch': { backgroundColor: 'transparent' },
+  '.cm-tooltip.cm-tooltip-autocomplete': {
+    padding: '4px',
+    '& > ul': {
+      fontFamily: 'var(--font-mono)',
+      fontSize: 'var(--text-xs)',
+      minWidth: '12rem',
+      maxHeight: '15rem',
+      '& > li': {
+        padding: '2px 8px',
+        borderRadius: 'var(--vy-radius-md)',
+        lineHeight: 'var(--text-xs--line-height)',
+        color: 'var(--vy-fg)'
+      },
+      '& > li:hover': { backgroundColor: 'var(--vy-surface)' }
+    }
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    background: 'var(--vy-surface-2)',
+    color: 'var(--vy-fg-strong)'
+  },
+  '.cm-tooltip-autocomplete-disabled ul li[aria-selected]': { background: 'var(--vy-surface)' },
+  '.cm-completionMatchedText': { textDecoration: 'none', color: 'var(--vy-accent)' },
+  '.cm-completionDetail': { marginLeft: '12px', fontStyle: 'normal', color: 'var(--vy-tertiary)' }
+}
+
 const AGENT_READ_LINE = Decoration.line({ class: 'cm-agentRead' })
 
 /** Tint lines `from`–`to` (1-based, clamped to the file): the lines the task's agent read. */
@@ -260,7 +398,9 @@ export function TextCodeEditor({
   markedLines = null,
   changedLines = null,
   lspDiagnostics = null,
+  readOnly = false,
   onLspHover,
+  onLspComplete,
   onScrollToLineHandled,
   onChange,
   onMetaChange,
@@ -279,7 +419,11 @@ export function TextCodeEditor({
   /** Lines the task changed, as the file reads now: a bar in the gutter beside each. */
   changedLines?: readonly number[] | null
   lspDiagnostics?: readonly LspDiagnosticItem[] | null
+  /** No edits: find stays, Replace, completion and bracket closing go. */
+  readOnly?: boolean
   onLspHover?: (line: number, character: number) => Promise<string | null>
+  /** Language-server completions at a 0-based position; words from the file are offered either way. */
+  onLspComplete?: LspCompletionFetch
   onScrollToLineHandled?: () => void
   onChange: (value: string) => boolean | void
   onMetaChange: (meta: { cursor: number; selections: WorkspaceEditorSelection[] }) => void
@@ -309,8 +453,14 @@ export function TextCodeEditor({
   const initialChangedLinesRef = useRef(changedLines)
   const hoverCompartmentRef = useRef(new Compartment())
   const completeCompartmentRef = useRef(new Compartment())
+  const readOnlyCompartmentRef = useRef(new Compartment())
+  const languageCompartmentRef = useRef(new Compartment())
+  const readOnlyRef = useRef(readOnly)
   const lspDiagnosticsRef = useRef(lspDiagnostics)
   const onLspHoverRef = useRef(onLspHover)
+  const onLspCompleteRef = useRef(onLspComplete)
+  readOnlyRef.current = readOnly
+  onLspCompleteRef.current = onLspComplete
   initialValueRef.current = value
   initialCursorRef.current = cursor
   initialSelectionsRef.current = selections
@@ -328,8 +478,10 @@ export function TextCodeEditor({
     const host = hostRef.current
     if (!host) return undefined
 
+    const languageId = editorLanguageFor(path)
+    const lazyLanguage = languageId != null && !BUNDLED_EDITOR_LANGUAGES.has(languageId)
     const doc = initialValueRef.current
-    const ranges = normalizedSelections(initialSelectionsRef.current, doc.length).map((range) =>
+    const ranges =normalizedSelections(initialSelectionsRef.current, doc.length).map((range) =>
       EditorSelection.range(
         Math.min(range.from, doc.length),
         Math.min(range.to, doc.length)
@@ -343,9 +495,13 @@ export function TextCodeEditor({
           : EditorSelection.cursor(Math.min(initialCursorRef.current, doc.length)),
       extensions: [
         minimalSetup,
-        languageExtension(path),
+        languageCompartmentRef.current.of(lazyLanguage ? [] : bundledLanguageExtension(languageId)),
         syntaxHighlighting(syntaxHighlightStyle),
         bracketMatching(),
+        // Ctrl/Cmd D and Alt-click build several selections; the tab keeps all of them.
+        EditorState.allowMultipleSelections.of(true),
+        editorSearchExtensions(),
+        readOnlyCompartmentRef.current.of(EditorState.readOnly.of(readOnlyRef.current)),
         highlightActiveLine(),
         highlightActiveLineGutter(),
         changesCompartmentRef.current.of(taskChangesExtension(initialChangedLinesRef.current)),
@@ -357,7 +513,9 @@ export function TextCodeEditor({
         lintCompartmentRef.current.of([]),
         markCompartmentRef.current.of(markedLinesExtension(initialMarkedLinesRef.current)),
         hoverCompartmentRef.current.of([]),
-        completeCompartmentRef.current.of([]),
+        completeCompartmentRef.current.of(
+          editingExtensions(readOnlyRef.current, () => onLspCompleteRef.current)
+        ),
         EditorView.theme({
           '&': {
             height: '100%',
@@ -447,7 +605,8 @@ export function TextCodeEditor({
             maxWidth: '28rem',
             whiteSpace: 'pre-wrap',
             color: 'var(--vy-fg)'
-          }
+          },
+          ...SEARCH_AND_COMPLETION_THEME
         }),
         EditorView.updateListener.of((update) => {
           const isReload = update.transactions.some(
@@ -502,6 +661,13 @@ export function TextCodeEditor({
     })
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
+    if (lazyLanguage) {
+      // Plain text until the mode's chunk lands; a closed or reopened editor ignores a late one.
+      void loadLegacyEditorLanguage(languageId).then((extension) => {
+        if (viewRef.current !== view) return
+        view.dispatch({ effects: languageCompartmentRef.current.reconfigure(extension) })
+      })
+    }
     const scroller = view.scrollDOM
     scroller.scrollTop = Math.max(0, initialScrollTopRef.current)
     const onScroll = (): void => {
@@ -535,6 +701,19 @@ export function TextCodeEditor({
       ]
     })
   }, [wordWrap])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || view.state.readOnly === readOnly) return
+    view.dispatch({
+      effects: [
+        readOnlyCompartmentRef.current.reconfigure(EditorState.readOnly.of(readOnly)),
+        completeCompartmentRef.current.reconfigure(
+          editingExtensions(readOnly, () => onLspCompleteRef.current)
+        )
+      ]
+    })
+  }, [readOnly])
 
   const markFrom = markedLines?.from ?? null
   const markTo = markedLines?.to ?? null

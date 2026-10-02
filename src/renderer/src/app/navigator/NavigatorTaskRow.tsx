@@ -2,9 +2,9 @@ import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, 
 import type { ToolApprovalDecision } from '@shared/ipc'
 import { approvalAsk, questionAsk } from '@shared/needsYouText'
 import { Icon } from '@renderer/lib/icons'
-import { Button, CheckMark, DiffStat, IconButton, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { Button, CheckMark, DiffStat, IconButton, StatusGlyph, Tooltip, cn, type TaskState } from '@renderer/lib/ui'
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from '@renderer/lib/ui/ContextMenu'
-import { BORDER_DIVIDER, ROW_HOVER } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import {
   markSessionDragEnd,
   markSessionDragStart,
@@ -25,6 +25,8 @@ export type NavigatorRowActions = {
   onRename: (workspacePath: string, runId: string, goal: string) => void
   onDelete: (workspacePath: string, runId: string) => void
   onExport?: (workspacePath: string, runId: string) => void
+  /** The task as a JSON bundle that Import task… reads back. */
+  onExportJson?: (workspacePath: string, runId: string) => void
   onCopyLink?: (workspacePath: string, runId: string) => void
   /** Stop a live run. */
   onStop?: (workspacePath: string, runId: string) => void
@@ -34,6 +36,8 @@ export type NavigatorRowActions = {
   onRetry?: (workspacePath: string, runId: string) => void
   /** The task header's Fork: the task's conversation as a new task. */
   onFork?: (workspacePath: string, runId: string) => void
+  /** Repeat the task's brief on a schedule (Repeat…). */
+  onRepeat?: (workspacePath: string, runId: string, title: string) => void
   /** Pause the standing goal — and stop the run it launched, if one is live. */
   onPauseGoal?: (workspacePath: string, runId: string, live: boolean) => void
   /** Disarm a scheduled loop. */
@@ -71,7 +75,8 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   onMultiSelect,
   snippet,
   query = '',
-  ask = null
+  ask = null,
+  openInstance = null
 }: {
   row: NavRow
   /** The state the group's heading says; a row in it shows no glyph of its own. */
@@ -91,6 +96,8 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   query?: string
   /** What a waiting task waits on, once main has said. */
   ask?: PendingAsk | null
+  /** The instance open in place of this task's record, marked in its fold. */
+  openInstance?: string | null
 }) {
   const [renaming, setRenaming] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -122,6 +129,9 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   const { workspacePath, runId } = row
   const live = row.state === 'running' || row.state === 'needs'
   const interrupted = !live && row.stateLabel.startsWith('Interrupted')
+  // A task you stopped carries on as the record's Resume does: the Retry path's continue.
+  // "Stopped · edits to review" too: the edits waiting do not change how it ended.
+  const stoppedByYou = !live && row.state === 'stopped' && row.stateLabel.startsWith('Stopped')
   // Retry only where the task view offers it: a failure Retry can get past.
   const retryable = row.state === 'failed' && row.run.retryable === true
   const goalActive = row.run.goalStatus === 'active'
@@ -134,6 +144,8 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
     }
     if (interrupted && onResume) {
       items.push({ id: 'resume', label: 'Resume', onSelect: () => onResume(workspacePath, runId) })
+    } else if (stoppedByYou && onRetry) {
+      items.push({ id: 'resume', label: 'Resume', onSelect: () => onRetry(workspacePath, runId) })
     }
     if (retryable && onRetry) {
       items.push({ id: 'retry', label: 'Retry', onSelect: () => onRetry(workspacePath, runId) })
@@ -153,11 +165,13 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         onSelect: () => onTogglePin(workspacePath, runId)
       })
     }
-    // A live task can't be put away: it still has something to say.
-    if (onToggleArchive && (row.archived || !live)) {
+    // A live task can't be put away: it still has something to say. It says why.
+    if (onToggleArchive) {
       items.push({
         id: 'archive',
         label: row.archived ? 'Unarchive' : 'Archive',
+        disabled: live && !row.archived,
+        disabledReason: 'Stop it or let it finish first',
         onSelect: () => onToggleArchive(workspacePath, runId)
       })
     }
@@ -170,10 +184,22 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         onSelect: () => onExport(workspacePath, runId)
       })
     }
+    if (actions.onExportJson) {
+      const onExportJson = actions.onExportJson
+      items.push({
+        id: 'export-json',
+        label: 'Export as JSON',
+        onSelect: () => onExportJson(workspacePath, runId)
+      })
+    }
     // As in the task header: main forks only a task that has stopped.
     if (actions.onFork && !live) {
       const onFork = actions.onFork
       items.push({ id: 'fork', label: 'Fork', onSelect: () => onFork(workspacePath, runId) })
+    }
+    if (actions.onRepeat) {
+      const onRepeat = actions.onRepeat
+      items.push({ id: 'repeat', label: 'Repeat…', onSelect: () => onRepeat(workspacePath, runId, row.title) })
     }
     if (actions.onCopyLink) {
       const onCopyLink = actions.onCopyLink
@@ -188,7 +214,7 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
       onSelect: () => setConfirmingDelete(true)
     })
     return items
-  }, [actions, retryable, goalActive, interrupted, live, loopArmed, row.archived, row.pinned, runId, workspacePath])
+  }, [actions, retryable, goalActive, interrupted, stoppedByYou, live, loopArmed, row.archived, row.pinned, row.title, runId, workspacePath])
 
   const dimmed = row.archived || row.state === 'done' || row.state === 'stopped'
   const showGlyph = row.state !== groupState
@@ -204,8 +230,9 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
     metaLabel(row.meta),
     row.state === 'running' ? row.activity : null,
     note,
-    checks ? `${checks.met} of ${checks.total} checks met` : null,
+    checks ? `${checks.met} of ${checks.total} ${checks.total === 1 ? 'check' : 'checks'} met` : null,
     row.run.worktreeBranch ? `worktree ${row.run.worktreeBranch}` : null,
+    row.run.scheduled ? scheduledText(row.run.scheduled) : null,
     row.foreign ? row.workspaceName : null,
     row.archived ? 'archived' : null,
     checked ? 'selected' : null,
@@ -329,6 +356,13 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
           >
             {row.title}
           </span>
+          {row.run.scheduled ? (
+            <Tooltip content={scheduledText(row.run.scheduled)} describeChild={false}>
+              <span className="inline-flex shrink-0 text-tertiary" data-row-scheduled aria-hidden>
+                <Icon name="repeat" size={12} />
+              </span>
+            </Tooltip>
+          ) : null}
           {confirmingDelete ? null : (
             <>
               {checked ? (
@@ -357,6 +391,7 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
       {row.instances ? (
         <RowInstances
           instances={row.instances}
+          current={openInstance}
           onOpen={(instanceRunId) => actions.onSelect(workspacePath, instanceRunId)}
         />
       ) : null}
@@ -420,6 +455,17 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
     </li>
   )
 })
+
+/** A scheduled run in words: "Repeats daily at 09:00", and whether it made up a missed time. */
+export function scheduledText(scheduled: NonNullable<NavRow['run']['scheduled']>): string {
+  const base = `Repeats: ${scheduled.label}`
+  if (!scheduled.catchUpFrom) return base
+  const from = new Date(scheduled.catchUpFrom)
+  const when = Number.isNaN(from.getTime())
+    ? scheduled.catchUpFrom
+    : from.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return `${base} · catching up a missed run from ${when}`
+}
 
 /** What a waiting task asks, in words: the approval or question main holds, or the state until it has said. */
 function askNote(row: NavRow, ask: PendingAsk | null): string {
@@ -485,7 +531,7 @@ function secondLine(row: NavRow, ask: PendingAsk | null, note: string | null): R
         {checks ? (
           <span className={checks.met < checks.total ? 'text-warning' : 'text-muted'}>
             <span aria-hidden>· </span>
-            {checks.met}/{checks.total} checks
+            {checks.met}/{checks.total} {checks.total === 1 ? 'check' : 'checks'}
           </span>
         ) : null}
       </span>
@@ -534,7 +580,16 @@ export function RowDecision({
 }
 
 /** A live task's instances, one line each under a fold that counts the ones still going. */
-function RowInstances({ instances, onOpen }: { instances: readonly NavInstance[]; onOpen: (runId: string) => void }) {
+function RowInstances({
+  instances,
+  current,
+  onOpen
+}: {
+  instances: readonly NavInstance[]
+  /** The one open in place of the task's record. */
+  current: string | null
+  onOpen: (runId: string) => void
+}) {
   const [open, setOpen] = useState(true)
   const going = instances.filter((i) => i.state === 'running' || i.state === 'needs').length
   const label = `${instances.length} ${instances.length === 1 ? 'instance' : 'instances'}`
@@ -559,15 +614,22 @@ function RowInstances({ instances, onOpen }: { instances: readonly NavInstance[]
               <button
                 type="button"
                 title={i.title}
+                aria-current={i.runId === current ? 'true' : undefined}
                 onClick={() => onOpen(i.runId)}
                 className={cn(
                   'flex h-6 w-full min-w-0 items-center gap-2 rounded-sm px-1 text-left text-caption vy-transition focus-visible:vy-focus-ring',
-                  ROW_HOVER
+                  i.runId === current ? SELECTED : ROW_HOVER
                 )}
               >
                 <StatusGlyph state={i.state} size={12} label />
-                <span className="shrink-0 text-secondary">{i.title}</span>
-                {i.activity ? <span className="min-w-0 truncate vy-text-live">{i.activity}</span> : null}
+                {/* The name first, cut only when it alone is too long; the activity has the room left. */}
+                <span className={cn('min-w-0 truncate', i.runId === current ? 'text-fg-strong' : 'text-secondary')}>{i.title}</span>
+                {i.agentType ? (
+                  <span className="max-w-[12ch] shrink-0 truncate text-tertiary" data-agent-type>
+                    {i.agentType}
+                  </span>
+                ) : null}
+                {i.activity ? <span className="min-w-0 flex-1 basis-0 truncate vy-text-live">{i.activity}</span> : null}
               </button>
             </li>
           ))}

@@ -51,6 +51,16 @@ import { setFocusedFile } from '@renderer/lib/focusedFile'
 import { handleTabListKeyDown } from '@renderer/lib/utils/tabListKeyboard'
 import { HexEditor } from './HexEditor'
 import { TextCodeEditor } from './TextCodeEditor'
+import { ConfirmFileList } from './ConfirmFileList'
+import {
+  compileFind,
+  describeReplaceCount,
+  findPatternSource,
+  lineMatches,
+  planReplaceAll,
+  uniquePaths,
+  type FindOptions
+} from './findReplace'
 import { useTaskChangedFile } from './useTaskChangedLines'
 import { FilePreview } from './FilePreview'
 import { defaultPreviewOpen, filePreviewKind } from './filePreviewKind'
@@ -1222,6 +1232,13 @@ export const FilesPanel = memo(function FilesPanel({
   const [findHits, setFindHits] = useState<Array<{ path: string; line: number; text: string }>>([])
   const [findError, setFindError] = useState<string | null>(null)
   const [findBusy, setFindBusy] = useState(false)
+  // Regex on by default: the query was always read as one, before the toggles existed.
+  const [findRegex, setFindRegex] = useState(true)
+  const [findMatchCase, setFindMatchCase] = useState(false)
+  const [findWholeWord, setFindWholeWord] = useState(false)
+  const [replaceOpen, setReplaceOpen] = useState(false)
+  const [replaceQuery, setReplaceQuery] = useState('')
+  const [replaceBusy, setReplaceBusy] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const previewKind = activeTab ? filePreviewKind(activeTab.path) : null
 
@@ -1746,6 +1763,177 @@ export const FilesPanel = memo(function FilesPanel({
     [requestConfirm, saveTab]
   )
 
+  const findOptions = useMemo<FindOptions>(
+    () => ({ query: findQuery.trim(), regex: findRegex, matchCase: findMatchCase, wholeWord: findWholeWord }),
+    [findQuery, findRegex, findMatchCase, findWholeWord]
+  )
+
+  /**
+   * Grep the workspace for the query. The grep reads every query as a
+   * case-insensitive regex, so the pattern carries literal/whole-word and, for
+   * Match case, the hits are re-checked here (`exact: false` keeps the superset —
+   * replace-all re-matches each file whole anyway).
+   */
+  const grepFind = useCallback(
+    async (
+      options: FindOptions,
+      maxResults: number,
+      exact: boolean
+    ): Promise<
+      { ok: true; hits: Array<{ path: string; line: number; text: string }>; truncated: boolean } | { ok: false; error: string }
+    > => {
+      const compiled = compileFind(options)
+      if (!compiled.ok) return { ok: false, error: compiled.error }
+      if (!workspacePath || !window.vyotiq?.workspaceGrep) {
+        return { ok: false, error: 'Find in files is unavailable.' }
+      }
+      const res = await window.vyotiq.workspaceGrep({
+        workspacePath,
+        query: findPatternSource(options),
+        maxResults
+      })
+      if (!res.ok) return { ok: false, error: res.error }
+      const hits =
+        exact && options.matchCase
+          ? res.data.hits.filter((hit) => lineMatches(compiled.regex, hit.text))
+          : res.data.hits
+      return { ok: true, hits, truncated: res.data.truncated }
+    },
+    [workspacePath]
+  )
+
+  const runFindInFiles = useCallback(async (): Promise<void> => {
+    if (!findOptions.query || !workspacePath || !window.vyotiq?.workspaceGrep) return
+    setFindBusy(true)
+    setFindError(null)
+    try {
+      const result = await grepFind(findOptions, 80, true)
+      if (!result.ok) {
+        setFindError(result.error)
+        setFindHits([])
+        return
+      }
+      setFindHits(result.hits)
+    } finally {
+      setFindBusy(false)
+    }
+  }, [findOptions, grepFind, workspacePath])
+
+  /**
+   * Replace every match in the workspace through the editor's own save path
+   * (read, then save against the version read). A file with unsaved edits in a
+   * tab is left alone and named, not merged; a clean open tab reloads.
+   */
+  const replaceAllInFiles = useCallback(async (): Promise<void> => {
+    const operation = captureWorkspaceOperation()
+    const api = window.vyotiq
+    if (!operation || !findOptions.query || !api?.workspaceFileRead || !api.workspaceFileSave) return
+    const samePath = (a: string, b: string): boolean => a.replace(/\\/g, '/') === b.replace(/\\/g, '/')
+    const openTab = (path: string): FileTab | undefined =>
+      sessionRef.current?.tabs.find((tab) => samePath(tab.path, path))
+    setReplaceBusy(true)
+    setFindError(null)
+    try {
+      const found = await grepFind(findOptions, 500, false)
+      if (!found.ok) {
+        setFindError(found.error)
+        return
+      }
+      const plan = await planReplaceAll({
+        paths: uniquePaths(found.hits),
+        options: findOptions,
+        replacement: replaceQuery,
+        hasUnsavedEdits: (path) => Boolean(openTab(path)?.dirty),
+        readFile: async (path) => {
+          const read = await api.workspaceFileRead({ workspacePath: operation.path, path })
+          return read.ok ? read.data : null
+        }
+      })
+      if (!isCurrentWorkspaceOperation(operation)) return
+      const unsaved = plan.skipped.filter((skip) => skip.reason === 'unsaved').length
+      const others = plan.skipped.length - unsaved
+      const leftAlone = [
+        unsaved > 0 ? `${unsaved} with unsaved edits` : null,
+        others > 0 ? `${others} binary, too large or unreadable` : null
+      ].filter(Boolean)
+      if (plan.files.length === 0) {
+        setNotice({
+          message: leftAlone.length
+            ? `Nothing replaced: matches are only in files left alone (${leftAlone.join(', ')}).`
+            : 'No matches to replace.'
+        })
+        return
+      }
+      const notes = [
+        leftAlone.length ? `Left alone: ${leftAlone.join(', ')}.` : null,
+        found.truncated ? 'The search stopped early, so run Replace all again for the rest.' : null
+      ].filter(Boolean)
+      const confirmed = await requestConfirm(
+        `Replace ${describeReplaceCount(plan.matches, plan.files.length)}?${notes.length ? ` ${notes.join(' ')}` : ''}`,
+        {
+          title: 'Replace in files',
+          confirmLabel: 'Replace all',
+          danger: true,
+          details: <ConfirmFileList files={plan.files.map((file) => ({ path: file.path, action: 'modified' as const }))} />
+        }
+      )
+      if (!confirmed || !isCurrentWorkspaceOperation(operation)) return
+      let replacedFiles = 0
+      let replacedMatches = 0
+      const failed: string[] = []
+      for (const file of plan.files) {
+        // Typed into while the confirm was open: the buffer wins.
+        if (openTab(file.path)?.dirty) {
+          failed.push(file.path)
+          continue
+        }
+        const saved = await api.workspaceFileSave({
+          workspacePath: operation.path,
+          path: file.path,
+          kind: 'text',
+          content: file.next,
+          encoding: file.read.encoding,
+          eol: file.read.eol,
+          bom: file.read.bom,
+          expectedVersion: file.read.version,
+          replaceExisting: false
+        })
+        if (!saved.ok) {
+          failed.push(file.path)
+          continue
+        }
+        replacedFiles += 1
+        replacedMatches += file.count
+        const open = openTab(file.path)
+        if (open && !open.dirty) void reloadTab(open.id)
+      }
+      if (!isCurrentWorkspaceOperation(operation)) return
+      if (failed.length > 0) {
+        setError(
+          `Replaced ${describeReplaceCount(replacedMatches, replacedFiles)}; ${failed.length} file${
+            failed.length === 1 ? '' : 's'
+          } changed meanwhile and ${failed.length === 1 ? 'was' : 'were'} left alone: ${failed.join(', ')}`
+        )
+      } else {
+        setNotice({ message: `Replaced ${describeReplaceCount(replacedMatches, replacedFiles)}.`, success: true })
+      }
+      void runFindInFiles()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReplaceBusy(false)
+    }
+  }, [
+    captureWorkspaceOperation,
+    findOptions,
+    grepFind,
+    isCurrentWorkspaceOperation,
+    reloadTab,
+    replaceQuery,
+    requestConfirm,
+    runFindInFiles
+  ])
+
   const allowLeaveTab = useCallback(
     async (id: string): Promise<boolean> => {
       const current = sessionRef.current?.tabs.find((tab) => tab.id === id)
@@ -2049,7 +2237,15 @@ export const FilesPanel = memo(function FilesPanel({
     if (index < 0) return
     pendingTreeScrollPathRef.current = null
     treeVirtualizer.scrollToIndex(index, { align: 'auto' })
-    document.getElementById(treeElementId(path))?.focus({ preventScroll: true })
+    // The reveal lands once its folders load, which can be after the person
+    // has clicked into the editor or a find field: only take focus that is
+    // already in the tree, or that nothing holds.
+    const row = document.getElementById(treeElementId(path))
+    const held = document.activeElement
+    const tree = row?.closest('[role="tree"]')
+    if (row && (!held || held === document.body || (tree?.contains(held) ?? false))) {
+      row.focus({ preventScroll: true })
+    }
   }, [treeVirtualizer, visibleEntries])
 
   useEffect(() => {
@@ -3643,27 +3839,13 @@ export const FilesPanel = memo(function FilesPanel({
       {findInFilesOpen ? (
         <div className="flex shrink-0 flex-col border-b border-border">
           <form
-            className="flex h-10 items-center gap-1.5 pl-4 pr-2"
+            className="flex h-10 items-center gap-1 pl-4 pr-2"
             onSubmit={(event) => {
               event.preventDefault()
-              const q = findQuery.trim()
-              if (!q || !workspacePath || !window.vyotiq?.workspaceGrep) return
-              setFindBusy(true)
-              setFindError(null)
-              void window.vyotiq
-                .workspaceGrep({ workspacePath, query: q, maxResults: 80 })
-                .then((res) => {
-                  if (!res.ok) {
-                    setFindError(res.error)
-                    setFindHits([])
-                    return
-                  }
-                  setFindHits(res.data.hits)
-                })
-                .finally(() => setFindBusy(false))
+              void runFindInFiles()
             }}
           >
-            <Icon name="search" size={13} className="shrink-0 text-muted" />
+            <Icon name="search" size={13} className="mr-0.5 shrink-0 text-muted" />
             <input
               ref={findInputRef}
               className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
@@ -3672,7 +3854,40 @@ export const FilesPanel = memo(function FilesPanel({
               value={findQuery}
               onChange={(event) => setFindQuery(event.target.value)}
             />
-            <Button size="xs" type="submit" pending={findBusy}>
+            <IconButton
+              icon="matchCase"
+              label="Match case"
+              size="xs"
+              tone="muted"
+              active={findMatchCase}
+              onClick={() => setFindMatchCase((on) => !on)}
+            />
+            <IconButton
+              icon="wholeWord"
+              label="Whole word"
+              size="xs"
+              tone="muted"
+              active={findWholeWord}
+              onClick={() => setFindWholeWord((on) => !on)}
+            />
+            <IconButton
+              icon="regex"
+              label="Regular expression"
+              size="xs"
+              tone="muted"
+              active={findRegex}
+              onClick={() => setFindRegex((on) => !on)}
+            />
+            <IconButton
+              icon="replace"
+              label={replaceOpen ? 'Hide replace' : 'Replace in files'}
+              size="xs"
+              tone="muted"
+              active={replaceOpen}
+              aria-expanded={replaceOpen}
+              onClick={() => setReplaceOpen((open) => !open)}
+            />
+            <Button size="xs" type="submit" pending={findBusy} className="ml-1">
               {findBusy ? 'Searching…' : 'Search'}
             </Button>
             <IconButton
@@ -3687,6 +3902,32 @@ export const FilesPanel = memo(function FilesPanel({
               }}
             />
           </form>
+          {replaceOpen ? (
+            <form
+              className="flex h-10 items-center gap-1 pl-4 pr-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void replaceAllInFiles()
+              }}
+            >
+              <Icon name="replace" size={13} className="mr-0.5 shrink-0 text-muted" />
+              <input
+                className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
+                placeholder={findRegex ? 'Replace ($1 for a group)' : 'Replace'}
+                aria-label="Replace with"
+                value={replaceQuery}
+                onChange={(event) => setReplaceQuery(event.target.value)}
+              />
+              <Button
+                size="xs"
+                type="submit"
+                pending={replaceBusy}
+                disabled={!findOptions.query || replaceBusy || findBusy}
+              >
+                {replaceBusy ? 'Replacing…' : 'Replace all'}
+              </Button>
+            </form>
+          ) : null}
           {findError ? <p className="m-0 px-4 pb-2 text-xs text-danger" role="alert">{findError}</p> : null}
           {findHits.length > 0 ? (
             <ul className="scroll-thin m-0 max-h-40 list-none overflow-auto border-t border-border py-1">
@@ -4506,6 +4747,7 @@ export const FilesPanel = memo(function FilesPanel({
                       : null
                   }
                   onLspHover={inlineLspEnabled ? inlineLsp.fetchHover : undefined}
+                  onLspComplete={inlineLspEnabled ? inlineLsp.fetchCompletion : undefined}
                   onScrollToLineHandled={() => setScrollToLine(null)}
                   onChange={(content) => {
                     const accepted = mutateTab(activeTab.id, (tab) => ({
