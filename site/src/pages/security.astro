@@ -15,19 +15,19 @@ const controls = [
   },
   {
     title: 'Some tools always ask',
-    body: 'Tools from MCP servers (unless you turn that setting off) and tools the agent wrote itself ask before they run, even when approvals are off. The "Unattended mode" switch in Settings, Agent approves the rest on its own but still asks before deleting files, running terminal commands, editing files and committing.'
+    body: 'Tools from MCP servers (unless you turn that setting off), tools the agent wrote itself and risky commands ask before they run, even when approvals are off. The "Unattended mode" switch in Settings, Agent approves the rest on its own but still asks before edits, deletes, terminal commands, commits, pull requests, MCP tools and other high-risk tools.'
   },
   {
     title: 'Approvals are narrow',
-    body: 'Allow once, allow for this task, or always allow one tool or command in this workspace. A command that chains or redirects is never offered "Always allow". A request nobody answers is denied after 15 minutes.'
+    body: 'Allow once, allow for this task, or always allow one tool or command in this workspace. A command that chains or redirects is never offered "Always allow". A risky command is only offered Allow once or Deny. A request nobody answers is denied after 15 minutes.'
   },
   {
     title: 'Work happens on a branch',
     body: 'A task can run in its own git worktree. An instance that writes gets its own branch when a worktree can be made; otherwise it must be limited to folders, and it cannot write outside them.'
   },
   {
-    title: 'Every write can be undone',
-    body: 'Each file the agent writes is checkpointed with a hash of what it wrote. Rewinding puts files back and leaves alone any file you changed since.'
+    title: 'File edits can be undone',
+    body: 'Each file the agent edits is checkpointed with a hash of what it wrote. Rewinding puts files back and leaves alone any file you changed since. A file changed by a terminal command may have no copy to go back to.'
   },
   {
     title: 'Ask mode reads',
@@ -51,7 +51,7 @@ const controls = [
   />
 
   <section class="wrap intro">
-    <Shot sky="fog" label="An approval card asking to run a database migration command, with Allow once, Allow for this task, Always allow and Deny." desktop={{ w: 1200, h: 440, x: 380, y: 104, s: 1 }} phone={{ w: 350, h: 220, x: 10, y: 22, s: 0.75 }}>
+    <Shot sky="fog" label="An approval card asking to run a database migration command, with Allow once, Allow for this task, Always allow and Deny." desktop={{ w: 1200, h: 440, x: 340, y: 125, s: 1 }} phone={{ w: 350, h: 200, x: 10, y: 22, s: 0.63 }}>
       <Approval />
     </Shot>
   </section>
@@ -69,7 +69,7 @@ const controls = [
     <h2 class="h3">What it does not do</h2>
     <div class="limit-list">
       <p><strong>Agent-built tools are not sandboxed.</strong> A tool the agent writes runs with full Node.js access in its own process, with a 30-second limit. That is why it asks before every run, and why an "Always allow" is tied to the exact contents of the file: change the file and it asks again.</p>
-      <p><strong>There is no command blocklist.</strong> Terminal commands are controlled by approvals, not by a list of forbidden commands. Keep "Edits and commands" on for work you are not watching.</p>
+      <p><strong>Nothing is forbidden outright.</strong> A short list of destructive commands, such as recursive deletes outside the workspace, force pushes, <code>git reset --hard</code>, <code>git clean -f</code>, disk formatting and downloads piped into a shell, always asks, in every mode. It reads the command text, so it can miss what a script does. Everything else follows your approval setting. Keep "Edits and commands" on for work you are not watching.</p>
     </div>
   </section>
 

@@ -29,13 +29,13 @@
   --gutter: 20px;
   --section-gap: 112px;
 
-  /* Agent V's own UI, Native skin, dark: used only inside the app screens. */
+  /* Agent V's own UI, Native skin, dark: used only inside the app screens.
+     Values are src/renderer/src/styles.css; --app-frame is the window's outline on the sky. */
   --app-font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --app-mono: 'Cascadia Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
   --app-chrome: #121212;
   --app-bg: #1a1a1a;
-  --app-raised: #1e1e1d;
-  --app-card: #232221;
+  --app-card: #1e1e1d;
   --app-surface: #252423;
   --app-surface-2: #2e2c2b;
   --app-sunken: #141414;
@@ -56,7 +56,11 @@
   --app-danger: #f26b5e;
   --app-danger-soft: rgb(242 107 94 / 0.15);
   --app-warning: #e9a23b;
-  --app-info: #4fb3e8;
+  --app-warning-soft: rgb(233 162 59 / 0.15);
+  --app-diff-add: rgb(61 187 123 / 0.12);
+  --app-diff-del: rgb(242 107 94 / 0.12);
+  --app-overlay: rgb(0 0 0 / 0.56);
+  --app-shadow-menu: 0 0 0 1px var(--app-border), 0 16px 40px -8px rgb(0 0 0 / 0.6);
 }
 
 @media (max-width: 1023px) {
@@ -146,3 +150,25 @@ h1, h2, h3, p, ul, ol, figure { margin: 0; }
 }
 .button.light { background: var(--night-fg); color: var(--ink); }
 .link { text-decoration: none; }
+
+/* The app's three motions, for its screens: the running mark's facets take the light in
+   turn, live text carries a moving highlight, and the live plan step pulses. */
+@keyframes app-agv { 0%, 100% { opacity: 0.26; } 13% { opacity: 1; } 44% { opacity: 0.26; } }
+.app-agv .f { animation: app-agv 1200ms ease-in-out infinite; }
+.app-agv .f-br { animation-delay: 400ms; }
+.app-agv .f-l { animation-delay: 800ms; }
+@keyframes app-live-text { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.app-live-text {
+  background-image: linear-gradient(90deg, var(--app-muted) 0%, var(--app-muted) 40%, var(--app-fg-strong) 50%, var(--app-muted) 60%, var(--app-muted) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: app-live-text 2.2s linear infinite;
+}
+@keyframes app-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.app-pulse { animation: app-pulse 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .app-agv .f, .app-pulse { animation: none; }
+  .app-live-text { animation: none; background: none; color: var(--app-muted); }
+}

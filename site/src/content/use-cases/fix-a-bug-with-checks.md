@@ -21,16 +21,16 @@ docs:
 
 A bug you could fix yourself in half an hour, where you already know what "fixed" looks like. This is the job to learn Agent mode on: it is small enough to follow every step, and the checks tell you whether it worked without reading every line.
 
-Pick "Agent", paste the brief, and add each Done when line with "Add a check". The checks are the most important part. Write them as things that can be shown: a command that passes, a file that exists, something that did not change.
+Pick "Agent", paste the brief, then type each Done when line into the "Done when… a command passes, a file exists" field at the bottom of the brief box and press Enter. The checks are the most important part. Write them as things that can be shown: a command that passes, a file that exists, something that did not change.
 
 ## What you will see
 
-The agent reads the invoice code, edits a file and runs the tests. With approvals on "Edits and commands", each edit and each command waits for you on an approval card that shows exactly what will run. "Allow once" is the safe answer while you are learning.
+The agent reads the invoice code and writes a short plan, then edits a file and runs the tests, itself or through an instance it starts. With approvals on "Edits and commands", each edit and each command waits for you on an approval card that shows exactly what will run. "Allow once" is the safe answer while you are learning.
 
-Before it can finish, the agent marks each check met or not met, with its evidence: the command it ran and what came back. The receipt at the end counts them, for example "3/3 checks met".
+Before it finishes, the agent is asked to mark each check met or not met, with its evidence: the command it ran and what came back. The receipt at the end counts them, for example "3/3 checks met". Checks from the agent's own plan count too, so the total can be higher than yours.
 
 ## What to check
 
 - Read the evidence under each check, not only the tick. "Not met" is an honest result, not an error, and it tells you exactly what is left.
-- A check left open counts as not checked. If that happens often, make your checks more concrete.
+- A check left open counts as not checked. If that happens often, make your checks more concrete. In Changes, "Ask it to check" sends an open check back to the agent, and "Ask it to cover this" sends a not met one.
 - The next use case covers what to do with the changes themselves.

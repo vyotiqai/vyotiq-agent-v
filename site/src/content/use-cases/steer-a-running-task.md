@@ -25,4 +25,4 @@ The instruction line at the bottom stays open during a run. `Shift+Enter` ("Send
 
 ## What to check
 
-- If the run has gone somewhere you do not want at all, press `Esc` to stop it. What it already changed stays in place for you to keep, undo or rewind.
+- If the run has gone somewhere you do not want at all, press `Esc` or click "Stop" in the task header. What it already changed stays in place for you to keep, undo or rewind.

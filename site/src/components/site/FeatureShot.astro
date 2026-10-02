@@ -1,5 +1,9 @@
 ---
-/** Renders a feature page's named screen inside its sky. */
+/**
+ * Renders a feature page's named screen inside its sky. A `wide` screen is the layout the
+ * app uses in a wide pane; on a phone the panel is too narrow for it, so the phone frame
+ * gets the narrow layout the app falls back to.
+ */
 import Shot from './Shot.astro'
 import AppWindow from '@/components/app/AppWindow.astro'
 import Brief from '@/components/app/Brief.astro'
@@ -20,5 +24,18 @@ const SCREENS = { app: AppWindow, brief: Brief, doneWhen: DoneWhen, instance: In
 const Screen = SCREENS[shot.name]
 ---
 <Shot sky={shot.sky} label={shot.label} desktop={shot.desktop} phone={shot.phone} eager={eager}>
-  <Screen />
+  {shot.wide ? (
+    <Fragment>
+      <div class="wide"><Screen wide /></div>
+      <div class="narrow"><Screen /></div>
+    </Fragment>
+  ) : <Screen />}
 </Shot>
+
+<style>
+  .narrow { display: none; }
+  @media (max-width: 639px) {
+    .wide { display: none; }
+    .narrow { display: block; }
+  }
+</style>

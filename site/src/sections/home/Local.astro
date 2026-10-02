@@ -3,11 +3,11 @@ import Shot from '@/components/site/Shot.astro'
 import Approval from '@/components/app/Approval.astro'
 
 const facts = [
-  'Open source under GPL-3.0',
+  'Open source under GPL-3.0-or-later',
   'Your own model keys, or local models through Ollama',
   'You choose which actions wait for your approval',
   'Each task can run in its own git worktree',
-  'Every write is checkpointed and can be rewound',
+  'Every file edit is checkpointed and can be rewound',
   'The code index runs on your machine, and dictation can too'
 ]
 ---
@@ -17,7 +17,7 @@ const facts = [
     <ul>{facts.map((f) => <li>{f}</li>)}</ul>
     <a href="/privacy" class="more tap">What leaves your machine →</a>
   </div>
-  <Shot sky="fog" label="An approval card: the agent asks to run a database migration command, with Allow once, Allow for this task, Always allow and Deny." desktop={{ w: 592, h: 440, x: 76, y: 104, s: 1 }} phone={{ w: 350, h: 210, x: 10, y: 18, s: 0.75 }}>
+  <Shot sky="fog" label="An approval card: the agent asks to run a database migration command, with Allow once, Allow for this task, Always allow and Deny." desktop={{ w: 592, h: 440, x: 36, y: 125, s: 1 }} phone={{ w: 350, h: 200, x: 10, y: 22, s: 0.63 }}>
     <Approval />
   </Shot>
 </section>

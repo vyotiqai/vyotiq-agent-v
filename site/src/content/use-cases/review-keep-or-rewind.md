@@ -22,7 +22,7 @@ After every task that changed files. A rename across a project is a good one to 
 
 ## What you will see
 
-Press `Ctrl+E` to open "Changes" in the inspector. Under "This task" each file the task wrote has its diff and two buttons: "Keep" accepts it, "Undo" puts it back.
+Press `Ctrl+E` to open "Changes" in the inspector. Under "This task" each file the task wrote has its diff and two icon buttons: the tick keeps it, the undo arrow puts it back. "Keep all" and "Undo all" do every file at once. They unlock once the run stops.
 
 If the whole direction was wrong, not one file, rewind instead: hover your instruction in the record and click "Rewind files and record to before this instruction". The dialog lists what happens to each file before anything changes.
 
@@ -30,4 +30,4 @@ If the whole direction was wrong, not one file, rewind instead: hover your instr
 
 - Files you edited yourself after the agent wrote them are marked "Edited since" in Changes and "changed since" in the rewind dialog. Undo and rewind leave those alone, so your own work is not overwritten.
 - Keep what is right and undo the rest; you do not have to take a task's work all or nothing.
-- Rewinding removes everything after that instruction from the record too, so you can give a better instruction and run it again.
+- Rewinding also removes everything after that instruction from the record; the instruction itself stays. To change the instruction and run it again, use "Edit and rerun" on it instead. Until you send something new, "Redo" brings a rewind back.

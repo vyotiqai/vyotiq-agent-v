@@ -17,7 +17,9 @@ docs:
 
 ## When to use it
 
-When a task's work is reviewed and ready for your team. It needs git, the GitHub CLI and a GitHub connection. Open the "PR" tab (`Ctrl+Shift+G`): it offers "Install GitHub CLI" if the CLI is missing, and "Connect GitHub" signs you in once. There is no token to paste.
+When a task's work is reviewed and ready for your team. It needs git, the GitHub CLI and a GitHub connection. Open the "PR" tab (`Ctrl+Shift+G`): it offers "Install GitHub CLI" if the CLI is missing, and "Connect GitHub" signs you in once with a one-time code you enter on GitHub. There is no token to paste.
+
+Send the brief in the instruction line of the task that did the work, not as a new task: a commit holds only the files its own task changed.
 
 ## What you will see
 
@@ -28,5 +30,5 @@ When a CI check fails, it has a "Hand to the agent" button. That gives the task 
 ## What to check
 
 - The commit holds only the files this task changed, not everything in your working copy.
-- Read the commit message before you approve it. It becomes the pull request's description, which your team reads.
-- Merging stays your call. The merge button in the "PR" tab is disabled, with the reason on hover, when GitHub would not allow it.
+- Read the commit message before you approve it. The pull request is filled from it, and your team reads that.
+- Merging stays your call. The "Squash and merge" button in the "PR" tab is disabled, with the reason on hover, when GitHub would not allow it. A draft has "Mark ready for review" beside it.

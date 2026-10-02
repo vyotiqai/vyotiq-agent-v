@@ -22,7 +22,7 @@ Type the command on the New task page, or in the instruction line of a task you 
 
 ## What you will see
 
-A "Goal" bar sits above the instruction line with the objective, and "Pause" and "Mark complete" buttons. When a turn ends, the task continues on its own until the agent marks the goal complete. After 25 turns without finishing it pauses, and the navigator shows "Goal paused" until you resume it. The limits, and what happens after a restart, are in [Goals and loops](/docs/goals-and-loops).
+A "Goal" bar sits above the instruction line with the objective, and "Pause" and "Mark complete" buttons. When a turn ends, the task continues on its own until the agent marks the goal complete. After 25 automatic continues without finishing it pauses, and the navigator shows "Goal paused" until you click "Resume". The limits, and what happens after a restart, are in [Goals and loops](/docs/goals-and-loops).
 
 ## What to check
 

@@ -24,10 +24,11 @@ Any change you would otherwise check by opening the page yourself: layout, a for
 
 The agent starts the dev server in a terminal, then opens the page in its own browser. You can watch it in the inspector's "Browser" tab: it navigates, clicks, types and takes snapshots of the page to see what it built. In Agent mode that browser can reach `localhost`, so it can test your local server.
 
-Each command still asks first under "Edits and commands", including starting the server.
+Under "Edits and commands", each command asks first, starting the server included, and so does each browser action. "Allow for this task" on the first card of a kind stops that kind asking again in this task.
 
 ## What to check
 
 - Look at the last snapshot yourself in the record. If the agent says the overlap is gone, the snapshot should show it.
 - Name the state to look at in the brief ("submit it empty", "signed out"). The agent checks what you name.
-- The agent's browser does not change its window size. For a check at a fixed width, or a flow you want to keep as a test, add the Playwright MCP server from Extensions.
+- To point at the problem, click "Pick an element to ask about" in the "Browser" tab, then click the element. It goes into your instruction.
+- The agent cannot resize its browser, but you can: the "Browser" tab's viewport switch sets "Fit" or a fixed width such as 390, and its menu has more sizes.

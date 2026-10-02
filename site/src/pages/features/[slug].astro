@@ -27,15 +27,15 @@ const others = FEATURES.filter((f) => f.slug !== feature.slug)
     ))}
   </section>
 
-  {feature.second && (
+  {feature.more?.map((m) => (
     <section class="wrap second">
       <div class="text">
-        <h2 class="h3">{feature.second.title}</h2>
-        <p class="muted">{feature.second.body}</p>
+        <h2 class="h3">{m.title}</h2>
+        <p class="muted">{m.body}</p>
       </div>
-      <FeatureShot shot={feature.second.shot} />
+      <FeatureShot shot={m.shot} />
     </section>
-  )}
+  ))}
 
   <section class="wrap next">
     <div class="docs">

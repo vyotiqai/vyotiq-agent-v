@@ -12,7 +12,7 @@ const count = stages.reduce((n, s) => n + s.cases.length, 0)
   <PageHead
     eyebrow="Use cases"
     title="Learn it in the order<br />you would use it"
-    lede={`${count} jobs, each with a brief you can paste. Start with the first: each one builds on the ones before it.`}
+    lede={`${count} jobs, each with a brief or a command you can paste. Start with the first: each one builds on the ones before it.`}
   >
     {first && <a href={`/use-cases/${first.id}`} class="button start">Start with use case 1</a>}
   </PageHead>

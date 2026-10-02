@@ -1,0 +1,17 @@
+---
+/** One of the app's icons at its pixel size, in the current text colour unless `color` is given. */
+import { ICONS, type IconName } from './icons'
+
+interface Props {
+  name: IconName
+  size?: number | string
+  color?: string
+  /** The inspector toggle is the navigator's glyph, mirrored. */
+  mirrored?: boolean
+  style?: string
+}
+const { name, size = 16, color = 'currentColor', mirrored = false, style = '' } = Astro.props
+const px = Number(size)
+const flip = mirrored ? ' transform: scaleX(-1);' : ''
+---
+<svg width={px} height={px} viewBox="0 0 256 256" fill={color} aria-hidden="true" style={`flex-shrink: 0;${flip}${style ? ' ' + style : ''}`}>{ICONS[name].map((d) => <path d={d}></path>)}</svg>

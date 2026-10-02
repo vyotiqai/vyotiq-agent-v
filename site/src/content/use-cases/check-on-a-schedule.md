@@ -22,10 +22,11 @@ Type the command in the instruction line of a task you already have open; a loop
 
 ## What you will see
 
-The navigator lists the task as "Scheduled", with the time to the next run. Each run is a normal turn in the same task, so the record builds a history of every check. `/loop stop` turns it off.
+The navigator lists the task as "Scheduled", with the time to the next run. The first check runs one interval after you set the loop. Each run is a normal turn in the same task, so the record builds a history of every check. `/loop` on its own shows the timer, and `/loop stop` turns it off.
 
 ## What to check
 
-- The timer runs inside Agent V: it fires while the app is open, and is set again when you open it.
+- The timer runs inside Agent V: it fires while the app is open, and is set again when you open it, for the workspaces you have open.
+- Each tick's commands ask like any others. Use "Always allow" on the read-only command it runs, such as `gh run list`, or each tick waits on you.
 - Keep the instruction's output short. Every tick is a model call, and the task's receipts show what the checks cost over a day.
 - Combine it with a goal for jobs that should end: the loop stops once the task's goal is complete.

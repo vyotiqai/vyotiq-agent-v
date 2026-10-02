@@ -17,9 +17,9 @@ Setup's step 3, "Decide what needs your OK", offers three choices. Settings name
 | "Every tool" | "Every tool" | "Even reads and searches ask." |
 | "Unattended" | "Nothing" | "For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask." |
 
-Setup starts on "Edits and commands". The mode can differ per workspace; setup says "You can change this per workspace."
+Setup starts on "Edits and commands" unless you already chose "Every tool" in Settings. The mode can differ per workspace; setup says "You can change this per workspace." To give a workspace its own mode, turn on its switch in Settings, "General", "Workspaces". The approval settings you change after that are saved for that workspace only, except Unattended mode.
 
-The "New task" page repeats the current mode in a short note, such as "Asks before edits and commands", with "MCP tools ask first" when that applies.
+The "New task" page repeats the current mode in a short note, such as "Asks before edits and commands", with "MCP tools ask first" when that applies. Its "Change" link opens Settings, "Agent".
 
 ### What "Edits and commands" lets through
 
@@ -31,13 +31,13 @@ These run without asking:
 - Loading a skill
 - `git status` and `git diff`
 - Language-server lookups (a rename still asks)
-- Planning and bookkeeping: writing the plan, updating steps, marking Done when checks, and starting or waiting on [instances](/docs/instances)
+- Planning and bookkeeping: writing the plan, updating steps, setting goals, switching between Ask and Agent, marking Done when checks, and starting, waiting on, reading or cancelling [instances](/docs/instances)
 
-Everything else asks: file edits and deletes, terminal commands, commits, pull requests and memory writes. Browser tools always ask in this mode.
+Everything else asks: file edits and deletes, applying patches, terminal commands, running tests, typecheck and lint, commits, pull requests, reviews and issues, memory writes, screen snips, merging an instance, building a tool, and all MCP tools, including listing, pinning and releasing them. Browser tools always ask in this mode.
 
 ## The approval card
 
-When a tool needs your OK, a "Needs you" card appears in the record. It shows the file or the full command, whether it "Can change files or run code" or "Reads only", and for a command, its folder and time limit. "Show the full request" reveals every argument.
+When a tool needs your OK, a "Needs you" card appears in the record. It shows the file or the full command, whether it "Can change files or run code" or "Reads only", how long until it is denied, and for a command, its time limit and any working folder. For anything but a command, "Show the full request" shows the call's arguments (the first 4,000 characters, with secrets removed).
 
 | Button | Key | Effect |
 | --- | --- | --- |
@@ -50,9 +50,11 @@ On macOS the keys are `⌥A` and `⌥D`.
 
 ### Always allow rules for commands
 
-For a terminal command, "Always allow" is scoped to the command, not to the whole terminal. A command that chains or redirects is never offered "Always allow", and an allowed command never covers "one that chains or redirects".
+For a terminal command, "Always allow" remembers the program and its subcommand, such as `pnpm vitest`, and later commands that start with those words run without asking. A command that chains or redirects is never offered "Always allow", and an allowed command never covers "one that chains or redirects".
 
-Your rules are listed in Settings, "Agent", under "Always allowed": "Commands and tools you allowed for good. Remove one to be asked again."
+"Allow for this task" on a command is wider: every terminal command runs without asking for the rest of the task. Risky commands still ask.
+
+Your rules are listed in Settings, "Agent", under "Always allowed": "Commands and tools you allowed for good. Remove one to be asked again." With more than one rule, "Remove all" clears the list.
 
 ### Nobody answers
 
@@ -60,9 +62,9 @@ An approval that waits too long is denied. The card counts down ("denied automat
 
 ## What always asks
 
-- **MCP tools.** "MCP tools always ask" is on by default: "Even when approvals are off." You can turn it off in the same group.
+- **MCP tools.** MCP server tools ask in every mode. With "Nothing" they keep asking while "MCP tools always ask" is on, the default ("Even when approvals are off."). You can turn it off in the same group. An Always allow or Allow for this task you give one still covers it.
 - **Tools the agent wrote.** A tool made with `build_tool` asks before it runs, even with approvals set to "Nothing". An allow for it covers only the code you saw, so it asks again whenever that code changes. See [Agent-built tools](/docs/agent-built-tools).
-- **Risky commands.** A terminal command asks whatever the mode, Always allow rules, "Allow for this task" or Unattended mode say when it would:
+- **Risky commands.** A terminal or test command asks whatever the mode, Always allow rules, "Allow for this task" or Unattended mode say when it would:
   - delete recursively outside the workspace, the whole workspace, or its `.git` folder, or delete paths it reads from its input
   - force-push, mirror, or delete a branch or tag on a remote
   - run `git reset --hard` or `git clean -f`
@@ -79,6 +81,7 @@ High-risk tools still ask with it on:
 
 - File edits and deletes, and applying patches
 - Terminal commands
+- A test run whose command is not one of the usual test, lint or build checks
 - Commits, pull requests, pull request reviews and GitHub issues
 - Merging an instance
 - Building a tool, and any agent-built tool
@@ -86,7 +89,7 @@ High-risk tools still ask with it on:
 - MCP tools
 - A language-server rename
 
-"Questions while unattended" decides what happens when the agent asks you something: "Wait for an answer" or "Skip the question".
+With Unattended mode on, "Questions while unattended" decides what happens when the agent asks you something: "Wait for an answer" (the default) or "Skip the question". The spend limit and workspace hooks questions always wait.
 
 ## Home: "Needs you"
 
@@ -98,4 +101,6 @@ Home collects everything waiting on you under "Needs you":
 
 When there is nothing: "Nothing is waiting on you. Approvals and questions from running tasks land here."
 
-`Ctrl+J` jumps to the next task that needs you.
+The navigator's "Needs you" group and the Inbox also offer "Allow once" and "Deny" on a waiting approval.
+
+`Ctrl+J` (`⌘J` on macOS) jumps to the next task that needs you. You can change the key in Settings, "Shortcuts".

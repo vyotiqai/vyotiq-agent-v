@@ -17,22 +17,22 @@ import ModelPicker from '@/components/app/ModelPicker.astro'
       <Fragment slot="body">Home lists the approvals and questions from every running task. Allow or deny a command right there, or open the task that asked.</Fragment>
     </Card>
     <Card title="See what it cost" href="/features/usage">
-      <Shot sky="slate" label="Usage for the last seven days: 23 tasks, 18.4M tokens, $4.12 estimated spend, 87% finished, and tasks per day." desktop={{ w: 592, h: 460, x: 44, y: 36, s: 0.84 }} phone={{ w: 350, h: 260, x: 18, y: 20, s: 0.49 }}>
+      <Shot sky="slate" label="Usage for the last seven days: 23 tasks, 8.6M tokens, $4.12 estimated spend, 90% finished and 92% of changed files kept, with spend per day." desktop={{ w: 592, h: 460, x: 59, y: 32, s: 0.74 }} phone={{ w: 350, h: 260, x: 34, y: 18, s: 0.44 }}>
         <Usage />
       </Shot>
-      <Fragment slot="body">Usage shows tasks, tokens and estimated spend per day, which models did the work, which tools failed, and which edits never had a passing check.</Fragment>
+      <Fragment slot="body">Usage shows tasks, tokens and estimated spend per day, how much changed work you kept, which models did the work, which tools failed, and which edits never had a passing check.</Fragment>
     </Card>
     <Card title="Checks its own work" href="/features/task-record">
-      <Shot sky="sage" label="A finished task: all three Done when checks passed, the result, and a receipt with time, tokens and cost." desktop={{ w: 592, h: 420, x: 26, y: 24, s: 1 }} phone={{ w: 350, h: 240, x: 14, y: 18, s: 0.595 }}>
+      <Shot sky="sage" label="A finished task: its result, the files it changed, all three Done when checks met with their evidence, and a receipt with time, tokens and cost." desktop={{ w: 592, h: 460, x: 16, y: 38, s: 0.8 }} phone={{ w: 350, h: 260, x: 10, y: 16, s: 0.47 }}>
         <DoneWhen />
       </Shot>
-      <Fragment slot="body">Write what done looks like. Each line is checked at the end against what it actually read and ran, and the receipt shows the time, tokens and cost.</Fragment>
+      <Fragment slot="body">Write what done looks like. The agent marks each line met or not met with the evidence it saw, and the receipt shows the time, tokens and cost.</Fragment>
     </Card>
     <Card title="Uses the model you trust">
-      <Shot sky="fog" label="The model picker: providers on the left, Anthropic's models with context size and price on the right, and the effort below." desktop={{ w: 592, h: 420, x: 16, y: 14, s: 1 }} phone={{ w: 350, h: 240, x: 14, y: 16, s: 0.575 }}>
+      <Shot sky="fog" label="The model picker: your providers on the left, Anthropic's models with context size and price on the right, and the effort below." desktop={{ w: 592, h: 460, x: 36, y: 30, s: 1 }} phone={{ w: 350, h: 260, x: 14, y: 16, s: 0.6 }}>
         <ModelPicker />
       </Shot>
-      <Fragment slot="body">Nine providers on your own keys, any OpenAI-compatible endpoint, or local models through Ollama. Pick the mode and the effort for each task.</Fragment>
+      <Fragment slot="body">Eleven providers on your own keys or cloud credentials, any OpenAI-compatible endpoint including Azure OpenAI, or local models through Ollama. Pick the mode and the effort for each task.</Fragment>
     </Card>
   </div>
 </section>

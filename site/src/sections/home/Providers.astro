@@ -10,7 +10,9 @@ const providers: [string, string][] = [
   ['OpenRouter', 'font-weight: 500; letter-spacing: -0.02em'],
   ['xAI', 'font-weight: 600; letter-spacing: -0.02em'],
   ['Mistral', 'font-weight: 600; letter-spacing: 0.01em; text-transform: uppercase; font-size: 0.95em'],
-  ['OpenCode', 'font-family: var(--mono); font-weight: 500; font-size: 0.85em']
+  ['OpenCode Go', 'font-family: var(--mono); font-weight: 500; font-size: 0.85em'],
+  ['Bedrock', 'font-weight: 600; letter-spacing: -0.02em'],
+  ['Vertex AI', 'font-weight: 500; letter-spacing: -0.01em']
 ]
 ---
 <section class="wrap strip" aria-label="Model providers">
@@ -23,11 +25,11 @@ const providers: [string, string][] = [
 <style>
   .strip { margin-top: 64px; min-height: 112px; border-block: 1px solid var(--hair); display: flex; align-items: center; gap: 48px; }
   p { width: 130px; flex-shrink: 0; font-size: 15px; line-height: 1.35; color: var(--nav); }
-  ul { padding: 0; list-style: none; flex-grow: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 22px; font-size: 22px; color: var(--faint); white-space: nowrap; }
+  ul { padding: 0; list-style: none; flex-grow: 1; display: grid; grid-template-columns: repeat(6, auto); align-items: center; justify-content: space-between; gap: 10px 22px; font-size: 22px; color: var(--faint); white-space: nowrap; }
   @media (max-width: 1023px) {
     .strip { flex-direction: column; align-items: flex-start; gap: 14px; padding-block: 22px; }
     p { width: auto; font-size: 14px; }
-    ul { justify-content: flex-start; font-size: 18px; }
+    ul { display: flex; flex-wrap: wrap; justify-content: flex-start; font-size: 18px; }
   }
   @media (max-width: 639px) { .strip { margin-top: 44px; } }
 </style>

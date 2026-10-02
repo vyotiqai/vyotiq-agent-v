@@ -29,4 +29,4 @@ Skills load on demand. With Flake hunter added, the agent recognises the job and
 
 - The failure rate before and after. A fix without a before-and-after rate is a guess.
 - The diff should change the cause, such as a shared clock, test order or a race, not the test's patience.
-- Other skills in Extensions work the same way. "Review code" is a good one to add next, for a second look at a diff before you commit it.
+- Other skills in Extensions work the same way. "Quality" is a good one to add next: its code-review skill gives a diff a second look before you commit it.

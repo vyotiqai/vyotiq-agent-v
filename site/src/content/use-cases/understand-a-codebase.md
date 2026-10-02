@@ -18,14 +18,14 @@ docs:
 
 You have just joined a team, cloned a project you have never seen, or come back to your own code after months away. Before you hand the agent anything that changes files, have it read the code for you. It is also the quickest way to see how Agent V works, because in Ask mode it reads rather than changes files.
 
-Open the project's folder as a workspace, pick "Ask" in the switch under the brief (or press `Ctrl+.`), and paste the brief.
+Open the project's folder as a workspace, pick "Ask" in the Agent | Ask switch at the bottom of the brief box (or press `Ctrl+.`), paste the brief and click "Start task".
 
 ## What you will see
 
-The record fills with what the agent reads and searches, one row per step: "Read", "Searched", "Listed". Open a row to see which files it looked at. The answer comes last, in plain words, naming the files it found.
+The record fills with what the agent looks at. Reads, searches and listings in a row fold into one line, such as "Explored", "Read" or "Searched", with a count. Open the line to see each file it looked at. The answer comes last, in plain words, naming the files it found.
 
 ## What to check
 
 - Open two or three of the files it names and see whether the answer holds. An answer grounded in the files is one you can trust; a vague one means the brief needs to be more specific.
 - Ask a follow-up in the instruction line at the bottom, such as "Where are the rate limits set?". It keeps the context of the first answer.
-- By default the agent can switch itself from Ask to Agent when a job needs changes. To keep a task strictly read-only, turn off "Switch between Ask and Agent on its own" in Settings, "Agent".
+- By default the agent can switch itself from Ask to Agent when a job needs changes. To keep Ask strictly read-only, turn off "Switch between Ask and Agent on its own" in Settings, "Agent". It applies to every task.

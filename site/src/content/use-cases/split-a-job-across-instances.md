@@ -17,16 +17,15 @@ docs:
 
 ## When to use it
 
-A job with two or more separate workstreams: the same change in several services, or a feature with a back end, a front end and tests that can be written apart. Saying in the brief that the parts are independent helps; the agent decides whether to split.
+A job with two or more separate workstreams: the same change in several services, or a feature with a back end, a front end and tests that can be written apart. Saying in the brief that the parts are independent helps the agent split them cleanly.
 
 ## What you will see
 
-The plan shows a step that starts instances, with a short id for each. An instance is a sub-agent with its own brief: a goal, the outcome wanted, its steps and its own Done when checks. It never sees your conversation, only that brief. An instance that writes normally works in its own git worktree, on its own branch under `vyotiq/instance/`, so the parallel edits do not collide in your folder.
+Under the plan step, a block lists the instances, one row each with a short id and what it is doing. An instance is a sub-agent with its own brief: a goal, the outcome wanted, its steps and its own Done when checks. It never sees your conversation, only that brief. An instance that writes normally works in its own git worktree, on its own branch under `vyotiq/instance/`, so the parallel edits do not collide in your folder.
 
-Click an id to open an instance and watch it. When they finish, the parent reads their reports and merges their branches one at a time, then runs its own checks across the whole result.
+Click a row to open that instance and watch it. When they finish, the parent reads their reports and merges their branches one at a time. Each merge is a git merge into your current branch.
 
 ## What to check
 
 - Open the instances' briefs. A clear brief per instance is what makes parallel work land; a vague one comes back vague.
-- A task runs up to 16 instances at once by default, and instances cannot start instances of their own, so the work stays a tree you can follow.
-- The parent's checks are the ones that matter at the end: they run after the merge, across everything.
+- A task runs up to 16 instances at once by default ("Instances at once" in Settings, "Agent", can lower it), and instances cannot start instances of their own, so the work stays a tree you can follow.

@@ -25,12 +25,12 @@ In the header of the "New task" page, switch "This folder" to "New worktree" bef
 
 ## What you will see
 
-For a job this size the agent writes a plan first. Its steps show in the record and tick off as they finish; the full plan is in the inspector's "Plan" tab. Because the brief asks it to, the agent stops at the library choice and asks you with a small form in the record. The run waits for your answer.
+The agent writes a plan first, as it does for every Agent task. Its steps show in the record and tick off as they finish; the full plan is in the inspector's "Plan" tab. Because the brief asks it to, the agent stops at the library choice and asks you with a small form in the record. The run waits for your answer.
 
 When the run is over, a strip under the record says it "Works in its own worktree" and how much there is to merge.
 
 ## What to check
 
-- Review the changes as usual, then choose "Merge into" the branch it came from, or "Discard" to delete the worktree and its branch.
+- Review the changes as usual, then choose "Merge into" the branch it came from, or "Discard" to delete the worktree and its branch. "Merge into" commits anything uncommitted under the task's title first. After a merge, "Remove worktree" deletes it.
 - Uncommitted files in your folder are not copied into the worktree. Commit what the task needs to see first.
 - The worktree lives in Agent V's data folder, never inside your project.

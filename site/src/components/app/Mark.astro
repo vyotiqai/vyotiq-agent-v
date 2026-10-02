@@ -1,0 +1,11 @@
+---
+/** A provider mark or a file-type icon, drawn the way the app draws it. */
+import { FILE_ICONS, PROVIDER_MARKS, type FileIconName, type ProviderMarkName } from './marks'
+
+type Props = { size?: number | string; style?: string } & ({ provider: ProviderMarkName; file?: never } | { file: FileIconName; provider?: never })
+const { size = 16, style = '', provider, file } = Astro.props
+const mark = provider ? PROVIDER_MARKS[provider] : FILE_ICONS[file as FileIconName]
+const color = provider ? PROVIDER_MARKS[provider].color : undefined
+const px = Number(size)
+---
+<svg width={px} height={px} viewBox={mark.viewBox} fill-rule="evenodd" aria-hidden="true" style={`flex-shrink: 0;${color ? ` color: ${color};` : ''}${style ? ' ' + style : ''}`}>{mark.paths.map((p) => <path d={p.d} fill={'fill' in p && p.fill ? p.fill : 'currentColor'} clip-rule={'clipRule' in p ? String(p.clipRule) : undefined}></path>)}</svg>

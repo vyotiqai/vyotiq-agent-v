@@ -5,6 +5,13 @@
 import catalog from '../../../resources/marketplace/catalog.json'
 
 const icons = import.meta.glob<string>('../../../resources/marketplace/icons/*.svg', { query: '?url', import: 'default', eager: true })
+const iconSources = import.meta.glob<string>('../../../resources/marketplace/icons/*.svg', { query: '?raw', import: 'default', eager: true })
+
+/** One black ink, which the app draws as a mask in the text colour (main/marketplace/catalogIcons.ts). */
+function isMonochrome(svg: string | undefined): boolean {
+  const colours = new Set(svg?.match(/#[0-9A-Fa-f]{3,6}/g) ?? [])
+  return colours.size > 0 && [...colours].every((c) => c.toLowerCase() === '#000000')
+}
 
 type Raw = (typeof catalog.packages)[number] & {
   verified?: boolean
@@ -22,6 +29,7 @@ export type Extension = {
   description: string
   verified: boolean
   icon: string | null
+  iconMono: boolean
   signIn: boolean
   requires: string[]
   featured: number
@@ -41,6 +49,7 @@ export const extensions: Extension[] = (catalog.packages as Raw[])
     description: p.description,
     verified: Boolean(p.verified),
     icon: icons[`../../../resources/marketplace/${p.iconPath}`] ?? null,
+    iconMono: isMonochrome(iconSources[`../../../resources/marketplace/${p.iconPath}`]),
     signIn: p.auth === 'oauth' || p.auth === 'oauth-client',
     requires: p.requires ?? [],
     featured: p.featuredRank ?? 999

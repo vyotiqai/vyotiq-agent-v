@@ -26,9 +26,10 @@ const noun = kind === 'command' ? 'command' : 'brief'
     <div class="checks">
       <p class="label">Done when</p>
       <ul>{checks.map((c) => <li>{c}</li>)}</ul>
-      <p class="hint">Add each line with "Add a check" under the brief.</p>
+      <p class="hint">Type each line into the "Done when… a command passes, a file exists" field in the brief box and press Enter.</p>
     </div>
   )}
+  {kind === 'command' && <p class="hint">Paste it into the instruction line of an open task.</p>}
 </figure>
 
 <style>

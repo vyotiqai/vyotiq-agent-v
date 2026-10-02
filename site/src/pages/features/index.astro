@@ -4,12 +4,12 @@ import PageHead from '@/components/site/PageHead.astro'
 import FeatureShot from '@/components/site/FeatureShot.astro'
 import { FEATURES } from '@/data/features'
 
-/** Each feature's hero screen again, in a card-sized frame. */
+/** Each feature's hero screen again, in a card-sized frame, at the app's narrow layout. */
 const CARD: Record<string, { desktop: { w: number; h: number; x: number; y: number; s: number } }> = {
   'task-record': { desktop: { w: 592, h: 400, x: -150, y: 28, s: 0.56 } },
   instances: { desktop: { w: 592, h: 400, x: 24, y: 28, s: 0.78 } },
   approvals: { desktop: { w: 592, h: 400, x: 44, y: 32, s: 0.84 } },
-  usage: { desktop: { w: 592, h: 400, x: 44, y: 32, s: 0.84 } }
+  usage: { desktop: { w: 592, h: 400, x: 59, y: 28, s: 0.74 } }
 }
 ---
 <Base title="Features" description="What Agent V does: tasks with a record and checks, instances that work in parallel, approvals and rewind, and usage with honest costs.">
@@ -17,7 +17,7 @@ const CARD: Record<string, { desktop: { w: number; h: number; x: number; y: numb
   <div class="wrap grid">
     {FEATURES.map((f) => (
       <a href={`/features/${f.slug}`} class="card">
-        <FeatureShot shot={{ ...f.hero, desktop: CARD[f.slug].desktop }} />
+        <FeatureShot shot={{ ...f.hero, wide: false, desktop: CARD[f.slug].desktop }} />
         <h2 class="h4">{f.nav} →</h2>
         <p class="muted">{f.lede}</p>
       </a>

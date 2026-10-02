@@ -9,7 +9,7 @@ const files = installers(release)
 
 type Row = { id: Platform; label: string; note: string }
 const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] = [
-  { os: 'windows', name: 'Windows', rows: [{ id: 'windows', label: 'Installer', note: 'x64 · installs for your user, no admin rights' }] },
+  { os: 'windows', name: 'Windows', rows: [{ id: 'windows', label: 'Installer', note: 'x64 · for you only, or for everyone on the PC' }] },
   {
     os: 'mac',
     name: 'macOS',
@@ -23,13 +23,13 @@ const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] =
     name: 'Linux',
     rows: [
       { id: 'appimage', label: 'AppImage', note: 'x64 · updates from inside the app' },
-      { id: 'deb', label: '.deb', note: 'Debian, Ubuntu · updates through your package manager' },
-      { id: 'rpm', label: '.rpm', note: 'Fedora, RHEL · updates through your package manager' }
+      { id: 'deb', label: '.deb', note: 'Debian, Ubuntu · update by installing a newer .deb' },
+      { id: 'rpm', label: '.rpm', note: 'Fedora, RHEL · update by installing a newer .rpm' }
     ]
   }
 ]
 ---
-<Base title="Download" description="Download Agent V for Windows, macOS and Linux. Free and open source under GPL-3.0.">
+<Base title="Download" description="Download Agent V for Windows, macOS and Linux. Free and open source under GPL-3.0-or-later.">
   <PageHead
     eyebrow={release ? `Version ${release.version} · ${formatDate(release.date)}` : 'Download'}
     title="Download Agent V"
@@ -94,8 +94,8 @@ const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] =
       <h2 class="h3">What else you need</h2>
     </div>
     <dl>
-      <div><dt>A model</dt><dd>An API key for one of nine providers, any OpenAI-compatible endpoint, or Ollama running locally with no key at all.</dd></div>
-      <div><dt>Git</dt><dd>Optional, but worktrees, instances, Changes and commits need it on your PATH.</dd></div>
+      <div><dt>A model</dt><dd>An API key or cloud credentials for one of eleven providers, any OpenAI-compatible endpoint, or Ollama running locally with no key at all.</dd></div>
+      <div><dt>Git</dt><dd>Optional. Worktrees, instances on their own branch, uncommitted changes, commits and pull requests need it on your PATH.</dd></div>
       <div><dt>Node or uv</dt><dd>Only for MCP servers that start with <code>npx</code> or <code>uvx</code>.</dd></div>
     </dl>
   </section>

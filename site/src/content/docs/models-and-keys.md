@@ -14,7 +14,7 @@ Agent V does not ship its own model. You connect a provider, and the agent sends
 | OpenAI | Yes |
 | Anthropic | Yes |
 | Gemini | Yes |
-| Ollama | No, when it runs on your machine |
+| Ollama | No, unless you use Ollama Cloud |
 | DeepSeek | Yes |
 | Groq | Yes |
 | OpenRouter | Yes |
@@ -26,15 +26,15 @@ Agent V does not ship its own model. You connect a provider, and the agent sends
 | Google Vertex AI | A service-account key or this computer's gcloud login |
 | Azure OpenAI | Yes (added as a custom endpoint) |
 
-The "Model" group at the top of the page sets the "Provider for new tasks" and the "Model". You can refresh the model list from there. The brief on the "New task" page also has a model and effort menu; see [Writing a task](/docs/writing-a-task).
+The "Model" group at the top of the Providers section sets the "Provider for new tasks", the "Model" and the "Effort". The provider menu lists only providers that have a key or need none. The refresh button reloads the model list. Each provider row also has "Use for new tasks", and the one in use is marked "In use". A workspace can run its own model: Settings, "General", "Workspaces" ("Override gives a workspace its own model and agent settings."). The brief on the "New task" page also has a model and effort menu; see [Writing a task](/docs/writing-a-task).
 
 ## Adding a key
 
-1. Open Settings, "Providers", and find the provider under "API keys".
-2. Click "Add key" ("Manage" once a key is saved, and always for local Ollama).
+1. Open Settings, "Providers", and find the provider under "API keys", or under "Custom endpoints" for your own servers.
+2. Click "Add key", or "Manage" when the row has a key or needs none.
 3. Paste the key into the "Paste a {provider} API key" field and click "Save key".
 
-"Get a key" links to the provider's own key page. "Clear" removes a saved key. Each row says where it stands: "Key saved", "Local · no key needed", "No key", or "Can’t save keys".
+"Get a key" links to the provider's key page until a key is saved. "Clear" removes a saved key; for Bedrock and Vertex AI the button is "Sign out". Each row says where it stands: "Key saved", "Local · no key needed", "No key", or "Can’t save keys". Dictation's cloud engines (Settings, "Voice") use the OpenAI or OpenRouter key saved here.
 
 ### Where keys are stored
 
@@ -44,15 +44,15 @@ If your system has no secure storage, keys cannot be saved at all: the field rea
 
 ## Custom OpenAI-compatible endpoints
 
-"Custom endpoints" takes "Any OpenAI-compatible server: vLLM, llama.cpp, LM Studio, a hosted gateway".
+With no endpoints added, "Custom endpoints" reads "Any OpenAI-compatible server: vLLM, llama.cpp, LM Studio, a hosted gateway".
 
-- Click "Add endpoint", give it a name ("Name, such as Home GPU") and a base URL.
-- You can save up to 20 endpoints. Each one appears as its own provider.
-- The base URL should end in `/v1`. If it has no `/v1`, Agent V adds it.
-- The default base is `http://127.0.0.1:8080/v1`.
+- Click "Add endpoint", pick "OpenAI-compatible" or "Azure OpenAI", give it a name ("Name, such as Home GPU") and a base URL, then click "Add".
+- You can save up to 20 endpoints. Each one appears as its own provider. "Remove" deletes one, but not while it is the provider for new tasks.
+- The base URL should contain `/v1`, or a vendor's mount such as `/v1/openai`. If it has no `/v1`, Agent V adds it.
+- The built-in "Custom OpenAI-compatible" row starts at `http://127.0.0.1:8080/v1`. An added endpoint needs its own URL.
 - "Public hosts need a key; loopback and a private LAN can go without."
 
-Agent V has no price table for custom endpoints, so their tasks show tokens but no cost. See [Usage and cost](/docs/usage-and-cost).
+Agent V has no price table for custom endpoints. Their tasks show tokens, and a cost only when the server reports one. See [Usage and cost](/docs/usage-and-cost).
 
 ### Azure OpenAI
 
@@ -60,35 +60,35 @@ In "Add endpoint", pick "Azure OpenAI" and paste the resource endpoint from the 
 
 ### Extra headers
 
-An endpoint's row has an "Extra headers" field, one `Name: value` per line, for gateways that route on a header or want an organisation id. Headers the request owns (`Host`, `Content-Type`, `Content-Length` and the like) can't be set. The headers are stored in settings, not the key vault, so put secrets in the API key.
+An endpoint you added has an extra headers box, one `Name: value` per line and up to 16, for gateways that route on a header or want an organisation id. Headers the request owns (`Host`, `Content-Type`, `Content-Length` and the like) can't be set. The headers are stored in settings, not the key vault, so put secrets in the API key.
 
-Some local models write a tool call as text in their own template syntax (`<tool_call>…`, `[TOOL_CALLS]…`, `<|python_tag|>…`) instead of as a real tool call. Agent V recognises these and runs the call, but only for tools the model was offered, and a reply that just shows what a call looks like in the middle of an explanation is left as a reply.
+### Tool calls written as text
+
+Some local models write a tool call as text in their own template syntax (`<tool_call>…`, `[TOOL_CALLS]…`, `<|python_tag|>…`) instead of as a real tool call. Agent V recognises these, `<function=…>` and a reply that is only a JSON call, and runs the call, but only for tools the model was offered. JSON shown inside a longer explanation is left as a reply.
 
 ## Amazon Bedrock
 
-Open the "Amazon Bedrock" row and set the "AWS region". Calls go only to `bedrock-runtime.<region>.amazonaws.com`. Then sign in one of two ways:
+Open the "Amazon Bedrock" row and set the "AWS region". Tasks call `bedrock-runtime.<region>.amazonaws.com`, and the model list comes from `bedrock.<region>.amazonaws.com`. Then sign in one of two ways:
 
 - "API key": a Bedrock API key, sent as a bearer token.
 - "Access keys": an access key ID, a secret access key and, for temporary keys, a session token. Requests are signed with AWS Signature Version 4.
 
-Every model goes through Bedrock's Converse API. The model list shows your account's system inference profiles (the `global.` and `us.` ids newer Claude models require) and the on-demand text models. For Claude, thinking and prompt caching are passed through; for other models, only what Converse supports.
+Every model goes through Bedrock's Converse API. The model list shows your account's system inference profiles (the `global.` and `us.` ids newer Claude models require) and the on-demand text models. Claude gets thinking and prompt caching, Amazon Nova gets prompt caching, and other models get what Converse supports.
 
 ## Google Vertex AI
 
 Open the "Google Vertex AI" row and set the "Google Cloud project" and the "Vertex location": `global`, `us`, `eu`, or a region like `us-east5`. Then sign in:
 
 - "Key file": paste a service-account key (the whole JSON file).
-- "gcloud login": use the login `gcloud auth application-default login` wrote on this computer. "Check this computer" shows what it found. Nothing is copied; the file is read when a task starts.
+- "gcloud login": use the login `gcloud auth application-default login` wrote on this computer. "Check this computer" shows what it found. Then click "Use this login". Nothing is copied; the file is read when a task starts.
 
 Gemini models go through `streamGenerateContent`, Claude models through `streamRawPredict`. Models from other publishers on Vertex are not supported yet. Vertex has no endpoint that lists the models a project can use, so the list comes from the models.dev registry, after Agent V checks your sign-in works.
 
 Agent V has no price table for Bedrock, Vertex AI or Azure, so their tasks show tokens but no cost, and the per-task spend limit can't count them.
 
-Bedrock and Vertex AI are new. They were tested against the published request and stream formats with local stand-ins, not yet against a live account.
-
 ## Claude through OpenRouter
 
-For Claude models through OpenRouter, or through a custom endpoint pointed at `openrouter.ai`, Agent V marks where the provider may cache the prompt, so each step after the first bills most of its input at the cached rate.
+For Claude models through OpenRouter, or through a custom endpoint pointed at `openrouter.ai`, Agent V marks where the provider may cache the prompt.
 
 ## Helper and utility models
 
@@ -103,7 +103,7 @@ Pick a provider, then one of its models. Choosing a provider alone saves nothing
 
 ## Ollama: local or cloud
 
-Ollama is the default provider. It points at `http://127.0.0.1:11434`, the local Ollama daemon, and needs no key.
+Ollama is the default provider. It points at `http://127.0.0.1:11434`, the local Ollama daemon, and needs no key. Open the Ollama row to point it at another host.
 
 If you save an Ollama API key, the provider moves to Ollama Cloud at `https://ollama.com`. In the app's words: "Saving an API key moves this to Ollama Cloud (https://ollama.com); a local host never needs one."
 
@@ -117,7 +117,7 @@ Settings, "General", "Network" sets the proxy for everything the app sends: prov
 
 | "Proxy" | What it does |
 | --- | --- |
-| "System" | Uses `HTTPS_PROXY`/`NO_PROXY` when they are set, otherwise the operating system's proxy. |
+| "System" | Uses `HTTPS_PROXY` or `HTTP_PROXY`, with `NO_PROXY`, when set. Otherwise it uses the operating system's proxy. |
 | "Manual" | Uses the "Proxy address" for everything except the hosts in "Skip the proxy for". This computer is always skipped. |
 | "None" | Connects directly. |
 

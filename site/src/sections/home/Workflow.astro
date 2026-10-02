@@ -18,7 +18,7 @@ const useCaseCount = (await allUseCases()).length
       <h3 class="h3">Write the brief</h3>
       <p class="muted">Say what you want and how you will know it is done. Agent mode plans, edits files and runs commands; Ask mode reads and answers.</p>
     </div>
-    <Shot sky="sand" label="The New task page: a brief about rate limiting, three Done when checks, and Start task." desktop={{ w: 592, h: 440, x: 28, y: 34, s: 0.92 }} phone={{ w: 350, h: 260, x: 14, y: 20, s: 0.555 }}>
+    <Shot sky="sand" label="The New task page: a brief about rate limiting with three Done when checks in the box, and Start task." desktop={{ w: 592, h: 440, x: 35, y: 24, s: 0.9 }} phone={{ w: 350, h: 260, x: 14, y: 16, s: 0.54 }}>
       <Brief />
     </Shot>
   </div>
@@ -27,9 +27,9 @@ const useCaseCount = (await allUseCases()).length
     <div class="text">
       <div class="eyebrow">02</div>
       <h3 class="h3">It does the work</h3>
-      <p class="muted">It reads code, edits files, runs your commands and tests, and drives a browser when the job needs one. Bigger jobs go to instances, each on its own worktree branch, that report back to the task that started them.</p>
+      <p class="muted">It reads code, edits files, runs your commands and tests, and drives a browser when the job needs one. Bigger jobs go to instances that report back to the task that started them; an instance that writes gets its own worktree branch.</p>
     </div>
-    <Shot sky="fog" label="An instance's page: its goal, its own worktree branch and folder scope, and the files it created so far." desktop={{ w: 592, h: 440, x: 16, y: 24, s: 0.78 }} phone={{ w: 350, h: 260, x: 14, y: 18, s: 0.5 }}>
+    <Shot sky="fog" label="An instance's page: the task it reports to, its goal, its own worktree branch and folder, and the files it created so far." desktop={{ w: 592, h: 440, x: 20, y: 20, s: 0.76 }} phone={{ w: 350, h: 260, x: 14, y: 14, s: 0.46 }}>
       <Instance />
     </Shot>
   </div>
@@ -40,7 +40,7 @@ const useCaseCount = (await allUseCases()).length
       <h3 class="h3">You review it</h3>
       <p class="muted">Changes shows every file the task touched. Keep it, undo it, or rewind to before any instruction. Edits you made since are left alone.</p>
     </div>
-    <Shot sky="sage" label="The Changes tab with a diff, and the rewind dialog listing the files it would put back." desktop={{ w: 592, h: 440, x: 24, y: 28, s: 1 }} phone={{ w: 350, h: 260, x: 14, y: 18, s: 0.54 }}>
+    <Shot sky="sage" label="The Changes tab with its checks met and a diff, and the rewind dialog listing the files it would put back." desktop={{ w: 592, h: 440, x: 32, y: 16, s: 0.82 }} phone={{ w: 350, h: 260, x: 14, y: 14, s: 0.5 }}>
       <div class="stack">
         <Changes />
         <div class="over"><RewindDialog /></div>
@@ -54,7 +54,7 @@ const useCaseCount = (await allUseCases()).length
       <h3 class="h3">Ship it</h3>
       <p class="muted">Commit and open the pull request from the task, then watch its checks in the PR tab. A failing check goes back to the agent in one click.</p>
     </div>
-    <Shot sky="slate" label="The PR tab: the pull request's passing checks and a Squash and merge button." desktop={{ w: 592, h: 440, x: 16, y: 24, s: 1 }} phone={{ w: 350, h: 260, x: 14, y: 18, s: 0.575 }}>
+    <Shot sky="slate" label="The PR tab: the pull request's passing checks and a Squash and merge button." desktop={{ w: 592, h: 440, x: 44, y: 16, s: 0.88 }} phone={{ w: 350, h: 260, x: 14, y: 14, s: 0.54 }}>
       <PullRequest />
     </Shot>
   </div>
@@ -70,7 +70,7 @@ const useCaseCount = (await allUseCases()).length
   .text p { font-size: 17px; line-height: 1.5; }
   .flip .text { order: 2; padding: 0 0 0 96px; }
   .stack { position: relative; }
-  .over { position: absolute; left: 112px; top: 148px; }
+  .over { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--app-overlay); }
   .more { align-self: flex-start; text-decoration: none; font-size: 17px; }
 
   @media (max-width: 1023px) {

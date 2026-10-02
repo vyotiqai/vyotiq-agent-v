@@ -6,11 +6,11 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Is Agent V free?',
-    a: 'Yes. Agent V is open source under GPL-3.0 and costs nothing. You pay your model provider for what your tasks use, or nothing at all with a local model through Ollama.'
+    a: 'Yes. Agent V is open source under GPL-3.0-or-later and costs nothing. You pay your model provider for what your tasks use, or nothing at all with a local model through Ollama.'
   },
   {
     q: 'Which models can it use?',
-    a: 'OpenAI, Anthropic, Gemini, DeepSeek, Groq, OpenRouter, xAI, Mistral and OpenCode Go with your own keys; any OpenAI-compatible server such as vLLM, llama.cpp or LM Studio; and Ollama running locally with no key. See <a href="/docs/models-and-keys">Models and keys</a>.'
+    a: 'OpenAI, Anthropic, Gemini, DeepSeek, Groq, OpenRouter, xAI, Mistral and OpenCode Go with your own keys; Amazon Bedrock and Google Vertex AI with your cloud credentials; Azure OpenAI or any OpenAI-compatible server such as vLLM, llama.cpp or LM Studio as a custom endpoint; and Ollama running locally with no key. See <a href="/docs/models-and-keys">Models and keys</a>.'
   },
   {
     q: 'Does my code go to Vyotiq?',
@@ -30,15 +30,15 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Do I need git?',
-    a: 'Not to start, but worktrees, instances, the Changes tab and commits need git on your PATH. Some MCP servers also need Node.js or uv.'
+    a: 'Not to start. Worktrees, instances on their own branch, uncommitted changes, commits and pull requests need git on your PATH. Some MCP servers also need Node.js or uv.'
   },
   {
     q: 'What does a task cost?',
-    a: 'It depends on the model and the task. Every run ends with a receipt showing tokens and cost, and the Usage page adds it up per day. Costs are the provider\'s own figure when it reports one, and otherwise estimated from published prices.'
+    a: 'It depends on the model and the task. Every run ends with a receipt showing tokens and cost, and the Usage page adds it up per day. Costs are the provider\'s own figure when it reports one, and otherwise estimated from published prices. You can also set a spend limit per task in Settings, Agent: at the limit the task asks before it spends more.'
   },
   {
     q: 'Can it break my repository?',
-    a: 'It can run commands and edit files, so you choose what waits for your approval. Tasks can work on their own branch, every file it writes is checkpointed, and you can rewind a task to before any instruction. Keep your work in version control either way.'
+    a: 'It can run commands and edit files, so you choose what waits for your approval. Tasks can work on their own branch, every file edit is checkpointed, and you can rewind a task to before any instruction. Keep your work in version control either way.'
   },
   {
     q: 'What are instances?',
