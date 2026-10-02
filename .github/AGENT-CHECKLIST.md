@@ -263,6 +263,44 @@ dependency's file layout:
 - **Windows packaging EBUSY/EPERM on `win-unpacked(.tmp)`**: transient
   AV/indexer locks — kill stray `Vyotiq.exe`, wait, retry, or use the
   `:alt` output-dir scripts.
+- **`GH013 Repository rule violations … Push cannot contain secrets`** (push
+  protection) names a commit and a file:line. Look at it: in 1.1.0 it was a
+  fake `sk_live_…` in a redaction test's fixtures. Do not use the "allow this
+  secret" link, and a fix commit on top does not help, because every pushed
+  commit is scanned. Rewrite the unpushed commits that hold the literal so the
+  fixture is built at run time (`['sk', 'live', '…'].join('_')`). In a shared
+  checkout build them through a private index and `git hash-object -t commit`,
+  leaving the working tree alone, then push the new tip by SHA
+  (`git push origin <sha>:refs/heads/main`) and only afterwards move the local
+  branch with `git update-ref refs/heads/main <new> <old>`.
+- **A push that ends `HTTP 408`, `Connection was aborted` or "unexpected
+  disconnect while reading sideband packet"** has landed nothing, even when
+  the last line says `Everything up-to-date`. Retry with
+  `git -c http.postBuffer=524288000 -c http.version=HTTP/1.1 push` and confirm
+  with `git ls-remote origin refs/heads/main`.
+- **CI red on every OS, local green**: CI runs Node 22, this machine and
+  Electron 44 run 24. `http.setGlobalProxyFromEnv` is missing on 22, so the
+  proxy traffic tests must be gated on it. Test the other branch locally by
+  deleting that property in a vitest setup file.
+- **`SyntaxError: Invalid or unexpected token` loading a test, Windows CI
+  only**: a script with a shebang that a test imports. Vite strips a hashbang
+  only when it ends in a bare LF, and Windows checks files out as CRLF. Leave
+  shebangs off scripts that tests import.
+- **A test that fails on macOS or Windows CI only**, passing here: paths. The
+  temp dir is spelled differently (`/var` against `/private/var`, a long name
+  against `RUNNER~1`) and git writes the real one into worktree pointers.
+  Reproduce with `TEMP` set to an 8.3 path:
+  `(New-Object -ComObject Scripting.FileSystemObject).GetFolder($dir).ShortPath`.
+- **CI stops at the first failing step**, so lint, build, audit, the packaging
+  smoke and GUI e2e have not run until the unit step is green. Expect a second
+  wave. In 1.1.0: macOS GUI e2e (Ctrl-click is a right-click there; use
+  `ControlOrMeta`) and Linux GUI e2e (no keyring, so `encryptionAvailable` is
+  false and a gate on it hid the Bedrock and Vertex panels).
+- **A gate started in the background that never finishes**: the machine slept
+  and killed it mid-pack. Compare the log's last write time with `date`, check
+  nothing is still running, and rerun that step in the foreground. A watcher
+  script once exited 4 with the run green; read `gh run view <id> --json
+  status,conclusion` instead of trusting its exit code.
 
 ---
 
