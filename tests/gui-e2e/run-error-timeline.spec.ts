@@ -196,7 +196,7 @@ test('an earlier failed turn reads as failed in History, its box inside it, with
     await followUp.elementHandle()
   )
   expect(boxBeforeFollowUp).toBe(true)
-  await expect(window.getByRole('button', { name: 'Retry' })).toHaveCount(0)
+  await expect(window.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
 })
 
 test('the latest failed turn shows one box with Retry and no duplicate banner', async () => {
@@ -206,8 +206,9 @@ test('the latest failed turn shows one box with Retry and no duplicate banner', 
   const box = record.getByRole('alert').filter({ hasText: LATEST.error })
   await expect(box).toHaveCount(1, { timeout: 20_000 })
 
-  await expect(box.getByRole('button', { name: 'Retry' })).toBeVisible()
-  await expect(window.getByRole('button', { name: 'Retry' })).toHaveCount(1)
+  await expect(box.getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
+  // One Retry button: the header's ⋯ names Retry among its items, which is not a second one.
+  await expect(window.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(1)
   await expect(window.locator('[data-composer-line] [role="alert"]')).toHaveCount(0)
 })
 

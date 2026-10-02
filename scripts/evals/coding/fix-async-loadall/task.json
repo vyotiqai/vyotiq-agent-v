@@ -1,0 +1,11 @@
+{
+  "id": "fix-async-loadall",
+  "category": "bug-fix",
+  "instruction": "The order report test fails: `orderReport` in src/report.js always reports zero orders. Find the root cause and fix it so `node --test` passes. Do not change the tests.",
+  "done_when": [
+    "`node --test` passes and test/ is unchanged",
+    "loadAll resolves every result in input order even when fetches finish out of order, and rejects when one fails (hidden tests)"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 30
+}

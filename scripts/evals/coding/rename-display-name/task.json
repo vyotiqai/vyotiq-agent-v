@@ -1,0 +1,12 @@
+{
+  "id": "rename-display-name",
+  "category": "multi-file-rename",
+  "instruction": "Rename the function `getUserName` to `getDisplayName` everywhere it appears (source, tests and README.md), and rename the module src/userName.js to src/displayName.js, updating every import. Behaviour must not change.",
+  "done_when": [
+    "src/displayName.js exists and src/userName.js does not",
+    "no file in the workspace mentions getUserName or userName.js",
+    "`node --test` passes and getDisplayName/greet/profileCard behave as before (hidden tests)"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 35
+}

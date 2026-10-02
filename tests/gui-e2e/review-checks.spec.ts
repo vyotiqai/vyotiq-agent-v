@@ -114,14 +114,23 @@ test('Files bars the lines the task changed, in a gutter before the numbers', as
   await window.getByRole('tab', { name: 'Changes' }).click()
 })
 
-test('Ask it to cover this sends the check to the task as its next instruction', async () => {
+test('Ask it to cover this drafts the check into the task’s box, and sent it is the next instruction', async () => {
   const { window } = launched
   const changes = window.getByRole('region', { name: 'Changes' })
   await changes.getByRole('button', { name: 'Ask it to cover this' }).click()
 
-  // The instruction lands in the record as the next run's, and the task answers it.
-  await expect(window.getByText(`The done-when check c2 "${OPEN_CHECK}" is not met.`, { exact: false }).first()).toBeVisible({
-    timeout: 20_000
-  })
+  // Drafted, not sent: it waits in the box, to read and edit first.
+  const box = window.getByRole('combobox', { name: 'Instruction' })
+  await expect(box).toContainText(`The done-when check c2 "${OPEN_CHECK}" is not met.`, { timeout: 20_000 })
+  await expect(box).toBeFocused()
+  await box.press('Enter')
+
+  // Sent, it lands in the record as the next run's — read as what it asks, the
+  // words the app wrote one click away — and the task answers it.
+  const followUp = window.locator('[data-task-pane] [data-brief-origin="check"]').last()
+  await expect(followUp).toContainText('Make check c2 pass', { timeout: 20_000 })
+  await expect(followUp).toContainText(OPEN_CHECK)
+  await followUp.getByRole('button', { name: 'Show as sent' }).click()
+  await expect(followUp.locator('[data-brief-sent]')).toContainText(`The done-when check c2 "${OPEN_CHECK}" is not met.`)
   await expect(window.getByText('E2E fixture response.').first()).toBeVisible({ timeout: 20_000 })
 })

@@ -1,0 +1,7 @@
+[
+  { "sku": "ABC-001", "name": "Pen", "priceCents": 199 },
+  { "sku": "ABC-002", "name": "Notebook", "priceCents": 450 },
+  { "sku": "BCD-010", "name": "Stapler", "priceCents": 1299 },
+  { "sku": "BCD-011", "name": "Stapler refills", "priceCents": "12.50" },
+  { "sku": "CDE-100", "name": "Desk lamp", "priceCents": 3499 },
+]

@@ -1,0 +1,7 @@
+# Working in this repo
+
+- Every change adds one bullet to CHANGELOG.md under the `## Unreleased`
+  heading, in the form `- <function name>: <what changed>`.
+- Every public function is exported from its own module AND re-exported from
+  src/index.js. Consumers only import from src/index.js.
+- Tests use node:test, live in test/, and run with `node --test`.

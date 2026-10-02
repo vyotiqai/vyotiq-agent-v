@@ -1,0 +1,13 @@
+{
+  "id": "follow-agents-md",
+  "category": "repo-instructions",
+  "instruction": "Add a `clamp(value, min, max)` function to src/math.js. It returns value limited to the inclusive range [min, max], and throws a RangeError when min is greater than max.",
+  "done_when": [
+    "clamp behaves as specified (hidden tests)",
+    "AGENTS.md rule: clamp is also exported from src/index.js",
+    "AGENTS.md rule: CHANGELOG.md has a `- clamp: ...` bullet under `## Unreleased`",
+    "`node --test` passes"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 30
+}

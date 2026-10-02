@@ -51,8 +51,12 @@ test('a failure Redis caused offers to mock Redis, and sends it as the next inst
   await expect(mock).toBeVisible()
 
   await mock.click()
-  // Sent as the task's next instruction: it opens run 2, and run 1's failure is history.
-  await expect(record.getByText(INSTRUCTION, { exact: true }).first()).toBeVisible({ timeout: 20_000 })
+  // Sent as the task's next instruction: it opens run 2, read as what it asks
+  // (the words sent a click away), and run 1's failure is history.
+  const followUp = record.locator('[data-brief-origin="mock"]').last()
+  await expect(followUp).toContainText('Mock Redis instead of connecting to it', { timeout: 20_000 })
+  await followUp.getByRole('button', { name: 'Show as sent' }).click()
+  await expect(followUp.locator('[data-brief-sent]')).toHaveText(INSTRUCTION)
   await expect(record.getByRole('button', { name: /Run 1 Cache repository search results in Redis/ })).toBeVisible({
     timeout: 20_000
   })

@@ -12,15 +12,61 @@ hot path always gets a verdict rather than having to defend against an
 exception. `checkEgress()` judges and records in one call, so nothing can be
 enforced without also being auditable.
 
-Three rules, applied in order:
+Four rules, applied in order:
 
 1. **Scheme.** Non-network schemes (`about:`, `data:`, `blob:`, `file:`,
    `chrome*:`) resolve without touching the network.
 2. **Host.** Loopback, private and link-local ranges are refused unless the
    caller passes `allowLocal`. This delegates to `isSyncBlockedUrl` in
    `webFetch.ts`, which remains the single definition of a blocked address.
-3. **Allowlist.** When `browserDomainAllowlist` is non-empty, the host must
+   `0.0.0.0/8` and multicast stay refused even under `allowLocal`.
+3. **Private network.** When the caller passes `initiatorUrl`, a loopback or
+   private target is refused (`private_network`) unless that initiating page is
+   itself loopback/private or `file:`. See below.
+4. **Allowlist.** When `browserDomainAllowlist` is non-empty, the host must
    match it exactly or by `*.suffix`. Empty means no extra host filter.
+
+## Private-network access
+
+`allowLocal` is the agent's *posture* (Agent mode: on; Ask: off), held per tab.
+A tab is not a trust boundary, though: once the agent opens a public page in an
+Agent-mode tab, that page's script could `fetch()` your router, a dev server's
+admin route, or `169.254.169.254` by riding the tab's allowance. Rule 3 closes
+that, the way Chromium's Private Network Access does — a request may enter
+loopback/private space only from a page that is already there.
+
+| Request | Judged by (`initiatorUrl`) |
+| --- | --- |
+| Subresource, subframe, WebSocket (`onBeforeRequest`) | the tab's committed top-level URL |
+| Page-started navigation (`will-navigate`: link, form, script) | the committed top-level URL |
+| Main-frame redirect (`will-redirect`) | the URL being redirected away from |
+| Popup (`setWindowOpenHandler`) | the opener's top-level URL |
+| Navigation the agent or user asked for (`loadURL`) | not judged — no initiator |
+
+So `browser_navigate http://localhost:3000` still works in Agent mode, and that
+page may call `127.0.0.1:8787`; a public page in the same tab may not, and an
+explicit navigation to a public URL that 302s into the LAN is cancelled. The
+main-frame request is skipped in `onBeforeRequest` because only the navigation
+events can tell an explicit navigation from one the page started. A request
+with no attributable tab is judged as coming from a public page.
+
+The classifier (`src/main/net/privateNetwork.ts`) is synchronous and DNS-free.
+It canonicalises hosts the way the URL parser does (`2130706433`, `0177.0.0.1`,
+`0x7f.1` and `localhost.` are all loopback) and covers 127/8, 0/8, 10/8,
+172.16/12, 192.168/16, 169.254/16, 100.64/10, multicast/reserved, `::1`, `::`,
+`fc00::/7`, `fe80::/10`, IPv4-mapped/compatible and NAT64 forms, `localhost`,
+`*.localhost`, `.local`, `.internal`, `.lan`, `.home.arpa`, single-label names,
+names that spell out a local address (`10.0.0.1.nip.io`,
+`192-168-1-1.sslip.io`) and the loopback wildcard zones `localtest.me`,
+`lvh.me`, `vcap.me`, `localhost.direct`.
+
+**What it does not catch:** a public DNS name that merely *resolves* to a
+private address (DNS rebinding). Seeing that needs the resolved IP, which the
+per-request hook does not have. **The tradeoff:** a flow that leaves a local
+page for a public one and is redirected back (an OAuth callback to
+`localhost`) is refused at the redirect; the agent must navigate to the
+callback URL itself. Refusals are reported to the agent in the tool result
+(see below), naming `browser_navigate` as the way to open a local page.
 
 ## Coverage
 
@@ -53,6 +99,16 @@ https://ads.example. The page may be incomplete. This is the host allowlist
 refusing the request, not the site failing.
 ```
 
+Private-network refusals get their own line, and it covers the page's own
+navigations too (a cancelled link, redirect or popup is just as silent as a
+cancelled XHR):
+
+```
+[egress policy] Refused 2 request(s) from a public page into loopback/private
+network space: http://192.168.1.1, http://127.0.0.1:9000. Only a local page may
+reach local hosts; to open one, navigate to it directly with browser_navigate.
+```
+
 The note is attached by wrapping every handler in `browserTools.ts`, not by
 each handler remembering to add it, so a new browser tool cannot omit it.
 
@@ -71,7 +127,10 @@ OS-level network controls, not a module.
 
 **The terminal tool** runs arbitrary commands, and any of them — `curl`,
 `git push`, a test runner — can open its own connection. It is governed by the
-tool-approval gate (what you allow it to run), not by this one.
+tool-approval gate (what you allow it to run), not by this one. On macOS and
+Linux the optional command sandbox can cut it off the network entirely
+(Settings → Tools → Sandbox → Network: Deny); see `docs/sandbox.md`. That is
+all-or-nothing at the OS level, not a host allowlist.
 
 Both are outside the boundary by design, not by oversight. Do not describe this
 gate as covering all agent network activity.
@@ -134,11 +193,15 @@ Neither ledger is surfaced in the UI yet.
 ## Tests
 
 - `tests/main/unit/egressPolicy.test.ts` — the policy and the in-memory ledger
+- `tests/main/unit/privateNetwork.test.ts` — host classification (IPv4/IPv6,
+  numeric encodings, DNS names) and the private-network decision
 - `tests/main/unit/agentBrowserEgressHook.test.ts` — the wiring, driven through
-  real tab creation; asserts one listener per partition
+  real tab creation; asserts one listener per partition, and the
+  private-network rule on subresources, `will-navigate`, `will-redirect` and
+  popups
 - `tests/main/unit/egressRunLedger.test.ts` — aggregation, run attribution and
   the durable file
 - `tests/main/unit/browserEgressNote.test.ts` — the refusal note and its
   bracketing
 
-Run all four after any change to browser egress.
+Run all five after any change to browser egress.

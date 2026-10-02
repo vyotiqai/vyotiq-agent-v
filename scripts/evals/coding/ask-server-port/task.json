@@ -1,0 +1,13 @@
+{
+  "id": "ask-server-port",
+  "category": "read-only-question",
+  "mode": "ask",
+  "instruction": "Which TCP port does the server in this repo listen on when nothing is configured, and which environment variable overrides it? Answer with the port number and the variable name.",
+  "done_when": [
+    "the final answer names port 8443",
+    "the final answer names the VY_LISTEN_PORT environment variable",
+    "no workspace file is created, changed or deleted"
+  ],
+  "timeoutSec": 300,
+  "maxSteps": 20
+}

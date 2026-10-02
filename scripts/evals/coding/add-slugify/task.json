@@ -1,0 +1,12 @@
+{
+  "id": "add-slugify",
+  "category": "feature",
+  "instruction": "Add an exported function `slugify(text)` to src/strings.js. It lowercases the text, replaces every run of characters other than a-z and 0-9 with a single '-', and strips any leading or trailing '-'. Add tests for slugify under test/ and make sure `node --test` passes.",
+  "done_when": [
+    "slugify is exported from src/strings.js and behaves as specified (hidden tests)",
+    "a test file under test/ exercises slugify",
+    "`node --test` passes and the existing capitalize/truncate tests still run"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 30
+}

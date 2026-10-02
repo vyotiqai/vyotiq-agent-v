@@ -1,0 +1,13 @@
+{
+  "id": "refactor-pricing",
+  "category": "refactor",
+  "instruction": "Refactor src/pricing.js: the discount-and-round logic is repeated in priceForStudent, priceForSenior and priceForMember. Extract it into one exported helper `applyDiscount(base, rate)` that the three functions call. Behaviour must not change, and do not edit the tests.",
+  "done_when": [
+    "applyDiscount(base, rate) is exported and the three price functions call it",
+    "the rounding expression appears once in src/pricing.js",
+    "outputs are identical to the original for a grid of inputs (hidden tests)",
+    "`node --test` passes and test/ is unchanged"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 30
+}

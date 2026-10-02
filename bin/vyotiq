@@ -1,0 +1,26 @@
+#!/bin/sh
+# VYOTIQ headless launcher: bin/vyotiq [options]   (docs/headless.md)
+#
+#   bin/vyotiq --cwd . --prompt "What files are here?" --mode ask --output json
+#
+# VYOTIQ_APP  path to an installed Vyotiq executable to run instead of this
+#             checkout (e.g. /Applications/Vyotiq.app/Contents/MacOS/Vyotiq).
+# Otherwise this checkout runs on its own Electron; build it first:
+#   pnpm build:vite
+set -e
+
+if [ -n "$VYOTIQ_APP" ]; then
+  exec "$VYOTIQ_APP" --headless "$@"
+fi
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo=$(dirname -- "$here")
+
+if [ ! -f "$repo/out/main/index.js" ]; then
+  echo "vyotiq: no build in $repo/out - run: pnpm build:vite" >&2
+  exit 2
+fi
+
+# electron/cli.js spawns the Electron binary with this process's stdio and
+# exits with its exit code.
+exec node "$repo/node_modules/electron/cli.js" "$repo" --headless "$@"

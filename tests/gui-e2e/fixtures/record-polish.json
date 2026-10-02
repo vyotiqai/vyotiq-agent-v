@@ -1,0 +1,520 @@
+{
+ "events": [
+  {
+   "type": "status",
+   "status": "running"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "plan-1",
+   "name": "todo_write",
+   "argumentsDelta": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"in_progress\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"pending\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"pending\"}]}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "toolCalls": [
+    {
+     "id": "plan-1",
+     "name": "todo_write",
+     "arguments": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"in_progress\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"pending\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"pending\"}]}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "plan-1",
+   "name": "todo_write",
+   "summary": "3 tasks"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "plan-1",
+   "name": "todo_write",
+   "summary": "3 tasks",
+   "ok": true,
+   "content": "0/3 complete\n[~] (a) Start the **suite** detached\n[ ] (b) Poll `c14-exit.txt` until the suite exits\n[ ] (c) Report what the suite says"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "start-1",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"pnpm exec vitest run --reporter=dot > c14.log\"}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "thinking": "The suite takes minutes, so it runs on its own and I poll its exit file.",
+   "toolCalls": [
+    {
+     "id": "start-1",
+     "name": "terminal",
+     "arguments": "{\"command\":\"pnpm exec vitest run --reporter=dot > c14.log\"}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "start-1",
+   "name": "terminal",
+   "summary": "pnpm exec vitest run --reporter=dot > c14.log"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "start-1",
+   "name": "terminal",
+   "summary": "pnpm exec vitest run --reporter=dot > c14.log",
+   "ok": true,
+   "content": "started\nexit_code: 0"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "plan-2",
+   "name": "todo_write",
+   "argumentsDelta": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"in_progress\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"pending\"}]}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "toolCalls": [
+    {
+     "id": "plan-2",
+     "name": "todo_write",
+     "arguments": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"in_progress\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"pending\"}]}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "plan-2",
+   "name": "todo_write",
+   "summary": "3 tasks"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "plan-2",
+   "name": "todo_write",
+   "summary": "3 tasks",
+   "ok": true,
+   "content": "1/3 complete\n[x] (a) Start the **suite** detached\n[~] (b) Poll `c14-exit.txt` until the suite exits\n[ ] (c) Report what the suite says"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "poll-1",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "thinking": "POLL_THOUGHT_1 The log is at 252 bytes.",
+   "toolCalls": [
+    {
+     "id": "poll-1",
+     "name": "terminal",
+     "arguments": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "poll-1",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "poll-1",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }",
+   "ok": true,
+   "content": "running\nexit_code: 0"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "poll-2",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "thinking": "POLL_THOUGHT_2 Still running; the log grew to 1.2 kB.",
+   "toolCalls": [
+    {
+     "id": "poll-2",
+     "name": "terminal",
+     "arguments": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "poll-2",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "poll-2",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }",
+   "ok": true,
+   "content": "running\nexit_code: 0"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "poll-3",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "thinking": "POLL_THOUGHT_3 Still running.",
+   "toolCalls": [
+    {
+     "id": "poll-3",
+     "name": "terminal",
+     "arguments": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "poll-3",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "poll-3",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }",
+   "ok": true,
+   "content": "running\nexit_code: 0"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "poll-4",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "thinking": "POLL_THOUGHT_4 The dots stopped for a moment; one more look.",
+   "toolCalls": [
+    {
+     "id": "poll-4",
+     "name": "terminal",
+     "arguments": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "poll-4",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "poll-4",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }",
+   "ok": true,
+   "content": "running\nexit_code: 0"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "poll-5",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "thinking": "POLL_THOUGHT_5 Last poll before reading the log.",
+   "toolCalls": [
+    {
+     "id": "poll-5",
+     "name": "terminal",
+     "arguments": "{\"command\":\"if (Test-Path c14-exit.txt) { \\\"DONE\\\" } else { \\\"running\\\" }\"}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "poll-5",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "poll-5",
+   "name": "terminal",
+   "summary": "if (Test-Path c14-exit.txt) { \"DONE\" } else { \"running\" }",
+   "ok": true,
+   "content": "running\nexit_code: 0"
+  },
+  {
+   "type": "thinking_delta",
+   "text": "NOW_THOUGHT The exit file "
+  },
+  {
+   "type": "thinking_delta",
+   "text": "is there, "
+  },
+  {
+   "type": "thinking_delta",
+   "text": "so the log "
+  },
+  {
+   "type": "thinking_delta",
+   "text": "has the summary."
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "name": "read",
+   "argumentsDelta": "{\""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": ""
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "read-log",
+   "argumentsDelta": "path\":\"c14.log\",\"startLine\":1,\"endLine\":40}"
+  },
+  {
+   "type": "thinking_done"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "thinking": "NOW_THOUGHT The exit file is there, so the log has the summary.",
+   "toolCalls": [
+    {
+     "id": "read-log",
+     "name": "read",
+     "arguments": "{\"path\":\"c14.log\",\"startLine\":1,\"endLine\":40}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "read-log",
+   "name": "read",
+   "summary": "c14.log"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "read-log",
+   "name": "read",
+   "summary": "c14.log",
+   "ok": true,
+   "content": "Tests  4794 passed (4794)"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "plan-3",
+   "name": "todo_write",
+   "argumentsDelta": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"completed\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"in_progress\"}]}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "toolCalls": [
+    {
+     "id": "plan-3",
+     "name": "todo_write",
+     "arguments": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"completed\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"in_progress\"}]}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "plan-3",
+   "name": "todo_write",
+   "summary": "3 tasks"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "plan-3",
+   "name": "todo_write",
+   "summary": "3 tasks",
+   "ok": true,
+   "content": "2/3 complete\n[x] (a) Start the **suite** detached\n[x] (b) Poll `c14-exit.txt` until the suite exits\n[~] (c) Report what the suite says"
+  },
+  {
+   "type": "assistant_message",
+   "content": "POLISH_WHY The summary line is at the end of the log."
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "tail-1",
+   "name": "terminal",
+   "argumentsDelta": "{\"command\":\"Get-Content c14.log -Tail 5\"}"
+  },
+  {
+   "type": "__approval",
+   "toolCallId": "tail-1",
+   "name": "terminal",
+   "arguments": "{\"command\":\"Get-Content c14.log -Tail 5\"}",
+   "summary": "Get-Content c14.log -Tail 5",
+   "result": "Tests  4794 passed (4794)\nexit_code: 0"
+  },
+  {
+   "type": "tool_call_delta",
+   "toolCallId": "plan-4",
+   "name": "todo_write",
+   "argumentsDelta": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"completed\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"completed\"}]}"
+  },
+  {
+   "type": "assistant_message",
+   "content": "",
+   "toolCalls": [
+    {
+     "id": "plan-4",
+     "name": "todo_write",
+     "arguments": "{\"todos\":[{\"id\":\"a\",\"content\":\"Start the **suite** detached\",\"status\":\"completed\"},{\"id\":\"b\",\"content\":\"Poll `c14-exit.txt` until the suite exits\",\"status\":\"completed\"},{\"id\":\"c\",\"content\":\"Report what the suite says\",\"status\":\"completed\"}]}"
+    }
+   ]
+  },
+  {
+   "type": "tool_start",
+   "toolCallId": "plan-4",
+   "name": "todo_write",
+   "summary": "3 tasks"
+  },
+  {
+   "type": "tool_result",
+   "toolCallId": "plan-4",
+   "name": "todo_write",
+   "summary": "3 tasks",
+   "ok": true,
+   "content": "3/3 complete\n[x] (a) Start the **suite** detached\n[x] (b) Poll `c14-exit.txt` until the suite exits\n[x] (c) Report what the suite says"
+  },
+  {
+   "type": "text_delta",
+   "text": "## Summary\nThe suite passes: **4794 passed**, 0 failed, run with `pnpm exec vitest run`.\n\n## Changes\n- [[src/main/agent/loop.ts:12]] keeps its cap.\n- `vitest.config.ts` is unchanged.\n\n## Checks\nPOLISH_DONE c14 is met."
+  },
+  {
+   "type": "assistant_message",
+   "content": "## Summary\nThe suite passes: **4794 passed**, 0 failed, run with `pnpm exec vitest run`.\n\n## Changes\n- [[src/main/agent/loop.ts:12]] keeps its cap.\n- `vitest.config.ts` is unchanged.\n\n## Checks\nPOLISH_DONE c14 is met."
+  },
+  {
+   "type": "status",
+   "status": "done"
+  }
+ ]
+}

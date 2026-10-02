@@ -11,10 +11,16 @@ This is version 1.1.0. Release notes: [release-notes/v1.1.0.md](release-notes/v1
 
 - **Tasks, sorted by what they need** — the navigator groups every task in your open workspaces as Needs you, Running, Ready for review and Done. A task is a record of the work, not a chat: the instruction, then each step the agent took, with terminal and diff output kept whole.
 - **Done-when checks** — a task can carry the conditions that mean it is finished; the agent marks each met or not met with evidence before it stops, and the record shows every verdict.
-- **The inspector** — Changes, Files, Terminal, Browser, Pull request and Plan beside the task. Changes is a review: keep or undo each file, mark files viewed, ask about a line, and commit with a message drafted once per change set.
+- **The inspector** — Changes, Files, Terminal, Browser, Pull request and Plan beside the task. Changes is a review: keep or undo each file, or undo a single hunk, mark files viewed, ask about a line, and commit with a message drafted once per change set.
+- **Files and search** — the Files tab is an editor with find and replace and syntax highlighting for 39 languages. Find in files searches the whole workspace, and task search reads titles and what was said in every task.
+- **Git and pull requests** — fetch, pull and push from the task's git bar. The Pull request tab shows the review threads on a pull request; reply to one or resolve it without leaving the app.
 - **Rewind and Redo** — go back to an earlier instruction; the dialog says which files go back and which stop at a change you made, and a rewind can be brought back until you send a new instruction.
 - **Worktrees** — start a task on its own branch in its own folder, then merge it back or discard it.
-- **Multiple model providers** — OpenAI, Anthropic, Google Gemini, Ollama (local models), DeepSeek, Groq, OpenRouter, xAI, Mistral, or any custom OpenAI-compatible endpoint, plus an OpenCode provider. Model lists are fetched per provider where the API supports it.
+- **Multiple model providers** — OpenAI, Anthropic, Google Gemini, Amazon Bedrock, Google Vertex AI, Ollama (local models), DeepSeek, Groq, OpenRouter, xAI, Mistral, or any custom OpenAI-compatible endpoint, plus an OpenCode provider. Model lists are fetched per provider where the API supports it.
+- **Permission rules** — allow, ask or deny a tool, a command or a path, in Settings or in a workspace's own `.vyotiq/permissions.json` (deny and ask only). Secret files such as `.env` and SSH keys ask before the agent touches them.
+- **Command sandbox** — opt in and the commands the agent runs can read the disk but write only the workspace, temp and package caches, with network access optional. macOS (sandbox-exec) and Linux (bubblewrap); off by default, and never applied to the terminal you type into.
+- **Usage** — what tasks cost and how they went over 7, 30 or 90 days or a range you pick: spend and tokens by day, by workspace and by task, model mix, tool failures, and edits no check followed. Export it as CSV, one row per task per day.
+- **Export and import** — save a task as Markdown to read, or as JSON to import into another workspace or machine, where it opens as a read-only record; fork it to carry on.
 - **An agent that acts on your checkout** — two modes, Ask (reads and answers) and Agent (plans, edits and runs commands). The built-in tool catalog includes a terminal, file tools (read, edit, search, glob, grep, codebase search), git tools (status, diff, commit, apply patch), GitHub tools (pull requests, issues), typecheck/lint/test runners, browser automation, notebook editing, and language-server queries.
 - **Helper instances** — a task can fan work out to helper instances, each on its own git worktree branch, merged back into the task's branch. Settings caps how many run at once.
 - **Local Whisper dictation** — voice dictation is transcribed entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app. The model weights are fetched from Hugging Face into the app's user data directory the first time you use dictation, so the feature needs one download before it works offline.
@@ -26,8 +32,17 @@ This is version 1.1.0. Release notes: [release-notes/v1.1.0.md](release-notes/v1
 
 ## Documentation
 
+- [User documentation](https://vyotiq.com/docs) — using the app; also in the app from the command palette (Open documentation), and every keyboard shortcut is one key away (`?`, or `Ctrl+/` / `⌘/`)
 - [Outbound network egress — what the gate covers, and what it deliberately does not](docs/egress.md)
 - [Agent-built tools — what `build_tool` permits, and the four things that bound it](docs/agent-tools.md)
+- [Headless runs — `Vyotiq --headless` for scripts and CI: flags, approval policies, output formats, exit codes](docs/headless.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and the standard gates
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code of conduct
+- [SECURITY.md](SECURITY.md) — how to report vulnerabilities
+- [PRIVACY.md](PRIVACY.md) — what the app stores and what leaves your machine
+- [TERMS.md](TERMS.md) — terms of use
+- [RELEASE-RUNBOOK.md](RELEASE-RUNBOOK.md) — maintainer release procedure
+- [NOTICE](NOTICE) — third-party notices
 
 ## Platforms
 
@@ -102,16 +117,6 @@ Artifacts are written to `dist-package/` (see `electron-builder.yml`: appId `com
 - `src/shared` — code shared between main and renderer
 - `tests/` — vitest unit/e2e suites plus Playwright GUI e2e
 - `scripts/` — sync and build helper scripts wired into the package scripts
-
-## Documentation
-
-- [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and the standard gates
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code of conduct
-- [SECURITY.md](SECURITY.md) — how to report vulnerabilities
-- [PRIVACY.md](PRIVACY.md) — what the app stores and what leaves your machine
-- [TERMS.md](TERMS.md) — terms of use
-- [RELEASE-RUNBOOK.md](RELEASE-RUNBOOK.md) — maintainer release procedure
-- [NOTICE](NOTICE) — third-party notices
 
 ## Contributing
 

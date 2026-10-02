@@ -1,0 +1,13 @@
+{
+  "id": "recover-build",
+  "category": "failing-command-recovery",
+  "instruction": "Run `node scripts/build.mjs` and make it succeed so that dist/catalog.json is produced. The build script is correct: fix the input data, not the script, and keep every product. Prices are integer cents.",
+  "done_when": [
+    "scripts/build.mjs is unchanged",
+    "all five products are still in data/products.json with valid integer priceCents",
+    "dist/catalog.json exists with the expected count, totalCents and skus",
+    "re-running the build from a clean copy succeeds and produces the same catalog"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 30
+}

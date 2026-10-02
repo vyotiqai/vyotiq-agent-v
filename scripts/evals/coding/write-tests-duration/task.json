@@ -1,0 +1,12 @@
+{
+  "id": "write-tests-duration",
+  "category": "test-writing",
+  "instruction": "Write tests for src/parseDuration.js in test/parseDuration.test.js. Cover hours, minutes, seconds, combined units (such as 1h30m), surrounding whitespace and spaces between parts, and invalid input (which must throw). The tests must pass against the current implementation; do not modify anything under src/.",
+  "done_when": [
+    "test/parseDuration.test.js exists and `node --test` passes",
+    "src/ is unchanged",
+    "every hidden mutant of parseDuration makes the suite fail"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 30
+}

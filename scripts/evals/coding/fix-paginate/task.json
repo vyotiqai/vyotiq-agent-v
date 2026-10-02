@@ -1,0 +1,12 @@
+{
+  "id": "fix-paginate",
+  "category": "bug-fix",
+  "instruction": "The test suite fails (run it with `node --test`). Find and fix the bugs in src/paginate.js so every test passes. Do not change anything under test/.",
+  "done_when": [
+    "`node --test` passes in the workspace",
+    "files under test/ are byte-for-byte unchanged",
+    "hidden edge-case tests for paginate and pageCount pass"
+  ],
+  "timeoutSec": 600,
+  "maxSteps": 30
+}

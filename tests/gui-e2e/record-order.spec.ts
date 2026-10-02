@@ -83,14 +83,15 @@ test('a finished run keeps every step’s work in its step, in order', async () 
   await step1.getByRole('button', { name: 'Read the config' }).click()
   const words = step1.getByText('STEP_ONE_WORDS reading the config.')
   await expect(words).toBeVisible()
-  // The step's own lookup line comes before the between-steps work in its item.
-  const lookup = step1.getByRole('button', { name: /^Read 1 file/ }).first()
+  // The step's own lookup line comes before the between-steps work in its item;
+  // one lookup names what it read.
+  const lookup = step1.getByRole('button', { name: /^Read config.json/ }).first()
   expect((await words.boundingBox())!.y).toBeLessThan((await lookup.boundingBox())!.y)
   await lookup.click()
   await expect(fileRow(step1, 'config.json')).toBeVisible()
 
   // Step 2 holds its own call.
   await step2.getByRole('button', { name: 'Read the tests' }).click()
-  await step2.getByRole('button', { name: /^Read 1 file/ }).click()
+  await step2.getByRole('button', { name: /^Read app.test.ts/ }).click()
   await expect(fileRow(step2, 'app.test.ts')).toBeVisible()
 })
