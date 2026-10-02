@@ -40,16 +40,41 @@ const REFUSAL_NOTE_MAX_ORIGINS = 5
  * silently is worse than one that refuses loudly.
  */
 export function egressRefusalNote(workspace: string | undefined, sinceSeq: number): string {
-  const denied = listEgress({ deniedOnly: true, purpose: 'browser_subresource' }).filter(
+  const denied = listEgress({ deniedOnly: true }).filter(
     (entry) =>
       entry.seq > sinceSeq &&
       // Entries recorded without a workspace cannot be excluded on that basis.
       (!entry.workspacePath || !workspace || entry.workspacePath === workspace)
   )
-  if (denied.length === 0) return ''
+  // Private-network refusals of a page's own navigation (a link, a redirect, a
+  // popup) are silent too — the tab just stays put — so they are reported
+  // alongside subresources. Other navigation refusals throw and need no note.
+  const privateNetwork = denied.filter((entry) => entry.reason === 'private_network')
+  const policy = denied.filter(
+    (entry) => entry.purpose === 'browser_subresource' && entry.reason !== 'private_network'
+  )
 
+  const notes: string[] = []
+  if (policy.length > 0) {
+    notes.push(
+      `[egress policy] Refused ${policy.length} request(s) from this page to: ` +
+        `${originSummary(policy)}. The page may be incomplete. This is the host ` +
+        `allowlist refusing the request, not the site failing.`
+    )
+  }
+  if (privateNetwork.length > 0) {
+    notes.push(
+      `[egress policy] Refused ${privateNetwork.length} request(s) from a public page into ` +
+        `loopback/private network space: ${originSummary(privateNetwork)}. Only a local ` +
+        `page may reach local hosts; to open one, navigate to it directly with browser_navigate.`
+    )
+  }
+  return notes.join('\n')
+}
+
+function originSummary(entries: readonly { origin: string }[]): string {
   const byOrigin = new Map<string, number>()
-  for (const entry of denied) {
+  for (const entry of entries) {
     byOrigin.set(entry.origin, (byOrigin.get(entry.origin) ?? 0) + 1)
   }
   const ranked = [...byOrigin.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -57,13 +82,7 @@ export function egressRefusalNote(workspace: string | undefined, sinceSeq: numbe
     .slice(0, REFUSAL_NOTE_MAX_ORIGINS)
     .map(([origin, count]) => (count > 1 ? `${origin} (${count})` : origin))
   const rest = ranked.length - shown.length
-  const more = rest > 0 ? `, and ${rest} more` : ''
-
-  return (
-    `[egress policy] Refused ${denied.length} request(s) from this page to: ` +
-    `${shown.join(', ')}${more}. The page may be incomplete. This is the host ` +
-    `allowlist refusing the request, not the site failing.`
-  )
+  return `${shown.join(', ')}${rest > 0 ? `, and ${rest} more` : ''}`
 }
 
 /**

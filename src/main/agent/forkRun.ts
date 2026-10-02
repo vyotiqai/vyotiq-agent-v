@@ -38,7 +38,9 @@ export async function forkRun(
   // belongs to the new run, not the source.
   createRun(workspacePath, forkedRunId, `${parsed.goal} (fork)`, {
     mode: parsed.mode,
-    parentRunId: runId
+    parentRunId: runId,
+    // The fork goes on in the same folders; each is re-checked when it runs.
+    ...(parsed.extraRoots?.length ? { extraRoots: parsed.extraRoots } : {})
   })
   const forkedDir = resolveRunDir(workspacePath, forkedRunId)
   await syncMessagesAsync(forkedDir, source.slice(0, keep))

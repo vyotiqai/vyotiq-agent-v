@@ -1,7 +1,8 @@
 import { execFile as execFileCb } from 'child_process'
 import { createHash } from 'crypto'
 import { readFileSync, realpathSync, statSync } from 'fs'
-import { basename, dirname, isAbsolute, join, resolve } from 'path'
+import { homedir } from 'os'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { promisify } from 'util'
 import { app } from 'electron'
 import { atomicWriteJson } from '../storage/atomicWrite'
@@ -16,11 +17,26 @@ const execFile = promisify(execFileCb)
  * folder someone hands you is enough — its `.git/config` travels with it — so
  * opening it would run their code without a click.
  *
+ * The network and write commands the app runs reach further: fetch and push
+ * run `core.sshCommand`, `core.gitProxy`, `credential.helper`, `core.askPass`,
+ * a remote's `uploadpack`/`receivepack` and `core.alternateRefsCommand`, a
+ * signed commit or `log.showSignature` runs `gpg.*program`, a commit runs the
+ * hooks under `core.hooksPath`, and `protocol.ext.allow` lets a remote URL be
+ * a shell command. Included files (`include.path`, `includeIf`) report the
+ * scope of the file that included them, so a repo's include is the repo's.
+ *
  * Every git command the app runs itself goes through `guardGitInvocation`,
  * which switches those settings off unless the person allowed this exact set
  * for this repository. Settings from the user's own global or system config
- * (git-lfs, say) are theirs and never touched. The agent's terminal is not
+ * (git-lfs, say) are theirs and never touched: where a repo setting replaces
+ * one of theirs, the override puts theirs back. The agent's terminal is not
  * guarded: those are the agent's commands, and approvals cover them.
+ *
+ * Not covered, on purpose: `.git/hooks` itself (the app's commit runs the
+ * repo's hooks the way git does; only a `core.hooksPath` leading out of the
+ * repository is switched off), and `core.editor`/`core.pager`, which git only
+ * starts on a terminal the app never gives it. `uploadpack.packObjectsHook`
+ * is ignored by git itself in repository config.
  */
 
 /** A repo-scoped setting that names a program. */
@@ -28,18 +44,39 @@ export type RepoCommand = { key: string; value: string }
 
 type GitConfigRecord = { scope: string; origin: string; key: string; value: string | null }
 
-type Neutralizer = { config: Array<[string, string]>; diffFlags: boolean }
+/**
+ * How one setting is switched off. `special` marks the ones `-c` cannot
+ * override on its own: credential helpers are a list (rebuilt whole),
+ * `core.gitProxy` keeps its first value (the environment wins instead), a
+ * remote's pack programs keep their first value (flags and no local transport),
+ * and `core.sshCommand` with nothing of the user's to put back defers to the
+ * environment's `GIT_SSH`.
+ */
+type Neutralizer = {
+  config: Array<[string, string]>
+  diffFlags: boolean
+  special?: 'credential' | 'gitProxy' | 'packPrograms' | 'sshDefault'
+}
 
 type RepoCommandScan = {
+  /** Whether git found a repository here at all. */
+  inRepo: boolean
   /** The repository's shared git dir — the same for all of its worktrees. */
   trustKey: string | null
   blocked: RepoCommand[]
   fingerprint: string
   config: Array<[string, string]>
   diffFlags: boolean
+  /** Specials from `Neutralizer`, applied at call time. */
+  gitProxyOff: boolean
+  packPrograms: boolean
+  sshDefault: boolean
   /** Files whose change means the scan is stale. */
   watch: string[]
 }
+
+/** Looks up the user's own (system, global or command-line) value: the last one among `keys`. */
+type Inherited = (...keys: string[]) => string | undefined
 
 const SCAN_TIMEOUT_MS = 10_000
 const SCAN_MAX_BUFFER = 4 * 1024 * 1024
@@ -68,12 +105,88 @@ export function parseGitConfigList(out: string): GitConfigRecord[] {
 }
 
 /**
+ * A bare program name, such as `manager`, `gpg2` or `plink`: git finds it on
+ * PATH (or as `git credential-<name>`), so it is installed software, not
+ * something that came with the folder. A path, arguments or shell syntax are not.
+ */
+function isBareProgramName(value: string): boolean {
+  return /^[A-Za-z0-9][\w.+-]*$/.test(value.trim())
+}
+
+const NO_INHERITED: Inherited = () => undefined
+
+/** gpg programs and what git runs when none is set. */
+const GPG_PROGRAMS: Record<string, { keys: string[]; fallback: string }> = {
+  'gpg.program': { keys: ['gpg.program', 'gpg.openpgp.program'], fallback: 'gpg' },
+  'gpg.openpgp.program': { keys: ['gpg.program', 'gpg.openpgp.program'], fallback: 'gpg' },
+  'gpg.x509.program': { keys: ['gpg.x509.program'], fallback: 'gpgsm' },
+  'gpg.ssh.program': { keys: ['gpg.ssh.program'], fallback: 'ssh-keygen' }
+}
+
+/**
+ * Prints nothing, whatever argument git appends: no alternate's refs are
+ * offered as "haves", which only costs a fetch some efficiency.
+ */
+const NEUTRAL_ALTERNATE_REFS = 'true #'
+
+/**
  * How to switch one setting off, or null when it runs nothing. Section and
  * variable names arrive lowercased from git; the driver name keeps its case.
  * Empty filter commands mean "no filter", but an empty diff program makes git
  * fail to spawn "", so diff programs are switched off with flags instead.
+ * `inherited` finds the user's own value to put back where git keeps one.
  */
-export function neutralizerFor(key: string, value: string | null): Neutralizer | null {
+export function neutralizerFor(
+  key: string,
+  value: string | null,
+  inherited: Inherited = NO_INHERITED
+): Neutralizer | null {
+  if (key === 'credential.helper' || /^credential\..+\.helper$/.test(key)) {
+    // Empty resets the list; a bare name is `git credential-<name>`.
+    if (value === null || value.trim() === '' || isBareProgramName(value)) return null
+    return { config: [], diffFlags: false, special: 'credential' }
+  }
+  if (key === 'core.sshcommand') {
+    if (value === null || isBareProgramName(value)) return null
+    const own = inherited('core.sshcommand')
+    return own === undefined
+      ? { config: [], diffFlags: false, special: 'sshDefault' }
+      : { config: [['core.sshCommand', own]], diffFlags: false }
+  }
+  if (key === 'core.askpass') {
+    if (value === null || value.trim() === '' || isBareProgramName(value)) return null
+    // Empty means no askpass program; the app never prompts anyway.
+    return { config: [['core.askPass', inherited('core.askpass') ?? '']], diffFlags: false }
+  }
+  if (key === 'core.gitproxy') {
+    // `command [for domain]`; "none" turns the proxy off.
+    const command = value?.trim().split(/\s+for\s+/i)[0]?.trim() ?? ''
+    if (!command || command.toLowerCase() === 'none' || isBareProgramName(command)) return null
+    return { config: [], diffFlags: false, special: 'gitProxy' }
+  }
+  const gpg = GPG_PROGRAMS[key]
+  if (gpg) {
+    if (value === null || value.trim() === '' || isBareProgramName(value)) return null
+    const program = inherited(...gpg.keys) ?? gpg.fallback
+    return { config: gpg.keys.map((k): [string, string] => [k, program]), diffFlags: false }
+  }
+  if (key === 'gpg.ssh.defaultkeycommand') {
+    if (value === null || value.trim() === '') return null
+    return { config: [['gpg.ssh.defaultKeyCommand', inherited(key) ?? '']], diffFlags: false }
+  }
+  if (key === 'core.alternaterefscommand') {
+    if (value === null || value.trim() === '') return null
+    return { config: [['core.alternateRefsCommand', inherited(key) ?? NEUTRAL_ALTERNATE_REFS]], diffFlags: false }
+  }
+  if (/^remote\..+\.(uploadpack|receivepack)$/.test(key)) {
+    if (value === null || isBareProgramName(value)) return null
+    return { config: [], diffFlags: false, special: 'packPrograms' }
+  }
+  if (key === 'protocol.allow' || key === 'protocol.ext.allow') {
+    // `ext::` runs its URL as a command; git's own default for it is never.
+    if (value === null || value.trim().toLowerCase() === 'never') return null
+    return { config: [['protocol.ext.allow', 'never']], diffFlags: false }
+  }
   if (key === 'core.fsmonitor') {
     // A boolean selects git's built-in daemon, which is git's own code.
     if (value === null || BOOLEAN_WORDS.has(value.trim().toLowerCase())) return null
@@ -95,7 +208,8 @@ export function neutralizerFor(key: string, value: string | null): Neutralizer |
   return null
 }
 
-type GitDirs = { gitDir: string; commonDir: string }
+/** `workTree` is the checkout git found the repository from; null for a bare one. */
+type GitDirs = { gitDir: string; commonDir: string; workTree?: string | null }
 
 function isFile(path: string): boolean {
   try {
@@ -122,7 +236,7 @@ export function resolveGitDirs(cwd: string): GitDirs | null {
   let dir = resolve(cwd)
   for (;;) {
     const dotGit = join(dir, '.git')
-    if (isDir(dotGit)) return { gitDir: dotGit, commonDir: dotGit }
+    if (isDir(dotGit)) return { gitDir: dotGit, commonDir: dotGit, workTree: dir }
     if (isFile(dotGit)) {
       let pointer: RegExpExecArray | null = null
       try {
@@ -139,10 +253,10 @@ export function resolveGitDirs(cwd: string): GitDirs | null {
       } catch {
         // A main checkout's gitdir has no commondir file.
       }
-      return { gitDir, commonDir }
+      return { gitDir, commonDir, workTree: dir }
     }
     if (isFile(join(dir, 'HEAD')) && isDir(join(dir, 'objects')) && isDir(join(dir, 'refs'))) {
-      return { gitDir: dir, commonDir: dir }
+      return { gitDir: dir, commonDir: dir, workTree: null }
     }
     const parent = dirname(dir)
     if (parent === dir) return null
@@ -186,14 +300,63 @@ function fingerprintOf(blocked: RepoCommand[]): string {
   return createHash('sha256').update(JSON.stringify(sorted)).digest('hex')
 }
 
+function realOrResolved(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
+function isInside(root: string, path: string): boolean {
+  const rel = relative(root, path)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/**
+ * Whether a repo-set `core.hooksPath` leads out of the repository: its git
+ * dirs and checkouts. Hooks inside it came with the folder the way
+ * `.git/hooks` does (husky's `.husky/_`, say) and run like those; one
+ * elsewhere — another folder, a network share — is the repo reaching out.
+ */
+export function hooksPathLeavesRepo(value: string, dirs: GitDirs): boolean {
+  const raw = value.trim()
+  if (!raw) return false
+  // `%(prefix)/` is git's install; `~` is the user's home: neither is the repo's.
+  if (raw.startsWith('%(prefix)')) return true
+  const expanded = /^~(?=[\\/]|$)/.test(raw) ? join(homedir(), raw.slice(1)) : raw
+  const base = dirs.workTree ?? dirs.gitDir
+  const target = realOrResolved(isAbsolute(expanded) ? expanded : resolve(base, expanded))
+  const roots = [dirs.gitDir, dirs.commonDir, dirs.workTree ?? null]
+  if (basename(dirs.commonDir) === '.git') roots.push(dirname(dirs.commonDir))
+  return !roots.some((root) => root != null && isInside(realOrResolved(root), target))
+}
+
+function isCredentialHelperKey(key: string): boolean {
+  return key === 'credential.helper' || /^credential\..+\.helper$/.test(key)
+}
+
 /** Build the scan from a config listing. Exported for tests. */
 export function scanFromConfigList(out: string, cwd: string, dirs: GitDirs | null): RepoCommandScan {
+  const records = parseGitConfigList(out)
+  const inherited: Inherited = (...keys) => {
+    let found: string | undefined
+    for (const record of records) {
+      if (!REPO_SCOPES.has(record.scope) && record.value !== null && keys.includes(record.key)) found = record.value
+    }
+    return found
+  }
   const blocked: RepoCommand[] = []
+  const blockedRecords = new Set<GitConfigRecord>()
   const config = new Map<string, string>()
   let diffFlags = false
+  let credential = false
+  let gitProxyOff = false
+  let packPrograms = false
+  let sshDefault = false
   const watch = new Set<string>()
   let firstLocalConfig: string | null = null
-  for (const record of parseGitConfigList(out)) {
+  for (const record of records) {
     if (!REPO_SCOPES.has(record.scope)) continue
     const origin = originPath(record.origin, cwd)
     if (origin) {
@@ -202,30 +365,64 @@ export function scanFromConfigList(out: string, cwd: string, dirs: GitDirs | nul
         firstLocalConfig = origin
       }
     }
-    const neutral = neutralizerFor(record.key, record.value)
+    let neutral: Neutralizer | null
+    if (record.key === 'core.hookspath') {
+      neutral =
+        dirs && record.value !== null && hooksPathLeavesRepo(record.value, dirs)
+          ? { config: [['core.hooksPath', inherited('core.hookspath') ?? join(dirs.commonDir, 'hooks')]], diffFlags: false }
+          : null
+    } else {
+      neutral = neutralizerFor(record.key, record.value, inherited)
+    }
     if (!neutral) continue
     blocked.push({ key: record.key, value: record.value ?? '' })
+    blockedRecords.add(record)
     for (const [key, value] of neutral.config) config.set(key, value)
     diffFlags ||= neutral.diffFlags
+    credential ||= neutral.special === 'credential'
+    gitProxyOff ||= neutral.special === 'gitProxy'
+    packPrograms ||= neutral.special === 'packPrograms'
+    sshDefault ||= neutral.special === 'sshDefault'
   }
   if (dirs) for (const file of repoFiles(dirs)) watch.add(file)
   const trustRoot = dirs?.commonDir ?? (firstLocalConfig ? dirname(firstLocalConfig) : null)
+  // Helpers are a list, and an empty value empties it: empty it, then
+  // rebuild it in git's own order without the blocked ones, so the user's
+  // helpers (URL-scoped ones under their own keys) work as before.
+  const helpers: Array<[string, string]> = []
+  if (credential) {
+    helpers.push(['credential.helper', ''])
+    for (const record of records) {
+      if (isCredentialHelperKey(record.key) && record.value !== null && !blockedRecords.has(record)) {
+        helpers.push([record.key, record.value])
+      }
+    }
+  }
+  if (packPrograms) config.set('protocol.file.allow', 'never')
   return {
+    inRepo: true,
     trustKey: trustRoot ? trustKeyOf(trustRoot) : null,
     blocked,
     fingerprint: fingerprintOf(blocked),
-    config: [...config.entries()],
+    config: [...config.entries(), ...helpers],
     diffFlags,
+    gitProxyOff,
+    packPrograms,
+    sshDefault,
     watch: [...watch]
   }
 }
 
 const EMPTY_SCAN: RepoCommandScan = {
+  inRepo: false,
   trustKey: null,
   blocked: [],
   fingerprint: fingerprintOf([]),
   config: [],
   diffFlags: false,
+  gitProxyOff: false,
+  packPrograms: false,
+  sshDefault: false,
   watch: []
 }
 
@@ -356,8 +553,8 @@ function withConfigEnv(env: NodeJS.ProcessEnv, pairs: Array<[string, string]>): 
   return next
 }
 
-/** Insert `--no-ext-diff`/`--no-textconv` after the subcommand of a diff-producing call. */
-export function withDiffProgramsOff(args: readonly string[]): string[] {
+/** Index of the subcommand: the first argument that is not a global option. */
+function subcommandIndex(args: readonly string[]): number {
   let i = 0
   while (i < args.length) {
     const arg = args[i]!
@@ -371,6 +568,12 @@ export function withDiffProgramsOff(args: readonly string[]): string[] {
     }
     break
   }
+  return i
+}
+
+/** Insert `--no-ext-diff`/`--no-textconv` after the subcommand of a diff-producing call. */
+export function withDiffProgramsOff(args: readonly string[]): string[] {
+  const i = subcommandIndex(args)
   const sub = args[i]
   const flags =
     sub === 'diff' || sub === 'log' || sub === 'show'
@@ -380,6 +583,30 @@ export function withDiffProgramsOff(args: readonly string[]): string[] {
         : null
   if (!flags) return [...args]
   return [...args.slice(0, i + 1), ...flags, ...args.slice(i + 1)]
+}
+
+/**
+ * Name git's own pack programs on a fetch or push: a remote's `uploadpack`
+ * and `receivepack` keep their first value, so `-c` cannot replace a repo's.
+ * A flag reaches only that one command, not the per-remote children of
+ * `fetch --all`; `protocol.file.allow=never` stops those running a local one.
+ */
+export function withPackProgramsReset(args: readonly string[]): string[] {
+  const i = subcommandIndex(args)
+  const sub = args[i]
+  const flag =
+    sub === 'fetch' || sub === 'pull' || sub === 'ls-remote'
+      ? '--upload-pack=git-upload-pack'
+      : sub === 'push'
+        ? '--receive-pack=git-receive-pack'
+        : null
+  if (!flag) return [...args]
+  return [...args.slice(0, i + 1), flag, ...args.slice(i + 1)]
+}
+
+/** A value `sh` reads as one word. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 /**
@@ -394,11 +621,17 @@ export async function guardGitInvocation(
   bin = 'git'
 ): Promise<{ args: string[]; env: NodeJS.ProcessEnv }> {
   const scan = await currentScan(cwd, bin, baseEnv)
-  if (scan.blocked.length === 0 || isAllowed(scan)) return { args: [...args], env: baseEnv }
-  return {
-    args: scan.diffFlags ? withDiffProgramsOff(args) : [...args],
-    env: withConfigEnv(baseEnv, scan.config)
+  if (!scan.inRepo || (scan.blocked.length > 0 && isAllowed(scan))) return { args: [...args], env: baseEnv }
+  // `ext::` remotes stay off in every repository, whoever's config allows them.
+  const env = withConfigEnv(baseEnv, [...scan.config, ['protocol.ext.allow', 'never']])
+  if (scan.gitProxyOff && env.GIT_PROXY_COMMAND === undefined) env.GIT_PROXY_COMMAND = ''
+  if (scan.sshDefault && env.GIT_SSH_COMMAND === undefined) {
+    // The environment beats any config; GIT_SSH is what git would use next.
+    env.GIT_SSH_COMMAND = env.GIT_SSH ? shellQuote(env.GIT_SSH) : 'ssh'
   }
+  let guardedArgs = scan.diffFlags ? withDiffProgramsOff(args) : [...args]
+  if (scan.packPrograms) guardedArgs = withPackProgramsReset(guardedArgs)
+  return { args: guardedArgs, env }
 }
 
 /** What this repository's settings would run and the app skips, or null when nothing is skipped. */

@@ -3,9 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { dirname, join, resolve, sep } from 'path'
 import type { ChatMessage, RewindRedoStatus } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
-import { resolveInsideWorkspace } from '../workspace/safePath'
 import { resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
-import type { RewindRunScope, RewindWritesPlan } from './checkpoints'
+import { resolveCheckpointPath, type RewindRunScope, type RewindWritesPlan } from './checkpoints'
 import { isActive } from './runRegistry'
 import { invalidateListRunsCache } from './runListCache'
 import {
@@ -13,8 +12,14 @@ import {
   flushMessageAppends,
   flushStatusWrites,
   invalidateMessagesCache,
-  loadMessagesAsync
+  loadMessagesAsync,
+  loadStatus
 } from './state'
+
+/** A rewound file: workspace-relative, or absolute in one of the run's added folders. */
+function targetFor(workspacePath: string, runDir: string, path: string): string {
+  return resolveCheckpointPath(workspacePath, path, loadStatus(runDir)?.extraRoots)
+}
 
 /**
  * Redo for a rewind. Just before a rewind applies, the run's own files (its
@@ -175,7 +180,7 @@ export async function captureRewindRedo(input: {
   for (const file of input.plan.files) {
     if (!file.undoable || seen.has(file.path)) continue
     seen.add(file.path)
-    const target = resolveInsideWorkspace(input.workspacePath, file.path)
+    const target = targetFor(input.workspacePath, runDir, file.path)
     if (existsSync(target) && statSync(target).isFile()) {
       copyInto(target, join(dir, 'files', String(workspaceFiles.length)))
       workspaceFiles.push({ path: file.path, before: 'file', beforeHash: fileHash(target) })
@@ -209,7 +214,7 @@ export async function sealRewindRedo(workspacePath: string, runId: string): Prom
     sealedScopeFiles: manifest.scopes.map((scope) => hashesOf(scope.runDir, checkpointMarkFiles(scope.runDir))),
     workspaceFiles: manifest.workspaceFiles.map((entry) => ({
       ...entry,
-      afterHash: fileHash(resolveInsideWorkspace(workspacePath, entry.path))
+      afterHash: fileHash(targetFor(workspacePath, runDir, entry.path))
     }))
   })
 }
@@ -244,7 +249,7 @@ export async function rewindRedoStatus(workspacePath: string, runId: string): Pr
     }
   }
   for (const entry of manifest.workspaceFiles) {
-    if (fileHash(resolveInsideWorkspace(workspacePath, entry.path)) !== (entry.afterHash ?? null)) {
+    if (fileHash(targetFor(workspacePath, runDir, entry.path)) !== (entry.afterHash ?? null)) {
       return { available: false, reason: 'files-changed' }
     }
   }
@@ -274,7 +279,7 @@ export async function redoRewind(workspacePath: string, runId: string): Promise<
   const manifest = readManifest(runDir)!
 
   for (const [index, entry] of manifest.workspaceFiles.entries()) {
-    const target = resolveInsideWorkspace(workspacePath, entry.path)
+    const target = targetFor(workspacePath, runDir, entry.path)
     if (entry.before === 'file') copyInto(join(dir, 'files', String(index)), target)
     else rmSync(target, { force: true })
   }

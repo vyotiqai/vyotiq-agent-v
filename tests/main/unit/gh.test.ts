@@ -389,7 +389,12 @@ describe('gh helpers', () => {
       throw new Error(`unexpected command: ${args.join(' ')}`)
     })
 
-    const result = await prCreateFromChanges('/ws', 'ship it', 'all')
+    // A task's commit is settled once the commit lands, before the PR opens.
+    let callsAtCommit: string[][] = []
+    const onCommitted = vi.fn(async () => {
+      callsAtCommit = execFileAsync.mock.calls.map((call) => call[1] as string[])
+    })
+    const result = await prCreateFromChanges('/ws', 'ship it', 'all', { onCommitted })
     expect(result).toMatchObject({
       url: 'https://github.com/ex/repo/pull/12',
       baseBranch: 'main',
@@ -397,6 +402,10 @@ describe('gh helpers', () => {
       detail: 'Draft pull request created'
     })
     expect(result.branch).toMatch(/^vyotiq\/ship-it-/)
+    expect(onCommitted).toHaveBeenCalledTimes(1)
+    expect(onCommitted).toHaveBeenCalledWith(expect.objectContaining({ committed: true }))
+    expect(callsAtCommit.some((args) => args[0] === 'commit')).toBe(true)
+    expect(callsAtCommit.some((args) => args[0] === 'pr' && args[1] === 'create')).toBe(false)
     const createArgs = execFileAsync.mock.calls.find(
       (call) => (call[1] as string[] | undefined)?.[1] === 'create'
     )?.[1] as string[] | undefined
@@ -436,9 +445,12 @@ describe('gh helpers', () => {
       throw new Error(`unexpected command: ${args.join(' ')}`)
     })
 
-    await expect(prCreateFromChanges('/ws', 'ship it', 'all')).rejects.toThrow(
+    const onCommitted = vi.fn(async () => {})
+    await expect(prCreateFromChanges('/ws', 'ship it', 'all', { onCommitted })).rejects.toThrow(
       /Nothing to commit/i
     )
+    // Nothing committed: nothing to settle.
+    expect(onCommitted).not.toHaveBeenCalled()
     const argLists = execFileAsync.mock.calls.map((call) => call[1] as string[])
     // The user is switched back to the original branch, never left on the stray.
     expect(argLists.some((args) => args[0] === 'switch' && args[1] === 'main')).toBe(true)

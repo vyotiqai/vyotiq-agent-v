@@ -22,6 +22,7 @@ import { atomicWriteFile, atomicWriteJson } from '@main/storage/atomicWrite'
 import { logger } from '../../shared/logger'
 import { readJsonDocCached } from './jsonDocCache'
 import { looksLikeWorkspacePath } from './pathPlausibility'
+import { extraRootFor, isAbsolutePathLike, isPathInsideRoot, slashPath } from '../../shared/extraRoots'
 
 export type CheckpointFileAction = 'created' | 'modified' | 'deleted'
 
@@ -77,6 +78,12 @@ export type WriteCheckpointMeta = {
    * that user turn when the checkpoint session starts). Used by edit-and-rewind.
    */
   anchorUserMessageIndex?: number
+  /**
+   * The task's added folders when this turn ran (extraRoots.ts). A file in
+   * one is keyed by its absolute path, forward slashes, and is restored only
+   * while it is still inside a folder listed here.
+   */
+  extraRoots?: string[]
   files: CheckpointFileEntry[]
 }
 
@@ -108,6 +115,56 @@ function toCheckpointRelPath(workspaceRoot: string, pathArg: string): string {
     /* fall through to slash-normalize */
   }
   return normalizeRelPath(pathArg)
+}
+
+/**
+ * Where a checkpoint key points. A workspace file's key is relative to the
+ * workspace; a file in an added folder (extraRoots.ts) is keyed by its
+ * absolute path and resolves only inside one of `extraRoots`, under the same
+ * symlink-escape check as the workspace.
+ */
+export function resolveCheckpointPath(
+  workspaceRoot: string,
+  key: string,
+  extraRoots: readonly string[] | undefined
+): string {
+  if (!isAbsolutePathLike(key) || !extraRoots?.length) return resolveInsideWorkspace(workspaceRoot, key)
+  try {
+    return resolveInsideWorkspace(workspaceRoot, key)
+  } catch (err) {
+    const root = extraRootFor(key, extraRoots)
+    if (!root) throw err
+    return resolveInsideWorkspace(root, key)
+  }
+}
+
+/** The added folders a checkpoint recorded, read once per checkpoint dir. */
+const checkpointRootsCache = new Map<string, string[]>()
+
+function checkpointExtraRoots(checkpointDir: string): string[] {
+  const hit = checkpointRootsCache.get(checkpointDir)
+  if (hit) return hit
+  let roots: string[] = []
+  try {
+    const meta = JSON.parse(readFileSync(join(checkpointDir, 'meta.json'), 'utf8')) as { extraRoots?: unknown }
+    if (Array.isArray(meta.extraRoots)) roots = meta.extraRoots.filter((r): r is string => typeof r === 'string')
+  } catch {
+    roots = []
+  }
+  if (checkpointRootsCache.size >= 256) checkpointRootsCache.clear()
+  checkpointRootsCache.set(checkpointDir, roots)
+  return roots
+}
+
+/** resolveCheckpointPath for a restore that has only the checkpoint's dir. */
+function resolveEntryPath(workspaceRoot: string, checkpointDir: string, key: string): string {
+  if (!isAbsolutePathLike(key)) return resolveInsideWorkspace(workspaceRoot, key)
+  return resolveCheckpointPath(workspaceRoot, key, checkpointExtraRoots(checkpointDir))
+}
+
+/** A key for a file in an added folder: absolute, so it cannot collide with a workspace path. */
+function isExtraRootKey(key: string): boolean {
+  return isAbsolutePathLike(key)
 }
 
 /**
@@ -193,7 +250,17 @@ async function hashExistingFileAsync(path: string): Promise<string | undefined> 
   }
 }
 
+/**
+ * An added-folder file's copy: flat under `_extra/`, named by its key's hash.
+ * Its absolute key (a drive letter, a leading slash) cannot be a folder path
+ * under the checkpoint, and must not land beside the workspace's copies.
+ */
+function extraBlobPathFor(checkpointDir: string, area: 'files' | 'after', key: string): string {
+  return join(checkpointDir, area, '_extra', createHash('sha256').update(slashPath(key)).digest('hex'))
+}
+
 function blobPathFor(checkpointDir: string, relPath: string): string {
+  if (isExtraRootKey(relPath)) return extraBlobPathFor(checkpointDir, 'files', relPath)
   const parts = normalizeRelPath(relPath).split('/').filter(Boolean)
   if (parts.some((p) => p === '..')) {
     throw new Error('Invalid checkpoint path')
@@ -203,6 +270,7 @@ function blobPathFor(checkpointDir: string, relPath: string): string {
 
 /** Where an Undo keeps the agent's version of a path, to bring it back. */
 function afterImagePathFor(checkpointDir: string, relPath: string): string {
+  if (isExtraRootKey(relPath)) return extraBlobPathFor(checkpointDir, 'after', relPath)
   const parts = normalizeRelPath(relPath).split('/').filter(Boolean)
   if (parts.some((p) => p === '..')) {
     throw new Error('Invalid checkpoint path')
@@ -413,16 +481,31 @@ export class InvokeWriteCheckpoint {
   /** See {@link otherWriteCount}. */
   private otherWrites = 0
 
+  /** The task's added folders (extraRoots.ts): their files are keyed by absolute path. */
+  private readonly extraRoots: readonly string[]
+
   constructor(
     runDir: string,
     workspaceRoot: string,
-    anchorUserMessageIndex?: number
+    anchorUserMessageIndex?: number,
+    extraRoots: readonly string[] = []
   ) {
     this.id = randomUUID()
     this.createdAt = new Date().toISOString()
     this.runDir = runDir
     this.workspaceRoot = workspaceRoot
     this.anchorUserMessageIndex = anchorUserMessageIndex
+    this.extraRoots = extraRoots
+  }
+
+  /** The tool's path resolved against the workspace, or the added folder it names. */
+  private resolveArg(pathArg: string): string {
+    return resolveCheckpointPath(this.workspaceRoot, pathArg, this.extraRoots)
+  }
+
+  /** What every meta this checkpoint writes carries besides its files. */
+  private metaExtraRoots(): Pick<WriteCheckpointMeta, 'extraRoots'> {
+    return this.extraRoots.length > 0 ? { extraRoots: [...this.extraRoots] } : {}
   }
 
   /**
@@ -464,7 +547,13 @@ export class InvokeWriteCheckpoint {
   }
 
   private relPathFromResolved(resolved: string): string {
-    return normalizeRelPath(relative(this.realWorkspaceRoot(), resolved))
+    const rel = normalizeRelPath(relative(this.realWorkspaceRoot(), resolved))
+    if (rel && !rel.startsWith('..') && !isAbsolutePathLike(rel)) return rel
+    // Outside the workspace: an added folder's file keeps its absolute path.
+    if (this.extraRoots.some((root) => isPathInsideRoot(resolved, root) && !isPathInsideRoot(root, resolved))) {
+      return slashPath(resolved)
+    }
+    return rel
   }
 
   private checkpointDir(): string {
@@ -486,7 +575,7 @@ export class InvokeWriteCheckpoint {
     }
   ): Promise<void> {
     if (this.finalized) return
-    const resolved = resolveInsideWorkspace(this.workspaceRoot, pathArg)
+    const resolved = this.resolveArg(pathArg)
     const rel = this.relPathFromResolved(resolved)
     if (!rel || rel.startsWith('..')) return
     // Recursive dir deletes are recorded as bare directory names (no extension
@@ -620,7 +709,7 @@ export class InvokeWriteCheckpoint {
     priorBlobPath?: string
   ): Promise<void> {
     if (this.finalized) return
-    const resolved = resolveInsideWorkspace(this.workspaceRoot, pathArg)
+    const resolved = this.resolveArg(pathArg)
     const rel = this.relPathFromResolved(resolved)
     if (!rel || rel.startsWith('..')) return
     if (!looksLikeWorkspacePath(rel)) return
@@ -694,7 +783,7 @@ export class InvokeWriteCheckpoint {
 
   private async stampPostWriteHashAsync(file: CheckpointFileEntry): Promise<void> {
     try {
-      const resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
+      const resolved = this.resolveArg(file.path)
       if (file.action === 'modified') {
         const prior = await hashExistingFileAsync(blobPathFor(this.checkpointDir(), file.path))
         if (prior && prior === (await hashExistingFileAsync(resolved))) return
@@ -708,7 +797,7 @@ export class InvokeWriteCheckpoint {
 
   private stampPostWriteHashSync(file: CheckpointFileEntry): void {
     try {
-      const resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
+      const resolved = this.resolveArg(file.path)
       if (file.action === 'modified') {
         const prior = hashExistingFile(blobPathFor(this.checkpointDir(), file.path))
         if (prior && prior === hashExistingFile(resolved)) return
@@ -738,6 +827,7 @@ export class InvokeWriteCheckpoint {
       ...(this.anchorUserMessageIndex !== undefined
         ? { anchorUserMessageIndex: this.anchorUserMessageIndex }
         : {}),
+      ...this.metaExtraRoots(),
       files: [...this.files.values()]
     }
     try {
@@ -794,7 +884,7 @@ export class InvokeWriteCheckpoint {
       if (file.action === 'deleted') continue
       let resolved: string
       try {
-        resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
+        resolved = this.resolveArg(file.path)
       } catch {
         continue
       }
@@ -856,6 +946,7 @@ export class InvokeWriteCheckpoint {
       ...(this.anchorUserMessageIndex !== undefined
         ? { anchorUserMessageIndex: this.anchorUserMessageIndex }
         : {}),
+      ...this.metaExtraRoots(),
       files: [...this.files.values()]
     }
     saveMeta(this.runDir, meta)
@@ -868,7 +959,9 @@ export class InvokeWriteCheckpoint {
 export function beginWriteCheckpoint(
   runDir: string,
   workspaceRoot: string,
-  anchorUserMessageIndex?: number
+  anchorUserMessageIndex?: number,
+  /** The task's added folders this turn (extraRoots.ts). */
+  extraRoots: readonly string[] = []
 ): InvokeWriteCheckpoint {
   const existing = activeSessions.get(runDir)
   if (existing) {
@@ -895,7 +988,7 @@ export function beginWriteCheckpoint(
       })
     }
   }
-  const session = new InvokeWriteCheckpoint(runDir, workspaceRoot, anchorUserMessageIndex)
+  const session = new InvokeWriteCheckpoint(runDir, workspaceRoot, anchorUserMessageIndex, extraRoots)
   activeSessions.set(runDir, session)
   return session
 }
@@ -997,7 +1090,7 @@ function goesPastNoCopyOnDisk(workspaceRoot: string, checkpointDir: string, file
   if (!file.undoable) return true
   try {
     const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
-    return goesPastNoCopy(hashExistingFile(resolveInsideWorkspace(workspaceRoot, file.path)), blob, file)
+    return goesPastNoCopy(hashExistingFile(resolveEntryPath(workspaceRoot, checkpointDir, file.path)), blob, file)
   } catch {
     return false
   }
@@ -1177,7 +1270,7 @@ function restoreFile(
   undo?: RewindUndo
 ): RestoreOutcome {
   if (!file.undoable) return 'skipped'
-  const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
+  const resolved = resolveEntryPath(workspaceRoot, checkpointDir, file.path)
   if (file.action === 'created') {
     if (writeState(hashExistingFile(resolved), null, file) === 'edited') {
       // User edited the file the agent created — refuse to delete their work.
@@ -1440,7 +1533,7 @@ function captureRedo(
 ): 'copy' | 'absent' | null {
   if (!file.undoable) return null
   try {
-    const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
+    const resolved = resolveEntryPath(workspaceRoot, checkpointDir, file.path)
     const current = hashExistingFile(resolved)
     if (file.action === 'deleted') return current === undefined ? 'absent' : null
     if (!current || !file.hash || current !== file.hash) return null
@@ -1477,7 +1570,7 @@ function redoFile(
   file: CheckpointFileEntry
 ): 'reopened' | 'conflict' | 'failed' {
   try {
-    const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
+    const resolved = resolveEntryPath(workspaceRoot, checkpointDir, file.path)
     const current = hashExistingFile(resolved)
     if (file.action === 'created') {
       if (current !== undefined) return 'conflict'
@@ -1622,6 +1715,59 @@ export function keepWritesForPaths(
     for (const path of result.kept) kept.push({ checkpointId: meta.id, path })
   }
   return kept
+}
+
+/**
+ * The newest turn's record of the task's write to `relPath` — the one per-file
+ * Keep and Undo act on — and whether it is still waiting on review. Null when
+ * no turn wrote it.
+ */
+export type AgentWriteRecord = {
+  checkpointId: string
+  /** As the checkpoint records it: workspace-relative, forward slashes. */
+  path: string
+  /** Kept, undone or settled by a rewind: no longer waiting on review. */
+  settled: CheckpointFileResolution | 'rewound' | null
+  undoable: boolean
+  hash?: string
+}
+
+export function newestAgentWrite(runDir: string, workspaceRoot: string, relPath: string): AgentWriteRecord | null {
+  const rel = toCheckpointRelPath(workspaceRoot, relPath)
+  const metas = listCheckpointMetas(runDir)
+  for (let i = metas.length - 1; i >= 0; i -= 1) {
+    const meta = metas[i]!
+    const file = meta.files.find((f) => f.path === rel)
+    if (!file) continue
+    const settled: AgentWriteRecord['settled'] = file.rewound
+      ? 'rewound'
+      : (file.resolved ?? (meta.undone || meta.resolved ? 'discarded' : null))
+    return { checkpointId: meta.id, path: rel, settled, undoable: file.undoable, ...(file.hash ? { hash: file.hash } : {}) }
+  }
+  return null
+}
+
+/**
+ * The review changed a write still waiting on it (one hunk undone or put
+ * back): the file is still the agent's write to Keep, Undo or rewind, so its
+ * hash moves with it. Only from exactly the agent's write — a file someone
+ * changed since keeps reading as changed, so an Undo still refuses to
+ * overwrite that change. Returns whether the record moved.
+ */
+export function restampAgentWrite(
+  runDir: string,
+  checkpointId: string,
+  relPath: string,
+  fromHash: string,
+  toHash: string
+): boolean {
+  const meta = loadMeta(runDir, checkpointId)
+  if (!meta || meta.undone || meta.resolved) return false
+  const file = meta.files.find((f) => f.path === relPath)
+  if (!file || file.resolved || !file.hash || file.hash !== fromHash) return false
+  file.hash = toHash
+  saveMeta(runDir, meta)
+  return true
 }
 
 /**
@@ -1784,7 +1930,7 @@ export function planRewindWritesAcrossRuns(
 function planFileRewind(workspaceRoot: string, writes: RewoundWrite[]): RewindWritesPlanFile | null {
   const newest = writes[0]!.file
   try {
-    const now = hashExistingFile(resolveInsideWorkspace(workspaceRoot, newest.path))
+    const now = hashExistingFile(resolveEntryPath(workspaceRoot, writes[0]!.checkpointDir, newest.path))
     let content = now
     const taken: CheckpointFileEntry[] = []
     // Writes with no copy the walk has reached but not yet got past.

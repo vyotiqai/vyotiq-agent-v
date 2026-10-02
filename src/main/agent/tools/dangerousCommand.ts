@@ -549,3 +549,34 @@ export function dangerousCommand(command: string, ctx: CommandContext): Dangerou
   if (!command.trim()) return null
   return checkText(command, ctx.cwd, ctx, ctx.syntax, 0)
 }
+
+/**
+ * Every simple command a line runs, as the words it starts with past env
+ * assignments and wrappers (`sudo`, `env`, `npx`…): each side of `&&` `;` `|`,
+ * the bodies of `$(…)` and backticks, and a script handed to `bash -c` or
+ * `powershell -Command`. What a deny or ask permission rule on a command
+ * prefix reads, so `a && b` cannot hide `b` behind `a`.
+ */
+export function simpleCommands(command: string, syntax: Syntax): string[][] {
+  const out: string[][] = []
+  const visit = (text: string, how: Syntax, depth: number): void => {
+    if (depth > 4) return
+    for (const segment of splitSegments(text, how)) {
+      for (const word of segment.words) {
+        for (const inner of substitutions(word)) visit(inner, how, depth + 1)
+      }
+      const { words } = unwrap(segment.words)
+      if (words.length === 0) continue
+      out.push(words)
+      const inline = inlineScript(words)
+      if (inline) visit(inline.script, inline.syntax, depth + 1)
+    }
+  }
+  visit(command, syntax, 0)
+  return out
+}
+
+/** Lower-cased program name without directory or Windows extension (`C:\x\Git.EXE` → `git`). */
+export function commandProgramName(word: string): string {
+  return programName(word)
+}

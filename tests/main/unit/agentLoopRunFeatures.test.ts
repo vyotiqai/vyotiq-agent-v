@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { StreamChunk } from '@main/agent/providers/types'
@@ -80,6 +80,7 @@ import { runAgent } from '@main/agent/loop'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
 import { registerQuestionSender, resetAgentQuestionForTests, resolveAgentQuestion } from '@main/agent/agentQuestion'
 import { resetHooksForTests } from '@main/agent/hooks'
+import { loadMessagesAsync } from '@main/agent/state'
 
 type Ev = { type: string; status?: string; name?: string; content?: string; ok?: boolean }
 
@@ -309,5 +310,71 @@ describe('hooks in a run', () => {
     expect(asked[0]).toMatch(/\.vyotiq\/hooks\.json runs commands around the agent's work:\n• PreToolUse: node /)
     expect(executeTool).not.toHaveBeenCalled()
     expect(run.seen[1]).toContain('repo says no')
+  }, 60_000)
+
+  it('SessionStart and UserPromptSubmit run before the first step, and what they print reaches the model', async () => {
+    const log = join(scripts, 'stdin.jsonl')
+    const echo = (name: string, out: string): string =>
+      hookScript(
+        name,
+        `let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{require('fs').appendFileSync(${JSON.stringify(log)},s+'\\n');process.stdout.write(${JSON.stringify(out)})})`
+      )
+    writeFileSync(
+      join(userData, 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: echo('start', 'Branch: main, 3 files dirty') }] }],
+          UserPromptSubmit: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: echo('prompt', JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Ticket ABC-12 is open' } }))
+                }
+              ]
+            }
+          ]
+        }
+      })
+    )
+    assembleContext.mockClear()
+    readThenAnswer()
+    for await (const ev of runAgent({ runId: 'hooks-start', messages: [{ role: 'user', content: 'fix the build' }], workspacePath: workspace })) {
+      void ev
+    }
+    const inputs = readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)
+    expect(inputs).toEqual([
+      expect.objectContaining({ hook_event_name: 'SessionStart', source: 'startup', session_id: 'hooks-start' }),
+      expect.objectContaining({ hook_event_name: 'UserPromptSubmit', prompt: 'fix the build', session_id: 'hooks-start' })
+    ])
+    const hint = (assembleContext.mock.calls[0]![0] as { loopHint?: string }).loopHint ?? ''
+    expect(hint).toContain('Branch: main, 3 files dirty')
+    expect(hint).toContain('Ticket ABC-12 is open')
+  }, 60_000)
+
+  it('a UserPromptSubmit hook that exits 2 blocks the instruction before any model step', async () => {
+    writeFileSync(
+      join(userData, 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            { hooks: [{ type: 'command', command: hookScript('deny', "process.stderr.write('that prompt has a secret in it');process.exit(2)") }] }
+          ]
+        }
+      })
+    )
+    readThenAnswer()
+    const events: Array<Ev & { message?: string; code?: string }> = []
+    for await (const ev of runAgent({ runId: 'hooks-blocked', messages: [{ role: 'user', content: 'deploy with key sk-123' }], workspacePath: workspace })) {
+      events.push(ev as Ev & { message?: string; code?: string })
+    }
+    expect(streamChat).not.toHaveBeenCalled()
+    expect(events.find((e) => e.type === 'error')).toMatchObject({
+      code: 'HOOK_BLOCKED',
+      message: expect.stringContaining('that prompt has a secret in it')
+    })
+    expect(events.at(-1)).toMatchObject({ type: 'status', status: 'error' })
+    // The blocked instruction is taken back out of the task's transcript.
+    expect(JSON.stringify(await loadMessagesAsync(workspace, 'hooks-blocked'))).not.toContain('sk-123')
   }, 60_000)
 })

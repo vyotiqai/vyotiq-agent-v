@@ -1,0 +1,108 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 4,
+          "pageInfo": { "hasNextPage": true, "endCursor": "Y3Vyc29yOjM=" },
+          "nodes": [
+            {
+              "id": "PRRT_kwDOAbc123",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "src/main/app.ts",
+              "line": 42,
+              "originalLine": 40,
+              "startLine": 40,
+              "diffSide": "RIGHT",
+              "resolvedBy": null,
+              "viewerCanResolve": true,
+              "viewerCanUnresolve": false,
+              "viewerCanReply": true,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "id": "PRRC_1",
+                    "author": { "login": "alice" },
+                    "body": "Rename this to `startApp`.\n\nIt reads better.",
+                    "createdAt": "2026-10-01T10:00:00Z",
+                    "url": "https://github.com/acme/app/pull/12#discussion_r1"
+                  },
+                  {
+                    "id": "PRRC_2",
+                    "author": { "login": "bob" },
+                    "body": "Agreed",
+                    "createdAt": "2026-10-01T11:00:00Z",
+                    "url": "https://github.com/acme/app/pull/12#discussion_r2"
+                  },
+                  {
+                    "id": "PRRC_3",
+                    "author": null,
+                    "body": "+1",
+                    "createdAt": "2026-10-01T12:00:00Z",
+                    "url": "javascript:alert(1)"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOAbc124",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "src/main/app.ts",
+              "line": 7,
+              "originalLine": 7,
+              "startLine": null,
+              "diffSide": "LEFT",
+              "resolvedBy": { "login": "carol" },
+              "viewerCanResolve": false,
+              "viewerCanUnresolve": true,
+              "viewerCanReply": true,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "id": "PRRC_4",
+                    "author": { "login": "carol" },
+                    "body": "Typo",
+                    "createdAt": "2026-10-01T09:00:00Z",
+                    "url": "https://github.com/acme/app/pull/12#discussion_r4"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOAbc125",
+              "isResolved": false,
+              "isOutdated": true,
+              "path": "README.md",
+              "line": null,
+              "originalLine": 3,
+              "startLine": null,
+              "diffSide": "RIGHT",
+              "resolvedBy": null,
+              "viewerCanResolve": true,
+              "viewerCanUnresolve": false,
+              "viewerCanReply": false,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "id": "PRRC_5",
+                    "author": { "login": "dave" },
+                    "body": "Out of date wording",
+                    "createdAt": "2026-10-01T08:00:00Z",
+                    "url": "https://github.com/acme/app/pull/12#discussion_r5"
+                  }
+                ]
+              }
+            },
+            null,
+            { "id": "not a valid id!", "path": "x.ts" }
+          ]
+        }
+      }
+    }
+  }
+}

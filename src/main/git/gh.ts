@@ -4,7 +4,19 @@ import { unlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
-import type { PrChangeType, PrCreateResult, PrReview, PrView } from '../../shared/ipc'
+import type {
+  PrChangeType,
+  PrCheckoutResult,
+  PrCreateResult,
+  PrListResult,
+  PrReview,
+  PrReviewThread,
+  PrReviewThreadComment,
+  PrReviewThreadReplyResult,
+  PrReviewThreadResolveResult,
+  PrReviewThreadsResult,
+  PrView
+} from '../../shared/ipc'
 import { resolveGhTokenForCli, setupGithubGitAuth } from '@main/git/githubAuth'
 import {
   ghAvailable,
@@ -22,7 +34,8 @@ import {
   isGitRepo,
   parseGitObjectId,
   pushCurrentBranch,
-  sanitizeRelativePaths
+  sanitizeRelativePaths,
+  type CommitOutcome
 } from './git'
 import { sanitizedTerminalEnv } from '../agent/tools/terminal'
 import { guardGitInvocation } from './repoCommandGuard'
@@ -64,13 +77,16 @@ async function gh(args: string[], cwd: string, timeout = TIMEOUT_MS): Promise<st
   if (!executable) {
     throw new Error('GitHub CLI (gh) is not installed or not on PATH')
   }
+  // gh runs git in this repository itself (`pr create --fill` reads the log,
+  // `pr merge` checks out and pulls), so its git gets the app's guard too.
+  const { env } = await guardGitInvocation(['push'], cwd, buildGhEnv())
   const { stdout } = await execFile(executable, args, {
     cwd,
     encoding: 'utf8',
     timeout,
     maxBuffer: MAX_BUFFER,
     windowsHide: true,
-    env: buildGhEnv()
+    env
   })
   return stdout
 }
@@ -537,7 +553,14 @@ export async function prCreateFromChanges(
   cwd: string,
   message: string,
   mode: 'all' | 'staged' = 'all',
-  opts: { draft?: boolean } & PrCreateText = {}
+  opts: {
+    draft?: boolean
+    /**
+     * Runs once the commit has landed, before the push is checked or the PR
+     * opened, while HEAD is that commit: what settles a task's edits with it.
+     */
+    onCommitted?: (outcome: CommitOutcome) => Promise<void>
+  } & PrCreateText = {}
 ): Promise<PrCreateResult> {
   const commitMessage = message.trim()
   if (!commitMessage) throw new Error('Commit message is required')
@@ -561,6 +584,7 @@ export async function prCreateFromChanges(
   }
 
   const outcome = await commitAll(cwd, commitMessage, true, mode)
+  if (outcome.committed) await opts.onCommitted?.(outcome)
   if (!outcome.committed) {
     if (existing) {
       return {
@@ -841,4 +865,410 @@ export async function createGithubIssue(
   if (body?.trim()) args.push('--body', body.trim())
   const output = (await gh(args, cwd, TIMEOUT_MS)).trim()
   return { url: output, detail: 'Issue created' }
+}
+
+// ── Review threads ──────────────────────────────────────────────────────────
+//
+// Inline review conversations come from GraphQL: REST lists the comments but
+// not whether a thread was resolved, which is the one thing worth sorting by.
+
+const REVIEW_THREADS_PAGE = 100
+const REVIEW_THREAD_COMMENTS = 50
+/** 300 threads is past any review a person reads; the panel says when there are more. */
+const REVIEW_THREADS_MAX_PAGES = 3
+const PR_CHECKOUT_TIMEOUT_MS = 120_000
+
+/** One line: a multi-line argument is one more thing for Windows quoting to get wrong. */
+function graphqlText(query: string): string {
+  return query.replace(/\s+/g, ' ').trim()
+}
+
+const REVIEW_THREAD_COMMENT_FIELDS = 'id author { login } body createdAt url'
+
+const REVIEW_THREADS_QUERY = graphqlText(`
+  query($owner: String!, $name: String!, $number: Int!, $after: String) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        reviewThreads(first: ${REVIEW_THREADS_PAGE}, after: $after) {
+          totalCount
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id isResolved isOutdated path line originalLine startLine diffSide
+            resolvedBy { login }
+            viewerCanResolve viewerCanUnresolve viewerCanReply
+            comments(first: ${REVIEW_THREAD_COMMENTS}) {
+              totalCount
+              nodes { ${REVIEW_THREAD_COMMENT_FIELDS} }
+            }
+          }
+        }
+      }
+    }
+  }
+`)
+
+const RESOLVE_THREAD_MUTATION = graphqlText(`
+  mutation($threadId: ID!) {
+    resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
+  }
+`)
+
+const UNRESOLVE_THREAD_MUTATION = graphqlText(`
+  mutation($threadId: ID!) {
+    unresolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
+  }
+`)
+
+const REPLY_THREAD_MUTATION = graphqlText(`
+  mutation($threadId: ID!, $body: String!) {
+    addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+      comment { ${REVIEW_THREAD_COMMENT_FIELDS} }
+    }
+  }
+`)
+
+type GhReviewThreadCommentJson = {
+  id?: string | null
+  author?: { login?: string | null } | null
+  body?: string | null
+  createdAt?: string | null
+  url?: string | null
+}
+
+type GhReviewThreadJson = {
+  id?: string | null
+  isResolved?: boolean | null
+  isOutdated?: boolean | null
+  path?: string | null
+  line?: number | null
+  originalLine?: number | null
+  startLine?: number | null
+  diffSide?: string | null
+  resolvedBy?: { login?: string | null } | null
+  viewerCanResolve?: boolean | null
+  viewerCanUnresolve?: boolean | null
+  viewerCanReply?: boolean | null
+  comments?: { totalCount?: number | null; nodes?: Array<GhReviewThreadCommentJson | null> | null } | null
+}
+
+type GhReviewThreadsPageJson = {
+  data?: {
+    repository?: {
+      pullRequest?: {
+        reviewThreads?: {
+          totalCount?: number | null
+          pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null
+          nodes?: Array<GhReviewThreadJson | null> | null
+        } | null
+      } | null
+    } | null
+  } | null
+  errors?: Array<{ message?: string; type?: string }> | null
+}
+
+const THREAD_ID_RE = /^[A-Za-z0-9_=-]{1,200}$/
+
+function intOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) ? value : null
+}
+
+function mapReviewThreadComment(c: GhReviewThreadCommentJson): PrReviewThreadComment {
+  return {
+    id: c.id ?? '',
+    // A deleted account's comments keep their text and lose their author.
+    author: c.author?.login?.trim() || 'ghost',
+    body: c.body ?? '',
+    createdAt: c.createdAt ?? null,
+    url: httpsUrl(c.url)
+  }
+}
+
+/** One GraphQL thread node in the panel's shape; null for a node with no usable id. */
+export function mapReviewThread(node: GhReviewThreadJson | null | undefined): PrReviewThread | null {
+  if (!node || typeof node.id !== 'string' || !THREAD_ID_RE.test(node.id)) return null
+  const comments = (node.comments?.nodes ?? [])
+    .filter((c): c is GhReviewThreadCommentJson => Boolean(c))
+    .map(mapReviewThreadComment)
+  const total = intOrNull(node.comments?.totalCount)
+  return {
+    id: node.id,
+    path: (node.path ?? '').replace(/\\/g, '/'),
+    line: intOrNull(node.line),
+    originalLine: intOrNull(node.originalLine),
+    startLine: intOrNull(node.startLine),
+    diffSide: (node.diffSide ?? '').trim().toUpperCase(),
+    isResolved: node.isResolved === true,
+    isOutdated: node.isOutdated === true,
+    resolvedBy: node.resolvedBy?.login?.trim() || null,
+    viewerCanResolve: node.viewerCanResolve === true,
+    viewerCanUnresolve: node.viewerCanUnresolve === true,
+    viewerCanReply: node.viewerCanReply === true,
+    comments,
+    commentCount: Math.max(comments.length, total ?? 0)
+  }
+}
+
+export type ReviewThreadsPage = {
+  threads: PrReviewThread[]
+  totalCount: number
+  hasNextPage: boolean
+  endCursor: string | null
+}
+
+/**
+ * One page of `gh api graphql` output. Null when the repository has no such
+ * pull request; throws on a GraphQL error that is not that.
+ */
+export function parseReviewThreadsPage(raw: string): ReviewThreadsPage | null {
+  let data: GhReviewThreadsPageJson
+  try {
+    data = JSON.parse(raw) as GhReviewThreadsPageJson
+  } catch {
+    throw new Error('GitHub CLI returned an invalid review threads response')
+  }
+  const errors = (data.errors ?? []).map((e) => e.message?.trim() ?? '').filter(Boolean)
+  const reviewThreads = data.data?.repository?.pullRequest?.reviewThreads
+  if (!reviewThreads) {
+    if (errors.some(isMissingPullRequest) || (errors.length === 0 && data.data?.repository)) return null
+    throw new Error(errors.join('\n') || 'GitHub returned no review threads')
+  }
+  const threads = (reviewThreads.nodes ?? [])
+    .map(mapReviewThread)
+    .filter((t): t is PrReviewThread => t !== null)
+  const pageInfo = reviewThreads.pageInfo
+  return {
+    threads,
+    totalCount: Math.max(threads.length, intOrNull(reviewThreads.totalCount) ?? 0),
+    hasNextPage: pageInfo?.hasNextPage === true && Boolean(pageInfo.endCursor),
+    endCursor: pageInfo?.endCursor ?? null
+  }
+}
+
+function isMissingPullRequest(message: string): boolean {
+  return /could not resolve to a pullrequest/i.test(message)
+}
+
+function reviewThreadIdArg(threadId: string): string {
+  const id = threadId.trim()
+  if (!THREAD_ID_RE.test(id)) throw new Error('Invalid review thread id')
+  return id
+}
+
+/** `gh api graphql`: gh exits non-zero on a GraphQL error, with the reason on stderr. */
+async function ghGraphql(fields: Array<[flag: '-f' | '-F', value: string]>, cwd: string): Promise<string> {
+  const args = ['api', 'graphql']
+  for (const [flag, value] of fields) args.push(flag, value)
+  return gh(args, cwd, TIMEOUT_MS)
+}
+
+/**
+ * The pull request's inline review threads, oldest first as GitHub keeps them.
+ * Null when the repository has no such pull request. `{owner}`/`{repo}` are
+ * gh's own placeholders: the same base repository `gh pr view` resolves.
+ */
+export async function prReviewThreads(cwd: string, number: number): Promise<PrReviewThreadsResult | null> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  const prNumber = prNumberArg(number)
+  const threads: PrReviewThread[] = []
+  let totalCount = 0
+  let after: string | null = null
+  let truncated = false
+  for (let page = 0; page < REVIEW_THREADS_MAX_PAGES; page += 1) {
+    const fields: Array<['-f' | '-F', string]> = [
+      ['-f', `query=${REVIEW_THREADS_QUERY}`],
+      ['-F', 'owner={owner}'],
+      ['-F', 'name={repo}'],
+      ['-F', `number=${prNumber}`]
+    ]
+    if (after) fields.push(['-f', `after=${after}`])
+    let raw: string
+    try {
+      raw = await ghGraphql(fields, cwd)
+    } catch (err) {
+      const message = execErrorText(err)
+      if (isMissingPullRequest(message) || isExpectedPrAbsence(message)) return null
+      throw new Error(message)
+    }
+    const parsed = parseReviewThreadsPage(raw)
+    if (!parsed) return null
+    threads.push(...parsed.threads)
+    totalCount = Math.max(totalCount, parsed.totalCount)
+    if (!parsed.hasNextPage) break
+    after = parsed.endCursor
+    truncated = page === REVIEW_THREADS_MAX_PAGES - 1
+  }
+  return {
+    number: Number(prNumber),
+    threads,
+    totalCount: Math.max(totalCount, threads.length),
+    truncated: truncated || totalCount > threads.length
+  }
+}
+
+/** Resolve or reopen one thread. Only from a button: it changes the review on GitHub. */
+export async function prReviewThreadResolve(
+  cwd: string,
+  threadId: string,
+  resolved: boolean
+): Promise<PrReviewThreadResolveResult> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  const id = reviewThreadIdArg(threadId)
+  let raw: string
+  try {
+    raw = await ghGraphql(
+      [
+        ['-f', `query=${resolved ? RESOLVE_THREAD_MUTATION : UNRESOLVE_THREAD_MUTATION}`],
+        ['-f', `threadId=${id}`]
+      ],
+      cwd
+    )
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  let data: {
+    data?: Record<string, { thread?: { id?: string; isResolved?: boolean } | null } | null> | null
+  }
+  try {
+    data = JSON.parse(raw) as typeof data
+  } catch {
+    throw new Error('GitHub CLI returned an invalid response')
+  }
+  const thread = data.data?.[resolved ? 'resolveReviewThread' : 'unresolveReviewThread']?.thread
+  if (!thread || typeof thread.isResolved !== 'boolean') {
+    throw new Error('GitHub did not confirm the change to the review thread')
+  }
+  return { threadId: id, isResolved: thread.isResolved }
+}
+
+/**
+ * Reply on a thread. This posts publicly under the signed-in account, so it
+ * is wired to one explicit Send button and nothing else.
+ */
+export async function prReviewThreadReply(
+  cwd: string,
+  threadId: string,
+  body: string
+): Promise<PrReviewThreadReplyResult> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  const id = reviewThreadIdArg(threadId)
+  const text = body.trim()
+  if (!text) throw new Error('Reply cannot be empty')
+  let raw: string
+  try {
+    raw = await ghGraphql(
+      [
+        ['-f', `query=${REPLY_THREAD_MUTATION}`],
+        ['-f', `threadId=${id}`],
+        ['-f', `body=${text}`]
+      ],
+      cwd
+    )
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  let data: {
+    data?: { addPullRequestReviewThreadReply?: { comment?: GhReviewThreadCommentJson | null } | null } | null
+  }
+  try {
+    data = JSON.parse(raw) as typeof data
+  } catch {
+    throw new Error('GitHub CLI returned an invalid response')
+  }
+  const comment = data.data?.addPullRequestReviewThreadReply?.comment
+  if (!comment?.id) throw new Error('GitHub did not confirm the reply')
+  return { comment: mapReviewThreadComment(comment) }
+}
+
+type GhPrListJson = Array<{
+  number?: number
+  title?: string
+  headRefName?: string
+  author?: { login?: string | null } | null
+  updatedAt?: string | null
+  url?: string | null
+  isDraft?: boolean
+}>
+
+/** Recent open pull requests in the repository (gh's default order: newest first). */
+export async function prList(cwd: string): Promise<PrListResult> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  let raw: string
+  try {
+    raw = await gh(
+      ['pr', 'list', '--json', 'number,title,headRefName,author,updatedAt,url,isDraft', '--limit', '20'],
+      cwd
+    )
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  let rows: GhPrListJson
+  try {
+    rows = JSON.parse(raw) as GhPrListJson
+  } catch {
+    throw new Error('GitHub CLI returned an invalid pull request list')
+  }
+  return {
+    prs: (Array.isArray(rows) ? rows : [])
+      .filter((row) => typeof row.number === 'number' && Number.isInteger(row.number) && row.number > 0)
+      .slice(0, 20)
+      .map((row) => ({
+        number: row.number!,
+        title: row.title ?? '',
+        headRefName: row.headRefName ?? '',
+        author: row.author?.login?.trim() || 'ghost',
+        updatedAt: row.updatedAt ?? null,
+        url: httpsUrl(row.url),
+        isDraft: row.isDraft === true
+      }))
+  }
+}
+
+/** Tracked files with changes (staged or not); untracked files survive a checkout. */
+async function trackedChanges(cwd: string): Promise<string[]> {
+  const out = await git(['status', '--porcelain=v1', '--untracked-files=no'], cwd)
+  return out.split(/\r?\n/).filter((line) => line.trim().length > 0)
+}
+
+/**
+ * `gh pr checkout`. Refused while tracked files have uncommitted changes, so a
+ * checkout never carries one branch's work onto another. gh runs git itself;
+ * it gets the same repository-program guard as the app's own git calls.
+ */
+export async function prCheckout(cwd: string, number: number): Promise<PrCheckoutResult> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const prNumber = prNumberArg(number)
+  const changed = await trackedChanges(cwd)
+  if (changed.length > 0) {
+    throw new Error(
+      `Commit or discard the ${changed.length} uncommitted change${changed.length === 1 ? '' : 's'} before checking out pull request #${prNumber}.`
+    )
+  }
+  const executable = await resolveGhExecutable()
+  if (!executable) throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  const { env } = await guardGitInvocation(['checkout'], cwd, buildGhEnv())
+  try {
+    await execFile(executable, ['pr', 'checkout', prNumber], {
+      cwd,
+      encoding: 'utf8',
+      timeout: PR_CHECKOUT_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      windowsHide: true,
+      env
+    })
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  const branch = await currentGitBranch(cwd)
+  return { detail: branch ? `Checked out #${prNumber} on ${branch}` : `Checked out #${prNumber}` }
 }

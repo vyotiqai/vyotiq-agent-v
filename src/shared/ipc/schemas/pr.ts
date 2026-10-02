@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { RunIdSchema } from './agent'
+import { TaskCommitSettledSchema } from './taskOutcome'
 
 export const PrMergeMethodSchema = z.enum(['squash', 'merge', 'rebase'])
 export type PrMergeMethod = z.infer<typeof PrMergeMethodSchema>
@@ -91,7 +93,9 @@ export const PrCreateRequestSchema = z.object({
    */
   title: z.string().trim().min(1).max(256).optional(),
   /** GitHub caps a PR body at 65,536 characters. */
-  body: z.string().max(65_536).optional()
+  body: z.string().max(65_536).optional(),
+  /** The task whose Changes this was committed from: the commit settles its edits. */
+  runId: RunIdSchema.optional()
 })
 
 export const PrCreateResultSchema = z.object({
@@ -99,7 +103,9 @@ export const PrCreateResultSchema = z.object({
   branch: z.string().min(1),
   baseBranch: z.string().min(1),
   draft: z.boolean(),
-  detail: z.string().min(1)
+  detail: z.string().min(1),
+  /** Set when the commit took edits of the task named by `runId`. */
+  task: TaskCommitSettledSchema.optional()
 })
 export type PrCreateResult = z.infer<typeof PrCreateResultSchema>
 
@@ -188,3 +194,115 @@ export const GithubIssueCreateResultSchema = z.object({
   detail: z.string()
 })
 export type GithubIssueCreateResult = z.infer<typeof GithubIssueCreateResultSchema>
+
+/** A GraphQL node id (`PRRT_kwDO…`): what resolve and reply name a thread by. */
+export const PrReviewThreadIdSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9_=-]+$/, 'Invalid review thread id')
+
+export const PrReviewThreadCommentSchema = z.object({
+  id: z.string(),
+  author: z.string(),
+  body: z.string(),
+  createdAt: z.string().nullable(),
+  /** The comment on GitHub (https only). */
+  url: z.string().nullable()
+})
+export type PrReviewThreadComment = z.infer<typeof PrReviewThreadCommentSchema>
+
+/**
+ * One inline review conversation on a pull request, as GitHub's GraphQL API
+ * reports it — the REST API has no resolved state.
+ */
+export const PrReviewThreadSchema = z.object({
+  id: PrReviewThreadIdSchema,
+  path: z.string(),
+  /** The line in the current diff; null once the thread is outdated. */
+  line: z.number().int().nullable(),
+  /** The line the comment was first made on. */
+  originalLine: z.number().int().nullable(),
+  /** First line of a multi-line comment, when it spans several. */
+  startLine: z.number().int().nullable(),
+  /** LEFT (the base side) or RIGHT (the head side); '' when GitHub gave none. */
+  diffSide: z.string(),
+  isResolved: z.boolean(),
+  isOutdated: z.boolean(),
+  resolvedBy: z.string().nullable(),
+  viewerCanResolve: z.boolean(),
+  viewerCanUnresolve: z.boolean(),
+  viewerCanReply: z.boolean(),
+  /** The comments fetched (the first 50), oldest first. */
+  comments: z.array(PrReviewThreadCommentSchema),
+  /** Every comment in the thread, including any past the first 50. */
+  commentCount: z.number().int().min(0)
+})
+export type PrReviewThread = z.infer<typeof PrReviewThreadSchema>
+
+export const PrReviewThreadsRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive()
+})
+
+export const PrReviewThreadsResultSchema = z.object({
+  number: z.number().int().positive(),
+  threads: z.array(PrReviewThreadSchema),
+  /** GitHub's count; more than `threads.length` when the pages ran out. */
+  totalCount: z.number().int().min(0),
+  truncated: z.boolean()
+})
+export type PrReviewThreadsResult = z.infer<typeof PrReviewThreadsResultSchema>
+
+export const PrReviewThreadResolveRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  threadId: PrReviewThreadIdSchema,
+  resolved: z.boolean()
+})
+
+export const PrReviewThreadResolveResultSchema = z.object({
+  threadId: PrReviewThreadIdSchema,
+  isResolved: z.boolean()
+})
+export type PrReviewThreadResolveResult = z.infer<typeof PrReviewThreadResolveResultSchema>
+
+export const PrReviewThreadReplyRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  threadId: PrReviewThreadIdSchema,
+  body: z.string().trim().min(1).max(8_000)
+})
+
+export const PrReviewThreadReplyResultSchema = z.object({
+  comment: PrReviewThreadCommentSchema
+})
+export type PrReviewThreadReplyResult = z.infer<typeof PrReviewThreadReplyResultSchema>
+
+export const PrListRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+
+export const PrListItemSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  headRefName: z.string(),
+  author: z.string(),
+  updatedAt: z.string().nullable(),
+  url: z.string().nullable(),
+  isDraft: z.boolean()
+})
+export type PrListItem = z.infer<typeof PrListItemSchema>
+
+export const PrListResultSchema = z.object({
+  prs: z.array(PrListItemSchema).max(50)
+})
+export type PrListResult = z.infer<typeof PrListResultSchema>
+
+export const PrCheckoutRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive()
+})
+
+export const PrCheckoutResultSchema = z.object({
+  detail: z.string()
+})
+export type PrCheckoutResult = z.infer<typeof PrCheckoutResultSchema>

@@ -1,13 +1,12 @@
 import { lineDiffStat } from '../../shared/utils/lineDiffStat'
 import { mapLimit } from '../../shared/utils/mapLimit'
-import { createWorkspacePathResolver } from '../workspace/safePath'
 import {
   checkpointBeforeImagePath,
   listCheckpointMetasAsync,
   type CheckpointFileAction,
   type WriteCheckpointMeta
 } from './checkpoints'
-import { readStatedText, statOrNull } from './taskFileDiff'
+import { checkpointsExtraRoots, readStatedText, rootsPathResolver, statOrNull } from './taskFileDiff'
 
 /**
  * A finished task's edits that still wait on Keep or Undo — the navigator's
@@ -38,9 +37,11 @@ export async function pendingReviewSummary(
   runDir: string,
   workspaceRoot: string
 ): Promise<PendingReview | undefined> {
-  const resolve = createWorkspacePathResolver(workspaceRoot)
+  const metas = await listCheckpointMetasAsync(runDir)
+  // Files in the task's added folders are keyed absolute (extraRoots.ts).
+  const resolve = rootsPathResolver(workspaceRoot, checkpointsExtraRoots(metas))
   const candidates = await mapLimit(
-    collectPending(runDir, await listCheckpointMetasAsync(runDir)),
+    collectPending(runDir, metas),
     STAT_CONCURRENCY,
     async (file) => {
       const resolved = await resolve(file.path)

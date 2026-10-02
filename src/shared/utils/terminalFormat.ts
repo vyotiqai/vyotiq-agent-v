@@ -49,9 +49,9 @@ export function sanitizeTerminalDisplayText(text: string): string {
     .join('\n')
 }
 
-/** Strip cwd/shell headers injected by toolTerminal before parsing exit metadata. */
+/** Strip cwd/shell (and sandbox, when it ran in one) headers injected by toolTerminal before parsing exit metadata. */
 export function stripTerminalCwdHeader(content: string): string {
-  return content.replace(/^cwd:.*\n(?:shell:.*\n)?\n?/m, '')
+  return content.replace(/^cwd:.*\n(?:shell:.*\n)?(?:sandbox:.*\n)?\n?/m, '')
 }
 
 /**
@@ -99,13 +99,36 @@ function takeTrailingExitCode(text: string): { body: string; exitCode: number | 
   }
 }
 
+const TERMINAL_FENCE_OPEN_RE = /(^|\n)<untrusted_content source="terminal"[^\n]*>\n/
+const FENCE_CLOSE = '\n</untrusted_content>'
+
+/**
+ * Remove the untrusted-content envelope main puts around the output of a
+ * command that fetched remote content (main/agent/tools/terminalRemoteFence.ts).
+ * The fence is for the model; the frame's readers — the terminal card, the
+ * receipt, exit-code checks — want the frame underneath it.
+ */
+export function stripTerminalOutputFence(content: string): string {
+  const open = TERMINAL_FENCE_OPEN_RE.exec(content)
+  if (!open) return content
+  const before = content.slice(0, open.index + open[1]!.length)
+  const after = content.slice(open.index + open[0].length)
+  const close = after.lastIndexOf(FENCE_CLOSE)
+  const closed =
+    close >= 0 &&
+    (after.length === close + FENCE_CLOSE.length || after[close + FENCE_CLOSE.length] === '\n')
+  // A truncated row can lose the close line; drop the open line regardless.
+  return closed ? before + after.slice(0, close) + after.slice(close + FENCE_CLOSE.length) : before + after
+}
+
 /**
  * Parse terminal tool result text into cwd, streams, and exit code.
  *
  * Format: optional session headers, `cwd: …`, optional stdout, optional `stderr:\n…`,
- * trailing `exit_code: N`.
+ * trailing `exit_code: N`. A remote-fetch output fence is stripped first.
  */
-export function parseTerminalOutput(content: string): ParsedTerminalOutput {
+export function parseTerminalOutput(raw: string): ParsedTerminalOutput {
+  const content = stripTerminalOutputFence(raw)
   const { body: withoutSession, sessionId, sessionStatus, command } =
     stripTerminalSessionHeader(content)
   const cwdMatch = withoutSession.match(/^cwd:\s*(.+)$/m)

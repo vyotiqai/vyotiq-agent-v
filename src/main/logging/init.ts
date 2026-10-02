@@ -18,7 +18,7 @@ import {
   backfillCrashSnippetsFromLog
 } from './crashDiagnostics'
 import { isAbortError } from '../../shared/errors'
-import { isIgnorablePipeError, isIgnorableUncaught } from './pipeErrors'
+import { isIgnorablePipeError, isIgnorableUncaught, isRefusedNodePtyFork } from './pipeErrors'
 import { exitAfterFatal } from './fatalExit'
 
 export { isIgnorablePipeError, isIgnorableUncaught } from './pipeErrors'
@@ -170,6 +170,8 @@ function installProcessHandlers(): void {
     if (isIgnorableUncaught(err)) {
       if (isAbortError(err)) {
         logger.warn('Ignored abort-shaped uncaught exception', { scope: 'main', err })
+      } else if (isRefusedNodePtyFork(err)) {
+        logger.warn('Ignored node-pty console-list fork refused by the runAsNode fuse', { scope: 'terminal', err })
       }
       return
     }
@@ -185,6 +187,8 @@ function installProcessHandlers(): void {
     if (isIgnorableUncaught(reason)) {
       if (isAbortError(reason)) {
         logger.warn('Ignored abort-shaped unhandled rejection', { scope: 'main', err: reason })
+      } else if (isRefusedNodePtyFork(reason)) {
+        logger.warn('Ignored node-pty console-list fork refused by the runAsNode fuse', { scope: 'terminal', err: reason })
       }
       return
     }

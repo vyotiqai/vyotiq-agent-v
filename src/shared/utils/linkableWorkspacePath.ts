@@ -106,10 +106,73 @@ function autolinkPathMatch(
   )
 }
 
-/** Turn bare `src/foo.ts` / `src/foo.ts:42` mentions into markdown links (prose only). */
-export function autolinkWorkspacePathsInProse(source: string): string {
-  const withNested = autolinkPathMatch(source, MULTI_SEGMENT_PATH_RE, () => true)
+/**
+ * An inline code span: a run of backticks, its text, the same run again. The
+ * text may hold shorter runs (``a `b` c``).
+ */
+const CODE_SPAN_RE = /(`+)([\s\S]*?[^`])\1(?!`)/g
+
+/**
+ * A citation as the tool descriptions ask for one: `[[src/a.ts]]`,
+ * `[[src/a.ts:12]]`, `[[src/a.ts:12-20]]`, `[[https://url]]`.
+ */
+const CITATION_RE = /\[\[([^[\]\n]+)\]\]/g
+const CITED_FILE_RE = /^([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,10})(?::(\d+)(?:-\d+)?)?$/
+
+/**
+ * A citation as something to open: a workspace file at its (first) line, a
+ * web page, or — a bare file name that names no folder, or any file when
+ * there is nothing to open it with — code, so it reads like the paths around
+ * it. Anything else (`[[1, 2]]`) stays as written.
+ */
+function formatCitations(prose: string, openFiles: boolean): string {
+  return prose.replace(CITATION_RE, (full: string, target: string) => {
+    const cited = target.trim()
+    if (/^https?:\/\/\S+$/i.test(cited)) return `[${cited.replace(/^https?:\/\//i, '')}](${cited})`
+    const file = CITED_FILE_RE.exec(cited)
+    if (!file) return full
+    const [, path, line] = file
+    const ref = line ? `${path}:${line}` : path!
+    const openable =
+      openFiles && isLinkableWorkspacePath(ref) && (path!.includes('/') || isLikelyRootConfigFile(path!))
+    return openable ? `[${cited}](${VY_FILE_HREF_PREFIX}${ref})` : `\`${cited}\``
+  })
+}
+
+function autolinkPaths(prose: string): string {
+  const withNested = autolinkPathMatch(formatCitations(prose, true), MULTI_SEGMENT_PATH_RE, () => true)
   return autolinkPathMatch(withNested, ROOT_CONFIG_PATH_RE, isLikelyRootConfigFile)
+}
+
+/** `rewrite` applied to the prose between inline code spans; the spans are kept as written. */
+function outsideCodeSpans(source: string, rewrite: (prose: string) => string): string {
+  let out = ''
+  let last = 0
+  for (const span of source.matchAll(CODE_SPAN_RE)) {
+    out += rewrite(source.slice(last, span.index)) + span[0]
+    last = span.index + span[0].length
+  }
+  return out + rewrite(source.slice(last))
+}
+
+/**
+ * Turn bare `src/foo.ts` / `src/foo.ts:42` mentions and `[[src/foo.ts:42]]`
+ * citations into markdown links (prose only). Code spans are left as written:
+ * link syntax inside one renders as literal text — `npx vitest run
+ * [tests/a.test](#vy-file:…).tsx` — and a span that is all path already opens
+ * from its chip.
+ */
+export function autolinkWorkspacePathsInProse(source: string): string {
+  return outsideCodeSpans(source, autolinkPaths)
+}
+
+/**
+ * The citations alone, where nothing can open a file: each reads as code, a
+ * web page still links. The tool descriptions ask every model for
+ * `[[path:line]]`, so without this they showed with their brackets.
+ */
+export function formatCitationsInProse(source: string): string {
+  return outsideCodeSpans(source, (prose) => formatCitations(prose, false))
 }
 
 export function parseVyFileHref(href: string | undefined): { path: string; line?: number } | null {

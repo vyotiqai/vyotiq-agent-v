@@ -7,6 +7,7 @@ import { assertInsideWorkspace } from '../../../shared/workspacePath'
 import { scrubPath } from '../../../shared/utils/scrub'
 import { abortError } from '../../../shared/errors'
 import { killProcessTree, sanitizedTerminalEnv } from './terminal'
+import { sandboxHeaderLines, sandboxHintLines, type SandboxLaunch } from '../sandbox/wrap'
 
 const DIAG_TIMEOUT_MS = 120_000
 /**
@@ -179,10 +180,13 @@ export function runSafeCommand(
     env: NodeJS.ProcessEnv
     signal?: AbortSignal
     timeoutMs?: number
+    /** Run inside this OS sandbox (main/agent/sandbox). Absent = unsandboxed. */
+    sandbox?: SandboxLaunch
   }
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null; killed: boolean }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, {
+    const launch = options.sandbox ? options.sandbox.wrap(bin, args) : { bin, args }
+    const child = spawn(launch.bin, launch.args, {
       cwd: options.cwd,
       env: options.env,
       windowsHide: true,
@@ -549,8 +553,10 @@ export async function toolDiagnosticsAsync(
   workspace: string,
   kind: DiagnosticsKind,
   signal: AbortSignal,
-  diagnosticsCommand?: string | null
+  diagnosticsCommand?: string | null,
+  opts: { sandbox?: SandboxLaunch } = {}
 ): Promise<{ ok: boolean; content: string }> {
+  const sandbox = opts.sandbox
   const override =
     (diagnosticsCommand ?? getSettings().diagnosticsCommand)?.trim() || undefined
   if (kind === 'typecheck' && !override && !hasTypeScriptProject(workspace)) {
@@ -586,7 +592,8 @@ export async function toolDiagnosticsAsync(
       cwd: workspace,
       env: sanitizedTerminalEnv(),
       signal,
-      timeoutMs: DIAG_TIMEOUT_MS
+      timeoutMs: DIAG_TIMEOUT_MS,
+      sandbox
     })
     if (signal.aborted) throw abortError()
 
@@ -602,8 +609,10 @@ export async function toolDiagnosticsAsync(
         ok: false,
         content: [
           `command: ${command}`,
+          ...sandboxHeaderLines(sandbox),
           `exit: ${exitCode ?? 'error'}`,
-          output
+          output,
+          ...sandboxHintLines(output, sandbox)
         ]
           .filter(Boolean)
           .join('\n')
@@ -617,6 +626,7 @@ export async function toolDiagnosticsAsync(
         ok: false,
         content: [
           `command: ${command}`,
+          ...sandboxHeaderLines(sandbox),
           'Diagnostics command was killed (timeout)',
           ...(parsed.length > 0 ? [`diagnostics before the timeout: ${parsed.length}`] : []),
           output
@@ -629,6 +639,7 @@ export async function toolDiagnosticsAsync(
     if (parsed.length > 0) {
       const lines = [
         `command: ${command}`,
+        ...sandboxHeaderLines(sandbox),
         ...(exitCode !== 0 ? [`exit: ${exitCode ?? 'error'}`] : []),
         `diagnostics: ${parsed.length}`,
         '',
@@ -640,12 +651,16 @@ export async function toolDiagnosticsAsync(
       return { ok: true, content: lines.join('\n') }
     }
 
-    return { ok: true, content: [`command: ${command}`, '', output].join('\n') }
+    return { ok: true, content: [`command: ${command}`, ...sandboxHeaderLines(sandbox), '', output].join('\n') }
   } catch (err) {
     if (signal.aborted) throw err
     return {
       ok: false,
-      content: [`command: ${command}`, (err as Error).message ?? 'Diagnostics command failed'].join('\n')
+      content: [
+        `command: ${command}`,
+        ...sandboxHeaderLines(sandbox),
+        (err as Error).message ?? 'Diagnostics command failed'
+      ].join('\n')
     }
   }
 }

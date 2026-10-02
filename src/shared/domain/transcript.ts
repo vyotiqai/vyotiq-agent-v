@@ -179,6 +179,13 @@ export type UiItem =
       verifyFailures?: string[]
       verifyCoverage?: number
     }
+  | {
+      /** A one-line note the run left in the record: a switch to a fallback model. */
+      kind: 'notice'
+      id: string
+      text: string
+      at?: string
+    }
 
 /** Attachment chips for a message: names and sizes only, never the quoted text. */
 export function uiAttachments(content: MessageContent): UiAttachment[] {
@@ -1062,12 +1069,9 @@ function compactionUiItemFromEvent(
   return null
 }
 
-export function weaveCompactionItems(
-  items: UiItem[],
-  extras: Extract<UiItem, { kind: 'compaction' }>[]
-): UiItem[] {
+export function weaveCompactionItems(items: UiItem[], extras: readonly UiItem[]): UiItem[] {
   if (extras.length === 0) return items
-  if (items.length === 0) return extras
+  if (items.length === 0) return [...extras]
   const out = [...items]
   for (const extra of extras) {
     const extraMs = extra.at ? Date.parse(extra.at) : Number.NaN
@@ -1131,6 +1135,29 @@ export function applyCompactionItems(items: UiItem[], events: PersistedEvent[]):
     if (item) extras.push(item)
   }
   const base = items.filter((item) => item.kind !== 'compaction')
+  if (extras.length === 0) return base
+  return weaveCompactionItems(base, extras)
+}
+
+/** The record note a persisted event leaves, if any (a model fallback). */
+export function noticeUiItemFromEvent(
+  row: PersistedEvent,
+  index: number
+): Extract<UiItem, { kind: 'notice' }> | null {
+  if (!isAgentEvent(row.event) || row.event.type !== 'model_fallback') return null
+  return { kind: 'notice', id: `notice:${row.at}:${index}`, text: row.event.message, at: row.at }
+}
+
+/** Insert persisted record notes into the transcript by time (replacing any live ones). */
+export function applyNoticeItems(items: UiItem[], events: PersistedEvent[]): UiItem[] {
+  const extras: Extract<UiItem, { kind: 'notice' }>[] = []
+  for (let i = 0; i < events.length; i++) {
+    const row = events[i]
+    if (!row) continue
+    const item = noticeUiItemFromEvent(row, i)
+    if (item) extras.push(item)
+  }
+  const base = items.filter((item) => item.kind !== 'notice')
   if (extras.length === 0) return base
   return weaveCompactionItems(base, extras)
 }

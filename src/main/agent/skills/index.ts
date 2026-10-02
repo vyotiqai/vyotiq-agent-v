@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs'
 import { dirname, join, relative } from 'path'
-import type { MarketplaceOverrides } from '../../../shared/ipc'
+import type { MarketplaceInstallSource, MarketplaceOverrides } from '../../../shared/ipc'
 import { VyotiqPluginManifestSchema } from '../../../shared/ipc'
 import { effectiveMarketplaceEnabled } from '../../../shared/domain/marketplaceEnablement'
 import { parseSkillFrontmatter } from './parse'
@@ -30,6 +30,10 @@ export type LoadedSkill = {
    * `/name` and an explicit Skill call still load it.
    */
   modelInvocable: boolean
+  /** Frontmatter `allowed-tools`, as written (see allowedTools.ts). */
+  allowedTools?: string
+  /** How a Marketplace skill or plugin got here; absent for local skills. */
+  installSource?: MarketplaceInstallSource
 }
 
 function loadSkillFromDir(skillDir: string): {
@@ -38,6 +42,7 @@ function loadSkillFromDir(skillDir: string): {
   body: string
   skillPath: string
   modelInvocable: boolean
+  allowedTools?: string
 } | null {
   const skillPath = resolveSkillMdPath(skillDir)
   if (!skillPath) return null
@@ -48,7 +53,8 @@ function loadSkillFromDir(skillDir: string): {
       description: parsed.description,
       body: parsed.body,
       skillPath,
-      modelInvocable: parsed['disable-model-invocation'] !== true
+      modelInvocable: parsed['disable-model-invocation'] !== true,
+      ...(parsed['allowed-tools'] ? { allowedTools: parsed['allowed-tools'] } : {})
     }
   } catch {
     return null
@@ -108,7 +114,8 @@ export function loadEnabledSkills(
       root: local.root,
       skillPath: local.skillPath,
       source: local.source,
-      modelInvocable: local.modelInvocable
+      modelInvocable: local.modelInvocable,
+      ...(local.allowedTools ? { allowedTools: local.allowedTools } : {})
     })
   }
 
@@ -128,7 +135,9 @@ export function loadEnabledSkills(
       root,
       skillPath: loaded.skillPath,
       source: 'skill',
-      modelInvocable: loaded.modelInvocable
+      modelInvocable: loaded.modelInvocable,
+      installSource: item.installSource,
+      ...(loaded.allowedTools ? { allowedTools: loaded.allowedTools } : {})
     })
   }
 
@@ -157,7 +166,9 @@ export function loadEnabledSkills(
           root: skillDir,
           skillPath: loaded.skillPath,
           source: 'plugin',
-          modelInvocable: loaded.modelInvocable
+          modelInvocable: loaded.modelInvocable,
+          installSource: item.installSource,
+          ...(loaded.allowedTools ? { allowedTools: loaded.allowedTools } : {})
         })
       }
     } catch {

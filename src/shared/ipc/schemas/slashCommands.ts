@@ -48,7 +48,8 @@ export const BuiltinClientActionSchema = z.enum([
   'goal_usage',
   'loop_set',
   'loop_stop',
-  'loop_status'
+  'loop_status',
+  'add_dir'
 ])
 export type BuiltinClientAction = z.infer<typeof BuiltinClientActionSchema>
 

@@ -16,6 +16,19 @@ export const IPC = {
   taskWorktreeInfo: 'worktrees:info',
   taskWorktreeMerge: 'worktrees:merge',
   taskWorktreeDiscard: 'worktrees:discard',
+  /** Tasks that repeat on a schedule while the app is open. */
+  schedulesList: 'schedules:list',
+  schedulesCreate: 'schedules:create',
+  schedulesUpdate: 'schedules:update',
+  schedulesDelete: 'schedules:delete',
+  schedulesToggle: 'schedules:toggle',
+  schedulesRunNow: 'schedules:run-now',
+  /** What Repeat… would repeat: a task's brief, model and worktree, read from its record. */
+  schedulesSource: 'schedules:source',
+  /** Main → renderer: open a scheduled run's new worktree as a workspace. */
+  schedulesWorktreeOpen: 'schedules:worktree-open',
+  /** Renderer → main: that worktree is open (or why not); main starts the run. */
+  schedulesWorktreeOpened: 'schedules:worktree-opened',
   workspacesAdd: 'workspaces:add',
   workspacesRemove: 'workspaces:remove',
   workspacesSetActive: 'workspaces:set-active',
@@ -96,7 +109,15 @@ export const IPC = {
   runsOpenArtifact: 'runs:openArtifact',
   runsTaskFileStats: 'runs:taskFileStats',
   runsTaskFileDiff: 'runs:taskFileDiff',
+  runsPickExtraRoot: 'runs:pickExtraRoot',
+  runsSetExtraRoots: 'runs:setExtraRoots',
+  runsUndoHunk: 'runs:undoHunk',
+  runsRestoreHunk: 'runs:restoreHunk',
   homeActivity: 'runs:activity',
+  // Usage page → Export CSV (save dialog in main), and task bundles as JSON.
+  usageExportCsv: 'usage:export-csv',
+  runsExportJson: 'runs:export-json',
+  runsImport: 'runs:import',
   runsSetGoalStatus: 'runs:setGoalStatus',
   runsSetLoop: 'runs:setLoop',
   // Per-run user verdict. Namespaced away from `feedback:compose`, which is
@@ -136,6 +157,11 @@ export const IPC = {
   gitUnstagePaths: 'git:unstage-paths',
   gitBranches: 'git:branches',
   gitCheckout: 'git:checkout',
+  /** Sync, user-initiated only: fetch every remote, pull (ff-only by default), push, new branch. */
+  gitFetch: 'git:fetch',
+  gitPull: 'git:pull',
+  gitPush: 'git:push',
+  gitCreateBranch: 'git:create-branch',
   gitLog: 'git:log',
   gitCommitFiles: 'git:commit-files',
   gitBlame: 'git:blame',
@@ -159,12 +185,16 @@ export const IPC = {
   crashRecoveryConsume: 'crash:recovery-consume',
   telemetryStatus: 'telemetry:status',
   appInfo: 'app:info',
+  /** Whether agent commands can be OS-sandboxed here (Settings → Tools → Sandbox). */
+  sandboxCapability: 'sandbox:capability',
   updaterState: 'updater:state',
   updaterGetState: 'updater:get-state',
   updaterCheck: 'updater:check',
   updaterDownload: 'updater:download',
   updaterInstall: 'updater:install',
   feedbackCompose: 'feedback:compose',
+  /** Save a redacted .zip of version, logs, crashes, memory and settings (Settings → Diagnostics). */
+  diagnosticsExport: 'diagnostics:export',
   workspaceGrep: 'workspace:grep',
   gitConflictFile: 'git:conflict-file',
   gitResolveConflict: 'git:resolve-conflict',
@@ -246,6 +276,14 @@ export const IPC = {
   prClose: 'pr:close',
   prReady: 'pr:ready',
   prEditTitle: 'pr:edit-title',
+  /** Inline review threads (GraphQL: resolved and outdated state included). */
+  prReviewThreads: 'pr:review-threads',
+  prReviewThreadResolve: 'pr:review-thread-resolve',
+  /** Posts a reply on GitHub: only from an explicit button. */
+  prReviewThreadReply: 'pr:review-thread-reply',
+  /** Recent open pull requests, for a branch that has none. */
+  prList: 'pr:list',
+  prCheckout: 'pr:checkout',
   githubAuthStatus: 'github:auth-status',
   githubAuthStart: 'github:auth-start',
   githubAuthCancel: 'github:auth-cancel',

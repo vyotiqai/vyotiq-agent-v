@@ -45,6 +45,23 @@ describe('tool args preview cap', () => {
     expect(preview.length).toBeLessThan(huge.length)
     expect(preview.endsWith('\n…')).toBe(true)
   })
+
+  it('cuts an oversized object to one that still parses, its short fields whole', () => {
+    // A spawn: the long goal comes first as the model wrote it.
+    const args = JSON.stringify({ goal: 'Vyotiq is an Electron coding agent. '.repeat(300), outcome: 'The suite exits 0', step_id: 's3' })
+    const preview = truncateToolArgsPreview(args)
+    expect(preview.length).toBeLessThanOrEqual(4000)
+    const parsed = JSON.parse(preview) as Record<string, string>
+    expect(parsed.outcome).toBe('The suite exits 0')
+    expect(parsed.step_id).toBe('s3')
+    expect(parsed.goal!.startsWith('Vyotiq is an Electron coding agent.')).toBe(true)
+    expect(parsed.goal!.endsWith('…')).toBe(true)
+  })
+
+  it('leaves arguments that are still streaming as they came', () => {
+    const partial = `{"goal": "${'x'.repeat(5000)}`
+    expect(truncateToolArgsPreview(partial).startsWith('{"goal": "xxx')).toBe(true)
+  })
 })
 
 describe('loadWorkingMessagesForFold', () => {

@@ -18,6 +18,12 @@ import { extractDocxText, isDocxPath, MAX_DOCX_ARCHIVE_BYTES } from '../tools/do
 export type SearchOptions = {
   limit?: number
   signal?: AbortSignal
+  /**
+   * Workspace-relative paths the caller must not see — a permission rule
+   * denies them or asks before they are read (permissions.ts). Their chunks
+   * are skipped, so neither a snippet nor the path reaches the model.
+   */
+  hidePath?: (rel: string) => boolean
 }
 
 const DOCS_OVERLAP_YIELD_EVERY = 16
@@ -58,7 +64,7 @@ async function loadDocsOverlapText(rel: string, full: string): Promise<string | 
 export async function collectDocsLexicalHits(
   workspaceRoot: string,
   query: string,
-  opts: { limit: number; seenPaths: ReadonlySet<string>; signal?: AbortSignal }
+  opts: { limit: number; seenPaths: ReadonlySet<string>; signal?: AbortSignal; hidePath?: (rel: string) => boolean }
 ): Promise<CodebaseSearchHit[]> {
   const tokens = docsQueryTokens(query)
   if (tokens.length === 0 || opts.limit <= 0) return []
@@ -88,7 +94,7 @@ export async function collectDocsLexicalHits(
     }
     const file = page.files[i]!
     const rel = `docs/${file.rel.replace(/\\/g, '/')}`
-    if (opts.seenPaths.has(rel)) continue
+    if (opts.seenPaths.has(rel) || opts.hidePath?.(rel)) continue
     const text = await loadDocsOverlapText(rel, file.full)
     if (!text) continue
     const lower = text.toLowerCase()
@@ -168,7 +174,7 @@ export async function searchCodeIndex(
   const hits: CodebaseSearchHit[] = []
   for (let i = 0; i < ids.length && hits.length < limit; i++) {
     const chunk = store.getChunk(ids[i]!)
-    if (!chunk) continue
+    if (!chunk || opts.hidePath?.(chunk.path)) continue
     hits.push({
       path: chunk.path,
       startLine: chunk.startLine,
@@ -186,7 +192,8 @@ export async function searchCodeIndex(
   const docsHits = await collectDocsLexicalHits(workspaceRoot, q, {
     limit: docsBudget,
     seenPaths: seen,
-    signal: opts.signal
+    signal: opts.signal,
+    hidePath: opts.hidePath
   })
   if (docsHits.length > 0) {
     hits.push(...docsHits)
@@ -205,7 +212,7 @@ export async function searchCodeIndex(
 export async function conceptSearchStore(
   store: CodeIndexStore,
   query: string,
-  opts: { limit?: number; signal?: AbortSignal; embed: DenseEmbedder }
+  opts: { limit?: number; signal?: AbortSignal; embed: DenseEmbedder; hidePath?: (rel: string) => boolean }
 ): Promise<CodebaseSearchHit[]> {
   throwIfAborted(opts.signal)
   const q = query.trim()
@@ -215,6 +222,9 @@ export async function conceptSearchStore(
     throw new Error('Embedding returned an empty query vector')
   }
   const limit = Math.min(Math.max(1, opts.limit ?? DEFAULT_SEARCH_LIMIT), MAX_SEARCH_LIMIT)
+  // A row's path is only known after the scan (no second query while the
+  // vector cursor is open), so with hidden paths keep spares to drop them from.
+  const keep = opts.hidePath ? limit * 3 : limit
   const top: { id: number; score: number }[] = []
   for (const { id, vec } of store.iterateDenseVectors()) {
     throwIfAborted(opts.signal)
@@ -223,7 +233,7 @@ export async function conceptSearchStore(
     if (vec.length !== qVec.length) continue
     let dot = 0
     for (let i = 0; i < qVec.length; i++) dot += qVec[i]! * vec[i]!
-    if (top.length < limit) {
+    if (top.length < keep) {
       top.push({ id, score: dot })
       top.sort((a, b) => b.score - a.score)
     } else if (dot > top[top.length - 1]!.score) {
@@ -233,8 +243,9 @@ export async function conceptSearchStore(
   }
   const hits: CodebaseSearchHit[] = []
   for (const t of top) {
+    if (hits.length >= limit) break
     const row = store.getDenseRow(t.id)
-    if (!row) continue
+    if (!row || opts.hidePath?.(row.path)) continue
     hits.push({
       path: row.path,
       startLine: row.startLine,

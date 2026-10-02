@@ -92,9 +92,41 @@ export class NestedInstructions {
   constructor(
     private readonly workspacePath: string,
     private readonly focusedFile: string | null | undefined,
-    seen: Iterable<string> = []
+    seen: Iterable<string> = [],
+    /** The task's added folders (extraRoots.ts): their AGENTS.md / CLAUDE.md attach too. */
+    private readonly extraRoots: readonly string[] = []
   ) {
     this.seen = new Set(seen)
+  }
+
+  /**
+   * An added folder's own instruction files, from the folder itself down to
+   * the file's folder. Unlike the workspace, the folder's root files are not
+   * in the system prompt, so they attach here with the rest. Glob rules stay
+   * the workspace's.
+   */
+  private async forExtraRootPath(path: string, found: AttachedInstruction[]): Promise<void> {
+    if (!isAbsolute(path)) return
+    const abs = resolve(path)
+    for (const root of this.extraRoots) {
+      const rel = relative(resolve(root), abs).replace(/\\/g, '/')
+      if (rel.startsWith('..') || isAbsolute(rel)) continue
+      const parts = rel.split('/').filter(Boolean)
+      if (parts.some((segment) => SKIP_SEGMENTS.has(segment))) return
+      const folders = parts.slice(0, -1)
+      for (let depth = 0; depth <= folders.length; depth += 1) {
+        const folderAbs = join(root, ...folders.slice(0, depth))
+        for (const name of ROOT_INSTRUCTION_FILES) {
+          const source = `${folderAbs.replace(/\\/g, '/')}/${name}`
+          if (this.seen.has(source)) continue
+          const content = await readCappedFile(join(folderAbs, name), { trim: true })
+          if (!content) continue
+          this.seen.add(source)
+          found.push({ source, appliesTo: `${folderAbs.replace(/\\/g, '/')}/`, content })
+        }
+      }
+      return
+    }
   }
 
   private loadGlobRules(): Promise<GlobRule[]> {
@@ -128,7 +160,13 @@ export class NestedInstructions {
 
   async forPaths(paths: readonly string[]): Promise<AttachedInstruction[]> {
     const found: AttachedInstruction[] = []
-    const rels = [...new Set(paths.map((p) => toWorkspaceRel(this.workspacePath, p)).filter((p): p is string => !!p))]
+    if (this.extraRoots.length > 0) {
+      for (const p of paths) {
+        if (found.length >= MAX_PER_RESULT) break
+        await this.forExtraRootPath(p, found)
+      }
+    }
+    const rels =[...new Set(paths.map((p) => toWorkspaceRel(this.workspacePath, p)).filter((p): p is string => !!p))]
     for (const rel of rels) {
       // Each folder from the top down, excluding the root (its files are in the system prompt).
       const segments = rel.split('/').slice(0, -1)

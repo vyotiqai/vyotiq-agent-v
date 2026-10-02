@@ -39,6 +39,7 @@ import {
   type ListRunsResult,
   type MessageContent,
   type PersistedEvent,
+  type RunScheduled,
   type RunStatus,
   type RunSummary
 } from '../../shared/ipc'
@@ -310,6 +311,12 @@ export type CreateRunOptions = {
   pathScope?: string[]
   worktreePath?: string
   worktreeBranch?: string
+  /** The helper type an inline instance runs as, and its tool allowlist. */
+  agentType?: { name: string; tools?: string[] }
+  /** Folders outside the workspace the task may also work in (already validated). */
+  extraRoots?: string[]
+  /** Started by a repeating schedule. */
+  scheduled?: RunScheduled
 }
 
 export function createRun(
@@ -349,7 +356,10 @@ export function createRun(
     ...(options.inlineInstance ? { inlineInstance: true as const } : {}),
     ...(options.pathScope?.length ? { pathScope: options.pathScope } : {}),
     ...(options.worktreePath ? { worktreePath: options.worktreePath } : {}),
-    ...(options.worktreeBranch ? { worktreeBranch: options.worktreeBranch } : {})
+    ...(options.worktreeBranch ? { worktreeBranch: options.worktreeBranch } : {}),
+    ...(options.agentType ? { agentType: options.agentType } : {}),
+    ...(options.extraRoots?.length ? { extraRoots: options.extraRoots } : {}),
+    ...(options.scheduled ? { scheduled: options.scheduled } : {})
   }
   atomicWriteJson(join(dir, 'status.json'), status)
   atomicWriteFile(join(dir, 'messages.jsonl'), '')
@@ -1232,7 +1242,10 @@ async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promis
         ...(status.inlineInstance ? { inlineInstance: true as const } : {}),
         ...(status.pathScope?.length ? { pathScope: status.pathScope } : {}),
         ...(status.worktreePath ? { worktreePath: status.worktreePath } : {}),
-        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {})
+        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {}),
+        ...(status.agentType ? { agentType: status.agentType.name } : {}),
+        ...(status.extraRoots?.length ? { extraRoots: status.extraRoots } : {}),
+        ...(status.scheduled ? { scheduled: status.scheduled } : {})
       }
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)

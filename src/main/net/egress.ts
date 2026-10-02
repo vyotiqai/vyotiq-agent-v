@@ -1,3 +1,4 @@
+import { evaluatePrivateNetworkAccess } from './privateNetwork'
 import { isSyncBlockedUrl } from './webFetch'
 
 /**
@@ -29,7 +30,12 @@ export type EgressPurpose =
   | 'browser_subresource'
   | 'mcp_remote'
 
-export type EgressDenyReason = 'unparseable' | 'scheme' | 'blocked_host' | 'not_in_allowlist'
+export type EgressDenyReason =
+  | 'unparseable'
+  | 'scheme'
+  | 'blocked_host'
+  | 'private_network'
+  | 'not_in_allowlist'
 
 export type EgressAllowReason = 'allowed' | 'non_network_scheme'
 
@@ -47,6 +53,16 @@ export type EgressRequest = {
   runId?: string
   /** When false, private/loopback hosts are refused (Ask/Plan posture). */
   allowLocal?: boolean
+  /**
+   * The page this request came from: the top-level document for a
+   * subresource, the URL being redirected away from for a redirect, the opener
+   * for a popup. When present, a loopback/private target is admitted only if
+   * this page is loopback/private (or `file:`) too, so a public page cannot
+   * ride a tab's `allowLocal` into the LAN. An empty string means "no
+   * attributable page" and is judged as public. Absent means an explicit
+   * request (the agent's own top-level navigation) with no page behind it.
+   */
+  initiatorUrl?: string
   /** Host allowlist in effect. Empty = no extra host filter (SSRF rules still apply). */
   allowlist?: readonly string[]
   /** Chromium resource type, when the request came from a browsed page. */
@@ -154,6 +170,13 @@ export function evaluateEgress(request: EgressRequest): EgressDecision {
       allowed: false,
       reason: 'blocked_host',
       detail: `${url.protocol}//${url.hostname} is refused by network policy`
+    }
+  }
+
+  if (request.initiatorUrl !== undefined) {
+    const privateNetwork = evaluatePrivateNetworkAccess(request.url, request.initiatorUrl)
+    if (!privateNetwork.allowed) {
+      return { allowed: false, reason: 'private_network', detail: privateNetwork.detail }
     }
   }
 

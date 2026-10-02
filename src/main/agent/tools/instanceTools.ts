@@ -15,6 +15,14 @@ import { readTodos } from './todo'
 import { resolveRunDir } from '@main/storage/paths'
 import { recordMergedInstanceChanges } from './mergeCheckpoint'
 import { readString } from './argAccess'
+import { ASK_SAFE_BUILTIN } from './modePolicy'
+import {
+  findAgentType,
+  loadAgentTypes,
+  resolveAgentType,
+  unknownAgentTypeError,
+  type ResolvedAgentType
+} from '../agentTypes'
 import { invalidateAfterWorkspaceMutation, throwIfAborted, toolOk, toolFail } from './index'
 import type { ToolHandler } from './index'
 
@@ -40,6 +48,19 @@ export const instanceHandlers = {
         'sub_tasks must be a non-empty array of strings'
       )
     }
+    // A user-defined helper type (.vyotiq/agent-types, .claude/agents, user's).
+    const agentTypeName = readString(args, 'agent_type')
+    let agentType: ResolvedAgentType | undefined
+    let typeOnlyReads = false
+    if (agentTypeName) {
+      const catalog = loadAgentTypes(context.sessionWorkspace ?? workspace)
+      const def = findAgentType(catalog, agentTypeName)
+      if (!def) return toolFail('spawn_agent_instance', 'spawn', unknownAgentTypeError(catalog, agentTypeName))
+      agentType = resolveAgentType(def)
+      // A type whose every declared tool only reads needs no worktree: it runs
+      // as a read-and-report child, the same as read_only: true.
+      typeOnlyReads = def.tools != null && def.tools.every((t) => ASK_SAFE_BUILTIN.has(t))
+    }
     const result = await spawnAgentInstance({
       parentRunId: context.runId,
       workspacePath: workspace,
@@ -52,7 +73,8 @@ export const instanceHandlers = {
         : undefined,
       isolation: args.isolation === 'shared' ? 'shared' : undefined,
       stepId: readString(args, 'step_id') || undefined,
-      readOnly: args.read_only === true,
+      readOnly: args.read_only === true || typeOnlyReads,
+      ...(agentType ? { agentType } : {}),
       emitParentEvent: context.emitAgentEvent
     })
     if (!result.ok) return toolFail('spawn_agent_instance', 'spawn', result.error)
@@ -60,6 +82,7 @@ export const instanceHandlers = {
       ? `\nworktree_branch: ${result.worktreeBranch}\nWhen done, merge one branch at a time with merge_agent_instance (refused only if your uncommitted or untracked changes overlap the branch's changed files).`
       : ''
     const notes: string[] = []
+    if (result.modelNote) notes.push(`agent_type "${agentType?.name}": ${result.modelNote}`)
     if (result.sharedBecause) {
       notes.push(
         `No worktree (${result.sharedBecause}): the child runs in this workspace inside path_scope, where terminal is refused. For a child that only reads, pass read_only: true.`
@@ -79,7 +102,7 @@ export const instanceHandlers = {
     return toolOk(
       'spawn_agent_instance',
       result.label,
-      `${result.label}\nrun_id: ${result.runId}${branchLine}${notes.map((note) => `\n\nNote: ${note}`).join('')}`
+      `${result.label}\nrun_id: ${result.runId}${agentType ? `\nagent_type: ${agentType.name}` : ''}${branchLine}${notes.map((note) => `\n\nNote: ${note}`).join('')}`
     )
   },
   await_agent_instance: async (workspace, args, signal, context) => {

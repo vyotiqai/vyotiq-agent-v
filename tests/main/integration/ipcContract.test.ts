@@ -30,6 +30,7 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onNotificationsChanged'
     | 'onNotificationActivate'
     | 'onDeepLinkOpened'
+    | 'onScheduleWorktreeOpen'
     | 'onAppearanceCustomCssChanged'
     | 'updater'
     | 'feedback'
@@ -45,6 +46,14 @@ const VYOTIQ_INVOKE_MAP: Record<
   listTaskDrafts: IPC.taskDraftsList,
   saveTaskDraft: IPC.taskDraftsSave,
   deleteTaskDraft: IPC.taskDraftsDelete,
+  listSchedules: IPC.schedulesList,
+  createSchedule: IPC.schedulesCreate,
+  updateSchedule: IPC.schedulesUpdate,
+  deleteSchedule: IPC.schedulesDelete,
+  toggleSchedule: IPC.schedulesToggle,
+  runScheduleNow: IPC.schedulesRunNow,
+  scheduleSource: IPC.schedulesSource,
+  scheduleWorktreeOpened: IPC.schedulesWorktreeOpened,
   rewindRedoStatus: IPC.runRewindRedoStatus,
   redoRewind: IPC.runRewindRedo,
   createTaskWorktree: IPC.taskWorktreeCreate,
@@ -95,7 +104,14 @@ const VYOTIQ_INVOKE_MAP: Record<
   reopenWrites: IPC.runsReopenWrites,
   undoTaskCommit: IPC.runsUndoTaskCommit,
   taskFileDiff: IPC.runsTaskFileDiff,
+  pickExtraRoot: IPC.runsPickExtraRoot,
+  setRunExtraRoots: IPC.runsSetExtraRoots,
+  undoHunk: IPC.runsUndoHunk,
+  restoreHunk: IPC.runsRestoreHunk,
   homeActivity: IPC.homeActivity,
+  usageExportCsv: IPC.usageExportCsv,
+  exportRunJson: IPC.runsExportJson,
+  importRun: IPC.runsImport,
   setGoalStatus: IPC.runsSetGoalStatus,
   setLoop: IPC.runsSetLoop,
   runFeedbackGet: IPC.runFeedbackGet,
@@ -169,6 +185,11 @@ const VYOTIQ_INVOKE_MAP: Record<
   prClose: IPC.prClose,
   prReady: IPC.prReady,
   prEditTitle: IPC.prEditTitle,
+  prReviewThreads: IPC.prReviewThreads,
+  prReviewThreadResolve: IPC.prReviewThreadResolve,
+  prReviewThreadReply: IPC.prReviewThreadReply,
+  prList: IPC.prList,
+  prCheckout: IPC.prCheckout,
   ptyCreate: IPC.ptyCreate,
   ptyList: IPC.ptyList,
   ptyWrite: IPC.ptyWrite,
@@ -178,6 +199,10 @@ const VYOTIQ_INVOKE_MAP: Record<
   gitUnstagePaths: IPC.gitUnstagePaths,
   gitBranches: IPC.gitBranches,
   gitCheckout: IPC.gitCheckout,
+  gitFetch: IPC.gitFetch,
+  gitPull: IPC.gitPull,
+  gitPush: IPC.gitPush,
+  gitCreateBranch: IPC.gitCreateBranch,
   marketplaceAckRemoteInstall: IPC.marketplaceAckRemoteInstall,
   githubAuthStatus: IPC.githubAuthStatus,
   githubAuthStart: IPC.githubAuthStart,
@@ -215,10 +240,12 @@ const VYOTIQ_INVOKE_MAP: Record<
   openLogsDir: IPC.logsOpenDir,
   getLogsPath: IPC.logsGetPath,
   getCrashDiagnostics: IPC.crashDiagnosticsGet,
+  exportDiagnostics: IPC.diagnosticsExport,
   consumeCrashRecovery: IPC.crashRecoveryConsume,
   telemetryStatus: IPC.telemetryStatus,
   stopTrace: IPC.traceStop,
   getAppInfo: IPC.appInfo,
+  getSandboxCapability: IPC.sandboxCapability,
   workspaceGrep: IPC.workspaceGrep,
   gitConflictFile: IPC.gitConflictFile,
   gitResolveConflict: IPC.gitResolveConflict,
@@ -307,6 +334,7 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onNotificationsChanged'
   | 'onNotificationActivate'
   | 'onDeepLinkOpened'
+  | 'onScheduleWorktreeOpen'
   | 'onAppearanceCustomCssChanged'
   | 'onAccessibilitySupportChanged'
   | 'onGitStatusChanged',
@@ -332,6 +360,7 @@ const VYOTIQ_PUSH_MAP: Record<
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
   onDeepLinkOpened: IPC.deepLinkOpened,
+  onScheduleWorktreeOpen: IPC.schedulesWorktreeOpen,
   onAppearanceCustomCssChanged: IPC.appearanceCustomCssChanged,
   onAccessibilitySupportChanged: IPC.accessibilitySupportChanged,
   onGitStatusChanged: IPC.gitStatusChanged,

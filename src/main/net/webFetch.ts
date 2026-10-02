@@ -169,8 +169,10 @@ function stripIpv6Brackets(host: string): string {
   return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host
 }
 
-function isBlockedHostname(host: string, allowLocal = false): boolean {
+function isBlockedHostname(raw: string, allowLocal = false): boolean {
   if (allowLocal) return false
+  // `localhost.` is the same host; the URL parser keeps the trailing dot.
+  const host = raw.replace(/\.+$/, '')
   return (
     host === 'localhost' ||
     host.endsWith('.localhost') ||

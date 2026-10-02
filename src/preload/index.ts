@@ -18,7 +18,8 @@ import {
   GitStatusChangedPayloadSchema,
   NotificationListSchema,
   NotificationActionSchema,
-  DeepLinkPayloadSchema
+  DeepLinkPayloadSchema,
+  TaskScheduleWorktreeOpenRequestSchema
 } from '../shared/ipc'
 import type { VyotiqApi } from '../shared/vyotiqApi'
 import type { IpcResult, Settings } from '../shared/ipc'
@@ -36,6 +37,25 @@ const api: VyotiqApi = {
   listTaskDrafts: (workspacePath) => ipcRenderer.invoke(IPC.taskDraftsList, { workspacePath }),
   saveTaskDraft: (payload) => ipcRenderer.invoke(IPC.taskDraftsSave, payload),
   deleteTaskDraft: (workspacePath, id) => ipcRenderer.invoke(IPC.taskDraftsDelete, { workspacePath, id }),
+  listSchedules: () => ipcRenderer.invoke(IPC.schedulesList),
+  createSchedule: (payload) => ipcRenderer.invoke(IPC.schedulesCreate, payload),
+  updateSchedule: (payload) => ipcRenderer.invoke(IPC.schedulesUpdate, payload),
+  deleteSchedule: (id) => ipcRenderer.invoke(IPC.schedulesDelete, { id }),
+  toggleSchedule: (id, enabled) => ipcRenderer.invoke(IPC.schedulesToggle, { id, enabled }),
+  runScheduleNow: (id) => ipcRenderer.invoke(IPC.schedulesRunNow, { id }),
+  scheduleSource: (workspacePath, runId) => ipcRenderer.invoke(IPC.schedulesSource, { workspacePath, runId }),
+  onScheduleWorktreeOpen: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = TaskScheduleWorktreeOpenRequestSchema.safeParse(raw)
+      if (!parsed.success) return
+      handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.schedulesWorktreeOpen, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.schedulesWorktreeOpen, listener)
+    }
+  },
+  scheduleWorktreeOpened: (payload) => ipcRenderer.invoke(IPC.schedulesWorktreeOpened, payload),
   rewindRedoStatus: (workspacePath, runId) => ipcRenderer.invoke(IPC.runRewindRedoStatus, { workspacePath, runId }),
   redoRewind: (workspacePath, runId) => ipcRenderer.invoke(IPC.runRewindRedo, { workspacePath, runId }),
   createTaskWorktree: (workspacePath, brief) => ipcRenderer.invoke(IPC.taskWorktreeCreate, { workspacePath, brief }),
@@ -122,7 +142,12 @@ const api: VyotiqApi = {
   reopenWrites: (payload) => ipcRenderer.invoke(IPC.runsReopenWrites, payload),
   undoTaskCommit: (payload) => ipcRenderer.invoke(IPC.runsUndoTaskCommit, payload),
   taskFileDiff: (payload) => ipcRenderer.invoke(IPC.runsTaskFileDiff, payload),
+  pickExtraRoot: (payload) => ipcRenderer.invoke(IPC.runsPickExtraRoot, payload),
+  setRunExtraRoots: (payload) => ipcRenderer.invoke(IPC.runsSetExtraRoots, payload),
+  undoHunk: (payload) => ipcRenderer.invoke(IPC.runsUndoHunk, payload),
+  restoreHunk: (payload) => ipcRenderer.invoke(IPC.runsRestoreHunk, payload),
   homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),
+  usageExportCsv: (payload) => ipcRenderer.invoke(IPC.usageExportCsv, payload),
   runFeedbackGet: (payload) => ipcRenderer.invoke(IPC.runFeedbackGet, payload),
   runsSearch: (payload) => ipcRenderer.invoke(IPC.runsSearch, payload),
   settingsExport: () => ipcRenderer.invoke(IPC.settingsExport),
@@ -283,6 +308,9 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.runsDelete, { workspacePath, runId }),
   exportRun: (workspacePath, runId) =>
     ipcRenderer.invoke(IPC.runsExport, { workspacePath, runId }),
+  exportRunJson: (workspacePath, runId) =>
+    ipcRenderer.invoke(IPC.runsExportJson, { workspacePath, runId }),
+  importRun: (workspacePath) => ipcRenderer.invoke(IPC.runsImport, { workspacePath }),
   renameRun: (workspacePath, runId, goal) =>
     ipcRenderer.invoke(IPC.runsRename, { workspacePath, runId, goal }),
   forkRun: (workspacePath, runId, forkIndex) =>
@@ -303,7 +331,11 @@ const api: VyotiqApi = {
   gitBranches: (workspacePath) => ipcRenderer.invoke(IPC.gitBranches, { workspacePath }),
   gitCheckout: (workspacePath, branch) =>
     ipcRenderer.invoke(IPC.gitCheckout, { workspacePath, branch }),
-  gitLog: (payload) => ipcRenderer.invoke(IPC.gitLog, payload),
+  gitFetch: (payload) => ipcRenderer.invoke(IPC.gitFetch, payload),
+  gitPull: (payload) => ipcRenderer.invoke(IPC.gitPull, payload),
+  gitPush: (payload) => ipcRenderer.invoke(IPC.gitPush, payload),
+  gitCreateBranch: (payload) => ipcRenderer.invoke(IPC.gitCreateBranch, payload),
+  gitLog:(payload) => ipcRenderer.invoke(IPC.gitLog, payload),
   gitCommitFiles: (payload) => ipcRenderer.invoke(IPC.gitCommitFiles, payload),
   gitDiff: (payload) => ipcRenderer.invoke(IPC.gitDiff, payload),
   gitBranchDiff: (workspacePath) => ipcRenderer.invoke(IPC.gitBranchDiff, { workspacePath }),
@@ -321,6 +353,13 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.prReady, { workspacePath, number }),
   prEditTitle: (workspacePath, title, number) =>
     ipcRenderer.invoke(IPC.prEditTitle, { workspacePath, title, number }),
+  prReviewThreads: (workspacePath, number) =>
+    ipcRenderer.invoke(IPC.prReviewThreads, { workspacePath, number }),
+  prReviewThreadResolve: (payload) => ipcRenderer.invoke(IPC.prReviewThreadResolve, payload),
+  prReviewThreadReply: (payload) => ipcRenderer.invoke(IPC.prReviewThreadReply, payload),
+  prList: (workspacePath) => ipcRenderer.invoke(IPC.prList, { workspacePath }),
+  prCheckout: (workspacePath, number) =>
+    ipcRenderer.invoke(IPC.prCheckout, { workspacePath, number }),
   githubAuthStatus: () => ipcRenderer.invoke(IPC.githubAuthStatus),
   githubAuthStart: (request?: { fresh?: boolean }) => ipcRenderer.invoke(IPC.githubAuthStart, request),
   githubAuthCancel: () => ipcRenderer.invoke(IPC.githubAuthCancel),
@@ -473,10 +512,12 @@ const api: VyotiqApi = {
   openLogsDir: () => ipcRenderer.invoke(IPC.logsOpenDir),
   getLogsPath: () => ipcRenderer.invoke(IPC.logsGetPath),
   getCrashDiagnostics: () => ipcRenderer.invoke(IPC.crashDiagnosticsGet),
+  exportDiagnostics: () => ipcRenderer.invoke(IPC.diagnosticsExport, {}),
   consumeCrashRecovery: () => ipcRenderer.invoke(IPC.crashRecoveryConsume),
   telemetryStatus: () => ipcRenderer.invoke(IPC.telemetryStatus),
   stopTrace: () => ipcRenderer.invoke(IPC.traceStop),
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
+  getSandboxCapability: () => ipcRenderer.invoke(IPC.sandboxCapability, {}),
   updater: {
     getState: () => ipcRenderer.invoke(IPC.updaterGetState),
     check: () => ipcRenderer.invoke(IPC.updaterCheck),

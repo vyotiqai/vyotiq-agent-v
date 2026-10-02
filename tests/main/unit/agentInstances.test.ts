@@ -239,6 +239,98 @@ describe('agentInstances', () => {
     }
   })
 
+  it('runs a typed child with its instructions after the brief, its tool list, and its model', async () => {
+    const { rememberRunModelSelection } = await import('@main/agent/runModelSelection')
+    rememberRunModelSelection(parentRunId, 'anthropic', 'claude-opus-5-5')
+    setSettings({ helperModel: { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' } })
+    try {
+      vi.mocked(startAgentRunInBackground).mockClear()
+      const result = await spawnAgentInstance({
+        parentRunId,
+        workspacePath,
+        goal: 'child task',
+        outcome: 'a review',
+        subTasks: ['review the diff'],
+        doneWhen: 'reported',
+        readOnly: true,
+        agentType: {
+          name: 'reviewer',
+          body: 'Review for bugs only.',
+          tools: ['read', 'grep', 'todo_write', 'create_plan', 'check_done_when'],
+          model: 'inherit'
+        }
+      })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const runDir = resolveRunDir(workspacePath, result.runId)
+      expect(loadStatus(runDir)?.agentType).toEqual({
+        name: 'reviewer',
+        tools: ['read', 'grep', 'todo_write', 'create_plan', 'check_done_when']
+      })
+      // The brief alone is the contract; the instructions ride in the first message.
+      expect(readFileSync(join(runDir, 'contract.md'), 'utf8')).not.toMatch(/Review for bugs only/)
+      const started = vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0]
+      const first = started?.agentInput.messages?.[0]?.content
+      expect(typeof first).toBe('string')
+      expect(first as string).toMatch(/^Outcome: a review\n/)
+      expect(first as string).toMatch(/\n\n<agent_type>\nYou are running as the "reviewer" helper type\.[^]*Review for bugs only\.\n<\/agent_type>$/)
+      // inherit: the task's own model, not the helper model.
+      expect(started?.agentInput).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5' })
+      await flushEventAppends()
+      const update = readFileSync(join(resolveRunDir(workspacePath, parentRunId), 'events.jsonl'), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { event: { type: string; instanceRunId?: string; agentType?: string } })
+        .find((row) => row.event.type === 'agent_instance_update' && row.event.instanceRunId === result.runId)
+      expect(update?.event.agentType).toBe('reviewer')
+      const listed = await listRuns(workspacePath)
+      expect(listed.instanceRuns.find((r) => r.runId === result.runId)?.agentType).toBe('reviewer')
+      clearRunAbort(result.runId)
+    } finally {
+      setSettings({ helperModel: null })
+    }
+  })
+
+  it('refuses an unknown agent_type naming the ones that exist, and runs a read-only type without a worktree', async () => {
+    const { instanceHandlers } = await import('@main/agent/tools/instanceTools')
+    const { clearAgentTypesCache, setUserAgentTypesDirForTests } = await import('@main/agent/agentTypes')
+    setUserAgentTypesDirForTests(join(root, 'no-user-types'))
+    clearAgentTypesCache()
+    try {
+      const typesDir = join(workspacePath, '.vyotiq', 'agent-types')
+      mkdirSync(typesDir, { recursive: true })
+      writeFileSync(
+        join(typesDir, 'scout.md'),
+        '---\nname: scout\ndescription: Maps code\ntools: Read, Grep, Glob\n---\nMap, do not edit.\n'
+      )
+      const args = {
+        goal: 'map it',
+        outcome: 'a map',
+        sub_tasks: ['read'],
+        done_when: 'mapped'
+      }
+      const context = { runId: parentRunId, runDir: resolveRunDir(workspacePath, parentRunId) }
+      const signal = new AbortController().signal
+      const unknown = await instanceHandlers.spawn_agent_instance(workspacePath, { ...args, agent_type: 'nope' }, signal, context)
+      expect(unknown.ok).toBe(false)
+      expect(unknown.content).toMatch(/Unknown agent_type "nope"\. Available: scout\./)
+
+      const typed = await instanceHandlers.spawn_agent_instance(workspacePath, { ...args, agent_type: 'Scout' }, signal, context)
+      expect(typed.ok).toBe(true)
+      expect(typed.content).toMatch(/\nagent_type: scout/)
+      const childRunId = /run_id: (\S+)/.exec(typed.content)?.[1]
+      expect(childRunId).toBeTruthy()
+      const status = loadStatus(resolveRunDir(workspacePath, childRunId!))
+      // Every declared tool reads: Ask mode, no worktree, as read_only: true.
+      expect(status?.mode).toBe('ask')
+      expect(status?.worktreePath).toBeUndefined()
+      expect(status?.agentType?.name).toBe('scout')
+      clearRunAbort(childRunId!)
+    } finally {
+      setUserAgentTypesDirForTests(null)
+    }
+  })
+
   it('appends the multi-line goal verbatim at the end of the composed child prompt', async () => {
     const goal = [
       'Fix auth token refresh in src/main/auth',
@@ -1153,7 +1245,8 @@ describe('agentInstances', () => {
     )
     writeFileSync(join(runDir, 'messages.jsonl'), `${rows.join('\n')}\n`)
     const tail = await pullChildRun(workspacePath, childRunId, 'tail')
-    expect(tail).toContain('showing 40 of 60 messages')
+    // One header fact per line: joined bare they ran together ("…)status: runningshowing 40…").
+    expect(tail).toMatch(/\(short [^)]+\)\nstatus: [a-z_]+\nshowing 40 of 60 messages\n\n\[user\]\n/)
     const blocks = tail.match(/\n\n\[user\]\n/g)
     expect(blocks).toHaveLength(40)
     expect(tail).toContain('\nm20')

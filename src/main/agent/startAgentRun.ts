@@ -6,6 +6,7 @@ import {
   type AgentInteractionMode,
   type ChatMessage,
   type ProviderIdAny,
+  type RunScheduled,
   needsYouDedupeKey,
   runDoneDedupeKey,
   runErrorDedupeKey
@@ -123,6 +124,10 @@ export type StartAgentRunAgentInput = {
   runtime?: RuntimeKind
   /** A new task's done-when checks, from its brief. */
   doneWhen?: string[]
+  /** Added folders, already validated by launchRun; on a running task they replace its own. */
+  extraRoots?: string[]
+  /** A new task started by a repeating schedule. */
+  scheduled?: RunScheduled
 }
 
 export type StartAgentRunInput = {
@@ -142,11 +147,17 @@ function firstUserMessageText(agentInput: StartAgentRunAgentInput): string {
   return content.trim().slice(0, 200) || 'chat'
 }
 
-export function startAgentRunInBackground(input: StartAgentRunInput): void {
+/**
+ * Starts the run and returns at once. The promise settles (never rejects)
+ * after the run's terminal cleanup — late events forwarded, gates released —
+ * for a caller that must know the run is over (a headless run); the app's
+ * own callers ignore it.
+ */
+export function startAgentRunInBackground(input: StartAgentRunInput): Promise<void> {
   const { runId, workspacePath, invokeId, wc, controller, agentInput } = input
   const releaseIpcSender = registerRunIpcSender(runId, wc)
 
-  ;(async () => {
+  return (async () => {
     let terminalSent = false
     let terminalStatus: 'done' | 'error' | 'cancelled' | undefined
     // Held so the finally can detach listeners. dispose() is NOT cancel: a
@@ -199,7 +210,8 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
           runSignal,
           goal: firstUserMessageText(agentInput),
           mode: agentInput.mode,
-          ...(agentInput.doneWhen?.length ? { doneWhen: agentInput.doneWhen } : {})
+          ...(agentInput.doneWhen?.length ? { doneWhen: agentInput.doneWhen } : {}),
+          ...(agentInput.scheduled ? { scheduled: agentInput.scheduled } : {})
         })
       } else {
         // Confirm the substrate can take the work before anything observes this

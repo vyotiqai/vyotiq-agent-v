@@ -3,6 +3,7 @@ import { DEFAULT_SEARCH_LIMIT } from '../codeindex/types'
 import { isAbortError } from '../../../shared/errors'
 import { logger } from '../../../shared/logger'
 import type { DenseEmbedder } from '../codeindex/denseJob'
+import { hiddenSearchPaths } from './codebaseSearch'
 
 export { DEFAULT_SEARCH_LIMIT as CONCEPT_SEARCH_DEFAULT_LIMIT }
 
@@ -10,16 +11,24 @@ export { DEFAULT_SEARCH_LIMIT as CONCEPT_SEARCH_DEFAULT_LIMIT }
 export async function toolConceptSearch(
   workspaceRoot: string,
   query: string,
-  opts: { maxResults?: number; signal?: AbortSignal; embed?: DenseEmbedder } = {}
+  opts: {
+    maxResults?: number
+    signal?: AbortSignal
+    embed?: DenseEmbedder
+    /** Files a permission rule keeps from search (permissions.ts hidesFromSearch). */
+    hidePath?: (rel: string) => boolean
+  } = {}
 ): Promise<string> {
   const q = query.trim()
   if (!q) throw new Error('concept_search query is required')
+  const hidden = hiddenSearchPaths(opts.hidePath)
   let result: Awaited<ReturnType<typeof runConceptSearch>>
   try {
     result = await runConceptSearch(workspaceRoot, q, {
       limit: opts.maxResults ?? DEFAULT_SEARCH_LIMIT,
       signal: opts.signal,
-      embed: opts.embed
+      embed: opts.embed,
+      hidePath: hidden.hidePath
     })
   } catch (err) {
     // Embedding worker/model failures surface as an actionable message instead
@@ -37,5 +46,5 @@ export async function toolConceptSearch(
     return formatted
   }
   const header = `index: ${status.chunkCount} chunks / ${status.fileCount} files · hits=${hits.length} (dense)`
-  return `${header}\n\n${formatted}`
+  return `${header}\n\n${formatted}${hidden.note()}`
 }

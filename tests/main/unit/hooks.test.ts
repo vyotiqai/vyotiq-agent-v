@@ -6,7 +6,15 @@ import { join } from 'path'
 const userData = mkdtempSync(join(tmpdir(), 'vyotiq-hooks-ud-'))
 vi.mock('electron', () => ({ app: { getPath: (n: string) => (n === 'userData' ? userData : tmpdir()) } }))
 
-import { loadRunHooks, readHooksFile, resetHooksForTests, runHookCommand } from '@main/agent/hooks'
+import {
+  hookCommands,
+  loadRunHooks,
+  parseHooksFile,
+  readHooksFile,
+  resetHooksForTests,
+  runHookCommand
+} from '@main/agent/hooks'
+import { logger } from '@shared/logger'
 
 let ws: string
 let scripts: string
@@ -107,10 +115,127 @@ describe('hooks', () => {
 
   it('ignores a file that is not a hooks file', () => {
     const bad = join(ws, 'bad.json')
-    writeFileSync(bad, '{"hooks":{"OnSave":[]}}')
+    writeFileSync(bad, '{"permissions":{}}')
+    expect(readHooksFile(bad, 'user')).toMatch(/not a hooks file/)
+    writeFileSync(bad, '{"hooks":[]}')
     expect(readHooksFile(bad, 'user')).toMatch(/not a hooks file/)
     writeFileSync(bad, '{nope')
     expect(readHooksFile(bad, 'user')).toMatch(/not valid JSON/)
     expect(readHooksFile(join(ws, 'missing.json'), 'user')).toBeNull()
   })
+
+  it("reads a Claude Code settings.json: keeps the command hooks it runs, skips the rest", () => {
+    // The shape `.claude/settings.json` takes, other keys and all.
+    const settings = {
+      permissions: { allow: ['Bash(npm test:*)'] },
+      env: { FOO: '1' },
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Bash',
+            hooks: [
+              { type: 'command', command: '"$CLAUDE_PROJECT_DIR"/.claude/hooks/check.sh', timeout: 30 },
+              { type: 'prompt', prompt: 'Is this command safe?' }
+            ]
+          },
+          { matcher: 'Write', hooks: [{ type: 'prompt', prompt: 'only prompts here' }] }
+        ],
+        PostToolUse: [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'npx prettier --check .', timeout: 900 }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node .claude/hooks/prompt.js' }] }],
+        SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'git status --short' }] }],
+        SubagentStop: [{ hooks: [{ type: 'command', command: 'echo done' }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: 'echo compacting' }] }],
+        Stop: 'not even a list'
+      }
+    }
+    const parsed = parseHooksFile(settings)
+    if (typeof parsed === 'string') throw new Error(parsed)
+    expect(parsed.file.hooks).toEqual({
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '"$CLAUDE_PROJECT_DIR"/.claude/hooks/check.sh', timeout: 30 }] }],
+      PostToolUse: [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'npx prettier --check .', timeout: 900 }] }],
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node .claude/hooks/prompt.js' }] }],
+      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'git status --short' }] }]
+    })
+    expect(parsed.skipped).toEqual([
+      'PreToolUse[0].hooks[1] (a "prompt" hook)',
+      'PreToolUse[1].hooks[0] (a "prompt" hook)',
+      'SubagentStop (not an event Agent V runs)',
+      'PreCompact (not an event Agent V runs)',
+      'Stop (not a list)'
+    ])
+
+    // From disk: the same file loads, and the trust prompt lists the new events.
+    const path = join(ws, 'settings.json')
+    writeFileSync(path, JSON.stringify(settings))
+    const loaded = readHooksFile(path, 'workspace')
+    if (loaded === null || typeof loaded === 'string') throw new Error(String(loaded))
+    expect(hookCommands(loaded.file)).toEqual([
+      'PreToolUse (Bash): "$CLAUDE_PROJECT_DIR"/.claude/hooks/check.sh',
+      'PostToolUse (Edit|Write): npx prettier --check .',
+      'UserPromptSubmit: node .claude/hooks/prompt.js',
+      'SessionStart (startup): git status --short'
+    ])
+  })
+
+  it('logs skipped entries once per file version', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    const path = join(ws, 'h.json')
+    writeFileSync(path, JSON.stringify({ hooks: { SubagentStop: [] } }))
+    readHooksFile(path, 'user')
+    readHooksFile(path, 'user')
+    expect(warn.mock.calls.filter(([m]) => m === 'Hooks file entries skipped')).toHaveLength(1)
+    warn.mockRestore()
+  })
+
+  it("reads Claude Code's JSON decisions on stdout", async () => {
+    const json = (name: string, out: unknown): string => {
+      const file = join(scripts, `${name}.cjs`)
+      writeFileSync(file, `process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(${JSON.stringify(JSON.stringify(out))}))`)
+      return `node "${file}"`
+    }
+    writeHooks(join(userData, 'hooks.json'), {
+      PreToolUse: [
+        { matcher: 'terminal', hooks: [{ type: 'command', command: json('deny', { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'no rm -rf' } }) }] },
+        { matcher: 'edit', hooks: [{ type: 'command', command: json('block', { decision: 'block', reason: 'generated file' }) }] },
+        { matcher: 'read', hooks: [{ type: 'command', command: json('allow', { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } }) }] }
+      ],
+      Stop: [{ hooks: [{ type: 'command', command: json('stop', { decision: 'block', reason: 'tests are red' }) }] }]
+    })
+    const hooks = await loadRunHooks(ws, 'run-json', null)
+    expect(await hooks.preToolUse('terminal', { command: 'rm -rf /' })).toBe('no rm -rf')
+    expect(await hooks.preToolUse('edit', { path: 'gen.ts' })).toBe('generated file')
+    expect(await hooks.preToolUse('read', { path: 'a' })).toBeNull()
+    expect(await hooks.stop(false)).toBe('tests are red')
+  }, 30_000)
+
+  it('UserPromptSubmit blocks on exit 2 or a JSON block, and passes context; SessionStart matches its source', async () => {
+    writeHooks(join(userData, 'hooks.json'), {
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command: script('prompt', 0) }] }],
+      SessionStart: [{ matcher: 'resume', hooks: [{ type: 'command', command: 'node -e "process.stdout.write(\'resumed context\')"' }] }]
+    })
+    const hooks = await loadRunHooks(ws, 'run-p', null)
+    expect(await hooks.userPromptSubmit('hello')).toEqual({ blocked: null, context: null })
+    expect(logged()).toEqual([{ session_id: 'run-p', cwd: ws, hook_event_name: 'UserPromptSubmit', prompt: 'hello' }])
+    expect(await hooks.sessionStart('startup')).toBeNull()
+    expect(await hooks.sessionStart('resume')).toBe('resumed context')
+
+    writeHooks(join(userData, 'hooks.json'), {
+      UserPromptSubmit: [
+        { hooks: [{ type: 'command', command: script('deny', 2, 'contains a key') }] },
+        { hooks: [{ type: 'command', command: script('never', 0) }] }
+      ]
+    })
+    const blocking = await loadRunHooks(ws, 'run-p2', null)
+    expect(await blocking.userPromptSubmit('key=sk-1')).toEqual({ blocked: 'contains a key', context: null })
+    // A block ends the event: the second hook never ran.
+    expect(logged().filter((l) => l.session_id === 'run-p2')).toHaveLength(1)
+  }, 30_000)
+
+  it('cuts a timeout over 600 seconds to 600 instead of rejecting the file', async () => {
+    writeHooks(join(userData, 'hooks.json'), { Stop: [{ hooks: [{ type: 'command', command: script('slow', 0), timeout: 3600 }] }] })
+    const loaded = readHooksFile(join(userData, 'hooks.json'), 'user')
+    if (loaded === null || typeof loaded === 'string') throw new Error(String(loaded))
+    expect(loaded.file.hooks.Stop?.[0]?.hooks[0]?.timeout).toBe(3600)
+    expect(await (await loadRunHooks(ws, 'run-t', null)).stop(false)).toBeNull()
+  }, 30_000)
 })

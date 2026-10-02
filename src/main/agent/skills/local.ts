@@ -34,6 +34,8 @@ export type LocalSkill = {
   relativePath: string
   /** False when frontmatter sets `disable-model-invocation` — user-invoked only. */
   modelInvocable: boolean
+  /** Frontmatter `allowed-tools`, as written (see skills/allowedTools.ts). */
+  allowedTools?: string
 }
 
 export type LocalSkillListItem = {
@@ -144,6 +146,7 @@ function tryLoadSkillFromDir(skillDir: string): {
   body: string
   skillPath: string
   modelInvocable: boolean
+  allowedTools?: string
 } | null {
   const skillPath = resolveSkillMdPath(skillDir)
   if (!skillPath) return null
@@ -154,7 +157,8 @@ function tryLoadSkillFromDir(skillDir: string): {
       description: parsed.description,
       body: parsed.body,
       skillPath,
-      modelInvocable: parsed['disable-model-invocation'] !== true
+      modelInvocable: parsed['disable-model-invocation'] !== true,
+      ...(parsed['allowed-tools'] ? { allowedTools: parsed['allowed-tools'] } : {})
     }
   } catch {
     return null
@@ -203,7 +207,8 @@ function scanSkillRoot(
       source,
       origin,
       relativePath: `${relativePrefix}/${name}/${fileName}`.replace(/\\/g, '/'),
-      modelInvocable: loaded.modelInvocable
+      modelInvocable: loaded.modelInvocable,
+      ...(loaded.allowedTools ? { allowedTools: loaded.allowedTools } : {})
     })
   }
 }

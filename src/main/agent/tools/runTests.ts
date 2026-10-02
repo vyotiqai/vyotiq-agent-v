@@ -7,6 +7,7 @@ import {
 } from './diagnostics'
 import { sanitizedTerminalEnv } from './terminal'
 import { abortError } from '../../../shared/errors'
+import { sandboxHeaderLines, sandboxHintLines, type SandboxLaunch } from '../sandbox/wrap'
 
 const TEST_TIMEOUT_MS = 300_000
 
@@ -74,8 +75,10 @@ function resolveTestCommand(workspace: string, command?: string, script?: string
 export async function toolRunTestsAsync(
   workspace: string,
   args: Record<string, unknown>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  opts: { sandbox?: SandboxLaunch } = {}
 ): Promise<RunTestsResult> {
+  const sandbox = opts.sandbox
   const resolved = resolveTestCommand(
     workspace,
     typeof args.command === 'string' ? args.command : undefined,
@@ -110,7 +113,8 @@ export async function toolRunTestsAsync(
       cwd: workspace,
       env: sanitizedTerminalEnv(),
       signal,
-      timeoutMs: TEST_TIMEOUT_MS
+      timeoutMs: TEST_TIMEOUT_MS,
+      sandbox
     })
     if (signal.aborted) throw abortError()
     const output = [stdout, stderr].filter(Boolean).join('\n').trim() || '(no output)'
@@ -119,7 +123,14 @@ export async function toolRunTestsAsync(
       return {
         ok: false,
         command,
-        content: [`command: ${command}`, `exit: ${exitCode ?? 'error'}`, ...(header ? [header] : []), output]
+        content: [
+          `command: ${command}`,
+          ...sandboxHeaderLines(sandbox),
+          `exit: ${exitCode ?? 'error'}`,
+          ...(header ? [header] : []),
+          output,
+          ...sandboxHintLines(output, sandbox)
+        ]
           .filter(Boolean)
           .join('\n')
       }
@@ -130,6 +141,7 @@ export async function toolRunTestsAsync(
         command,
         content: [
           `command: ${command}`,
+          ...sandboxHeaderLines(sandbox),
           'Test command was killed (timeout)',
           output
         ]
@@ -140,14 +152,18 @@ export async function toolRunTestsAsync(
     return {
       ok: true,
       command,
-      content: [`command: ${command}`, ...(header ? [header] : []), '', output].join('\n')
+      content: [`command: ${command}`, ...sandboxHeaderLines(sandbox), ...(header ? [header] : []), '', output].join(
+        '\n'
+      )
     }
   } catch (err) {
     if (signal.aborted) throw err
     return {
       ok: false,
       command,
-      content: [`command: ${command}`, (err as Error).message ?? 'Test command failed'].join('\n')
+      content: [`command: ${command}`, ...sandboxHeaderLines(sandbox), (err as Error).message ?? 'Test command failed'].join(
+        '\n'
+      )
     }
   }
 }

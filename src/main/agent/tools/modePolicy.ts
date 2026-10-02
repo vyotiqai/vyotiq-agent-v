@@ -11,6 +11,19 @@ export type ModePolicyOptions = {
   autoModeSwitch?: boolean
   /** When true, omit root-only instance tools (depth-1 nesting). */
   inlineInstance?: boolean
+  /**
+   * A typed helper's tool list (agentTypes.ts): only these names, plus any MCP
+   * tool whose server is listed as `mcp__<server>`. Absent = no restriction.
+   * Narrows whatever the mode allows; it never adds a tool the mode refuses.
+   */
+  toolAllowlist?: readonly string[]
+}
+
+/** Whether a typed helper's tool list holds `name` (by exact name, or by its MCP server). */
+export function isToolInAllowlist(name: string, allowlist: readonly string[]): boolean {
+  if (allowlist.includes(name)) return true
+  const mcp = parseMcpToolName(name)
+  return mcp != null && allowlist.includes(`mcp__${mcp.serverId}`)
 }
 
 /**
@@ -181,6 +194,10 @@ export function filterToolDefsForMode<T extends { name: string }>(
   if (opts?.inlineInstance) {
     filtered = filtered.filter((t) => !INLINE_OMIT_BUILTIN.has(t.name))
   }
+  const allowlist = opts?.toolAllowlist
+  if (allowlist) {
+    filtered = filtered.filter((t) => isToolInAllowlist(t.name, allowlist))
+  }
   return filtered
 }
 
@@ -221,6 +238,13 @@ export function assertToolAllowedInMode(
     return {
       ok: false,
       error: `Tool "${name}" is only available on the root orchestrator (inline instances cannot nest).`
+    }
+  }
+
+  if (opts?.toolAllowlist && !isToolInAllowlist(name, opts.toolAllowlist)) {
+    return {
+      ok: false,
+      error: `Tool "${name}" is not in this helper's agent-type tool list (${opts.toolAllowlist.join(', ')}). This denial will not change on retry.`
     }
   }
 

@@ -12,7 +12,7 @@ import {
 } from './terminalSessions'
 import { parseTerminalOutput } from '../../../shared/utils/terminalFormat'
 import { getSettings } from '@main/settings/settings'
-import { resolveInsideWorkspace } from '@main/workspace/safePath'
+import { extraRootsForCommand, resolveInsideRoots } from '../extraRoots'
 import {
   mirrorAgentCommandAborted,
   mirrorAgentCommandEnd,
@@ -20,9 +20,11 @@ import {
   mirrorAgentOutput
 } from './terminalMirror'
 import { needsOpaqueWatch, recordTerminalCommandPriors } from './terminalCheckpoint'
-import { startWatch, applyWatchDiffToCheckpoint, diffSince, disposeWatch } from '../workspaceMutationWatch'
+import { finishWatches, startWatches, type WorkspaceSnapshot } from '../workspaceMutationWatch'
 import { invalidateAfterWorkspaceMutation, terminalResultOk, toolOk, toolFail } from './index'
 import type { ToolHandler } from './index'
+import { prepareAgentSandbox, type SandboxLaunch } from '../sandbox'
+import { fenceRemoteTerminalOutput } from './terminalRemoteFence'
 
 /** Prefer the real shell command over a session UUID in logs and timeline titles. */
 function terminalResultSummary(command: string, sessionId: string, content: string): string {
@@ -33,7 +35,29 @@ function terminalResultSummary(command: string, sessionId: string, content: stri
   return (sessionId || 'session').slice(0, 80)
 }
 
-type CheckpointWatchContext = { runDir?: string; skipWriteCheckpoint?: boolean }
+type CheckpointWatchContext = {
+  runDir?: string
+  skipWriteCheckpoint?: boolean
+  /** Where the command runs: the workspace, or a folder in one of the task's added folders. */
+  cwd?: string
+  /** The task's added folders (extraRoots.ts). */
+  extraRoots?: readonly string[]
+}
+
+/**
+ * Snapshots for an opaque command (a build runner, a package manager): the
+ * workspace, plus each added folder the command runs in or names — never the
+ * ones it does not, since each costs a `git status` or a walk. Null when the
+ * command needs none.
+ */
+async function startCommandWatches(
+  workspace: string,
+  command: string,
+  context: CheckpointWatchContext
+): Promise<WorkspaceSnapshot[] | null> {
+  if (context.skipWriteCheckpoint || !context.runDir || !command.trim() || !needsOpaqueWatch(command)) return null
+  return startWatches(workspace, extraRootsForCommand(command, context.cwd ?? workspace, context.extraRoots))
+}
 
 /** Snapshot known + opaque terminal writes for undo. */
 async function withTerminalCheckpointWatch<T>(
@@ -42,18 +66,12 @@ async function withTerminalCheckpointWatch<T>(
   context: CheckpointWatchContext,
   run: () => Promise<T>
 ): Promise<T> {
-  await recordTerminalCommandPriors(workspace, command, context)
-  const snap =
-    !context.skipWriteCheckpoint && context.runDir && command.trim() && needsOpaqueWatch(command)
-      ? await startWatch(workspace)
-      : null
+  await recordTerminalCommandPriors(workspace, command, context, context)
+  const snaps = await startCommandWatches(workspace, command, context)
   try {
     return await run()
   } finally {
-    if (snap) {
-      await applyWatchDiffToCheckpoint(snap, await diffSince(snap), context)
-      await disposeWatch(snap)
-    }
+    if (snaps) await finishWatches(snaps, context)
   }
 }
 
@@ -69,24 +87,17 @@ async function withBackgroundTerminalCheckpointWatch(
   context: CheckpointWatchContext,
   run: (registerExitFinalize: (sessionId: string) => void) => Promise<string>
 ): Promise<string> {
-  await recordTerminalCommandPriors(workspace, command, context)
-  const snap =
-    !context.skipWriteCheckpoint && context.runDir && command.trim() && needsOpaqueWatch(command)
-      ? await startWatch(workspace)
-      : null
+  await recordTerminalCommandPriors(workspace, command, context, context)
+  const snaps = await startCommandWatches(workspace, command, context)
   let deferred = false
   const diffAndDispose = async (): Promise<void> => {
-    if (!snap) return
-    try {
-      await applyWatchDiffToCheckpoint(snap, await diffSince(snap), context)
-      invalidateAfterWorkspaceMutation(workspace)
-    } finally {
-      await disposeWatch(snap)
-    }
+    if (!snaps) return
+    await finishWatches(snaps, context)
+    invalidateAfterWorkspaceMutation(workspace)
   }
   try {
     return await run((sessionId) => {
-      if (!snap) return
+      if (!snaps) return
       deferred = registerTerminalSessionExitFinalize(sessionId, diffAndDispose)
     })
   } finally {
@@ -120,9 +131,29 @@ export const terminalHandlers = {
       typeof args.working_directory === 'string' && args.working_directory.trim()
         ? args.working_directory.trim()
         : ''
+    // An absolute working_directory may also name one of the task's added folders.
     const cwd = workingDirectory
-      ? resolveInsideWorkspace(workspace, workingDirectory)
+      ? resolveInsideRoots(workspace, context.extraRoots, workingDirectory)
       : workspace
+
+    // A poll reads a shell that is already running; only a new command spawns.
+    let sandbox: SandboxLaunch | undefined
+    if (command.trim()) {
+      const prepared = prepareAgentSandbox({
+        workspace,
+        cwd,
+        extraRoots: context.extraRoots,
+        settings: getSettings().agentSandbox
+      })
+      if (prepared.state === 'unavailable') {
+        return toolFail(
+          'terminal',
+          command.slice(0, 80),
+          [`cwd: ${cwd}`, '', prepared.message, 'exit_code: 1'].join('\n')
+        )
+      }
+      if (prepared.state === 'on') sandbox = prepared.launch
+    }
 
     const requested = typeof args.timeoutMs === 'number' ? args.timeoutMs : TERMINAL_DEFAULT_TIMEOUT_MS
     const timeoutMs = Math.max(1, requested)
@@ -150,7 +181,9 @@ export const terminalHandlers = {
       const defaultWait = args.timeoutMs == null && args.block_until_ms == null
       const watchCtx: CheckpointWatchContext = {
         runDir: context.runDir,
-        skipWriteCheckpoint: context.skipWriteCheckpoint
+        skipWriteCheckpoint: context.skipWriteCheckpoint,
+        cwd,
+        extraRoots: context.extraRoots
       }
       mirrorAgentCommandStart(workspace, command, cwd)
       const content = sessionId
@@ -181,7 +214,8 @@ export const terminalHandlers = {
                 blockUntilMs,
                 killOnTimeout: defaultWait,
                 onOutput,
-                onStillRunning: registerExitFinalize
+                onStillRunning: registerExitFinalize,
+                sandbox
               })
           )
       mirrorAgentCommandEnd(workspace, command, content)
@@ -191,13 +225,18 @@ export const terminalHandlers = {
       }
       const summary = terminalResultSummary(command, sessionId, content)
       const ok = terminalResultOk(command || 'session', content)
-      if (ok) return toolOk('terminal', summary, content)
-      return toolFail('terminal', summary, content)
+      // A poll carries no command arg; its frame names the command it polls.
+      const ran = command.trim() || parseTerminalOutput(content).command || ''
+      const delivered = fenceRemoteTerminalOutput(content, ran)
+      if (ok) return toolOk('terminal', summary, delivered)
+      return toolFail('terminal', summary, delivered)
     }
 
     const watchCtx: CheckpointWatchContext = {
       runDir: context.runDir,
-      skipWriteCheckpoint: context.skipWriteCheckpoint
+      skipWriteCheckpoint: context.skipWriteCheckpoint,
+      cwd,
+      extraRoots: context.extraRoots
     }
     mirrorAgentCommandStart(workspace, command, cwd)
     let content: string
@@ -207,7 +246,8 @@ export const terminalHandlers = {
           timeoutMs,
           shell,
           cwd,
-          onOutput
+          onOutput,
+          sandbox
         })
       )
     } catch (err) {
@@ -224,7 +264,8 @@ export const terminalHandlers = {
     invalidateAfterWorkspaceMutation(workspace)
     const summary = command.slice(0, 80)
     const ok = terminalResultOk(command, content)
-    if (ok) return toolOk('terminal', summary, content)
-    return toolFail('terminal', summary, content)
+    const delivered = fenceRemoteTerminalOutput(content, command)
+    if (ok) return toolOk('terminal', summary, delivered)
+    return toolFail('terminal', summary, delivered)
   }
 } satisfies Partial<Record<AgentToolName, ToolHandler>>

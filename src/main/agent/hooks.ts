@@ -19,49 +19,120 @@ import { killProcessTree, sanitizedTerminalEnv } from './tools/terminal'
  *   Stop          when the agent is about to finish. Exit 2 keeps it going,
  *                 with stderr as the reason.
  *   Notification  when a task needs you. Output is ignored.
+ *   UserPromptSubmit  when an instruction starts or continues a task, before
+ *                 the first model step (a follow-up queued mid-run and taken
+ *                 in between steps doesn't pass through it). Exit 2 blocks it:
+ *                 the instruction is taken out of the task and stderr is the
+ *                 error shown. What it prints on exit 0 goes to the agent.
+ *   SessionStart  when a task starts or resumes (`source`: startup | resume,
+ *                 which `matcher` can name). What it prints goes to the agent.
  *
  * Each hook gets one JSON object on stdin (session_id, cwd, hook_event_name,
- * and tool_name / tool_input / tool_response or message). Any other non-zero
- * exit is logged and changes nothing.
+ * and tool_name / tool_input / tool_response, message, prompt or source). Any
+ * other non-zero exit is logged and changes nothing.
+ *
+ * Claude Code's JSON on stdout is read where it maps onto the above:
+ * `{"decision":"block","reason"}` blocks a PreToolUse call or a prompt,
+ * `hookSpecificOutput.permissionDecision: "deny"` blocks a PreToolUse call,
+ * and `hookSpecificOutput.additionalContext` is the text that goes to the
+ * agent. PreToolUse runs after approval here, so "allow" and "ask" leave the
+ * call to the approval that already happened.
  *
  * From `<userData>/hooks.json` (yours, always on) and `<workspace>/.vyotiq/
  * hooks.json`. A workspace's file came with the folder, so its commands run
  * only after the person allows that exact file; a change to it asks again.
+ * Events and hook types Agent V doesn't run (a Claude Code `prompt` hook, a
+ * `SubagentStop` list) are skipped and logged once, not fatal to the file.
  */
 
-export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'Stop', 'Notification'] as const
+export const HOOK_EVENTS = [
+  'PreToolUse',
+  'PostToolUse',
+  'Stop',
+  'Notification',
+  'UserPromptSubmit',
+  'SessionStart'
+] as const
 export type HookEvent = (typeof HOOK_EVENTS)[number]
+
+const MAX_TIMEOUT_S = 600
 
 const HookCommandSchema = z.object({
   type: z.literal('command'),
   command: z.string().trim().min(1),
-  /** Seconds. */
-  timeout: z.number().positive().max(600).optional()
+  /** Seconds; anything over MAX_TIMEOUT_S runs with that. */
+  timeout: z.number().positive().optional()
 })
+type HookCommand = z.infer<typeof HookCommandSchema>
 
-const HookGroupSchema = z.object({
-  /** Tool names, as a regular expression over the whole name. Empty or `*`: every tool. */
+/** A group before its hooks are read one by one: a bad entry drops itself, not the group. */
+const HookGroupShape = z.object({
+  /** Tool names (SessionStart: the source), as a regular expression over the whole name. Empty or `*`: all. */
   matcher: z.string().optional(),
-  hooks: z.array(HookCommandSchema).min(1)
+  hooks: z.array(z.unknown())
 })
+type HookGroup = { matcher?: string; hooks: HookCommand[] }
 
-export const HooksFileSchema = z.object({
-  hooks: z
-    .object({
-      PreToolUse: z.array(HookGroupSchema).optional(),
-      PostToolUse: z.array(HookGroupSchema).optional(),
-      Stop: z.array(HookGroupSchema).optional(),
-      Notification: z.array(HookGroupSchema).optional()
-    })
-    .strict()
-})
-export type HooksFile = z.infer<typeof HooksFileSchema>
-type HookGroup = z.infer<typeof HookGroupSchema>
+/** Only the outer shape is strict; parseHooksFile reads what is inside entry by entry. */
+const HooksFileShape = z.object({ hooks: z.record(z.string(), z.unknown()) })
+export type HooksFile = { hooks: Partial<Record<HookEvent, HookGroup[]>> }
 
 const DEFAULT_TIMEOUT_S = 60
 const OUTPUT_CAP = 16_384
 
-type LoadedHooks = { source: 'user' | 'workspace'; path: string; hash: string; file: HooksFile }
+function isHookEvent(name: string): name is HookEvent {
+  return (HOOK_EVENTS as readonly string[]).includes(name)
+}
+
+function describeSkippedHook(raw: unknown): string {
+  const type = raw && typeof raw === 'object' ? (raw as { type?: unknown }).type : undefined
+  return typeof type === 'string' && type !== 'command' ? `a "${type}" hook` : 'not a command hook'
+}
+
+/**
+ * A hooks file (or a Claude Code settings.json, whose other keys are ignored)
+ * as the events and command hooks this app runs, plus what it skipped. An
+ * error string only when there is no `hooks` object at all.
+ */
+export function parseHooksFile(raw: unknown): { file: HooksFile; skipped: string[] } | string {
+  const outer = HooksFileShape.safeParse(raw)
+  if (!outer.success) return outer.error.issues[0]?.message ?? 'invalid'
+  const hooks: HooksFile['hooks'] = {}
+  const skipped: string[] = []
+  for (const [event, value] of Object.entries(outer.data.hooks)) {
+    if (!isHookEvent(event)) {
+      skipped.push(`${event} (not an event Agent V runs)`)
+      continue
+    }
+    if (!Array.isArray(value)) {
+      skipped.push(`${event} (not a list)`)
+      continue
+    }
+    const groups: HookGroup[] = []
+    value.forEach((rawGroup, gi) => {
+      const group = HookGroupShape.safeParse(rawGroup)
+      if (!group.success) {
+        skipped.push(`${event}[${gi}] (not a hook group)`)
+        return
+      }
+      const commands: HookCommand[] = []
+      group.data.hooks.forEach((rawHook, hi) => {
+        const hook = HookCommandSchema.safeParse(rawHook)
+        if (hook.success) commands.push(hook.data)
+        else skipped.push(`${event}[${gi}].hooks[${hi}] (${describeSkippedHook(rawHook)})`)
+      })
+      if (commands.length === 0) return
+      groups.push(group.data.matcher !== undefined ? { matcher: group.data.matcher, hooks: commands } : { hooks: commands })
+    })
+    if (groups.length > 0) hooks[event] = groups
+  }
+  return { file: { hooks }, skipped }
+}
+
+type LoadedHooks = { source: 'user' | 'workspace'; path: string; hash: string; file: HooksFile; skipped: string[] }
+
+/** Files whose skipped entries were already logged, by path and content hash. */
+const loggedSkips = new Set<string>()
 
 export function userHooksPath(): string {
   return join(app.getPath('userData'), 'hooks.json')
@@ -85,11 +156,19 @@ export function readHooksFile(path: string, source: LoadedHooks['source']): Load
   } catch (err) {
     return `${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`
   }
-  const parsed = HooksFileSchema.safeParse(raw)
-  if (!parsed.success) {
-    return `${path} is not a hooks file: ${parsed.error.issues[0]?.message ?? 'invalid'}`
+  const parsed = parseHooksFile(raw)
+  if (typeof parsed === 'string') {
+    return `${path} is not a hooks file: ${parsed}`
   }
-  return { source, path, hash: createHash('sha256').update(text).digest('hex'), file: parsed.data }
+  const hash = createHash('sha256').update(text).digest('hex')
+  if (parsed.skipped.length > 0 && !loggedSkips.has(`${path}\n${hash}`)) {
+    loggedSkips.add(`${path}\n${hash}`)
+    logger.warn('Hooks file entries skipped', {
+      scope: 'agent',
+      reason: `${parsed.skipped.length} skipped in ${path}: ${parsed.skipped.slice(0, 12).join(', ')}`
+    })
+  }
+  return { source, path, hash, file: parsed.file, skipped: parsed.skipped }
 }
 
 /** Every command a hooks file would run, for the question that asks to allow them. */
@@ -147,6 +226,7 @@ export function recordWorkspaceHooksDecision(workspace: string, hash: string, de
 
 export function resetHooksForTests(): void {
   trustCache = null
+  loggedSkips.clear()
 }
 
 // ── Running one hook ────────────────────────────────────────────────────────
@@ -210,6 +290,52 @@ export function runHookCommand(
   })
 }
 
+/** Claude Code's JSON output, when a hook printed a JSON object on stdout. */
+export function hookJsonOutput(stdout: string): Record<string, unknown> | null {
+  const text = stdout.trim()
+  if (!text.startsWith('{')) return null
+  try {
+    const value: unknown = JSON.parse(text)
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function specificOutput(json: Record<string, unknown> | null): Record<string, unknown> | null {
+  const out = json?.hookSpecificOutput
+  return out && typeof out === 'object' && !Array.isArray(out) ? (out as Record<string, unknown>) : null
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+/**
+ * Why a hook run blocks (exit 2, or JSON `decision: "block"`, or for
+ * PreToolUse `permissionDecision: "deny"`), or null when it doesn't.
+ */
+export function hookBlockReason(run: HookRun, event: HookEvent, fallback: string): string | null {
+  if (run.code === 2) return run.stderr.trim() || fallback
+  if (run.code !== 0) return null
+  const json = hookJsonOutput(run.stdout)
+  if (!json) return null
+  if (json.decision === 'block') return nonEmptyString(json.reason) ?? fallback
+  const specific = specificOutput(json)
+  if (event === 'PreToolUse' && specific?.permissionDecision === 'deny') {
+    return nonEmptyString(specific.permissionDecisionReason) ?? nonEmptyString(json.reason) ?? fallback
+  }
+  return null
+}
+
+/** What a successful hook adds for the agent: JSON `additionalContext`, else its plain stdout. */
+export function hookContext(run: HookRun): string | null {
+  if (run.code !== 0) return null
+  const json = hookJsonOutput(run.stdout)
+  if (json) return nonEmptyString(specificOutput(json)?.additionalContext)
+  return nonEmptyString(run.stdout)
+}
+
 function groupMatches(group: HookGroup, toolName: string | undefined): boolean {
   const matcher = group.matcher?.trim()
   if (!matcher || matcher === '*' || toolName === undefined) return true
@@ -239,7 +365,9 @@ export class RunHooks {
     event: HookEvent,
     toolName: string | undefined,
     payload: Record<string, unknown>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** A run that ends the event: later hooks would act on something that won't happen. */
+    endsEvent?: (run: HookRun) => boolean
   ): Promise<HookRun[]> {
     const runs: HookRun[] = []
     for (const set of this.sets) {
@@ -249,7 +377,11 @@ export class RunHooks {
           const run = await runHookCommand(
             hook.command,
             { session_id: this.ctx.runId, cwd: this.ctx.workspace, hook_event_name: event, ...payload },
-            { cwd: this.ctx.workspace, timeoutMs: (hook.timeout ?? DEFAULT_TIMEOUT_S) * 1000, signal }
+            {
+              cwd: this.ctx.workspace,
+              timeoutMs: Math.min(hook.timeout ?? DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S) * 1000,
+              signal
+            }
           )
           if (run.code !== 0 && run.code !== 2) {
             logger.warn(`${event} hook failed; carrying on`, {
@@ -259,8 +391,7 @@ export class RunHooks {
             })
           }
           runs.push(run)
-          // A block ends the event: later hooks would act on a call that won't run.
-          if (event === 'PreToolUse' && run.code === 2) return runs
+          if (endsEvent?.(run)) return runs
         }
       }
     }
@@ -270,9 +401,52 @@ export class RunHooks {
   /** The reason to give the agent when a hook blocks this call, or null to go ahead. */
   async preToolUse(toolName: string, toolInput: unknown, signal?: AbortSignal): Promise<string | null> {
     if (!this.has('PreToolUse')) return null
-    const runs = await this.runAll('PreToolUse', toolName, { tool_name: toolName, tool_input: toolInput }, signal)
-    const block = runs.find((run) => run.code === 2)
-    return block ? block.stderr.trim() || 'Blocked by a PreToolUse hook.' : null
+    const fallback = 'Blocked by a PreToolUse hook.'
+    const runs = await this.runAll(
+      'PreToolUse',
+      toolName,
+      { tool_name: toolName, tool_input: toolInput },
+      signal,
+      (run) => hookBlockReason(run, 'PreToolUse', fallback) !== null
+    )
+    for (const run of runs) {
+      const reason = hookBlockReason(run, 'PreToolUse', fallback)
+      if (reason !== null) return reason
+    }
+    return null
+  }
+
+  /**
+   * An instruction was sent. `blocked` is why a hook refused it (the task
+   * must not act on it); `context` is what the hooks printed for the agent.
+   */
+  async userPromptSubmit(
+    prompt: string,
+    signal?: AbortSignal
+  ): Promise<{ blocked: string | null; context: string | null }> {
+    if (!this.has('UserPromptSubmit')) return { blocked: null, context: null }
+    const fallback = 'Blocked by a UserPromptSubmit hook.'
+    const runs = await this.runAll(
+      'UserPromptSubmit',
+      undefined,
+      { prompt },
+      signal,
+      (run) => hookBlockReason(run, 'UserPromptSubmit', fallback) !== null
+    )
+    for (const run of runs) {
+      const reason = hookBlockReason(run, 'UserPromptSubmit', fallback)
+      if (reason !== null) return { blocked: reason, context: null }
+    }
+    const notes = runs.map(hookContext).filter((note): note is string => note !== null)
+    return { blocked: null, context: notes.length > 0 ? notes.join('\n\n') : null }
+  }
+
+  /** A task started or resumed: what the hooks printed for the agent, or null. */
+  async sessionStart(source: 'startup' | 'resume', signal?: AbortSignal): Promise<string | null> {
+    if (!this.has('SessionStart')) return null
+    const runs = await this.runAll('SessionStart', source, { source }, signal)
+    const notes = runs.map(hookContext).filter((note): note is string => note !== null)
+    return notes.length > 0 ? notes.join('\n\n') : null
   }
 
   /** What a hook wants the agent to know about this result, or null. */
@@ -289,7 +463,8 @@ export class RunHooks {
       { tool_name: toolName, tool_input: toolInput, tool_response: toolResponse },
       signal
     )
-    const notes = runs.filter((run) => run.code === 2).map((run) => run.stderr.trim()).filter(Boolean)
+    // Exit 2's stderr, or JSON `decision: "block"` with its reason.
+    const notes = runs.map((run) => hookBlockReason(run, 'PostToolUse', '')).filter((note): note is string => Boolean(note))
     return notes.length > 0 ? notes.join('\n') : null
   }
 
@@ -297,7 +472,9 @@ export class RunHooks {
   async stop(stopHookActive: boolean, signal?: AbortSignal): Promise<string | null> {
     if (!this.has('Stop')) return null
     const runs = await this.runAll('Stop', undefined, { stop_hook_active: stopHookActive }, signal)
-    const reasons = runs.filter((run) => run.code === 2).map((run) => run.stderr.trim() || 'A Stop hook asked to keep going.')
+    const reasons = runs
+      .map((run) => hookBlockReason(run, 'Stop', 'A Stop hook asked to keep going.'))
+      .filter((reason): reason is string => reason !== null)
     return reasons.length > 0 ? reasons.join('\n') : null
   }
 

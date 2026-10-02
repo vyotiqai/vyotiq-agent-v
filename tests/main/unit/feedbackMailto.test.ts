@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFeedbackMailto, FEEDBACK_EMAIL } from '@main/feedback/mailto'
+import { buildFeedbackMailto, DIAGNOSTICS_BUNDLE_LINE, FEEDBACK_EMAIL } from '@main/feedback/mailto'
 import type { FeedbackMailtoInput } from '@main/feedback/mailto'
 
 const base: FeedbackMailtoInput = {
@@ -32,7 +32,8 @@ describe('buildFeedbackMailto', () => {
       'App version: 1.2.3',
       'OS: Windows_NT 10.0.26200 (x64)',
       'Locale: en-US',
-      'Timestamp: 2026-09-08T12:00:00.000Z'
+      'Timestamp: 2026-09-08T12:00:00.000Z',
+      DIAGNOSTICS_BUNDLE_LINE
     ].join('\n')
     expect(buildFeedbackMailto(base)).not.toContain('App%20version')
     expect(buildFeedbackMailto({ ...base, includeDiagnostics: true })).toBe(
@@ -88,7 +89,8 @@ describe('buildFeedbackMailto', () => {
         'App version: 1.2.3',
         'OS: Windows_NT 10.0.26200 (x64)',
         'Locale: en-US',
-        'Timestamp: 2026-09-08T12:00:00.000Z'
+        'Timestamp: 2026-09-08T12:00:00.000Z',
+        DIAGNOSTICS_BUNDLE_LINE
       ].join('\n')
     )
   })

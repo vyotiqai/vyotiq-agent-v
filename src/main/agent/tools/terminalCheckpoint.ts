@@ -1,6 +1,9 @@
 import { getWriteCheckpoint } from '../checkpoints'
 import { looksLikeWorkspacePath } from '../pathPlausibility'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
+import { isAbsolutePathLike } from '../../../shared/extraRoots'
+import { resolveInsideRoots, routeExtraRoot } from '../extraRoots'
+import { join } from 'path'
 
 /**
  * Conservatively extract workspace-relative write targets from a shell command.
@@ -78,20 +81,31 @@ function tokenizeShellArgs(tail: string): string[] {
 export async function recordTerminalCommandPriors(
   workspaceRoot: string,
   command: string,
-  context: { runDir?: string; skipWriteCheckpoint?: boolean }
+  context: { runDir?: string; skipWriteCheckpoint?: boolean },
+  /**
+   * The command's working directory and the task's added folders
+   * (extraRoots.ts): a relative path run from inside an added folder means a
+   * file there, and an absolute one may name a file in any of them. Both are
+   * recorded under the file's absolute path, as edits there are.
+   */
+  roots: { cwd?: string; extraRoots?: readonly string[] } = {}
 ): Promise<void> {
   if (context.skipWriteCheckpoint || !context.runDir) return
   const cp = getWriteCheckpoint(context.runDir)
   if (!cp) return
+  const extraRoots = roots.extraRoots ?? []
+  const cwdRoot = roots.cwd ? routeExtraRoot(workspaceRoot, extraRoots, roots.cwd) : null
 
-  for (const pathArg of extractTerminalWritePaths(command)) {
+  for (const parsed of extractTerminalWritePaths(command)) {
+    const pathArg = cwdRoot && roots.cwd && !isAbsolutePathLike(parsed) ? join(roots.cwd, parsed) : parsed
     try {
-      resolveInsideWorkspace(workspaceRoot, pathArg)
+      if (extraRoots.length > 0) resolveInsideRoots(workspaceRoot, extraRoots, pathArg)
+      else resolveInsideWorkspace(workspaceRoot, pathArg)
     } catch {
       continue
     }
     // Prefer delete semantics for rm/del; otherwise write (covers create + modify).
-    const kind = isLikelyDeleteCommand(command, pathArg) ? 'delete' : 'write'
+    const kind = isLikelyDeleteCommand(command, parsed) ? 'delete' : 'write'
     await cp.recordPrior(pathArg, kind, {
       nonEditTool: true,
       ...(kind === 'delete' ? { recursiveDir: true } : {})

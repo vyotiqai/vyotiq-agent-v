@@ -13,6 +13,9 @@ export interface FeedbackMailtoInput {
 
 export const FEEDBACK_EMAIL = 'support@vyotiq.com'
 
+export const DIAGNOSTICS_BUNDLE_LINE =
+  'Logs: attach the .zip from Settings → Diagnostics → Export diagnostics (secrets and your username are taken out)'
+
 /**
  * Pure mailto builder for the feedback service.
  *
@@ -33,7 +36,9 @@ export function buildFeedbackMailto(input: FeedbackMailtoInput): string {
       `App version: ${input.appVersion}`,
       `OS: ${input.os}`,
       `Locale: ${input.locale}`,
-      `Timestamp: ${timestamp}`
+      `Timestamp: ${timestamp}`,
+      // A mailto can't carry a file; this says where the redacted one is.
+      DIAGNOSTICS_BUNDLE_LINE
     ].join('\n')
   }
   return `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`

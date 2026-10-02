@@ -1,6 +1,7 @@
 import { join } from 'path'
 import { assertInsideWorkspace } from '../../../shared/workspacePath'
 import { queryIndexFileList } from '../codeindex'
+import { extraRootDisplayPath } from '../../../shared/extraRoots'
 import {
   collectWorkspaceFilesPage,
   formatLiveScanCapNotice,
@@ -53,14 +54,20 @@ export function globPatternIsTextOnly(pattern: string, textExts: ReadonlySet<str
   return textExts.has(ext)
 }
 
-/** List workspace files matching a glob, honouring .gitignore. */
+/**
+ * List workspace files matching a glob, honouring .gitignore.
+ * `displayRoot`: the run's added folder this glob ran in (extraRoots.ts) —
+ * every path comes back absolute under it, so it can go straight to `read`.
+ */
 export async function toolGlob(
   workspaceRoot: string,
   pattern: string,
   maxResults?: number,
   signal?: AbortSignal,
-  scanCap?: number
+  scanCap?: number,
+  displayRoot?: string
 ): Promise<string> {
+  const shownPath = (rel: string): string => (displayRoot ? extraRootDisplayPath(displayRoot, rel) : rel)
   const trimmed = pattern.trim()
   if (!trimmed) throw new Error('glob requires a non-empty pattern')
 
@@ -110,10 +117,10 @@ export async function toolGlob(
     const notices = [`No files match ${trimmed}`]
     const nested = nestedMatchRels(trimmed, files)
     if (nested.length > 0) {
-      notices.push('Paths are relative to the workspace root.')
+      notices.push(displayRoot ? `Patterns are relative to ${displayRoot}.` : 'Paths are relative to the workspace root.')
       notices.push('Nested matches:')
       const shown = nested.slice(0, NESTED_SUGGEST_CAP)
-      notices.push(...shown)
+      notices.push(...shown.map(shownPath))
       if (nested.length > shown.length) {
         notices.push(`… ${nested.length - shown.length} more`)
       }
@@ -137,5 +144,5 @@ export async function toolGlob(
   if (liveHitCap) suffixParts.push(formatLiveScanCapNotice(liveCap))
   suffixParts.push(`index=${indexMode}`)
   const suffix = suffixParts.length > 0 ? `\n${suffixParts.join('\n')}` : ''
-  return `${shown.join('\n')}${suffix}`
+  return `${shown.map(shownPath).join('\n')}${suffix}`
 }

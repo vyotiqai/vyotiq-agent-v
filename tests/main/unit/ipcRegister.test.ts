@@ -149,6 +149,12 @@ vi.mock('@main/agent/checkpoints', () => ({
   getWriteCheckpointMeta: vi.fn(() => null)
 }))
 
+const undoHunkMock = vi.hoisted(() => vi.fn())
+vi.mock('@main/agent/hunkUndo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/hunkUndo')>()
+  return { ...actual, undoHunk: (...args: unknown[]) => undoHunkMock(...args) }
+})
+
 // Still the real refresh, recorded so a rewind can be checked for it.
 vi.mock('@main/agent/tools', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@main/agent/tools')>()
@@ -1082,6 +1088,64 @@ describe('registerIpc', () => {
         expect(result.error).toMatch(/run not found/i)
         expect(result.code).not.toBe('IPC_HANDLER')
       }
+    })
+  })
+
+  describe('runsUndoHunk', () => {
+    const request = {
+      workspacePath: '/ws',
+      runId: 'run-1',
+      path: 'src/a.ts',
+      hunk: { oldStart: 3, oldLines: 7, newStart: 3, newLines: 8, hash: 'abc123' },
+      diffHash: 'def456'
+    }
+    type Reply = { ok: true; data: unknown } | { ok: false; error: string; code?: string }
+    const undoHunkIpc = async (payload: unknown): Promise<Reply> =>
+      (await handlers.get(IPC.runsUndoHunk)!({ sender: mockWc, senderFrame: mockMainFrame }, payload)) as Reply
+
+    it('undoes the named hunk of the named run’s file', async () => {
+      runExistsMock.mockReturnValue(true)
+      undoHunkMock.mockReturnValue({ path: 'src/a.ts', restoreToken: 'token-1' })
+      const result = await undoHunkIpc(request)
+      expect(result).toEqual({ ok: true, data: { path: 'src/a.ts', restoreToken: 'token-1' } })
+      expect(undoHunkMock).toHaveBeenCalledWith(expect.any(String), '/ws', 'run-1', {
+        path: 'src/a.ts',
+        hunk: request.hunk,
+        diffHash: 'def456'
+      })
+    })
+
+    it('says why it refused, as an expected failure', async () => {
+      runExistsMock.mockReturnValue(true)
+      const { HunkUndoRefused } = await import('@main/agent/hunkUndo')
+      undoHunkMock.mockImplementation(() => {
+        throw new HunkUndoRefused('That file changed since its diff was shown — look at it again, then undo.')
+      })
+      const result = await undoHunkIpc(request)
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error).toMatch(/changed since its diff was shown/)
+        expect(result.code).not.toBe('IPC_HANDLER')
+      }
+    })
+
+    it('waits for a live run to stop', async () => {
+      runExistsMock.mockReturnValue(true)
+      isActiveMock.mockReturnValueOnce(true)
+      undoHunkMock.mockReset()
+      const result = await undoHunkIpc(request)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error).toMatch(/stop the run/i)
+      expect(undoHunkMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects a request without a hunk identity', async () => {
+      runExistsMock.mockReturnValue(true)
+      undoHunkMock.mockReset()
+      const { hunk: _hunk, ...noHunk } = request
+      const result = await undoHunkIpc(noHunk)
+      expect(result.ok).toBe(false)
+      expect(undoHunkMock).not.toHaveBeenCalled()
     })
   })
 

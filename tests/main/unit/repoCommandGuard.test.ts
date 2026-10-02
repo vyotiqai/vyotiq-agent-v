@@ -13,11 +13,13 @@ vi.mock('electron', () => ({
 import {
   allowRepoCommands,
   guardGitInvocation,
+  hooksPathLeavesRepo,
   neutralizerFor,
   parseGitConfigList,
   readBlockedRepoCommands,
   resetRepoCommandGuardForTests,
-  withDiffProgramsOff
+  withDiffProgramsOff,
+  withPackProgramsReset
 } from '@main/git/repoCommandGuard'
 
 /**
@@ -225,5 +227,194 @@ describe('repo command guard', () => {
     } finally {
       rmSync(plain, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * The settings fetch, push and commit reach: each program drops a marker,
+ * and the user's own (global) value is a different marker that must still run.
+ */
+describe('repo command guard on network and write commands', () => {
+  /** A program git runs directly (not through a shell): a script on disk. */
+  function script(name: string, tail: string): string {
+    const path = join(root, `${name}.sh`)
+    writeFileSync(path, `#!/bin/sh\necho ran >> "${markers.replace(/\\/g, '/')}/${name}"\n${tail}\n`, { mode: 0o755 })
+    return path.replace(/\\/g, '/')
+  }
+
+  function setGlobal(key: string, value: string): void {
+    git(['config', '--file', env.GIT_CONFIG_GLOBAL!, '--add', key, value])
+  }
+
+  /** Run git through the guard, feeding `input`; failures are fine, what ran is what matters. */
+  async function guardedRun(args: string[], input = ''): Promise<string[]> {
+    const call = await guardGitInvocation(args, repo, env)
+    try {
+      execFileSync('git', call.args, { cwd: repo, env: call.env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 20_000 })
+    } catch {
+      // expected for most: the remote is not there
+    }
+    return ran()
+  }
+
+  function unguardedRun(args: string[], input = ''): string[] {
+    try {
+      execFileSync('git', args, { cwd: repo, env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 20_000 })
+    } catch {
+      // as above
+    }
+    return ran()
+  }
+
+  const CREDENTIAL_QUERY = 'protocol=https\nhost=example.com\n\n'
+
+  beforeEach(() => {
+    // The machine's own ssh/askpass/proxy settings would mask what the repo's do.
+    for (const name of ['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_ASKPASS', 'SSH_ASKPASS', 'GIT_PROXY_COMMAND']) delete env[name]
+  })
+
+  it('picks out only programs that came with the repository', () => {
+    const inherited = (...keys: string[]): string | undefined => (keys.includes('core.sshcommand') ? 'ssh -i ~/.ssh/k' : undefined)
+    // Bare names are installed software: `git credential-manager`, gpg2 on PATH.
+    expect(neutralizerFor('credential.helper', 'manager')).toBeNull()
+    expect(neutralizerFor('credential.helper', '')).toBeNull()
+    expect(neutralizerFor('credential.https://h.example.helper', '!f() { evil; }; f')?.special).toBe('credential')
+    expect(neutralizerFor('gpg.program', 'gpg2')).toBeNull()
+    expect(neutralizerFor('gpg.program', './tools/gpg')?.config).toEqual([
+      ['gpg.program', 'gpg'],
+      ['gpg.openpgp.program', 'gpg']
+    ])
+    expect(neutralizerFor('core.sshcommand', 'sh -c evil', inherited)?.config).toEqual([['core.sshCommand', 'ssh -i ~/.ssh/k']])
+    expect(neutralizerFor('core.sshcommand', 'sh -c evil')?.special).toBe('sshDefault')
+    expect(neutralizerFor('core.gitproxy', 'none for example.com')).toBeNull()
+    expect(neutralizerFor('core.gitproxy', './proxy for example.com')?.special).toBe('gitProxy')
+    expect(neutralizerFor('protocol.allow', 'never')).toBeNull()
+    expect(neutralizerFor('protocol.ext.allow', 'always')?.config).toEqual([['protocol.ext.allow', 'never']])
+    expect(neutralizerFor('remote.origin.uploadpack', 'git-upload-pack')).toBeNull()
+    expect(neutralizerFor('remote.origin.receivepack', '/tmp/x')?.special).toBe('packPrograms')
+    expect(withPackProgramsReset(['fetch', '--all'])).toEqual(['fetch', '--upload-pack=git-upload-pack', '--all'])
+    expect(withPackProgramsReset(['push', 'origin', 'main'])).toEqual(['push', '--receive-pack=git-receive-pack', 'origin', 'main'])
+    expect(withPackProgramsReset(['status'])).toEqual(['status'])
+
+    const dirs = { gitDir: join(repo, '.git'), commonDir: join(repo, '.git'), workTree: repo }
+    expect(hooksPathLeavesRepo('.husky/_', dirs)).toBe(false)
+    expect(hooksPathLeavesRepo(join(repo, '.git', 'hooks'), dirs)).toBe(false)
+    expect(hooksPathLeavesRepo('../elsewhere', dirs)).toBe(true)
+    expect(hooksPathLeavesRepo(join(root, 'hooks-out'), dirs)).toBe(true)
+    expect(hooksPathLeavesRepo('~/hooks', dirs)).toBe(true)
+  })
+
+  it('keeps the user’s credential helpers and drops the repository’s', async () => {
+    setGlobal('credential.https://example.com.helper', `!${marker('global-url-helper', 'true')}`)
+    // Helpers that answer nothing, so git asks every one of them.
+    setGlobal('credential.helper', `!${marker('global-helper', 'true')}`)
+    git(['config', 'credential.helper', `!${marker('repo-helper', 'true')}`])
+    git(['config', 'credential.https://example.com.helper', `!${marker('repo-url-helper', 'true')}`])
+
+    expect(unguardedRun(['credential', 'fill'], CREDENTIAL_QUERY)).toEqual(
+      expect.arrayContaining(['repo-helper', 'repo-url-helper'])
+    )
+    clearRan()
+    // Both of the user's, URL-scoped one included, in git's order; none of the repo's.
+    expect(await guardedRun(['credential', 'fill'], CREDENTIAL_QUERY)).toEqual(['global-helper', 'global-url-helper'])
+    clearRan()
+    expect(await guardedRun(['credential', 'fill'], 'protocol=https\nhost=other.example\n\n')).toEqual(['global-helper'])
+  })
+
+  it('switches off a repository ssh command and askpass, and puts the user’s ssh command back', async () => {
+    setGlobal('core.sshCommand', marker('global-ssh', 'exit 1'))
+    git(['config', 'core.sshCommand', marker('repo-ssh', 'exit 1')])
+    git(['config', 'core.askPass', script('repo-askpass', 'echo x')])
+
+    expect(unguardedRun(['ls-remote', 'ssh://nobody@127.0.0.1:9/x'])).toEqual(['repo-ssh'])
+    clearRan()
+    expect(await guardedRun(['ls-remote', 'ssh://nobody@127.0.0.1:9/x'])).toEqual(['global-ssh'])
+    clearRan()
+    expect(unguardedRun(['-c', 'credential.helper=', 'credential', 'fill'], CREDENTIAL_QUERY)).toEqual(['repo-askpass'])
+    clearRan()
+    expect(await guardedRun(['credential', 'fill'], CREDENTIAL_QUERY)).toEqual([])
+    expect((await readBlockedRepoCommands(repo, env))?.blocked.map((c) => c.key).sort()).toEqual([
+      'core.askpass',
+      'core.sshcommand'
+    ])
+  })
+
+  it('treats a file the repository includes as the repository’s own', async () => {
+    const included = join(root, 'included.gitconfig')
+    git(['config', '--file', included, 'core.sshCommand', marker('included-ssh', 'exit 1')])
+    git(['config', 'include.path', included.replace(/\\/g, '/')])
+    expect((await readBlockedRepoCommands(repo, env))?.blocked).toEqual([
+      { key: 'core.sshcommand', value: expect.stringContaining('included-ssh') }
+    ])
+    setGlobal('core.sshCommand', marker('global-ssh', 'exit 1'))
+    resetRepoCommandGuardForTests()
+    expect(await guardedRun(['ls-remote', 'ssh://nobody@127.0.0.1:9/x'])).toEqual(['global-ssh'])
+  })
+
+  function addOrigin(): void {
+    const remote = join(root, 'remote.git')
+    git(['init', '-q', '--bare', remote], root)
+    git(['remote', 'add', 'origin', remote])
+    git(['push', '-q', 'origin', 'main'])
+  }
+
+  it('runs no repository pack program or proxy', async () => {
+    addOrigin()
+    git(['config', 'remote.origin.uploadpack', script('repo-uploadpack', 'exec git-upload-pack "$@"')])
+    git(['config', 'remote.origin.receivepack', script('repo-receivepack', 'exec git-receive-pack "$@"')])
+    expect(unguardedRun(['fetch', '--all'])).toEqual(['repo-uploadpack'])
+    clearRan()
+    expect(await guardedRun(['fetch', '--all'])).toEqual([])
+    expect(await guardedRun(['fetch'])).toEqual([])
+    git(['commit', '-q', '--allow-empty', '-m', 'more'])
+    expect(await guardedRun(['push', 'origin', 'main'])).toEqual([])
+
+    git(['config', 'core.gitProxy', script('repo-proxy', 'exit 1')])
+    expect(await guardedRun(['ls-remote', 'git://127.0.0.1:9/x'])).toEqual([])
+  })
+
+  it('runs no repository alternate-refs command or ext:: remote', async () => {
+    addOrigin()
+    const alt = join(root, 'alt')
+    git(['init', '-q', alt], root)
+    git(['commit', '-q', '--allow-empty', '-m', 'alt'], alt)
+    writeFileSync(join(repo, '.git', 'objects', 'info', 'alternates'), `${join(alt, '.git', 'objects').replace(/\\/g, '/')}\n`)
+    git(['config', 'core.alternateRefsCommand', marker('repo-altrefs', 'true')])
+    expect(unguardedRun(['fetch', 'origin'])).toEqual(['repo-altrefs'])
+    clearRan()
+    expect(await guardedRun(['fetch', 'origin'])).toEqual([])
+    git(['config', '--unset', 'core.alternateRefsCommand'])
+
+    // ext:: stays off with nothing else blocked, even where the user's own config allows it.
+    setGlobal('protocol.ext.allow', 'always')
+    git(['remote', 'add', 'evil', `ext::sh -c echo% ran% >>${markers.replace(/\\/g, '/')}/ext`])
+    expect(unguardedRun(['fetch', 'evil'])).toEqual(['ext'])
+    clearRan()
+    expect(await guardedRun(['fetch', 'evil'])).toEqual([])
+  })
+
+  it('signs with the user’s gpg, not the repository’s', async () => {
+    setGlobal('gpg.program', script('global-gpg', 'exit 1'))
+    git(['config', 'gpg.program', script('repo-gpg', 'exit 1')])
+    git(['config', 'commit.gpgSign', 'true'])
+    expect(await guardedRun(['commit', '--allow-empty', '-m', 'signed'])).toEqual(['global-gpg'])
+  })
+
+  it('runs the repository’s own hooks but not a hooks path outside it', async () => {
+    const hook = (dir: string, name: string): void => {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'post-commit'), `#!/bin/sh\necho ran >> "${markers.replace(/\\/g, '/')}/${name}"\n`, { mode: 0o755 })
+    }
+    hook(join(repo, '.git', 'hooks'), 'git-dir-hook')
+    hook(join(root, 'hooks-out'), 'outside-hook')
+    hook(join(repo, '.githooks'), 'inside-hook')
+
+    git(['config', 'core.hooksPath', join(root, 'hooks-out').replace(/\\/g, '/')])
+    expect(await guardedRun(['commit', '--allow-empty', '-m', 'a'])).toEqual(['git-dir-hook'])
+    clearRan()
+
+    git(['config', 'core.hooksPath', '.githooks'])
+    expect(await readBlockedRepoCommands(repo, env)).toBeNull()
+    expect(await guardedRun(['commit', '--allow-empty', '-m', 'b'])).toEqual(['inside-hook'])
   })
 })

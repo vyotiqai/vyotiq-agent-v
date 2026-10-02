@@ -12,7 +12,7 @@ import type {
 import { catalogProviderId } from '../../shared/ipc'
 import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { contentDisplayText, contentToText } from '../../shared/ipc'
-import { runGoalFromUserText, findAbsolutePathsInText, outsideWorkspacePathGuidance, stubPastSkillInvocationsInMessages } from '../../shared/slashCommands'
+import { runGoalFromUserText, findAbsolutePathsInText, outsideWorkspacePathGuidance, parseSkillInvocation, stubPastSkillInvocationsInMessages } from '../../shared/slashCommands'
 import { resolveProviderChatBaseUrl, seedModelsFor } from '../../shared/providers'
 import { formatError, isAbortError } from '../../shared/errors'
 import { logger, logErrorSummary } from '../../shared/logger'
@@ -39,6 +39,8 @@ import { resolveServiceTier } from '../../shared/domain/modelSelection'
 import { recallRunModelSelection, rememberRunModelSelection } from './runModelSelection'
 import { stripToolShapedAssistantText } from '../../shared/transcript'
 import { commandGuardFor, createApprovalGate } from './toolApproval'
+import { appUserDataDir, loadRunPermissionPolicy } from './permissions'
+import { formatExtraRootsSection, liveExtraRoots } from './extraRoots'
 import { askQuestionThroughRenderer } from './agentQuestion'
 import {
   addSpendAllowance,
@@ -107,6 +109,13 @@ import {
 import { disposeTerminalSessionsForInvoke } from './tools/terminalSessions'
 import { getProvider } from './providers'
 import { resolveModelInfo } from './modelResolve'
+import {
+  classifyOutageFailure,
+  classifyThrownOutage,
+  createModelFallback,
+  messagesHaveImages,
+  type ModelSwitch
+} from './modelFallback'
 import { requestMaxOutputTokens } from './providers/requestLimits'
 import type { ProviderReasoningState } from '../../shared/reasoning'
 import {
@@ -227,6 +236,8 @@ import {
 } from './mcp'
 import { resolveEffectiveMcpServers, resolveMcpServersForSessionMap, mcpSessionMapFingerprint } from '../marketplace/resolve'
 import { buildSkillsSection, loadEnabledSkills, loadPluginRules } from './skills'
+import { skillToolGrantResolver } from './skills/allowedTools'
+import { buildAgentTypesSection, loadAgentTypes } from './agentTypes'
 import { beginWriteCheckpoint, finalizeWriteCheckpoint, getWriteCheckpoint } from './checkpoints'
 import { isMcpToolPermitted } from '../../shared/utils/mcpToolPolicy'
 import {
@@ -1094,6 +1105,14 @@ export type RunAgentInput = {
   model?: string
   /** A new task's done-when checks, from its brief — written when the run is created. */
   doneWhen?: string[]
+  /**
+   * Folders outside the workspace the task may also work in, validated by
+   * launchRun. Written on a new run's status; on a resume they replace the
+   * run's own (`/add-dir`). Absent keeps what the run has.
+   */
+  extraRoots?: string[]
+  /** A new task started by a repeating schedule — written on its status when the run is created. */
+  scheduled?: import('../../shared/ipc').RunScheduled
 }
 
 export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent> {
@@ -1125,6 +1144,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   // Entire body in try/finally so early returns (missing key, etc.) always clear the abort map.
   // Storage / session paths stay on `workspace`. File tools may use an instance worktree.
   let toolWorkspace = workspace
+  /**
+   * Added folders in force this invoke (extraRoots.ts): re-checked from the
+   * run's status, never inherited by helper instances. Empty for most runs.
+   */
+  let runExtraRoots: string[] = []
   let runDir: string | null = null
   /** Trips the abort controller if the run dir vanishes mid-run (storage loss). */
   let abortOnStorageLost: (() => void) | null = null
@@ -1286,7 +1310,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
     if (opts?.reopen) {
       checkpointFlushed = false
-      beginWriteCheckpoint(runDir, toolWorkspace, lastUserMessageIndex(messages))
+      beginWriteCheckpoint(runDir, toolWorkspace, lastUserMessageIndex(messages), runExtraRoots)
     }
   }
   try {
@@ -1305,6 +1329,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     let resumedLoopCheckpoint: ReturnType<typeof loadLoopCheckpoint> = null
 
     let wasInterruptedResume = false
+    /**
+     * Where this invoke's own rows start in messages.jsonl, so a
+     * UserPromptSubmit hook that blocks the instruction can take it back out.
+     * Null when that is unknown (a run dir an internal starter made first).
+     */
+    let invokeRowsFrom: number | null = null
 
     if (input.resume) {
       const preResumeDir = resolveRunDir(workspace, runId)
@@ -1322,6 +1352,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // Prefer chatStart mode when the UI sent one; otherwise restore last run mode.
       agentMode = input.mode ?? persisted?.mode ?? 'agent'
       const diskMessages = await loadMessagesAsync(workspace, runId)
+      invokeRowsFrom = diskMessages.length
       // Always merge from durable disk history on resume so a stale client
       // payload cannot silently rewrite messages.jsonl.
       if (input.newMessages?.length) {
@@ -1374,13 +1405,20 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       } else {
         runDir = createRun(workspace, runId, goal, {
           mode: agentMode,
-          ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {})
+          ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {}),
+          ...(input.extraRoots?.length ? { extraRoots: input.extraRoots } : {}),
+          ...(input.scheduled ? { scheduled: input.scheduled } : {})
         })
+        invokeRowsFrom = 0
       }
       for (const m of messages) appendMessage(runDir, m)
       await flushMessageAppends(runDir)
     }
 
+    // A resumed task given folders (`/add-dir`): they replace the run's own.
+    if (input.resume && input.extraRoots) {
+      await updateStatus(runDir, { extraRoots: input.extraRoots }, { sync: true })
+    }
     const persistedForTools = loadStatus(runDir)
     // Storage-loss tripwire: if the run dir vanishes mid-run (external cleanup
     // gone wrong), append queues record ENOENT and fire this handler — trip the
@@ -1398,6 +1436,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
     const isInlineInstance = persistedForTools?.inlineInstance === true
     runIsInlineInstance = isInlineInstance
+    // A typed helper's tool list, frozen at spawn (agentTypes.ts): it narrows
+    // the catalog and the tool gate alike. Absent for every other run.
+    const agentTypeToolAllowlist = isInlineInstance ? persistedForTools?.agentType?.tools : undefined
+    // A helper instance works in its own tree (or path_scope) and is merged
+    // back through the workspace's git: added folders stay the parent's.
+    runExtraRoots = isInlineInstance ? [] : liveExtraRoots(workspace, persistedForTools?.extraRoots)
     if (isInlineInstance && persistedForTools?.worktreePath) {
       const wt = persistedForTools.worktreePath
       if (!isSafeInstanceWorktreePath(workspace, wt) || !existsSync(wt)) {
@@ -1477,7 +1521,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     })
     // messages is still the FULL transcript here — the compaction fold below has
     // not run yet, so the plain working index is already a full-transcript index.
-    beginWriteCheckpoint(runDir, toolWorkspace, lastUserMessageIndex(messages))
+    beginWriteCheckpoint(runDir, toolWorkspace, lastUserMessageIndex(messages), runExtraRoots)
 
     seedPlanStubIfMissing(runDir)
 
@@ -1702,6 +1746,25 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     // Always a gate, even with approvals and MCP protection both off: tools
     // this run wrote and commands the guard stops still ask then.
     const taskRunDir = runDir
+    const runCommandGuard = commandGuardFor(workspace, settings.terminalShell)
+    // Permission rules: Settings', plus the deny/ask rules a workspace ships in
+    // .vyotiq/permissions.json, read once per invoke like the settings.
+    const permissions = loadRunPermissionPolicy({
+      settingsRules: approvalSettings.rules ?? [],
+      workspace,
+      toolWorkspace,
+      extraRoots: runExtraRoots,
+      userDataDir: appUserDataDir(),
+      syntax: runCommandGuard.syntax,
+      onFileProblem: (problem) =>
+        logger.warn('Workspace permissions file partly ignored', {
+          scope: 'agent',
+          correlationId: runId,
+          reason: problem.error ?? `${problem.ignoredAllow} allow rules ignored (a workspace file cannot grant), ${problem.invalid} invalid`,
+          ignoredAllow: problem.ignoredAllow,
+          invalid: problem.invalid
+        })
+    })
     const approvalGate = createApprovalGate({
       runId,
       invokeId,
@@ -1714,8 +1777,17 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       persistAlways: (toolName) => persistAlwaysAllow(workspace, toolName),
       taskAllowlist: taskRunDir ? readTaskAllowlist(taskRunDir) : [],
       persistTask: taskRunDir ? (toolName) => void persistTaskAllow(taskRunDir, toolName) : undefined,
-      commandGuard: commandGuardFor(workspace, settings.terminalShell)
+      commandGuard: runCommandGuard,
+      permissions,
+      // Resolved as the Skill tool resolves it: same workspace, same overrides.
+      skillGrants: skillToolGrantResolver(toolWorkspace)
     })
+    {
+      // A turn the user opened with `/skill` has that skill active from its start.
+      const opened = [...((input.resume ? input.newMessages : input.messages) ?? [])].reverse().find((m) => m.role === 'user')
+      const invoked = opened ? parseSkillInvocation(contentDisplayText(opened.content)) : null
+      if (invoked) approvalGate.activateSkill?.(invoked.skillName)
+    }
 
     // Hooks (hooks.ts). The workspace's own file is a question the first time
     // it is seen, and after any change; a helper instance never asks.
@@ -1751,6 +1823,48 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             }
           }
     )
+
+    // SessionStart and UserPromptSubmit, before the first model step. What
+    // they print reaches the model as this invoke's run notice; a blocked
+    // instruction leaves the task and ends the invoke. Instances run neither,
+    // as they run no Stop hooks: their brief comes from the agent, not you.
+    let hookContextHint: string | undefined
+    if (!isInlineInstance) {
+      const sessionContext = await runHooks.sessionStart(input.resume ? 'resume' : 'startup', controller.signal)
+      const promptMessage = [...((input.resume ? input.newMessages : input.messages) ?? [])]
+        .reverse()
+        .find((m) => m.role === 'user')
+      const promptText = promptMessage ? contentDisplayText(promptMessage.content) : ''
+      let promptContext: string | null = null
+      if (promptMessage && !isGoalContinueMessage(promptText)) {
+        const submitted = await runHooks.userPromptSubmit(promptText, controller.signal)
+        if (submitted.blocked !== null) {
+          if (invokeRowsFrom !== null) {
+            const rowsFrom = invokeRowsFrom
+            const onDisk = await loadMessagesAsync(workspace, runId)
+            await syncMessagesAsync(
+              runDir,
+              onDisk.filter((m, i) => i < rowsFrom || m.role !== 'user')
+            )
+          }
+          yield* emitTerminalRunError({
+            runId,
+            invokeId,
+            runDir,
+            message: `A UserPromptSubmit hook blocked this instruction: ${submitted.blocked}`,
+            code: 'HOOK_BLOCKED',
+            flushWriteCheckpoint,
+            writeStatus
+          })
+          return
+        }
+        promptContext = submitted.context
+      }
+      hookContextHint = combineLoopHints(
+        sessionContext ? `From your SessionStart hooks:\n${sessionContext}` : undefined,
+        promptContext ? `From your UserPromptSubmit hooks:\n${promptContext}` : undefined
+      )
+    }
 
     /** Persist compaction; `saved` is false only when a write was required and failed. */
     const emitCompaction = (
@@ -1811,6 +1925,22 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       baseUrl,
       controller.signal
     )
+    // Fallback models for when this provider is down (modelFallback.ts): for
+    // this invoke only, so the next turn starts on the task's model again.
+    const modelFallback = createModelFallback({
+      settings,
+      primary: {
+        runProviderId,
+        providerId,
+        model: settings.model,
+        provider,
+        apiKey,
+        baseUrl,
+        modelInfo,
+        price: runModelPrice,
+        thinkingAllowed: catalogThinkingAllowed(settings.model, modelInfo.supportsThinking)
+      }
+    })
 
     if (controller.signal.aborted) {
       yield* flushWriteCheckpoint()
@@ -1828,9 +1958,17 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
 
     let skillsSection = buildSkillsSection(loadEnabledSkills(marketplaceOverrides, workspace))
     let pluginRulesSection = loadPluginRules(marketplaceOverrides)
+    // User-defined helper types a root run can spawn (agentTypes.ts). Children
+    // cannot spawn, so they never carry the list. Refreshed with the skills: a
+    // type file added mid-run joins on the next step, and an unchanged set
+    // leaves the stable prefix byte-identical.
+    const readAgentTypesSection = (): string =>
+      isInlineInstance ? '' : buildAgentTypesSection(loadAgentTypes(workspace).types)
+    let agentTypesSection = readAgentTypesSection()
     const refreshSkillPromptSections = (): void => {
       skillsSection = buildSkillsSection(loadEnabledSkills(marketplaceOverrides, workspace))
       pluginRulesSection = loadPluginRules(marketplaceOverrides)
+      agentTypesSection = readAgentTypesSection()
     }
 
     let runEnabledMcpIds = new Set<string>()
@@ -2000,7 +2138,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 wireToolDefs,
                 {
                 autoModeSwitch: settings.autoModeSwitch,
-                inlineInstance: isInlineInstance
+                inlineInstance: isInlineInstance,
+                toolAllowlist: agentTypeToolAllowlist
               }),
               liveCodeIndexEnabled
             )
@@ -2076,7 +2215,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     const nestedInstructions = new NestedInstructions(
       toolWorkspace,
       input.focusedFile,
-      attachedInstructionSources(messages)
+      attachedInstructionSources(messages),
+      runExtraRoots
     )
     const mutationPaths = seedMutationPathsFromMessages(messages)
     /**
@@ -2418,6 +2558,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const assembleLoopHint = combineLoopHints(
         mcpNotInCatalogFailFastHint(),
         outsidePathHint,
+        hookContextHint,
         takeCompactionHint()
       )
       const effectiveContentWindow = contentWindow(modelInfo, providerId)
@@ -2444,13 +2585,21 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         memoryWorkspacePath: isInlineInstance && toolWorkspace !== workspace ? workspace : undefined,
         goal,
         ...promptArtifactFields(artifacts),
-        sessionEnv: buildSessionEnvSection(settings.terminalShell),
+        // Added folders are per task: the volatile zone, beside the session block.
+        sessionEnv: [buildSessionEnvSection(settings.terminalShell), formatExtraRootsSection(runExtraRoots)]
+          .filter(Boolean)
+          .join('\n\n'),
         model: modelInfo,
         proactiveThreshold,
         toolsJsonEstimate,
         toolsSplit: toolsSplitDetail,
         priorCompaction: compaction,
-        skillsSection,
+        // Helper types ride with the skills list, and only where a spawn can
+        // happen: an Agent-mode root run.
+        skillsSection:
+          agentTypesSection && agentMode === 'agent'
+            ? [skillsSection, agentTypesSection].filter(Boolean).join('\n\n')
+            : skillsSection,
         mcpSection: mcpServersSection,
         pluginRulesSection,
         userRules: getSettings().userRules ?? [],
@@ -2622,6 +2771,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             loopHint: combineLoopHints(
               mcpNotInCatalogFailFastHint(),
               outsidePathHint,
+              hookContextHint,
               postFoldHint,
               loopHintWhenContextStillLarge(postCompactEstimate ?? 0, proactiveThreshold)
             )
@@ -2721,6 +2871,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               loopHint: combineLoopHints(
                 mcpNotInCatalogFailFastHint(),
                 outsidePathHint,
+                hookContextHint,
                 retryFoldHint,
                 loopHintWhenContextStillLarge(retryPostCompactEstimate ?? 0, proactiveThreshold)
               )
@@ -2851,8 +3002,51 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // request sent the same prefix, so a cold step was the provider's miss.
       const promptPrefixHash = promptPrefixFingerprint(toolDefs, assembled.systemStable)
 
+      // Model fallback (modelFallback.ts): the record's one-line note for a
+      // switch, and the hook every failed attempt passes through. A step may
+      // also start back on the task's model once the switch is old enough.
+      const emitModelSwitch = function* (change: ModelSwitch): Generator<AgentEvent, void> {
+        const switchEv: AgentEvent = {
+          type: 'model_fallback',
+          runId,
+          invokeId,
+          step,
+          provider: change.to.runProviderId,
+          model: change.to.model,
+          fromProvider: change.from.runProviderId,
+          fromModel: change.from.model,
+          ...(change.reason ? { reason: change.reason } : {}),
+          ...(change.restored ? { restored: true } : {}),
+          message: change.message
+        }
+        appendEvent(streamRunDir, switchEv)
+        yield switchEv
+      }
+      /** One failed attempt; true when it moved the step to another model. */
+      const switchModelOnOutage = async function* (
+        reason: string | null,
+        immediate: boolean
+      ): AsyncGenerator<AgentEvent, boolean> {
+        if (!reason) return false
+        const change = await modelFallback.onOutage(
+          reason,
+          {
+            tools: toolDefs.length > 0,
+            images: messagesHaveImages(assembled.messages),
+            promptTokens: assembled.estimatedTokens,
+            signal: streamSignalFor(runId, controller.signal)
+          },
+          { immediate }
+        )
+        if (!change) return false
+        yield* emitModelSwitch(change)
+        return true
+      }
+      const stepRestore = modelFallback.beginStep()
+      if (stepRestore) yield* emitModelSwitch(stepRestore)
+
       const streamRetryResult = yield* runWithStreamRetryGen({
-        circuitKey: circuitKeyProvider(runProviderId, baseUrl),
+        circuitKey: circuitKeyProvider(modelFallback.current().runProviderId, modelFallback.current().baseUrl),
         onAttemptStart: function* (attempt) {
           // Any prior attempt may have streamed text, thinking, or tool deltas —
           // tell the UI to drop all of it before the retry starts clean.
@@ -2882,6 +3076,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           streamedToolCallCount = 0
         },
         waitBeforeRetry: async function* (attempt) {
+          // Just moved to another model: nothing to wait out on that one.
+          if (modelFallback.takeSkipWait()) return
           yield* yieldStreamRetryWait(
             runId,
             invokeId,
@@ -2907,24 +3103,31 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         runAttempt: async function* (attempt) {
           const runDir = streamRunDir
           const streamStartedAt = Date.now()
+          // The task's model unless a fallback took over (modelFallback.ts).
+          // On the task's model every field below is what it always was, so
+          // its prompt cache sees the same bytes.
+          const target = modelFallback.current()
+          const onTaskModel = modelFallback.isPrimary()
           try {
-          for await (const chunk of provider.streamChat({
-          model: settings.model,
-          messages: assembled.messages,
+          for await (const chunk of target.provider.streamChat({
+          model: target.model,
+          messages: modelFallback.requestMessages(assembled.messages),
           tools: toolDefs,
           system: assembled.system,
           systemStable: assembled.systemStable,
           systemVolatile: assembled.systemVolatile,
           signal: streamSignalFor(runId, controller.signal),
-          apiKey,
-          baseUrl,
-          maxOutputTokens: requestMaxOutputTokens(providerId, modelInfo),
+          apiKey: target.apiKey,
+          baseUrl: target.baseUrl,
+          maxOutputTokens: requestMaxOutputTokens(target.providerId, target.modelInfo),
           toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
           parallelToolCalls: toolDefs.length > 0 ? true : undefined,
           promptCacheKey: runId,
-          modelInfo,
-          reasoningState: droppedPriorResponseState ? undefined : lastReasoningState(messages),
-          thinking: thinkingEnabled
+          modelInfo: target.modelInfo,
+          // A fallback never continues the task model's server-side chain.
+          reasoningState:
+            droppedPriorResponseState || !onTaskModel ? undefined : lastReasoningState(messages),
+          thinking: (onTaskModel ? thinkingEnabled : settings.thinkingEnabled && target.thinkingAllowed)
             ? {
                 enabled: true,
                 effort: weakestEffort(
@@ -2934,7 +3137,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 display: settings.showThinking ? 'summarized' : 'omitted'
               }
             : { enabled: false },
-          serviceTier: resolveServiceTier(settings, providerId, settings.model)
+          serviceTier: resolveServiceTier(settings, target.providerId, target.model)
         })) {
           if (controller.signal.aborted) break
           // Soft-steer: break so we can flush partial output and inject follow-ups.
@@ -3116,7 +3319,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             }
           } else if (chunk.type === 'done') {
             streamGotDone = true
-            if (chunk.reasoningState) stepReasoningState = chunk.reasoningState
+            if (chunk.reasoningState) {
+              stepReasoningState = chunk.reasoningState
+              modelFallback.noteReasoningState(chunk.reasoningState)
+            }
             if (chunk.stopReason) stepStopReason = chunk.stopReason
             if (chunk.usage) {
               lastUsage = chunk.usage
@@ -3130,8 +3336,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               // field and the model has verified published pricing. Runs on
               // unpriceable models keep token-only reporting — never a fake $.
               const stepEstimatedCost =
-                chunk.usage.billedCost == null && runModelPrice
-                  ? estimateStepCost(chunk.usage, runModelPrice) ?? undefined
+                chunk.usage.billedCost == null && target.price
+                  ? estimateStepCost(chunk.usage, target.price) ?? undefined
                   : undefined
               const cacheFieldsPresent =
                 chunk.usage.cachedInputTokens != null ||
@@ -3187,9 +3393,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 step,
                 // Attribution for offline analysis: events.jsonl is the only
                 // per-step record, and the run-level receipt carries whichever
-                // model the LAST invoke of this run used.
-                provider: runProviderId,
-                model: settings.model,
+                // model the LAST invoke of this run used. A fallback step
+                // names the fallback that served it.
+                provider: target.runProviderId,
+                model: target.model,
                 prefixHash: promptPrefixHash,
                 inputTokens: chunk.usage.inputTokens,
                 ...(chunk.usage.inputTokensIncludesCache !== undefined
@@ -3232,8 +3439,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               logger.info('Token cost step', {
                 scope: 'agent',
                 correlationId: runId,
-                provider: runProviderId,
-                model: settings.model,
+                provider: target.runProviderId,
+                model: target.model,
                 step,
                 inputTokens: chunk.usage.inputTokens,
                 outputTokens: chunk.usage.outputTokens,
@@ -3354,7 +3561,19 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               })
               return 'retry'
             }
-            if (shouldRetryStreamErrorChunk(errorCode, message, attempt, chunk.httpStatus)) {
+            const chunkRetriable = shouldRetryStreamErrorChunk(errorCode, message, attempt, chunk.httpStatus)
+            // Provider down (never a 429 / usage limit): maybe carry on on a fallback model.
+            if (
+              yield* switchModelOnOutage(
+                classifyOutageFailure({ errorCode: chunk.errorCode, message, httpStatus: chunk.httpStatus }),
+                !chunkRetriable
+              )
+            ) {
+              lastStreamFailureMessage = message
+              lastStreamFailureCode = errorCode
+              return 'retry'
+            }
+            if (chunkRetriable) {
               lastStreamFailureMessage = message
               lastStreamFailureCode = errorCode
               logger.warn('Provider stream error (retrying)', {
@@ -3458,6 +3677,15 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             // 'exhausted', which lands in the interrupted branch (Continue UX).
             lastStreamFailureMessage = message
             lastStreamFailureCode = 'PROVIDER_TIMEOUT'
+            lastStreamFailureHttpStatus = undefined
+            // Retried either way; a stalled provider may move to a fallback model.
+            yield* switchModelOnOutage('timed out', false)
+            return 'retry'
+          }
+          // Provider down (connect errors, a dead local endpoint): maybe a fallback model.
+          if (yield* switchModelOnOutage(classifyThrownOutage(err), !shouldRetryThrownStreamError(err, attempt))) {
+            lastStreamFailureMessage = err instanceof Error ? err.message : String(err)
+            lastStreamFailureCode = 'PROVIDER_STREAM'
             lastStreamFailureHttpStatus = undefined
             return 'retry'
           }
@@ -4043,7 +4271,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             checkpointFlushed = false
             // Anchor AFTER draining so the checkpoint covers the follow-up turn's
             // own prompt (rewind/edit of that prompt must restore its writes).
-            beginWriteCheckpoint(runDir, toolWorkspace, lastUserAnchorIndex(messages, foldedMessages))
+            beginWriteCheckpoint(runDir, toolWorkspace, lastUserAnchorIndex(messages, foldedMessages), runExtraRoots)
             continue
           }
           // The queued follow-up was removed between tryBeginRunClosing and the
@@ -4074,7 +4302,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             messages.push(continueUser)
             appendMessage(runDir, continueUser)
             checkpointFlushed = false
-            beginWriteCheckpoint(runDir, toolWorkspace, lastUserAnchorIndex(messages, foldedMessages))
+            beginWriteCheckpoint(runDir, toolWorkspace, lastUserAnchorIndex(messages, foldedMessages), runExtraRoots)
             continue
           }
           if (decision === 'stop_budget' && activeGoal) {
@@ -4271,7 +4499,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         runDir: runDir!,
         workspace: toolWorkspace,
         sessionWorkspace: workspace,
+        extraRoots: runExtraRoots,
         inlineInstance: isInlineInstance,
+        toolAllowlist: agentTypeToolAllowlist,
         signal: streamSignalFor(runId, controller.signal),
         runSignal: controller.signal,
         invokeId,

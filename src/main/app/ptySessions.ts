@@ -15,6 +15,7 @@ import {
 import type { PtySessionInfo } from '../../shared/ipc'
 import { getMainWindow } from './window'
 import { setTerminalMirrorSink } from '../agent/tools/terminalMirrorSink'
+import { installForklessConptyKill } from './conptyKill'
 
 // `IPty` is a type-only import — erased at runtime, so the optional node-pty
 // dependency still loads lazily via tryLoadPty() with the pipe fallback.
@@ -96,7 +97,10 @@ function shellBinAndArgs(): { file: string; args: string[] } {
 
 function tryLoadPty(): typeof import('node-pty') | null {
   try {
-    return require('node-pty') as typeof import('node-pty')
+    const nodePty = require('node-pty') as typeof import('node-pty')
+    // Before any pty can be killed: node-pty's Windows kill() would fork.
+    installForklessConptyKill()
+    return nodePty
   } catch {
     return null
   }

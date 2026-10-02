@@ -5,9 +5,17 @@ import { neutralizeXmlTags, OVERLAY_SECTION_TAGS } from './promptSections'
 /**
  * Sources whose bytes can carry prompt-injection payloads. Marketplace skills,
  * plugin rules, and workspace-authored rule files are deliberately included:
- * all three reach the model verbatim today.
+ * all three reach the model verbatim today. `terminal` is output of a command
+ * that fetched remote content (`curl`, `iwr`, `gh api` …) — see
+ * tools/terminalRemoteFence.ts; ordinary command output is not fenced.
  */
-export type UntrustedSource = 'workspace_harness' | 'browser' | 'mcp' | 'skill' | 'workspace_rules'
+export type UntrustedSource =
+  | 'workspace_harness'
+  | 'browser'
+  | 'mcp'
+  | 'skill'
+  | 'workspace_rules'
+  | 'terminal'
 
 export type WrapUntrustedOptions = {
   source: UntrustedSource

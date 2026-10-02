@@ -3,13 +3,38 @@ import { readFile, stat } from 'fs/promises'
 import { lineDiffStat } from '../../shared/utils/lineDiffStat'
 import { mapLimit } from '../../shared/utils/mapLimit'
 import { formatUnifiedDiff, lineDiff } from '../../shared/utils/unifiedDiff'
-import { createWorkspacePathResolver, resolveInsideWorkspace } from '../workspace/safePath'
+import { createWorkspacePathResolver } from '../workspace/safePath'
+import { extraRootFor, isAbsolutePathLike } from '../../shared/extraRoots'
 import {
   checkpointBeforeImagePath,
   listCheckpointMetas,
   listCheckpointMetasAsync,
+  resolveCheckpointPath,
   type WriteCheckpointMeta
 } from './checkpoints'
+
+/**
+ * Every added folder the task's turns wrote under (extraRoots.ts), from the
+ * checkpoints themselves: a file keyed by its absolute path is read only
+ * while it is inside one of them.
+ */
+export function checkpointsExtraRoots(metas: readonly WriteCheckpointMeta[]): string[] {
+  const out: string[] = []
+  for (const meta of metas) {
+    for (const root of meta.extraRoots ?? []) if (!out.includes(root)) out.push(root)
+  }
+  return out
+}
+
+/** The added folders a run's checkpoints recorded. */
+export function taskExtraRoots(runDir: string): string[] {
+  return checkpointsExtraRoots(listCheckpointMetas(runDir))
+}
+
+/** taskExtraRoots off the main thread's back, through the metas' parse cache. */
+export async function taskExtraRootsAsync(runDir: string): Promise<string[]> {
+  return checkpointsExtraRoots(await listCheckpointMetasAsync(runDir))
+}
 
 /**
  * What a task did to each file it wrote, net of all its turns: the
@@ -82,9 +107,9 @@ function safeBeforePath(runDir: string, checkpointId: string, relPath: string): 
   }
 }
 
-function workspaceFile(workspaceRoot: string, relPath: string): string | null {
+function workspaceFile(workspaceRoot: string, relPath: string, extraRoots: readonly string[] = []): string | null {
   try {
-    return resolveInsideWorkspace(workspaceRoot, relPath)
+    return resolveCheckpointPath(workspaceRoot, relPath, extraRoots)
   } catch {
     return null
   }
@@ -111,8 +136,12 @@ function netAction(written: Written, existsNow: boolean): TaskFileAction {
   return existsNow ? 'modified' : 'deleted'
 }
 
-function sides(written: Written, workspaceRoot: string): { before: string | null; after: string | null; existsNow: boolean } {
-  const abs = workspaceFile(workspaceRoot, written.path)
+function sides(
+  written: Written,
+  workspaceRoot: string,
+  extraRoots: readonly string[]
+): { before: string | null; after: string | null; existsNow: boolean } {
+  const abs = workspaceFile(workspaceRoot, written.path, extraRoots)
   const existsNow = abs !== null && existsSync(abs)
   const before = written.firstAction === 'created' ? '' : readText(written.beforePath, false)
   const after = abs ? readText(abs, true) : null
@@ -140,10 +169,36 @@ const STATS_CONCURRENCY = 8
  * launch, since the Changes list asks on open).
  */
 export async function taskFileStats(runDir: string, workspaceRoot: string): Promise<TaskFileStat[]> {
-  const written = [...collectWritten(runDir, await listCheckpointMetasAsync(runDir)).values()]
-  const resolve = createWorkspacePathResolver(workspaceRoot)
+  const metas = await listCheckpointMetasAsync(runDir)
+  const written = [...collectWritten(runDir, metas).values()]
+  const resolve = rootsPathResolver(workspaceRoot, checkpointsExtraRoots(metas))
   const stats = await mapLimit(written, STATS_CONCURRENCY, (file) => cachedStatFor(file, runDir, workspaceRoot, resolve))
   return stats.filter((s): s is TaskFileStat => s !== null).sort((a, b) => a.path.localeCompare(b.path))
+}
+
+type PathResolver = ReturnType<typeof createWorkspacePathResolver>
+
+/**
+ * The workspace's resolver, plus one per added folder for the files keyed by
+ * absolute path in it. A key in no listed folder resolves to nothing.
+ */
+export function rootsPathResolver(workspaceRoot: string, extraRoots: readonly string[]): PathResolver {
+  const primary = createWorkspacePathResolver(workspaceRoot)
+  if (extraRoots.length === 0) return primary
+  const byRoot = new Map<string, PathResolver>()
+  return async (key) => {
+    if (!isAbsolutePathLike(key)) return primary(key)
+    const inWorkspace = await primary(key)
+    if (inWorkspace) return inWorkspace
+    const root = extraRootFor(key, extraRoots)
+    if (!root) return null
+    let resolver = byRoot.get(root)
+    if (!resolver) {
+      resolver = createWorkspacePathResolver(root)
+      byRoot.set(root, resolver)
+    }
+    return resolver(key)
+  }
 }
 
 export async function statOrNull(path: string | null): Promise<Stats | null> {
@@ -164,7 +219,7 @@ async function cachedStatFor(
   written: Written,
   runDir: string,
   workspaceRoot: string,
-  resolve: ReturnType<typeof createWorkspacePathResolver>
+  resolve: PathResolver
 ): Promise<TaskFileStat | null> {
   const beforePath = written.beforePath
   const resolved = await resolve(written.path)
@@ -229,21 +284,39 @@ export function resetTaskFileStatsCacheForTests(): void {
   statsCache.clear()
 }
 
-/** The diff of one file the task wrote, as `git diff` would print it. */
-export function taskFileDiff(runDir: string, workspaceRoot: string, relPath: string): TaskFileDiff {
+/**
+ * The two texts one file's task diff is made from: the before-image its first
+ * write saved and the file now ('' for a side that does not exist), or why
+ * there are none to compare.
+ */
+export type TaskFileSides =
+  | { ok: true; path: string; action: TaskFileAction; before: string; after: string }
+  | { ok: false; path: string; action: TaskFileAction | null; reason: TaskFileDiffReason }
+
+export function taskFileSides(runDir: string, workspaceRoot: string, relPath: string): TaskFileSides {
   const path = relPath.replace(/\\/g, '/').replace(/^\.\//, '')
-  const written = collectWritten(runDir, listCheckpointMetas(runDir)).get(path)
-  if (!written) return { path, action: null, diff: null, reason: 'not_in_task' }
+  const metas = listCheckpointMetas(runDir)
+  const written = collectWritten(runDir, metas).get(path)
+  if (!written) return { ok: false, path, action: null, reason: 'not_in_task' }
+  const extraRoots = checkpointsExtraRoots(metas)
   // No before-image was kept — a recursive folder delete, or a terminal
   // command's change once the snapshot budget was spent. Say what happened to
   // the file now, not what a folder delete would have done.
   if (!written.undoable && written.firstAction !== 'created') {
-    const abs = workspaceFile(workspaceRoot, path)
-    return { path, action: netAction(written, abs !== null && existsSync(abs)), diff: null, reason: 'unrestorable' }
+    const abs = workspaceFile(workspaceRoot, path, extraRoots)
+    return { ok: false, path, action: netAction(written, abs !== null && existsSync(abs)), reason: 'unrestorable' }
   }
-  const { before, after, existsNow } = sides(written, workspaceRoot)
+  const { before, after, existsNow } = sides(written, workspaceRoot, extraRoots)
   const action = netAction(written, existsNow)
-  if (before === null || after === null) return { path, action, diff: null, reason: 'binary_or_large' }
+  if (before === null || after === null) return { ok: false, path, action, reason: 'binary_or_large' }
+  return { ok: true, path, action, before, after }
+}
+
+/** The diff of one file the task wrote, as `git diff` would print it. */
+export function taskFileDiff(runDir: string, workspaceRoot: string, relPath: string): TaskFileDiff {
+  const sided = taskFileSides(runDir, workspaceRoot, relPath)
+  if (!sided.ok) return { path: sided.path, action: sided.action, diff: null, reason: sided.reason }
+  const { path, action, before, after } = sided
   const diff = lineDiff(before, after)
   if (diff.hunks.length === 0) return { path, action, diff: null, add: 0, del: 0 }
   return {

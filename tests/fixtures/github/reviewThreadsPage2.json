@@ -1,0 +1,40 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 4,
+          "pageInfo": { "hasNextPage": false, "endCursor": "Y3Vyc29yOjQ=" },
+          "nodes": [
+            {
+              "id": "PRRT_kwDOAbc126",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "src\\renderer\\view.tsx",
+              "line": 5,
+              "originalLine": 5,
+              "startLine": null,
+              "diffSide": "right",
+              "resolvedBy": null,
+              "viewerCanResolve": true,
+              "viewerCanUnresolve": false,
+              "viewerCanReply": true,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "id": "PRRC_6",
+                    "author": { "login": "erin" },
+                    "body": "Missing key prop",
+                    "createdAt": "2026-10-01T07:00:00Z",
+                    "url": "https://github.com/acme/app/pull/12#discussion_r6"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

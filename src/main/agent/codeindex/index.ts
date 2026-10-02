@@ -297,7 +297,7 @@ function formatCodebaseSearchResult(
 export async function runCodebaseSearch(
   workspaceRoot: string,
   query: string,
-  opts: { limit?: number; signal?: AbortSignal; refresh?: boolean } = {}
+  opts: { limit?: number; signal?: AbortSignal; refresh?: boolean; hidePath?: (rel: string) => boolean } = {}
 ): Promise<CodebaseSearchResult> {
   const searchSignal = workspaceIndexSearchSignal(workspaceRoot, opts.signal)
 
@@ -332,7 +332,8 @@ export async function runCodebaseSearch(
             }
             const hits = await searchCodeIndex(workspaceRoot, store, query, {
               limit: opts.limit,
-              signal: searchSignal
+              signal: searchSignal,
+              hidePath: opts.hidePath
             })
             return formatCodebaseSearchResult(hits, status)
           },
@@ -350,7 +351,8 @@ export async function runCodebaseSearch(
       if (status.ready || status.chunkCount !== 0) {
         const hits = await searchCodeIndex(workspaceRoot, store, query, {
           limit: opts.limit,
-          signal: searchSignal
+          signal: searchSignal,
+          hidePath: opts.hidePath
         })
         const result = formatCodebaseSearchResult(hits, status)
         schedulePostSearchWarm(workspaceRoot)
@@ -477,7 +479,7 @@ async function realConceptEmbed(texts: string[], signal?: AbortSignal): Promise<
 export async function runConceptSearch(
   workspaceRoot: string,
   query: string,
-  opts: { limit?: number; signal?: AbortSignal; embed?: DenseEmbedder } = {}
+  opts: { limit?: number; signal?: AbortSignal; embed?: DenseEmbedder; hidePath?: (rel: string) => boolean } = {}
 ): Promise<ConceptSearchResult> {
   if (readCodeIndexEnabled() === false) return disabledSearchResult()
   const store = getOrOpenCodeIndexStore(workspaceRoot)
@@ -513,7 +515,8 @@ export async function runConceptSearch(
   const hits = await conceptSearchStore(store, query, {
     limit: opts.limit,
     signal: opts.signal,
-    embed
+    embed,
+    hidePath: opts.hidePath
   })
   const parts = [formatSearchHits(hits)]
   if (dense.vectorized < dense.total) {

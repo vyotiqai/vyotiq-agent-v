@@ -7,6 +7,8 @@ export const OVERLAY_SECTION_TAGS = [
   'run_contract',
   'plan',
   'available_skills',
+  'agent_types',
+  'agent_type',
   'mcp_servers',
   'plugin_rules',
   'user_rules',

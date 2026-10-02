@@ -8,6 +8,7 @@ import { logger } from '../../../shared/logger'
 import { lowerProcessPriority } from '../processPriority'
 import { TERMINAL_DEFAULT_TIMEOUT_MS } from '../../../shared/agentTimeouts'
 import { childProxyEnv } from '../../net/proxy'
+import { sandboxDenialHint, type SandboxLaunch } from '../sandbox/wrap'
 
 const KILL_TREE_WAIT_MS = 5_000
 
@@ -919,7 +920,8 @@ function formatTerminalOutput(
   stderr: string,
   code: number | null,
   annotations: string[],
-  resolved: ResolvedTerminalShell
+  resolved: ResolvedTerminalShell,
+  sandbox?: Pick<SandboxLaunch, 'label' | 'network'>
 ): string {
   const cmdSoft = resolved === 'cmd'
   const dirMissing = cmdSoft && isDirMissingPath(command, code, stdout, stderr)
@@ -935,6 +937,8 @@ function formatTerminalOutput(
   let out = [
     `cwd: ${cwd}`,
     `shell: ${resolved}`,
+    // The record of a sandboxed run says so; parseTerminalOutput strips it.
+    sandbox ? `sandbox: ${sandbox.label}` : null,
     '',
     ...annotations,
     stdout,
@@ -966,6 +970,10 @@ function formatTerminalOutput(
   out = appendPowerShellCompatHint(out, code, stderr, resolved, command)
   out = appendPowerShellFileOpHint(out, resolved, command)
   out = appendMissingCommandHint(out, code, stderr)
+  if (sandbox && code !== 0) {
+    const hint = sandboxDenialHint(`${stdout}\n${stderr}`, sandbox.network)
+    if (hint) out = `${out}\n\n${hint}`
+  }
   return out
 }
 
@@ -979,6 +987,7 @@ export function formatTerminalSessionOutput(input: {
   exitCode: number | null
   sessionId: string
   status: string
+  sandbox?: Pick<SandboxLaunch, 'label' | 'network'>
 }): string {
   const base = formatTerminalOutput(
     input.cwd,
@@ -987,7 +996,8 @@ export function formatTerminalSessionOutput(input: {
     input.stderr,
     input.exitCode,
     [],
-    input.shell
+    input.shell,
+    input.sandbox
   )
   return [`session_id: ${input.sessionId}`, `status: ${input.status}`, `command: ${input.command}`, base].join(
     '\n'
@@ -1107,6 +1117,8 @@ export type ToolTerminalOptions = {
   cwd?: string
   /** Live stdout/stderr chunks for UI streaming (capped with the buffers). */
   onOutput?: (chunk: { text: string; stream: 'stdout' | 'stderr' }) => void
+  /** Run inside this OS sandbox (main/agent/sandbox). Absent = unsandboxed. */
+  sandbox?: SandboxLaunch
 }
 
 export async function toolTerminal(
@@ -1174,7 +1186,8 @@ export async function toolTerminal(
       return
     }
 
-    const child = spawn(spec.bin, spec.args, {
+    const launch = opts.sandbox ? opts.sandbox.wrap(spec.bin, spec.args) : spec
+    const child = spawn(launch.bin, launch.args, {
       cwd,
       env: sanitizedTerminalEnv(),
       windowsHide: true
@@ -1255,7 +1268,8 @@ export async function toolTerminal(
             ? `[truncated] output exceeded ${TERMINAL_MAX_OUTPUT} chars per stream; narrow the command (head/tail/grep) for the rest`
             : ''
         ],
-        resolved
+        resolved,
+        opts.sandbox
       )
       finish(() => resolve(out))
     })

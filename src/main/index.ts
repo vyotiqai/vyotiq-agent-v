@@ -14,11 +14,13 @@ import { pruneWorktreesAfterWipe } from '@main/storage/dataWipe'
 import { applyCertificateLogging, applyCsp } from '@main/app/security'
 import { widenHappyEyeballsWindow } from '@main/net/happyEyeballs'
 import { applyEarlyNodeProxy, applyNetworkSettings } from '@main/net/proxy'
+import { installNodeCaCertificates, recoverFuseStrippedExtraCaCerts } from '@main/net/caCertificates'
 import { closeAgentBrowser } from '@main/app/agentBrowser'
 import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptySessions'
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
+import { startTaskScheduler, stopTaskScheduler } from './schedules/taskScheduler'
 import { initAutoUpdater, applyUpdateCheckSchedule } from '@main/updater'
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
@@ -57,6 +59,13 @@ import { initCrashReporter } from './logging/crashReporter'
 import { logger } from '../shared/logger'
 import { IPC } from '../shared/channels'
 import { startLoadPerfMonitor } from './perf/loadSnapshot'
+import { isHeadlessArgv } from './headless/args'
+import { runHeadlessProcess } from './headless/main'
+
+// `Vyotiq --headless …` (docs/headless.md): one scripted run, no window. It
+// runs beside an open app, so it never takes the single-instance lock, never
+// performs a pending data wipe, and keeps its own Chromium profile.
+const HEADLESS = isHeadlessArgv(process.argv)
 
 // One lock request for the process: the data wipe below takes it early, the
 // single-instance check further down reads the same answer.
@@ -69,7 +78,9 @@ const takeSingleInstanceLock = (): boolean => (singleInstanceLock ??= app.reques
 // folder never delete under each other.
 let dataWipeReport: WipeReport | null = null
 try {
-  dataWipeReport = performPendingWipe(app.getPath('userData'), { beforeDelete: takeSingleInstanceLock })
+  if (!HEADLESS) {
+    dataWipeReport = performPendingWipe(app.getPath('userData'), { beforeDelete: takeSingleInstanceLock })
+  }
 } catch (err) {
   logger.warn('Pending data wipe failed', { scope: 'main', err })
 }
@@ -78,7 +89,8 @@ try {
 // fight over the default Windows profile cache (Access denied / Gpu Cache).
 // Fingerprint the main bundle so rebuilds do not reuse stale disk cache.
 try {
-  configureChromiumDiskCache(join(__dirname, 'index.js'))
+  // Headless points the whole Chromium profile at its own folder instead.
+  if (!HEADLESS) configureChromiumDiskCache(join(__dirname, 'index.js'))
 } catch {
   // getPath can fail in odd launch contexts; ignore
 }
@@ -103,6 +115,8 @@ const RESUME_AFTER_FIRST_PAINT_MS = 2_000
 // the Electron child, leaving instance-worktree files locked (EPERM) on the next
 // launch. app.quit() runs the before-quit handler that releases those handles.
 function requestGracefulQuit(): void {
+  // A headless run stops its task and reports it (headless/main.ts).
+  if (HEADLESS) return
   if (app.isReady()) {
     app.quit()
   } else {
@@ -207,8 +221,10 @@ function requestRendererEditorFlush(win: BrowserWindow | null): Promise<EditorFl
   })
 }
 
-const gotLock = takeSingleInstanceLock()
-if (!gotLock) {
+const gotLock = !HEADLESS && takeSingleInstanceLock()
+if (HEADLESS) {
+  runHeadlessProcess(process.argv)
+} else if (!gotLock) {
   // Logging is not initialized this early; the shared logger falls back to
   // console so a rejected relaunch is no longer a silent no-op.
   logger.warn('Single-instance lock denied; another instance owns the app - quitting', {
@@ -278,6 +294,10 @@ if (!gotLock) {
     initTraceAutoCapture()
     // After userData path switches; before IPC / windows (Sentry + electron-log).
     initMainLogging()
+    // Before IPC can start a provider call: the OS trust store, and the
+    // NODE_EXTRA_CA_CERTS the NodeOptions fuse strips (caCertificates.ts).
+    installNodeCaCertificates()
+    void recoverFuseStrippedExtraCaCerts({ packaged: app.isPackaged })
     // Subscribe before anything can egress, so a run's outbound origins are
     // recorded from its first request rather than from whenever this ran.
     startEgressRunLedger()
@@ -428,6 +448,8 @@ if (!gotLock) {
         // first paint and renderer hydration win first.
         setTimeout(() => {
           if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
+          // Repeating tasks: a time missed while closed runs once, now.
+          startTaskScheduler()
         }, RESUME_AFTER_FIRST_PAINT_MS)
       }
     })
@@ -481,6 +503,8 @@ if (!gotLock) {
     if (quitting) return
     event.preventDefault()
     quitting = true
+    // No repeating task may start a run while the others are being stopped.
+    stopTaskScheduler()
 
     void (async () => {
       try {

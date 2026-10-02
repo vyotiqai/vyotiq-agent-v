@@ -13,23 +13,27 @@ directories:
 asar: true
 compression: maximum
 # Electron fuses, flipped in the packaged binary. Without them the installed
-# app could be started with a --inspect debugger or run an edited app.asar.
-# grantFileProtocolExtraPrivileges stays on because the renderer loads from
-# file://. resetAdHocDarwinSignature re-signs an unsigned macOS arm64 build,
-# which flipping a fuse would otherwise leave unlaunchable.
+# app could be started with a --inspect debugger, as plain Node
+# (ELECTRON_RUN_AS_NODE), with code injected through NODE_OPTIONS, or run an
+# edited app.asar. grantFileProtocolExtraPrivileges stays on because the
+# renderer loads from file://. resetAdHocDarwinSignature re-signs an unsigned
+# macOS arm64 build, which flipping a fuse would otherwise leave unlaunchable.
 #
-# Two fuses are left ON because turning either off breaks the packaged app
-# (measured on Electron 44 with the same node-pty, against a stock runtime):
-#  - runAsNode: node-pty's Windows kill() forks a helper through
-#    child_process.fork, which Electron then refuses, and the unhandled
-#    rejection ends the app. Closing a terminal tab quit Vyotiq.
-#  - enableNodeOptionsEnvironmentVariable: Electron then also drops
-#    NODE_EXTRA_CA_CERTS, so every provider call behind a proxy that
-#    re-signs TLS fails with UNABLE_TO_VERIFY_LEAF_SIGNATURE.
-# Turn either off only together with a fix for its cause.
+# Two of these broke the packaged app until their causes were fixed in code
+# (measured on Electron 44 with node-pty 1.1.0). Keep both fixes when touching
+# either fuse, and re-check on a packaged build: a plain launch passes either way.
+#  - runAsNode off: child_process.fork throws. node-pty's Windows kill() forks
+#    a console-list helper and the rejection ended the app when a terminal
+#    closed. src/main/app/conptyKill.ts replaces that helper; pipeErrors.ts
+#    excuses the refusal if a node-pty upgrade moves it. Anything new that
+#    needs a Node child uses utilityProcess, never fork or ELECTRON_RUN_AS_NODE.
+#  - enableNodeOptionsEnvironmentVariable off: Electron also strips
+#    NODE_EXTRA_CA_CERTS. src/main/net/caCertificates.ts loads the OS store
+#    and recovers the variable (Windows registry), or every provider call
+#    behind a proxy that re-signs TLS fails UNABLE_TO_VERIFY_LEAF_SIGNATURE.
 electronFuses:
-  runAsNode: true
-  enableNodeOptionsEnvironmentVariable: true
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
@@ -54,6 +58,14 @@ files:
   # Excluded (not deleted): the data stays on disk, out of git and out of the pack.
   - '!{output,.playwright-mcp}/**'
   - '!{file-list-all.txt,replay-report.json}'
+  # Dev-only state at the repo root: agent/editor config (.vyotiq, .cursor),
+  # scratch builds (.tmp), test output, release-note drafts, one-off _*.diff
+  # dumps and dev configs. None is read at runtime. The last line repeats
+  # electron-builder's own default exclusions, which it adds to this list only
+  # — the platform sets below need them spelled out.
+  - '!{.vyotiq,.cursor,.tmp,coverage,test-results,release-notes,bin}/**'
+  - '!{_*.diff,.cursorrules,.mcp.json,vitest.config.ts,pnpm-workspace.yaml,tsconfig.*.json}'
+  - '!{electron-builder.yml,.gitignore,.gitattributes,.editorconfig}'
   - '!src/**'
   - '!tests/**'
   - '!docs/**'
@@ -133,6 +145,9 @@ win:
         # Repo-root scratch: same reason as the top-level `files:` list.
         - '!{output,.playwright-mcp}/**'
         - '!{file-list-all.txt,replay-report.json}'
+        - '!{.vyotiq,.cursor,.tmp,coverage,test-results,release-notes,bin}/**'
+        - '!{_*.diff,.cursorrules,.mcp.json,vitest.config.ts,pnpm-workspace.yaml,tsconfig.*.json}'
+        - '!{electron-builder.yml,.gitignore,.gitattributes,.editorconfig}'
         - '!src/**'
         - '!tests/**'
         - '!docs/**'
@@ -193,6 +208,9 @@ mac:
         # Repo-root scratch: same reason as the top-level `files:` list.
         - '!{output,.playwright-mcp}/**'
         - '!{file-list-all.txt,replay-report.json}'
+        - '!{.vyotiq,.cursor,.tmp,coverage,test-results,release-notes,bin}/**'
+        - '!{_*.diff,.cursorrules,.mcp.json,vitest.config.ts,pnpm-workspace.yaml,tsconfig.*.json}'
+        - '!{electron-builder.yml,.gitignore,.gitattributes,.editorconfig}'
         - '!src/**'
         - '!tests/**'
         - '!docs/**'
@@ -248,6 +266,9 @@ linux:
         # Repo-root scratch: same reason as the top-level `files:` list.
         - '!{output,.playwright-mcp}/**'
         - '!{file-list-all.txt,replay-report.json}'
+        - '!{.vyotiq,.cursor,.tmp,coverage,test-results,release-notes,bin}/**'
+        - '!{_*.diff,.cursorrules,.mcp.json,vitest.config.ts,pnpm-workspace.yaml,tsconfig.*.json}'
+        - '!{electron-builder.yml,.gitignore,.gitattributes,.editorconfig}'
         - '!src/**'
         - '!tests/**'
         - '!docs/**'

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema, DictationEngineSchema } from './settings'
 import { ProviderIdSchemaAny } from './providers'
+import { RunScheduledSchema } from './schedules'
 import {
   AGENT_QUESTION_MAX_ANSWER_CHARS,
   AGENT_QUESTION_MAX_ANSWER_VALUES,
@@ -10,6 +11,7 @@ import {
   AGENT_QUESTION_MAX_PROMPT_CHARS,
   AGENT_QUESTION_MAX_TITLE_CHARS
 } from '../../utils/agentQuestionForm'
+import { EXTRA_ROOT_MAX_CHARS, MAX_EXTRA_ROOTS } from '../../extraRoots'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -75,7 +77,8 @@ export type ToolImageRef = z.infer<typeof ToolImageRefSchema>
  * Calls the gate never held (exempt tools, approvals off, autonomy) carry none.
  */
 export const ToolApprovalGrantSchema = z.object({
-  by: z.enum(['you', 'rule']),
+  /** `skill`: an active skill's allowed-tools, for this turn; `allow` names the skill. */
+  by: z.enum(['you', 'rule', 'skill']),
   scope: z.enum(['once', 'task', 'workspace']),
   /** What an "Always allow" answer remembers: the tool, or the terminal command prefix. */
   allow: z.string().max(2000).optional()
@@ -196,7 +199,42 @@ export const RunStatusSchema = z.object({
   /** Git worktree checkout for write-capable inline instances. */
   worktreePath: z.string().min(1).optional(),
   /** Branch checked out in the instance worktree; used for sequential merge-back. */
-  worktreeBranch: z.string().min(1).optional()
+  worktreeBranch: z.string().min(1).optional(),
+  /**
+   * Folders outside the workspace this task may also read and edit (absolute,
+   * validated when set). The workspace stays the task's cwd and git root.
+   */
+  extraRoots: z.array(z.string().min(1).max(EXTRA_ROOT_MAX_CHARS)).max(MAX_EXTRA_ROOTS).optional(),
+  /**
+   * The user-defined helper type an inline instance was spawned as
+   * (agentTypes.ts), frozen at spawn: its name, and the tool allowlist the
+   * child's catalog and tool gate apply (absent = unrestricted).
+   */
+  agentType: z
+    .object({
+      name: z.string().min(1).max(64),
+      tools: z.array(z.string().min(1)).optional()
+    })
+    .optional(),
+  /**
+   * Started by `Vyotiq --headless` (main/headless) rather than from a window:
+   * the record is ordinary, this only says nobody watched it run.
+   */
+  headless: z.literal(true).optional(),
+  /**
+   * Read in from a task bundle (Export as JSON): a finished record to read,
+   * never resumed — a new instruction is refused; Fork continues it.
+   */
+  imported: z
+    .object({
+      at: z.string().min(1),
+      /** The id the task had where it was exported. */
+      sourceRunId: z.string().min(1).max(200).optional(),
+      exportedAt: z.string().optional()
+    })
+    .optional(),
+  /** Started by a repeating schedule (Repeat…), not by hand. */
+  scheduled: RunScheduledSchema.optional()
 })
 export type RunStatus = z.infer<typeof RunStatusSchema>
 
@@ -419,6 +457,8 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     at: z.string().optional(),
     /** The plan step (todo id) the parent spawned it for. */
     stepId: z.string().min(1).optional(),
+    /** The user-defined helper type it was spawned as (agentTypes.ts). */
+    agentType: z.string().min(1).max(64).optional(),
     /** While it runs: the step it is on and what it is doing (live only, never persisted). */
     step: z.number().int().min(0).optional(),
     activity: z.string().max(300).optional(),
@@ -555,6 +595,24 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     step: z.number().int().min(1).optional()
   }),
   z.object({
+    /**
+     * The step's provider was down, so the step moved to another model
+     * (main/agent/modelFallback.ts) — or, `restored`, back to the task's own
+     * model. `message` is the record's one-line note.
+     */
+    type: z.literal('model_fallback'),
+    ...eventBase,
+    step: z.number().int().min(1).optional(),
+    provider: z.string().max(64),
+    model: z.string().max(200),
+    fromProvider: z.string().max(64),
+    fromModel: z.string().max(200),
+    /** Why the step left `fromModel` ("HTTP 503", "connection refused"); absent on `restored`. */
+    reason: z.string().max(120).optional(),
+    restored: z.boolean().optional(),
+    message: z.string().min(1).max(400)
+  }),
+  z.object({
     type: z.literal('step_usage'),
     ...eventBase,
     step: z.number().int().min(1),
@@ -563,7 +621,8 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
      * before these fields existed must still parse.
      *
      * Fixed within one invoke (`resolveTurnModel` runs once, before the step
-     * loop), but a later turn of the SAME run can resolve a different model —
+     * loop) unless a model fallback served the step (`model_fallback`), and a
+     * later turn of the SAME run can resolve a different model —
      * and each invoke overwrites the run-level provider/model that reaches
      * `receipt.json`. So the receipt cannot attribute an individual step, and
      * `events.jsonl` carried no model at all before this field.
@@ -903,6 +962,12 @@ export const RunSummarySchema = z.object({
   pathScope: z.array(z.string().min(1)).optional(),
   worktreePath: z.string().min(1).optional(),
   worktreeBranch: z.string().min(1).optional(),
+  /** Folders outside the workspace the task may also work in — muted chips on its record. */
+  extraRoots: z.array(z.string().min(1)).max(MAX_EXTRA_ROOTS).optional(),
+  /** The helper type an inline instance was spawned as — a muted label on its row. */
+  agentType: z.string().min(1).max(64).optional(),
+  /** Started by a repeating schedule: the row's repeat icon and its tooltip. */
+  scheduled: RunScheduledSchema.optional(),
   /** Provider-reported cost for the run when the provider bills it. */
   billedCost: z.number().nonnegative().optional(),
   /** Sum of token×price estimates for steps the provider didn't bill. */
@@ -992,6 +1057,11 @@ export const ChatStartRequestSchema = z
      * contract's Done when.
      */
     doneWhen: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
+    /**
+     * Folders outside the workspace the task may also read and edit (absolute).
+     * Main validates them; on a running task they replace its added folders.
+     */
+    extraRoots: z.array(z.string().trim().min(1).max(EXTRA_ROOT_MAX_CHARS)).max(MAX_EXTRA_ROOTS).optional(),
     /** The draft this new task was started from — removed once the task exists. */
     draftId: z.string().regex(/^[a-zA-Z0-9-]{8,64}$/).optional()
   })
@@ -1357,12 +1427,39 @@ export const RunTokenUsageSchema = z.object({
 export type RunTokenUsage = z.infer<typeof RunTokenUsageSchema>
 
 /** Home Activity request: aggregate over the open workspaces' receipts. */
+/** Longest window the Usage page reads (a custom range is capped to it). */
+export const USAGE_MAX_RANGE_DAYS = 365
+
+/** A local calendar day, YYYY-MM-DD. */
+const LocalDayKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
 export const HomeActivityRequestSchema = z.object({
   workspacePaths: z.array(z.string().min(1)).min(1).max(12),
-  /** Local-day window (1–30); the renderer offers 7 and 30. Default 7. */
-  windowDays: z.number().int().min(1).max(30).optional()
+  /** Local-day window (1–365); Home asks for 7, Usage for 7, 30, 90 or a custom range. Default 7. */
+  windowDays: z.number().int().min(1).max(USAGE_MAX_RANGE_DAYS).optional(),
+  /** Last local day of the window (a custom range); absent ends it today. */
+  endDay: LocalDayKeySchema.optional(),
+  /** Per-workspace and per-task totals for the window (the Usage page). */
+  breakdown: z.boolean().optional()
 })
 export type HomeActivityRequest = z.infer<typeof HomeActivityRequestSchema>
+
+/** Usage → Export CSV: one row per task per day over the same window as the page. */
+export const UsageExportRequestSchema = z.object({
+  workspacePaths: z.array(z.string().min(1)).min(1).max(12),
+  windowDays: z.number().int().min(1).max(USAGE_MAX_RANGE_DAYS),
+  endDay: LocalDayKeySchema.optional()
+})
+export type UsageExportRequest = z.infer<typeof UsageExportRequestSchema>
+
+export const UsageExportResultSchema = z.object({
+  saved: z.boolean(),
+  /** Absolute path of the written file when saved. */
+  path: z.string().optional(),
+  /** Task-day rows written. */
+  rows: z.number().int().min(0).optional()
+})
+export type UsageExportResult = z.infer<typeof UsageExportResultSchema>
 
 /** One local-day bucket of usage derived from run receipts. */
 export const HomeActivityDaySchema = z.object({
@@ -1386,16 +1483,35 @@ export const HomeActivityDaySchema = z.object({
 })
 export type HomeActivityDay = z.infer<typeof HomeActivityDaySchema>
 
-/** Per-workspace usage slice — only included for multi-workspace requests. */
+/** Per-workspace usage slice — for multi-workspace requests and the Usage breakdown. */
 export const HomeActivityWorkspaceSchema = z.object({
   path: z.string().min(1),
   runs: z.number().int().min(0),
   billedInputTokens: z.number().int().min(0),
   outputTokens: z.number().int().min(0),
+  /** Input tokens read from the provider's cache, when any were reported. */
+  cachedInputTokens: z.number().int().min(0).optional(),
   billedCost: z.number().finite().optional(),
   estimatedCost: z.number().finite().optional()
 })
 export type HomeActivityWorkspace = z.infer<typeof HomeActivityWorkspaceSchema>
+
+/** One task's usage across the window — the Usage page's per-task breakdown. */
+export const HomeActivityTaskSchema = z.object({
+  runId: z.string().min(1),
+  workspacePath: z.string().min(1),
+  /** The task's title source (its goal), when the run recorded one. */
+  goal: z.string().optional(),
+  model: z.string().optional(),
+  /** Window days the task used tokens on. */
+  days: z.number().int().min(0),
+  billedInputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  cachedInputTokens: z.number().int().min(0).optional(),
+  billedCost: z.number().finite().optional(),
+  estimatedCost: z.number().finite().optional()
+})
+export type HomeActivityTask = z.infer<typeof HomeActivityTaskSchema>
 
 /** Compact 7-day activity for the Home tab — all values from real receipts. */
 export const HomeActivityResultSchema = z.object({
@@ -1404,9 +1520,15 @@ export const HomeActivityResultSchema = z.object({
   /** Days with any activity in the window (streak/cadence signal). */
   activeDays: z.number().int().min(0).optional(),
   /** Requested window in local days (echoes the request; default 7). */
-  windowDays: z.number().int().min(1).max(30).optional(),
-  /** Per-workspace usage slices — only for multi-workspace requests. */
+  windowDays: z.number().int().min(1).max(USAGE_MAX_RANGE_DAYS).optional(),
+  /** Last local day of the window, when the request named one (a custom range). */
+  endDay: LocalDayKeySchema.optional(),
+  /** Per-workspace usage slices — for multi-workspace requests and the breakdown. */
   workspaces: z.array(HomeActivityWorkspaceSchema).optional(),
+  /** Per-task totals, costliest first — only when the request asked for a breakdown. */
+  tasks: z.array(HomeActivityTaskSchema).optional(),
+  /** Tasks with usage in the window left out of `tasks` by its cap. */
+  tasksOmitted: z.number().int().min(1).optional(),
   /**
    * Attention signals from receipts — present only when receipts report them.
    * unverifiedRuns counts parent runs whose files were mutated after the last
@@ -1653,7 +1775,11 @@ export const TaskFileStatSchema = z.object({
 })
 export type TaskFileStat = z.infer<typeof TaskFileStatSchema>
 
-export const TaskFileStatsResultSchema = z.object({ files: z.array(TaskFileStatSchema) })
+export const TaskFileStatsResultSchema = z.object({
+  files: z.array(TaskFileStatSchema),
+  /** Added folders the task wrote under: its files there are keyed by absolute path. */
+  extraRoots: z.array(z.string().min(1)).optional()
+})
 export type TaskFileStatsResult = z.infer<typeof TaskFileStatsResultSchema>
 
 export const TaskFileDiffRequestSchema = z.object({
@@ -1662,6 +1788,57 @@ export const TaskFileDiffRequestSchema = z.object({
   path: z.string().min(1).max(4096)
 })
 export type TaskFileDiffRequest = z.infer<typeof TaskFileDiffRequestSchema>
+
+/**
+ * Add a folder to a new task: with `path` (typed, `/add-dir`) it is checked
+ * as given; without, the OS folder picker asks. `current` are the folders
+ * already added, so a duplicate or nested one is refused here.
+ */
+export const PickExtraRootRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  path: z.string().trim().min(1).max(EXTRA_ROOT_MAX_CHARS).optional(),
+  current: z.array(z.string().min(1).max(EXTRA_ROOT_MAX_CHARS)).max(MAX_EXTRA_ROOTS).optional()
+})
+export type PickExtraRootRequest = z.infer<typeof PickExtraRootRequestSchema>
+
+/** `path` is the folder to add (canonical); null when the picker was cancelled or it was refused. */
+export type PickExtraRootResult = { path: string | null; refused?: string }
+
+/**
+ * Add a folder to a task that already exists, or take one away. `add` with no
+ * `path` opens the OS picker. Main checks the folder against the workspace and
+ * the task's own folders and saves the list on the run: a running task takes
+ * it up when it next starts, a finished one with its next follow-up.
+ */
+export const UpdateRunExtraRootsRequestSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('add'),
+    workspacePath: z.string().min(1),
+    runId: RunIdSchema,
+    path: z.string().trim().min(1).max(EXTRA_ROOT_MAX_CHARS).optional()
+  }),
+  z.object({
+    action: z.literal('remove'),
+    workspacePath: z.string().min(1),
+    runId: RunIdSchema,
+    root: z.string().min(1).max(EXTRA_ROOT_MAX_CHARS)
+  })
+])
+export type UpdateRunExtraRootsRequest = z.infer<typeof UpdateRunExtraRootsRequestSchema>
+
+/**
+ * The task's folders after the change. `live`: the run was going when the
+ * change was saved, so it takes effect when the task next starts. `refused`
+ * (with the list unchanged) says why; `cancelled` is a picker closed empty.
+ */
+export type UpdateRunExtraRootsResult = {
+  extraRoots: string[]
+  live: boolean
+  added?: string
+  removed?: string
+  refused?: string
+  cancelled?: true
+}
 
 export const TaskFileDiffResultSchema = z.object({
   path: z.string(),
@@ -1675,6 +1852,42 @@ export const TaskFileDiffResultSchema = z.object({
   reason: z.enum(['binary_or_large', 'not_in_task', 'unrestorable']).optional()
 })
 export type TaskFileDiffResult = z.infer<typeof TaskFileDiffResultSchema>
+
+/**
+ * One hunk of a task file's diff, named by where it sits and what it says
+ * (shared/utils/hunkPatch), with the fingerprint of the diff it was shown in.
+ */
+export const UndoHunkRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  path: z.string().min(1).max(4096),
+  hunk: z.object({
+    oldStart: z.number().int().nonnegative(),
+    oldLines: z.number().int().nonnegative(),
+    newStart: z.number().int().nonnegative(),
+    newLines: z.number().int().nonnegative(),
+    hash: z.string().min(1).max(64)
+  }),
+  diffHash: z.string().min(1).max(64)
+})
+export type UndoHunkRequest = z.infer<typeof UndoHunkRequestSchema>
+
+export const UndoHunkResultSchema = z.object({
+  path: z.string(),
+  /** Hand to restoreHunk to put the hunk back (a toast's Restore). */
+  restoreToken: z.string()
+})
+export type UndoHunkResult = z.infer<typeof UndoHunkResultSchema>
+
+export const RestoreHunkRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  restoreToken: z.string().min(1).max(64)
+})
+export type RestoreHunkRequest = z.infer<typeof RestoreHunkRequestSchema>
+
+export const RestoreHunkResultSchema = z.object({ path: z.string() })
+export type RestoreHunkResult = z.infer<typeof RestoreHunkResultSchema>
 
 export const ReadRunArtifactResultSchema = z.object({
   name: RunArtifactNameSchema,
@@ -1926,6 +2139,21 @@ export const ExportRunResultSchema = z.object({
   path: z.string().optional()
 })
 export type ExportRunResult = z.infer<typeof ExportRunResultSchema>
+
+/** Import a task bundle (Export as JSON) into a workspace, as a new finished task. */
+export const ImportRunRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type ImportRunRequest = z.infer<typeof ImportRunRequestSchema>
+
+export const ImportRunResultSchema = z.object({
+  /** False when the file dialog was cancelled. */
+  imported: z.boolean(),
+  /** The new task's id — never the bundle's own. */
+  runId: RunIdSchema.optional(),
+  title: z.string().optional()
+})
+export type ImportRunResult = z.infer<typeof ImportRunResultSchema>
 
 export const RenameRunRequestSchema = z.object({
   workspacePath: z.string().min(1),
@@ -2480,6 +2708,8 @@ export type ComposerSendExtras = {
   doneWhen?: string[]
   /** The draft the brief continues: main removes it once the task exists. */
   draftId?: string
+  /** A new task's added folders (absolute), outside the workspace. */
+  extraRoots?: string[]
   /**
    * Start the new task in a new worktree of this workspace. The renderer makes
    * the worktree and starts the task there; this never reaches main.

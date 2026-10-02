@@ -53,6 +53,12 @@ import { excludeChatEventUiSubscription } from '../ipc/streamBatch'
 import { isSafePathScopePrefix } from './tools/writeGuard'
 import { disposeWorkspaceIndexes } from './workspaceIndex'
 import { copyWorkspaceIndexesForInstance } from './indexInheritance'
+import {
+  formatAgentTypeInstructions,
+  providerHasCredentials,
+  resolveAgentTypeModel,
+  type ResolvedAgentType
+} from './agentTypes'
 
 const childToParent = new Map<string, string>()
 const childWorkspace = new Map<string, string>()
@@ -280,7 +286,7 @@ export function notifyChildTerminal(
   childRunId: string,
   phase: 'done' | 'error' | 'cancelled',
   waiterSummary?: string,
-  opts?: { goal?: string; pathScope?: string[] }
+  opts?: { goal?: string; pathScope?: string[]; agentType?: string }
 ): void {
   const parentRunId = childToParent.get(childRunId)
   const workspacePath = childWorkspace.get(childRunId)
@@ -300,6 +306,7 @@ export function notifyChildTerminal(
     at: new Date().toISOString(),
     ...(opts?.goal ? { goal: opts.goal } : {}),
     ...(opts?.pathScope ? { pathScope: opts.pathScope } : {}),
+    ...(opts?.agentType ? { agentType: opts.agentType } : {}),
     ...(progress?.stepId ? { stepId: progress.stepId } : {}),
     ...(progress && progress.usage.steps > 0 ? { step: progress.step, usage: instanceUsageOf(progress.usage) } : {})
   })
@@ -465,10 +472,11 @@ function formatChildTail(
   const status = loadStatus(runDir)
   const total = messages.length
   const shown = Math.min(CHILD_TAIL_MAX_MESSAGES, total)
+  // The header is one fact per line, as the outline writes it; the blocks
+  // below bring their own blank lines. Joined bare, it read
+  // "…(short ab12)status: runningshowing 36 of 36 messages".
   const parts: string[] = [
-    `${formatAgentInstanceLabel(childRunId)}`,
-    `status: ${status?.status ?? 'unknown'}`,
-    `showing ${shown} of ${total} messages`
+    [formatAgentInstanceLabel(childRunId), `status: ${status?.status ?? 'unknown'}`, `showing ${shown} of ${total} messages`].join('\n')
   ]
   for (const msg of messages.slice(total - shown)) {
     const raw = contentDisplayText(msg.content).trim() || '(empty)'
@@ -710,6 +718,8 @@ export type SpawnAgentInstanceInput = {
   stepId?: string
   /** A read-and-report child: Ask mode, in this workspace, no worktree. */
   readOnly?: boolean
+  /** A user-defined helper type (agentTypes.ts): instructions, tool allowlist, model. */
+  agentType?: ResolvedAgentType
   emitParentEvent?: (event: AgentEvent) => void
 }
 
@@ -740,6 +750,8 @@ export type SpawnAgentInstanceResult =
       worktreeBranch?: string
       /** Why a child asked for a worktree runs shared in path_scope instead. */
       sharedBecause?: string
+      /** Why a typed child runs on another model than its type names. */
+      modelNote?: string
     }
   | { ok: false; error: string }
 
@@ -824,6 +836,7 @@ export async function spawnAgentInstance(
     return scoped
   }
   const pathScope = scoped.pathScope
+  const agentType = input.agentType
 
   const briefLines = [
     `Outcome: ${outcome}`,
@@ -942,7 +955,10 @@ export async function spawnAgentInstance(
       inlineInstance: true,
       ...(pathScope?.length ? { pathScope } : {}),
       ...(worktreePath ? { worktreePath } : {}),
-      ...(worktreeBranch ? { worktreeBranch } : {})
+      ...(worktreeBranch ? { worktreeBranch } : {}),
+      ...(agentType
+        ? { agentType: { name: agentType.name, ...(agentType.tools ? { tools: agentType.tools } : {}) } }
+        : {})
     })
   } catch (err) {
     releaseChildIpc()
@@ -959,10 +975,13 @@ export async function spawnAgentInstance(
   }
 
   // The child's prompt is the composed structured brief verbatim:
-  // outcome → sub-tasks → done-when → paths → raw goal (last line).
+  // outcome → sub-tasks → done-when → paths → raw goal (last line). A typed
+  // child's instructions follow it here, in its first message — never in the
+  // system prompt, whose stable prefix every helper shares and the provider
+  // caches — and never in the contract, which keeps the brief alone.
   const childMessage: ChatMessage = {
     role: 'user',
-    content: childPrompt
+    content: agentType ? `${childPrompt}\n\n${formatAgentTypeInstructions(agentType)}` : childPrompt
   }
 
   const stepId = input.stepId?.trim() || undefined
@@ -981,7 +1000,8 @@ export async function spawnAgentInstance(
     goal: goalText,
     at: new Date().toISOString(),
     ...(stepId ? { stepId } : {}),
-    ...(pathScope?.length ? { pathScope } : {})
+    ...(pathScope?.length ? { pathScope } : {}),
+    ...(agentType ? { agentType: agentType.name } : {})
   }
   // emitLiveEvent (emitParentEvent) already appends agent_instance_update — avoid double persist.
   if (input.emitParentEvent) {
@@ -994,7 +1014,26 @@ export async function spawnAgentInstance(
   // The helper model when one is set; otherwise the model this task runs on.
   // Without either the child fell back to the workspace default, so a task
   // started on one model quietly fanned its helpers out to another.
-  const childModel = getSettings().helperModel ?? recallRunModelSelection(input.parentRunId)
+  // A typed child's own model wins when its provider can run it (agentTypes.ts).
+  const settings = getSettings()
+  const typedModel = agentType?.model
+    ? resolveAgentTypeModel(agentType.model, {
+        parent: recallRunModelSelection(input.parentRunId),
+        helper: settings.helperModel ?? null,
+        hasCredentials: (provider) => providerHasCredentials(provider, settings)
+      })
+    : null
+  if (typedModel?.note) {
+    logger.warn('agent type model unavailable; helper runs on the default helper model', {
+      scope: 'agentInstances',
+      childRunId,
+      agentType: agentType?.name,
+      reason: typedModel.note
+    })
+  }
+  const childModel = typedModel
+    ? typedModel.choice
+    : (settings.helperModel ?? recallRunModelSelection(input.parentRunId))
   startAgentRunInBackground({
     runId: childRunId,
     workspacePath: input.workspacePath,
@@ -1015,7 +1054,8 @@ export async function spawnAgentInstance(
     runId: childRunId,
     label: formatAgentInstanceLabel(childRunId),
     ...(worktreeBranch ? { worktreeBranch } : {}),
-    ...(sharedBecause ? { sharedBecause } : {})
+    ...(sharedBecause ? { sharedBecause } : {}),
+    ...(typedModel?.note ? { modelNote: typedModel.note } : {})
   }
 }
 
@@ -1060,7 +1100,8 @@ export async function handleInlineInstanceFinished(
   } finally {
     notifyChildTerminal(childRunId, phase, undefined, {
       goal: childStatus?.goal,
-      pathScope: childStatus?.pathScope
+      pathScope: childStatus?.pathScope,
+      agentType: childStatus?.agentType?.name
     })
     unregisterChildInstance(childRunId)
     const wc = runIpcSenders.get(childRunId)

@@ -95,6 +95,30 @@ describe('egressRefusalNote', () => {
     expect(egressRefusalNote(WS, 0)).toBe('')
   })
 
+  it('reports private-network refusals, including the page\'s own navigations', () => {
+    checkEgress({
+      url: 'http://192.168.1.1/admin',
+      purpose: 'browser_navigation',
+      workspacePath: WS,
+      allowLocal: true,
+      initiatorUrl: 'https://evil.example/'
+    })
+    checkEgress({
+      url: 'http://127.0.0.1:9000/x',
+      purpose: 'browser_subresource',
+      workspacePath: WS,
+      allowLocal: true,
+      initiatorUrl: 'https://evil.example/'
+    })
+    const note = egressRefusalNote(WS, 0)
+    expect(note).toContain('Refused 2 request(s) from a public page into loopback/private')
+    expect(note).toContain('http://192.168.1.1')
+    expect(note).toContain('http://127.0.0.1:9000')
+    expect(note).toContain('browser_navigate')
+    // Not blamed on the allowlist.
+    expect(note).not.toContain('allowlist')
+  })
+
   it('ignores refusals belonging to another workspace', () => {
     checkEgress({
       url: 'https://tracker.example/x',

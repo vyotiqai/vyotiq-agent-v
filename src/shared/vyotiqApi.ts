@@ -28,8 +28,18 @@ import type {
   ReadRunArtifactResult,
   TaskFileStatsResult,
   TaskFileDiffResult,
+  PickExtraRootRequest,
+  PickExtraRootResult,
+  UpdateRunExtraRootsRequest,
+  UpdateRunExtraRootsResult,
+  UndoHunkRequest,
+  UndoHunkResult,
+  RestoreHunkRequest,
+  RestoreHunkResult,
   RunArtifactName,
   HomeActivityResult,
+  UsageExportResult,
+  ImportRunResult,
   RunFeedbackGetResult,
   RunSearchResult,
   SettingsExportResult,
@@ -79,6 +89,7 @@ import type {
   DictationLiveEvent,
   TelemetryStatus,
   AppInfo,
+  SandboxCapability,
   UpdateInfo,
   UpdaterStatePayload,
   FeedbackComposeRequest,
@@ -132,6 +143,13 @@ import type {
   TaskWorktreeMergeResult,
   TaskDraftSaveRequest,
   TaskDraftsListResult,
+  TaskSchedule,
+  TaskScheduleCreateRequest,
+  TaskScheduleUpdateRequest,
+  TaskSchedulesListResult,
+  TaskScheduleSource,
+  TaskScheduleWorktreeOpenRequest,
+  TaskScheduleWorktreeOpened,
   ComposerAttachmentsGetResult,
   ComposerAttachmentsSetRequest,
   WorkspaceFileListRequest,
@@ -218,6 +236,22 @@ export interface VyotiqApi {
   saveTaskDraft: (payload: TaskDraftSaveRequest) => Promise<IpcResult<TaskDraft>>
   /** True when there was a draft to remove. */
   deleteTaskDraft: (workspacePath: string, id: string) => Promise<IpcResult<boolean>>
+  /** Repeating tasks, every workspace's, newest first. */
+  listSchedules: () => Promise<IpcResult<TaskSchedulesListResult>>
+  /** Repeat a brief (or a past task's, by `fromRunId`) on a schedule. */
+  createSchedule: (payload: TaskScheduleCreateRequest) => Promise<IpcResult<TaskSchedule>>
+  updateSchedule: (payload: TaskScheduleUpdateRequest) => Promise<IpcResult<TaskSchedule>>
+  /** True when there was a schedule to remove. */
+  deleteSchedule: (id: string) => Promise<IpcResult<boolean>>
+  toggleSchedule: (id: string, enabled: boolean) => Promise<IpcResult<TaskSchedule>>
+  /** Start one run now; the schedule as written, with what happened in `lastOutcome`. */
+  runScheduleNow: (id: string) => Promise<IpcResult<TaskSchedule>>
+  /** What Repeat… on a task would repeat: its brief, mode, model, and whether it ran in its own worktree. */
+  scheduleSource: (workspacePath: string, runId: string) => Promise<IpcResult<TaskScheduleSource>>
+  /** Main asks the window to open a scheduled run's new worktree as a workspace. */
+  onScheduleWorktreeOpen: (handler: (request: TaskScheduleWorktreeOpenRequest) => void) => () => void
+  /** The window's answer: the worktree is open (main starts the run), or why not. Null when the schedule is gone. */
+  scheduleWorktreeOpened: (payload: TaskScheduleWorktreeOpened) => Promise<IpcResult<TaskSchedule | null>>
   /** Whether the task's last rewind can still be redone. */
   rewindRedoStatus: (workspacePath: string, runId: string) => Promise<IpcResult<RewindRedoStatus>>
   /** Bring back what the last rewind took — the record and the files — while nothing has changed since. */
@@ -350,10 +384,28 @@ export interface VyotiqApi {
     runId: string
     path: string
   }) => Promise<IpcResult<TaskFileDiffResult>>
+  /** A folder for a new task to also work in: the OS picker, or a typed path, checked by main. */
+  pickExtraRoot: (payload: PickExtraRootRequest) => Promise<IpcResult<PickExtraRootResult>>
+  /** Add a folder to (picker or typed path) or remove one from a task that already exists. */
+  setRunExtraRoots: (payload: UpdateRunExtraRootsRequest) => Promise<IpcResult<UpdateRunExtraRootsResult>>
+  /** Undo one hunk of a task file's diff; refused when the file changed since that diff was shown. */
+  undoHunk: (payload: UndoHunkRequest) => Promise<IpcResult<UndoHunkResult>>
+  /** Put back a hunk undoHunk took out, by the token it returned. */
+  restoreHunk: (payload: RestoreHunkRequest) => Promise<IpcResult<RestoreHunkResult>>
   homeActivity: (payload: {
     workspacePaths: string[]
     windowDays?: number
+    /** Last local day (YYYY-MM-DD) of a custom range; absent ends it today. */
+    endDay?: string
+    /** Per-workspace and per-task totals (the Usage page). */
+    breakdown?: boolean
   }) => Promise<IpcResult<HomeActivityResult>>
+  /** Usage → Export CSV: one row per task per day, written where the user picks. */
+  usageExportCsv: (payload: {
+    workspacePaths: string[]
+    windowDays: number
+    endDay?: string
+  }) => Promise<IpcResult<UsageExportResult>>
   /** Save settings to a file (no keys, no MCP servers). */
   settingsExport: () => Promise<IpcResult<SettingsExportResult>>
   /** Choose a settings file and see what importing it would change. */
@@ -453,6 +505,13 @@ export interface VyotiqApi {
     workspacePath: string,
     runId: string
   ) => Promise<IpcResult<ExportRunResult>>
+  /** The task as a versioned JSON bundle that Import task… reads back. */
+  exportRunJson: (
+    workspacePath: string,
+    runId: string
+  ) => Promise<IpcResult<ExportRunResult>>
+  /** Choose a task bundle and add it to the workspace as a finished, read-only task. */
+  importRun: (workspacePath: string) => Promise<IpcResult<ImportRunResult>>
   renameRun: (
     workspacePath: string,
     runId: string,
@@ -510,6 +569,15 @@ export interface VyotiqApi {
     workspacePath: string,
     branch: string
   ) => Promise<IpcResult<{ detail: string }>>
+  /** `git fetch --all`. User-initiated only. */
+  gitFetch: (payload: import('./ipc').GitFetchRequest) => Promise<IpcResult<import('./ipc').GitFetchResult>>
+  /** Fast-forward by default; `diverged` when both sides moved (nothing changed then). */
+  gitPull: (payload: import('./ipc').GitPullRequest) => Promise<IpcResult<import('./ipc').GitPullResult>>
+  /** Push the current branch, publishing it when it has no upstream. Never forced. */
+  gitPush: (payload: import('./ipc').GitPushRequest) => Promise<IpcResult<import('./ipc').GitPushResult>>
+  gitCreateBranch: (
+    payload: import('./ipc').GitCreateBranchRequest
+  ) => Promise<IpcResult<import('./ipc').GitCreateBranchResult>>
   gitLog: (payload: {
     workspacePath: string
     limit?: number
@@ -539,6 +607,8 @@ export interface VyotiqApi {
       /** Given, replaces gh's `--fill` (with `body` as the description). */
       title?: string
       body?: string
+      /** Committed from this task's Changes: the commit settles the edits it took. */
+      runId?: string
     }
   ) => Promise<IpcResult<import('./ipc').PrCreateResult>>
   prMerge: (
@@ -566,6 +636,28 @@ export interface VyotiqApi {
     title: string,
     number: number
   ) => Promise<IpcResult<{ title: string }>>
+  /** The pull request's inline review threads; null when GitHub has no such PR. */
+  prReviewThreads: (
+    workspacePath: string,
+    number: number
+  ) => Promise<IpcResult<import('./ipc').PrReviewThreadsResult | null>>
+  prReviewThreadResolve: (payload: {
+    workspacePath: string
+    threadId: string
+    resolved: boolean
+  }) => Promise<IpcResult<import('./ipc').PrReviewThreadResolveResult>>
+  /** Posts publicly on GitHub — call only from an explicit user action. */
+  prReviewThreadReply: (payload: {
+    workspacePath: string
+    threadId: string
+    body: string
+  }) => Promise<IpcResult<import('./ipc').PrReviewThreadReplyResult>>
+  prList: (workspacePath: string) => Promise<IpcResult<import('./ipc').PrListResult>>
+  /** `gh pr checkout`: refused with uncommitted changes or a task running in the checkout. */
+  prCheckout: (
+    workspacePath: string,
+    number: number
+  ) => Promise<IpcResult<import('./ipc').PrCheckoutResult>>
   githubAuthStatus: () => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
   /** `fresh`: the saved sign-in was rejected; get a new one instead of re-adopting it. */
   githubAuthStart: (request?: import('./ipc').GithubAuthStartRequest) => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
@@ -637,10 +729,14 @@ export interface VyotiqApi {
   openLogsDir: () => Promise<IpcResult<true>>
   getLogsPath: () => Promise<IpcResult<string>>
   getCrashDiagnostics: () => Promise<IpcResult<CrashDiagnosticsSnapshot>>
+  /** Asks where to save, writes a redacted diagnostics .zip there and shows it in the file manager. */
+  exportDiagnostics: () => Promise<IpcResult<import('./ipc').DiagnosticsExportResult>>
   consumeCrashRecovery: () => Promise<IpcResult<CrashRecoveryPending | null>>
   telemetryStatus: () => Promise<IpcResult<TelemetryStatus>>
   stopTrace: () => Promise<IpcResult<TraceStopResult>>
   getAppInfo: () => Promise<IpcResult<AppInfo>>
+  /** Re-detected on each call, so installing bwrap shows up without a restart. */
+  getSandboxCapability: () => Promise<IpcResult<SandboxCapability>>
   updater: VyotiqUpdaterApi
   feedback: VyotiqFeedbackApi
   workspaceGrep: (payload: WorkspaceGrepRequest) => Promise<IpcResult<WorkspaceGrepResult>>

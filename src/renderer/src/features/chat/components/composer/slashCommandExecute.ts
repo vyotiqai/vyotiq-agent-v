@@ -24,6 +24,8 @@ export type SlashClientHandlers = {
   onLoopSet?: (trailing?: string) => void | boolean | Promise<void | boolean>
   onLoopStop?: () => void | boolean | Promise<void | boolean>
   onLoopStatus?: () => void | boolean | Promise<void | boolean>
+  /** `/add-dir [path]`: a folder the task may also work in (new or started); no path opens the picker. */
+  onAddDir?: (path?: string) => void | boolean | Promise<void | boolean>
   onMarketplaceAction?: (
     packageId: string,
     intent: 'install' | 'enable'
@@ -127,6 +129,11 @@ async function runClientAction(
     }
     case 'loop_status': {
       const r = await handlers.onLoopStatus?.()
+      return r !== false
+    }
+    case 'add_dir': {
+      if (!handlers.onAddDir) return false
+      const r = await handlers.onAddDir(opts.trailingText?.trim() || undefined)
       return r !== false
     }
     default: {

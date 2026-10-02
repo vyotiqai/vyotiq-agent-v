@@ -12,6 +12,7 @@ import {
   type WalkedFile
 } from './walk'
 import { compileUserRegex } from './safeUserRegex'
+import { extraRootDisplayPath } from '../../../shared/extraRoots'
 import { extractDocxText, isDocxPath, MAX_DOCX_ARCHIVE_BYTES } from './docxText'
 import {
   queryIndexCandidates,
@@ -31,6 +32,10 @@ export type GrepOptions = {
   maxResults?: number
   /** Override live-walk file cap (tests). Production uses GREP_SCAN_CAP. */
   scanCap?: number
+  /** Files a permission rule keeps out of results (denied, or asked before reading). */
+  hidePath?: (rel: string) => boolean
+  /** The added folder this grep runs in (extraRoots.ts): hits are cited absolute under it. */
+  displayRoot?: string
 }
 
 function compile(pattern: string, caseSensitive: boolean): RegExp {
@@ -212,6 +217,11 @@ function formatGrepHits(
  * Coverage notice for files the size cap kept out of the scan. Leading `…`
  * matches the other notices so result parsers skip it as a path candidate.
  */
+/** Files left out because a permission rule denies them or asks before they are read. */
+export function formatPermissionHiddenNotice(count: number): string {
+  return `${count} file${count === 1 ? '' : 's'} not searched: a permission rule denies or asks before reading ${count === 1 ? 'it' : 'them'} (read one directly to ask)`
+}
+
 export function formatOversizedNotice(count: number, capBytes = GREP_MAX_FILE_BYTES): string {
   const kb = Math.round(capBytes / 1024)
   return `… ${count} file${count === 1 ? '' : 's'} over ${kb}KB not scanned`
@@ -304,13 +314,36 @@ export async function toolGrep(
     throwIfAborted(signal)
   }
 
+  // Counted only where grep would have read the file: a `.env` it skips as
+  // non-text anyway is not worth a notice on every search.
+  let hidden = 0
+  if (options.hidePath) {
+    const hide = options.hidePath
+    files = files.filter((f) => {
+      if (!hide(f.rel)) return true
+      if (!shouldSkipGrepFile(f, includeRegex)) hidden++
+      return false
+    })
+  }
+
+  // In an added folder every hit is cited by its absolute path: include is
+  // applied to the folder-relative path first, then the path is rewritten.
+  let scanInclude = includeRegex
+  if (options.displayRoot) {
+    const root = options.displayRoot
+    files = files
+      .filter((f) => !includeRegex || includeRegex.test(f.rel))
+      .map((f) => ({ ...f, rel: extraRootDisplayPath(root, f.rel) }))
+    scanInclude = null
+  }
+
   const { out, matchCount, truncated, oversized } = await formatGrepHitsAsync(
     files,
     trimmed,
     options,
     maxResults,
     contextLines,
-    includeRegex,
+    scanInclude,
     signal
   )
 
@@ -325,6 +358,7 @@ export async function toolGrep(
   // A size skip is a coverage gap, not an absence of matches: say so, or a
   // symbol living in an oversized file reads back as "no such symbol".
   if (oversized > 0) notices.push(formatOversizedNotice(oversized))
+  if (hidden > 0) notices.push(formatPermissionHiddenNotice(hidden))
   if (indexSyncInProgress) {
     notices.push(`index sync in progress (${indexedFileCount} files indexed so far)`)
   }

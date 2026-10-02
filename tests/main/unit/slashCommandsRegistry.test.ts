@@ -99,8 +99,8 @@ describe('builtin slash commands', () => {
       expect.arrayContaining(['goal', 'loop'])
     )
     // 15 before /plan was removed with Plan mode, 14 before the two
-    // /harness-* commands were removed with the self-harness loop.
-    expect(BUILTIN_COMMANDS).toHaveLength(12)
+    // /harness-* commands were removed with the self-harness loop; 13 with /add-dir.
+    expect(BUILTIN_COMMANDS).toHaveLength(13)
     expect(BUILTIN_COMMANDS.map((c) => c.trigger)).not.toContain('plan')
     expect(BUILTIN_COMMANDS.map((c) => c.trigger)).not.toContain('harness-review')
     expect(BUILTIN_COMMANDS.map((c) => c.trigger)).not.toContain('harness-apply')

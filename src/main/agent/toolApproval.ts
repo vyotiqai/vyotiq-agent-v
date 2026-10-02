@@ -34,6 +34,8 @@ import { TOOL_APPROVAL_TIMEOUT_MS } from '../../shared/agentTimeouts'
 import { isCheckCommand } from './feedback/checkCommands'
 import { dangerousCommand, type CommandContext, type DangerousCommand } from './tools/dangerousCommand'
 import { resolveTerminalShell } from './tools/terminal'
+import type { ActiveSkillAllows, PermissionPolicy, PermissionVerdict } from './permissions'
+import type { SkillToolGrant } from './skills/allowedTools'
 
 /** Browse/fetch egress — gated, but not workspace-mutating.
  * Legacy `web_fetch` / `web_search` kept for transcript approval replay only
@@ -359,6 +361,17 @@ export type ToolApprovalGate = {
     name: string
     arguments: string
   }): Promise<AuthorizeResult>
+  /**
+   * True when grep/search must leave this workspace-relative file out of what
+   * they return — a permission rule denies it or asks before it is read.
+   */
+  hidesFromSearch?(toolName: string, relPath: string): boolean
+  /**
+   * A skill loaded (the Skill tool) or was invoked (`/name`): its
+   * `allowed-tools` pre-approve calls for the rest of this gate's invoke,
+   * when the skill is one the user put there (skills/allowedTools.ts).
+   */
+  activateSkill?(skillName: string): void
 }
 
 export type ApprovalGateOptions = {
@@ -392,6 +405,18 @@ export type ApprovalGateOptions = {
    * autonomy say. Omitted only where no shell command can run.
    */
   commandGuard?: CommandGuard
+  /**
+   * Permission rules (permissions.ts), checked before everything else here:
+   * a deny refuses the call, an ask puts the card in front of it whatever the
+   * mode, allowlists or autonomy say, and an allow lets a gated call through
+   * the way a standing allow does — never past the command guard.
+   */
+  permissions?: PermissionPolicy
+  /**
+   * What a skill's `allowed-tools` grant, by skill name — the Skill tool's own
+   * resolution. Without it (or without `permissions`) no skill pre-approves.
+   */
+  skillGrants?: (skillName: string) => SkillToolGrant | null
 }
 
 function askThroughRenderer(
@@ -484,25 +509,107 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         streamSignalFor(options.runId, options.signal),
         options.invokeId
       ))
+  /** Skills active in this invoke whose allowed-tools are honoured, by lowercased name. */
+  const activeSkills = new Map<string, ActiveSkillAllows>()
 
   return {
+    activateSkill(skillName: string): void {
+      if (!options.skillGrants || !options.permissions) return
+      const key = skillName.trim().toLowerCase()
+      if (!key || activeSkills.has(key)) return
+      let grant: SkillToolGrant | null = null
+      try {
+        grant = options.skillGrants(skillName)
+      } catch (err) {
+        logger.warn('Skill allowed-tools could not be read', { scope: 'agent', correlationId: options.runId, tool: 'Skill', err })
+        return
+      }
+      if (!grant || (grant.allows.length === 0 && grant.ignored.length === 0)) return
+      if (!grant.trusted) {
+        logger.info('Skill allowed-tools not honoured', {
+          scope: 'agent',
+          correlationId: options.runId,
+          tool: 'Skill',
+          reason: `skill ${grant.skill} (${grant.source}) is not one you installed; its allowed-tools still ask`
+        })
+        return
+      }
+      logger.info('Skill allowed-tools active', {
+        scope: 'agent',
+        correlationId: options.runId,
+        tool: 'Skill',
+        reason: `skill ${grant.skill}: ${grant.allows.map((a) => a.entry).join(', ') || 'none'}${
+          grant.ignored.length ? `; ignored ${grant.ignored.join(', ')}` : ''
+        }`
+      })
+      if (grant.allows.length > 0) activeSkills.set(key, { skill: grant.skill, allows: grant.allows })
+    },
     async authorize(call): Promise<AuthorizeResult> {
       const name = canonicalizeAgentToolName(call.name)
+      const agentBuiltAllowKey = await agentBuiltAllowKeyFor(name)
+      // Permission rules come first: a deny refuses before anything can ask.
+      let permission: PermissionVerdict | null = null
+      if (options.permissions) {
+        try {
+          permission = options.permissions.evaluate(
+            name,
+            parseArgs(call.arguments),
+            activeSkills.size > 0 ? { skills: [...activeSkills.values()] } : undefined
+          )
+        } catch (err) {
+          // A rule that cannot be read must not wave the call through.
+          logger.warn('Permission rules could not be checked', { scope: 'agent', correlationId: options.runId, tool: name, err })
+          permission = { effect: 'ask', source: 'built-in', rule: 'unreadable rules', reason: 'The permission rules could not be checked for this call' }
+        }
+        // An agent-built tool's standing allow is pinned to its content hash;
+        // a rule naming the tool must not follow a rewritten module.
+        if (permission?.effect === 'allow' && agentBuiltAllowKey) permission = null
+      }
+      if (permission?.effect === 'deny') {
+        logger.info('Tool call denied by permission rule', {
+          scope: 'agent',
+          correlationId: options.runId,
+          tool: name,
+          decision: 'deny',
+          reason: `permission-rule:${permission.source}`
+        })
+        return { allowed: false, reason: permission.reason }
+      }
       // Checked before every way past the card: the mode, the allowlists and
       // autonomy all answer for ordinary commands, never for these.
       const danger = options.commandGuard ? guardedCommand(name, call.arguments, options.commandGuard) : null
-      const agentBuiltAllowKey = await agentBuiltAllowKeyFor(name)
+      // What holds the call at the card whatever else says — the command
+      // guard, or an ask rule — and how the card and the model hear about it.
+      const held: { reason: string; log: string; what: 'command' | 'call' } | null = danger
+        ? { reason: danger.reason, log: `command-guard:${danger.kind}`, what: 'command' }
+        : permission?.effect === 'ask'
+          ? { reason: permission.reason, log: `permission-rule:${permission.source}`, what: 'call' }
+          : null
       const gateOpts = { mcpProtection: options.mcpProtection, agentBuiltAllowKey }
       if (
-        !danger &&
+        !held &&
         !isToolGated(name, options.mode, sessionAllowlist, workspaceAllowlist, call.arguments, gateOpts)
       ) {
         const grant = ruleGrantFor(name, options.mode, sessionAllowlist, call.arguments, gateOpts)
         return grant ? { allowed: true, grant } : { allowed: true }
       }
 
+      if (!held && permission?.effect === 'allow') {
+        if (permission.source === 'skill') {
+          logger.info('Tool call allowed by skill', {
+            scope: 'agent',
+            correlationId: options.runId,
+            tool: name,
+            decision: 'once',
+            reason: `skill-allowed-tools:${permission.rule}`
+          })
+          return { allowed: true, grant: { by: 'skill', scope: 'once', allow: grantAllow(permission.skill ?? permission.rule) } }
+        }
+        return { allowed: true, grant: { by: 'rule', scope: 'workspace', allow: grantAllow(permission.rule) } }
+      }
+
       if (
-        !danger &&
+        !held &&
         options.autonomousMode &&
         !isAutonomousHighRiskTool(name, call.arguments) &&
         !workspaceAllowlist.includes(name)
@@ -518,12 +625,12 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
 
       // The terminal's "Always allow" is scoped to the command, computed here —
       // from the full arguments, not the card's truncated preview.
-      // A command the guard stopped is never remembered: no "Always allow".
-      const terminalCommand = name === 'terminal' && !danger ? terminalCommandOf(parseArgs(call.arguments)) : null
+      // A call the guard or an ask rule held is never remembered: no "Always allow".
+      const terminalCommand = name === 'terminal' && !held ? terminalCommandOf(parseArgs(call.arguments)) : null
       const alwaysAllowCommand = terminalCommand ? commandAllowPrefix(terminalCommand) : null
       const request: ToolApprovalRequest = {
         ...(name === 'terminal' ? { alwaysAllowCommand } : {}),
-        ...(danger ? { danger: danger.reason } : {}),
+        ...(held ? { danger: held.reason } : {}),
         requestId: randomUUID(),
         runId: options.runId,
         toolCallId: call.id,
@@ -550,8 +657,8 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         if (isAbortError(err) || (err instanceof Error && err.name === 'AbortError')) {
           throw err
         }
-        const message = danger
-          ? `This command needs the user's OK whatever the approval settings say (${danger.reason}), and no app window is listening to ask. It did not run. Do not retry it; find another way or ask the user.`
+        const message = held
+          ? `This ${held.what} needs the user's OK whatever the approval settings say (${held.reason}), and no app window is listening to ask. It did not run. Do not retry it; find another way or ask the user.`
           : err instanceof Error
             ? err.message
             : 'Tool approval failed because no app window is listening.'
@@ -566,22 +673,22 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         tool: name,
         decision,
         // `reason` survives the log field allowlist; the guard's rule goes there.
-        ...(danger ? { reason: `command-guard:${danger.kind}` } : {})
+        ...(held ? { reason: held.log } : {})
       })
 
-      if (danger) {
+      if (held) {
         // The card offers Allow once and Deny only; a standing grant from any
-        // other path is still this one command, never remembered.
+        // other path is still this one call, never remembered.
         if (decision === 'deny') {
           return {
             allowed: false,
-            reason: `The user denied this command (${danger.reason}). Do not retry it; ask what to do instead or continue without it.`
+            reason: `The user denied this ${held.what} (${held.reason}). Do not retry it; ask what to do instead or continue without it.`
           }
         }
         if (decision === 'timeout') {
           return {
             allowed: false,
-            reason: `Approval for this command (${danger.reason}) timed out and it was not run. Do not retry it; ask what to do instead or continue without it.`
+            reason: `Approval for this ${held.what} (${held.reason}) timed out and it was not run. Do not retry it; ask what to do instead or continue without it.`
           }
         }
         return { allowed: true, grant: { by: 'you', scope: 'once' } }
@@ -624,6 +731,9 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
           return _exhaustive
         }
       }
+    },
+    hidesFromSearch(toolName: string, relPath: string): boolean {
+      return options.permissions?.hidesFromSearch(toolName, relPath) ?? false
     }
   }
 }

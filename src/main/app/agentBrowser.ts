@@ -145,7 +145,9 @@ type BrowserTab = {
   workspacePath?: string
   /**
    * When false (Ask/Plan tool navigations), block private/loopback hosts on
-   * navigate and in-page redirects. User/IPC + Agent keep true.
+   * navigate and in-page redirects. User/IPC + Agent keep true. Even when
+   * true, only a loopback/private page may reach loopback/private hosts on its
+   * own (subresources, redirects, popups) — see net/privateNetwork.ts.
    */
   allowLocalHosts: boolean
 }
@@ -281,12 +283,22 @@ async function assertPostNavigationPolicy(url: string, allowLocal: boolean): Pro
  * Recorded rather than merely evaluated, so the ledger shows where a run went
  * as well as what it was refused.
  */
-function isSyncBlockedNavigation(url: string, allowLocal: boolean): boolean {
+function isSyncBlockedNavigation(
+  url: string,
+  allowLocal: boolean,
+  /**
+   * The page that caused this navigation (the current document for a link or
+   * script navigation, the redirecting URL for a redirect, the opener for a
+   * popup). Omitted only for navigations the agent or user asked for directly.
+   */
+  initiatorUrl?: string
+): boolean {
   return !checkEgress({
     url,
     purpose: 'browser_navigation',
     allowLocal,
-    allowlist: getSettings().browserDomainAllowlist ?? []
+    allowlist: getSettings().browserDomainAllowlist ?? [],
+    ...(initiatorUrl === undefined ? {} : { initiatorUrl })
   }).allowed
 }
 
@@ -698,11 +710,29 @@ function tabForContents(wc: WebContents): BrowserTab | undefined {
 function attachAgentSecurity(wc: WebContents): void {
   const allowLocalFor = (): boolean => tabForContents(wc)?.allowLocalHosts ?? true
 
-  const blockIfNeeded = (event: { preventDefault: () => void }, url: string): void => {
-    if (isSyncBlockedNavigation(url, allowLocalFor())) {
+  const blockIfNeeded = (
+    event: { preventDefault: () => void },
+    url: string,
+    initiatorUrl: string
+  ): boolean => {
+    if (isSyncBlockedNavigation(url, allowLocalFor(), initiatorUrl)) {
       event.preventDefault()
+      return true
     }
+    return false
   }
+
+  /**
+   * Where the current main-frame navigation is right now: its start URL, then
+   * each redirect target it was allowed to follow. A redirect is judged by the
+   * URL it leaves, not by the page still committed in the tab — an explicit
+   * navigation to a public URL that 302s into the LAN must not borrow the
+   * previous page's local origin.
+   */
+  let mainFrameHop = ''
+  wc.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) mainFrameHop = details.url
+  })
 
   const verifyLandedUrl = async (): Promise<void> => {
     const tab = tabForContents(wc)
@@ -743,11 +773,16 @@ function attachAgentSecurity(wc: WebContents): void {
     }
   }
 
+  // will-navigate never fires for loadURL, so everything reaching it was started
+  // by the page (a link, a form, script): judge it by the committed document.
   wc.on('will-navigate', (event, url) => {
-    blockIfNeeded(event, url)
+    blockIfNeeded(event, url, wc.getURL())
   })
   wc.on('will-redirect', (event, url) => {
-    blockIfNeeded(event, url)
+    const mainFrame = event.isMainFrame !== false
+    const from = mainFrame ? mainFrameHop || wc.getURL() : wc.getURL()
+    const blocked = blockIfNeeded(event, url, from)
+    if (mainFrame && !blocked) mainFrameHop = url
   })
   wc.on('did-navigate', () => {
     void verifyLandedUrl()
@@ -760,7 +795,9 @@ function attachAgentSecurity(wc: WebContents): void {
     const parentTab = tabForContents(wc)
     const parentWorkspace = parentTab?.workspacePath
     const parentAllow = allowLocalFor()
-    if (isSyncBlockedNavigation(url, parentAllow)) return { action: 'deny' }
+    // A popup is the opener page acting, so the opener's origin decides whether
+    // it may land in loopback/private space.
+    if (isSyncBlockedNavigation(url, parentAllow, wc.getURL())) return { action: 'deny' }
     if (tabs.size >= MAX_BROWSER_TABS) return { action: 'deny' }
     void withBrowserLock(async () => {
       const tab = createTab(parentWorkspace, parentAllow)
@@ -872,6 +909,15 @@ function tabForWebContentsId(id?: number): BrowserTab | undefined {
   return undefined
 }
 
+/** The tab's committed top-level URL; '' (judged public) when it cannot be read. */
+function topLevelUrlOf(tab: BrowserTab): string {
+  try {
+    return tab.view.webContents.getURL()
+  } catch {
+    return ''
+  }
+}
+
 /**
  * Per-request network egress gate for browsed pages, registered once per
  * partition session (same shape as `denyPartitionDownloads`).
@@ -894,6 +940,14 @@ function guardPartitionEgress(ses: Electron.Session, partition: string): void {
         // Requests with no attributable tab (service workers, for instance)
         // get the strict posture rather than the permissive tab default.
         allowLocal: tab?.allowLocalHosts ?? false,
+        // The tab's allowLocal is the agent's posture, not the page's: a public
+        // page must not reach loopback/LAN through it. Judge everything a page
+        // loads by the top-level document. The main-frame request itself is
+        // left to the navigation guards, which can tell an explicit navigation
+        // (allowed) from one the page started (judged like this).
+        ...(details.resourceType === 'mainFrame'
+          ? {}
+          : { initiatorUrl: tab ? topLevelUrlOf(tab) : '' }),
         allowlist: browserAllowlistSnapshot(),
         workspacePath: tab?.workspacePath ?? partitionWorkspacePaths.get(partition)
       })

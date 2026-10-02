@@ -1,11 +1,13 @@
 import { existsSync } from 'fs'
 import type { WebContents } from 'electron'
-import type { AgentInteractionMode, ChatMessage, ProviderIdAny } from '../../shared/ipc'
+import type { AgentInteractionMode, ChatMessage, ProviderIdAny, RunScheduled } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
 import { workspacePathsEqual } from '../../shared/workspacePath'
 import { getWorkspaces } from '../workspace/workspaces'
 import { runExists } from './state'
 import { createRunId } from './loop'
+import { isImportedRun } from './runBundle'
+import { validateExtraRoots } from './extraRoots'
 import {
   isActive,
   isRunTurnComplete,
@@ -43,6 +45,13 @@ export type LaunchRunRequest = {
   runtime?: RuntimeKind
   /** A new task's done-when checks, from its brief. */
   doneWhen?: string[]
+  /**
+   * Folders outside the workspace the task may also work in. Checked here; a
+   * refused folder refuses the launch. On a running task they replace its own.
+   */
+  extraRoots?: string[]
+  /** A new task started by a repeating schedule; marked on its status. */
+  scheduled?: RunScheduled
   /** Where this run's events stream. */
   wc: WebContents
   /** Log label for the originating surface. */
@@ -69,6 +78,13 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
   if (!existsSync(workspacePath)) {
     return refuse('Workspace path does not exist', 'workspace_missing')
   }
+  let extraRoots: string[] | undefined
+  if (request.extraRoots) {
+    const checked = validateExtraRoots(workspacePath, request.extraRoots)
+    const first = checked.refused[0]
+    if (first) return refuse(`Can’t add the folder ${first.path}: ${first.reason}.`, 'extra_root_refused')
+    extraRoots = checked.roots
+  }
 
   let runId: string
   let resume = false
@@ -77,6 +93,10 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
     // refuses rather than waits (launchRun is the variant that waits), so the
     // caller's bounded retry is what covers that race.
     if (isActive(request.runId)) return refuse('Run is already active', 'run_active')
+    // An imported task is a record from elsewhere: read it, or fork it to go on.
+    if (isImportedRun(workspacePath, request.runId)) {
+      return refuse('An imported task is read-only. Fork it to continue.', 'run_imported')
+    }
     runId = request.runId
     resume = true
   } else {
@@ -109,7 +129,8 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
     focusedFile: request.focusedFile,
     provider: request.provider,
     model: request.model,
-    ...(request.runtime ? { runtime: request.runtime } : {})
+    ...(request.runtime ? { runtime: request.runtime } : {}),
+    ...(extraRoots ? { extraRoots } : {})
   }
   const agentInput =
     request.incremental && request.runId && request.newMessages?.length
@@ -121,7 +142,8 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
       : {
           ...shared,
           messages: request.messages ?? [],
-          ...(request.doneWhen?.length ? { doneWhen: request.doneWhen } : {})
+          ...(request.doneWhen?.length ? { doneWhen: request.doneWhen } : {}),
+          ...(request.scheduled ? { scheduled: request.scheduled } : {})
         }
 
   startAgentRunInBackground({ runId, workspacePath, invokeId, controller, wc, agentInput })

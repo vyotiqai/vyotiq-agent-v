@@ -8,6 +8,8 @@ export type AgentInstanceUiState = {
   pathScope?: string[]
   /** The plan step (todo id) the parent spawned it for. */
   stepId?: string
+  /** The user-defined helper type it was spawned as. */
+  agentType?: string
   /** When it started and when it reached a terminal phase (ISO). */
   startedAt?: string
   endedAt?: string

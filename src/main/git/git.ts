@@ -13,6 +13,7 @@ import type {
 } from '../../shared/ipc'
 import { mapLimit } from '../../shared/utils/mapLimit'
 import { isSafeWorkspaceRelPath } from '../../shared/utils/workspacePath'
+import { branchNameProblem } from '../../shared/utils/gitBranch'
 import { createWorkspacePathResolver, resolveInsideWorkspace } from '../workspace/safePath'
 import { sanitizedTerminalEnv } from '../agent/tools/terminal'
 import { allowRepoCommands, guardGitInvocation, readBlockedRepoCommands } from './repoCommandGuard'
@@ -198,6 +199,20 @@ export async function readGitAheadBehind(
   return { ahead, behind }
 }
 
+/**
+ * The current branch's tracking ref as git names it (`origin/main`), or null
+ * when it has none — never pushed, or its remote branch is gone.
+ */
+export async function readGitUpstream(cwd: string): Promise<string | null> {
+  const raw = await gitQuiet(
+    ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+    cwd,
+    READ_TIMEOUT_MS
+  )
+  const upstream = raw?.trim()
+  return upstream && upstream !== '@{upstream}' ? upstream : null
+}
+
 async function git(args: string[], cwd: string, timeout: number): Promise<string> {
   // Use the resolved binary so installs missing from PATH still work.
   const bin = (await resolveGitBinary()) ?? 'git'
@@ -242,6 +257,21 @@ async function gitDiffStdout(args: string[], cwd: string, timeout: number): Prom
  */
 export function runGit(args: string[], cwd: string, timeout = WRITE_TIMEOUT_MS): Promise<string> {
   return git(args, cwd, timeout)
+}
+
+/**
+ * The binary, args and env `runGit` would use — the same environment and the
+ * same repo-command guard — for a caller that has to own the process: stdin,
+ * binary or streamed stdout. Null when no git binary is available.
+ */
+export async function guardedGitCommand(
+  args: string[],
+  cwd: string
+): Promise<{ bin: string; args: string[]; env: NodeJS.ProcessEnv } | null> {
+  const bin = await resolveGitBinary()
+  if (!bin) return null
+  const guarded = await guardGitInvocation(args, cwd, buildGitEnv(), bin)
+  return { bin, args: guarded.args, env: guarded.env }
 }
 
 async function gitQuiet(args: string[], cwd: string, timeout: number): Promise<string | null> {
@@ -487,9 +517,10 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   const stagedArgs = hasCommits
     ? ['diff', '--numstat', '--no-renames', '-z', '--cached', 'HEAD']
     : ['diff', '--numstat', '--no-renames', '-z', '--cached']
-  const [stagedMap, aheadBehind, repoCommands] = await Promise.all([
+  const [stagedMap, aheadBehind, upstream, repoCommands] = await Promise.all([
     numstatMap(cwd, stagedArgs),
     hasRemote && hasCommits ? readGitAheadBehind(cwd) : Promise.resolve(null),
+    hasRemote && branch ? readGitUpstream(cwd) : Promise.resolve(null),
     blockedRepoCommandsQuiet(cwd)
   ])
 
@@ -605,6 +636,7 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
     hasRemote,
     hasCommits,
     ...(aheadBehind ?? {}),
+    ...(upstream ? { upstream } : {}),
     ...(repoCommands ? { repoCommands } : {})
   }
   return { kind: 'ok', status }
@@ -1420,4 +1452,250 @@ export async function resolveConflict(
   writeFileSync(resolveInsideWorkspace(cwd, relPath), content, 'utf8')
   await git(['add', '--', relPath], cwd, WRITE_TIMEOUT_MS)
   return { detail: `Resolved ${relPath}` }
+}
+
+// ── Sync: fetch, pull, push, new branch ─────────────────────────────────────
+//
+// User-initiated only. Each runs through `git()`, so the repo-command guard and
+// the non-interactive env (GIT_TERMINAL_PROMPT=0, GCM_INTERACTIVE=never) apply:
+// a missing credential fails at once instead of waiting on a prompt nobody
+// can see. Nothing here ever forces a push or makes a merge commit unasked.
+
+/** Network round trips: fetch, push, and the fetch inside a pull. */
+const SYNC_TIMEOUT_MS = PUSH_TIMEOUT_MS
+/** A local merge or rebase after the fetch — no network, but can touch many files. */
+const INTEGRATE_TIMEOUT_MS = 60_000
+
+export type GitSyncOp = 'fetch' | 'pull' | 'push'
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+/** Git's own words from a failed run: stderr without the hints, never the argv echo. */
+function gitFailureText(err: unknown): string {
+  const stderr = (err as { stderr?: unknown } | null)?.stderr
+  const raw =
+    typeof stderr === 'string' && stderr.trim()
+      ? stderr
+      : err instanceof Error
+        ? err.message.replace(/^Command failed:[^\n]*\n?/, '')
+        : String(err)
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^hint:/i.test(line))
+  const text = lines.join(' ').replace(/\s+/g, ' ').trim()
+  return text.length > 600 ? `${text.slice(0, 600)}…` : text
+}
+
+/**
+ * A sync failure in words a person can act on, with git's own message kept.
+ * Auth, reachability, rejection and timeouts each get a lead; anything else is
+ * git's text as-is.
+ */
+export function describeGitSyncError(op: GitSyncOp, err: unknown, timeoutMs = SYNC_TIMEOUT_MS): string {
+  const e = err as { killed?: unknown; signal?: unknown; code?: unknown } | null
+  if (e?.killed === true || e?.code === 'ETIMEDOUT') {
+    return `git ${op} gave no answer in ${Math.round(timeoutMs / 1000)}s and was stopped. Check the network and the remote, then try again.`
+  }
+  const said = gitFailureText(err)
+  const lower = said.toLowerCase()
+  if (
+    /authentication failed|could not read (username|password)|terminal prompts disabled|invalid username or password|permission denied \(publickey|logon failed|access denied|http basic: access denied|the requested url returned error: 40[13]/.test(
+      lower
+    )
+  ) {
+    return `Git could not sign in to the remote — the app never asks for a password itself. Sign in with your credential manager or SSH key, then try again. git: ${said}`
+  }
+  if (/repository not found|could not read from remote repository|could not resolve host|unable to access|connection (timed out|refused)/.test(lower)) {
+    return `The remote could not be reached, or the repository was not found. git: ${said}`
+  }
+  if (op === 'push' && /\[rejected\]|non-fast-forward|fetch first|updates were rejected/.test(lower)) {
+    return `The remote has commits this branch does not have. Pull, then push again. git: ${said}`
+  }
+  return said ? `git ${op} failed: ${said}` : `git ${op} failed`
+}
+
+async function syncGit(op: GitSyncOp, args: string[], cwd: string, timeout = SYNC_TIMEOUT_MS): Promise<string> {
+  try {
+    return await git(args, cwd, timeout)
+  } catch (err) {
+    throw new Error(describeGitSyncError(op, err, timeout))
+  }
+}
+
+async function requireRemotes(cwd: string): Promise<string[]> {
+  const remotes = parseRemoteNames(await gitQuiet(['remote'], cwd, READ_TIMEOUT_MS))
+  if (remotes.length === 0) throw new Error('No git remote configured. Add one before syncing.')
+  return remotes
+}
+
+async function requireBranch(cwd: string, action: string): Promise<string> {
+  const branch = await currentGitBranch(cwd)
+  if (!branch) throw new Error(`HEAD is detached. Check out a branch to ${action}.`)
+  return branch
+}
+
+export type GitFetchOutcome = { detail: string; ahead?: number; behind?: number }
+
+/** `git fetch --all`: every remote's refs, nothing in the working tree touched. */
+export async function fetchRemotes(cwd: string): Promise<GitFetchOutcome> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  await requireRemotes(cwd)
+  await syncGit('fetch', ['fetch', '--all'], cwd)
+  const upstream = await readGitUpstream(cwd)
+  const counts = upstream ? await readGitAheadBehind(cwd) : null
+  if (!upstream || !counts) return { detail: 'Fetched' }
+  const detail =
+    counts.behind > 0
+      ? `Fetched · ${plural(counts.behind, 'new commit', 'new commits')} on ${upstream}`
+      : `Fetched · up to date with ${upstream}`
+  return { detail, ...counts }
+}
+
+export type GitPullStrategy = 'ff-only' | 'rebase' | 'merge'
+
+export type GitPullOutcome =
+  | { kind: 'pulled'; detail: string }
+  | { kind: 'up-to-date'; detail: string }
+  /** Both sides have commits: nothing was changed; the caller offers rebase or merge. */
+  | { kind: 'diverged'; detail: string; ahead: number; behind: number; upstream: string }
+  /** A merge stopped on conflicts, left in place for the conflict resolver. */
+  | { kind: 'conflicted'; detail: string; files: number }
+
+async function conflictedPaths(cwd: string): Promise<string[]> {
+  const out = await gitQuiet(['diff', '--name-only', '--diff-filter=U', '-z'], cwd, READ_TIMEOUT_MS)
+  return splitNul(out ?? '').filter(Boolean)
+}
+
+/**
+ * Bring the upstream's commits in. A fast-forward is the only thing done by
+ * default; when both sides have commits nothing changes and the answer is
+ * `diverged`, so a merge commit is never made without being asked for.
+ * `rebase` undoes itself on a conflict; `merge` leaves conflicts for the
+ * resolver, the way git does.
+ */
+export async function pullCurrentBranch(cwd: string, strategy: GitPullStrategy = 'ff-only'): Promise<GitPullOutcome> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const branch = await requireBranch(cwd, 'pull')
+  const upstream = await readGitUpstream(cwd)
+  if (!upstream) throw new Error(`${branch} has no upstream yet. Publish it first.`)
+  await syncGit('fetch', ['fetch'], cwd)
+  const counts = await readGitAheadBehind(cwd)
+  if (!counts) throw new Error(`Could not compare ${branch} with ${upstream}`)
+  const { ahead, behind } = counts
+  if (behind === 0) {
+    return {
+      kind: 'up-to-date',
+      detail: ahead > 0 ? `Already up to date · ${plural(ahead, 'commit', 'commits')} to push` : 'Already up to date'
+    }
+  }
+  const pulled = `Pulled ${plural(behind, 'commit', 'commits')} from ${upstream}`
+  if (ahead === 0) {
+    await syncGit('pull', ['merge', '--ff-only', '@{upstream}'], cwd, INTEGRATE_TIMEOUT_MS)
+    return { kind: 'pulled', detail: pulled }
+  }
+  if (strategy === 'ff-only') {
+    return {
+      kind: 'diverged',
+      detail: `${branch} and ${upstream} have diverged: ${plural(ahead, 'commit', 'commits')} here, ${plural(behind, 'commit', 'commits')} there.`,
+      ahead,
+      behind,
+      upstream
+    }
+  }
+  if (strategy === 'rebase') {
+    try {
+      await git(['rebase', '@{upstream}'], cwd, INTEGRATE_TIMEOUT_MS)
+    } catch (err) {
+      const inProgress = (await gitQuiet(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'], cwd, READ_TIMEOUT_MS)) != null
+      if (inProgress) {
+        await gitQuiet(['rebase', '--abort'], cwd, WRITE_TIMEOUT_MS)
+        throw new Error(`Rebase stopped on a conflict and was undone; nothing changed. git: ${gitFailureText(err)}`)
+      }
+      throw new Error(describeGitSyncError('pull', err, INTEGRATE_TIMEOUT_MS))
+    }
+    return { kind: 'pulled', detail: `Rebased ${plural(ahead, 'commit', 'commits')} onto ${upstream}` }
+  }
+  try {
+    await git(['merge', '--no-edit', '@{upstream}'], cwd, INTEGRATE_TIMEOUT_MS)
+  } catch (err) {
+    const files = await conflictedPaths(cwd)
+    if (files.length > 0) {
+      return {
+        kind: 'conflicted',
+        files: files.length,
+        detail: `Merge stopped on conflicts in ${plural(files.length, 'file', 'files')}. Resolve them in Changes, then commit.`
+      }
+    }
+    throw new Error(describeGitSyncError('pull', err, INTEGRATE_TIMEOUT_MS))
+  }
+  return { kind: 'pulled', detail: `Merged ${upstream} · ${plural(behind, 'commit', 'commits')}` }
+}
+
+export type GitPushOutcome = { detail: string; upstream: string; published: boolean }
+
+/**
+ * Push the current branch. With no upstream it is published to `origin`
+ * (else the first remote) and tracks it — unless `setUpstream` is false,
+ * which refuses instead. There is no force: a rejected push says to pull.
+ */
+export async function pushBranch(cwd: string, options: { setUpstream?: boolean } = {}): Promise<GitPushOutcome> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const branch = await requireBranch(cwd, 'push')
+  const remotes = await requireRemotes(cwd)
+  const upstream = await readGitUpstream(cwd)
+  if (upstream) {
+    const counts = await readGitAheadBehind(cwd)
+    await syncGit('push', ['push'], cwd)
+    const detail =
+      counts && counts.ahead > 0
+        ? `Pushed ${plural(counts.ahead, 'commit', 'commits')} to ${upstream}`
+        : `Pushed to ${upstream}`
+    return { detail, upstream, published: false }
+  }
+  if (options.setUpstream === false) throw new Error(`${branch} has no upstream. Publish it to set one.`)
+  const remote = remotes.includes('origin') ? 'origin' : remotes[0]!
+  await syncGit('push', ['push', '--set-upstream', remote, branch], cwd)
+  const tracking = (await readGitUpstream(cwd)) ?? `${remote}/${branch}`
+  return { detail: `Published ${branch} to ${tracking}`, upstream: tracking, published: true }
+}
+
+/**
+ * Create a branch, from HEAD or `from` (any commit-ish), and by default switch
+ * to it. The name passes the shared rules and git's own check-ref-format.
+ */
+export async function createGitBranch(
+  cwd: string,
+  rawName: string,
+  options: { from?: string; checkout?: boolean } = {}
+): Promise<{ detail: string; branch: string }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const name = rawName.trim()
+  const problem = branchNameProblem(name)
+  if (problem) throw new Error(problem)
+  const checked = await gitQuiet(['check-ref-format', '--branch', name], cwd, READ_TIMEOUT_MS)
+  if (checked?.trim() !== name) throw new Error(`Git does not accept “${name}” as a branch name`)
+  const exists = await gitQuiet(['show-ref', '--verify', '--quiet', `refs/heads/${name}`], cwd, READ_TIMEOUT_MS)
+  if (exists !== null) throw new Error(`A branch named ${name} already exists`)
+  const from = options.from?.trim()
+  if (from !== undefined && from !== '') {
+    if (from.startsWith('-') || /\s/.test(from)) throw new Error('Invalid starting point')
+    const resolved = await gitQuiet(['rev-parse', '--verify', '--quiet', `${from}^{commit}`], cwd, READ_TIMEOUT_MS)
+    if (!resolved?.trim()) throw new Error(`Unknown starting point: ${from}`)
+  } else if (!(await hasGitCommits(cwd))) {
+    throw new Error('Make a first commit before creating a branch')
+  }
+  const start = from ? [from] : []
+  try {
+    if (options.checkout === false) await git(['branch', name, ...start], cwd, WRITE_TIMEOUT_MS)
+    else await git(['switch', '--create', name, ...start], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    throw new Error(gitFailureText(err) || 'Could not create the branch')
+  }
+  return {
+    branch: name,
+    detail: options.checkout === false ? `Created ${name}` : `Created and switched to ${name}`
+  }
 }

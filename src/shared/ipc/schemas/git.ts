@@ -45,6 +45,8 @@ export const GitStatusSchema = z.object({
   ahead: z.number().int().min(0).optional(),
   /** Commits on the upstream not on HEAD — only when a tracking ref exists. */
   behind: z.number().int().min(0).optional(),
+  /** The branch's tracking ref (`origin/main`); absent when it has none yet (Publish). */
+  upstream: z.string().min(1).optional(),
   /**
    * Programs this repository's own git settings name (filters, diff and merge
    * drivers, fsmonitor), which the app's git skips until the person allows
@@ -197,6 +199,82 @@ export const GitCheckoutResultSchema = z.object({
   detail: z.string()
 })
 export type GitCheckoutResult = z.infer<typeof GitCheckoutResultSchema>
+
+// ── Sync: fetch / pull / push / new branch (user-initiated only) ────────────
+
+export const GitFetchRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type GitFetchRequest = z.infer<typeof GitFetchRequestSchema>
+
+export const GitFetchResultSchema = z.object({
+  detail: z.string(),
+  ahead: z.number().int().min(0).optional(),
+  behind: z.number().int().min(0).optional()
+})
+export type GitFetchResult = z.infer<typeof GitFetchResultSchema>
+
+/** `ff-only` (default) never makes a merge commit; the other two are the answer to `diverged`. */
+export const GitPullStrategySchema = z.enum(['ff-only', 'rebase', 'merge'])
+export type GitPullStrategy = z.infer<typeof GitPullStrategySchema>
+
+export const GitPullRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  strategy: GitPullStrategySchema.optional()
+})
+export type GitPullRequest = z.infer<typeof GitPullRequestSchema>
+
+export const GitPullResultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('pulled'), detail: z.string() }),
+  z.object({ kind: z.literal('up-to-date'), detail: z.string() }),
+  z.object({
+    kind: z.literal('diverged'),
+    detail: z.string(),
+    ahead: z.number().int().min(0),
+    behind: z.number().int().min(0),
+    upstream: z.string()
+  }),
+  z.object({ kind: z.literal('conflicted'), detail: z.string(), files: z.number().int().min(0) })
+])
+export type GitPullResult = z.infer<typeof GitPullResultSchema>
+
+/** No force flag exists: a rejected push is answered by pulling. */
+export const GitPushRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  /** Default true: a branch with no upstream is published to origin and tracks it. */
+  setUpstream: z.boolean().optional()
+})
+export type GitPushRequest = z.infer<typeof GitPushRequestSchema>
+
+export const GitPushResultSchema = z.object({
+  detail: z.string(),
+  upstream: z.string(),
+  /** The branch had no upstream and now does. */
+  published: z.boolean()
+})
+export type GitPushResult = z.infer<typeof GitPushResultSchema>
+
+export const GitCreateBranchRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  name: z.string().trim().min(1).max(255),
+  /** A commit-ish to start from; HEAD when omitted. Never option-like. */
+  from: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .refine((ref) => !ref.startsWith('-') && !/\s/.test(ref), { message: 'Invalid starting point' })
+    .optional(),
+  /** Switch to the new branch (default true). */
+  checkout: z.boolean().optional()
+})
+export type GitCreateBranchRequest = z.infer<typeof GitCreateBranchRequestSchema>
+
+export const GitCreateBranchResultSchema = z.object({
+  branch: z.string(),
+  detail: z.string()
+})
+export type GitCreateBranchResult = z.infer<typeof GitCreateBranchResultSchema>
 
 export const GitDiffRequestSchema = z.object({
   workspacePath: z.string().min(1),

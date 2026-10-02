@@ -28,9 +28,19 @@ import {
   OpenRunArtifactRequestSchema,
   TaskFileStatsRequestSchema,
   TaskFileDiffRequestSchema,
+  PickExtraRootRequestSchema,
+  type PickExtraRootResult,
+  UpdateRunExtraRootsRequestSchema,
+  type UpdateRunExtraRootsResult,
+  UndoHunkRequestSchema,
+  RestoreHunkRequestSchema,
   type TaskFileStatsResult,
   type TaskFileDiffResult,
+  type UndoHunkResult,
+  type RestoreHunkResult,
   HomeActivityRequestSchema,
+  UsageExportRequestSchema,
+  type UsageExportResult,
   RunFeedbackGetRequestSchema,
   RunSearchRequestSchema,
   type RunSearchResult,
@@ -54,6 +64,8 @@ import {
   LoadToolResultRequestSchema,
   DeleteRunRequestSchema,
   ExportRunRequestSchema,
+  ImportRunRequestSchema,
+  type ImportRunResult,
   ForkRunRequestSchema,
   RenameRunRequestSchema,
   SetGoalStatusRequestSchema,
@@ -73,6 +85,14 @@ import {
   GitUnstagePathsRequestSchema,
   GitBranchesRequestSchema,
   GitCheckoutRequestSchema,
+  GitFetchRequestSchema,
+  GitPullRequestSchema,
+  GitPushRequestSchema,
+  GitCreateBranchRequestSchema,
+  type GitFetchResult,
+  type GitPullResult,
+  type GitPushResult,
+  type GitCreateBranchResult,
   GitDiffRequestSchema,
   GitBranchDiffRequestSchema,
   GitBranchDiffResultSchema,
@@ -87,6 +107,11 @@ import {
   PrCloseRequestSchema,
   PrReadyRequestSchema,
   PrEditTitleRequestSchema,
+  PrReviewThreadsRequestSchema,
+  PrReviewThreadResolveRequestSchema,
+  PrReviewThreadReplyRequestSchema,
+  PrListRequestSchema,
+  PrCheckoutRequestSchema,
   ShellOpenExternalRequestSchema,
   GithubAuthStartRequestSchema,
   PtyCreateRequestSchema,
@@ -219,6 +244,9 @@ import {
   type PersistedEvent,
   type TelemetryStatus,
   type AppInfo,
+  type SandboxCapability,
+  SandboxCapabilitySchema,
+  SandboxCapabilityRequestSchema,
   type UpdateInfo,
   type UpdaterStatePayload,
   type FeedbackComposeRequest,
@@ -228,6 +256,8 @@ import {
   UpdaterDownloadRequestSchema,
   UpdaterInstallRequestSchema,
   FeedbackComposeRequestSchema,
+  DiagnosticsExportRequestSchema,
+  type DiagnosticsExportResult,
   type WorkspaceGrepResult,
   type GitConflictFileResult,
   type GithubIssuesListResult,
@@ -239,6 +269,7 @@ import {
   type ActiveRunsResult,
   type GitStatusResult,
   type GitCommitResult,
+  type TaskCommitSettled,
   type GitInitResult,
   type GitAllowRepoCommandsResult,
   type AgentBrowserState,
@@ -333,7 +364,10 @@ import {
   CompactionVerifyFailedError
 } from '../agent/compactRun'
 import { resolveWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
-import { taskFileDiff, taskFileStats } from '../agent/taskFileDiff'
+import { taskExtraRootsAsync, taskFileDiff, taskFileStats } from '../agent/taskFileDiff'
+import { validateExtraRoots } from '../agent/extraRoots'
+import { updateRunExtraRoots } from '../agent/runExtraRootsEdit'
+import { HunkUndoRefused, restoreHunk, undoHunk } from '../agent/hunkUndo'
 import { readTaskOutcome } from '../agent/taskOutcome'
 import { reopenTaskWrites, settleTaskAfterCommit, undoTaskCommit } from '../agent/taskSettle'
 import {
@@ -357,7 +391,16 @@ import {
   deleteWorkspaceStorageDir
 } from '@main/storage/retention'
 import { previewDataWipe, runDataWipe } from '@main/storage/dataWipe'
-import { collectHomeActivity } from '../agent/activityStats'
+import { collectHomeActivity, collectUsageTaskDays } from '../agent/activityStats'
+import { usageCsvFileName, usageRowsToCsv } from '../agent/usageExport'
+import {
+  RunBundleError,
+  buildRunBundle,
+  importRunBundle,
+  readRunBundleFile,
+  serializeRunBundle
+} from '../agent/runBundle'
+import { lastDayKeys, localDayKeyOf } from '../../shared/utils/localDay'
 import { applyNetworkSettings, proxyStatus } from '@main/net/proxy'
 import { searchRuns } from '@main/agent/runSearch'
 import {
@@ -416,6 +459,7 @@ import {
   stopAgentContextWatch
 } from '../agent/context/agentContextWatcher'
 import { toolDiagnosticsAsync } from '../agent/tools/diagnostics'
+import { getSandboxCapability } from '../agent/sandbox/capability'
 import { disposeTerminalSessionsForWorkspace as disposeAgentTerminalSessionsForWorkspace } from '../agent/tools/terminalSessions'
 import {
   chatCancelResult,
@@ -471,6 +515,27 @@ import { armLoop, disarmLoop, readLoop } from '../agent/runLoopScheduler'
 import { launchRunFollowUpOrStart } from '../agent/launchRunInvoke'
 import { formatGoalContinueMessage } from '../../shared/goalRuntime'
 import { deleteTaskDraft, listTaskDrafts, saveTaskDraft } from '../drafts/taskDrafts'
+import {
+  createScheduleFromRequest,
+  deleteSchedule,
+  listSchedules,
+  readScheduleSource,
+  runScheduleNow,
+  scheduledWorktreeOpened,
+  toggleSchedule,
+  updateSchedule
+} from '../schedules/taskScheduler'
+import {
+  TaskScheduleCreateRequestSchema,
+  TaskScheduleIdRequestSchema,
+  TaskScheduleSourceRequestSchema,
+  TaskScheduleToggleRequestSchema,
+  TaskScheduleUpdateRequestSchema,
+  TaskScheduleWorktreeOpenedSchema,
+  type TaskSchedule,
+  type TaskScheduleSource,
+  type TaskSchedulesListResult
+} from '../../shared/ipc'
 import { discardRewindRedo, redoRewind, rewindRedoStatus } from '../agent/rewindRedo'
 import { createTaskWorktree, discardTaskWorktree, mergeTaskWorktree, taskWorktreeInfo } from '../git/taskWorktrees'
 import {
@@ -516,7 +581,11 @@ import {
   stagePaths,
   unstagePaths,
   readConflictFile,
-  resolveConflict
+  resolveConflict,
+  fetchRemotes,
+  pullCurrentBranch,
+  pushBranch,
+  createGitBranch
 } from '@main/git/git'
 import { invalidateGitStatusCache, readGitStatusCached } from '@main/git/gitStatusCache'
 import { emitGitStatusChanged } from '@main/git/gitStatusEvents'
@@ -530,6 +599,11 @@ import {
   prEditTitle,
   prMerge,
   prView,
+  prReviewThreads,
+  prReviewThreadResolve,
+  prReviewThreadReply,
+  prList,
+  prCheckout,
   reviewPullRequest,
   listGithubIssues,
   createGithubIssue
@@ -551,6 +625,7 @@ import {
   updaterState
 } from '@main/updater'
 import { composeFeedback } from '@main/feedback'
+import { exportDiagnostics } from '@main/diagnostics/export'
 import { grepWorkspaceHits } from '@main/agent/tools/grep'
 import {
   createPtySession,
@@ -1010,6 +1085,88 @@ export function registerIpc(): void {
       return ok(await deleteTaskDraft(req.workspacePath, req.id))
     } catch (err) {
       return failFrom(err, IPC.taskDraftsDelete)
+    }
+  })
+
+  // Repeating tasks (src/main/schedules). Runs start through launchRunSync,
+  // so these handlers only validate and hand over.
+  ipcMain.handle(IPC.schedulesList, async (event): Promise<IpcResult<TaskSchedulesListResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok({ schedules: listSchedules() })
+    } catch (err) {
+      return failFrom(err, IPC.schedulesList)
+    }
+  })
+
+  ipcMain.handle(IPC.schedulesCreate, async (event, raw): Promise<IpcResult<TaskSchedule>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskScheduleCreateRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (req.fromRunId && !runExists(req.workspacePath, req.fromRunId)) return fail('Task not found')
+      return ok(await createScheduleFromRequest(req))
+    } catch (err) {
+      return failFrom(err, IPC.schedulesCreate)
+    }
+  })
+
+  ipcMain.handle(IPC.schedulesSource, async (event, raw): Promise<IpcResult<TaskScheduleSource>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskScheduleSourceRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (!runExists(req.workspacePath, req.runId)) return fail('Task not found')
+      return ok(await readScheduleSource(req.workspacePath, req.runId))
+    } catch (err) {
+      return failFrom(err, IPC.schedulesSource)
+    }
+  })
+
+  // The window's answer to schedules:worktree-open: the run starts here, in main.
+  ipcMain.handle(IPC.schedulesWorktreeOpened, async (event, raw): Promise<IpcResult<TaskSchedule | null>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(scheduledWorktreeOpened(TaskScheduleWorktreeOpenedSchema.parse(raw)))
+    } catch (err) {
+      return failFrom(err, IPC.schedulesWorktreeOpened)
+    }
+  })
+
+  ipcMain.handle(IPC.schedulesUpdate, async (event, raw): Promise<IpcResult<TaskSchedule>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(updateSchedule(TaskScheduleUpdateRequestSchema.parse(raw)))
+    } catch (err) {
+      return failFrom(err, IPC.schedulesUpdate)
+    }
+  })
+
+  ipcMain.handle(IPC.schedulesDelete, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(deleteSchedule(TaskScheduleIdRequestSchema.parse(raw).id))
+    } catch (err) {
+      return failFrom(err, IPC.schedulesDelete)
+    }
+  })
+
+  ipcMain.handle(IPC.schedulesToggle, async (event, raw): Promise<IpcResult<TaskSchedule>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskScheduleToggleRequestSchema.parse(raw)
+      return ok(toggleSchedule(req.id, req.enabled))
+    } catch (err) {
+      return failFrom(err, IPC.schedulesToggle)
+    }
+  })
+
+  ipcMain.handle(IPC.schedulesRunNow, async (event, raw): Promise<IpcResult<TaskSchedule>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(runScheduleNow(TaskScheduleIdRequestSchema.parse(raw).id))
+    } catch (err) {
+      return failFrom(err, IPC.schedulesRunNow)
     }
   })
 
@@ -2454,7 +2611,12 @@ export function registerIpc(): void {
         const req = TaskFileStatsRequestSchema.parse(raw)
         if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
         if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
-        return ok({ files: await taskFileStats(resolveRunDir(req.workspacePath, req.runId), req.workspacePath) })
+        const statsRunDir = resolveRunDir(req.workspacePath, req.runId)
+        const [files, extraRoots] = await Promise.all([
+          taskFileStats(statsRunDir, req.workspacePath),
+          taskExtraRootsAsync(statsRunDir)
+        ])
+        return ok({ files, ...(extraRoots.length > 0 ? { extraRoots } : {}) })
       } catch (err) {
         return failFrom(err, IPC.runsTaskFileStats)
       }
@@ -2532,6 +2694,118 @@ export function registerIpc(): void {
     }
   )
 
+  /** The OS folder picker for a task's added folder; null when cancelled. */
+  const pickTaskFolder = async (sender: Electron.WebContents): Promise<string | null> => {
+    const parent = BrowserWindow.fromWebContents(sender) ?? undefined
+    const options: Electron.OpenDialogOptions = {
+      title: 'Add a folder to this task',
+      properties: ['openDirectory']
+    }
+    const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  }
+
+  // Add a folder to a new task (extraRoots.ts): the OS picker, or a typed
+  // path (`/add-dir`). Checked against the workspace and the folders already
+  // added; launchRun checks them all again when the task starts.
+  ipcMain.handle(
+    IPC.runsPickExtraRoot,
+    async (event, raw): Promise<IpcResult<PickExtraRootResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = PickExtraRootRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        const picked = req.path ?? (await pickTaskFolder(event.sender))
+        if (!picked) return ok({ path: null })
+        const before = validateExtraRoots(req.workspacePath, req.current ?? []).roots
+        const checked = validateExtraRoots(req.workspacePath, [...before, picked])
+        const refusal = checked.refused.find((r) => r.path === picked.trim())
+        if (refusal) return ok({ path: null, refused: `${refusal.path}: ${refusal.reason}` })
+        const added = checked.roots.find((r) => !before.includes(r))
+        return ok(added ? { path: added } : { path: null, refused: `${picked}: already added` })
+      } catch (err) {
+        return failFrom(err, IPC.runsPickExtraRoot)
+      }
+    }
+  )
+
+  // Add a folder to, or take one from, a task that already exists (/add-dir,
+  // the task menu). Saved on the run: a running task takes it up when it next
+  // starts, a finished one with its next follow-up (runExtraRootsEdit.ts).
+  ipcMain.handle(
+    IPC.runsSetExtraRoots,
+    async (event, raw): Promise<IpcResult<UpdateRunExtraRootsResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = UpdateRunExtraRootsRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        if (req.action === 'remove') {
+          return ok(await updateRunExtraRoots(req.workspacePath, req.runId, { remove: req.root }))
+        }
+        const picked = req.path ?? (await pickTaskFolder(event.sender))
+        if (!picked) return ok({ extraRoots: [], live: false, cancelled: true })
+        return ok(await updateRunExtraRoots(req.workspacePath, req.runId, { add: picked }))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (/run not found|invalid run status/i.test(msg)) return failExpected(msg, IPC.runsSetExtraRoots)
+        return failFrom(err, IPC.runsSetExtraRoots)
+      }
+    }
+  )
+
+  // Undo one hunk of a task file's diff, and put it back (the toast's Restore).
+  // The write stays waiting on review; the list and git hear of the change.
+  const hunkEdited = (workspacePath: string): void => {
+    invalidateListRunsCache(workspacePath)
+    invalidateGitStatusCache(workspacePath)
+    emitGitStatusChanged(workspacePath)
+  }
+  ipcMain.handle(IPC.runsUndoHunk, async (event, raw): Promise<IpcResult<UndoHunkResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = UndoHunkRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+      if (isActive(req.runId)) return failExpected('Stop the run before undoing part of a file.', IPC.runsUndoHunk)
+      const result = undoHunk(resolveRunDir(req.workspacePath, req.runId), req.workspacePath, req.runId, {
+        path: req.path,
+        hunk: req.hunk,
+        diffHash: req.diffHash
+      })
+      hunkEdited(req.workspacePath)
+      logger.info('Undid one hunk of an agent write', {
+        scope: 'ipc',
+        correlationId: req.runId,
+        channel: IPC.runsUndoHunk,
+        path: result.path
+      })
+      return ok(result)
+    } catch (err) {
+      if (err instanceof HunkUndoRefused) return failExpected(err.message, IPC.runsUndoHunk)
+      return failFrom(err, IPC.runsUndoHunk)
+    }
+  })
+  ipcMain.handle(IPC.runsRestoreHunk, async (event, raw): Promise<IpcResult<RestoreHunkResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = RestoreHunkRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+      if (isActive(req.runId)) return failExpected('Stop the run before putting the hunk back.', IPC.runsRestoreHunk)
+      const result = restoreHunk(
+        resolveRunDir(req.workspacePath, req.runId),
+        req.workspacePath,
+        req.runId,
+        req.restoreToken
+      )
+      hunkEdited(req.workspacePath)
+      return ok(result)
+    } catch (err) {
+      if (err instanceof HunkUndoRefused) return failExpected(err.message, IPC.runsRestoreHunk)
+      return failFrom(err, IPC.runsRestoreHunk)
+    }
+  })
+
   // One search per window at a time: a newer query stops the one before it.
   const runSearchGeneration = new Map<number, number>()
   ipcMain.handle(IPC.runsSearch, async (event, raw): Promise<IpcResult<RunSearchResult>> => {
@@ -2594,10 +2868,48 @@ export function registerIpc(): void {
           if (!isOpenWorkspace(p)) return fail('Workspace is not open')
         }
         return ok(
-          await collectHomeActivity(req.workspacePaths, new Date(), req.windowDays)
+          await collectHomeActivity(req.workspacePaths, new Date(), req.windowDays, {
+            ...(req.endDay ? { endDay: req.endDay } : {}),
+            ...(req.breakdown ? { breakdown: true } : {})
+          })
         )
       } catch (err) {
         return failFrom(err, IPC.homeActivity)
+      }
+    }
+  )
+
+  // Usage → Export CSV: the same window and attribution as the page, one row
+  // per task per day; main writes the file the user picks.
+  ipcMain.handle(
+    IPC.usageExportCsv,
+    async (event, raw): Promise<IpcResult<UsageExportResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = UsageExportRequestSchema.parse(raw)
+        for (const p of req.workspacePaths) {
+          if (!isOpenWorkspace(p)) return fail('Workspace is not open')
+        }
+        const now = new Date()
+        const rows = await collectUsageTaskDays(req.workspacePaths, now, req.windowDays, {
+          ...(req.endDay ? { endDay: req.endDay } : {})
+        })
+        const lastDay = req.endDay ?? localDayKeyOf(now.toISOString())
+        const days = lastDayKeys(lastDay, req.windowDays)
+        const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
+        const options: Electron.SaveDialogOptions = {
+          title: 'Export usage as CSV',
+          defaultPath: usageCsvFileName(days[0] ?? lastDay, lastDay),
+          filters: [{ name: 'CSV', extensions: ['csv'] }]
+        }
+        const dialogResult = parent
+          ? await dialog.showSaveDialog(parent, options)
+          : await dialog.showSaveDialog(options)
+        if (dialogResult.canceled || !dialogResult.filePath) return ok({ saved: false })
+        await writeFile(dialogResult.filePath, usageRowsToCsv(rows), 'utf8')
+        return ok({ saved: true, path: dialogResult.filePath, rows: rows.length })
+      } catch (err) {
+        return failFrom(err, IPC.usageExportCsv)
       }
     }
   )
@@ -2760,6 +3072,66 @@ export function registerIpc(): void {
         return ok({ saved: true, path: dialogResult.filePath })
       } catch (err) {
         return failFrom(err, IPC.runsExport)
+      }
+    }
+  )
+
+  // Task bundles: Export as JSON writes one, Import task… reads one back as a
+  // new, finished, read-only task (runBundle.ts).
+  ipcMain.handle(
+    IPC.runsExportJson,
+    async (event, raw): Promise<IpcResult<ExportRunResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = ExportRunRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+        const bundle = await buildRunBundle(req.workspacePath, req.runId, app.getVersion())
+        const text = serializeRunBundle(bundle)
+        const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
+        const safeTitle = bundle.task.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || req.runId
+        const options: Electron.SaveDialogOptions = {
+          title: 'Export task as JSON',
+          defaultPath: `${safeTitle}.json`,
+          filters: [{ name: 'Vyotiq task', extensions: ['json'] }]
+        }
+        const dialogResult = parent
+          ? await dialog.showSaveDialog(parent, options)
+          : await dialog.showSaveDialog(options)
+        if (dialogResult.canceled || !dialogResult.filePath) return ok({ saved: false })
+        await writeFile(dialogResult.filePath, text, 'utf8')
+        return ok({ saved: true, path: dialogResult.filePath })
+      } catch (err) {
+        if (err instanceof RunBundleError) return failExpected(err.message, IPC.runsExportJson)
+        return failFrom(err, IPC.runsExportJson)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.runsImport,
+    async (event, raw): Promise<IpcResult<ImportRunResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = ImportRunRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
+        const options: Electron.OpenDialogOptions = {
+          title: 'Import task',
+          properties: ['openFile'],
+          filters: [{ name: 'Vyotiq task', extensions: ['json'] }]
+        }
+        const picked = parent
+          ? await dialog.showOpenDialog(parent, options)
+          : await dialog.showOpenDialog(options)
+        const filePath = picked.filePaths[0]
+        if (picked.canceled || !filePath) return ok({ imported: false })
+        const bundle = await readRunBundleFile(filePath)
+        const result = await importRunBundle(req.workspacePath, bundle)
+        return ok({ imported: true, runId: result.runId, title: result.title })
+      } catch (err) {
+        if (err instanceof RunBundleError) return failExpected(err.message, IPC.runsImport)
+        return failFrom(err, IPC.runsImport)
       }
     }
   )
@@ -3102,6 +3474,100 @@ export function registerIpc(): void {
     }
   })
 
+  // ── Git sync (fetch / pull / push / new branch) — the person's click only ──
+  // A task live in this exact checkout is writing to its working tree, so a
+  // pull (or a branch started elsewhere) waits for it — as Commit does. A
+  // task in its own worktree has that worktree as its workspace and never
+  // matches here.
+  const runLiveInCheckout = (workspacePath: string): boolean =>
+    listActiveRuns().some((run) => workspacePathsEqual(run.workspacePath, workspacePath))
+  const gitSyncSettled = (workspacePath: string): void => {
+    invalidateGitStatusCache(workspacePath)
+    emitGitStatusChanged(workspacePath)
+  }
+
+  ipcMain.handle(IPC.gitFetch, async (event, raw): Promise<IpcResult<GitFetchResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitFetchRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      try {
+        return ok(await fetchRemotes(req.workspacePath))
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitFetch)
+      } finally {
+        gitSyncSettled(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitFetch)
+    }
+  })
+
+  ipcMain.handle(IPC.gitPull, async (event, raw): Promise<IpcResult<GitPullResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitPullRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (runLiveInCheckout(req.workspacePath)) {
+        return failExpected('A task is working in this checkout. Pull when it stops.', IPC.gitPull)
+      }
+      try {
+        return ok(await pullCurrentBranch(req.workspacePath, req.strategy ?? 'ff-only'))
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitPull)
+      } finally {
+        gitSyncSettled(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitPull)
+    }
+  })
+
+  ipcMain.handle(IPC.gitPush, async (event, raw): Promise<IpcResult<GitPushResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitPushRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      try {
+        return ok(await pushBranch(req.workspacePath, { setUpstream: req.setUpstream !== false }))
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitPush)
+      } finally {
+        gitSyncSettled(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitPush)
+    }
+  })
+
+  ipcMain.handle(IPC.gitCreateBranch, async (event, raw): Promise<IpcResult<GitCreateBranchResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitCreateBranchRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (req.from && req.checkout !== false && runLiveInCheckout(req.workspacePath)) {
+        return failExpected(
+          'A task is working in this checkout. Start a branch from elsewhere when it stops.',
+          IPC.gitCreateBranch
+        )
+      }
+      try {
+        return ok(
+          await createGitBranch(req.workspacePath, req.name, {
+            ...(req.from ? { from: req.from } : {}),
+            checkout: req.checkout !== false
+          })
+        )
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitCreateBranch)
+      } finally {
+        gitSyncSettled(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitCreateBranch)
+    }
+  })
+
   ipcMain.handle(IPC.gitLog, async (event, raw) => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -3187,15 +3653,25 @@ export function registerIpc(): void {
       const req = PrCreateRequestSchema.parse(raw)
       workspacePath = req.workspacePath
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-      return ok(
-        req.message
-          ? await prCreateFromChanges(req.workspacePath, req.message, req.mode, {
-              draft: req.draft,
-              title: req.title,
-              body: req.body
-            })
-          : await prCreate(req.workspacePath, { draft: req.draft, title: req.title, body: req.body })
-      )
+      if (!req.message) {
+        return ok(await prCreate(req.workspacePath, { draft: req.draft, title: req.title, body: req.body }))
+      }
+      // Committed from a task's Changes: the commit settles what it took of that task, as Commit does.
+      let task: TaskCommitSettled | undefined
+      const runId = req.runId
+      const result = await prCreateFromChanges(req.workspacePath, req.message, req.mode, {
+        draft: req.draft,
+        title: req.title,
+        body: req.body,
+        ...(runId
+          ? {
+              onCommitted: async (outcome) => {
+                task = await settleTaskAfterCommit(req.workspacePath, runId, outcome)
+              }
+            }
+          : {})
+      })
+      return ok(task ? { ...result, task } : result)
     } catch (err) {
       return failFrom(err, IPC.prCreate)
     } finally {
@@ -3261,6 +3737,76 @@ export function registerIpc(): void {
       return ok(await prEditTitle(req.workspacePath, req.title, req.number))
     } catch (err) {
       return failFrom(err, IPC.prEditTitle)
+    }
+  })
+
+  // ── PR review threads, open PR list, PR checkout ──
+  ipcMain.handle(IPC.prReviewThreads, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrReviewThreadsRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prReviewThreads(req.workspacePath, req.number))
+    } catch (err) {
+      return failFrom(err, IPC.prReviewThreads)
+    }
+  })
+
+  ipcMain.handle(IPC.prReviewThreadResolve, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrReviewThreadResolveRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prReviewThreadResolve(req.workspacePath, req.threadId, req.resolved))
+    } catch (err) {
+      return failFrom(err, IPC.prReviewThreadResolve)
+    }
+  })
+
+  ipcMain.handle(IPC.prReviewThreadReply, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrReviewThreadReplyRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prReviewThreadReply(req.workspacePath, req.threadId, req.body))
+    } catch (err) {
+      return failFrom(err, IPC.prReviewThreadReply)
+    }
+  })
+
+  ipcMain.handle(IPC.prList, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrListRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prList(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.prList)
+    }
+  })
+
+  ipcMain.handle(IPC.prCheckout, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    let workspacePath: string | null = null
+    try {
+      const req = PrCheckoutRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      // A task working in this checkout would find its files swapped under it.
+      const running = listActiveRuns().filter((run) => workspacePathsEqual(run.workspacePath, req.workspacePath))
+      if (running.length > 0) {
+        return fail(
+          `A task is running in this checkout. Stop it or wait for it to finish before checking out pull request #${req.number}.`
+        )
+      }
+      workspacePath = req.workspacePath
+      return ok(await prCheckout(req.workspacePath, req.number))
+    } catch (err) {
+      return failFrom(err, IPC.prCheckout)
+    } finally {
+      if (workspacePath) {
+        invalidateGitStatusCache(workspacePath)
+        emitGitStatusChanged(workspacePath)
+      }
     }
   })
 
@@ -3455,6 +4001,19 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(
+    IPC.diagnosticsExport,
+    async (event, raw): Promise<IpcResult<DiagnosticsExportResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        DiagnosticsExportRequestSchema.parse(raw ?? {})
+        return ok(await exportDiagnostics(BrowserWindow.fromWebContents(event.sender)))
+      } catch (err) {
+        return failFrom(err, IPC.diagnosticsExport)
+      }
+    }
+  )
+
+  ipcMain.handle(
     IPC.crashRecoveryConsume,
     async (event): Promise<IpcResult<CrashRecoveryPending | null>> => {
       if (!senderOk(event)) return fail('Invalid sender')
@@ -3540,6 +4099,17 @@ export function registerIpc(): void {
       })
     } catch (err) {
       return failFrom(err, IPC.appInfo)
+    }
+  })
+
+  ipcMain.handle(IPC.sandboxCapability, async (event, raw): Promise<IpcResult<SandboxCapability>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      SandboxCapabilityRequestSchema.parse(raw ?? {})
+      // Re-detect: Settings asks when it opens, so a just-installed bwrap counts.
+      return ok(SandboxCapabilitySchema.parse(getSandboxCapability({ refresh: true })))
+    } catch (err) {
+      return failFrom(err, IPC.sandboxCapability)
     }
   })
 

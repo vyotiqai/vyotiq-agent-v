@@ -213,6 +213,25 @@ describe('scrubber', () => {
     expect(scrubbed.ok).toBe(true)
   })
 
+  it('keeps token counts but still redacts token values', () => {
+    const scrubbed = scrubValue({
+      maxTokens: 8192,
+      maxOutputTokens: 4096,
+      cacheReadTokens: 12,
+      thinkingTokenBudget: 2048,
+      accessTokens: ['tok-a'],
+      secretTokens: 'x',
+      githubToken: 'ghp-x'
+    }) as Record<string, unknown>
+    expect(scrubbed.maxTokens).toBe(8192)
+    expect(scrubbed.maxOutputTokens).toBe(4096)
+    expect(scrubbed.cacheReadTokens).toBe(12)
+    expect(scrubbed.thinkingTokenBudget).toBe(2048)
+    expect(scrubbed.accessTokens).toBe('[redacted]')
+    expect(scrubbed.secretTokens).toBe('[redacted]')
+    expect(scrubbed.githubToken).toBe('[redacted]')
+  })
+
   it('preserves Error message/name when scrubbing LogFields.err', () => {
     const err = new AppError('failed with sk-abcdefghijklmnop', {
       code: 'PROVIDER_HTTP',

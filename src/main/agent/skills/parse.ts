@@ -188,6 +188,50 @@ export function expandSkillMarkdown(raw: string): string {
   return `---\n${expanded}\n---\n\n${rest}`
 }
 
+/**
+ * Split any markdown file with `---` YAML frontmatter into its raw YAML, the
+ * flat fields this parser reads, and the body. Null when the file has no
+ * closed frontmatter block. Shared with agent-type definitions (agentTypes.ts),
+ * which use the same subset of YAML as SKILL.md.
+ */
+export function parseMarkdownFrontmatter(
+  raw: string
+): { yaml: string; fields: Record<string, string | Record<string, string>>; body: string } | null {
+  const trimmed = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
+  if (!trimmed.startsWith('---')) return null
+  const end = trimmed.indexOf('\n---', 3)
+  if (end < 0) return null
+  const yaml = trimmed.slice(3, end).trim()
+  // Skip the rest of the closing fence line (`---` plus any trailing spaces).
+  const afterFence = trimmed.slice(end + 4).replace(/^[^\S\r\n]*/, '')
+  const body = afterFence.replace(/^\r?\n/, '')
+  return { yaml, fields: parseFrontmatterFields(yaml), body }
+}
+
+/**
+ * `allowed-tools` as one string, whichever way the skill wrote it: a scalar
+ * (`Read, Grep`), a flow list (`[Read, Grep]`) or a block list (`- Read`).
+ * An empty field is no field — the schema refuses an empty string, and that
+ * used to drop the whole skill.
+ */
+function allowedToolsField(yaml: string, value: string | Record<string, string> | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const flow = /^\[(.*)\]$/s.exec(value.trim())
+  if (flow) return flow[1]!.trim() || undefined
+  if (value.trim()) return value.trim()
+  const lines = yaml.split(/\r?\n/)
+  const at = lines.findIndex((line) => /^allowed-tools:\s*$/.test(line.trim()) && !/^\s/.test(line))
+  if (at < 0) return undefined
+  const items: string[] = []
+  for (const line of lines.slice(at + 1)) {
+    if (!line.trim()) continue
+    const item = /^\s*-\s+(.+)$/.exec(line)
+    if (!item) break
+    items.push(stripQuotes(item[1]!.trim()))
+  }
+  return items.filter(Boolean).join(', ') || undefined
+}
+
 export function parseSkillFrontmatter(raw: string): SkillFrontmatter & { body: string } {
   const trimmed = expandSkillMarkdown(raw.replace(/^\uFEFF/, ''))
   if (!trimmed.startsWith('---')) {
@@ -216,8 +260,7 @@ export function parseSkillFrontmatter(raw: string): SkillFrontmatter & { body: s
     license: typeof fields.license === 'string' ? fields.license : undefined,
     compatibility: typeof fields.compatibility === 'string' ? fields.compatibility : undefined,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    'allowed-tools':
-      typeof fields['allowed-tools'] === 'string' ? fields['allowed-tools'] : undefined,
+    'allowed-tools': allowedToolsField(yaml, fields['allowed-tools']),
     'disable-model-invocation':
       typeof fields['disable-model-invocation'] === 'string'
         ? fields['disable-model-invocation']

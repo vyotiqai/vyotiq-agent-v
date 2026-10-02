@@ -58,10 +58,13 @@ import {
 import { toolSkill, summarizeSkillArgs } from './skill'
 import { toolDiagnosticsAsync } from './diagnostics'
 import { toolRunTestsAsync } from './runTests'
+import { AGENT_BUILT_TOOL_SANDBOX_REFUSAL, prepareAgentSandbox } from '../sandbox'
 import { toolEditNotebookAsync, type EditNotebookArgs } from './editNotebook'
 import { toolLsp, applyLspRenameEdits } from './lsp'
 import { getSettings } from '@main/settings/settings'
 import { getWriteCheckpoint } from '../checkpoints'
+import { routeExtraRootToolCall } from '../extraRoots'
+import { extraRootDisplayPath } from '../../../shared/extraRoots'
 import { isBinaryGitPatch, patchTouchedPaths } from './applyPatch'
 import { applyMcpFilesystemMutations, recordMcpFilesystemPriors } from './mcpCheckpoint'
 import { noteInlineInstanceDeniedTool } from '../agentInstances'
@@ -143,8 +146,17 @@ export type ToolExecutionContext = {
    * stay on the worktree.
    */
   sessionWorkspace?: string
+  /**
+   * Added folders (extraRoots.ts): an absolute path inside one runs read,
+   * edit, list_dir, glob, grep… there. Relative paths always mean the workspace.
+   */
+  extraRoots?: readonly string[]
+  /** Set by executeTool when this call was routed to an added folder: that folder. */
+  extraRoot?: string
   /** True when this invoke is a depth-1 inline instance (avoids extra status.json reads). */
   inlineInstance?: boolean
+  /** A typed helper's tool allowlist (agentTypes.ts); absent = unrestricted. */
+  toolAllowlist?: readonly string[]
   /** Run that owns this call; required for ask_question. */
   runId?: string
   /** Provider tool-call id; required for ask_question. */
@@ -226,6 +238,33 @@ export type ToolExecutionContext = {
    * Parent tool-approval gate.
    */
   approval?: ToolApprovalGate
+}
+
+/**
+ * What grep/search leave out: files a permission rule denies or asks before
+ * reading. The gate asks per call; a search reads many files at once, so a
+ * protected file's contents stay out of it instead.
+ */
+function searchHidePath(
+  context: ToolExecutionContext,
+  toolName: 'grep' | 'search' | 'codebase_search' | 'concept_search'
+): ((rel: string) => boolean) | undefined {
+  const gate = context.approval
+  if (!gate?.hidesFromSearch) return undefined
+  // In an added folder the rules see the file's absolute path.
+  const root = context.extraRoot
+  if (root) return (rel) => gate.hidesFromSearch?.(toolName, extraRootDisplayPath(root, rel)) === true
+  return (rel) => gate.hidesFromSearch?.(toolName, rel) === true
+}
+
+/** Workspace caches and the code index follow workspace writes; an added folder has neither. */
+function invalidateAfterToolMutation(
+  workspace: string,
+  context: ToolExecutionContext,
+  mutatedRelPath?: string | string[]
+): void {
+  if (context.extraRoot) return
+  invalidateAfterWorkspaceMutation(workspace, mutatedRelPath)
 }
 
 export type ToolHandler = (
@@ -417,50 +456,56 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       await getWriteCheckpoint(context.runDir)?.recordPrior(path, 'write')
     }
     const content = await toolEditAsync(workspace, path, contents, diff)
-    invalidateAfterWorkspaceMutation(workspace, path)
+    invalidateAfterToolMutation(workspace, context, path)
     return toolOk('edit', path, content)
   },
-  search: async (workspace, args, signal) => {
+  search: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const query = args.query as string
     const maxResults = typeof args.maxResults === 'number' ? args.maxResults : undefined
     const regex = args.regex === true
-    const content = await toolSearch(workspace, query, maxResults, signal, regex)
+    const content = await toolSearch(workspace, query, maxResults, signal, regex, undefined, searchHidePath(context, 'search'), {
+      path: typeof args.path === 'string' ? args.path : undefined,
+      // Routed into an added folder (extraRoots.ts): hits are cited absolute, as grep cites them.
+      ...(context.extraRoot ? { displayRoot: context.extraRoot } : {})
+    })
     throwIfAborted(signal)
     return toolOk('search', query, content)
   },
-  glob: async (workspace, args, signal) => {
+  glob: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const pattern = args.pattern as string
     const maxResults = typeof args.maxResults === 'number' ? args.maxResults : undefined
-    const content = await toolGlob(workspace, pattern, maxResults, signal)
+    const content = await toolGlob(workspace, pattern, maxResults, signal, undefined, context.extraRoot)
     throwIfAborted(signal)
     return toolOk('glob', pattern, content)
   },
-  codebase_search: async (workspace, args, signal) => {
+  codebase_search: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const query = args.query as string
     const content = await toolCodebaseSearch(workspace, query, {
       maxResults:
         typeof args.maxResults === 'number' ? args.maxResults : CODEBASE_SEARCH_DEFAULT_LIMIT,
       refresh: args.refresh === true,
-      signal
+      signal,
+      hidePath: searchHidePath(context, 'codebase_search')
     })
     throwIfAborted(signal)
     return toolOk('codebase_search', query, content)
   },
-  concept_search: async (workspace, args, signal) => {
+  concept_search: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const query = args.query as string
     const content = await toolConceptSearch(workspace, query, {
       maxResults:
         typeof args.maxResults === 'number' ? args.maxResults : CONCEPT_SEARCH_DEFAULT_LIMIT,
-      signal
+      signal,
+      hidePath: searchHidePath(context, 'concept_search')
     })
     throwIfAborted(signal)
     return toolOk('concept_search', query, content)
   },
-  grep: async (workspace, args, signal) => {
+  grep: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const pattern = args.pattern as string
     const content = await toolGrep(
@@ -470,7 +515,9 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
         include: typeof args.include === 'string' ? args.include : undefined,
         caseSensitive: args.caseSensitive === true,
         contextLines: typeof args.contextLines === 'number' ? args.contextLines : undefined,
-        maxResults: typeof args.maxResults === 'number' ? args.maxResults : undefined
+        maxResults: typeof args.maxResults === 'number' ? args.maxResults : undefined,
+        hidePath: searchHidePath(context, 'grep'),
+        ...(context.extraRoot ? { displayRoot: context.extraRoot } : {})
       },
       signal
     )
@@ -495,7 +542,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       readString(args, 'new_string') ?? '',
       args.replace_all === true
     )
-    invalidateAfterWorkspaceMutation(workspace, path)
+    invalidateAfterToolMutation(workspace, context, path)
     return toolOk('str_replace', path, content)
   },
   delete: async (workspace, args, signal, context) => {
@@ -508,7 +555,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       })
     }
     const content = await toolDeleteAsync(workspace, path, recursive)
-    invalidateAfterWorkspaceMutation(workspace, path)
+    invalidateAfterToolMutation(workspace, context, path)
     return toolOk('delete', path, content)
   },
   todo_write: (_workspace, args, signal, context) => {
@@ -753,19 +800,34 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
   diagnostics: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const kind = args.kind === 'lint' ? 'lint' : 'typecheck'
+    const sandbox = prepareAgentSandbox({
+      workspace,
+      extraRoots: context.extraRoots,
+      settings: getSettings().agentSandbox
+    })
+    if (sandbox.state === 'unavailable') return toolFail('diagnostics', kind, sandbox.message)
     const result = await toolDiagnosticsAsync(
       workspace,
       kind,
       signal,
-      context.diagnosticsCommand
+      context.diagnosticsCommand,
+      { sandbox: sandbox.state === 'on' ? sandbox.launch : undefined }
     )
     throwIfAborted(signal)
     if (!result.ok) return toolFail('diagnostics', kind, result.content)
     return toolOk('diagnostics', kind, result.content)
   },
-  run_tests: async (workspace, args, signal) => {
+  run_tests: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
-    const result = await toolRunTestsAsync(workspace, args, signal)
+    const sandbox = prepareAgentSandbox({
+      workspace,
+      extraRoots: context.extraRoots,
+      settings: getSettings().agentSandbox
+    })
+    if (sandbox.state === 'unavailable') return toolFail('run_tests', 'run_tests', sandbox.message)
+    const result = await toolRunTestsAsync(workspace, args, signal, {
+      sandbox: sandbox.state === 'on' ? sandbox.launch : undefined
+    })
     throwIfAborted(signal)
     if (!result.ok) return toolFail('run_tests', result.command, result.content)
     return toolOk('run_tests', result.command, result.content)
@@ -777,7 +839,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       await getWriteCheckpoint(context.runDir)?.recordPrior(path, 'write')
     }
     const content = await toolEditNotebookAsync(workspace, args as EditNotebookArgs)
-    invalidateAfterWorkspaceMutation(workspace, path)
+    invalidateAfterToolMutation(workspace, context, path)
     return toolOk('edit_notebook', path, content)
   },
   lsp: async (workspace, args, signal, context) => {
@@ -992,7 +1054,8 @@ export async function executeTool(
     const parsed = parseToolArgs(name, argsJson)
     const modeGate = assertToolAllowedInMode(agentMode, name, parsed, {
       autoModeSwitch: context.autoModeSwitch,
-      inlineInstance: context.inlineInstance === true
+      inlineInstance: context.inlineInstance === true,
+      toolAllowlist: context.toolAllowlist
     })
     if (!modeGate.ok) return toolFail(name, name, modeGate.error)
     try {
@@ -1006,6 +1069,11 @@ export async function executeTool(
       return toolFail(name, name, formatError(err))
     }
     const summary = `${name} (agent-built)`
+    // The module runs in an Electron utility process, which no OS wrapper can
+    // be put around. With the sandbox on, refusing beats running it unconfined.
+    if (getSettings().agentSandbox?.mode === 'workspace-write') {
+      return toolFail(name, summary, AGENT_BUILT_TOOL_SANDBOX_REFUSAL)
+    }
     try {
       const outcome = await runAgentTool(agentBuilt, parsed)
       if (!outcome.ok) {
@@ -1027,7 +1095,8 @@ export async function executeTool(
     const parsed = parseToolArgs(name, argsJson)
     const modeGate = assertToolAllowedInMode(agentMode, name, parsed, {
       autoModeSwitch: context.autoModeSwitch,
-      inlineInstance: context.inlineInstance === true
+      inlineInstance: context.inlineInstance === true,
+      toolAllowlist: context.toolAllowlist
     })
     if (!modeGate.ok) {
       return toolFail(name, name, modeGate.error)
@@ -1151,7 +1220,8 @@ export async function executeTool(
     validation.ok && !browserSelectWithoutTarget ? validation.data : args
   const modeGate = assertToolAllowedInMode(agentMode, name, validatedArgs, {
     autoModeSwitch: context.autoModeSwitch,
-    inlineInstance: context.inlineInstance === true
+    inlineInstance: context.inlineInstance === true,
+    toolAllowlist: context.toolAllowlist
   })
   if (!modeGate.ok) {
     return toolFail(name, summarizeToolArgsFromRecord(name, validatedArgs), modeGate.error)
@@ -1213,6 +1283,20 @@ export async function executeTool(
     effectiveArgs = { ...args, path: remapPathArg(pathArg) }
     if (name === 'edit' || name === 'str_replace') {
       effectiveContext = { ...context, skipWriteCheckpoint: true }
+    }
+  }
+
+  // Added folders (extraRoots.ts): an absolute path inside one runs the call
+  // there, under the same symlink-escape check the workspace gets. Every
+  // guard below is for the workspace's own tree and keys off
+  // `effectiveWorkspace === workspace`, so a routed call skips them; the
+  // permission rules already ran on its absolute path at the gate.
+  if (!remapRunArtifact && context.extraRoots?.length) {
+    const routed = routeExtraRootToolCall(name, effectiveArgs, workspace, context.extraRoots)
+    if (routed) {
+      effectiveWorkspace = routed.root
+      effectiveArgs = routed.args
+      effectiveContext = { ...effectiveContext, extraRoot: routed.root }
     }
   }
 
@@ -1345,7 +1429,7 @@ export async function executeTool(
   // Memory stays on the session workspace (notes live there).
   // codebase_search, grep, glob, search, read, and edits run on the worktree
   // so child indexes and hits match the files the instance is editing.
-  if (effectiveContext.sessionWorkspace && usesSessionWorkspaceIndex(name)) {
+  if (effectiveContext.sessionWorkspace && !effectiveContext.extraRoot && usesSessionWorkspaceIndex(name)) {
     effectiveWorkspace = effectiveContext.sessionWorkspace
   }
 

@@ -23,6 +23,7 @@ import type { TerminalShell } from '../../../shared/ipc'
 import { lowerProcessPriority } from '../processPriority'
 import { logger } from '../../../shared/logger'
 import { registerRunCancelHooks } from '../runRegistry'
+import type { SandboxLaunch } from '../sandbox/wrap'
 
 export type TerminalSessionStatus = 'running' | 'done' | 'timeout' | 'pattern_matched' | 'aborted'
 
@@ -46,6 +47,8 @@ type TerminalSession = {
   cwd: string
   command: string
   shell: ResolvedTerminalShell
+  /** Set when the shell runs inside the OS sandbox; every poll frame says so. */
+  sandbox?: Pick<SandboxLaunch, 'label' | 'network'>
   child: ChildProcess
   stdout: string
   stderr: string
@@ -273,7 +276,8 @@ function formatSession(session: TerminalSession): string {
     stderr: session.stderr,
     exitCode: session.exitCode,
     sessionId: session.id,
-    status: session.status
+    status: session.status,
+    sandbox: session.sandbox
   })
 }
 
@@ -330,6 +334,8 @@ export type StartBackgroundTerminalOpts = {
   onOutput?: (chunk: { text: string; stream: 'stdout' | 'stderr' }) => void
   /** Forwarded to the inner poll — fired when the process outlives the wait window. */
   onStillRunning?: (sessionId: string) => void
+  /** Run the shell inside this OS sandbox (main/agent/sandbox). Absent = unsandboxed. */
+  sandbox?: SandboxLaunch
 }
 
 export async function startBackgroundTerminal(
@@ -394,7 +400,8 @@ export async function startBackgroundTerminal(
     }
   }
 
-  const child = spawn(spec.bin, spec.args, {
+  const launch = opts.sandbox ? opts.sandbox.wrap(spec.bin, spec.args) : spec
+  const child = spawn(launch.bin, launch.args, {
     cwd,
     env: sanitizedTerminalEnv(),
     windowsHide: true
@@ -409,6 +416,7 @@ export async function startBackgroundTerminal(
     cwd,
     command,
     shell: resolved,
+    sandbox: opts.sandbox ? { label: opts.sandbox.label, network: opts.sandbox.network } : undefined,
     child,
     stdout: '',
     stderr: '',

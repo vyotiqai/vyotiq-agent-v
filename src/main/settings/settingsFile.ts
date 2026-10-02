@@ -56,6 +56,7 @@ export const EXPORTED_KEYS: readonly Key[] = [
   'browserDomainAllowlist',
   'terminalShell',
   'terminalScreenReader',
+  'agentSandbox',
   'diagnosticsCommand',
   'autoModeSwitch',
   'autoResumeInterruptedRuns',
@@ -64,6 +65,7 @@ export const EXPORTED_KEYS: readonly Key[] = [
   'taskSpendLimitUsd',
   'helperModel',
   'utilityModel',
+  'modelFallback',
   'maxChatPanes',
   'autoCheckUpdates',
   'codeIndex',
@@ -94,6 +96,7 @@ export const IMPORT_SKIPPED_KEYS: ReadonlyMap<Key, string> = new Map<Key, string
   ['telemetryEnabled', 'crash reporting'],
   ['diagnosticsCommand', 'a command the app runs'],
   ['toolApproval', 'what runs without asking'],
+  ['agentSandbox', 'the command sandbox'],
   ['browserDomainAllowlist', 'sites the browser opens without asking'],
   ['autonomousMode', 'autonomous mode'],
   ['autonomousSkipQuestions', 'autonomous mode']

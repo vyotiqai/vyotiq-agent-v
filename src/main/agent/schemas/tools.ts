@@ -133,6 +133,10 @@ const searchArgs = z
     regex: z
       .boolean()
       .describe('Treat query as case-insensitive regex (default false)')
+      .optional(),
+    path: z
+      .string()
+      .describe('Optional folder to search: workspace-relative, or absolute inside an added folder.')
       .optional()
   })
 
@@ -1018,6 +1022,15 @@ const spawnAgentInstanceArgs = z.object({
     .boolean()
     .describe(
       'true for a child that only reads and reports (analysis, review, research): it runs in Ask mode — read-only tools, no terminal, no edits — directly in this workspace, with no worktree to create and nothing to merge.'
+    )
+    .optional(),
+  agent_type: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .describe(
+      'Name of a helper type from the Agent types list in your instructions (user-defined markdown files). The child runs with that type’s instructions, tool list and model. Omit for a general helper.'
     )
     .optional()
 })

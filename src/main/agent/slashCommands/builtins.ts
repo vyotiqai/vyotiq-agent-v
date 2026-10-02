@@ -109,6 +109,15 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     kind: 'builtin',
     group: 'App',
     availability: 'ready'
+  },
+  {
+    id: 'builtin:add-dir',
+    trigger: 'add-dir',
+    label: 'Add folder',
+    description: 'Let this task also work in another folder. /add-dir <absolute path>, or no path to pick one',
+    kind: 'builtin',
+    group: 'App',
+    availability: 'ready'
   }
 ]
 
@@ -169,6 +178,11 @@ export function resolveBuiltin(
         clientAction: 'loop_set',
         trailingText: trailingText.trim()
       }
+    }
+    case 'builtin:add-dir': {
+      // Quotes are how a path with spaces is usually pasted.
+      const path = trailingText.trim().replace(/^(["'])(.*)\1$/, '$2').trim()
+      return { action: 'client', clientAction: 'add_dir', ...(path ? { trailingText: path } : {}) }
     }
     default:
       return null

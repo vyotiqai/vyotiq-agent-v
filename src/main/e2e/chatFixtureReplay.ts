@@ -1,10 +1,11 @@
 import { readFileSync } from 'fs'
 import { isAbsolute, join } from 'path'
-import type { AgentEvent, AgentInteractionMode } from '../../shared/ipc'
+import type { AgentEvent, AgentInteractionMode, RunScheduled } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import { clearRunAbort, streamSignalFor } from '../agent/runRegistry'
 import { commandGuardFor, createApprovalGate, type ToolApprovalGate } from '../agent/toolApproval'
+import { appUserDataDir, loadRunPermissionPolicy } from '../agent/permissions'
 import { persistAlwaysAllow } from '../agent/toolApprovalStore'
 import { persistTaskAllow, readTaskAllowlist } from '../agent/taskApprovalStore'
 import { getSettings } from '../settings/settings'
@@ -98,7 +99,13 @@ function fixtureApprovalGate(input: { runId: string; invokeId: number; workspace
     persistAlways: (toolName) => persistAlwaysAllow(input.workspacePath, toolName),
     taskAllowlist: readTaskAllowlist(runDir),
     persistTask: (toolName) => void persistTaskAllow(runDir, toolName),
-    commandGuard: commandGuardFor(input.workspacePath, getSettings().terminalShell)
+    commandGuard: commandGuardFor(input.workspacePath, getSettings().terminalShell),
+    permissions: loadRunPermissionPolicy({
+      settingsRules: (effective.toolApproval ?? DEFAULT_SETTINGS.toolApproval).rules ?? [],
+      workspace: input.workspacePath,
+      toolWorkspace: input.workspacePath,
+      userDataDir: appUserDataDir()
+    })
   })
 }
 
@@ -134,6 +141,8 @@ export async function* replayChatFixture(input: {
   mode?: AgentInteractionMode
   /** A new task's checks — the run is created as runAgent would create it. */
   doneWhen?: string[]
+  /** A run a repeating schedule started. */
+  scheduled?: RunScheduled
 }): AsyncGenerator<AgentEvent> {
   const signal = streamSignalFor(input.runId, input.runSignal)
   // The fixture replaces the whole event stream, so `runAgent` — and with it
@@ -144,7 +153,8 @@ export async function* replayChatFixture(input: {
   if (!runExists(input.workspacePath, input.runId)) {
     createRun(input.workspacePath, input.runId, input.goal ?? 'chat', {
       mode: input.mode ?? 'agent',
-      ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {})
+      ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {}),
+      ...(input.scheduled ? { scheduled: input.scheduled } : {})
     })
   }
   const persistStatus = async (status: 'done' | 'error' | 'cancelled'): Promise<void> => {

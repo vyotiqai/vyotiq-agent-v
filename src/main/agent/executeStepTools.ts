@@ -160,8 +160,12 @@ export type ToolStepContext = {
   workspace: string
   /** Parent/session workspace when `workspace` is an instance worktree. */
   sessionWorkspace?: string
+  /** Added folders the file tools may also reach by absolute path (extraRoots.ts). */
+  extraRoots?: readonly string[]
   /** True when this invoke is a depth-1 inline instance. */
   inlineInstance?: boolean
+  /** A typed helper's tool allowlist (agentTypes.ts); absent = unrestricted. */
+  toolAllowlist?: readonly string[]
   /** Combined run cancel + soft stream / follow-up interrupt. */
   signal: AbortSignal
   /** Run-level cancel only — distinguishes Interrupted vs Cancelled. */
@@ -488,7 +492,9 @@ async function runSingleTool(
     const pending = executeTool(call.name, call.arguments, ctx.workspace, toolSignal, {
       runDir: ctx.runDir,
       sessionWorkspace: ctx.sessionWorkspace,
+      extraRoots: ctx.extraRoots,
       inlineInstance: ctx.inlineInstance,
+      toolAllowlist: ctx.toolAllowlist,
       runId: ctx.runId,
       toolCallId: call.id,
       invokeId: ctx.invokeId,
@@ -530,6 +536,10 @@ async function runSingleTool(
     const result = await (DEADLINE_EXEMPT_TOOLS.has(call.name)
       ? pending
       : raceToolDeadline(pending, call.name, () => deadlineController.abort()))
+    // A loaded skill's allowed-tools pre-approve from here to the end of the invoke.
+    if (result.ok && canonicalizeAgentToolName(call.name) === 'Skill' && typeof toolArgs.name === 'string') {
+      ctx.approval?.activateSkill?.(toolArgs.name)
+    }
     let content = result.content
     if (result.ok && unreadPaths.length > 0) {
       content = `${content}\n\n[Soft warning: edited existing file(s) without a prior read/grep/glob/codebase_search inspect: ${unreadPaths.join(', ')}]`

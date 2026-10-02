@@ -266,6 +266,44 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   system: true
 }
 
+/** What a permission rule does to a call it matches. Precedence: deny > ask > allow. */
+export const PermissionRuleEffectSchema = z.enum(['allow', 'ask', 'deny'])
+export type PermissionRuleEffect = z.infer<typeof PermissionRuleEffectSchema>
+
+/**
+ * One permission rule (Settings → Agent → Permission rules, or a workspace's
+ * `.vyotiq/permissions.json`). Every matcher it sets must match:
+ *
+ * - `tool`: the tool's name; `*` is a wildcard (`mcp__github__*`).
+ * - `command`: a terminal command prefix, word for word (`git push`). A deny or
+ *   ask matches the prefix anywhere in a chain; an allow only a simple command.
+ * - `path`: a glob (`**`, `*`, `?`, `{a,b}`). Workspace-relative, absolute, or
+ *   from `~/`; one with no `/` matches that name at any depth, and a match on
+ *   a folder covers everything in it.
+ */
+export const PermissionRuleSchema = z
+  .object({
+    effect: PermissionRuleEffectSchema,
+    tool: z.string().trim().min(1).max(200).optional(),
+    command: z.string().trim().min(1).max(500).optional(),
+    path: z.string().trim().min(1).max(500).optional()
+  })
+  .refine((rule) => Boolean(rule.tool || rule.command || rule.path), {
+    message: 'A permission rule needs a tool, a command or a path'
+  })
+export type PermissionRule = z.infer<typeof PermissionRuleSchema>
+
+/**
+ * A list of rules that drops the entries it cannot read rather than failing:
+ * one hand-edited typo must not quarantine the whole settings file.
+ */
+export const PermissionRulesSchema = z.array(z.unknown()).transform((items) =>
+  items.flatMap((item) => {
+    const parsed = PermissionRuleSchema.safeParse(item)
+    return parsed.success ? [parsed.data] : []
+  })
+)
+
 export const ToolApprovalSettingsSchema = z.object({
   mode: ToolApprovalModeSchema.default('off'),
   /** Tool names the user chose to always allow, persisted per workspace. */
@@ -274,15 +312,54 @@ export const ToolApprovalSettingsSchema = z.object({
    * When true, MCP server tools (`mcp__*`) require approval even if `mode` is off.
    * Built-in MCP meta tools (list/pin/release) follow `mode` only. Default on.
    */
-  mcpProtection: z.boolean().default(true)
+  mcpProtection: z.boolean().default(true),
+  /** Permission rules, checked before the mode and the allowlist (deny > ask > allow). */
+  rules: PermissionRulesSchema.default([])
 })
 export type ToolApprovalSettings = z.infer<typeof ToolApprovalSettingsSchema>
 
 export const DEFAULT_TOOL_APPROVAL: ToolApprovalSettings = {
   mode: 'off',
   allowlist: [],
-  mcpProtection: true
+  mcpProtection: true,
+  rules: []
 }
+
+/**
+ * OS-level confinement for commands the agent runs (terminal, run_tests,
+ * diagnostics). `workspace-write` lets a command read the disk but write only
+ * the workspace, temp and package caches (main/agent/sandbox). Off by default.
+ */
+export const AgentSandboxModeSchema = z.enum(['off', 'workspace-write'])
+export type AgentSandboxMode = z.infer<typeof AgentSandboxModeSchema>
+
+export const AgentSandboxNetworkSchema = z.enum(['allow', 'deny'])
+export type AgentSandboxNetwork = z.infer<typeof AgentSandboxNetworkSchema>
+
+export const AgentSandboxSettingsSchema = z.object({
+  mode: AgentSandboxModeSchema.catch('off').default('off'),
+  /** `deny` cuts sandboxed commands off the network (localhost stays on macOS). */
+  network: AgentSandboxNetworkSchema.catch('allow').default('allow')
+})
+export type AgentSandboxSettings = z.infer<typeof AgentSandboxSettingsSchema>
+
+export const DEFAULT_AGENT_SANDBOX: AgentSandboxSettings = {
+  mode: 'off',
+  network: 'allow'
+}
+
+/** Whether this machine can sandbox agent commands, and why not when it can't. */
+export const SandboxCapabilitySchema = z.object({
+  available: z.boolean(),
+  /** `seatbelt` = macOS sandbox-exec, `bubblewrap` = Linux bwrap. */
+  mechanism: z.enum(['seatbelt', 'bubblewrap']).nullable(),
+  /** Why it is unavailable, in words fit to show; null when available. */
+  reason: z.string().nullable()
+})
+export type SandboxCapability = z.infer<typeof SandboxCapabilitySchema>
+
+/** `getSandboxCapability` takes no arguments; the preload sends `{}`. */
+export const SandboxCapabilityRequestSchema = z.object({}).strict()
 
 export const CodeIndexSettingsSchema = z.object({
   enabled: z.boolean().default(true),
@@ -605,6 +682,38 @@ export const ModelRefSchema = z.object({
 })
 export type ModelRef = z.infer<typeof ModelRefSchema>
 
+/** Most fallback models that can stand behind the task's model. */
+export const MAX_FALLBACK_MODELS = 3
+
+/**
+ * Models a step moves to when the task's provider is down (5xx/529,
+ * connection refused/reset, DNS, timeouts) — never on a usage limit or rate
+ * limit, which keep waiting on the task's own model (main/agent/modelFallback.ts).
+ * Unreadable entries and repeats are dropped, and the list is capped, rather
+ * than failing the settings file.
+ */
+export const ModelFallbackSettingsSchema = z.object({
+  enabled: z.boolean().catch(false).default(false),
+  models: z
+    .array(z.unknown())
+    .catch([])
+    .transform((items) => {
+      const out: ModelRef[] = []
+      for (const item of items) {
+        const parsed = ModelRefSchema.safeParse(item)
+        if (!parsed.success) continue
+        if (out.some((m) => m.provider === parsed.data.provider && m.model === parsed.data.model)) continue
+        out.push(parsed.data)
+        if (out.length === MAX_FALLBACK_MODELS) break
+      }
+      return out
+    })
+    .default([])
+})
+export type ModelFallbackSettings = z.infer<typeof ModelFallbackSettingsSchema>
+
+export const DEFAULT_MODEL_FALLBACK: ModelFallbackSettings = { enabled: false, models: [] }
+
 export const SettingsSchema = z.object({
   provider: ProviderIdSchemaAny,
   model: z.string().min(1),
@@ -688,6 +797,8 @@ export const SettingsSchema = z.object({
    * it on without a screen reader costs significant CPU on chatty output.
    */
   terminalScreenReader: z.enum(['auto', 'on', 'off']).default('auto'),
+  /** OS sandbox for agent-run commands. Never applies to the terminal panel you type into. */
+  agentSandbox: AgentSandboxSettingsSchema.catch(DEFAULT_AGENT_SANDBOX).default(DEFAULT_AGENT_SANDBOX),
   /**
    * Optional override for the diagnostics tool typecheck command.
    * Empty = auto-detect from package.json scripts / tsc.
@@ -732,6 +843,8 @@ export const SettingsSchema = z.object({
    * model; only the summary is written by this one.
    */
   utilityModel: ModelRefSchema.nullable().default(null),
+  /** Fallback models for when the task's provider is down. Off by default. */
+  modelFallback: ModelFallbackSettingsSchema.catch(DEFAULT_MODEL_FALLBACK).default(DEFAULT_MODEL_FALLBACK),
   /**
    * Maximum simultaneously visible chat panes (split session view). 0 = Auto:
    * derived from the viewport (min 280px per pane, hard cap 6). 1–6 is a fixed
@@ -830,6 +943,7 @@ export const DEFAULT_SETTINGS: Settings = {
   toolApprovalOnboardingDone: false,
   terminalShell: 'auto',
   terminalScreenReader: 'auto',
+  agentSandbox: DEFAULT_AGENT_SANDBOX,
   diagnosticsCommand: '',
   autoModeSwitch: true,
   autoResumeInterruptedRuns: true,
@@ -838,6 +952,7 @@ export const DEFAULT_SETTINGS: Settings = {
   taskSpendLimitUsd: 0,
   helperModel: null,
   utilityModel: null,
+  modelFallback: DEFAULT_MODEL_FALLBACK,
   maxChatPanes: 0,
   autoCheckUpdates: true,
   googleMcpClientId: '',

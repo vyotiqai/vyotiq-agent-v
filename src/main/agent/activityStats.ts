@@ -103,6 +103,41 @@ function blankDay(date: string): HomeActivityDay {
   return { date, runs: 0, billedInputTokens: 0, outputTokens: 0 }
 }
 
+/** Tasks the Usage page's breakdown lists, costliest first; the rest are counted. */
+const BREAKDOWN_TASK_CAP = 300
+
+export type ActivityOptions = {
+  /**
+   * Last local day of the window (YYYY-MM-DD) — a custom range on the Usage
+   * page. Absent: the window ends today.
+   */
+  endDay?: string
+  /** Per-workspace and per-task totals for the window (the Usage page). */
+  breakdown?: boolean
+}
+
+/** One task's usage on one local day — a row of the Usage CSV export. */
+export type UsageTaskDay = {
+  date: string
+  workspacePath: string
+  runId: string
+  /** The task's title as the navigator shows it (its goal), when known. */
+  goal?: string
+  model?: string
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  billedCost?: number
+  estimatedCost?: number
+}
+
+/** Noon on a local day key, so the day survives any DST shift; null when unparseable. */
+function dayAnchor(dayKey: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return null
+  const parsed = new Date(`${dayKey}T12:00:00`)
+  return Number.isNaN(parsed.getTime()) || localDayKeyOf(parsed.toISOString()) !== dayKey ? null : parsed
+}
+
 /**
  * Aggregate real persisted usage into a bounded local-day window.
  *
@@ -121,10 +156,45 @@ function blankDay(date: string): HomeActivityDay {
 export async function collectHomeActivity(
   workspacePaths: readonly string[],
   now = new Date(),
-  windowDays: number = ACTIVITY_WINDOW_DAYS
+  windowDays: number = ACTIVITY_WINDOW_DAYS,
+  options: ActivityOptions = {}
 ): Promise<HomeActivityResult> {
-  const todayKey = localDayKeyOf(now.toISOString())
+  return (await aggregateActivity(workspacePaths, now, windowDays, options)).result
+}
+
+/**
+ * Every task's usage per local day across the window, oldest day first —
+ * the Usage page's CSV export. Same attribution as the page's totals
+ * (ledger first, receipt fallback), so the rows sum to what it shows.
+ */
+export async function collectUsageTaskDays(
+  workspacePaths: readonly string[],
+  now = new Date(),
+  windowDays: number = ACTIVITY_WINDOW_DAYS,
+  options: Pick<ActivityOptions, 'endDay'> = {}
+): Promise<UsageTaskDay[]> {
+  const { taskDays } = await aggregateActivity(workspacePaths, now, windowDays, options)
+  return taskDays.sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      a.workspacePath.localeCompare(b.workspacePath) ||
+      (a.goal ?? '').localeCompare(b.goal ?? '') ||
+      a.runId.localeCompare(b.runId)
+  )
+}
+
+async function aggregateActivity(
+  workspacePaths: readonly string[],
+  now: Date,
+  windowDays: number,
+  options: ActivityOptions
+): Promise<{ result: HomeActivityResult; taskDays: UsageTaskDay[] }> {
+  const anchor = options.endDay != null ? dayAnchor(options.endDay) : now
+  if (!anchor) throw new Error('Invalid end day')
+  const todayKey = localDayKeyOf(anchor.toISOString())
   const windowKeys = new Set(lastDayKeys(todayKey, windowDays))
+  /** Per run, per window day: what the CSV export writes and the breakdown sums. */
+  const taskDayMap = new Map<string, UsageTaskDay>()
   const days = new Map<string, HomeActivityDay>()
   /** Distinct parent runs with in-window activity — the honest session count. */
   const activeRunIds = new Set<string>()
@@ -158,6 +228,7 @@ export async function collectHomeActivity(
       runs: Set<string>
       billedInputTokens: number
       outputTokens: number
+      cachedInputTokens: number
       billedCost: number
       withCost: boolean
       estimatedCost: number
@@ -165,7 +236,7 @@ export async function collectHomeActivity(
     }
   >()
   /** Previous equal-length window totals — the trend signal (tokens). */
-  const previousKeys = new Set(lastDayKeys(localDayKeyOf(new Date(now.getTime() - windowDays * 86_400_000).toISOString()), windowDays))
+  const previousKeys = new Set(lastDayKeys(localDayKeyOf(new Date(anchor.getTime() - windowDays * 86_400_000).toISOString()), windowDays))
   let previousTokens = 0
   /** Distinct runs with activity in the previous window — the trend signal (tasks). */
   const previousRunIds = new Set<string>()
@@ -208,6 +279,7 @@ export async function collectHomeActivity(
         runs: new Set(),
         billedInputTokens: 0,
         outputTokens: 0,
+        cachedInputTokens: 0,
         billedCost: 0,
         withCost: false,
         estimatedCost: 0,
@@ -247,13 +319,34 @@ export async function collectHomeActivity(
       runs: Set<string>
       billedInputTokens: number
       outputTokens: number
+      cachedInputTokens: number
       billedCost: number
       withCost: boolean
       estimatedCost: number
       withEstimate: boolean
-    }
+    },
+    task?: { workspacePath: string; goal?: string }
   ): void => {
     activeRunIds.add(runId)
+    if (task) {
+      const key = `${day.date}\0${task.workspacePath}\0${runId}`
+      const row = taskDayMap.get(key) ?? {
+        date: day.date,
+        workspacePath: task.workspacePath,
+        runId,
+        ...(task.goal ? { goal: task.goal } : {}),
+        ...(usage.model ? { model: usage.model } : {}),
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0
+      }
+      row.inputTokens += usage.inputTokens
+      row.outputTokens += usage.outputTokens
+      if (usage.cachedInputTokens != null && usage.cachedInputTokens > 0) row.cachedInputTokens += usage.cachedInputTokens
+      if (usage.billedCost != null && usage.billedCost > 0) row.billedCost = (row.billedCost ?? 0) + usage.billedCost
+      if (usage.estimatedCost != null && usage.estimatedCost > 0) row.estimatedCost = (row.estimatedCost ?? 0) + usage.estimatedCost
+      taskDayMap.set(key, row)
+    }
     // Per-day distinct-run count: one usage attribution per run per day.
     day.runs += 1
     day.billedInputTokens += usage.inputTokens
@@ -314,6 +407,7 @@ export async function collectHomeActivity(
       slice.runs.add(runId)
       slice.billedInputTokens += usage.inputTokens
       slice.outputTokens += usage.outputTokens
+      if (usage.cachedInputTokens != null && usage.cachedInputTokens > 0) slice.cachedInputTokens += usage.cachedInputTokens
     }
   }
 
@@ -444,7 +538,10 @@ export async function collectHomeActivity(
         if (status?.status === 'running' && !receipt) outcomes.running += 1
         continue
       }
-      const slice = workspacePaths.length > 1 ? sliceFor(workspacePath) : undefined
+      const slice = workspacePaths.length > 1 || options.breakdown ? sliceFor(workspacePath) : undefined
+      // The title the navigator shows (a rename rewrites the status goal).
+      const goal = status?.goal?.trim() || receipt?.goal?.trim() || undefined
+      const task = { workspacePath, ...(goal ? { goal } : {}) }
 
       // Ledger-first attribution: per-day deltas recorded while the run
       // executed (live runs update this every step — the panel stays live).
@@ -472,7 +569,8 @@ export async function collectHomeActivity(
               peakInputTokens: entry.peakInputTokens,
               contextWindow: entry.contextWindow
             },
-            slice
+            slice,
+            task
           )
         }
       }
@@ -566,7 +664,8 @@ export async function collectHomeActivity(
             peakInputTokens: usage?.peakInputTokens,
             contextWindow: receipt.contextWindow
           },
-          slice
+          slice,
+          task
         )
       }
     }
@@ -578,9 +677,56 @@ export async function collectHomeActivity(
     runs: slice.runs.size,
     billedInputTokens: slice.billedInputTokens,
     outputTokens: slice.outputTokens,
+    ...(slice.cachedInputTokens > 0 ? { cachedInputTokens: slice.cachedInputTokens } : {}),
     ...(slice.withCost ? { billedCost: slice.billedCost } : {}),
     ...(slice.withEstimate ? { estimatedCost: slice.estimatedCost } : {})
   }))
+  const taskDays = [...taskDayMap.values()]
+  // Per task across the window: the breakdown's rows, costliest first.
+  const byTask = new Map<string, {
+    runId: string
+    workspacePath: string
+    goal?: string
+    model?: string
+    days: number
+    billedInputTokens: number
+    outputTokens: number
+    cachedInputTokens: number
+    billedCost?: number
+    estimatedCost?: number
+  }>()
+  if (options.breakdown) {
+    for (const row of taskDays) {
+      const key = `${row.workspacePath}\0${row.runId}`
+      const task = byTask.get(key) ?? {
+        runId: row.runId,
+        workspacePath: row.workspacePath,
+        ...(row.goal ? { goal: row.goal } : {}),
+        ...(row.model ? { model: row.model } : {}),
+        days: 0,
+        billedInputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0
+      }
+      task.days += 1
+      task.billedInputTokens += row.inputTokens
+      task.outputTokens += row.outputTokens
+      task.cachedInputTokens += row.cachedInputTokens
+      if (row.billedCost != null) task.billedCost = (task.billedCost ?? 0) + row.billedCost
+      if (row.estimatedCost != null) task.estimatedCost = (task.estimatedCost ?? 0) + row.estimatedCost
+      byTask.set(key, task)
+    }
+  }
+  const taskCost = (task: { billedCost?: number; estimatedCost?: number }): number =>
+    (task.billedCost ?? 0) + (task.estimatedCost ?? 0)
+  const breakdownTasks = [...byTask.values()]
+    .sort(
+      (a, b) =>
+        taskCost(b) - taskCost(a) ||
+        b.billedInputTokens + b.outputTokens - (a.billedInputTokens + a.outputTokens) ||
+        a.runId.localeCompare(b.runId)
+    )
+    .map(({ cachedInputTokens, ...task }) => ({ ...task, ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}) }))
   // Top tools across window receipts — only when receipts recorded tool calls.
   const topTools = [...toolTotals.entries()]
     .map(([name, totals]) => ({ name, ...totals }))
@@ -607,12 +753,19 @@ export async function collectHomeActivity(
     .sort((a, b) => (a.writtenAt < b.writtenAt ? 1 : a.writtenAt > b.writtenAt ? -1 : 0))
     .slice(0, 3)
     .map(({ runId, workspacePath, goal }) => ({ runId, workspacePath, ...(goal ? { goal } : {}) }))
-  return HomeActivityResultSchema.parse({
+  const result = HomeActivityResultSchema.parse({
     days: sortedDays,
     // Days in the window that show any activity — cadence/streak signal.
     activeDays: sortedDays.filter((day) => day.runs > 0 || day.billedInputTokens > 0 || day.outputTokens > 0).length,
     windowDays,
-    ...(workspacePaths.length > 1 && slices.length > 0 ? { workspaces: slices } : {}),
+    ...(options.endDay != null ? { endDay: todayKey } : {}),
+    ...((workspacePaths.length > 1 || options.breakdown) && slices.length > 0 ? { workspaces: slices } : {}),
+    ...(options.breakdown
+      ? {
+          tasks: breakdownTasks.slice(0, BREAKDOWN_TASK_CAP),
+          ...(breakdownTasks.length > BREAKDOWN_TASK_CAP ? { tasksOmitted: breakdownTasks.length - BREAKDOWN_TASK_CAP } : {})
+        }
+      : {}),
     ...(unverifiedRuns > 0 || topTools.length > 0 || errorDigest.length > 0
       ? {
           attention: {
@@ -648,4 +801,5 @@ export async function collectHomeActivity(
     },
     generatedAt: now.toISOString()
   })
+  return { result, taskDays }
 }

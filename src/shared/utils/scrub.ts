@@ -130,9 +130,19 @@ const SENSITIVE_KEY_SUBSTRINGS = [
   'dsn'
 ]
 
+/**
+ * Token *counts* (`maxTokens`, `outputTokens`, `thinkingTokenBudget`) carry no
+ * secret, and blanking them makes a diagnostics bundle useless for usage
+ * questions. Only the `token` fragment is waived — `secretTokens` still trips
+ * on `secret`.
+ */
+const TOKEN_COUNT_KEY =
+  /(?:max|min|input|output|prompt|completion|cache\w*|reasoning|thinking|total|context|used|remaining)_?tokens$|token_?(?:budget|limit|count|usage)s?$/
+
 function isSensitiveKey(lower: string): boolean {
   if (SENSITIVE_KEYS.has(lower)) return true
-  return SENSITIVE_KEY_SUBSTRINGS.some((s) => lower.includes(s))
+  const countKey = TOKEN_COUNT_KEY.test(lower)
+  return SENSITIVE_KEY_SUBSTRINGS.some((s) => lower.includes(s) && !(countKey && s === 'token'))
 }
 
 /** Log fields that may keep semantic path hints without full home paths. */
