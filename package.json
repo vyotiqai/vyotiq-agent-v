@@ -1,6 +1,6 @@
 {
   "name": "vyotiq",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Agent V — coding workspace for real repositories",
   "packageManager": "pnpm@12.4.2",
   "engines": {
