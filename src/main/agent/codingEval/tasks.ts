@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process'
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'fs'
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
 import { isAbsolute, join, relative, resolve, sep } from 'path'
 import { nodeBinary, nodeChildEnv } from './check'
 import type { CodingEvalMode, CodingEvalTask } from './types'
@@ -92,9 +92,30 @@ export function loadCodingTasks(root: string, filter?: string): CodingEvalTask[]
   return tasks
 }
 
+/**
+ * Fold CRLF to LF in the copied text files. A CRLF checkout (git
+ * `core.autocrlf=true` on a Windows runner) would otherwise hand a solver a
+ * workspace whose bytes differ from the fixture, so a correct fix that matches
+ * the fixture text line for line fails for a reason no OS should have.
+ */
+function foldLineEndings(dir: string): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      foldLineEndings(path)
+      continue
+    }
+    if (!entry.isFile()) continue
+    const bytes = readFileSync(path)
+    if (!bytes.includes(0x0d) || bytes.includes(0)) continue
+    writeFileSync(path, bytes.toString('utf8').replace(/\r\n/g, '\n'))
+  }
+}
+
 /** Copy `from` into `to` (merging), then drop the `.fixture` suffix from copied names. */
 function copyTree(from: string, to: string): void {
   cpSync(from, to, { recursive: true, force: true })
+  foldLineEndings(to)
   const strip = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)

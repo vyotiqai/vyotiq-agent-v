@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -302,6 +302,21 @@ describe('repo command guard on network and write commands', () => {
     expect(hooksPathLeavesRepo('../elsewhere', dirs)).toBe(true)
     expect(hooksPathLeavesRepo(join(root, 'hooks-out'), dirs)).toBe(true)
     expect(hooksPathLeavesRepo('~/hooks', dirs)).toBe(true)
+  })
+
+  it('counts hooks inside the repository as inside, however its path is spelled', () => {
+    // A checkout reached through an alias is the same repository: a macOS
+    // runner's `/var` for `/private/var`, a Windows runner's 8.3 TEMP. Hooks
+    // under it did come with the folder, so they are not the repo reaching out.
+    const alias = join(root, 'alias')
+    symlinkSync(repo, alias, 'junction')
+    const dirs = { gitDir: join(alias, '.git'), commonDir: join(alias, '.git'), workTree: alias }
+    expect(hooksPathLeavesRepo('.husky/_', dirs)).toBe(false)
+    expect(hooksPathLeavesRepo(join(alias, '.git', 'hooks'), dirs)).toBe(false)
+    // Still leaves, spelled either way: outside the checkout, or beside it.
+    expect(hooksPathLeavesRepo('../elsewhere', dirs)).toBe(true)
+    expect(hooksPathLeavesRepo(join(root, 'hooks-out'), dirs)).toBe(true)
+    expect(hooksPathLeavesRepo(join(alias, '..', 'hooks-out'), dirs)).toBe(true)
   })
 
   it('keeps the user’s credential helpers and drops the repository’s', async () => {

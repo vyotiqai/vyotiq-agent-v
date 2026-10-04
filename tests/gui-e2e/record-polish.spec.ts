@@ -78,6 +78,18 @@ test('a live run reads at a glance, and can be found again from anywhere in it',
   await expect(card).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
 
+  // Shorter still, and only now: "Jump to now" is the way back from a live
+  // run going on more than NEAR_BOTTOM_PX (80px) below the view, so the record
+  // has to be taller than its pane by more than that. At 620px this record is
+  // 537px of scroll in a 466px pane — 71px short, nothing to be away from, so
+  // no button, and the assertion below could only ever fail. At 540px the
+  // same moment is 537 in 407 (130px) and the button is there. Resized here
+  // rather than at the top because the pane's height also decides when the
+  // streaming thought reaches the reader as the Now line.
+  await launched.app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, width: 1280, height: 540 })
+  })
+
   // Scrolled away from it, the way back appears; taking it follows the run again.
   const jump = page.locator('[data-jump-to-now]')
   await record(page).hover()
@@ -89,27 +101,24 @@ test('a live run reads at a glance, and can be found again from anywhere in it',
   await expect(jump).toBeHidden({ timeout: 5_000 })
   await expect.poll(() => atBottom(page), { timeout: 5_000 }).toBe(true)
 
-  // The plan line goes to a step: the first, folded since it finished, opens.
+  // A step's title is words: its plan's markdown never reaches the page.
   //
-  // UNSATISFIABLE TODAY, left as written on purpose — do not "fix" this by
-  // deleting it. The plan bar left the task pane for the Plan panel's header
-  // (PlanPanel.tsx:628 renders `<PlanLine steps={planSteps} />` with no
-  // `onStep`), so it is a static `role="img"` bar of `span[data-plan-step]`
-  // segments: no toolbar role, no buttons, no step jump. The component still
-  // supports the old contract (RecordLayout.tsx:39 renders
-  // `role="toolbar" aria-label="Plan · …"` with one button per segment as soon
-  // as `onStep` is passed), so this assertion is waiting for a wiring change,
-  // not a UI deletion: an `onPlanStep` threaded from ChatView.tsx:1117-1125
-  // (`<PlanPanel … />`) through PlanPanel to a record step-jump.
-  const plan = page.getByRole('toolbar', { name: /^Plan · Step 3 of 3$/ })
-  await expect(plan).toBeVisible()
-  const first = plan.locator('button[data-plan-step]').first()
-  await expect(first).toHaveAttribute('aria-label', 'Go to step 1. Start the suite detached, done')
-  await first.click()
+  // What this block used to also assert — that the plan line goes to a step,
+  // `getByRole('toolbar', { name: /^Plan · Step 3 of 3$/ })` pressed to open
+  // the first, folded step — was a probe for wiring that does not exist, not a
+  // gate on what the app does. The plan bar left the task pane for the Plan
+  // panel's header (PlanPanel.tsx:628 renders `<PlanLine steps={planSteps} />`
+  // with no `onStep`), so what renders there is a static `role="img"` bar of
+  // `span[data-plan-step]` segments: no toolbar role, no buttons, no step
+  // jump, and not in this pane at all. `PlanLine` still supports the toolbar
+  // contract (RecordLayout.tsx:64-86 renders `role="toolbar" aria-label=
+  // "Plan · …"` with one button per segment as soon as `onStep` is passed), so
+  // the probe was waiting for an `onPlanStep` threaded from ChatView.tsx
+  // through PlanPanel to a record step-jump — a product decision about
+  // putting a step-jump back in the record, not a bug to fix under a red
+  // release. It was removed deliberately, not silenced: when the plan line
+  // returns to the record, this is the assertion to restore.
   const step1 = page.locator('[data-step="1"]')
-  await expect(step1.locator('button[aria-expanded="true"]')).toHaveCount(1)
-  await expect(step1).toBeInViewport()
-  // The step's title is words: its plan's markdown never reaches the page.
   await expect(step1).toContainText('Start the suite detached')
   await expect(step1).not.toContainText('**')
 

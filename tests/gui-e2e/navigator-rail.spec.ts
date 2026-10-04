@@ -57,7 +57,12 @@ test('the rail holds the live task and the places, and the drawer the full list'
   await expect(rail.getByRole('button', { name: 'Usage' })).toHaveAttribute('aria-current', 'page')
   await expect(task).not.toHaveAttribute('aria-current', 'page')
   await task.click()
-  await expect(page.getByRole('heading', { name: 'Run the suite and build', level: 1 })).toBeVisible({ timeout: 20_000 })
+  // The pane names itself, not a heading: the task pane's own 40px header row
+  // — and the h1 it held — is gone, and the pane is a labelled region
+  // (ChatPaneHost.tsx `role="region" aria-label={paneTitle}`) under the
+  // chat column's one sr-only h1, "Tasks" (ChatView.tsx). Same claim, current
+  // markup: the glyph brought this task back on screen.
+  await expect(page.getByRole('region', { name: 'Run the suite and build', exact: true })).toBeVisible({ timeout: 20_000 })
 
   // Waiting on you, the glyph moves to that group and says so.
   await expect(rail.locator('[data-rail-section="needs"]')).toBeVisible({ timeout: 30_000 })

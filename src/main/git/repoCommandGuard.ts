@@ -300,11 +300,26 @@ function fingerprintOf(blocked: RepoCommand[]): string {
   return createHash('sha256').update(JSON.stringify(sorted)).digest('hex')
 }
 
+/**
+ * The path as the filesystem sees it. A hooks path need not exist yet, so
+ * realpath the deepest part that does and put the rest back on the end:
+ * comparing it against a real root otherwise spells one side through an alias
+ * (`/var` for `/private/var`, a Windows runner's 8.3 TEMP) and the other not,
+ * and a folder inside the repository reads as outside it.
+ */
 function realOrResolved(path: string): string {
-  try {
-    return realpathSync.native(path)
-  } catch {
-    return resolve(path)
+  const resolved = resolve(path)
+  let dir = resolved
+  const tail: string[] = []
+  for (;;) {
+    try {
+      return tail.length === 0 ? realpathSync.native(dir) : join(realpathSync.native(dir), ...tail)
+    } catch {
+      const parent = dirname(dir)
+      if (parent === dir) return resolved
+      tail.unshift(basename(dir))
+      dir = parent
+    }
   }
 }
 
