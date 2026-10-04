@@ -2,9 +2,10 @@ import { cpus } from 'os'
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'path'
 import react from '@vitejs/plugin-react'
+import { iifeBundlePlugin } from './scripts/viteIifePlugin'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), iifeBundlePlugin()],
   resolve: {
     alias: {
       '@shared': resolve(__dirname, 'src/shared'),

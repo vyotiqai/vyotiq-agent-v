@@ -1,67 +1,7 @@
 import { useState, type ReactNode, type Ref } from 'react'
-import { STATE_LABEL, StatusGlyph, Tooltip, cn, type TaskState } from '@renderer/lib/ui'
+import { STATE_LABEL, Tooltip, cn, type TaskState } from '@renderer/lib/ui'
 import { DIVIDER_FILL, RECORD_MAX, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { plainLine } from './plainText'
-
-/**
- * The task header is one 40px row — the height of the inspector's tab strip,
- * so every pane starts on one shared rule. Glyph, title, where the work lives,
- * actions. The step count is in the step list and the workspace is in the
- * navigator, so neither is repeated here.
- */
-export function TaskHeader({
-  state,
-  stateLabel,
-  title,
-  editor,
-  facts,
-  actions,
-  plan,
-  onPlanStep
-}: {
-  /** None for a task that has not started. */
-  state?: TaskState | null
-  stateLabel?: string
-  title: string
-  /** While renaming, an input takes the title's place. */
-  editor?: ReactNode
-  facts?: Array<{ text: ReactNode; mono?: boolean; title?: string }>
-  actions?: ReactNode
-  /** The latest plan's steps, drawn over the header's bottom rule. */
-  plan?: ReadonlyArray<{ title: string; state: TaskState }>
-  /** Go to a plan step in the record, by its index in `plan`. */
-  onPlanStep?: (index: number) => void
-}) {
-  return (
-    <header
-      className="relative flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2"
-      data-task-header
-    >
-      {state ? (
-        <span title={stateLabel ?? STATE_LABEL[state]} className="shrink-0" data-task-state={state}>
-          <StatusGlyph state={state} size={14} label />
-        </span>
-      ) : null}
-      {editor ?? (
-        <h1
-          tabIndex={-1}
-          title={title}
-          className="min-w-0 truncate text-sm font-semibold text-fg-strong outline-none"
-        >
-          {title}
-        </h1>
-      )}
-      {(facts ?? []).map((f, i) => (
-        <span key={i} title={f.title} className={cn('min-w-0 shrink truncate text-xs text-tertiary', f.mono && 'font-mono')}>
-          {f.text}
-        </span>
-      ))}
-      <span className="flex-1" />
-      {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
-      {plan ? <PlanLine steps={plan} onStep={onPlanStep} /> : null}
-    </header>
-  )
-}
 
 /** Keys that move along the plan line, and where each one goes. */
 const PLAN_KEYS: Record<string, (at: number, last: number) => number> = {
@@ -72,10 +12,10 @@ const PLAN_KEYS: Record<string, (at: number, last: number) => number> = {
 }
 
 /**
- * The plan as the header's bottom rule: one segment per step, so progress
- * costs no row. Done steps are quiet ink, the live one breathes in the
- * accent, one that needs you is solid accent, a failed one is the danger hue.
- * A plan with nothing left to do draws nothing.
+ * The plan as one rule: one segment per step, so progress costs no row. Done
+ * steps are quiet ink, the live one breathes in the accent, one that needs you
+ * is solid accent, a failed one is the danger hue. A plan with nothing left to
+ * do draws nothing.
  *
  * With `onStep`, each segment is the way to its step in a long record: one
  * stop in the tab order (the live step's, else the first), the arrow keys
@@ -107,7 +47,8 @@ export function PlanLine({
             aria-label={`Go to step ${label}, ${STATE_LABEL[s.state].toLowerCase()}`}
             onClick={() => onStep(i)}
             onFocus={() => setFocusAt(i)}
-            // The press reaches 6px above the rule it draws, short of the header's controls.
+            // The press reaches 6px above the rule it draws, so it is a stop
+            // you can hit rather than a hairline you have to find.
             className={cn(
               'relative h-full min-w-0 flex-1 rounded-full after:absolute after:inset-x-0 after:-top-1.5 after:bottom-0 focus-visible:vy-focus-ring',
               planSegmentFill(s.state)
@@ -225,7 +166,7 @@ export function RecordBody({
       data-record-scroll
       data-transcript-scroll
     >
-      <div ref={contentRef} className={cn('mx-auto w-full px-6 pb-10 pt-3', RECORD_MAX, className)}>
+      <div ref={contentRef} className={cn('mx-auto w-full px-4 pb-10 pt-3', RECORD_MAX, className)}>
         {children}
       </div>
     </div>

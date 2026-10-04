@@ -62,7 +62,8 @@ test('a finished run keeps every step’s work in its step, in order', async () 
   // The run ends with its answer as the record's result.
   const result = window.locator('section[aria-label="Result"]')
   await expect(result).toContainText('RECORD_ORDER_DONE', { timeout: 30_000 })
-  await expect(window.locator('[data-task-header] [data-task-state]')).not.toHaveAttribute('data-task-state', 'running', {
+  // The run is over: the composer offers no Stop.
+  await expect(window.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i })).toHaveCount(0, {
     timeout: 15_000
   })
 

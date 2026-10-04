@@ -277,6 +277,15 @@ export function useRecordScroll({
         if (!e.defaultPrevented && !isEditableShortcutTarget(e.target) && ownsEvent(e.target)) letGo()
         return
       }
+      if (e.key === ' ' || e.code === 'Space') {
+        // Space pages the record natively and fires no wheel or pointer event,
+        // so a jump still in flight would swallow its scroll events and leave
+        // the pin state stale. Shift+Space goes up, as a wheel turned up does.
+        if (e.defaultPrevented || isEditableShortcutTarget(e.target) || !ownsEvent(e.target)) return
+        if (e.shiftKey) letGo()
+        else jumpingRef.current = null
+        return
+      }
       if (e.key !== 'End' && e.key !== 'Home') return
       if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.defaultPrevented) return
       if (isEditableShortcutTarget(e.target) || !ownsEvent(e.target)) return

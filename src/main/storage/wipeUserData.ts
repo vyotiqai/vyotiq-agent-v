@@ -12,6 +12,17 @@ import { join } from 'path'
  * The marker is removed last. Anything that couldn't be deleted is named in it
  * and tried again on the following launch — only those names, so a retry
  * never deletes what was made after the wipe.
+ *
+ * Coverage of secrets copies: each top-level entry is removed recursively
+ * (`rmSync(..., { recursive: true })` below), so the pass is name-agnostic and
+ * takes whole backup folders with it. Audit 2026-10-02 found two byte-identical
+ * copies of the live secrets store in `%APPDATA%\vyotiq` —
+ * `pre-remove-backup-20260929\secrets.json` and
+ * `marketplace\20260929-pre-remove-backup\secrets.json`, each SHA-256 equal to
+ * `secrets.json` — both inside top-level entries this pass deletes, so no
+ * backup-name rule is needed or wanted: `grep "pre-remove"` over the repo
+ * returns nothing, so no code here created those folders and claiming them by
+ * name would only risk a user's own `pre-remove-backup-*` folder.
  */
 
 export const WIPE_MARKER = '.pending-wipe'

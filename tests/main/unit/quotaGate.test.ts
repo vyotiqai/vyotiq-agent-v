@@ -25,6 +25,18 @@ const resumableQuotaStatus: RunStatus = {
   error: INCIDENT_QUOTA_MESSAGE
 }
 
+// Verbatim from %APPDATA%/vyotiq/logs/vyotiq.log, 2026-09-29 00:12:58Z
+// through 00:44:12Z: 88 occurrences across 7 run ids, 12–13 retries each on
+// the same step, all PROVIDER_HTTP 429 on opencode mimo-v2.6-pro.
+const VENDOR_USAGE_LIMIT_429 = 'Go usage limit exceeded'
+// Same vendor family, longer shapes: the opencode gateway's 5-hour window
+// wording (verbatim from the live gateway 2026-09-19, asserted as a retry in
+// streamRetry.test.ts) and its "You have exceeded your usage limit" form.
+const VENDOR_5H_WINDOW_MESSAGE =
+  '5-hour usage limit reached. Resets in 3hr 4min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_01M2VV4MEG5G6FTWEZYVSBPHY2/go'
+const VENDOR_EXCEEDED_YOU_MESSAGE =
+  'You have exceeded your usage limit for this plan. Upgrade to continue.'
+
 describe('quotaGate', () => {
   it('matches the verbatim incident quota message', () => {
     expect(isQuotaExhaustedMessage(INCIDENT_QUOTA_MESSAGE)).toBe(true)
@@ -43,6 +55,60 @@ describe('quotaGate', () => {
     ).toBe(false)
     expect(isQuotaExhaustedMessage('socket hang up')).toBe(false)
     expect(isQuotaExhaustedMessage('')).toBe(false)
+  })
+
+  // Regression: 88× "Go usage limit exceeded" (2026-09-29) is a plan limit,
+  // and the pre-fix regex had no alternative for "exceeded" wording — every
+  // phrase it held ended in "reached". All three guards that consult this
+  // classifier (goalRelaunchPlan, resumeActiveGoals, runLoopScheduler) were
+  // defeated by that gap.
+  it('matches the 2026-09-29 vendor 429 message verbatim', () => {
+    expect(isQuotaExhaustedMessage(VENDOR_USAGE_LIMIT_429)).toBe(true)
+  })
+
+  it('matches the bare "usage limit exceeded" wording', () => {
+    expect(isQuotaExhaustedMessage('usage limit exceeded')).toBe(true)
+  })
+
+  it('matches real-world variants of the same gate', () => {
+    // opencode gateway 5-hour window wording (live gateway, 2026-09-19).
+    expect(isQuotaExhaustedMessage(VENDOR_5H_WINDOW_MESSAGE)).toBe(true)
+    // opencode "You have exceeded your usage limit" upgrade prompt.
+    expect(isQuotaExhaustedMessage(VENDOR_EXCEEDED_YOU_MESSAGE)).toBe(true)
+    // Same sentence shape without the leading pronoun, plus plan-limit wording.
+    expect(isQuotaExhaustedMessage('Exceeded the monthly usage limit for this account.')).toBe(
+      true
+    )
+    expect(
+      isQuotaExhaustedMessage('Plan limit reached for this workspace. Upgrade to continue.')
+    ).toBe(true)
+    expect(isQuotaExhaustedMessage('Daily usage limit reached — resets at midnight UTC')).toBe(true)
+  })
+
+  // "Rate limit exceeded, retry after 12s" is deliberately still FALSE: every
+  // gate alternative requires a `usage`/`quota`/`plan` subject, so a bare
+  // "limit exceeded" stays the throttling wording.
+  it('keeps throttling wordings transient', () => {
+    expect(isQuotaExhaustedMessage('Rate limit exceeded, retry after 12s')).toBe(false)
+    expect(isQuotaExhaustedMessage('Request limit exceeded (HTTP 429)')).toBe(false)
+    expect(isQuotaExhaustedMessage('Too many requests — slow down')).toBe(false)
+    // "exceeded your … limit" needs the usage/quota subject; a rate limit with
+    // the same sentence shape stays transient.
+    expect(isQuotaExhaustedMessage('You have exceeded your rate limit.')).toBe(false)
+    expect(isQuotaExhaustedMessage('exceeded your monthly limits')).toBe(false)
+    expect(isQuotaExhaustedMessage('file size limit exceeded')).toBe(false)
+  })
+
+  it('holds on empty, whitespace-only and abusive short input without throwing', () => {
+    expect(isQuotaExhaustedMessage('   ')).toBe(false)
+    expect(isQuotaExhaustedMessage('\n\t ')).toBe(false)
+    expect(isQuotaExhaustedMessage('limit')).toBe(false)
+    expect(isQuotaExhaustedMessage('usage')).toBe(false)
+    expect(isQuotaExhaustedMessage('exceeded your ')).toBe(false)
+    expect(isQuotaExhaustedMessage('\n\n')).toBe(false)
+    // Bounded gaps: no catastrophic backtracking on long near-miss inputs.
+    expect(isQuotaExhaustedMessage(`exceeded your ${'x'.repeat(50_000)} rate limit`)).toBe(false)
+    expect(isQuotaExhaustedMessage(`${'a'.repeat(50_000)} usage limit exceeded`)).toBe(true)
   })
 })
 

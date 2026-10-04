@@ -145,6 +145,14 @@ export function logErrorSummary(err: unknown, code?: string): string {
   return code ? `${code}: error` : 'Error'
 }
 
+/**
+ * Per-string cap applied to a scrubbed message and to each allowlisted field
+ * value. A *rendered* line is prefix + message + serialized fields, so this
+ * number alone does not bound what reaches disk — see {@link
+ * import('./logger').LOG_LINE_TEXT_CAP} for the line-level mark.
+ */
+export const LOG_MESSAGE_TEXT_CAP = 240
+
 export function sanitizeLogMessage(message: string): string {
   let out = scrubString(message)
   out = out.replace(PATH_IN_TEXT, '[path]')

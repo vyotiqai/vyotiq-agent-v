@@ -25,13 +25,6 @@ import './recordFind.css'
  */
 export const RecordOpenContext = createContext<ReadonlySet<string>>(new Set())
 
-/**
- * A step asked for by the header's plan line: it opens, once per ask (`nonce`),
- * and stays as you leave it after that.
- */
-export type StepReveal = { runN: number; key: string; nonce: number }
-export const StepRevealContext = createContext<StepReveal | null>(null)
-
 export const runOpenKey = (n: number): string => `run:${n}`
 export const stepOpenKey = (runN: number, stepKey: string): string => `step:${runN}:${stepKey}`
 export const looseOpenKey = (runN: number, list: 'setup' | 'after'): string => `loose:${runN}:${list}`

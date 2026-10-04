@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import type { ComponentProps } from 'react'
 import { AppShell } from '@renderer/app/AppShell'
 import { getToasts, resetToastStoreForTests } from '@renderer/lib/ui/toastStore'
+import type { NotificationItem, NotificationList } from '@shared/ipc'
 
 const baseProps = {
   view: 'chat' as const,
@@ -746,22 +747,22 @@ describe('AppShell', () => {
 
 describe('AppShell run toasts', () => {
   function withInbox() {
-    let push: ((list: { items: unknown[] }) => void) | null = null
-    // @ts-expect-error test bridge
+    let push: ((list: NotificationList) => void) | null = null
+    // @ts-expect-error test bridge — a partial window.vyotiq stands in for the preload API
     window.vyotiq = {
       platform: 'win32',
       windowIsMaximized: vi.fn(async () => ({ ok: true as const, data: false })),
       listNotifications: vi.fn(async () => ({ ok: true as const, data: { items: [] } })),
       markNotificationsRead: vi.fn(async () => ({ ok: true as const, data: { items: [] } })),
-      onNotificationsChanged: (handler: (list: { items: unknown[] }) => void) => {
+      onNotificationsChanged: (handler: (list: NotificationList) => void) => {
         push = handler
         return () => {}
       }
     }
-    return (items: unknown[]) => act(() => push?.({ items }))
+    return (items: NotificationItem[]) => act(() => push?.({ items }))
   }
 
-  const finished = (runId: string) => ({
+  const finished = (runId: string): NotificationItem => ({
     id: `n-${runId}`,
     createdAt: new Date(Date.now() + 1000).toISOString(),
     read: false,
@@ -875,7 +876,7 @@ describe('AppShell run toasts', () => {
         runs: [{ ...baseProps.runsByWorkspacePath['/ws/demo'].runs[0]!, status, ...(retryable ? { retryable: true as const } : {}) }]
       }
     })
-    const failure = { ...finished('run-abc'), id: 'n-err', kind: 'run_error', body: 'Failed: rate limit', dedupeKey: 'run:run-abc:error', reviewFiles: undefined }
+    const failure: NotificationItem = { ...finished('run-abc'), id: 'n-err', kind: 'run_error', body: 'Failed: rate limit', dedupeKey: 'run:run-abc:error', reviewFiles: undefined }
     const { rerender } = render(
       <AppShell {...baseProps} view="home" runsByWorkspacePath={failedRuns('error')} onRetryRunInWorkspace={onRetryRunInWorkspace}>
         <p>Home</p>
@@ -906,7 +907,7 @@ describe('AppShell run toasts', () => {
         runs: [{ ...baseProps.runsByWorkspacePath['/ws/demo'].runs[0]!, status: 'error' as const }]
       }
     }
-    const failure = { ...finished('run-abc'), id: 'n-err', kind: 'run_error', body: 'Failed: crashed', dedupeKey: 'run:run-abc:error', reviewFiles: undefined }
+    const failure: NotificationItem = { ...finished('run-abc'), id: 'n-err', kind: 'run_error', body: 'Failed: crashed', dedupeKey: 'run:run-abc:error', reviewFiles: undefined }
     render(
       <AppShell {...baseProps} view="home" runsByWorkspacePath={runs} onRetryRunInWorkspace={vi.fn()}>
         <p>Home</p>

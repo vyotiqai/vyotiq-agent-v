@@ -27,7 +27,13 @@ function redactionContext(): RedactionContext {
   return { home: homedir(), username }
 }
 
-/** The app log and its rotated archive (electron-log keeps one, `vyotiq.old.log`), current first. */
+/**
+ * The live app log plus every retained rotation, current first: `vyotiq.log`,
+ * then `vyotiq.old.1.log` (the previous generation) … `vyotiq.old.5.log`
+ * (LOG_ARCHIVE_GENERATIONS in logging/rotation.ts). The sort below splits live
+ * from rotated and is then lexicographic, which orders single-digit
+ * generations correctly; a retention bump past 9 would need a numeric rank.
+ */
 async function readLogs(): Promise<Array<{ name: string; text: string }>> {
   const dir = logsDirectory()
   let names: string[]

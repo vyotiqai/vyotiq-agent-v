@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol } from 'electron'
 import { join } from 'path'
 import { electronApp } from '@electron-toolkit/utils'
 import { watchWindowShortcuts } from '@main/app/windowShortcuts'
@@ -12,6 +12,9 @@ import { configureChromiumDiskCache } from '@main/app/chromiumProfile'
 import { performPendingWipe, type WipeReport } from '@main/storage/wipeUserData'
 import { pruneWorktreesAfterWipe } from '@main/storage/dataWipe'
 import { applyCertificateLogging, applyCsp } from '@main/app/security'
+import { VIDEO_SCHEMES } from '@main/video/schemes'
+import { registerMediaProtocol } from '@main/video/mediaProtocol'
+import { cancelAllRenderJobs } from '@main/video/renderHost'
 import { widenHappyEyeballsWindow } from '@main/net/happyEyeballs'
 import { applyEarlyNodeProxy, applyNetworkSettings } from '@main/net/proxy'
 import { installNodeCaCertificates, recoverFuseStrippedExtraCaCerts } from '@main/net/caCertificates'
@@ -97,6 +100,11 @@ try {
 
 // Crashpad must start before any renderer is created; prefer before ready.
 initCrashReporter()
+
+// Electron honours registerSchemesAsPrivileged only before the app is ready,
+// and the second call replaces the first — so this stays at module scope,
+// ahead of app.whenReady() below (src/main/video/schemes.ts owns the list).
+protocol.registerSchemesAsPrivileged(VIDEO_SCHEMES)
 
 // Windows: GPU sandbox re-enabled — Chromium uses default GPU path on Win 11 26200+.
 // If startup crashes return, bisect flags here (do not leave permanent disable-gpu-sandbox).
@@ -314,6 +322,9 @@ if (HEADLESS) {
     electronApp.setAppUserModelId('com.vyotiq.agent')
     applyCsp()
     applyCertificateLogging()
+    // The app window plays workspace/run media through vyotiq-media; the
+    // privileged-scheme registration above ran before ready.
+    registerMediaProtocol()
     await applyNetworkSettings(getSettings().network)
     // Recover the user's real PATH before any MCP server is spawned. A macOS app
     // launched from Finder inherits only /usr/bin:/bin:/usr/sbin:/sbin, which
@@ -521,6 +532,9 @@ if (HEADLESS) {
 
       destroyTray()
       closeAgentBrowser()
+      // A live render job holds a sandboxed window and an encoder; closing it
+      // with the app is synchronous, unlike the child-process teardown below.
+      cancelAllRenderJobs()
       disposeAllTerminalSessions()
       disposeAllPtySessions()
       shutdownTokenizerPool()

@@ -205,6 +205,25 @@ export type HeadlessStatus =
 export type DoneWhenVerdict = Pick<DoneWhenCheck, 'id' | 'text' | 'source' | 'verdict' | 'evidence'>
 
 /**
+ * Why a run that reported `done` produced no record. A headless run's whole
+ * output is its transcript: with nothing in it there is nothing for the caller
+ * to read, so `done` would claim a success nothing was produced for. The
+ * fixture replay path reaches this — it writes `status.json` and never a
+ * single event or message row.
+ */
+export const EMPTY_TRANSCRIPT_ERROR =
+  'The run reported success but wrote no transcript: messages.jsonl and events.jsonl are both empty.'
+
+/**
+ * The error for a transcript of `bytes`, or undefined when it holds something.
+ * Any row at all counts — one append is proof the path wrote, whatever
+ * happened afterwards.
+ */
+export function emptyTranscriptError(bytes: number): string | undefined {
+  return bytes > 0 ? undefined : EMPTY_TRANSCRIPT_ERROR
+}
+
+/**
  * The run's status. A run the runner stopped reports why; otherwise the
  * loop's terminal status, refined: `done` with a failed or unmarked brief
  * check is `not_met` (the brief's checks are the caller's contract — a plan's

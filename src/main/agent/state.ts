@@ -197,6 +197,10 @@ export async function resumeRun(workspacePath: string, runId: string): Promise<s
   if (!existsSync(dir)) {
     throw new Error('Run not found')
   }
+  // A re-invoke (resume, retry, a follow-up turn) reopens the run: whatever the
+  // previous stop published no longer describes it, so it goes before the new
+  // invoke can publish a notice of its own.
+  dismissRunLifecycleInbox(runId)
   // chatStart may already have queued the follow-up user turn.
   await flushMessageAppends(dir)
   // Close any unfinished tool pairing from a previous crash before continuing.
@@ -390,11 +394,21 @@ export async function syncEventsAsync(dir: string, rows: PersistedEvent[]): Prom
   await removeEventArchives(dir)
 }
 
+const TERMINAL_RUN_STATUS = new Set<RunStatus['status']>(['done', 'error', 'cancelled'])
+
 export async function updateStatus(
   dir: string,
   patch: Partial<RunStatus>,
   options?: { sync?: boolean }
 ): Promise<void> {
+  // Every terminal stop goes through here — the loop's writeStatus, a cancel
+  // force-finish, stale-run reconcile, a rewind. A run's `Finished`/`Failed`
+  // row describes one stop; a second stop (or a re-invoke) makes it wrong, so
+  // withdraw it before the new terminal state can publish its own. needs_you
+  // keys are deliberately untouched: a pending prompt outlives its run's stop.
+  if (patch.status && TERMINAL_RUN_STATUS.has(patch.status)) {
+    dismissRunLifecycleInbox(basename(dir))
+  }
   if (options?.sync) {
     await writeStatusImmediate(
       dir,

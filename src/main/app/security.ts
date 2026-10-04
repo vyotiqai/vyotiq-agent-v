@@ -1,6 +1,7 @@
 import { BrowserWindow, session } from 'electron'
 import { shell } from 'electron'
 import { logger } from '../../shared/logger'
+import { MEDIA_SCHEME } from '../video/schemes'
 
 /** True only for parseable https: URLs (rejects https: with a userinfo/host trick via URL). */
 export function isAllowedHttpsUrl(url: string): boolean {
@@ -91,6 +92,14 @@ export function needsViteHmrCsp(env: { electronRendererUrl?: string } = {}): boo
   return Boolean(url)
 }
 
+/**
+ * `<video>`/`<audio>` in the app window read registered media over
+ * `${MEDIA_SCHEME}:` (src/main/video/mediaProtocol.ts). Without media-src the
+ * request falls back to `default-src 'self'` and the player is blocked.
+ * `'self'` stays so a same-origin <video> keeps working.
+ */
+const MEDIA_SRC = `media-src 'self' ${MEDIA_SCHEME}:`
+
 /** Build Content-Security-Policy header value for the renderer session. */
 export function buildCspPolicy(env: { electronRendererUrl?: string } = {}): string {
   if (needsViteHmrCsp(env)) {
@@ -107,6 +116,7 @@ export function buildCspPolicy(env: { electronRendererUrl?: string } = {}): stri
       // if the renderer ever adopts object URLs, add `blob:` to the prod policy
       // below too so dev and prod cannot silently diverge.
       "img-src 'self' data: blob:",
+      MEDIA_SRC,
       "connect-src 'self' ws://127.0.0.1:* ws://localhost:* wss://127.0.0.1:* wss://localhost:* http://127.0.0.1:* http://localhost:* https:"
     ].join('; ')
   }
@@ -116,6 +126,7 @@ export function buildCspPolicy(env: { electronRendererUrl?: string } = {}): stri
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data:",
+    MEDIA_SRC,
     "connect-src 'self' http://127.0.0.1:* http://localhost:* https:"
   ].join('; ')
 }

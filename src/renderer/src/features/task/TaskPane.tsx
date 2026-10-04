@@ -17,7 +17,7 @@ import { isRetryableTurnFailure } from '@shared/errors'
 import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { ActionMenu, Button, IconButton, ImageLightbox, Tooltip, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, ImageLightbox, cn, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
 import {
   isCodeEditorTarget,
   isEditableShortcutTarget,
@@ -30,35 +30,24 @@ import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
 import { AgentContextCard } from '@renderer/features/chat/components/AgentContextCard'
 import { GoalRunBanner } from '@renderer/features/chat/components/GoalRunBanner'
-import { useGitStatus } from '@renderer/features/chat/components/useGitStatus'
 import { useRunTodos } from '@renderer/features/chat/hooks/useRunTodos'
 import type { InlineInstanceGate } from '@renderer/features/chat/hooks/useInlineInstanceUi'
 import { formatRunActivityLabel } from '@renderer/features/chat/utils/runActivity'
 import type { ChatItemsStore, ChatMetaStore } from '@renderer/features/chat/chatStores'
-import { taskHeaderState } from '@renderer/app/navigator/navigatorModel'
 import { runTitle } from '@renderer/app/navigator/runTitle'
-import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { buildRecordModel, runStateOf, type BuildOptions, type InstanceFacts } from './recordModel'
-import { RecordBody, TaskHeader } from './record/RecordLayout'
+import { RecordBody } from './record/RecordLayout'
 import { useRewindRedo } from './rewindRedo'
 import { addTaskFolder, removeTaskFolder } from './taskFolders'
 import { TaskWorktreeStrip, useTaskWorktree } from './taskWorktree'
-import { RecordActionsContext, latestRetryableErrorId } from './record/WorkItems'
+import { NowLine, RecordActionsContext, latestRetryableErrorId } from './record/WorkItems'
 import { TaskRecord } from './TaskRecord'
-import {
-  clearMatches,
-  findRanges,
-  foldsToOpen,
-  paintMatches,
-  RecordOpenContext,
-  StepRevealContext,
-  type StepReveal
-} from './recordFind'
+import { clearMatches, findRanges, foldsToOpen, paintMatches, RecordOpenContext } from './recordFind'
 import { useRecordScroll } from './useRecordScroll'
 import { checksRevisionOf, useRunChecks } from './useRunChecks'
 
-/** Palette commands that run one of the task header menu's items. */
+/** Palette commands that run one of the task menu's items. */
 const TASK_COMMAND_MENU_ITEMS: Record<string, string> = {
   renameTask: 'rename',
   archiveTask: 'archive',
@@ -166,14 +155,14 @@ function useRunEndRevision(live: boolean): number {
 }
 
 /**
- * A task: the 40px header, the record, and the instruction line — the whole
- * pane. Everything shown is read from the run's own stream, its files on disk
- * and the run list; nothing is kept here that those do not say.
+ * A task: the record, its controls at the top edge, and the instruction line —
+ * the whole pane. Everything shown is read from the run's own stream, its files
+ * on disk and the run list; nothing is kept here that those do not say.
  */
 /**
- * The pane's own controls at the end of its header: the inspector's toggle,
- * lit while it is open, and closing this pane of a split — named for the task,
- * so each pane says which one closes.
+ * The pane's own controls at the top-right of its record: the inspector's
+ * toggle, lit while it is open, and closing this pane of a split — named for
+ * the task, so each pane says which one closes.
  */
 export function PaneHeaderActions({
   title,
@@ -202,6 +191,19 @@ export function PaneHeaderActions({
       ) : null}
       {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="xs" tone="muted" onClick={onClosePane} /> : null}
     </>
+  )
+}
+
+/**
+ * The record is still loading. One line for both places it appears: the
+ * record's whole column, and a row of work with more to load under it.
+ */
+function RecordLoading({ className }: { className?: string }) {
+  return (
+    <div className={cn('flex items-center gap-2 text-xs text-muted', className)} role="status" aria-busy="true">
+      <AgentVSpinner size={11} />
+      Loading the record…
+    </div>
   )
 }
 
@@ -274,64 +276,18 @@ export function TaskPane(props: TaskPaneProps) {
   const checksRevision = useMemo(() => checksRevisionOf(items, live), [items, live])
   const checks = useRunChecks(workspacePath, runId, checksRevision)
 
-  // ── Header ────────────────────────────────────────────────────────────
+  // ── The record's own top ──────────────────────────────────────────────
   const firstNeed = live ? (last?.needs[0] ?? null) : null
-  const liveSteps = last?.steps ?? []
-  // Steps a later plan dropped stay in the record for their work, not in the plan.
-  const planSteps = useMemo(() => (last?.steps ?? []).filter((s) => s.n > 0), [last])
-  const liveStepAt = liveSteps.findIndex((s) => s.state === 'running' || s.state === 'needs')
-  const doneSteps = liveSteps.filter((s) => s.state === 'done').length
-  const header = taskHeaderState({
-    run: props.run,
-    streaming: live,
-    // Its own request first; else a sub-agent of this task waiting on you.
-    needs: firstNeed
-      ? { kind: firstNeed.kind, since: firstNeed.at }
-      : live && props.instanceGates?.[0]
-        ? { kind: props.instanceGates[0].kind, since: null }
-        : null,
-    steps:
-      live && liveSteps.length > 0
-        ? { current: liveStepAt >= 0 ? liveStepAt + 1 : Math.min(doneSteps + 1, liveSteps.length), total: liveSteps.length }
-        : null,
-    turnStatus: props.turnStatus,
-    started: model.runs.length > 0
-  })
   const title = props.run ? runTitle(props.run) : last?.text.split('\n')[0]?.trim() || (runId ? 'Task' : 'New task')
 
-  // A task not started yet says where it will run; the context card below
-  // reads its branch, so the header does not repeat it.
+  // A task not started yet has no branch or worktree to read yet.
   const draft = !runId && model.runs.length === 0
 
   const gitRevision = useRunEndRevision(live)
-  const git = useGitStatus(workspacePath, gitRevision, Boolean(workspacePath) && !draft && !props.run?.worktreeBranch)
-  const branch = props.run?.worktreeBranch ?? git.status?.branch ?? null
   // A task started in a new worktree: its workspace is that worktree.
   const worktree = useTaskWorktree(draft ? null : workspacePath, gitRevision)
-  const baseFacts = draft
-    ? workspacePath
-      ? [{ text: `in ${formatWorkspaceName(workspacePath)}`, title: workspacePath }]
-      : []
-    : branch
-      ? [{ text: branch, mono: true, title: props.run?.worktreeBranch || worktree.info ? 'Worktree branch' : 'Branch' }]
-      : []
-  // Folders outside the workspace the task may also work in: muted, after where it runs.
+  // Folders outside the workspace the task may also work in.
   const extraRoots = props.run?.extraRoots ?? []
-  const facts =
-    extraRoots.length > 0
-      ? [
-          ...baseFacts,
-          {
-            text: (
-              <span className="inline-flex items-center gap-1" data-task-extra-roots>
-                <Icon name="folder" size={12} className="shrink-0" />
-                {extraRoots.map(extraRootLabel).join(', ')}
-              </span>
-            ),
-            title: `Also works in\n${extraRoots.join('\n')}`
-          }
-        ]
-      : baseFacts
 
   const [renaming, setRenaming] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -573,29 +529,8 @@ export function TaskPane(props: TaskPaneProps) {
   }, [scroll.scrollRef])
 
   // ── A new request for you comes into view in the focused pane ─────────
-  const { jumpTop, jumpTo, jumpBottom, isFollowing, contentRef: recordContentRef } = scroll
+  const { jumpTop, jumpTo, jumpBottom, isFollowing } = scroll
 
-  // ── The header's plan line goes to its step ───────────────────────────
-  const [reveal, setReveal] = useState<StepReveal | null>(null)
-  const lastRunN = last?.n ?? null
-  const onPlanStep = useCallback(
-    (index: number) => {
-      const step = planSteps[index]
-      if (!step || lastRunN == null) return
-      setReveal({ runN: lastRunN, key: step.key, nonce: Date.now() })
-      // Once it has opened: the step's top is where it was, but the room
-      // below it to scroll into is only there after it opens.
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          const row = recordContentRef.current?.querySelector<HTMLElement>(
-            `[data-steps-run="${lastRunN}"] > [data-step="${step.n}"]`
-          )
-          if (row) jumpTo(row)
-        })
-      )
-    },
-    [planSteps, lastRunN, jumpTo, recordContentRef]
-  )
   const needsKey = firstNeed ? (firstNeed.kind === 'approval' ? firstNeed.approval.requestId : firstNeed.question.requestId) : null
   const gateKey = props.instanceGates?.[0]?.runId ?? null
   const shownNeedRef = useRef<string | null>(null)
@@ -683,59 +618,6 @@ export function TaskPane(props: TaskPaneProps) {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-bg" data-chat-stage data-task-pane>
-      <TaskHeader
-        state={header?.state ?? null}
-        stateLabel={header?.label}
-        title={title}
-        editor={
-          renaming ? (
-            <RenameField
-              initial={title}
-              onDone={(next) => {
-                setRenaming(false)
-                if (next && next !== title) void props.actions.onRename?.(next)
-              }}
-            />
-          ) : undefined
-        }
-        facts={facts}
-        plan={planSteps}
-        onPlanStep={onPlanStep}
-        actions={
-          <>
-            {liveNow ? (
-              <Tooltip content="Stop the run (Esc)">
-                <Button size="xs" variant="ghost" icon="stop" onClick={props.onStop}>
-                  Stop
-                </Button>
-              </Tooltip>
-            ) : null}
-            {menuItems.length > 0 ? (
-              <ActionMenu
-                open={menuOpen}
-                onOpenChange={setMenuOpen}
-                placement="down"
-                align="end"
-                aria-label="Task actions"
-                items={menuItems}
-                trigger={(t) => (
-                  <IconButton
-                    ref={t.ref}
-                    icon="more"
-                    label={`More — ${menuItems.map((item) => item.label.toLowerCase()).join(', ')}`}
-                    size="xs"
-                    aria-expanded={t['aria-expanded']}
-                    aria-controls={t['aria-controls']}
-                    aria-haspopup={t['aria-haspopup']}
-                    onClick={t.onClick}
-                  />
-                )}
-              />
-            ) : null}
-            <PaneHeaderActions title={title} inspectorToggle={props.inspectorToggle} onClosePane={props.actions.onClosePane} />
-          </>
-        }
-      />
       {findOpen ? (
         <div
           className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs"
@@ -793,9 +675,55 @@ export function TaskPane(props: TaskPaneProps) {
       ) : null}
       <RecordActionsContext.Provider value={recordActions}>
         <RecordOpenContext.Provider value={folds}>
-        <StepRevealContext.Provider value={reveal}>
         {/* The record and, while a run goes on below what you read, the way back to it. */}
         <div className="relative flex min-h-0 flex-1 flex-col">
+          {/* The pane's own controls, pinned above the scroll at the top right: pane
+              chrome, not record content, so they hold their corner on a long record.
+              No rule above them, and the column pads its own first row below. */}
+          <div className="flex shrink-0 items-center justify-end gap-1 px-2 pt-1.5" data-task-controls>
+            {renaming && runId ? (
+              // The title, in the pane's own control row and the column's own words:
+              // Enter keeps it, Esc or leaving it without a change drops it.
+              <RenameField
+                initial={title}
+                onDone={(next) => {
+                  setRenaming(false)
+                  const name = next?.trim()
+                  if (name && name !== title) void props.actions.onRename?.(name)
+                }}
+              />
+            ) : (
+              <>
+                {menuItems.length > 0 ? (
+                  <ActionMenu
+                    open={menuOpen}
+                    onOpenChange={setMenuOpen}
+                    placement="down"
+                    align="end"
+                    aria-label="Task actions"
+                    items={menuItems}
+                    trigger={(t) => (
+                      <IconButton
+                        ref={t.ref}
+                        icon="more"
+                        label={`More — ${menuItems.map((item) => item.label.toLowerCase()).join(', ')}`}
+                        size="xs"
+                        aria-expanded={t['aria-expanded']}
+                        aria-controls={t['aria-controls']}
+                        aria-haspopup={t['aria-haspopup']}
+                        onClick={t.onClick}
+                      />
+                    )}
+                  />
+                ) : null}
+                <PaneHeaderActions
+                  title={title}
+                  inspectorToggle={props.inspectorToggle}
+                  onClosePane={props.actions.onClosePane}
+                />
+              </>
+            )}
+          </div>
           <RecordBody
             scrollRef={scroll.scrollRef}
             contentRef={scroll.contentRef}
@@ -816,9 +744,12 @@ export function TaskPane(props: TaskPaneProps) {
               </div>
             ) : null}
             {loading ? (
-              <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted" role="status" aria-busy="true">
-                <AgentVSpinner size={14} />
-                Loading the record…
+              <RecordLoading className="min-h-48 justify-center" />
+            ) : empty && live && activity != null ? (
+              // A run that has started but streamed nothing yet: there is no
+              // record to draw, but it still says what it is doing.
+              <div className="py-3">
+                <NowLine text={activity} />
               </div>
             ) : empty && !live ? (
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-sm text-muted" data-chat-empty-state>
@@ -845,12 +776,7 @@ export function TaskPane(props: TaskPaneProps) {
                 onImageClick={setLightbox}
               />
             )}
-            {props.transcriptLoading && !empty ? (
-              <p className="flex items-center gap-2 py-2 text-xs text-muted" role="status" aria-busy="true">
-                <AgentVSpinner size={11} />
-                Loading the record…
-              </p>
-            ) : null}
+            {props.transcriptLoading && !empty ? <RecordLoading className="py-2" /> : null}
             {redo && !live ? (
               <div className="mt-3 flex items-center gap-2 text-xs text-muted" data-rewind-redo>
                 <Icon name="undo" size={13} className="shrink-0 text-tertiary" />
@@ -884,7 +810,6 @@ export function TaskPane(props: TaskPaneProps) {
             </div>
           ) : null}
         </div>
-        </StepRevealContext.Provider>
         </RecordOpenContext.Provider>
       </RecordActionsContext.Provider>
       {showGoal && props.goal ? (

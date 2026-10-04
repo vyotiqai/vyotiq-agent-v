@@ -74,6 +74,13 @@ function follow(box: Box, api: ReturnType<typeof useRecordScroll>): void {
   box.el.dispatchEvent(new Event('scroll'))
 }
 
+/** Space (and Shift+Space) on `target` — the pane reads it on window, so it must bubble. */
+function pressSpace(target: EventTarget, shift = false): void {
+  act(() => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', shiftKey: shift, bubbles: true, cancelable: true }))
+  })
+}
+
 describe('useRecordScroll', () => {
   it('follows a live run you are at the end of as it grows', () => {
     const { box, api } = mount(true)
@@ -192,5 +199,63 @@ describe('useRecordScroll', () => {
     // A run that is over has no "now" to go back to.
     rerender(false)
     expect(api().away).toBe(false)
+  })
+
+  it('pages past a jump in flight with Space, so the reader’s page is not the glide’s', () => {
+    const { box, api } = mount(true)
+    follow(box, api())
+    // A jump to a card 300px above the view's top edge — the glide still running.
+    const card = document.createElement('div')
+    card.getBoundingClientRect = () => ({ top: -300 }) as DOMRect
+    box.el.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
+    act(() => api().jumpTo(card))
+    // Space pages the record: no wheel event fires, so only the Space branch can
+    // tell that the scroll events to follow are the reader's, not the glide's.
+    pressSpace(box.el)
+    act(() => {
+      box.el.scrollTop = 900
+      box.el.dispatchEvent(new Event('scroll'))
+    })
+    expect(api().isFollowing()).toBe(false)
+    const paged = box.el.scrollTop
+    box.grow(300)
+    act(() => observers.forEach((fire) => fire()))
+    expect(box.el.scrollTop).toBe(paged)
+  })
+
+  it('lets go at once on Shift+Space, which goes up as a wheel turned up does', () => {
+    const { box, api } = mount(true)
+    follow(box, api())
+    expect(api().isFollowing()).toBe(true)
+    pressSpace(box.el, true)
+    expect(api().isFollowing()).toBe(false)
+    const before = box.el.scrollTop
+    box.grow(300)
+    act(() => observers.forEach((fire) => fire()))
+    expect(box.el.scrollTop).toBe(before)
+  })
+
+  it('leaves a jump in flight alone when Space is typed in a text field', () => {
+    const { box, api } = mount(true)
+    follow(box, api())
+    const card = document.createElement('div')
+    card.getBoundingClientRect = () => ({ top: -300 }) as DOMRect
+    box.el.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
+    act(() => api().jumpTo(card))
+    const field = document.createElement('input')
+    box.el.appendChild(field)
+    // The space belongs to the field: the jump keeps its claim on scroll events.
+    pressSpace(field)
+    act(() => {
+      box.el.scrollTop = 0
+      box.el.dispatchEvent(new Event('scroll'))
+    })
+    // Still the glide's own scroll, so this far from the end is not a reader's.
+    expect(api().isFollowing()).toBe(false)
+    act(() => {
+      box.el.scrollTop = box.el.scrollHeight - 400
+      box.el.dispatchEvent(new Event('scroll'))
+    })
+    expect(api().isFollowing()).toBe(false)
   })
 })

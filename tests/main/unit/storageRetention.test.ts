@@ -61,7 +61,7 @@ import {
   sweepRetentionAuto,
   withinProtectedWindow
 } from '@main/storage/retention'
-import { workspacesRoot, workspaceIdFromPath } from '@main/storage/paths'
+import { workspacesRoot, workspaceIdFromPath, workspaceSessionsRoot } from '@main/storage/paths'
 import { DEFAULT_STORAGE_SETTINGS } from '@shared/ipc'
 import { logger } from '@shared/logger'
 
@@ -138,6 +138,27 @@ function makeCheckpoint(
   age(cpDir, ageDays)
   age(join(runDir, 'checkpoints'), ageDays)
   age(runDir, ageDays)
+}
+
+/**
+ * Register a storage id as a known workspace so the orphan reaper and the
+ * report treat it as tracked. Retention tests that are about per-workspace
+ * policy use this so the 30-day orphan grace cannot remove their fixture.
+ */
+function trackWorkspace(id: string, wsPath = `C:\\proj\\${id}`): void {
+  mockWorkspacesState.workspaceIdsByPath = { ...mockWorkspacesState.workspaceIdsByPath, [wsPath]: id }
+}
+
+/** A rebuildable code index dir under a workspace store, backdated. */
+function makeCodeIndex(
+  id: string,
+  opts: { bytes?: number; ageDays?: number; name?: string } = {}
+): string {
+  const dir = join(workspacesRoot(), id, opts.name ?? 'codeindex')
+  mkdirSync(dir, { recursive: true })
+  writeWithAge(join(dir, 'index.sqlite'), opts.bytes ?? 1000, opts.ageDays ?? 30)
+  age(dir, opts.ageDays ?? 30)
+  return dir
 }
 
 /** Default-armed settings (ack + defaults) for most sweeps. */
@@ -313,18 +334,108 @@ describe('checkpoint GC (sweepRetentionAuto)', () => {
 })
 
 describe('session retention (sweepRetentionAuto)', () => {
-  it('deletes sessions beyond keep-N only when also past the age window', async () => {
+  it('evicts a session past keep-N that is INSIDE the age window (keep-N stands alone)', async () => {
+    // The defect this replaces: keep-N and the age window were AND-ed, so a
+    // session had to be old enough to evict before keep-N could act — with a
+    // 60-day window and an all-recent session tree, keep-N never fired.
+    ackedSettings({
+      sessionRetentionEnabled: true,
+      sessionKeepCount: 1,
+      sessionMaxAgeDays: 60
+    })
+    makeStorageId('wid-a')
+    trackWorkspace('wid-a')
+    makeSession('wid-a', 'run-newest', { ageDays: 3 }) // index 0 — inside keep
+    const beyondKeep = makeSession('wid-a', 'run-beyond-keep', { ageDays: 5 })
+    // Both bounds still apply where both are true.
+    const beyondBoth = makeSession('wid-a', 'run-beyond-both', { ageDays: 90 })
+    expect(beyondKeep).not.toBe(beyondBoth)
+
+    const warnSpy = vi.spyOn(logger, 'warn')
+    await sweepRetentionAuto()
+
+    // Beyond keep-N but only 5 days old — well inside the 60-day window. The
+    // age bound is a ceiling on aggressiveness, not the gate, so keep-N evicts.
+    expect(existsSync(beyondKeep)).toBe(false)
+    expect(existsSync(beyondBoth)).toBe(false)
+    // The newest session is inside keep-N and inside the window — untouched.
+    expect(existsSync(join(workspacesRoot(), 'wid-a', 'sessions', 'run-newest'))).toBe(true)
+    // Every eviction logs runId + bytes.
+    expect(warnSpy).toHaveBeenCalledWith('Evicted session dir (session retention)', {
+      scope: 'storage',
+      code: 'SESSION_DIR_EVICTED',
+      correlationId: 'run-beyond-keep',
+      reason: 'count',
+      bytes: 50
+    })
+    warnSpy.mockRestore()
+  })
+
+  it('deletes sessions beyond keep-N when also past the age window', async () => {
+    // The original direction, kept: past keep-N AND past the age window.
     ackedSettings({
       sessionRetentionEnabled: true,
       sessionKeepCount: 1,
       sessionMaxAgeDays: 30
     })
     makeStorageId('wid-a')
+    trackWorkspace('wid-a')
     const old = makeSession('wid-a', 'run-old', { ageDays: 40 })
-    makeSession('wid-a', 'run-new', { ageDays: 5 }) // beyond keep but inside window
+    makeSession('wid-a', 'run-new', { ageDays: 5 })
+    const warnSpy = vi.spyOn(logger, 'warn')
     await sweepRetentionAuto()
     expect(existsSync(old)).toBe(false)
+    // run-new is the newest dir, so the min-1 floor holds it regardless.
     expect(existsSync(join(workspacesRoot(), 'wid-a', 'sessions', 'run-new'))).toBe(true)
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Evicted session dir (session retention)',
+      expect.objectContaining({ correlationId: 'run-old', reason: 'count+age' })
+    )
+    warnSpy.mockRestore()
+  })
+
+  it('the age window still evicts a session that is INSIDE keep-N', async () => {
+    // Age is a ceiling on aggressiveness, not a floor: it still fires on its
+    // own, otherwise raising keep-N would pin old sessions forever.
+    ackedSettings({
+      sessionRetentionEnabled: true,
+      sessionKeepCount: 30,
+      sessionMaxAgeDays: 30
+    })
+    makeStorageId('wid-a')
+    trackWorkspace('wid-a')
+    makeSession('wid-a', 'run-ancient', { ageDays: 90 }) // newest, so inside keep
+    await sweepRetentionAuto()
+    // The hard min-1 floor: the newest session is never deleted, even aged out.
+    expect(existsSync(join(workspacesRoot(), 'wid-a', 'sessions', 'run-ancient'))).toBe(true)
+
+    makeSession('wid-a', 'run-ancient-2', { ageDays: 91 })
+    await sweepRetentionAuto()
+    expect(existsSync(join(workspacesRoot(), 'wid-a', 'sessions', 'run-ancient-2'))).toBe(false)
+    expect(existsSync(join(workspacesRoot(), 'wid-a', 'sessions', 'run-ancient'))).toBe(true)
+  })
+
+  it('never deletes the session dir of an active run, even beyond keep-N', async () => {
+    ackedSettings({
+      sessionRetentionEnabled: true,
+      sessionKeepCount: 1,
+      sessionMaxAgeDays: 60
+    })
+    const wsPath = 'C:\\proj\\active-retention'
+    const id = workspaceIdFromPath(wsPath)
+    makeStorageId(id)
+    trackWorkspace(id, wsPath)
+    makeSession(id, 'run-newest', { ageDays: 3 })
+    const activeDir = makeSession(id, 'run-active', { ageDays: 5 })
+    makeSession(id, 'run-dead', { ageDays: 7 })
+    activeRuns = [{ runId: 'run-active', workspacePath: wsPath, invokeId: 1 }]
+    expect(join(workspacesRoot(), id, 'sessions', 'run-active')).toBe(activeDir)
+
+    await sweepRetentionAuto()
+
+    // Beyond keep-N and inside the age window, but registry-listed: protected.
+    expect(existsSync(activeDir)).toBe(true)
+    expect(existsSync(join(workspacesRoot(), id, 'sessions', 'run-dead'))).toBe(false)
   })
 
   it('session retention OFF (default) keeps every session', async () => {
@@ -491,9 +602,18 @@ describe('sweepRetentionAuto orphan reap (derived-only strays)', () => {
     expect(existsSync(join(workspacesRoot(), 'wid-auto'))).toBe(false)
   })
 
-  it('never auto-reaps a user-data orphan, even past the grace window', async () => {
+  it('auto-reaps a user-data orphan once it is past orphanGraceDays', async () => {
+    // Previously the automatic reap took derived-only dirs only, so a store
+    // holding sessions/ + meta.json under a path nothing registered was
+    // unreachable without Settings → Storage. Now it is reaped after the same
+    // grace the report already flags it with.
     ackedSettings({ orphanGraceDays: 30 })
     makeStorageId('wid-old', ['run-old'])
+    writeFileSync(
+      join(workspacesRoot(), 'wid-old', 'meta.json'),
+      JSON.stringify({ canonicalPath: 'C:\\Temp\\scratchpad' })
+    )
+    age(join(workspacesRoot(), 'wid-old', 'meta.json'), 45)
     writeWithAge(join(workspacesRoot(), 'wid-old', 'sessions', 'run-old', 'messages.jsonl'), 200, 45)
     age(join(workspacesRoot(), 'wid-old', 'sessions', 'run-old'), 45)
     age(join(workspacesRoot(), 'wid-old', 'sessions'), 45)
@@ -501,8 +621,43 @@ describe('sweepRetentionAuto orphan reap (derived-only strays)', () => {
 
     await sweepRetentionAuto()
 
-    expect(existsSync(join(workspacesRoot(), 'wid-old'))).toBe(true)
-    expect(existsSync(join(workspacesRoot(), 'wid-old', 'sessions', 'run-old'))).toBe(true)
+    expect(existsSync(join(workspacesRoot(), 'wid-old'))).toBe(false)
+  })
+
+  it('leaves a user-data orphan untouched until the grace window has passed', async () => {
+    ackedSettings({ orphanGraceDays: 30 })
+    makeStorageId('wid-fresh', ['run-1'])
+    writeWithAge(join(workspacesRoot(), 'wid-fresh', 'sessions', 'run-1', 'messages.jsonl'), 200, 5)
+    age(join(workspacesRoot(), 'wid-fresh', 'sessions', 'run-1'), 5)
+    age(join(workspacesRoot(), 'wid-fresh', 'sessions'), 5)
+    age(join(workspacesRoot(), 'wid-fresh'), 5)
+
+    await sweepRetentionAuto()
+
+    expect(existsSync(join(workspacesRoot(), 'wid-fresh'))).toBe(true)
+    expect(existsSync(join(workspacesRoot(), 'wid-fresh', 'sessions', 'run-1'))).toBe(true)
+  })
+
+  it('never auto-reaps an orphan whose store still hosts an active run', async () => {
+    // Untracked is not the same as unreferenced-in-use: reaping this would
+    // delete a live run's session dir, so it stays even past the grace window.
+    const wsPath = 'C:\\Temp\\scratchpad\\live'
+    const id = workspaceIdFromPath(wsPath)
+    ackedSettings({ orphanGraceDays: 30 })
+    makeStorageId(id, ['run-live'])
+    writeWithAge(join(workspacesRoot(), id, 'sessions', 'run-live', 'messages.jsonl'), 200, 60)
+    age(join(workspacesRoot(), id, 'sessions', 'run-live'), 60)
+    age(join(workspacesRoot(), id, 'sessions'), 60)
+    age(join(workspacesRoot(), id), 60)
+    activeRuns = [{ runId: 'run-live', workspacePath: wsPath, invokeId: 1 }]
+    expect(join(workspacesRoot(), id, 'sessions', 'run-live')).toBe(
+      join(workspaceSessionsRoot(wsPath), 'run-live')
+    )
+
+    await sweepRetentionAuto()
+
+    expect(existsSync(join(workspacesRoot(), id))).toBe(true)
+    expect(existsSync(join(workspacesRoot(), id, 'sessions', 'run-live'))).toBe(true)
   })
 
   it('skips orphan reaping when the reaper setting is disabled', async () => {
@@ -652,6 +807,117 @@ describe('size-cap LRU', () => {
     expect(sizeCapCat?.items).toBeGreaterThanOrEqual(1)
     expect(existsSync(join(runDir, 'checkpoints', 'cp-old'))).toBe(false)
     expect(existsSync(join(runDir, 'checkpoints', 'cp-new'))).toBe(true)
+  })
+
+  it('leaves a rebuildable code index alone when checkpoints can satisfy the excess', async () => {
+    // ~15.9 KB excess against ~20.5 KB of checkpoints: stage 1 can cover it, so
+    // stage 2 (code indexes) must never run — even though a 500 KB index sits
+    // right there, larger than the whole overage.
+    ackedSettings({ sizeCapGb: 0.00047 })
+    makeStorageId('wid-a')
+    trackWorkspace('wid-a')
+    const runDir = makeSession('wid-a', 'run-1', { ageDays: 20, transcriptBytes: 10 })
+    makeCheckpoint(runDir, 'cp-old', { bytes: 10_000, ageDays: 5 })
+    makeCheckpoint(runDir, 'cp-new', { bytes: 10_000, ageDays: 3 })
+    makeCodeIndex('wid-a', { bytes: 500_000, ageDays: 10 })
+    age(runDir, 20)
+    const warnSpy = vi.spyOn(logger, 'warn')
+    const preview = await previewStorageCleanup()
+    const result = await runStorageCleanup(preview.confirm.token)
+
+    expect(result.categories.find((c) => c.id === 'size-cap')?.items).toBeGreaterThanOrEqual(1)
+    expect(existsSync(join(runDir, 'checkpoints', 'cp-old'))).toBe(false)
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      'Size-cap LRU eviction of rebuildable code index dir',
+      expect.anything()
+    )
+    expect(existsSync(join(workspacesRoot(), 'wid-a', 'codeindex'))).toBe(true)
+    expect(existsSync(join(workspacesRoot(), 'wid-a', 'codeindex', 'index.sqlite'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('evicts rebuildable code indexes oldest-first when checkpoints cannot satisfy the excess', async () => {
+    // No checkpoints at all and ~92.6 KB of excess against two 100 KB indexes:
+    // stage 2 fires and takes only the oldest workspace's index.
+    ackedSettings({ sizeCapGb: 0.0001 })
+    makeStorageId('wid-old')
+    trackWorkspace('wid-old')
+    makeSession('wid-old', 'run-1', { ageDays: 20, transcriptBytes: 10 })
+    const oldIndex = makeCodeIndex('wid-old', { bytes: 100_000, ageDays: 10 })
+    makeStorageId('wid-new')
+    trackWorkspace('wid-new')
+    makeSession('wid-new', 'run-1', { ageDays: 20, transcriptBytes: 10 })
+    const newIndex = makeCodeIndex('wid-new', { bytes: 100_000, ageDays: 3 })
+
+    const warnSpy = vi.spyOn(logger, 'warn')
+    const preview = await previewStorageCleanup()
+    const result = await runStorageCleanup(preview.confirm.token)
+
+    const sizeCapCat = result.categories.find((c) => c.id === 'size-cap')
+    expect(sizeCapCat?.items).toBe(1)
+    expect(sizeCapCat?.reclaimBytes).toBe(100_000)
+    expect(existsSync(oldIndex)).toBe(false)
+    // Oldest first: the newer index survives this pass.
+    expect(existsSync(newIndex)).toBe(true)
+    expect(warnSpy).toHaveBeenCalledWith('Size-cap LRU eviction of rebuildable code index dir', {
+      scope: 'storage',
+      code: 'CODE_INDEX_EVICTED',
+      correlationId: 'wid-old',
+      index: 'codeindex',
+      bytes: 100_000
+    })
+    warnSpy.mockRestore()
+  })
+
+  it('never evicts a code index for a workspace with an active run', async () => {
+    const wsPath = 'C:\\proj\\indexing'
+    const id = workspaceIdFromPath(wsPath)
+    ackedSettings({ sizeCapGb: 0.000001 })
+    makeStorageId(id, ['run-live'])
+    trackWorkspace(id, wsPath)
+    const runDir = makeSession(id, 'run-live', { ageDays: 40, transcriptBytes: 100 })
+    const indexDir = makeCodeIndex(id, { bytes: 400_000, ageDays: 40 })
+    activeRuns = [{ runId: 'run-live', workspacePath: wsPath, invokeId: 1 }]
+    const infoSpy = vi.spyOn(logger, 'info')
+
+    const preview = await previewStorageCleanup()
+    const result = await runStorageCleanup(preview.confirm.token)
+
+    expect(result.categories.find((c) => c.id === 'size-cap')?.items ?? 0).toBe(0)
+    expect(existsSync(indexDir)).toBe(true)
+    expect(existsSync(runDir)).toBe(true)
+    expect(infoSpy).toHaveBeenCalledWith(
+      'Size-cap eviction skipped: no reclaimable managed category can satisfy excess',
+      expect.objectContaining({ scope: 'storage', code: 'SIZE_CAP_EVICTED' })
+    )
+    infoSpy.mockRestore()
+  })
+
+  it('skips size-cap eviction when no managed category is reclaimable at all', async () => {
+    // A ~1 KB cap against a 5 KB transcript: there are no checkpoints to drop
+    // and no code index to drop, so both stages skip and nothing is deleted.
+    ackedSettings({ sizeCapGb: 0.000001 })
+    makeStorageId('wid-a')
+    trackWorkspace('wid-a')
+    const runDir = makeSession('wid-a', 'run-1', { ageDays: 40, transcriptBytes: 5000 })
+    const infoSpy = vi.spyOn(logger, 'info')
+
+    const preview = await previewStorageCleanup()
+    const result = await runStorageCleanup(preview.confirm.token)
+
+    const sizeCapCat = result.categories.find((c) => c.id === 'size-cap')
+    expect(sizeCapCat?.reclaimBytes ?? 0).toBe(0)
+    expect(sizeCapCat?.items ?? 0).toBe(0)
+    expect(infoSpy).toHaveBeenCalledWith(
+      'Size-cap eviction skipped: reclaimable checkpoints cannot satisfy excess',
+      expect.objectContaining({ scope: 'storage', code: 'SIZE_CAP_EVICTED' })
+    )
+    expect(infoSpy).toHaveBeenCalledWith(
+      'Size-cap eviction skipped: no reclaimable managed category can satisfy excess',
+      expect.objectContaining({ scope: 'storage', code: 'SIZE_CAP_EVICTED' })
+    )
+    expect(existsSync(runDir)).toBe(true)
+    infoSpy.mockRestore()
   })
 })
 

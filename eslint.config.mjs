@@ -40,7 +40,11 @@ export default [
     // builds, generated output and agent worktrees (.claude/, each a full
     // checkout) are not source either; CI has none of them, so without these
     // a local `eslint .` failed where CI passed.
-    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**', 'errand-main/**', 'site/**', 'dist-package*/**', 'output/**', '.claude/**']
+    // `.vyotiq/**` is the app's own per-workspace state directory (memory,
+    // rules, hooks.json, skills, tasks.json) plus whatever scratch a session
+    // leaves in it. It is never repo source; linting a scratch probe a session
+    // dropped there reddened `eslint .` with 46 errors that CI cannot see.
+    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**', 'errand-main/**', 'site/**', 'dist-package*/**', 'output/**', '.claude/**', '.vyotiq/**']
   },
   js.configs.recommended,
   {

@@ -4,6 +4,7 @@ import { defineConfig, loadEnv } from 'electron-vite'
 import type { Plugin, Rollup } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { iifeBundlePlugin } from './scripts/viteIifePlugin'
 
 // Give the Node/Vite build and dev-server processes deliberate headroom.
 //
@@ -120,6 +121,8 @@ export default defineConfig(({ mode }) => {
       // Bake DSN + Google MCP client into packaged main (runtime process.env is
       // empty in production).
       define: { ...dsnDefine, ...googleMcpDefine },
+      // `?iife` imports: the video runner page, served to its sandbox from memory.
+      plugins: [iifeBundlePlugin()],
       resolve: {
         alias: {
           '@main': resolve('src/main'),

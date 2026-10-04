@@ -55,7 +55,7 @@ test('a running command counts up, opens Terminal, and a stopped run resumes', a
   await expect(terminalTab).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 })
   await expect(page.locator('#dock-panel-terminal')).toBeVisible()
 
-  await page.locator('[data-task-header]').getByRole('button', { name: /^stop$/i }).click()
+  await page.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i }).click()
   const receipt = page.locator('[data-receipt]').last()
   await expect(receipt.locator('[data-receipt-outcome="stopped"]')).toBeVisible({ timeout: 20_000 })
   // Nothing was written, so there is nothing to undo — only the way on.
@@ -64,7 +64,8 @@ test('a running command counts up, opens Terminal, and a stopped run resumes', a
 
   await receipt.getByRole('button', { name: 'Resume' }).click()
   await expect(page.getByText('Continue from where you stopped.')).toBeVisible({ timeout: 20_000 })
-  await expect(page.locator('[data-task-header] [data-task-state]')).toHaveAttribute('data-task-state', 'running', {
+  // Stop is back in the composer: the run is live again.
+  await expect(page.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i })).toBeVisible({
     timeout: 20_000
   })
 })

@@ -11,7 +11,10 @@ vi.mock('@main/settings/settings', () => ({
 import { executeTool } from '@main/agent/tools'
 import { toolTodoWrite } from '@main/agent/tools/todo'
 import { resetTerminalSessionsForTests } from '@main/agent/tools/terminalSessions'
-import { setTerminalMirrorSink } from '@main/agent/tools/terminalMirrorSink'
+import {
+  flushTerminalMirror,
+  setTerminalMirrorSink
+} from '@main/agent/tools/terminalMirrorSink'
 
 /**
  * The mirror must be a pure observer.
@@ -27,6 +30,16 @@ describe('terminal mirroring does not change what the model reads', () => {
 
   function termCtx() {
     return { runDir: workspace, agentMode: 'agent' as const }
+  }
+
+  /**
+   * Mirror writes are batched inside the sink, so a run's last bytes may still
+   * be buffered when the command resolves. Flushing before reading keeps these
+   * assertions about the full byte stream, unchanged.
+   */
+  function mirroredText(): string {
+    flushTerminalMirror()
+    return mirrored.join('')
   }
 
   async function run(command: string) {
@@ -78,7 +91,7 @@ describe('terminal mirroring does not change what the model reads', () => {
     setTerminalMirrorSink((_ws, text) => mirrored.push(text))
     const result = await run('echo vyotiq-mirror-probe')
 
-    const text = mirrored.join('')
+    const text = mirroredText()
     expect(text).toContain('echo vyotiq-mirror-probe')
     expect(text).toContain('vyotiq-mirror-probe')
     expect(text).toContain('exit 0')
@@ -102,7 +115,7 @@ describe('terminal mirroring does not change what the model reads', () => {
     const result = await run('node -e "process.exit(3)"')
 
     expect(result.content).toContain('exit_code: 3')
-    expect(mirrored.join('')).toContain('exit 3')
+    expect(mirroredText()).toContain('exit 3')
   }, 30_000)
 
   it('runs unchanged when no sink is registered at all', async () => {

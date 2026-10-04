@@ -90,6 +90,17 @@ test('a live run reads at a glance, and can be found again from anywhere in it',
   await expect.poll(() => atBottom(page), { timeout: 5_000 }).toBe(true)
 
   // The plan line goes to a step: the first, folded since it finished, opens.
+  //
+  // UNSATISFIABLE TODAY, left as written on purpose — do not "fix" this by
+  // deleting it. The plan bar left the task pane for the Plan panel's header
+  // (PlanPanel.tsx:628 renders `<PlanLine steps={planSteps} />` with no
+  // `onStep`), so it is a static `role="img"` bar of `span[data-plan-step]`
+  // segments: no toolbar role, no buttons, no step jump. The component still
+  // supports the old contract (RecordLayout.tsx:39 renders
+  // `role="toolbar" aria-label="Plan · …"` with one button per segment as soon
+  // as `onStep` is passed), so this assertion is waiting for a wiring change,
+  // not a UI deletion: an `onPlanStep` threaded from ChatView.tsx:1117-1125
+  // (`<PlanPanel … />`) through PlanPanel to a record step-jump.
   const plan = page.getByRole('toolbar', { name: /^Plan · Step 3 of 3$/ })
   await expect(plan).toBeVisible()
   const first = plan.locator('button[data-plan-step]').first()
@@ -167,16 +178,19 @@ test('the Result copies by section, its marks set as type, and reasoning hides f
   expect(read.italicThoughts).toBe(0)
   expect(read.text).not.toMatch(/\*\*|\[\[/)
 
-  // Every pane's 40px row ends on one hairline: the navigator's as the task header's.
+  // Every 40px pane row ends on one hairline: the navigator's and the Changes
+  // panel's. The task pane's own row is gone with the header it deleted, so it
+  // is no longer part of this rule — that is the change, not a gap in it.
   const rules = await page.evaluate(() => {
     const line = (sel: string): string | null => {
       const el = document.querySelector(sel)
       return el ? getComputedStyle(el).borderBottomColor : null
     }
-    return { navigator: line('[data-navigator-head]'), task: line('[data-task-header]') }
+    return { navigator: line('[data-navigator-head]'), changes: line('[data-changes-toolbar]') }
   })
   expect(rules.navigator).not.toBeNull()
-  expect(rules.navigator).toBe(rules.task)
+  expect(rules.changes).not.toBeNull()
+  expect(rules.navigator).toBe(rules.changes)
 
   // The same record in the light theme, for the eye.
   await page.evaluate(async () => {

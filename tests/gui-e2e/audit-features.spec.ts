@@ -371,7 +371,7 @@ test.describe('Files: highlighting, editor search, replace in files', () => {
   async function openFiles(page: Page): Promise<void> {
     const panel = page.getByRole('tabpanel', { name: 'Files' })
     if (await panel.isVisible()) return
-    await expect(page.locator('[data-task-header]')).toBeVisible({ timeout: 30_000 })
+    await expect(page.locator('[data-task-pane]').first()).toBeVisible({ timeout: 30_000 })
     await page.keyboard.press('Alt+2')
     await expect(panel).toBeVisible({ timeout: 20_000 })
   }
@@ -631,7 +631,11 @@ test.describe('Repeat… and Scheduled tasks', () => {
     // The opened task is the new run, marked as scheduled in the navigator.
     // (Its record stays empty here: the e2e fixture never persists messages,
     // and the run finishes before the window opens it.)
-    await expect(page.locator('[data-task-header]')).toContainText(GOAL, { timeout: 20_000 })
+    // The pane no longer renders the task's title. Its run's own words would be
+    // the record's brief row (`[data-brief="1"]`, Brief.tsx), but the record of
+    // this run is empty here — see above — so the task that opened is named by
+    // the navigator's selected row, which is where the title lives now.
+    await expect(page.locator('[data-nav-row][aria-current="page"]')).toContainText(GOAL, { timeout: 20_000 })
 
     await page.locator('[data-navigator-view]').click()
     await page.getByRole('menuitem', { name: 'Scheduled tasks…' }).click()
@@ -710,7 +714,7 @@ test.describe('Undo one hunk of a task’s edit', () => {
 
   test('Undo the second hunk takes only it out; Restore puts it back', async () => {
     const page = launched.window
-    await expect(page.locator('[data-task-header]')).toBeVisible({ timeout: 30_000 })
+    await expect(page.locator('[data-task-pane]').first()).toBeVisible({ timeout: 30_000 })
     await page.keyboard.press('Alt+1')
     const panel = page.locator('[data-changes-panel]')
     await expect(panel).toBeVisible({ timeout: 20_000 })

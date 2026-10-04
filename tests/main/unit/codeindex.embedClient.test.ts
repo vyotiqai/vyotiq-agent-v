@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import {
   EmbedUtilityClient,
   resetEmbedUtilityClientForTests
@@ -14,7 +14,7 @@ type FakeChild = EventEmitter & {
   pid: number
   messages: unknown[]
   postMessage: (message: unknown) => void
-  kill: ReturnType<typeof vi.fn>
+  kill: Mock<() => void>
 }
 
 function makeFork(opts?: {
@@ -158,6 +158,33 @@ describe('EmbedUtilityClient', () => {
       await vi.advanceTimersByTimeAsync(1_000)
       expect(children[0]!.kill).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(120_000)
+      expect(children[0]!.kill).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('arms the idle self-dispose when a request times out instead of responding', async () => {
+    vi.useFakeTimers()
+    try {
+      const { fork, children } = makeFork({
+        onPost: () => {
+          /* never responds */
+        }
+      })
+      const client = new EmbedUtilityClient({ forkImpl: fork, idleMs: 120_000 })
+      const promise = client.ensure('x')
+      const rejected = expect(promise).rejects.toThrow(/timeout \(ensure\)/)
+      // Let the spawn settle, then run to the request timeout itself, so the
+      // idle window below is counted from the timeout rather than guessed.
+      await vi.advanceTimersByTimeAsync(1)
+      await vi.advanceTimersToNextTimerAsync()
+      await rejected
+      // The worker is now unused: the idle window must still free it.
+      expect(children[0]!.kill).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(119_999)
+      expect(children[0]!.kill).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
       expect(children[0]!.kill).toHaveBeenCalled()
     } finally {
       vi.useRealTimers()

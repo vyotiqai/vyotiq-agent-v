@@ -3,6 +3,7 @@ import { join } from 'path'
 import { atomicWriteJson } from '../storage/atomicWrite'
 import { CRASH_DEDUPE_KEY } from '../../shared/ipc'
 import { publishLifecycleNotification } from '../notifications/bus'
+import { logArchivePaths } from './rotation'
 
 /** Decode Windows exit codes as unsigned NTSTATUS hex for crash logs. */
 export function formatWindowsExitCode(exitCode: number): string | undefined {
@@ -423,7 +424,21 @@ export function rendererBoundaryCrashFromLogMessage(message: {
 }
 
 /**
- * One-shot: seed crash-history.json from recent log crash lines.
+ * One-shot: seed crash-history.json from recent log crash lines, reading the
+ * rotated generations beside the live log as well as the live log itself.
+ *
+ * The generations matter because a crash outlives its own log file: rotation
+ * (logging/rotation.ts) keeps 5 x 5 MB numbered generations, so the line that
+ * recorded a renderer/child crash is frequently no longer in `vyotiq.log` by
+ * the time anyone reads Diagnostics. diagnostics/export.ts already ships
+ * every generation in a support bundle, so before this read the panel was
+ * the one place that could lose the crash outright.
+ *
+ * Reading them here, inside the existing single backfill, is what keeps the
+ * anti-loop `backfillVersion` gate below intact: re-running on every boot
+ * would re-parse the whole retained log history at every launch. The cost is
+ * paid once per history schema version instead.
+ *
  * No-ops when `backfillVersion` is already {@link CRASH_BACKFILL_VERSION}.
  * @returns number of snippets newly added from the log
  */
@@ -431,19 +446,26 @@ export function backfillCrashSnippetsFromLog(logPath: string): number {
   const history = readHistory()
   if ((history.backfillVersion ?? 0) >= CRASH_BACKFILL_VERSION) return 0
 
-  let parsed: CrashSnippet[] = []
-  if (existsSync(logPath)) {
+  // Oldest generation first, live log last, so the reverse() below still
+  // yields newest-first and the MAX_CRASH_SNIPPETS cap keeps recent crashes.
+  // logArchivePaths derives the generation names; nothing here re-derives them.
+  const archivesOldestFirst = logArchivePaths(logPath).reverse()
+  const parsed: CrashSnippet[] = []
+  for (const path of [...archivesOldestFirst, logPath]) {
+    if (!existsSync(path)) continue
     try {
-      const text = readFileSync(logPath, 'utf8')
-      parsed = parseCrashSnippetsFromLogText(text)
+      parsed.push(...parseCrashSnippetsFromLogText(readFileSync(path, 'utf8')))
     } catch {
-      parsed = []
+      // Rotated away or unreadable between the check and the read — the other
+      // generations are still worth parsing.
     }
   }
 
   const seen = new Set(history.snippets.map(snippetDedupeKey))
   const added: CrashSnippet[] = []
   // Newest first (log order is chronological; reverse so recent crashes win the cap).
+  // `seen` also collapses a line present in two generations, so overlapping
+  // generations cannot double-count one crash.
   for (const snippet of [...parsed].reverse()) {
     const key = snippetDedupeKey(snippet)
     if (seen.has(key)) continue

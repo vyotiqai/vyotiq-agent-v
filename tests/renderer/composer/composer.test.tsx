@@ -453,8 +453,9 @@ describe('Composer', () => {
     })
   })
 
-  it('keeps the line editable while a run is in progress, with no Send or Stop button', () => {
-    render(
+  it('keeps the line editable while a run is in progress, with Queue and Stop', () => {
+    const onStop = vi.fn()
+    const { rerender } = render(
       <Composer
         provider="ollama"
         model="qwen2.5"
@@ -465,13 +466,35 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
         onSend={vi.fn()}
+        onStop={onStop}
       />
     )
 
     const ta = screen.getByRole('combobox', { name: 'Instruction' })
     expect(ta.getAttribute('contenteditable')).toBe('true')
-    expect(screen.queryByRole('button', { name: /^Stop$/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Send$/i })).toBeNull()
+    // Stop moved into the line's control row, right before the action.
+    const stop = screen.getByRole('button', { name: /^Stop$/i })
+    expect(stop.nextElementSibling?.textContent).toContain('Queue')
+    fireEvent.click(stop)
+    expect(onStop).toHaveBeenCalledTimes(1)
+
+    // Not live, nothing to stop.
+    rerender(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running={false}
+        hasWorkspace
+        secrets={testSecrets}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={vi.fn()}
+        onStop={onStop}
+      />
+    )
+    expect(screen.queryByRole('button', { name: /^Stop$/i })).toBeNull()
   })
 
   it('keeps mode and model controls enabled while a run is in progress', async () => {

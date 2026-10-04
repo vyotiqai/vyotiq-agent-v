@@ -302,7 +302,7 @@ import { pickWorkspace } from '@main/workspace/workspace'
 import { consumePendingDeepLink } from '@main/app/deepLinks'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
 import { getSettings, setSettings, setMarketplaceRemoteInstallAcked, redactSettingsForIpc, enqueueSettingsMutation, onSettingsWritten } from '@main/settings/settings'
-import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, retryFailedMcpServers, startMcpOAuth, setMcpStdioWorkspace } from '@main/agent/mcp'
+import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, retryFailedMcpServers, startMcpOAuth, setMcpStdioWorkspace, getMcpStdioWorkspace } from '@main/agent/mcp'
 import { isExecutableMcpBinary } from '@main/agent/mcp/binaries'
 import { headersWithoutAuthorization } from '../../shared/utils/mcpAuth'
 import {
@@ -737,6 +737,24 @@ function protectedInstanceRunIds(workspacePath: string): Set<string> {
 /** Git runs commands in a directory, so only ever in one the user has opened. */
 function isOpenWorkspace(path: string): boolean {
   return getWorkspaces().openPaths.some((open) => workspacePathsEqual(open, path))
+}
+
+/**
+ * Where the stdio MCP hint should point once a workspace is closed.
+ *
+ * The hint is a module-global fallback in `@main/agent/mcp` that keeps one
+ * warm stdio child process per server, so a hint left naming a closed
+ * workspace pins those processes for the rest of the session — closing the
+ * last workspace never releases them. Retarget it at whatever is active now,
+ * or clear it when nothing is.
+ */
+export function mcpStdioWorkspaceAfterRemove(
+  removedPath: string,
+  hint: string | null,
+  next: WorkspacesState
+): string | null {
+  if (hint == null || !workspacePathsEqual(hint, removedPath)) return hint
+  return next.activePath ?? null
 }
 
 const EXT_MIME: Record<string, string> = {
@@ -1308,6 +1326,13 @@ export function registerIpc(): void {
         stopAgentContextWatch(path)
         invalidateWorkspaceFileListCache(path)
         const next = await enqueueWorkspaceMutation(() => removeWorkspace(path))
+        // The stdio MCP hint is the one warm-session key setActive writes but
+        // remove never did, so a hint naming the closed workspace kept its
+        // stdio child processes alive for the rest of the session. Retarget it
+        // before the sync below, which fans out over the warm workspace set.
+        setMcpStdioWorkspace(
+          mcpStdioWorkspaceAfterRemove(path, getMcpStdioWorkspace(), next)
+        )
         // Storage retention (audit H5): renderer-confirmed storage-dir delete
         // on workspace removal. Skip silently when the dir is gone already.
         if (deleteStorage && getSettings().storage.pruneOnWorkspaceRemoval) {

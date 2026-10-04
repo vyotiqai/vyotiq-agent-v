@@ -1,5 +1,13 @@
 # pnpm 11 security defaults (explicit so global ~/.config/pnpm/rc cannot drift).
 minimumReleaseAge: 1440
+# The one exception to the 24h floor, and it is not a convenience: 4.3.0 is the
+# fix for the GHSA-ch52-4w7c-c8xp high advisory in the override below, and the
+# audit gate is `--audit-level high`, so waiting for maturity means shipping a
+# release with a known high (and a red CI). Build-time only, so the supply-chain
+# risk of a same-day pick is bounded. Delete this line on or after 2026-10-05;
+# the install passes on its own once the package matures.
+minimumReleaseAgeExclude:
+  - http-cache-semantics@4.3.0
 nodeLinker: isolated
 
 allowBuilds:
@@ -74,3 +82,12 @@ overrides:
   'brace-expansion@<1.1.20': '^1.1.20'
   'brace-expansion@>=2.0.0 <2.1.6': '^2.1.6'
   'brace-expansion@>=4.0.0 <5.0.11': '^5.0.11'
+  # GHSA-ch52-4w7c-c8xp (high, 2026-10-04): max-stale handling in
+  # http-cache-semantics <=4.2.0 can disclose cross-user cached responses.
+  # Build-time only - electron-builder's @electron/get (app-builder-lib,
+  # dmg-builder) downloads build inputs; it never serves a cached response to
+  # an end user, so there is no cross-user cache to disclose. Scoped to the
+  # vulnerable range so only the affected line moves: a bare '>=4.3.0' would
+  # also match a future 5.x and drag it into cacheable-request@7.0.4, which
+  # declares ^4.1.0. Patched in 4.3.0 (2026-10-04), a minor within 4.x.
+  'http-cache-semantics@<=4.2.0': '^4.3.0'

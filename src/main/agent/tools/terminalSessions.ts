@@ -31,6 +31,15 @@ export type TerminalSessionStatus = 'running' | 'done' | 'timeout' | 'pattern_ma
 export const MAX_BACKGROUND_TERMINALS_PER_INVOKE = 8
 
 /**
+ * App-wide ceiling on concurrent *live* background shells, across every run and
+ * invoke. The per-invoke cap alone is multiplied by
+ * `maxParallelInstances` (default 16 — settings.maxParallelInstances), so one
+ * task could otherwise hold 128 shell process trees. 24 sits well above a
+ * realistic single-task peak (8 per invoke) while still bounding the app.
+ */
+export const MAX_BACKGROUND_TERMINALS_GLOBAL = 24
+
+/**
  * Finished sessions stay readable for later polls, but only for this long —
  * after the TTL (or once too many pile up) they are disposed so the map and
  * the concurrency budget cannot leak across a long-lived invoke.
@@ -190,6 +199,20 @@ export function countTerminalSessionsForInvoke(runId: string, invokeId: number):
 /** @internal Test helper — total live background sessions. */
 export function countTerminalSessionsGlobalForTests(): number {
   return sessions.size
+}
+
+/**
+ * Live shells across every run and invoke — what MAX_BACKGROUND_TERMINALS_GLOBAL
+ * bounds. Finished-but-unpruned sessions are deliberately excluded: the ceiling
+ * exists to cap concurrent process trees, not retained output history, and the
+ * per-invoke TTL prune reclaims those on the next spawn.
+ */
+function countLiveTerminalSessionsGlobal(): number {
+  let count = 0
+  for (const session of sessions.values()) {
+    if (session.running) count++
+  }
+  return count
 }
 
 export function disposeTerminalSessionsForInvoke(runId: string, invokeId: number): number {
@@ -383,6 +406,15 @@ export async function startBackgroundTerminal(
       `shell: ${resolved}`,
       '',
       `Too many concurrent background terminal sessions for this invoke (limit ${MAX_BACKGROUND_TERMINALS_PER_INVOKE}). Wait for existing sessions to finish or dispose them.`,
+      'exit_code: 1'
+    ].join('\n')
+  }
+  if (countLiveTerminalSessionsGlobal() >= MAX_BACKGROUND_TERMINALS_GLOBAL) {
+    return [
+      `cwd: ${cwd}`,
+      `shell: ${resolved}`,
+      '',
+      `Too many concurrent background terminal sessions app-wide (limit ${MAX_BACKGROUND_TERMINALS_GLOBAL}). Wait for existing sessions to finish or dispose them.`,
       'exit_code: 1'
     ].join('\n')
   }

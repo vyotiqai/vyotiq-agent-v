@@ -110,12 +110,12 @@ test('Ctrl I hides the inspector, and the task header offers it back on the same
   await window.keyboard.press(`${MOD}+I`)
   await expect(inspector(window)).toHaveCount(0)
 
-  const offer = window.locator('[data-task-header]').getByRole('button', { name: /^Show inspector/ })
+  const offer = window.locator('[data-task-pane]').getByRole('button', { name: /^Show inspector/ })
   await expect(offer).toBeVisible()
   await offer.click()
   await expect(tab(window, /^Plan/)).toHaveAttribute('aria-selected', 'true')
   // The same button stays, lit, and now hides it.
-  const toggle = window.locator('[data-task-header] [data-inspector-toggle]')
+  const toggle = window.locator('[data-task-pane] [data-inspector-toggle]')
   await expect(toggle).toHaveAccessibleName(/^Hide inspector/)
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await toggle.click()
@@ -182,7 +182,7 @@ test('a new task leaves the work area to its brief until the inspector is asked 
   await window.keyboard.press(`${MOD}+N`)
   await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
   await expect(inspector(window)).toHaveCount(0)
-  const offer = window.locator('[data-task-header]').getByRole('button', { name: /^Show inspector/ })
+  const offer = window.locator('[data-task-pane]').getByRole('button', { name: /^Show inspector/ })
   await expect(offer).toBeVisible()
 
   await window.keyboard.press(`${MOD}+I`)

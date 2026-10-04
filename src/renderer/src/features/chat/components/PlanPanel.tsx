@@ -5,9 +5,11 @@ import { CHAT_RIGHT_PANEL_BODY, NUM, SECTION_LABEL } from '@renderer/lib/utils/l
 import type { RunReceipt } from '@shared/ipc'
 import { RunReceiptSchema } from '@shared/ipc'
 import { useRunChecks } from '@renderer/features/task/useRunChecks'
+import { PlanLine } from '@renderer/features/task/record/RecordLayout'
 import { EmptyPanel } from './PanelChrome'
 import { isPlanDraftReady } from '../utils/planDraft'
 import { useRunTodos } from '../hooks/useRunTodos'
+import type { TodoItem } from '../toolUi/parsers/todo'
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
 
 type ArtifactView = 'plan' | 'contract' | 'receipt'
@@ -112,6 +114,14 @@ function receiptStatusGlyph(status: RunReceipt['status']): TaskState {
       return _exhaustive
     }
   }
+}
+
+/** A todo's status in the task vocabulary — the plan line's segment vocabulary. */
+function todoStepState(status: TodoItem['status']): TaskState {
+  if (status === 'in_progress') return 'running'
+  if (status === 'completed') return 'done'
+  if (status === 'cancelled') return 'stopped'
+  return 'queued'
 }
 
 /**
@@ -375,6 +385,12 @@ export const PlanPanel = memo(function PlanPanel({
     active: active && tab === 'plan'
   })
   const hasTodos = (todosData?.items.length ?? 0) > 0
+  // The header's plan line counts the run's steps, so they come from the same
+  // todos.json poll that hides the document's own steps section.
+  const planSteps = useMemo(
+    () => (todosData?.items ?? []).map((item) => ({ title: item.content, state: todoStepState(item.status) })),
+    [todosData]
+  )
   // create_plan writes checks.json with plan.md, so the plan's text is the
   // moment to look again.
   const checks = useRunChecks(workspacePath, runId, tab === 'plan' ? (content ?? '') : '')
@@ -561,7 +577,7 @@ export const PlanPanel = memo(function PlanPanel({
       {/* The pane's 40px row, fixed above the document: it no longer scrolls away. */}
       <div
         className={cn(
-          'flex h-10 shrink-0 items-center gap-2 border-b border-border',
+          'relative flex h-10 shrink-0 items-center gap-2 border-b border-border',
           tab !== 'plan' ? 'px-2' : 'pl-4 pr-2'
         )}
         data-plan-header
@@ -607,6 +623,9 @@ export const PlanPanel = memo(function PlanPanel({
             />
           )}
           />
+        {/* The plan as this header's bottom rule. The steps it counts are the
+            ones below it, so the rule is the panel's own, not a pane's. */}
+        <PlanLine steps={planSteps} />
       </div>
       <div
         ref={scrollRootRef}

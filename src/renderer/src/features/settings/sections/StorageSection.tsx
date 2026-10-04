@@ -432,7 +432,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
           field="checkpointKeep"
           form={form}
           title="Keep undo points of the newest"
-          hint="Per workspace, whatever their age."
+          hint="Per workspace. The age limit applies here too — anything running or from the last 24 hours is never touched."
           help="Sessions average well under 1 MB of checkpoints; 20 keeps about a week of undo cheaply."
           nested
           unit="tasks"
@@ -452,7 +452,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
               ? 'Deletes old tasks on a schedule.'
               : 'Off: nothing is deleted on a schedule. Free up space still applies the limits below.'
           }
-          help="A task is deleted only when it is both beyond the kept count and older than the age limit. The open task and anything from the last 24 hours are never touched."
+          help="A task is deleted once it is beyond the kept count or older than the age limit — either one is enough. Anything running, anything from the last 24 hours, and the newest task in each workspace are never touched."
           checked={storage.sessionRetentionEnabled}
           disabled={form.formLocked}
           {...form.nestedDefaultMark('storage', 'sessionRetentionEnabled')}
@@ -479,7 +479,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
           field="sessionKeep"
           form={form}
           title="Always keep the newest"
-          hint="Per workspace, whatever their age."
+          hint="Per workspace. Only the newest one is safe from the age limit too."
           nested
           unit="tasks"
           min={1}

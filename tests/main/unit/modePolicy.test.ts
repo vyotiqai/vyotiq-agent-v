@@ -8,11 +8,24 @@ import {
   isPlanArtifactPath,
   isRunContractPath,
   isRunPlanPath,
-  modeSectionMarkdown
+  isScopeSharedInlineInstance,
+  modeSectionMarkdown,
+  SCOPE_SHARED_OMIT_BUILTIN
 } from '../../../src/main/agent/tools/modePolicy'
 import { AGENT_ONLY_BUILTIN, INLINE_OMIT_BUILTIN } from '../../../src/main/agent/tools/classify'
 import { BUILTIN_TOOL_NAMES, TOOL_REGISTRY } from '../../../src/main/agent/schemas/tools'
 import { setMcpReadOnlyHintsForTests } from '../../../src/main/agent/mcp'
+
+const ALL_BUILTIN_DEFS = BUILTIN_TOOL_NAMES.map((name) => ({ name }))
+
+/** Names the instance's tool catalog would actually advertise. */
+function catalogNames(opts?: Parameters<typeof filterToolDefsForMode>[2]): string[] {
+  return filterToolDefsForMode('agent', ALL_BUILTIN_DEFS, opts).map((d) => d.name)
+}
+
+function allBuiltinsOf(names: readonly string[]): { name: string }[] {
+  return names.map((name) => ({ name }))
+}
 
 describe('modePolicy', () => {
   beforeEach(() => {
@@ -420,5 +433,151 @@ describe('modePolicy', () => {
     expect(isBuiltinAllowedInMode('ask', 'switch_mode')).toBe(false)
     expect(isBuiltinAllowedInMode('agent', 'switch_mode')).toBe(false)
     expect(isBuiltinAllowedInMode('agent', 'switch_mode', { autoModeSwitch: true })).toBe(true)
+  })
+
+  // The condition assertInlineInstanceUnscopedToolAllowed enforces at dispatch
+  // (writeGuard.ts). The catalog must agree with it: a tool the child is never
+  // allowed to call costs a whole turn each time the child tries.
+  describe('path_scope-shared inline instance without a worktree', () => {
+    it('drops terminal from the catalog before any call is made', () => {
+      const names = catalogNames({ autoModeSwitch: true, inlineInstance: true, pathScopeShared: true })
+      expect(names).not.toContain('terminal')
+      // `terminal` is still there for every other configuration.
+      expect(catalogNames({ autoModeSwitch: true })).toContain('terminal')
+      expect(catalogNames({ autoModeSwitch: true, inlineInstance: true })).toContain('terminal')
+    })
+
+    it('drops every other tool the same unscoped guard refuses', () => {
+      // Same assertInlineInstanceUnscopedToolAllowed call as terminal
+      // (tools/index.ts) — git_commit escapes the parent tree the same way.
+      const names = catalogNames({ autoModeSwitch: true, inlineInstance: true, pathScopeShared: true })
+      expect(names).not.toContain('git_commit')
+      expect(catalogNames({ autoModeSwitch: true, inlineInstance: true })).toContain('git_commit')
+    })
+
+    it('the omit set stays exactly the dispatch-guarded builtins — no more', () => {
+      // `diagnostics` and `run_tests` deliberately stay: they read the tree,
+      // write nothing, and are how a scope-shared child checks its own work.
+      expect([...SCOPE_SHARED_OMIT_BUILTIN].sort()).toEqual(['git_commit', 'terminal'])
+      expect(SCOPE_SHARED_OMIT_BUILTIN.has('diagnostics')).toBe(false)
+      expect(SCOPE_SHARED_OMIT_BUILTIN.has('run_tests')).toBe(false)
+    })
+
+    it('keeps exactly the tools it is meant to keep, and drops nothing extra', () => {
+      const expected = BUILTIN_TOOL_NAMES.filter(
+        (name) => !INLINE_OMIT_BUILTIN.has(name) && !SCOPE_SHARED_OMIT_BUILTIN.has(name)
+      )
+      expect(
+        catalogNames({ autoModeSwitch: true, inlineInstance: true, pathScopeShared: true }).sort()
+      ).toEqual([...expected].sort())
+    })
+
+    it('tells the child in the mode section, naming the tools that survive', () => {
+      const section = modeSectionMarkdown('agent', {
+        inlineInstance: true,
+        pathScopeShared: true
+      })!
+      expect(section).toMatch(/shares the parent tree by `path_scope`/)
+      expect(section).toMatch(/no worktree of its own/)
+      // It must say what to use instead, not just that something is missing.
+      expect(section).toMatch(/edit\/str_replace/)
+      expect(section).toMatch(/`diagnostics` and `run_tests` remain available/)
+    })
+
+    it('says nothing about path_scope to any other configuration', () => {
+      expect(modeSectionMarkdown('agent', { inlineInstance: true })).not.toMatch(/no worktree/)
+      expect(modeSectionMarkdown('agent')).not.toMatch(/path_scope/)
+      expect(modeSectionMarkdown('agent', { inlineInstance: true, pathScopeShared: false })).not.toMatch(
+        /no worktree/
+      )
+    })
+
+    it('is deterministic — same input, same catalog, no clock or randomness', () => {
+      const opts = { autoModeSwitch: true, inlineInstance: true, pathScopeShared: true }
+      const first = catalogNames(opts)
+      expect(catalogNames(opts)).toEqual(first)
+      expect(catalogNames({ ...opts })).toEqual(first)
+      expect(isScopeSharedInlineInstance({ inlineInstance: true, pathScope: ['src/a'] })).toBe(true)
+    })
+  })
+
+  describe('isScopeSharedInlineInstance', () => {
+    it('is true only for a scoped inline instance with no worktree', () => {
+      expect(
+        isScopeSharedInlineInstance({ inlineInstance: true, pathScope: ['src/a'] })
+      ).toBe(true)
+      expect(
+        isScopeSharedInlineInstance({
+          inlineInstance: true,
+          pathScope: ['src/a'],
+          worktreePath: 'C:/repo/.wt'
+        })
+      ).toBe(false)
+      // Not an inline instance, no scope, or an empty scope — the guard lets
+      // every one of these through, so the catalog must too.
+      expect(isScopeSharedInlineInstance({ pathScope: ['src/a'] })).toBe(false)
+      expect(isScopeSharedInlineInstance({ inlineInstance: true })).toBe(false)
+      expect(isScopeSharedInlineInstance({ inlineInstance: true, pathScope: [] })).toBe(false)
+      expect(isScopeSharedInlineInstance({})).toBe(false)
+    })
+
+    it('leaves the catalog of a worktree instance untouched', () => {
+      const withWorktree = catalogNames({ autoModeSwitch: true, inlineInstance: true })
+      expect(withWorktree).toContain('terminal')
+      expect(withWorktree).toContain('git_commit')
+      expect(withWorktree).toEqual(catalogNames({ autoModeSwitch: true, inlineInstance: true }))
+    })
+  })
+
+  describe('non-denied tools survive a scope-shared instance', () => {
+    const shared = { autoModeSwitch: true, inlineInstance: true, pathScopeShared: true }
+
+    it('run_tests stays available — it is the escape hatch that runs vitest/eslint/tsc', () => {
+      const names = filterToolDefsForMode(
+        'agent',
+        allBuiltinsOf(['run_tests', 'terminal']),
+        shared
+      ).map((d) => d.name)
+      expect(names).toContain('run_tests')
+      expect(names).not.toContain('terminal')
+      expect(assertToolAllowedInMode('agent', 'run_tests', {}, shared).ok).toBe(true)
+    })
+
+    it('diagnostics stays available — tools/index.ts allows it for exactly this case', () => {
+      const names = filterToolDefsForMode(
+        'agent',
+        allBuiltinsOf(['diagnostics', 'terminal']),
+        shared
+      ).map((d) => d.name)
+      expect(names).toContain('diagnostics')
+      expect(assertToolAllowedInMode('agent', 'diagnostics', { kind: 'typecheck' }, shared).ok).toBe(
+        true
+      )
+    })
+
+    it('the in-scope edit tools stay available too', () => {
+      const names = filterToolDefsForMode(
+        'agent',
+        allBuiltinsOf(['edit', 'str_replace', 'delete', 'read', 'grep']),
+        shared
+      ).map((d) => d.name)
+      expect(names).toEqual(['edit', 'str_replace', 'delete', 'read', 'grep'])
+      for (const name of names) {
+        expect(assertToolAllowedInMode('agent', name, {}, shared).ok, name).toBe(true)
+      }
+    })
+  })
+
+  it('inline nesting omissions still apply inside a scope-shared instance', () => {
+    // INLINE_OMIT_BUILTIN keeps its own meaning; pathScopeShared narrows further,
+    // it never re-admits an omitted tool.
+    const names = filterToolDefsForMode(
+      'agent',
+      BUILTIN_TOOL_NAMES.map((name) => ({ name })),
+      { autoModeSwitch: true, inlineInstance: true, pathScopeShared: true }
+    ).map((d) => d.name)
+    for (const omitted of INLINE_OMIT_BUILTIN) expect(names, omitted).not.toContain(omitted)
+    expect(names).not.toContain('spawn_agent_instance')
+    expect(names).not.toContain('create_goal')
   })
 })

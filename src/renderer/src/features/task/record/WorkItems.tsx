@@ -123,7 +123,9 @@ function Chevron({ open }: { open: boolean }) {
     <Icon
       name={open ? 'chevron' : 'chevronRight'}
       size={11}
-      className={cn('shrink-0 text-tertiary', open ? '' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
+      // Pulled in like the step, loose and History rows' own glyph, so every
+      // duration in the record ends on that one right edge.
+      className={cn('-ml-0.5 shrink-0 text-tertiary', open ? '' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
     />
   )
 }
@@ -156,7 +158,7 @@ function WorkLine({
       <span className="flex-1" />
       {trailing}
       {/* The chevron's slot is kept on every line, so trailing facts share one right edge. */}
-      {onToggle ? <Chevron open={Boolean(open)} /> : <span aria-hidden className="w-[11px] shrink-0" />}
+      {onToggle ? <Chevron open={Boolean(open)} /> : <span aria-hidden className="-ml-0.5 w-[11px] shrink-0" />}
     </>
   )
   if (!onToggle) return <div className="group flex min-h-6 items-center gap-2 text-xs">{body}</div>
@@ -523,7 +525,7 @@ function NoticeItem({ text }: { text: string }) {
       <span className="min-w-0 truncate font-medium text-fg">{what}</span>
       {why ? <span className="min-w-0 truncate text-muted">{why}</span> : null}
       <span className="flex-1" />
-      <span aria-hidden className="w-[11px] shrink-0" />
+      <span aria-hidden className="-ml-0.5 w-[11px] shrink-0" />
     </div>
   )
 }
@@ -628,6 +630,9 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
                   )}
                   <span className="flex-1" />
                   <Duration ms={toolDurationMs(t)} />
+                  {/* The chevron's slot, as the parent WorkLine keeps it, so a
+                      nested lookup's time ends on the same right edge. */}
+                  <span aria-hidden className="-ml-0.5 w-[11px] shrink-0" />
                 </div>
                 {fail && t.tool.content ? (
                   ERROR_LINE_LOOKUPS.has(t.tool.name) ? (

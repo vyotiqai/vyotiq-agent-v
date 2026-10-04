@@ -22,6 +22,7 @@ import { removeWorkspaceIndexStorage } from '../agent/indexStoragePaths'
 import { disposePtySessionsUnderPath } from '../app/ptySessions'
 import { workspaceId, workspaceMetaDir } from '../storage/paths'
 import { disposeWorkspaceLsp } from '../workspace/lspService'
+import { DEFAULT_MAX_PARALLEL_INSTANCES } from '../../shared/ipc'
 import { gitAvailable, isGitRepo } from './git'
 import { guardGitInvocation } from './repoCommandGuard'
 
@@ -39,6 +40,23 @@ const INSTANCE_BRANCH_PREFIX = 'vyotiq/instance/'
 // commits are all reachable from some other ref carries no work and goes at
 // once, whatever its age.
 const INSTANCE_BRANCH_MAX_AGE_MS = 14 * 24 * 60 * 60_000
+// Count ceiling. Age and reachability both fail on the same backlog: a
+// backlog of branches 3 days old whose tips are 88 behind / 18 ahead of main
+// carries its own commits, so neither rule sees it and the set grows without
+// limit (48 measured live, none age-eligible). A ceiling prunes the oldest of
+// the kept set down to this many once the total exceeds it.
+//
+// Chosen as 2 × maxParallelInstances (2 × 16 = 32): comfortably above the
+// concurrency cap — the setting cannot exceed 16 (MAX_PARALLEL_INSTANCES_LIMIT),
+// so a normal run's branches are never in the overflow — and low enough to
+// shrink the 48-branch backlog measured live. It reads the default rather than
+// getSettings(): the prune pass runs at boot/workspace open, and pulling the
+// settings module in here would read settings.json (and the OS keychain behind
+// it) on a git path that needs neither. The ceiling is a storage bound, not a
+// concurrency one, so it must not shrink when someone lowers the spawn cap —
+// and live branches are protected/checked-out regardless, so it does not need
+// to. 1 × would sit at the cap itself and prune a full run's own branches.
+const INSTANCE_BRANCH_MAX_COUNT = DEFAULT_MAX_PARALLEL_INSTANCES * 2
 // `git branch -D a b c…` deletes in one spawn (~250 ms each here); chunk so a
 // backlog never builds a command line past the win32 limit.
 const INSTANCE_BRANCH_DELETE_CHUNK = 50
@@ -1310,6 +1328,8 @@ export type PruneInstanceWorktreesOpts = {
   backoffMs?: number
   /** Age of a kept branch's last commit past which it is deleted. */
   branchMaxAgeMs?: number
+  /** Count past which the oldest kept branches are deleted. */
+  branchMaxCount?: number
 }
 
 /**
@@ -1430,6 +1450,8 @@ export type PruneInstanceBranchesSummary = {
   merged: number
   /** Deleted: unmerged, but the last commit is older than branchMaxAgeMs. */
   aged: number
+  /** Deleted: unmerged and inside the age bound, but past the count ceiling. */
+  overCount: number
   /** Unmerged and younger than the cutoff — still the merge source for its run. */
   kept: number
   /** Belongs to a protected run or a spawn still in flight. */
@@ -1442,6 +1464,7 @@ export type PruneInstanceBranchesSummary = {
 const EMPTY_BRANCH_PRUNE_SUMMARY: PruneInstanceBranchesSummary = {
   merged: 0,
   aged: 0,
+  overCount: 0,
   kept: 0,
   protected: 0,
   checkedOut: 0,
@@ -1556,6 +1579,7 @@ async function pruneStaleInstanceBranchesUnlocked(
 
   const now = opts?.nowFn ?? Date.now
   const maxAgeMs = opts?.branchMaxAgeMs ?? INSTANCE_BRANCH_MAX_AGE_MS
+  const maxCount = opts?.branchMaxCount ?? INSTANCE_BRANCH_MAX_COUNT
   const protectedBranches = new Set<string>()
   for (const runId of protectedRunIds) protectedBranches.add(instanceWorktreeBranch(runId))
   const checkedOut = checkedOutBranches(
@@ -1565,6 +1589,8 @@ async function pruneStaleInstanceBranchesUnlocked(
 
   const summary: PruneInstanceBranchesSummary = { ...EMPTY_BRANCH_PRUNE_SUMMARY }
   const doomed: string[] = []
+  // Branches that reached `kept`: the only pool the ceiling may draw from.
+  const keptBranches: InstanceBranchRef[] = []
   for (const branch of branches) {
     const runId = branch.name.slice(INSTANCE_BRANCH_PREFIX.length)
     if (
@@ -1589,7 +1615,27 @@ async function pruneStaleInstanceBranchesUnlocked(
       doomed.push(branch.name)
       continue
     }
+    keptBranches.push(branch)
     summary.kept += 1
+  }
+
+  // Count ceiling, after `merged` and `aged` so neither loses a branch it would
+  // otherwise have taken. The overflow is measured against what is still
+  // standing once those two are gone, and drawn from the kept pool alone: a
+  // protected or checked-out branch was never in it, so it is never chosen,
+  // and the set lands exactly on the ceiling rather than a branch wider.
+  const overCountNames: string[] = []
+  const overflow = branches.length - doomed.length - maxCount
+  if (overflow > 0 && keptBranches.length > 0) {
+    const oldestFirst = [...keptBranches].sort(
+      (a, b) => committedAtForSort(a) - committedAtForSort(b) || (a.name < b.name ? -1 : 1)
+    )
+    for (const branch of oldestFirst.slice(0, overflow)) {
+      summary.overCount += 1
+      summary.kept -= 1
+      doomed.push(branch.name)
+      overCountNames.push(branch.name)
+    }
   }
 
   const deleted = await deleteInstanceBranchesBestEffort(workspacePath, doomed)
@@ -1601,6 +1647,9 @@ async function pruneStaleInstanceBranchesUnlocked(
       deleted,
       merged: summary.merged,
       aged: summary.aged,
+      overCount: summary.overCount,
+      overCountBranches: overCountNames.slice(0, 5),
+      maxCount,
       kept: summary.kept,
       protected: summary.protected,
       checkedOut: summary.checkedOut,
@@ -1609,6 +1658,11 @@ async function pruneStaleInstanceBranchesUnlocked(
     })
   }
   return summary
+}
+
+/** Oldest first, and an unparseable date last: it is no evidence of age. */
+function committedAtForSort(branch: InstanceBranchRef): number {
+  return Number.isFinite(branch.committedAtMs) ? branch.committedAtMs : Number.POSITIVE_INFINITY
 }
 
 /** Batch `git branch -D`; returns how many of `branches` are gone afterwards. */

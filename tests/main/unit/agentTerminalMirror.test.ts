@@ -30,6 +30,7 @@ import {
   mirrorAgentCommandStart,
   mirrorAgentOutput
 } from '@main/agent/tools/terminalMirror'
+import { flushTerminalMirror } from '@main/agent/tools/terminalMirrorSink'
 
 const WS = process.platform === 'win32' ? 'C:\\ws' : '/ws'
 const OTHER = process.platform === 'win32' ? 'C:\\other' : '/other'
@@ -45,7 +46,13 @@ function sentOn(channel: string): unknown[] {
   return hoisted.send.mock.calls.filter((call) => call[0] === channel).map((call) => call[1])
 }
 
+/**
+ * Mirror writes are batched, so a test that wants to read what reached the
+ * panel flushes first. Flushing here keeps every expected string below exactly
+ * as it was: these assertions still describe the bytes, not the batching.
+ */
 function mirroredText(): string {
+  flushTerminalMirror()
   return (sentOn(IPC.ptyData) as Array<{ data: string }>).map((p) => p.data).join('')
 }
 

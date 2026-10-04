@@ -14,7 +14,7 @@ import {
 } from '../agent/tools/terminal'
 import type { PtySessionInfo } from '../../shared/ipc'
 import { getMainWindow } from './window'
-import { setTerminalMirrorSink } from '../agent/tools/terminalMirrorSink'
+import { flushTerminalMirror, setTerminalMirrorSink } from '../agent/tools/terminalMirrorSink'
 import { installForklessConptyKill } from './conptyKill'
 
 // `IPty` is a type-only import — erased at runtime, so the optional node-pty
@@ -392,6 +392,10 @@ export function killPty(id: string, workspacePath?: string): boolean {
   const s = sessions.get(id)
   if (!s) return false
   if (workspacePath && !workspacePathsEqual(s.workspacePath, workspacePath)) return false
+  // Mirror writes are batched. Deliver whatever is still buffered while this
+  // session exists — after the delete below, a late flush would find no handle
+  // and create a brand new mirror session for a disposed workspace.
+  if (s.backend.kind === 'agent') flushTerminalMirror(s.workspacePath)
   try {
     if (s.backend.kind === 'pty') s.backend.pty.kill()
     else if (s.backend.kind === 'pipe') s.backend.child.kill()

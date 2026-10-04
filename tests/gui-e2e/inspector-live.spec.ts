@@ -59,7 +59,7 @@ test('Files goes live with the file the run is writing, and stops when it lands'
   const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   // A new task keeps the inspector out of the way until asked for.
-  await window.locator('[data-task-header]').getByRole('button', { name: /^Show inspector/ }).click()
+  await window.locator('[data-task-pane]').getByRole('button', { name: /^Show inspector/ }).click()
   const files = window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ })
   await expect(files).toBeVisible()
   await expect(files).not.toContainText('working now')

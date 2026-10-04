@@ -144,6 +144,24 @@ export const PAGE_TITLE = 'text-title font-semibold tracking-[var(--vy-tracking-
 /** The record column: one content edge, a readable measure. No label gutter. */
 export const RECORD_MAX = 'max-w-[780px]'
 
+/** The instruction line: the record's own edge, so the two read as one column. */
+export const COMPOSER_MAX = 'max-w-[780px]'
+
+/**
+ * The 8px the record's scroll reserves with `[scrollbar-gutter:stable]`. The
+ * composer is not a scrollport, so it reserves the same width as padding —
+ * without it the composer's column centres on the pane's offset box and sits
+ * ~4px right of the record's, which centres on its client box.
+ */
+export const COMPOSER_GUTTER = 'pr-2'
+
+/**
+ * The box is the record's card — the brief and the step rows bleed 8px past
+ * the column's 16px padding on each side, so the composer's box takes the
+ * same bleed and lands on the record's card edge instead of 12px inside it.
+ */
+export const COMPOSER_BOX_BLEED = '-mx-2'
+
 export { RUN_LIST_CAP } from '@shared/domain/runs'
 
 /** localStorage key for the navigator being hidden (Ctrl B). */

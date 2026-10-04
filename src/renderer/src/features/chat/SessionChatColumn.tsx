@@ -513,6 +513,7 @@ export function SessionChatColumn({
                   key={`composer:${surfaceKey}`}
                   {...composerProps}
                   variant={newTask ? 'brief' : 'line'}
+                  onStop={onStop}
                   lineOutcome={lineOutcome}
                   onDismissError={onDismissError}
                   newTaskTargets={newTaskTargets}

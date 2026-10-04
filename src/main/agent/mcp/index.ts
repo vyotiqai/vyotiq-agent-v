@@ -219,6 +219,37 @@ export function collectStdioWorkspacePaths(): string[] {
 }
 
 /**
+ * Workspaces that keep a stdio MCP session between syncs: one with a run
+ * going, plus the workspace on screen.
+ *
+ * `collectStdioWorkspacePaths` unions every open workspace, and a session is a
+ * child process — on Windows that is three processes and ~110 MB per server.
+ * Keying the fan-out off the open-workspace list meant the price of *listing*
+ * a folder was a process per folder, paid for every configured stdio server
+ * until the app closed. A workspace nobody is working in now connects on its
+ * first tool call instead (`ensureMcpSessionConnected`).
+ *
+ * The screen hint and `activePath` are both included so the workspace on view
+ * stays warm whichever one the caller set last, and so a server always has at
+ * least one live session while any workspace is open.
+ */
+function collectWarmStdioWorkspaces(): string[] {
+  const paths = new Set<string>()
+  for (const run of listActiveRuns()) {
+    if (run.workspacePath?.trim()) paths.add(run.workspacePath.trim())
+  }
+  const hint = mcpStdioWorkspacePath?.trim()
+  if (hint) paths.add(hint)
+  try {
+    const active = readWorkspacesState().activePath?.trim()
+    if (active) paths.add(active)
+  } catch {
+    // tests / early startup
+  }
+  return [...paths]
+}
+
+/**
  * Hint the default workspace for stdio MCP when no explicit path is passed.
  * Does not disconnect existing workspace-scoped sessions.
  */
@@ -492,6 +523,96 @@ function resolveSessionForServer(
     if (parsed?.serverId === serverId) return { key, session }
   }
   return null
+}
+
+/**
+ * Connect a stdio session for a workspace sync deliberately left cold.
+ *
+ * Sync keeps sessions only for the workspaces doing work plus the one on
+ * screen, so a server the user configured for a workspace nobody is working in
+ * has no session until something reaches for it. Called from the lookup path —
+ * the tool call, the resource read, the prompt fetch — so "not warm yet" costs
+ * one connect instead of a dead server.
+ *
+ * Deliberately narrow: only a stdio server the user still has enabled, only a
+ * this-workspace server's own bound workspace, only a workspace the app
+ * already lists (so an arbitrary cwd passed in is still refused rather than
+ * spawned, which is the isolation the workspace tests pin), and never while the
+ * connect circuit for that key is open.
+ */
+async function ensureMcpSessionConnected(
+  serverId: string,
+  workspacePath?: string | null
+): Promise<void> {
+  const wp = resolveStdioWorkspacePath(workspacePath)
+  if (!wp) return
+  const key = mcpStdioSessionKey(serverId, wp)
+  if (sessions.has(key)) return
+  let cfg: McpServer | undefined
+  try {
+    cfg = resolveEffectiveMcpServers().find((s) => s.id === serverId)
+  } catch {
+    // Settings/marketplace unavailable — there is no config to connect from.
+  }
+  if (!cfg || !cfg.enabled || !isStdioTransport(cfg.transport)) return
+  if (isThisWorkspaceMcpAuth(cfg) && !mcpAuthAllowedForWorkspace(cfg, wp)) return
+  if (!collectStdioWorkspacePaths().some((p) => workspacePathsEqual(p, wp))) return
+  if (isGitMcpServer(cfg) && !isGitRepo(wp)) {
+    connectErrors.set(key, gitMcpNotARepoMessage(wp))
+    return
+  }
+  try {
+    assertCircuitClosed(circuitKeyMcpConnect(key), MCP_CONNECT_CIRCUIT_POLICY)
+  } catch (err) {
+    if (isCircuitOpenError(err)) return
+    throw err
+  }
+  const configKey = mcpServerConfigKey(cfg, wp)
+  if (connectConfigByKey.get(key) !== configKey) {
+    resetCircuit(circuitKeyMcpConnect(key))
+    connectConfigByKey.set(key, configKey)
+  }
+  try {
+    await connectMcpServer(cfg, wp)
+    recordCircuitSuccess(circuitKeyMcpConnect(key))
+  } catch (err) {
+    const message = describeMcpConnectError(err, cfg)
+    connectErrors.set(key, message)
+    recordCircuitFailure(circuitKeyMcpConnect(key), MCP_CONNECT_CIRCUIT_POLICY)
+    if (quietMcpConnectSkip(message)) return
+    logger.warn('MCP connect failed', {
+      scope: 'mcp',
+      serverId,
+      workspaceId: workspaceIdFromPath(wp),
+      code: mcpConnectErrorCode(err),
+      kind: classifyMcpConnectError(err),
+      reason: message,
+      err
+    })
+  }
+}
+
+/**
+ * `assertMcpServerAccess` for the async call paths.
+ *
+ * A miss is normally "server not connected" — but with a deliberately cold
+ * workspace it means "not connected *yet*". Connect once and look again, so a
+ * configured server stays callable from any open workspace. The `enabledIds`
+ * gate is checked before connecting: a server this run may not use must not
+ * have a process started on its behalf.
+ */
+async function assertMcpServerAccessForCall(
+  serverId: string,
+  enabledIds?: ReadonlySet<string>,
+  workspacePath?: string | null
+): Promise<{ ok: true; session: McpSession; sessionKey: string } | { ok: false; error: string }> {
+  if (enabledIds && !enabledIds.has(serverId)) {
+    return assertMcpServerAccess(serverId, enabledIds, workspacePath)
+  }
+  const access = assertMcpServerAccess(serverId, enabledIds, workspacePath)
+  if (access.ok) return access
+  await ensureMcpSessionConnected(serverId, workspacePath)
+  return assertMcpServerAccess(serverId, enabledIds, workspacePath)
 }
 
 export function assertMcpServerAccess(
@@ -1098,7 +1219,9 @@ export async function refreshMcpServers(servers: McpServer[]): Promise<McpServer
   // Belt and braces: disconnect already clears the fingerprint, but Refresh
   // must reconnect even if a future teardown path forgets to.
   invalidateSyncFingerprint()
-  await syncMcpServers(servers)
+  // Refresh is the explicit "make everything usable" action, so it warms every
+  // open workspace — the one path that still pays a process per open folder.
+  await syncMcpServers(servers, { warmOpenWorkspaces: true })
   return getMcpServerStatus(servers)
 }
 
@@ -1110,7 +1233,7 @@ export async function refreshMcpServers(servers: McpServer[]): Promise<McpServer
  */
 export async function retryFailedMcpServers(servers: McpServer[]): Promise<McpServerStatus[]> {
   clearMcpBinaryCache()
-  await syncMcpServers(servers, { forceRetryFailures: true })
+  await syncMcpServers(servers, { forceRetryFailures: true, warmOpenWorkspaces: true })
   return getMcpServerStatus(servers)
 }
 
@@ -1790,16 +1913,23 @@ async function disconnectMcpSessionByKey(
 
 export async function syncMcpServers(
   servers: McpServer[],
-  opts?: { forceRetryFailures?: boolean }
+  opts?: { forceRetryFailures?: boolean; warmOpenWorkspaces?: boolean }
 ): Promise<void> {
-  const stdioWorkspaces = collectStdioWorkspacePaths()
+  // `openWorkspaces` is every listed workspace — what a warm-on-open session or
+  // an explicit Retry used to be keyed off. `stdioWorkspaces` is the smaller
+  // set that stays connected between syncs, so an idle workspace costs no
+  // process until it is used (`ensureMcpSessionConnected`) or refreshed.
+  const openWorkspaces = collectStdioWorkspacePaths()
+  const stdioWorkspaces = opts?.warmOpenWorkspaces
+    ? openWorkspaces
+    : collectWarmStdioWorkspaces()
   if (opts?.forceRetryFailures) {
     for (const server of servers) {
       if (!server.enabled) continue
       const keysToCheck = isStdioTransport(server.transport)
-        ? stdioWorkspaces.map((wp) => sessionMapKey(server, wp))
+        ? openWorkspaces.map((wp) => sessionMapKey(server, wp))
         : isThisWorkspaceMcpAuth(server)
-          ? [sessionMapKey(server, remoteSyncWorkspacePath(server, stdioWorkspaces))]
+          ? [sessionMapKey(server, remoteSyncWorkspacePath(server, openWorkspaces))]
           : [server.id]
       for (const key of keysToCheck) {
         if (sessions.has(key)) continue
@@ -1830,7 +1960,7 @@ export async function syncMcpServers(
       lastSyncedServersFp = ''
     }
   }
-  const fpParts: string[] = [stdioWorkspaces.sort().join(',')]
+  const fpParts: string[] = [`warm=${stdioWorkspaces.sort().join(',')}`]
   for (const s of servers) {
     if (!s.enabled) {
       fpParts.push(`${s.id}:0`)
@@ -1841,7 +1971,7 @@ export async function syncMcpServers(
         fpParts.push(`${s.id}@${wp}:1:${mcpServerConfigKey(s, wp)}`)
       }
     } else if (isThisWorkspaceMcpAuth(s)) {
-      const wp = remoteSyncWorkspacePath(s, stdioWorkspaces)
+      const wp = remoteSyncWorkspacePath(s, openWorkspaces)
       if (wp) fpParts.push(`${s.id}@${wp}:1:${mcpServerConfigKey(s, wp)}`)
       else fpParts.push(`${s.id}:bound-closed`)
     } else {
@@ -1853,7 +1983,9 @@ export async function syncMcpServers(
     if (lastSyncInflight) await lastSyncInflight
     return
   }
-  const run = syncChain.then(() => syncMcpServersUnlocked(servers, stdioWorkspaces))
+  const run = syncChain.then(() =>
+    syncMcpServersUnlocked(servers, stdioWorkspaces, openWorkspaces)
+  )
   // Keep the chain alive even when a sync rejects so later callers still queue.
   syncChain = run.then(
     () => undefined,
@@ -1870,7 +2002,8 @@ export async function syncMcpServers(
 
 async function syncMcpServersUnlocked(
   servers: McpServer[],
-  stdioWorkspaces: string[]
+  stdioWorkspaces: string[],
+  openWorkspaces: string[]
 ): Promise<void> {
   const duplicateError = validateMcpServers(servers)
   if (duplicateError) {
@@ -1906,9 +2039,13 @@ async function syncMcpServersUnlocked(
   const neededKeys = new Set<string>()
   for (const server of enabled) {
     if (isStdioTransport(server.transport)) {
+      // Only the warm set. A session left over for an idle workspace is torn
+      // down here rather than kept alive at one process per open folder.
       for (const wp of stdioWorkspaces) neededKeys.add(sessionMapKey(server, wp))
     } else if (isThisWorkspaceMcpAuth(server)) {
-      const wp = remoteSyncWorkspacePath(server, stdioWorkspaces)
+      // Auth scoping is unchanged: a this-workspace token stays keyed to the
+      // workspace it is bound to, which is always a listed workspace.
+      const wp = remoteSyncWorkspacePath(server, openWorkspaces)
       if (wp) neededKeys.add(sessionMapKey(server, wp))
     } else {
       neededKeys.add(server.id)
@@ -2001,7 +2138,7 @@ async function syncMcpServersUnlocked(
         await syncOne(server, wp)
       }
     } else if (isThisWorkspaceMcpAuth(server)) {
-      const wp = remoteSyncWorkspacePath(server, stdioWorkspaces)
+      const wp = remoteSyncWorkspacePath(server, openWorkspaces)
       if (wp) await syncOne(server, wp)
     } else {
       await syncOne(server, null)
@@ -2034,6 +2171,10 @@ export async function listMcpResources(
   workspacePath?: string | null
 ): Promise<McpResourceEntry[]> {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  // Named explicitly, so it is meant to be reachable even if its workspace was
+  // left cold. The caller gates on `enabledIds` before this, and the connect
+  // re-checks both, so nothing starts that the run may not use.
+  if (serverId?.trim()) await ensureMcpSessionConnected(serverId, workspacePath)
   const targetIds = resolveTargetServerIds(serverId, enabledIds, workspacePath)
   const out: McpResourceEntry[] = []
   for (const id of targetIds) {
@@ -2081,7 +2222,7 @@ export async function readMcpResource(
   workspacePath?: string | null
 ): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
-  const access = assertMcpServerAccess(serverId, enabledIds, workspacePath)
+  const access = await assertMcpServerAccessForCall(serverId, enabledIds, workspacePath)
   if (!access.ok) return access
   const gate = beginMcpInvoke(access.sessionKey)
   if (!gate.ok) return gate
@@ -2119,6 +2260,9 @@ export async function listMcpPrompts(
   workspacePath?: string | null
 ): Promise<McpPromptEntry[]> {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  // As in listMcpResources: a named server is meant to be reachable, so a
+  // deliberately cold workspace connects on this first read.
+  if (serverId?.trim()) await ensureMcpSessionConnected(serverId, workspacePath)
   const targetIds = resolveTargetServerIds(serverId, enabledIds, workspacePath)
   const out: McpPromptEntry[] = []
   for (const id of targetIds) {
@@ -2156,7 +2300,7 @@ export async function getMcpPrompt(
   workspacePath?: string | null
 ): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
-  const access = assertMcpServerAccess(serverId, enabledIds, workspacePath)
+  const access = await assertMcpServerAccessForCall(serverId, enabledIds, workspacePath)
   if (!access.ok) return access
   const gate = beginMcpInvoke(access.sessionKey)
   if (!gate.ok) return gate
@@ -2316,7 +2460,7 @@ export async function invokeMcpTool(
 ): Promise<ToolResult> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
   const summary = mcpToolSummary(toolName, args)
-  const access = assertMcpServerAccess(serverId, enabledIds, workspacePath)
+  const access = await assertMcpServerAccessForCall(serverId, enabledIds, workspacePath)
   if (!access.ok) {
     return { ok: false, summary, content: access.error }
   }
@@ -2414,6 +2558,11 @@ export function listConnectedMcpServerIdsForTests(): string[] {
     ids.add(parsed?.serverId ?? key)
   }
   return [...ids]
+}
+
+/** Test helper — live session keys (one stdio key = one child process). */
+export function listMcpSessionKeysForTests(): string[] {
+  return [...sessions.keys()]
 }
 
 /** Test helper — register a mock MCP session without a live transport. */

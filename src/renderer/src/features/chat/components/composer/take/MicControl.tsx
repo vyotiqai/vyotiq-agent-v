@@ -19,7 +19,12 @@ import type { TakeHandle } from './useTake'
 
 const PANEL_WIDTH_PX = 380
 
-export function MicControl({ take }: { take: TakeHandle }) {
+/**
+ * `disabled` greys the mic instead of leaving it live: every press path in
+ * useTake bails when the composer is disabled, so a live-looking glyph that
+ * does nothing is worse than one that says so.
+ */
+export function MicControl({ take, disabled = false }: { take: TakeHandle; disabled?: boolean }) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const open = take.panel !== null
@@ -50,6 +55,7 @@ export function MicControl({ take }: { take: TakeHandle }) {
           label={`Insert (${chord})`}
           size="md"
           active
+          disabled={disabled}
           data-take-mic="live"
           onMouseDown={(e) => e.preventDefault()}
           onClick={take.actions.press}
@@ -80,6 +86,7 @@ export function MicControl({ take }: { take: TakeHandle }) {
           size="md"
           tone="inherit"
           className="text-warning"
+          disabled={disabled}
           aria-expanded={open}
           aria-haspopup="dialog"
           data-take-mic="blocked"
@@ -97,6 +104,7 @@ export function MicControl({ take }: { take: TakeHandle }) {
           title={`Set up dictation (${chord})`}
           size="md"
           tone="muted"
+          disabled={disabled}
           aria-expanded={open}
           aria-haspopup="dialog"
           data-take-mic="setup"
@@ -114,6 +122,7 @@ export function MicControl({ take }: { take: TakeHandle }) {
           title={tip}
           size="md"
           tone="muted"
+          disabled={disabled}
           data-take-mic="idle"
           onPointerEnter={take.actions.warm}
           onFocus={take.actions.warm}

@@ -62,14 +62,27 @@ describe('traceCapture flight recorder', () => {
     const ct = fakeContentTracing()
     const capture = createTraceCapture(ct, () => 'C:/traces')
     const result = await capture.dumpNow('manual')
-    // Buffer was auto-restarted before the dump, then resumed after it.
-    expect(ct.startRecording).toHaveBeenCalledTimes(2)
+    // Buffer was started on the spot for the dump — the file always lands.
+    expect(ct.startRecording).toHaveBeenCalledTimes(1)
     expect(ct.stopRecording).toHaveBeenCalledTimes(1)
     expect(result.path.replace(/\\/g, '/').startsWith('C:/traces/trace-manual-')).toBe(true)
     expect(result.path.endsWith('.json')).toBe(true)
     // Real statSync fails on the fake path → falls back to 0 (documented).
     expect(result.bytes).toBe(0)
-    expect((await capture.status()).recording).toBe(true)
+    // Nothing was recording before, so the ring stays down after the dump.
+    expect((await capture.status()).recording).toBe(false)
+  })
+
+  it('manual dump in a non-perf session leaves the ring stopped (no resume)', async () => {
+    const ct = fakeContentTracing()
+    const capture = createTraceCapture(ct, () => 'C:/traces')
+    // Triggers-only session: no ensureRecording(), so nothing was recording.
+    const result = await capture.dumpNow('manual')
+    // Buffer is started so the dump yields a file, then stopped for good.
+    expect(ct.stopRecording).toHaveBeenCalledTimes(1)
+    expect(result.path.replace(/\\/g, '/').startsWith('C:/traces/trace-manual-')).toBe(true)
+    expect(ct.startRecording).toHaveBeenCalledTimes(1) // pre-dump only, no resume
+    expect((await capture.status()).recording).toBe(false)
   })
 
   it('dumps restart the buffer, write a reason-stamped file, and resume recording', async () => {

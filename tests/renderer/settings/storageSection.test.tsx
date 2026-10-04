@@ -325,6 +325,53 @@ describe('Settings → Storage', () => {
     ).toBe(false)
   })
 
+  it('states the retention rule as either bound, not both', async () => {
+    // sweepSessions OR-s the two bounds: keep-N evicts on its own, and the age
+    // backstop evicts inside keep-N. "only when it is both beyond the kept count
+    // and older than the age limit" told users the opposite — raising the age
+    // limit does not protect old-but-over-counted tasks, and lowering the kept
+    // count does delete recent tasks.
+    const bridge = makeBridge()
+    renderStorage(bridge)
+
+    await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
+    // The rule lives in the row's `?` tip, so the test has to open it.
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'About Delete old tasks' }))
+    const help = await screen.findByText(
+      /A task is deleted once it is beyond the kept count or older than the age limit/i
+    )
+    expect(help.textContent ?? '').not.toMatch(/both/i)
+    // Protections that still hold against retention.ts: active runs
+    // (activeRunDirs), the 24 h protected window, and the hard min-1 floor
+    // on the newest task.
+    expect(help.textContent ?? '').toMatch(/running/i)
+    expect(help.textContent ?? '').toMatch(/last 24 hours/i)
+    expect(help.textContent ?? '').toMatch(/newest task/i)
+  })
+
+  it('does not promise the kept undo points are safe from the age limit', async () => {
+    // sweepCheckpointCountCap OR-s the two bounds as well —
+    // `if (!beyondCount && !beyondAge) continue` — and unlike sweepSessions its
+    // `keep` has no min-1 floor, so the newest task's undo points go once it
+    // passes checkpointMaxAgeDays. "Per workspace, whatever their age."
+    // promised an exemption the sweep has no code for.
+    const bridge = makeBridge()
+    renderStorage(bridge)
+
+    await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
+    const row = document.querySelector('[data-settings-field="storage-checkpoint-keep"]')
+    const copy = row?.textContent ?? ''
+    expect(copy).not.toMatch(/whatever their age/i)
+    // The age limit still reaches inside the kept count, and the copy says so
+    // rather than leaving the reader to assume the count wins.
+    expect(copy).toMatch(/age limit/i)
+    // Only the protections that really hold: active runs and the 24 h window.
+    expect(copy).toMatch(/running/i)
+    expect(copy).toMatch(/last 24 hours/i)
+    // No newest-task exemption exists on this path, unlike the session sweep.
+    expect(copy).not.toMatch(/newest task/i)
+  })
+
   it('every retention control is present and labeled', async () => {
     const bridge = makeBridge()
     renderStorage(bridge)

@@ -608,6 +608,10 @@ describe.skipIf(!canGit)('linkNodeModulesBestEffort fresh worktree flow', () => 
 describe.skipIf(!canGit)('instance branch retention', () => {
   const DAY_MS = 86_400_000
   const IDENTITY = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test'] as const
+  // The production ceiling is DEFAULT_MAX_PARALLEL_INSTANCES (16) * 2, which
+  // is not exported. Assert it here rather than trust it: 2 × the spawn cap,
+  // and the cap itself cannot exceed 16 (MAX_PARALLEL_INSTANCES_LIMIT).
+  const CEILING = 32
   let repo = ''
   let extraWorktree = ''
 
@@ -704,6 +708,7 @@ describe.skipIf(!canGit)('instance branch retention', () => {
     expect(summary).toEqual({
       merged: 2,
       aged: 1,
+      overCount: 0,
       kept: 1,
       protected: 0,
       checkedOut: 0,
@@ -743,6 +748,7 @@ describe.skipIf(!canGit)('instance branch retention', () => {
     expect(summary).toEqual({
       merged: 0,
       aged: 0,
+      overCount: 0,
       kept: 0,
       protected: 1,
       checkedOut: 1,
@@ -773,5 +779,192 @@ describe.skipIf(!canGit)('instance branch retention', () => {
     expect(existsSync(live.worktreePath)).toBe(true)
     expect(localBranches()).toEqual([live.branch, 'main'].sort())
     await removeInstanceWorktree(repo, live.worktreePath)
+  }, 60_000)
+
+  /**
+   * `count` unmerged instance branches, each carrying its own commit, dated so
+   * that run `00` is the oldest and `count-1` the newest — deliberately the
+   * inverse of name order, so "oldest first" cannot pass by sorting on name.
+   * Plumbing (`commit-tree` + one `update-ref --stdin`) instead of a checkout
+   * and a commit per branch: 48 branches in ~50 spawns, not ~150.
+   */
+  function unmergedBacklog(count: number): string[] {
+    const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd: repo,
+      encoding: 'utf8',
+      windowsHide: true
+    }).trim()
+    const names: string[] = []
+    const refs: string[] = []
+    for (let i = 0; i < count; i += 1) {
+      const name = instanceWorktreeBranch(`${String(i).padStart(2, '0')}-run`)
+      const ageDays = 1 + (count - 1 - i) / count
+      const date = new Date(Date.now() - ageDays * DAY_MS).toISOString()
+      const sha = execFileSync('git', [...IDENTITY, 'commit-tree', tree, '-p', 'main', '-m', `w${i}`], {
+        cwd: repo,
+        encoding: 'utf8',
+        windowsHide: true,
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_AUTHOR_DATE: date,
+          GIT_COMMITTER_DATE: date
+        }
+      }).trim()
+      refs.push(`create refs/heads/${name} ${sha}`)
+      names.push(name)
+    }
+    execFileSync('git', ['update-ref', '--stdin'], {
+      cwd: repo,
+      input: `${refs.join('\n')}\n`,
+      windowsHide: true
+    })
+    return names
+  }
+
+  function instanceBranchNames(): string[] {
+    return localBranches().filter((name) => name.startsWith('vyotiq/instance/'))
+  }
+
+  it('bounds the branch count: 48 unmerged, unpinned branches prune to the ceiling, oldest first', async () => {
+    initRepo()
+    // The measured live state: 48 instance branches, none merged, none checked
+    // out, none past INSTANCE_BRANCH_MAX_AGE_MS. Age and reachability both
+    // miss every one of them, so before the ceiling nothing was ever removed.
+    const names = unmergedBacklog(48)
+    expect(names).toHaveLength(48)
+    const infoSpy = vi.spyOn(logger, 'info')
+
+    const summary = await pruneStaleInstanceBranches(repo, new Set())
+
+    expect(summary).toEqual({
+      merged: 0,
+      aged: 0,
+      overCount: 48 - CEILING,
+      kept: CEILING,
+      protected: 0,
+      checkedOut: 0,
+      failed: 0
+    })
+    // Oldest first: `00-run` is the oldest of the 48, so the overflow is the
+    // lowest-numbered names, not the alphabetically-first or last.
+    const survivors = instanceBranchNames()
+    expect(survivors).toHaveLength(CEILING)
+    expect(survivors).toEqual(names.slice(48 - CEILING))
+    // Its own classification, distinct from merged/aged, naming what went.
+    expect(infoSpy).toHaveBeenCalledWith(
+      'instance branch prune summary',
+      expect.objectContaining({
+        scope: 'git',
+        deleted: 48 - CEILING,
+        merged: 0,
+        aged: 0,
+        overCount: 48 - CEILING,
+        overCountBranches: names.slice(0, 5),
+        maxCount: CEILING
+      })
+    )
+  }, 120_000)
+
+  it('deletes nothing extra at the ceiling', async () => {
+    initRepo()
+    const names = unmergedBacklog(8)
+
+    const summary = await pruneStaleInstanceBranches(repo, new Set(), { branchMaxCount: 8 })
+
+    expect(summary).toEqual({
+      merged: 0,
+      aged: 0,
+      overCount: 0,
+      kept: 8,
+      protected: 0,
+      checkedOut: 0,
+      failed: 0
+    })
+    expect(instanceBranchNames()).toEqual([...names].sort())
+  }, 60_000)
+
+  it('never deletes a checked-out branch from inside the overflow set', async () => {
+    initRepo()
+    const names = unmergedBacklog(10)
+    // The oldest branch, so it is first in the overflow.
+    extraWorktree = mkdtempSync(join(tmpdir(), 'vyotiq-wt-count-'))
+    git(repo, 'worktree', 'add', '-q', extraWorktree, names[0])
+
+    const summary = await pruneStaleInstanceBranches(repo, new Set(), { branchMaxCount: 5 })
+
+    // The overflow is the 5 oldest kept branches; the checked-out one is not in
+    // the kept pool, so it is never chosen and never back-filled.
+    expect(summary).toEqual({
+      merged: 0,
+      aged: 0,
+      overCount: 5,
+      kept: 4,
+      protected: 0,
+      checkedOut: 1,
+      failed: 0
+    })
+    const survivors = instanceBranchNames()
+    expect(survivors).toContain(names[0])
+    expect(survivors).toEqual([names[0], ...names.slice(6)].sort())
+  }, 60_000)
+
+  it('never deletes a protected branch from inside the overflow set', async () => {
+    initRepo()
+    const names = unmergedBacklog(10)
+
+    const summary = await pruneStaleInstanceBranches(
+      repo,
+      new Set(['00-run', '01-run']),
+      { branchMaxCount: 5 }
+    )
+
+    // The two oldest are protected, so they were never in the kept pool: the
+    // overflow is 5 (10 branches - ceiling) drawn from the 8 kept ones, and it
+    // takes the next 5 oldest of those. No protected branch is chosen, and no
+    // branch outside the overflow is deleted to back-fill for one.
+    expect(summary).toEqual({
+      merged: 0,
+      aged: 0,
+      overCount: 5,
+      kept: 3,
+      protected: 2,
+      checkedOut: 0,
+      failed: 0
+    })
+    const survivors = instanceBranchNames()
+    expect(survivors).toEqual([...names.slice(0, 2), ...names.slice(7)].sort())
+    expect(survivors).toHaveLength(5)
+  }, 60_000)
+
+  it('keeps merged and aged rules ahead of the ceiling', async () => {
+    initRepo()
+    // 8 instance branches against a ceiling of 4: 6 kept, 1 merged, 1 aged.
+    // merged and aged run first and take their branches, so the overflow is
+    // measured against the 6 still standing and the ceiling takes 2 of those —
+    // the ceiling never takes a branch those rules would otherwise have taken.
+    const kept = unmergedBacklog(6)
+    const merged = instanceWorktreeBranch('merged-run')
+    branchWithWork(merged, 1)
+    git(repo, 'checkout', '-q', '-b', 'feature', 'main')
+    git(repo, ...IDENTITY, 'merge', '-q', '--no-ff', '-m', 'land', merged)
+    git(repo, 'checkout', '-q', 'main')
+    const aged = instanceWorktreeBranch('aged-run')
+    branchWithWork(aged, 20)
+
+    const summary = await pruneStaleInstanceBranches(repo, new Set(), { branchMaxCount: 4 })
+
+    expect(summary).toEqual({
+      merged: 1,
+      aged: 1,
+      overCount: 2,
+      kept: 4,
+      protected: 0,
+      checkedOut: 0,
+      failed: 0
+    })
+    // The 4 newest kept branches survive: the 2 oldest kept ones are the
+    // overflow, and the merged/aged branches went under their own reasons.
+    expect(instanceBranchNames()).toEqual(kept.slice(2))
   }, 60_000)
 })

@@ -10,7 +10,7 @@
  * never break a run. All fs access is `fs/promises` (zero sync I/O on main).
  */
 import { readdir, readFile, rm, stat } from 'fs/promises'
-import { join } from 'path'
+import { join, sep } from 'path'
 import { randomUUID } from 'crypto'
 import { userDataRoot, workspacesRoot, workspaceSessionsRoot } from './paths'
 import { listActiveRuns } from '../agent/runRegistry'
@@ -682,10 +682,18 @@ export function selectOrphanDirs(
 }
 
 async function reapOrphanDirs(
-  orphans: StorageReportWorkspace[]
+  orphans: StorageReportWorkspace[],
+  protectedRuns: Set<string>
 ): Promise<{ bytes: number; dirs: number; skipped: number }> {
   const out = { bytes: 0, dirs: 0, skipped: 0 }
   for (const orphan of orphans) {
+    // A store dir that still hosts an active run's session dir is deleted
+    // under the run's feet, so it is never a reap candidate — automatic or
+    // confirm-gated. Untracked is not the same as unreferenced-in-use.
+    if (workspaceHasActiveRun(orphan.workspaceId, protectedRuns)) {
+      out.skipped++
+      continue
+    }
     const dir = join(workspacesRoot(), orphan.workspaceId)
     try {
       await rm(dir, { recursive: true, force: true })
@@ -714,7 +722,102 @@ async function reapOrphanDirs(
  * Size cap (design §6.4.5) — LRU backstop over managed surfaces only
  * ------------------------------------------------------------------------- */
 
-/** Oldest checkpoint dirs first until the managed set fits the cap. */
+/**
+ * Rebuildable derived index dirs under a workspace's storage dir.
+ * `codeindex/` holds one SQLite DB per workspace and `sparsegrep/` is the
+ * obsolete pre-FTS5 store; both are pure caches that the indexer recreates
+ * (removeWorkspaceIndexStorage already deletes exactly this pair when an
+ * instance worktree is torn down — indexStoragePaths.ts).
+ */
+const REBUILDABLE_INDEX_DIRS = ['codeindex', 'sparsegrep'] as const
+
+/** True when any protected (active) run dir lives in this workspace's store. */
+function workspaceHasActiveRun(id: string, protectedRuns: Set<string>): boolean {
+  const sessionsRoot = join(workspacesRoot(), id, 'sessions')
+  for (const dir of protectedRuns) {
+    if (dir.startsWith(sessionsRoot + sep)) return true
+  }
+  return false
+}
+
+/**
+ * Size-cap stage 2 candidates: rebuildable code index dirs, oldest first.
+ *
+ * Audit 2026-10-02: `indexes` is reported `managed: true` (so it counts
+ * against `sizeCapGb`) but the cap could only build candidates from checkpoint
+ * dirs and then bailed — 431,289,488 B of the 588,154,956 B `workspaces/` tree
+ * (73.3%) sat under a cap with no eviction path behind it at all.
+ *
+ * Cost is a re-index, not lost data, and it is bounded three ways: this stage
+ * runs only after checkpoint eviction is exhausted, only oldest-first, and
+ * never for a workspace with an active run (or an index written inside the 24 h
+ * protected window, which a live indexer is writing right now).
+ */
+async function collectRebuildableIndexCandidates(
+  storageIds: string[],
+  protectedRuns: Set<string>,
+  nowMs: number
+): Promise<Array<{ dir: string; bytes: number; lastWriteMs: number; workspaceId: string; name: string }>> {
+  const out: Array<{ dir: string; bytes: number; lastWriteMs: number; workspaceId: string; name: string }> = []
+  for (const id of storageIds) {
+    if (workspaceHasActiveRun(id, protectedRuns)) continue
+    const root = join(workspacesRoot(), id)
+    for (const name of REBUILDABLE_INDEX_DIRS) {
+      const dir = join(root, name)
+      if (!(await dirExists(dir))) continue
+      const m = await measureDir(dir)
+      if (m.bytes === 0) continue
+      if (withinProtectedWindow(m.lastWriteMs, nowMs)) continue
+      out.push({ dir, bytes: m.bytes, lastWriteMs: m.lastWriteMs, workspaceId: id, name })
+    }
+  }
+  out.sort((a, b) => a.lastWriteMs - b.lastWriteMs)
+  return out
+}
+
+/** Delete rebuildable index dirs oldest-first until `excessBytes` is covered. */
+async function evictRebuildableIndexes(
+  storageIds: string[],
+  protectedRuns: Set<string>,
+  nowMs: number,
+  excessBytes: number
+): Promise<{ bytes: number; dirs: number; skipped: number }> {
+  const out = { bytes: 0, dirs: 0, skipped: 0 }
+  const candidates = await collectRebuildableIndexCandidates(storageIds, protectedRuns, nowMs)
+  let excess = excessBytes
+  for (const cand of candidates) {
+    if (excess <= 0) break
+    try {
+      await rm(cand.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 })
+      out.bytes += cand.bytes
+      out.dirs++
+      excess -= cand.bytes
+      logger.warn('Size-cap LRU eviction of rebuildable code index dir', {
+        scope: 'storage',
+        code: 'CODE_INDEX_EVICTED',
+        correlationId: cand.workspaceId,
+        index: cand.name,
+        bytes: cand.bytes
+      })
+    } catch (err) {
+      out.skipped++
+      logger.warn('Size-cap code index eviction failed (skipped)', {
+        scope: 'storage',
+        code: 'CODE_INDEX_EVICTED',
+        correlationId: cand.workspaceId,
+        index: cand.name,
+        err
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * Oldest checkpoint dirs first until the managed set fits the cap; if undo
+ * history alone cannot cover the excess, fall through to stage 2 (rebuildable
+ * code indexes) rather than destroying checkpoints for nothing.
+ */
 async function enforceSizeCap(
   settings: Settings,
   protectedRuns: Set<string>,
@@ -726,7 +829,7 @@ async function enforceSizeCap(
   const excessBytes = report.managedBytes - capBytes
   if (excessBytes <= 0) return out
 
-  // LRU candidates: checkpoint dirs across all workspaces, oldest first.
+  // Stage 1 LRU candidates: checkpoint dirs across all workspaces, oldest first.
   type Candidate = { dir: string; bytes: number; lastWriteMs: number; runId: string }
   const candidates: Candidate[] = []
   const storageIds = await listStorageIds()
@@ -750,43 +853,56 @@ async function enforceSizeCap(
   candidates.sort((a, b) => a.lastWriteMs - b.lastWriteMs)
 
   const reclaimableBytes = candidates.reduce((sum, c) => sum + c.bytes, 0)
-  if (reclaimableBytes < excessBytes) {
-    // The overage is dominated by surfaces the cap cannot evict (e.g. tracked
-    // workspace indexes). Deleting undo history would not bring the managed
-    // set under the cap, so skip instead of destroying checkpoints for nothing.
-    logger.info('Size-cap eviction skipped: reclaimable checkpoints cannot satisfy excess', {
-      scope: 'storage',
-      code: 'SIZE_CAP_EVICTED',
-      excessBytes,
-      reclaimableBytes
-    })
+  if (reclaimableBytes >= excessBytes) {
+    let excess = excessBytes
+    for (const cand of candidates) {
+      if (excess <= 0) break
+      try {
+        await rm(cand.dir, { recursive: true, force: true })
+        out.bytes += cand.bytes
+        out.dirs++
+        excess -= cand.bytes
+        logger.warn('Size-cap LRU eviction of checkpoint dir', {
+          scope: 'storage',
+          code: 'SIZE_CAP_EVICTED',
+          correlationId: cand.runId,
+          bytes: cand.bytes
+        })
+      } catch (err) {
+        out.skipped++
+        logger.warn('Size-cap eviction failed (skipped)', {
+          scope: 'storage',
+          code: 'SIZE_CAP_EVICTED',
+          correlationId: cand.runId,
+          err
+        })
+      }
+    }
     return out
   }
 
-  let excess = excessBytes
-  for (const cand of candidates) {
-    if (excess <= 0) break
-    try {
-      await rm(cand.dir, { recursive: true, force: true })
-      out.bytes += cand.bytes
-      out.dirs++
-      excess -= cand.bytes
-      logger.warn('Size-cap LRU eviction of checkpoint dir', {
-        scope: 'storage',
-        code: 'SIZE_CAP_EVICTED',
-        correlationId: cand.runId,
-        bytes: cand.bytes
-      })
-    } catch (err) {
-      out.skipped++
-      logger.warn('Size-cap eviction failed (skipped)', {
-        scope: 'storage',
-        code: 'SIZE_CAP_EVICTED',
-        correlationId: cand.runId,
-        err
-      })
-    }
+  // Checkpoints cannot cover the excess: deleting undo history would not bring
+  // the managed set under the cap on its own, so keep it and spend stage 2
+  // (rebuildable code indexes) instead. When nothing is reclaimable at all the
+  // same skip is the correct outcome — no category can move the managed set.
+  logger.info('Size-cap eviction skipped: reclaimable checkpoints cannot satisfy excess', {
+    scope: 'storage',
+    code: 'SIZE_CAP_EVICTED',
+    excessBytes,
+    reclaimableBytes
+  })
+
+  const indexOut = await evictRebuildableIndexes(storageIds, protectedRuns, nowMs, excessBytes)
+  if (indexOut.bytes === 0 && indexOut.skipped === 0) {
+    logger.info('Size-cap eviction skipped: no reclaimable managed category can satisfy excess', {
+      scope: 'storage',
+      code: 'SIZE_CAP_EVICTED',
+      excessBytes
+    })
   }
+  out.bytes += indexOut.bytes
+  out.dirs += indexOut.dirs
+  out.skipped += indexOut.skipped
   return out
 }
 
@@ -796,7 +912,21 @@ async function enforceSizeCap(
 
 export type SessionSweepResult = { bytes: number; dirs: number; skipped: number }
 
-/** keep-last-N / age-window session deletion per workspace (min 1 kept). */
+/**
+ * Retention bound for a session dir. The two bounds are OR-ed, not AND-ed, so
+ * keep-N evicts on its own: before this, a session had to be past keep-N *and*
+ * older than `sessionMaxAgeDays`, which made keep-N unreachable in practice
+ * (audit 2026-10-02: 146 session dirs against a 3.91-day-oldest measurement
+ * under a 60-day window, and zero `SESSION_DIR_EVICTED` lines across both log
+ * generations — the setting read "keep 30" in Settings → Storage but meant
+ * "keep everything for 60 days").
+ *
+ * `sessionMaxAgeDays` is therefore a ceiling on aggressiveness, not the gate:
+ * it still evicts a session *inside* keep-N once it ages out, and the newest
+ * `max(1, keep)` sessions by last write are still exempt from the count bound.
+ * Protected windows and active runs are checked by the caller before this runs
+ * and always win over either bound.
+ */
 async function sweepSessions(
   sessionsRoot: string,
   settings: Settings,
@@ -809,23 +939,27 @@ async function sweepSessions(
   const ageCutoff = nowMs - settings.storage.sessionMaxAgeDays * DAY_MS
   for (let i = 0; i < sessions.length; i++) {
     const session = sessions[i]
-    if (i < keep) continue
     if (protectedRuns.has(session.dir) || withinProtectedWindow(session.lastWriteMs, nowMs)) {
       out.skipped++
       continue
     }
-    // Both bounds apply: beyond keep-N AND older than the age window.
-    if (session.lastWriteMs >= ageCutoff) continue
+    // i === 0 is the newest dir — the hard min-1 floor, so the age backstop
+    // can never empty a workspace's session tree even when keep is large.
+    if (i === 0) continue
+    const beyondKeep = i >= keep
+    const beyondAge = session.lastWriteMs < ageCutoff
+    if (!beyondKeep && !beyondAge) continue
     try {
       const m = await measureDir(session.dir)
       await rm(session.dir, { recursive: true, force: true })
       out.bytes += m.bytes
       out.dirs++
-      logger.warn('Evicted old session dir (session retention)', {
+      logger.warn('Evicted session dir (session retention)', {
         scope: 'storage',
         code: 'SESSION_DIR_EVICTED',
         correlationId: session.runId,
-        bytes: session.bytes
+        reason: beyondKeep && beyondAge ? 'count+age' : beyondKeep ? 'count' : 'age',
+        bytes: m.bytes
       })
     } catch (err) {
       out.skipped++
@@ -858,12 +992,16 @@ async function previewSessionSweep(
   const ageCutoff = nowMs - settings.storage.sessionMaxAgeDays * DAY_MS
   for (let i = 0; i < sessions.length; i++) {
     const session = sessions[i]
-    if (i < keep) continue
     if (protectedRuns.has(session.dir) || withinProtectedWindow(session.lastWriteMs, nowMs)) {
       out.skipped++
       continue
     }
-    if (session.lastWriteMs >= ageCutoff) continue
+    // Same min-1 floor and same OR-ed bounds as sweepSessions, so the preview
+    // and the run it authorises never disagree about what is deleted.
+    if (i === 0) continue
+    const beyondKeep = i >= keep
+    const beyondAge = session.lastWriteMs < ageCutoff
+    if (!beyondKeep && !beyondAge) continue
     const m = await measureDir(session.dir)
     out.bytes += m.bytes
     out.dirs++
@@ -1029,7 +1167,7 @@ export async function runStorageCleanup(confirmToken: string): Promise<StorageCl
   // Orphans (confirm token = the explicit user action §6.2 B3 requires).
   const report = await collectStorageReport()
   const orphans = selectOrphanDirs(report.workspaces, settings, nowMs)
-  const reaped = await reapOrphanDirs(orphans)
+  const reaped = await reapOrphanDirs(orphans, protectedRuns)
   if (reaped.dirs > 0 || reaped.skipped > 0) {
     pushCategory('orphans', 'Untracked workspace storage', reaped)
   }
@@ -1084,22 +1222,33 @@ export async function sweepRetentionAuto(): Promise<void> {
       lastSizeCapAutoMs = nowMs
       await enforceSizeCap(settings, protectedRuns, nowMs)
     }
-    // Derived-only orphan reap (§6.2) — codeindex-only strays left behind by
-    // past worktree/workspace paths. No user data inside (verified: no
-    // sessions/, no meta.json), so this needs no ack and no confirm; the
-    // reaper setting + the same 6 h cadence gate it. User-data orphans stay
-    // confirm-gated via the Settings → Storage cleanup flow.
+    // Orphan reap (§6.2) — storage dirs no workspace maps to any more.
+    //
+    // Audit 2026-10-02: the automatic reap only took `derivedOnly` dirs, so an
+    // unregistered store holding real user data (`sessions/` + `meta.json`)
+    // was unreachable by the automatic path — 5 store dirs on disk against 4
+    // registered in workspaces.json, one of them 49 session-tree files under a
+    // scratchpad path nothing tracked. The rule now: a derived-only dir is
+    // reaped as soon as it is untracked (it holds only rebuildable caches), and
+    // a store holding user data only once it has been idle past
+    // `orphanGraceDays` — the same grace the report already flags it with, so
+    // the user still gets a full grace window (and the Settings → Storage
+    // surface stays the faster, confirm-gated route) before a run record is
+    // removed without asking. Registered dirs and stores with an active run are
+    // never candidates.
     if (
       settings.storage.orphanReaperEnabled &&
       nowMs - lastOrphanReapAutoMs >= ORPHAN_REAP_AUTO_INTERVAL_MS
     ) {
       lastOrphanReapAutoMs = nowMs
       const report = await collectStorageReport()
-      const derivedOnlyOrphans = selectOrphanDirs(report.workspaces, settings, nowMs).filter(
-        (w) => w.derivedOnly === true
+      const autoReapable = selectOrphanDirs(report.workspaces, settings, nowMs).filter(
+        (w) =>
+          (w.derivedOnly === true || w.idleDays >= settings.storage.orphanGraceDays) &&
+          !workspaceHasActiveRun(w.workspaceId, protectedRuns)
       )
-      if (derivedOnlyOrphans.length > 0) {
-        await reapOrphanDirs(derivedOnlyOrphans)
+      if (autoReapable.length > 0) {
+        await reapOrphanDirs(autoReapable, protectedRuns)
       }
     }
   } catch (err) {

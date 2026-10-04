@@ -62,7 +62,7 @@ Settings, "Storage" covers "What Agent V keeps on disk, and when it lets go of i
 | Setting | Default |
 | --- | --- |
 | "Clean up undo points" | On. A task's undo points are deleted once the task is more than 30 days old ("Keep undo points for") or is not among the newest 20 tasks in its workspace ("Keep undo points of the newest"). Nothing from the last 24 hours, and no running task, is touched. |
-| "Delete old tasks" | Off. Nothing is deleted on a schedule. "Free up space now" still offers to delete tasks that are past the newest 30 in their workspace and older than 60 days. |
+| "Delete old tasks" | Off. Nothing is deleted on a schedule. "Free up space now" still applies the limits: a task is deleted once it is past the newest 30 in its workspace or older than 60 days — either one is enough. Nothing from the last 24 hours, no running task, and each workspace's newest task are kept. |
 | "Clean up untracked storage" | On. Storage of a workspace that is no longer open, recent or in use becomes cleanable after 30 idle days ("Grace period"), and "Free up space now" offers to delete it. |
 | "Delete storage when closing a workspace" | On. Closing a workspace offers to delete its app data too. |
 | "Managed size cap" | 5 GB. "Past this, the oldest undo points are evicted until it fits." |

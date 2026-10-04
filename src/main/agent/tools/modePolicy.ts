@@ -12,6 +12,13 @@ export type ModePolicyOptions = {
   /** When true, omit root-only instance tools (depth-1 nesting). */
   inlineInstance?: boolean
   /**
+   * An inline instance sharing the parent tree by `path_scope` with no
+   * worktree of its own. Unscoped tools are refused at dispatch by
+   * `assertInlineInstanceUnscopedToolAllowed` (writeGuard.ts); this says so
+   * before the call. Derive it with `isScopeSharedInlineInstance`.
+   */
+  pathScopeShared?: boolean
+  /**
    * A typed helper's tool list (agentTypes.ts): only these names, plus any MCP
    * tool whose server is listed as `mcp__<server>`. Absent = no restriction.
    * Narrows whatever the mode allows; it never adds a tool the mode refuses.
@@ -68,6 +75,34 @@ export const ASK_SAFE_BUILTIN = new Set([
   'lsp'
   // `diagnostics` spawns a shell — Agent-only, not Ask.
 ])
+
+/**
+ * The inline-instance condition writeGuard enforces at dispatch: an instance
+ * capped to a `path_scope` and given no worktree, so any tool that escapes the
+ * parent tree would write straight past the boundary its scope exists to hold.
+ * Reads the same status fields writeGuard reads, so both agree by construction.
+ */
+export function isScopeSharedInlineInstance(status: {
+  inlineInstance?: true
+  pathScope?: string[]
+  worktreePath?: string
+}): boolean {
+  return status.inlineInstance === true && !!status.pathScope?.length && !status.worktreePath
+}
+
+/**
+ * Built-ins dropped from a path_scope-shared instance's catalog — each one is
+ * refused by the same `assertInlineInstanceUnscopedToolAllowed` call, so naming
+ * it in the catalog only buys a wasted turn on the refusal.
+ *
+ * MCP tools and agent-built tools take that guard too, but they are named
+ * dynamically (a server or a user's own module), so they are not reachable
+ * from a builtin set; the dispatch guard stays their only line of defence.
+ *
+ * `diagnostics` and `run_tests` deliberately stay: both read the tree, write
+ * nothing, and are how such a child checks its own work (see tools/index.ts).
+ */
+export const SCOPE_SHARED_OMIT_BUILTIN = new Set(['terminal', 'git_commit'])
 
 /** Run-artifact filenames that live in the run directory, not the workspace. */
 export const PLAN_ARTIFACT_NAMES = new Set(['contract.md', 'plan.md'])
@@ -130,6 +165,11 @@ export function modeSectionMarkdown(
         [
           'Agent mode. You may use the tools in this turn’s catalog, subject to their schemas and approval requirements.',
           ...autoModeSwitchBanner(mode, auto),
+          ...(opts?.pathScopeShared
+            ? [
+                'This instance shares the parent tree by `path_scope` and has no worktree of its own, so tools that escape the parent tree are not in this turn’s catalog and calling one would be refused. Work with edit/str_replace/delete inside your path_scope. `diagnostics` and `run_tests` remain available: both read the tree and write nothing, and they are how you check your own work.'
+              ]
+            : []),
           // Plan mode's discipline, now unconditional: it was the only thing
           // that mode enforced that Agent did not already allow.
           'Plan before you act. Inspect the workspace with reads first so the plan names paths and symbols verified in this run, give every step a runnable check (a test, command, or output) instead of asserting success, then publish with `create_plan` — no mode change is needed to implement it.',
@@ -193,6 +233,9 @@ export function filterToolDefsForMode<T extends { name: string }>(
         })
   if (opts?.inlineInstance) {
     filtered = filtered.filter((t) => !INLINE_OMIT_BUILTIN.has(t.name))
+  }
+  if (opts?.pathScopeShared) {
+    filtered = filtered.filter((t) => !SCOPE_SHARED_OMIT_BUILTIN.has(t.name))
   }
   const allowlist = opts?.toolAllowlist
   if (allowlist) {

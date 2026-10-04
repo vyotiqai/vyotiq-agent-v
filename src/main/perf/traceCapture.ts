@@ -5,8 +5,9 @@
  *  - `ensureRecording()` starts a `record-continuously` ring buffer (bounded
  *    memory, no disk I/O until a dump) and is re-asserted after every dump.
  *  - `dumpNow(reason)` flushes the buffer to {userData}/traces/ and resumes
- *    recording. Manual dumps (IPC) force through; automatic dumps dedupe via
- *    a 30s cool-down so crash/hang trigger storms cannot thrash the disk.
+ *    recording only if the ring was already running. Manual dumps (IPC) force
+ *    through; automatic dumps dedupe via a 30s cool-down so crash/hang trigger
+ *    storms cannot thrash the disk.
  *  - Triggers are wired in traceAutoCapture.ts: renderer/child crashes,
  *    renderer unresponsive, uncaughtException/unhandledRejection.
  *
@@ -159,10 +160,11 @@ export function createTraceCapture(
     },
 
     /**
-     * Flush the ring buffer to disk and resume recording. Never throws
-     * "no recording" — if the buffer is somehow down it is restarted first,
-     * so a dump always produces a file. Auto dumps inside the cool-down are
-     * skipped (logged); manual dumps always force through.
+     * Flush the ring buffer to disk, then restore the mode it was in:
+     * a ring that was recording resumes, a stopped ring stays stopped. Never
+     * throws "no recording" — if the buffer is somehow down it is started
+     * first, so a dump always produces a file. Auto dumps inside the
+     * cool-down are skipped (logged); manual dumps always force through.
      */
     async dumpNow(reason: TraceDumpReason): Promise<TraceStopResult> {
       const force = reason === 'manual'
@@ -181,6 +183,11 @@ export function createTraceCapture(
         })
       }
       const run = dumpChain.then(async () => {
+        // Perf gate: the ring only resumes if it was already running when the
+        // dump arrived. A triggers-only session (no VYOTIQ_PERF) dumps from a
+        // buffer started on the spot and stays stopped, so a manual dump does
+        // not promote the recorder to always-on.
+        const wasRecording = recording
         if (!recording) await startBuffer()
         const elapsed = startedAtMs != null ? now() - startedAtMs : 0
         const dir = resolveTraceDir()
@@ -208,20 +215,23 @@ export function createTraceCapture(
           reason,
           count: bytes
         })
-        // Resume immediately — the recorder must never stay down.
-        try {
-          await startBuffer()
-          logger.info('Trace flight recorder resumed', {
-            scope: 'perf',
-            kind: 'trace',
-            action: 'resume'
-          })
-        } catch (err) {
-          logger.warn('Trace flight recorder failed to resume', {
-            scope: 'perf',
-            kind: 'trace',
-            err
-          })
+        // Resume only what was running before (see wasRecording) — otherwise
+        // the ring stays down and the session returns to its perf-gated state.
+        if (wasRecording) {
+          try {
+            await startBuffer()
+            logger.info('Trace flight recorder resumed', {
+              scope: 'perf',
+              kind: 'trace',
+              action: 'resume'
+            })
+          } catch (err) {
+            logger.warn('Trace flight recorder failed to resume', {
+              scope: 'perf',
+              kind: 'trace',
+              err
+            })
+          }
         }
         void pruneRetention()
         return { path: written, bytes, durationMs: Math.max(0, elapsed) }

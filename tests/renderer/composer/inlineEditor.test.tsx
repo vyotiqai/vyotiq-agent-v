@@ -79,6 +79,8 @@ describe('Edit and rerun', () => {
     for (const cls of ['rounded-lg', 'border', 'border-border', 'bg-bg', 'focus-within:border-border-strong']) {
       expect(shell.classList.contains(cls)).toBe(true)
     }
+    // The box is the record's card: it bleeds 8px past the column's padding.
+    expect(shell.classList.contains('-mx-2')).toBe(true)
     expect(shell.classList.contains('vy-chrome')).toBe(false)
 
     const row = within(shell)

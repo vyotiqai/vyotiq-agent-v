@@ -213,3 +213,11 @@ tests/**/_tmp-*.test.ts
 # Per-agent durable memory: same class of local state as .vyotiq/memory/ above,
 # one directory per agent instance. Machine-local, never commit.
 .vyotiq/agents/*/memory/
+# Audit scratch dropped at the .vyotiq root by this session's read-only audit:
+# probe scripts, `report*.json` dumps and session tables. Same class as
+# audit-modes/ and fixes/ above. The app's own .vyotiq/ subdirectories are NOT
+# blanket-ignored — project-authored ones (rules, skills, agent-types,
+# permissions.json) ship with the folder by design, so only the scratch trees
+# are listed here. eslint.config.mjs excludes .vyotiq/** for the same reason:
+# a session's probe in there is not repo source and must not redden `eslint .`.
+/.vyotiq/audit/

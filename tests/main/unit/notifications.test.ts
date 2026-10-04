@@ -99,6 +99,7 @@ import {
   type NotificationPublishInput
 } from '@shared/ipc'
 import { setNotificationBus } from '@main/notifications/bus'
+import { noticeTaskTitle } from '@main/notifications/runNotices'
 import {
   cancelPendingApprovals,
   createApprovalGate,
@@ -343,5 +344,65 @@ describe('notification service', () => {
 
   it('dismiss by dedupe key is a no-op when missing', () => {
     expect(dismissNotificationsByDedupeKey('missing').items).toHaveLength(0)
+  })
+})
+
+describe('notice titles', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-notification-titles-'))
+    setNotificationsPathForTests(join(dir, 'notifications.json'))
+    settingsState.current = {
+      ...DEFAULT_SETTINGS,
+      notifications: { ...DEFAULT_SETTINGS.notifications, desktop: 'off' }
+    }
+    send.mockReset()
+    MockNotification.instances = []
+    resetNotificationsForTests()
+    initNotifications()
+  })
+
+  afterEach(() => {
+    resetNotificationsForTests()
+    resetNotificationsStoreForTests()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** The verbatim goal of audit run 95e872da, pasted into the composer. */
+  const PASTED_DEEP_LINK =
+    'vyotiq://run/126a6ea6-e06f-4013-91af-b9f7e050ae27?ws=C%3A%5CUsers%5Cajay%5CDocuments%5CVYOTIQ%20-%20AGENT%20V%5CVYOTIQ%20-%20AGENT%20V'
+
+  function titleOf(goal: string, runId = 'run-1'): string {
+    return noticeTaskTitle({ goal }, runId)
+  }
+
+  it('titles a pasted deep link short and recognisable, never the whole URL', () => {
+    const title = titleOf(PASTED_DEEP_LINK)
+    expect(title).toBe('run/126a6ea6-e06f-4013-91af-b9f7e050ae27')
+    expect(title).not.toContain(PASTED_DEEP_LINK)
+    expect(title).not.toContain('://')
+    expect(title.length).toBeLessThanOrEqual(48)
+  })
+
+  it('survives the 80-char title clip whole, as a stored inbox row', () => {
+    publishNotification(
+      basePublish({ title: titleOf(PASTED_DEEP_LINK), body: 'Finished', dedupeKey: 'deep-link' })
+    )
+    const item = listNotifications().items[0]!
+    expect(item!.title).toBe('run/126a6ea6-e06f-4013-91af-b9f7e050ae27')
+    expect(item!.title.endsWith('…')).toBe(false)
+  })
+
+  it('leaves a plain goal title exactly as it was', () => {
+    expect(titleOf('**Fix** the flaky `updater` test\n\nSteps: …')).toBe('Fix the flaky updater test')
+    expect(titleOf('Rename max_retry_count in src/*.ts')).toBe('Rename max_retry_count in src/*.ts')
+    expect(titleOf('chat', 'abcdef1234567')).toBe('Untitled task')
+    expect(titleOf('   ', 'abcdef1234567')).toBe('abcdef12')
+  })
+
+  it('does not mangle a sentence that merely contains ://', () => {
+    const sentence = 'Mirror the docs at https://example.com/docs into site/'
+    expect(titleOf(sentence)).toBe(sentence)
   })
 })

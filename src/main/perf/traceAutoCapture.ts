@@ -7,6 +7,8 @@
  *    webContents via browser-window-created), uncaughtException/unhandledRejection → dump the
  *    buffer to {userData}/traces/ and resume recording (30s auto
  *    cool-down dedupes trigger storms; manual IPC dumps always force).
+ *    Triggers-only sessions dump without resuming: the ring starts on the
+ *    spot, writes the file, then stays down (perf gate).
  *    dumpNow() starts a buffer on demand, so triggers-only mode still yields
  *    a trace file for a real crash (post-trigger events only).
  *

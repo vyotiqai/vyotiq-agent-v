@@ -1,5 +1,5 @@
 import { join } from 'path'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, renameSync, rmSync } from 'fs'
 import { app } from 'electron'
 import log from 'electron-log/main'
 import { logger, setLoggerBackend, type LogFields, type LogLevel } from '../../shared/logger'
@@ -20,8 +20,20 @@ import {
 import { isAbortError } from '../../shared/errors'
 import { isIgnorablePipeError, isIgnorableUncaught, isRefusedNodePtyFork } from './pipeErrors'
 import { exitAfterFatal } from './fatalExit'
+import { logArchivePaths, planLogRotation } from './rotation'
 
 export { isIgnorablePipeError, isIgnorableUncaught } from './pipeErrors'
+
+/**
+ * `crop` exists on electron-log's File at runtime but is absent from its
+ * `LogFile` type, so the rename-failure fallback narrows at the call site
+ * rather than in this signature — `archiveLogFn` is contravariant, so a
+ * parameter that *requires* `crop` would not be assignable to it.
+ */
+type ArchiveTarget = Parameters<
+  NonNullable<typeof log.transports.file.archiveLogFn>
+>[0]
+type CroppableLogFile = ArchiveTarget & { crop(bytesAfter: number): void }
 
 export function logsDirectory(): string {
   return join(app.getPath('userData'), 'logs')
@@ -45,6 +57,35 @@ export function resolvePathFn(): string {
   return join(ensureLogsDirectory(), 'vyotiq.log')
 }
 
+/**
+ * Rotate into numbered generations (`vyotiq.old.1.log` … `vyotiq.old.5.log`)
+ * instead of electron-log's default, which renames the live file to
+ * `<name>.old<ext>` on every rotation — so the second rotation overwrites the
+ * only archive and exactly two generations ever survive. A support case needing
+ * yesterday-and-before was unrecoverable from disk. Retention stays bounded at
+ * LOG_ARCHIVE_GENERATIONS x the 5 MB cap.
+ *
+ * The generation choice is pure (`planLogRotation`) and unit-tested; this
+ * function is only the synchronous filesystem work electron-log requires.
+ */
+function archiveLogToNumberedGenerations(oldLogFile: ArchiveTarget): void {
+  const logPath = oldLogFile.path
+  const plan = planLogRotation(logPath, logArchivePaths(logPath).filter(existsSync))
+  try {
+    // Highest slot first: planLogRotation returns these descending so no
+    // rename clobbers a generation that has not moved yet.
+    for (const { from, to } of plan.shifts) renameSync(from, to)
+    renameSync(logPath, plan.target)
+    rmSync(plan.evict, { force: true })
+  } catch {
+    // Same fallback electron-log's own archiveLogFn uses when rename fails
+    // (log file held open by another handle, read-only volume, …): crop the
+    // live file rather than lose logging entirely.
+    const croppable = oldLogFile as CroppableLogFile
+    croppable.crop(Math.min(Math.round(log.transports.file.maxSize / 4), 256 * 1024))
+  }
+}
+
 function mapLevel(level: LogLevel): 'debug' | 'info' | 'warn' | 'error' {
   if (level === 'fatal') return 'error'
   return level
@@ -56,13 +97,17 @@ function mapLevel(level: LogLevel): 'debug' | 'info' | 'warn' | 'error' {
  */
 export function initMainLogging(): void {
   const logsDir = ensureLogsDirectory()
-  // One-shot: populate Settings crash history from prior RENDERER/CHILD log lines.
+  // One-shot: populate Settings crash history from prior RENDERER/CHILD log
+  // lines. The backfill derives and reads the rotated generations beside this
+  // live path itself (logging/rotation.ts), so a crash that already rotated out
+  // of vyotiq.log still seeds the panel.
   backfillCrashSnippetsFromLog(join(logsDir, 'vyotiq.log'))
   const isDev = !app.isPackaged
 
   log.initialize()
   log.transports.file.resolvePathFn = resolvePathFn
   log.transports.file.maxSize = 5 * 1024 * 1024 // 5 MB then rotate
+  log.transports.file.archiveLogFn = archiveLogToNumberedGenerations
   log.transports.file.level = isDev ? 'debug' : 'info'
   // Console writes to a closed pipe raise EPIPE; packaged / non-TTY runs skip console.
   const consoleWritable =

@@ -25,6 +25,31 @@ export function resetSoftWarnCooldownsForTests(): void {
   softWarnLastAt.clear()
 }
 
+/**
+ * A statusless `http` failure is raised by exactly one call site: the SSE error
+ * frame read *inside* an already-open 200 stream (providers/openai.ts). There
+ * is no response status to consult because the request itself succeeded — what
+ * failed is one frame, which the loop's retry recovers from.
+ *
+ * AppData 2026-09-29 08:40:58.003 logged
+ * `'Streaming response failed: [api_error] internal server error'` at [error],
+ * and 08:40:58.004 — 1ms later — logged the normal
+ * `'Provider stream error (retrying)'` at [warn]. One of the run's 9 [error]
+ * lines described a recovered degraded turn.
+ *
+ * So the level cannot key on `kind === 'http'` alone: only a *transient* body
+ * is downgraded. Bad requests, auth and model errors keep failing forever on
+ * retry and must stay at error. Same reasoning as the `parse` branch below —
+ * a dropped frame degrades one turn, it is not the whole request failing.
+ */
+const TRANSIENT_HTTP_BODY_RE =
+  /\[api_error\]|internal server error|service unavailable|temporarily unavailable|bad gateway|gateway time-?out|overloaded|server is busy|at capacity|upstream (connect )?error|connection (reset|closed|aborted)|socket hang up|rate limit|too many requests|quota/i
+
+/** True when a statusless `http` body is a transient upstream/transport shape. */
+export function isTransientProviderHttpBody(message: string | undefined): boolean {
+  return message !== undefined && TRANSIENT_HTTP_BODY_RE.test(message)
+}
+
 /** Log provider failures without request bodies, API keys, or full response text. */
 export function logProviderFailure(
   provider: string,
@@ -84,6 +109,11 @@ export function logProviderFailure(
   }
   // Non-auth 4xx: warn with scrubbed message so operators can diagnose without secrets.
   if (kind === 'http' && status !== undefined && status >= 400 && status < 500) {
+    logger.warn(`Provider ${kind} failure`, fields)
+    return
+  }
+  // Statusless http + transient body: a frame dropped inside a live stream.
+  if (kind === 'http' && status === undefined && isTransientProviderHttpBody(detail.message)) {
     logger.warn(`Provider ${kind} failure`, fields)
     return
   }

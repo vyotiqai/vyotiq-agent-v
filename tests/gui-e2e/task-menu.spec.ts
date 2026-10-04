@@ -46,7 +46,10 @@ test.afterAll(async () => {
 })
 
 const openMenu = async (): Promise<void> => {
-  await launched.window.locator('[data-task-header]').getByRole('button', { name: /^More — / }).click({ timeout: 30_000 })
+  await launched.window
+    .locator('[data-task-controls]')
+    .getByRole('button', { name: /^More — / })
+    .click({ timeout: 30_000 })
 }
 
 test('Pin keeps a finished task out of Done, under Pinned, and the menu then offers Unpin', async () => {
@@ -69,7 +72,9 @@ test('Fork opens a new task with the same conversation, listed beside the origin
   await openMenu()
   await window.getByRole('menuitem', { name: 'Fork' }).click()
   await expect(window.getByText('Forked — a copy of the task to take another way')).toBeVisible({ timeout: 20_000 })
-  await expect(window.locator('[data-task-header] h1')).toHaveText(`${TITLE} (fork)`, { timeout: 20_000 })
+  // The pane now carries the fork: its title is the run's own, which the fork
+  // made "… (fork)".
+  await expect(window.locator(`[data-chat-pane-title="${TITLE} (fork)"]`)).toHaveCount(1, { timeout: 20_000 })
   // Its record is the original's conversation.
   await expect(window.getByText('Shortcuts sit under App, and the section labels share one style.')).toBeVisible()
   // Both tasks are in the navigator.

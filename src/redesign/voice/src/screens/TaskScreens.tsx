@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { IconButton, StepMarker, cn, type TaskState } from '@renderer/lib/ui'
-import { RecordBody, RecordRow, TaskHeader } from '@renderer/features/task/record/RecordLayout'
+import { RecordBody, RecordRow } from '@renderer/features/task/record/RecordLayout'
 import { Inspector, Navigator, Panel, Window } from '../shell/Window'
 import { BlockedPopover, MicTip, SetupPopover } from '../voice/Popovers'
 import { InstructionLine, type Draft, type MicState } from '../voice/Surfaces'
@@ -70,17 +70,15 @@ export function TaskFrame({ line }: { line: ReactNode }) {
   return (
     <Window navigator={<Navigator />}>
       <Panel>
-        <TaskHeader
-          state="running"
-          title="Retry uploads on flaky networks"
-          facts={[{ text: 'retry-uploads', mono: true }]}
-          actions={
-            <>
-              <IconButton icon="stop" label="Stop run" size="sm" tone="muted" />
-              <IconButton icon="more" label="More" size="sm" tone="muted" />
-            </>
-          }
-        />
+        {/* The task's 40px row: title, run name, run controls. The header
+            strip is gone from the app; this mock keeps the row it draws. */}
+        <header className="flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2">
+          <h1 className="m-0 min-w-0 truncate text-sm font-semibold text-fg-strong">Retry uploads on flaky networks</h1>
+          <span className="font-mono text-xs text-tertiary">retry-uploads</span>
+          <span className="flex-1" />
+          <IconButton icon="stop" label="Stop run" size="sm" tone="muted" />
+          <IconButton icon="more" label="More" size="sm" tone="muted" />
+        </header>
         <Record />
         {line}
       </Panel>

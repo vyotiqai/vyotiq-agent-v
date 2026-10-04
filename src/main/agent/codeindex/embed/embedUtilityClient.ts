@@ -333,6 +333,9 @@ export class EmbedUtilityClient implements EmbedBackend {
         this.pending.delete(id)
         removeAbort()
         reject(new Error(`Embedding worker timeout (${body.op})`))
+        // No response will re-arm the idle timer for this request — without
+        // this the worker stays resident forever once a request times out.
+        this.scheduleIdleDispose()
       }, timeoutMs)
       const onAbort = (): void => {
         clearTimeout(timer)
@@ -362,6 +365,7 @@ export class EmbedUtilityClient implements EmbedBackend {
         this.pending.delete(id)
         removeAbort()
         reject(err instanceof Error ? err : new Error(String(err)))
+        this.scheduleIdleDispose()
       }
     })
   }

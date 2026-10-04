@@ -60,15 +60,14 @@ test('send message streams fixture assistant text and can stop', async () => {
 
   await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 15_000 })
 
-  // While the run streams the task header offers Stop; once it ends, Stop goes
-  // and the header reads the run's outcome.
-  const stop = window.locator('[data-task-header]').getByRole('button', { name: /^stop$/i })
+  // While the run streams, the task composer's line row offers Stop; once the
+  // run is no longer live the composer drops it.
+  const stop = window.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i })
   if (await stop.isVisible().catch(() => false)) {
     await stop.click()
     await expect(stop).toBeHidden({ timeout: 10_000 })
   } else {
-    await expect(window.locator('[data-task-header] [data-task-state]')).not.toHaveAttribute('data-task-state', 'running', {
-      timeout: 10_000
-    })
+    // The run ended before Stop was pressed: the composer carries no Stop.
+    await expect(stop).toHaveCount(0, { timeout: 10_000 })
   }
 })

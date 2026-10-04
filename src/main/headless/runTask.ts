@@ -1,4 +1,6 @@
 import type { WebContents } from 'electron'
+import { existsSync, statSync } from 'fs'
+import { join } from 'path'
 import type {
   AgentEvent,
   AgentQuestionRequest,
@@ -27,6 +29,7 @@ import {
   buildHeadlessResult,
   classifyHeadlessOutcome,
   createTally,
+  emptyTranscriptError,
   overStepBudget,
   tallyEvent,
   usageOf,
@@ -310,5 +313,44 @@ export async function runHeadlessTask(input: HeadlessTaskInput): Promise<Headles
   } catch (err) {
     logger.warn('Headless run could not flush its records', { scope: 'headless', correlationId: runId, err })
   }
-  return finish(setupError)
+  if (setupError) return finish(setupError)
+
+  /**
+   * A run whose whole output is its transcript wrote nothing: the fixture
+   * replay path reaches `status: done` without a single append, so a run that
+   * asked a question and received an answer would otherwise leave a success
+   * with nothing behind it. Both the result and the record name the gap, so
+   * `done` and a silent failure are no longer the same bytes on disk.
+   */
+  const empty = emptyTranscriptError(transcriptBytes())
+  if (!empty) return finish()
+  logger.error('Headless run finished with nothing written', { scope: 'headless', correlationId: runId, err: empty })
+  if (runExists(workspacePath, runId)) {
+    await updateStatus(
+      resolveRunDir(workspacePath, runId),
+      { status: 'error', error: empty },
+      { sync: true }
+    ).catch((err: unknown) => {
+      logger.warn('Headless run could not record its empty transcript', {
+        scope: 'headless',
+        correlationId: runId,
+        err
+      })
+    })
+  }
+  return finish(empty)
+
+  /**
+   * Transcript bytes on disk. Rotation only ever moves rows INTO the live
+   * files (eventAppendQueue.ts:199, messageAppendQueue.ts:216), so a run whose
+   * live pair is empty never appended a row.
+   */
+  function transcriptBytes(): number {
+    if (!runExists(workspacePath, runId)) return 0
+    const runDir = resolveRunDir(workspacePath, runId)
+    return ['messages.jsonl', 'events.jsonl'].reduce((total, file) => {
+      const path = join(runDir, file)
+      return total + (existsSync(path) ? statSync(path).size : 0)
+    }, 0)
+  }
 }

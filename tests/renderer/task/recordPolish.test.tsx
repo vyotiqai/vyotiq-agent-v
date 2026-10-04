@@ -12,7 +12,7 @@ import { foldsToOpen, briefOpenKey, runOpenKey } from '@renderer/features/task/r
 import { REPEAT_FOLD_AT, foldRepeats } from '@renderer/features/task/record/repeats'
 import { WorkList } from '@renderer/features/task/record/WorkItems'
 import { Brief } from '@renderer/features/task/record/Brief'
-import { TaskHeader } from '@renderer/features/task/record/RecordLayout'
+import { PlanLine } from '@renderer/features/task/record/RecordLayout'
 import { coverCheckInstruction, followUpOrigin, prCheckInstruction } from '@renderer/features/task/followUps'
 import { TaskPane, type TaskPaneProps } from '@renderer/features/task/TaskPane'
 import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
@@ -226,7 +226,7 @@ const plan = (...states: TaskState[]) => states.map((state, i) => ({ title: `Bou
 describe('the plan line, given somewhere to go', () => {
   it('is one stop in the tab order, named in words, that goes to a step', () => {
     const onStep = vi.fn()
-    const { container } = render(<TaskHeader title="T" plan={plan('done', 'running', 'queued')} onPlanStep={onStep} />)
+    const { container } = render(<PlanLine steps={plan('done', 'running', 'queued')} onStep={onStep} />)
     const bar = screen.getByRole('toolbar', { name: 'Plan · Step 2 of 3' })
     const segments = [...bar.querySelectorAll<HTMLButtonElement>('button[data-plan-step]')]
     expect(segments.map((s) => s.tabIndex)).toEqual([-1, 0, -1])

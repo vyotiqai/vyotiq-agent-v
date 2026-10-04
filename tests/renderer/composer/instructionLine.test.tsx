@@ -72,7 +72,7 @@ describe('resolveLinePlaceholder', () => {
 })
 
 describe('instruction line', () => {
-  it('is the field over one control row: mode, model, attach, mic, Send — no Stop', () => {
+  it('is the field over one control row: mode, model, attach, mic, Send — no Stop while idle', () => {
     renderLine()
     const shell = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-shell]')!
     expect(shell).toBeTruthy()
@@ -88,7 +88,7 @@ describe('instruction line', () => {
     expect(controls.getByRole('button', { name: 'Set up dictation' })).toBeTruthy()
     // Nothing to send yet: Send is there, and says so by being off.
     expect(controls.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true)
-    // Stop lives in the task header, not here.
+    // Stop lives in the composer's own row, beside Send, and only while a run is live.
     expect(screen.queryByRole('button', { name: /^Stop$/ })).toBeNull()
     // The decorative prompt glyph is gone.
     expect(shell.textContent).not.toContain('›')
@@ -102,7 +102,17 @@ describe('instruction line', () => {
     expect(shell.classList.contains('rounded-lg')).toBe(true)
     // No rule across the pane: the box is the edge.
     expect(line.classList.contains('border-t')).toBe(false)
-    expect(shell.parentElement!.classList.contains('max-w-[780px]')).toBe(true)
+    // The record's scroll reserves its 8px gutter; the composer reserves the same
+    // width as padding, so both columns centre on one axis.
+    const gutter = line.querySelector<HTMLElement>('[data-composer-gutter]')!
+    expect(gutter.classList.contains('pr-2')).toBe(true)
+    const column = line.querySelector<HTMLElement>('[data-composer-column]')!
+    expect(column.classList.contains('max-w-[780px]')).toBe(true)
+    // The box is the record's card: it bleeds 8px past the column's padding,
+    // and stays the column's own child.
+    expect(shell.classList.contains('-mx-2')).toBe(true)
+    expect(shell.parentElement).toBe(column)
+    expect(column.parentElement).toBe(gutter)
     expect(line.textContent).toContain('Tell it what to do differently…')
     rerender(<Composer {...props} lineOutcome="stopped" />)
     expect(line.textContent).toContain('Say what to change before it carries on…')
@@ -135,6 +145,41 @@ describe('instruction line', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Send now' }))
     await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
     expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ steer: true })
+  })
+
+  it('puts Stop in the control row before the action while a run is live', () => {
+    const onStop = vi.fn()
+    const { props, rerender } = renderLine({ running: true, onStop })
+    const row = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-controls]')!
+    const stop = within(row).getByRole('button', { name: 'Stop' })
+    // Same right edge as the action: Stop sits directly before it.
+    expect(stop.nextElementSibling?.textContent).toContain('Queue')
+    fireEvent.click(stop)
+    expect(onStop).toHaveBeenCalledTimes(1)
+
+    // Idle again, and nothing is left to stop.
+    rerender(<Composer {...props} running={false} />)
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+  })
+
+  it('keeps Stop out of the New task brief', () => {
+    const onStop = vi.fn()
+    render(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running
+        hasWorkspace
+        secrets={emptySecretStatus()}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={vi.fn()}
+        onStop={onStop}
+        variant="brief"
+      />
+    )
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
   })
 
   it('shows the context used beside the controls once there is a reading', () => {

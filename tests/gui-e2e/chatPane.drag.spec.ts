@@ -119,14 +119,17 @@ test('drag sidebar session onto right third splits into two panes', async () => 
   await splitBetaBesideAlpha()
 
   await expect(window.locator('[data-chat-pane-focused="1"]')).toHaveCount(1)
-  await expect(window.locator('[data-task-header]')).toHaveCount(2)
+  await expect(window.locator('[data-task-controls]')).toHaveCount(2)
   await expect(window.locator('[data-chat-pane-title="Pane Session Alpha"]')).toBeVisible()
   await expect(window.locator('[data-chat-pane-title="Pane Session Beta"]')).toBeVisible()
 
   // The split must hydrate the dropped session's transcript: Beta's pane shows
   // its seeded message and the composer leaves the draft placeholder.
+  // The pane names its task once, in the record's own first row. It used to
+  // say it twice — a header title over the brief — which is the duplication
+  // the header strip's removal is for.
   const betaPane = window.locator('[data-chat-pane]').nth(1)
-  await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
+  await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(1, { timeout: 20_000 })
   await expect(betaPane.getByText(/Ask for a change, or a follow-up/)).toBeVisible({ timeout: 20_000 })
 
   // Clicking an already-open session focuses its pane; does not add a third.
@@ -164,8 +167,8 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, inspector
     expect(width).toBeGreaterThanOrEqual(280)
   }
 
-  // Always-visible headers (not hover-only).
-  await expect(window.locator('[data-task-header]')).toHaveCount(2)
+  // Always-visible pane controls (not hover-only).
+  await expect(window.locator('[data-task-controls]')).toHaveCount(2)
   await expect(window.getByRole('button', { name: /Close Pane Session Alpha/i })).toBeVisible()
   await expect(window.getByRole('button', { name: /Close Pane Session Beta/i })).toBeVisible()
 
@@ -316,7 +319,8 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
   const betaPane = window.locator('[data-chat-pane-title="Pane Session Beta"]')
   await expect(betaPane).toBeVisible({ timeout: 15_000 })
-  await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
+  // Once, in the record's brief — the header that repeated it is gone.
+  await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(1, { timeout: 20_000 })
   await expect(betaPane.getByText(/Ask for a change, or a follow-up/)).toBeVisible({ timeout: 20_000 })
 
   // Pane 3: Cmd+\ again (Beta pane focused), then click Gamma into the draft.
@@ -337,10 +341,10 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
   await window.getByRole('button', { name: 'Pane Session Gamma', exact: true }).first().click()
   const gammaPane = window.locator('[data-chat-pane-title="Pane Session Gamma"]')
   await expect(gammaPane).toBeVisible({ timeout: 15_000 })
-  await expect(gammaPane.getByText('Pane Session Gamma')).toHaveCount(2, { timeout: 20_000 })
+  await expect(gammaPane.getByText('Pane Session Gamma')).toHaveCount(1, { timeout: 20_000 })
   await expect(gammaPane.getByText(/Ask for a change, or a follow-up/)).toBeVisible({ timeout: 20_000 })
 
   // Pane 1 must still show Alpha's transcript.
   const alphaPane = window.locator('[data-chat-pane-title="Pane Session Alpha"]')
-  await expect(alphaPane.getByText('Pane Session Alpha')).toHaveCount(2)
+  await expect(alphaPane.getByText('Pane Session Alpha')).toHaveCount(1)
 })

@@ -249,6 +249,7 @@ import { mcpAuthAllowedForWorkspace } from '../../shared/mcpApps'
 import {
   filterToolDefsForMode,
   filterToolDefsForCodeIndex,
+  isScopeSharedInlineInstance,
   modeSectionMarkdown
 } from './tools/modePolicy'
 import { dedupeToolCalls, ensureToolCallIds } from './dedupeToolCalls'
@@ -1436,6 +1437,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
     const isInlineInstance = persistedForTools?.inlineInstance === true
     runIsInlineInstance = isInlineInstance
+    // An instance capped to a path_scope with no worktree of its own cannot use
+    // the tools that escape the parent tree — the dispatch guard refuses them
+    // (writeGuard.assertInlineInstanceUnscopedToolAllowed). Naming them in the
+    // catalogue only buys a wasted turn on that refusal, so the same flag drops
+    // them from both the wire catalogue and the mode section below.
+    const isScopeSharedInstance = isScopeSharedInlineInstance(persistedForTools ?? {})
     // A typed helper's tool list, frozen at spawn (agentTypes.ts): it narrows
     // the catalog and the tool gate alike. Absent for every other run.
     const agentTypeToolAllowlist = isInlineInstance ? persistedForTools?.agentType?.tools : undefined
@@ -2139,6 +2146,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 {
                 autoModeSwitch: settings.autoModeSwitch,
                 inlineInstance: isInlineInstance,
+                pathScopeShared: isScopeSharedInstance,
                 toolAllowlist: agentTypeToolAllowlist
               }),
               liveCodeIndexEnabled
@@ -2615,7 +2623,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         modeSection:
           modeSectionMarkdown(agentMode, {
             autoModeSwitch: settings.autoModeSwitch,
-            inlineInstance: isInlineInstance
+            inlineInstance: isInlineInstance,
+            pathScopeShared: isScopeSharedInstance
           }) ?? undefined,
         loopHint: assembleLoopHint,
         taskList: formatTodosContextSection(stepTodos),

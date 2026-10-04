@@ -38,13 +38,59 @@ export function stripGoalMarkdown(goal: string): string {
 export const PLACEHOLDER_GOAL = 'chat'
 export const UNTITLED_TASK = 'Untitled task'
 
+/** A goal that is nothing but a URL: `scheme://…`. A `://` mid-sentence is not one. */
+const URL_GOAL = /^[a-z][a-z0-9+.-]*:\/\/\S*$/i
+
+/** How much of a URL to keep — short enough to scan, long enough to recognise. */
+const URL_TITLE_MAX = 48
+
+/**
+ * What to call a task whose goal is a URL. A pasted `vyotiq://run/<id>?ws=…`
+ * points at another run, so the title names the target instead of reproducing
+ * a query string: scheme + host + path segments, query and fragment dropped.
+ * A URL with no path keeps its host; anything unparseable keeps its own text.
+ */
+export function taskTitleFromUrl(url: string): string {
+  let parsed: URL | null = null
+  try {
+    parsed = new URL(url)
+  } catch {
+    parsed = null
+  }
+  const host = parsed?.host.replace(/^www\./i, '') ?? ''
+  const segments = (parsed?.pathname ?? '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment)
+      } catch {
+        return segment
+      }
+    })
+  if (!host) return clipTitle(url)
+  return clipTitle([host, ...segments].join('/'))
+}
+
+function clipTitle(title: string): string {
+  if (title.length <= URL_TITLE_MAX) return title
+  return `${title.slice(0, Math.max(1, URL_TITLE_MAX - 1)).trimEnd()}…`
+}
+
 /**
  * What a task is called, from its goal: the goal's first line without its
  * markdown. The navigator names a task by this, and so does everything that
  * tells you about one — a notification, a toast.
+ *
+ * A goal that is only a URL is a link, not an instruction — pasting a
+ * `vyotiq://` deep link into the composer used to title the run with 80 chars
+ * of percent-encoded path. It is named by its target instead, so the task is
+ * still identifiable, never an empty title or a bare scheme.
  */
 export function taskTitleFromGoal(goal: string): string {
   if (goal.trim().toLowerCase() === PLACEHOLDER_GOAL) return UNTITLED_TASK
+  const text = goal.trim()
+  if (URL_GOAL.test(text)) return taskTitleFromUrl(text)
   let plain = stripGoalMarkdown(goal)
   plain = plain.replace(SPAWN_PREFIX, '').trim()
   return plain || goal.trim()

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, type ReactNode } from 'react'
+import { useContext, useState, type ReactNode } from 'react'
 import { parseAgentInstanceRunId, parseAgentInstanceRunIdFromArgs, formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { formatElapsed } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
@@ -8,7 +8,7 @@ import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import { scrollMotion } from '@renderer/lib/utils/motion'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import type { RecordStep, RecordTail } from '../recordModel'
-import { RecordOpenContext, StepRevealContext, stepOpenKey } from '../recordFind'
+import { RecordOpenContext, stepOpenKey } from '../recordFind'
 import { RecordRow } from './RecordLayout'
 import { NowLine, WorkList, counted, plainLine, workCounts, workIsLive } from './WorkItems'
 
@@ -36,7 +36,9 @@ export function Steps({
   if (steps.length === 0) return null
   return (
     <RecordRow>
-      <ol className="-mx-2" aria-label="Steps" data-steps-run={runN}>
+      {/* -mx-2 bleeds each row into the gutter its own px-2 pulls back; the
+          gap is what keeps folded steps from reading as one dense slab. */}
+      <ol className="-mx-2 space-y-1" aria-label="Steps" data-steps-run={runN}>
         {steps.map((s) => (
           <StepRow
             key={s.key}
@@ -126,12 +128,6 @@ function StepRow({
   const [open, setOpen] = useState<boolean | null>(null)
   // Find in record opens a step that holds a match, whatever you last chose.
   const forced = useContext(RecordOpenContext).has(stepOpenKey(runN, step.key))
-  // The header's plan line asked for this step: it opens, and is yours to fold again.
-  const reveal = useContext(StepRevealContext)
-  const revealed = reveal != null && reveal.runN === runN && reveal.key === step.key ? reveal.nonce : null
-  useEffect(() => {
-    if (revealed != null) setOpen(true)
-  }, [revealed])
   // A card waiting on you inside the step (an instance it started may ask
   // after the step itself settled).
   const waiting = needs != null
@@ -153,111 +149,116 @@ function StepRow({
   const showBetweenActivity = betweenActivity != null && !(betweenTail && workIsLive(betweenTail))
   return (
     <li
-      className={cn('rounded-lg', live && 'bg-card')}
+      className="rounded-lg"
       data-step={step.n}
       data-step-state={step.state}
       {...(step.superseded ? { 'data-step-superseded': '' } : {})}
     >
+      {/* The live fill stops before the work done between this step and the
+          next: that work belongs to no step, so it paints on no step's card. */}
+      <div className={cn(live && 'rounded-lg bg-card')}>
       {/* The title button stretches over the whole row (its ::after), so the row
-          toggles anywhere; the needs-you link sits above it as its own control. */}
-      <div
-        className={cn(
-          'group relative flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1.5 vy-transition',
-          !live && canOpen && ROW_HOVER
-        )}
-      >
-        <StepMarker state={step.state} n={step.n} />
-        <button
-          type="button"
-          aria-expanded={canOpen ? expanded : undefined}
-          disabled={!canOpen}
-          onClick={() => setOpen(!expanded)}
+            toggles anywhere; the needs-you link sits above it as its own control. */}
+        <div
           className={cn(
-            // The title keeps at least 40% of the row: the counts beside it give way first.
-            'min-w-[40%] flex-1 truncate rounded-sm text-left text-sm after:absolute after:inset-0 after:rounded-lg focus-visible:vy-focus-ring disabled:cursor-default',
-            live ? 'font-medium text-fg-strong' : quiet || step.superseded ? 'text-muted' : 'text-secondary'
+            'group relative flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1.5 vy-transition',
+            !live && canOpen && ROW_HOVER
           )}
         >
-          {/* As words: a plan names `inputs` and **bold** the way its markdown does. */}
-          {plainLine(step.title)}
-        </button>
-        {step.superseded ? (
-          <span className="shrink-0 text-xs text-tertiary" title="A later plan dropped or renamed this step">
-            replaced
-          </span>
-        ) : null}
-        {/* The step's children, each a way into it — above the row's own
-            toggle, like the needs-you link. */}
-        {instances.map(({ runId, shortId }) =>
-          onOpenAgentInstance ? (
-            <button
-              key={runId}
-              type="button"
-              onClick={() => onOpenAgentInstance(runId)}
-              aria-label={`Open instance ${shortId}`}
-              className={cn(
-                'relative z-[1] inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted hover:text-fg-strong focus-visible:vy-focus-ring',
-                HOVER_ON_SURFACE,
-                NUM
-              )}
-            >
-              {shortId}
-            </button>
-          ) : (
-            <span key={runId} className={cn('inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted', NUM)}>
-              {shortId}
-            </span>
-          )
-        )}
-        {waiting && !expanded ? (
-          // Folded away, the step still says it is waiting, and opens onto the card.
+          <StepMarker state={step.state} n={step.n} />
           <button
             type="button"
-            onClick={(e) => {
-              const row = e.currentTarget.closest('li')
-              setOpen(true)
-              requestAnimationFrame(() => row && showNeedsYou(row))
-            }}
-            className="relative z-[1] shrink-0 rounded-sm text-xs font-medium text-accent hover:underline focus-visible:vy-focus-ring"
+            aria-expanded={canOpen ? expanded : undefined}
+            disabled={!canOpen}
+            onClick={() => setOpen(!expanded)}
+            className={cn(
+              // The title keeps at least 40% of the row: the counts beside it give way first.
+              'min-w-[40%] flex-1 truncate rounded-sm text-left text-sm after:absolute after:inset-0 after:rounded-lg focus-visible:vy-focus-ring disabled:cursor-default',
+              live ? 'font-medium text-fg-strong' : quiet || step.superseded ? 'text-muted' : 'text-secondary'
+            )}
           >
-            Waiting for you
+            {/* As words: a plan names `inputs` and **bold** the way its markdown does. */}
+            {plainLine(step.title)}
           </button>
-        ) : waiting || expanded ? null : summary ? (
-          // A folded step says what it holds; an open one shows it, and its
-          // title gets the room ("p5: Make c14 pass — bound maxFor…" was cut for counts).
-          <span className="hidden min-w-0 truncate text-xs text-tertiary @[640px]/record:inline" title={summary}>
-            {summary}
+          {step.superseded ? (
+            <span className="shrink-0 text-xs text-tertiary" title="A later plan dropped or renamed this step">
+              replaced
+            </span>
+          ) : null}
+          {/* The step's children, each a way into it — above the row's own
+              toggle, like the needs-you link. */}
+          {instances.map(({ runId, shortId }) =>
+            onOpenAgentInstance ? (
+              <button
+                key={runId}
+                type="button"
+                onClick={() => onOpenAgentInstance(runId)}
+                aria-label={`Open instance ${shortId}`}
+                className={cn(
+                  'relative z-[1] inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted hover:text-fg-strong focus-visible:vy-focus-ring',
+                  HOVER_ON_SURFACE,
+                  NUM
+                )}
+              >
+                {shortId}
+              </button>
+            ) : (
+              <span key={runId} className={cn('inline-flex h-[18px] shrink-0 items-center rounded-sm bg-surface px-1.5 text-muted', NUM)}>
+                {shortId}
+              </span>
+            )
+          )}
+          {waiting && !expanded ? (
+            // Folded away, the step still says it is waiting, and opens onto the card.
+            <button
+              type="button"
+              onClick={(e) => {
+                const row = e.currentTarget.closest('li')
+                setOpen(true)
+                requestAnimationFrame(() => row && showNeedsYou(row))
+              }}
+              className="relative z-[1] shrink-0 rounded-sm text-xs font-medium text-accent hover:underline focus-visible:vy-focus-ring"
+            >
+              Waiting for you
+            </button>
+          ) : waiting || expanded ? null : summary ? (
+            // A folded step says what it holds; an open one shows it, and its
+            // title gets the room ("p5: Make c14 pass — bound maxFor…" was cut for counts).
+            <span className="hidden min-w-0 truncate text-xs text-tertiary @[640px]/record:inline" title={summary}>
+              {summary}
+            </span>
+          ) : null}
+          <span className="min-w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
+            {durationMs != null && durationMs >= 1000 ? formatElapsed(durationMs) : ''}
           </span>
+          {/* Sized and pulled in like the History row's, so the time shares the work rows' right edge. */}
+          {canOpen ? (
+            <Icon
+              name={expanded ? 'chevron' : 'chevronRight'}
+              size={11}
+              className={cn('-ml-0.5 shrink-0 text-tertiary', !expanded && 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
+            />
+          ) : (
+            <span aria-hidden className="-ml-0.5 w-[11px] shrink-0" />
+          )}
+        </div>
+        {expanded && canOpen ? (
+          <div className="space-y-2 pb-3 pl-[36px] pr-2">
+            {step.work.length > 0 ? <WorkList items={step.work} /> : null}
+            {showActivity ? <NowLine text={activity!} /> : null}
+            {needs}
+          </div>
+        ) : errors.length > 0 ? (
+          // Folded, a step still shows why its run failed — and Retry with it.
+          <div className="pb-3 pl-[36px] pr-2" data-step-errors={step.n}>
+            <WorkList items={errors} />
+          </div>
         ) : null}
-        <span className="min-w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
-          {durationMs != null && durationMs >= 1000 ? formatElapsed(durationMs) : ''}
-        </span>
-        {/* Sized and pulled in like the History row's, so the time shares the work rows' right edge. */}
-        {canOpen ? (
-          <Icon
-            name={expanded ? 'chevron' : 'chevronRight'}
-            size={11}
-            className={cn('-ml-0.5 shrink-0 text-tertiary', !expanded && 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
-          />
-        ) : (
-          <span aria-hidden className="-ml-0.5 w-[11px] shrink-0" />
-        )}
       </div>
-      {expanded && canOpen ? (
-        <div className="space-y-2 pb-3 pl-[36px] pr-2">
-          {step.work.length > 0 ? <WorkList items={step.work} /> : null}
-          {showActivity ? <NowLine text={activity!} /> : null}
-          {needs}
-        </div>
-      ) : errors.length > 0 ? (
-        // Folded, a step still shows why its run failed — and Retry with it.
-        <div className="pb-3 pl-[36px] pr-2" data-step-errors={step.n}>
-          <WorkList items={errors} />
-        </div>
-      ) : null}
       {step.between.length > 0 || showBetweenActivity || betweenNeeds != null ? (
         // Done after this step settled and before another started: on the
-        // run's own edge, never folded into the step above it.
+        // run's own edge, never folded into the step above it — and below the
+        // fill above, so it paints on no step's card.
         <div className="space-y-2 px-2 pb-3 pt-1" data-step-between={step.n}>
           {step.between.length > 0 ? <WorkList items={step.between} /> : null}
           {showBetweenActivity ? <NowLine text={betweenActivity!} /> : null}

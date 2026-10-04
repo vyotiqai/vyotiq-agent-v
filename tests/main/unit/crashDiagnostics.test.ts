@@ -198,6 +198,20 @@ describe('parseCrashSnippetsFromLogText', () => {
       exitCodeHex: '0xFFFFFFFF'
     })
   })
+
+  it('ignores ordinary error lines and intentional-teardown reasons', () => {
+    // The parser is deliberately narrow: an [error] line with no crash code is
+    // not a crash, and killed / clean-exit are dev rebuilds and app quits.
+    const text = [
+      "[2026-08-01 19:42:35.771] [error] [main] EPIPE on stdout while writing log",
+      "[2026-08-01 19:42:36.771] [error] [main] Renderer process gone { code: 'RENDERER_CRASH', reason: 'killed', exitCode: 0 }",
+      "[2026-08-01 19:42:37.771] [error] [main] Renderer process gone { code: 'RENDERER_CRASH', reason: 'clean-exit', exitCode: 0 }",
+      "[2026-08-01 19:42:38.771] [error] [main] Child process gone { code: 'CHILD_PROCESS_CRASH', reason: 'clean-exit', exitCode: 0 }",
+      "[2026-08-01 19:42:39.771] [info] [main] Renderer process gone { code: 'RENDERER_CRASH' }"
+    ].join('\n')
+
+    expect(parseCrashSnippetsFromLogText(text)).toEqual([])
+  })
 })
 
 describe('backfillCrashSnippetsFromLog', () => {

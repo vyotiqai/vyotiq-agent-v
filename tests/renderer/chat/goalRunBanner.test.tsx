@@ -113,4 +113,38 @@ describe('GoalRunBanner', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(onDismiss).toHaveBeenCalled()
   })
+
+  it('sits on the record column, its band bleeding onto the composer box edge', () => {
+    render(
+      <GoalRunBanner
+        goal={goal}
+        loop={loop}
+        running={false}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onComplete={vi.fn()}
+        onStopLoop={vi.fn()}
+      />
+    )
+    const gutter = document.querySelector('[data-goal-gutter]') as HTMLElement
+    const column = document.querySelector('[data-goal-column]') as HTMLElement
+    const banner = document.querySelector('[data-goal-banner]') as HTMLElement
+    expect(gutter).toBeTruthy()
+    expect(column).toBeTruthy()
+    expect(banner).toBeTruthy()
+    // Same three constants the composer uses, so both columns centre on one
+    // axis and both cards land on the record's card edge.
+    expect(gutter.classList.contains('pr-2')).toBe(true)
+    expect(column.classList.contains('max-w-[780px]')).toBe(true)
+    expect(column.classList.contains('px-4')).toBe(true)
+    expect(banner.classList.contains('-mx-2')).toBe(true)
+    expect(banner.classList.contains('px-3')).toBe(true)
+    expect(banner.classList.contains('px-4')).toBe(false)
+    expect(banner.parentElement).toBe(column)
+    expect(column.parentElement).toBe(gutter)
+    // The queried band stays the visible one: no wrapper steals these.
+    expect(banner.getAttribute('data-goal-status')).toBe('active')
+    expect(banner.getAttribute('role')).toBe('region')
+    expect(banner.getAttribute('aria-label')).toBe('Active goal')
+  })
 })

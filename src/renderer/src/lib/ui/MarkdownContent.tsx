@@ -401,8 +401,19 @@ function scrollToFragment(from: Element, scope: string | undefined, fragment: st
   }
 }
 
-const CODE_CHIP =
-  'rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em] hover:bg-surface-2 focus-visible:vy-focus-ring'
+/**
+ * Inline code, with no filled rectangle behind it. The mono face, the step-down
+ * ink the markdown stylesheet gives it, and a hairline under the text are what
+ * say "code" — a `bg-surface` box made a paragraph naming a dozen files read as a
+ * row of grey tiles, and the fill also forced a hover fill to stay legible.
+ * `BORDER_DIVIDER` is the named quiet-grey weight, so nothing here invents a
+ * colour (CLAUDE.md: never hardcode one, never reach for a new opacity). Hover is
+ * an underline, not a fill: with no surface behind it there is nothing to
+ * deepen, and a fill would be a weight the design system does not name on a
+ * control that is otherwise plain text.
+ */
+const CODE_BASE = 'rounded-sm border-b border-border/60 px-1 py-0.5 font-mono text-[0.85em]'
+const CODE_CHIP = `${CODE_BASE} hover:underline focus-visible:vy-focus-ring`
 
 function formatLinkablePathText(parsed: { path: string; line?: number }): string {
   return parsed.line != null ? `${parsed.path}:${parsed.line}` : parsed.path
@@ -533,11 +544,7 @@ function buildMarkdownComponents(
           </button>
         )
       }
-      return (
-        <code className={cn('rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em]', codeClass)}>
-          {children}
-        </code>
-      )
+      return <code className={cn(CODE_BASE, codeClass)}>{children}</code>
     },
     pre: ({ children }: { children?: React.ReactNode }) => (
       <FencedCodePre openFenceBody={openFenceBody}>{children}</FencedCodePre>
@@ -593,11 +600,11 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
   )
 })
 
-/** `md` keeps the scale's own 22px line; the smaller steps read better relaxed. */
+/** Every size reads on the scale's relaxed line; `md` is the prose default. */
 const MARKDOWN_SIZE = {
   caption: 'text-caption leading-relaxed',
   sm: 'text-sm leading-relaxed',
-  md: 'text-md'
+  md: 'text-md leading-relaxed'
 } as const
 
 const MARKDOWN_TONE = {

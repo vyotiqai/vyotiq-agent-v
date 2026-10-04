@@ -87,10 +87,11 @@ test('a task in a new worktree: started there, merged into main, then removed', 
   expect(readFileSync(join(worktreePath, 'a.txt'), 'utf8')).toBe('a0\n')
   expect(readFileSync(join(repo, 'a.txt'), 'utf8')).toBe('mine, uncommitted\n')
 
-  // The task says where it works.
-  const header = page.locator('[data-task-header]')
-  await expect(header.getByTitle('Worktree branch')).toHaveText(BRANCH)
+  // The task says where it works. Its pane branch fact went with the header;
+  // the strip carries it now, naming the branch as the tooltip on the line
+  // that says where the task works.
   const strip = page.locator('[data-task-worktree]')
+  await expect(strip.getByTitle(BRANCH)).toContainText('Works in its own worktree')
   await expect(strip).toContainText('Works in its own worktree, from main · nothing to merge yet')
   await expect(strip.getByRole('button', { name: 'Merge into main' })).toBeDisabled()
 
@@ -101,7 +102,10 @@ test('a task in a new worktree: started there, merged into main, then removed', 
 
   // Merge needs a clean tree where it lands: commit the parent's edit first.
   git('commit', '-q', '-am', 'mine')
-  const title = (await header.getByRole('heading', { level: 1 }).textContent())?.trim() ?? ''
+  // The pane's title is gone with its header. The navigator's selected row is
+  // named by the same `runTitle` the merge dialog will name the commit after,
+  // and its aria-label is that title alone (NavigatorTaskRow.tsx:272).
+  const title = (await page.locator('[data-nav-row][aria-current="page"]').getAttribute('aria-label')) ?? ''
   await strip.getByRole('button', { name: 'Merge into main' }).click()
   const merge = page.getByRole('dialog', { name: 'Merge into main?' })
   await expect(merge).toContainText(`Commits the 1 uncommitted file as “${title}”, then merges ${BRANCH} into main`)

@@ -478,7 +478,7 @@ export function AgentInstancePane({
       data-agent-instance-session={instanceRunId}
       data-chat-stage
     >
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2 text-xs" data-instance-header="">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4 text-xs" data-instance-header="">
         <IconButton
           icon="arrowLeft"
           label={parentTitle ? `Back to ${parentTitle}` : 'Back to the parent task'}

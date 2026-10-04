@@ -868,6 +868,15 @@
 }
 
 .markdown-body {
+  /* One vertical rhythm, read off four steps declared here. Every margin
+     below is one of them, so the block keeps a single pulse instead of a
+     per-element value that drifts as elements are added. Steps are em so a
+     heading's own size drives its space. */
+  --md-gap: 0.6em;
+  --md-gap-tight: 0.4em;
+  --md-section: 0.9em;
+  --md-nest: 0.25em;
+
   &> :first-child {
     margin-top: 0;
   }
@@ -876,42 +885,69 @@
     margin-bottom: 0;
   }
 
+  /* A heading that wraps is balanced across its lines instead of leaving one
+     long line over a stub, so the two lines read as one label. */
   h1,
   h2,
   h3,
   h4,
   h5,
   h6 {
-    margin: 0.85em 0 0.4em;
-    font-weight: 600;
+    margin: var(--md-section) 0 var(--md-gap-tight);
     line-height: 1.25;
     letter-spacing: var(--vy-tracking-tight);
+    text-wrap: balance;
+  }
+
+  /* One step per level, all off the type scale, whatever size the body runs at.
+     h4 sits below the body text so a level-4 heading reads as a run-in label
+     rather than body copy in heading weight; h5/h6 drop once more. Ink steps
+     down with size: h1/h2 take the top of the ramp, h3/h4 the body step, and
+     h5/h6 step back off it. Weight is the same 600 at every level — the
+     hierarchy reads from size and ink, not from a heavier face further down. */
+  h1,
+  h2 {
+    font-weight: 600;
     color: var(--vy-fg-strong);
   }
 
-  /* On the type scale, whatever size the body runs at. */
   h1 {
     font-size: var(--text-title);
   }
 
   h2 {
-    margin-top: 1.4em;
     font-size: var(--text-heading);
+
+    /* The one section boundary in a record: h2 is a section's own name, so it
+       gets the hairline under it that opens the block. h3 and below are labels
+       inside a section and must not draw one, or every sub-heading would. */
+    border-bottom: 1px solid var(--vy-border);
+    padding-bottom: 0.35em;
+  }
+
+  h3,
+  h4 {
+    font-weight: 600;
+    color: var(--vy-fg);
   }
 
   h3 {
-    margin-top: 1.1em;
     font-size: var(--text-md);
   }
 
-  h4,
+  h4 {
+    font-size: var(--text-sm);
+  }
+
   h5,
   h6 {
-    font-size: 1em;
+    font-size: var(--text-caption);
+    font-weight: 600;
+    color: var(--vy-secondary);
   }
 
   hr {
-    margin: 1.1em 0;
+    margin: var(--md-section) 0;
     border: 0;
     border-top: 1px solid var(--vy-border);
   }
@@ -928,14 +964,17 @@
     vertical-align: middle;
   }
 
+  /* Orphan control: the last lines of a paragraph are rebalanced so a
+     paragraph never ends on a single short word. Layout width is unchanged. */
   p {
-    margin: 0.6em 0;
+    margin: var(--md-gap) 0;
+    text-wrap: pretty;
   }
 
   /* Tailwind preflight strips list markers globally; restore them for prose. */
   ul,
   ol {
-    margin: 0.6em 0;
+    margin: var(--md-gap) 0;
     padding-left: 1.35rem;
   }
 
@@ -956,7 +995,7 @@
   }
 
   li {
-    margin: 0.4em 0;
+    margin: var(--md-gap-tight) 0;
   }
 
   li::marker {
@@ -965,7 +1004,7 @@
 
   li>ul,
   li>ol {
-    margin: 0.25em 0;
+    margin: var(--md-nest) 0;
   }
 
   li.task-list-item {
@@ -973,10 +1012,13 @@
     margin-left: 0;
   }
 
+  /* Inset and rule both carry the reading measure: the quote's first line sits
+     inside the paragraph column, and the 3px rule gives it a spine without
+     another border tone. */
   blockquote {
-    margin: 0.6em 0;
-    padding: 0.1em 0 0.1em 0.85rem;
-    border-left: 2px solid var(--vy-border);
+    margin: var(--md-gap) 0;
+    padding: 0.1em 0 0.1em 1rem;
+    border-left: 3px solid var(--vy-border);
     color: var(--vy-secondary);
   }
 
@@ -989,14 +1031,14 @@
     color: var(--vy-muted);
   }
 
-  /* Emphasis from contrast, not mass: one step up the text ramp at the
-     semibold every skin loads. Preflight's `bolder` drew Segoe's 700 and a
-     faked bold in Jakarta (no 700 is loaded), so a bold run outweighed the
-     sentence around it. */
+  /* Emphasis from contrast, not mass: the semibold every skin loads.
+     Preflight's `bolder` drew Segoe's 700 and a faked bold in Jakarta (no 700
+     is loaded), so a bold run outweighed the sentence around it. No colour of
+     its own: the Result's body already sits at `--vy-fg-strong`, so a colour
+     here was a no-op there and a jump to heading ink everywhere else. */
   strong,
   b {
     font-weight: 600;
-    color: var(--vy-fg-strong);
   }
 
   code {
@@ -1012,17 +1054,22 @@
     overflow-x: auto;
   }
 
+  /* Horizontal rules only. A 1px box on every cell drew a lattice that fought
+     the row rhythm below it and put vertical lines through the columns. The
+     table keeps its own top rule, the head keeps its bottom rule, and body
+     rows are separated one horizontal rule each — alignment, not a grid, does
+     the work of lining the columns up. */
   table {
     border-collapse: collapse;
     margin: 0;
     width: max-content;
     min-width: 100%;
     font-size: 0.92em;
+    border-top: 1px solid var(--vy-border);
   }
 
   th,
   td {
-    border: 1px solid var(--vy-border);
     padding: 0.35em 0.65em;
     text-align: left;
     vertical-align: top;
@@ -1037,15 +1084,29 @@
     background: var(--vy-surface);
     color: var(--vy-fg-strong);
     font-weight: 600;
+    border-bottom: 1px solid var(--vy-border);
+  }
+
+  /* One rule between rows, none under the last: a trailing rule at the foot of
+     the table adds a weight the rest of the block doesn't have. */
+  tbody tr:not(:last-child) td {
+    border-bottom: 1px solid var(--vy-border);
   }
 }
 
 /* The agent's words in the record keep a reading measure. The column is sized
    for rows and cards; a paragraph across all of it ran ~115 characters a line
-   at 13px. Running text stops near 90; code, tables and diagrams keep the
-   column, and the rows' right edge is untouched (prose has none of its own). */
+   at 13px. At 14px the redesign probe measured the prose column itself at
+   643px — 1ch resolves to 10.24px, so the column is already ~63ch and is
+   the binding constraint at that pane width, not this cap. The 80ch it
+   replaced resolved to 819.84px, so it could only ever bind on a pane wider
+   than 820px and never did at the tested width. 72ch is 737.86px: above
+   ~738px of pane it binds, below that the column binds first and the cap is
+   inert. It is kept so a wide pane cannot stretch the measure back out. Code,
+   tables and diagrams keep the full column, and the rows' right edge is
+   untouched (prose has none of its own). */
 .record-prose > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) {
-  max-width: 80ch;
+  max-width: 72ch;
 }
 
 /* Inline code a step down the text ramp from the words around it. Mono at the
@@ -1107,8 +1168,10 @@
     min-width: 7rem;
   }
 
+  /* Bold carries weight only — the cell ink is already the top of the ramp, so
+     re-asserting a colour here would put bold back to heading ink in this
+     block alone. */
   td strong {
-    color: var(--vy-fg-strong);
     font-weight: 600;
   }
 

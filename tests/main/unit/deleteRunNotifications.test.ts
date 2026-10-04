@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { DEFAULT_SETTINGS, runDoneDedupeKey, runErrorDedupeKey, type Settings } from '@shared/ipc'
+import {
+  DEFAULT_SETTINGS,
+  needsYouDedupeKey,
+  runDoneDedupeKey,
+  runErrorDedupeKey,
+  type Settings
+} from '@shared/ipc'
 
 const { send, windowState, settingsState, MockNotification, isActiveMock } = vi.hoisted(() => {
   class MockNotification {
@@ -71,7 +77,7 @@ vi.mock('@main/app/window', () => ({
   })
 }))
 
-import { createRun, deleteRun } from '@main/agent/state'
+import { createRun, deleteRun, resumeRun, updateStatus } from '@main/agent/state'
 import { resolveRunDir } from '@main/storage/paths'
 import {
   initNotifications,
@@ -189,5 +195,128 @@ describe('deleteRun dismisses run inbox items', () => {
 
     expect(result).toEqual({ ok: false, error: 'Cancel run first' })
     expect(existsSync(runDir)).toBe(true)
+  })
+})
+
+/**
+ * A `Finished` / `Failed` row describes ONE stop. Audit 2026-10-02 found run
+ * 95e872da holding a `run_done` notice written at 06:47:31Z while status.json
+ * said `cancelled` at 06:58:32Z: invoke 3 finished, then invoke 4 was
+ * re-invoked and cancelled, and the first row never went away.
+ */
+describe('a run lifecycle notice is withdrawn when the run stops again', () => {
+  let dir: string
+  let workspace: string
+
+  function publishDone(runId: string, title = 'Finished: Tidy a.txt'): void {
+    publishNotification({
+      source: 'agent',
+      kind: 'run_done',
+      title,
+      body: 'Finished',
+      dedupeKey: runDoneDedupeKey(runId),
+      action: { type: 'open_run', workspacePath: workspace, runId }
+    })
+  }
+
+  function keys(): string[] {
+    return listNotifications().items.map((item) => item.dedupeKey)
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-stop-inbox-'))
+    workspace = mkdtempSync(join(tmpdir(), 'vyotiq-stop-ws-'))
+    setNotificationsPathForTests(join(dir, 'notifications.json'))
+    settingsState.current = {
+      ...DEFAULT_SETTINGS,
+      notifications: { ...DEFAULT_SETTINGS.notifications, desktop: 'off' }
+    }
+    isActiveMock.mockReset()
+    send.mockReset()
+    resetNotificationsForTests()
+    initNotifications()
+  })
+
+  afterEach(() => {
+    resetNotificationsForTests()
+    resetNotificationsStoreForTests()
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(workspace, { recursive: true, force: true })
+  })
+
+  it('drops the earlier run_done when the same run id then stops as cancelled', async () => {
+    const runId = 'run-reinvoked'
+    const runDir = createRun(workspace, runId, 'Tidy a.txt')
+    publishDone(runId)
+    expect(keys()).toEqual([runDoneDedupeKey(runId)])
+
+    // Invoke 2 is cancelled: the loop's terminal patch is the only difference.
+    await updateStatus(runDir, { status: 'cancelled' }, { sync: true })
+
+    expect(keys()).toEqual([])
+    // A different run's notice is untouched.
+    publishDone('run-unrelated')
+    await updateStatus(runDir, { status: 'cancelled' }, { sync: true })
+    expect(keys()).toEqual([runDoneDedupeKey('run-unrelated')])
+  })
+
+  it('drops the earlier run_done when the run then stops as failed', async () => {
+    const runId = 'run-done-then-error'
+    const runDir = createRun(workspace, runId, 'Tidy a.txt')
+    publishDone(runId)
+
+    await updateStatus(runDir, { status: 'error', error: 'Provider rate limit' }, { sync: true })
+
+    expect(keys()).toEqual([])
+  })
+
+  it('drops a run_error too, so a stale failure cannot outlive its stop', async () => {
+    const runId = 'run-error-then-cancelled'
+    const runDir = createRun(workspace, runId, 'Tidy a.txt')
+    publishNotification({
+      source: 'agent',
+      kind: 'run_error',
+      title: 'Failed: Tidy a.txt',
+      body: 'Failed: Provider rate limit',
+      dedupeKey: runErrorDedupeKey(runId),
+      action: { type: 'open_run', workspacePath: workspace, runId }
+    })
+
+    await updateStatus(runDir, { status: 'cancelled' }, { sync: true })
+
+    expect(keys()).toEqual([])
+  })
+
+  it('withdraws the notice on a re-invoke that has not stopped yet, publishing nothing', async () => {
+    const runId = 'run-resumed'
+    createRun(workspace, runId, 'Tidy a.txt')
+    publishDone(runId)
+    expect(keys()).toEqual([runDoneDedupeKey(runId)])
+
+    await resumeRun(workspace, runId)
+
+    expect(keys()).toEqual([])
+  })
+
+  it('leaves a needs_you prompt standing through every stop', async () => {
+    const runId = 'run-needs-you'
+    const runDir = createRun(workspace, runId, 'Tidy a.txt')
+    publishDone(runId)
+    publishNotification({
+      source: 'agent',
+      kind: 'needs_you',
+      title: 'Tidy a.txt',
+      body: 'Wants to delete old.ts',
+      dedupeKey: needsYouDedupeKey(runId),
+      action: { type: 'open_run', workspacePath: workspace, runId }
+    })
+
+    await updateStatus(runDir, { status: 'cancelled' }, { sync: true })
+
+    expect(keys()).toEqual([needsYouDedupeKey(runId)])
+
+    await resumeRun(workspace, runId)
+
+    expect(keys()).toEqual([needsYouDedupeKey(runId)])
   })
 })

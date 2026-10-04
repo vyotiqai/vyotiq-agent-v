@@ -488,6 +488,43 @@ export function clearGithubAccessToken(): void {
   logger.info('GitHub access token cleared', { scope: 'secrets' })
 }
 
+/** API keys for video engines that are not chat providers (fal, …); see src/main/video/engines. */
+const VIDEO_ENGINE_KEY_PREFIX = 'video-engine:'
+
+function videoEngineKey(engine: string): string {
+  if (!/^[a-z0-9-]{1,40}$/.test(engine)) throw new Error(`Invalid video engine id: ${engine}`)
+  return `${VIDEO_ENGINE_KEY_PREFIX}${engine}`
+}
+
+export function setVideoEngineKey(engine: string, key: string): void {
+  const trimmed = key.trim()
+  if (!trimmed) throw new Error('API key cannot be empty')
+  const data = readMutableSecretsFile()
+  data[videoEngineKey(engine)] = encryptBlob(trimmed)
+  writeFile(data)
+  logger.info('Video engine key saved', { scope: 'secrets', provider: engine })
+}
+
+export function getVideoEngineKey(engine: string): string | null {
+  const encrypted = readFile()[videoEngineKey(engine)]
+  if (!encrypted) return null
+  return decryptBlobCached(encrypted)
+}
+
+export function hasVideoEngineKey(engine: string): boolean {
+  const encrypted = readFile()[videoEngineKey(engine)]
+  return typeof encrypted === 'string' && encrypted.length > 0
+}
+
+export function clearVideoEngineKey(engine: string): void {
+  const data = readMutableSecretsFile()
+  const k = videoEngineKey(engine)
+  if (!(k in data)) return
+  delete data[k]
+  writeFile(data)
+  logger.info('Video engine key cleared', { scope: 'secrets', provider: engine })
+}
+
 const MCP_SERVER_SECRETS_PREFIX = 'mcp-server:'
 
 export type McpServerSecrets = {

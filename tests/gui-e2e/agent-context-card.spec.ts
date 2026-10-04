@@ -129,10 +129,11 @@ test('the aside follows the workspace live, pushed not polled', async () => {
   // Count pushes from a second subscriber: proves main emits per real change
   // rather than the card re-reading on a timer.
   await window.evaluate(() => {
-    const sink = window as unknown as { __accPushes: unknown[] }
-    sink.__accPushes = []
-    window.vyotiq.onAgentContextChanged((payload) => {
-      sink.__accPushes.push(payload.context)
+    // `window` in this scope is the Playwright Page; in the page it is the DOM one.
+    const dom = window as unknown as Window & { __accPushes: unknown[] }
+    dom.__accPushes = []
+    dom.vyotiq.onAgentContextChanged((payload) => {
+      dom.__accPushes.push(payload.context)
     })
   })
   const pushes = (): Promise<number> =>
