@@ -16,6 +16,7 @@ import {
   mergeOpenCodeGoMeta,
   normalizeOpenCodeGoModelId,
   opencodeGoEffortLadderFor,
+  opencodeGoEffortsFor,
   opencodeGoFloorEffort,
   opencodeGoTransportFor,
   loadOpenCodeGoCatalog,
@@ -111,9 +112,12 @@ export function opencodeThinkingFor(
   const ladder = shape === 'chat' ? getCachedOpenCodeGoEffortLadder(model) : undefined
   if (thinking?.enabled === false) {
     if (getCachedOpenCodeGoMeta(model)?.thinkingCanDisable) return thinking
-    return ladder
-      ? { enabled: true, effort: opencodeGoFloorEffort(ladder), display: 'omitted' }
-      : thinking
+    // No disable affordance: the Go mount rejects `none` on every transport
+    // (live 2026-10-05: muse-spark-1.3-contributor `/responses` 400s
+    // `reasoning_effort 'none' is not supported`). Fall back to the model's
+    // floor effort with display omitted — still thinks, but hidden.
+    const effective = ladder ?? opencodeGoEffortsFor(shape)
+    return { enabled: true, effort: opencodeGoFloorEffort(effective), display: 'omitted' }
   }
   return {
     enabled: true,

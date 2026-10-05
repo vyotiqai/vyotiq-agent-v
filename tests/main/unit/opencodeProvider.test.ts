@@ -113,7 +113,9 @@ describe('OpenCode Go (opencode) provider wiring', () => {
     const grok = models.get('grok-4.5')!
     expect(grok.supportsThinking).toBe(true)
     expect(grok.thinkingApi).toBe('responses')
-    expect(grok.supportedThinkingEfforts).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh'])
+    // The Go responses vocabulary accepts max (unlike OpenAI's own), so the
+    // ladder carries it up to the top rung.
+    expect(grok.supportedThinkingEfforts).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 
     const minimax = models.get('minimax-m3')!
     expect(minimax.thinkingApi).toBe('messages')

@@ -240,7 +240,7 @@ export function opencodeGoEffortsFor(
 ): NonNullable<ModelInfo['supportedThinkingEfforts']> {
   switch (transport) {
     case 'responses':
-      return ['minimal', 'low', 'medium', 'high', 'xhigh']
+      return ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
     case 'messages':
       return ['low', 'medium', 'high', 'xhigh', 'max']
     case 'chat':

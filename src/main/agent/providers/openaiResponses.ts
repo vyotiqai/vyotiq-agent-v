@@ -17,6 +17,13 @@ import {
   statefulContinuationMessages,
   type ProviderReasoningState
 } from '../../../shared/reasoning'
+import {
+  clampEffortToOpenCodeGoLadder,
+  getCachedOpenCodeGoEffortLadder,
+  getCachedOpenCodeGoMeta,
+  opencodeGoEffortsFor,
+  opencodeGoFloorEffort
+} from '../../../shared/domain/opencodeGoCatalog'
 import { parseServiceTier, serviceTierForApiBody } from '../../../shared/domain/serviceTier'
 import type { ProviderChatRequest, StopReason, StreamChunk, ToolCall, TokenUsage } from './types'
 import { billedCostFromUsage, cacheWriteTokensFromDetails } from './usageFields'
@@ -288,6 +295,26 @@ export async function* streamOpenAiResponses(
   const thinkingOff = req.thinking?.enabled === false
   const supportsThinking = req.modelInfo?.supportsThinking !== false
   const explicitCache = supportsExplicitPromptCache(req.model)
+  // OpenCode Go defense-in-depth: the gateway rejects `reasoning.effort none`
+  // on models without a disable affordance (live 2026-10-05:
+  // muse-spark-1.3-contributor `reasoning_effort 'none' is not supported`,
+  // supported minimal..max). opencodeThinkingFor already floor-converts, but
+  // a stale modelInfo or direct caller can still arrive disabled — never emit
+  // `none` then. Preserve `max`: the Go vocabulary accepts it, unlike OpenAI.
+  const isGoResponses = providerId === 'opencode'
+  const goLadder =
+    req.modelInfo?.supportedThinkingEfforts ??
+    getCachedOpenCodeGoEffortLadder(req.model) ??
+    opencodeGoEffortsFor('responses')
+  const goCanDisable =
+    req.modelInfo?.thinkingCanDisable ??
+    getCachedOpenCodeGoMeta(req.model)?.thinkingCanDisable ??
+    false
+  const goFloorEffort = opencodeGoFloorEffort(goLadder)
+  const goEnabledEffort = clampEffortToOpenCodeGoLadder(
+    req.thinking?.effort ?? 'medium',
+    goLadder
+  )
 
   const buildBody = (
     omitFields: readonly string[],
@@ -312,7 +339,9 @@ export async function* streamOpenAiResponses(
       ...(thinkingOn
         ? {
             reasoning: {
-              effort: normalizeEffortForOpenAiResponses(req.thinking?.effort, true),
+              effort: isGoResponses
+                ? goEnabledEffort
+                : normalizeEffortForOpenAiResponses(req.thinking?.effort, true),
               summary: 'auto',
               context: 'all_turns'
             }
@@ -320,7 +349,8 @@ export async function* streamOpenAiResponses(
         : thinkingOff && supportsThinking
           ? {
               reasoning: {
-                effort: 'none',
+                effort:
+                  isGoResponses && !goCanDisable ? goFloorEffort : 'none',
                 summary: 'auto',
                 context: 'all_turns'
               }

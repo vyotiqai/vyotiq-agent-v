@@ -98,11 +98,11 @@ function seedModelInfo(id: string, providerId: ProviderId): ModelInfo {
     ...(goTransport && supportsThinking
       ? {
           thinkingMode: goTransport === 'messages' ? 'manual' : 'effort',
-          thinkingCanDisable: true,
+          thinkingCanDisable:
+            getCachedOpenCodeGoMeta(id)?.thinkingCanDisable ?? false,
           supportedThinkingEfforts: opencodeGoEffortsFor(goTransport),
           ...(goLadder
             ? {
-                thinkingCanDisable: getCachedOpenCodeGoMeta(id)?.thinkingCanDisable ?? false,
                 supportedThinkingEfforts: [...goLadder]
               }
             : {})

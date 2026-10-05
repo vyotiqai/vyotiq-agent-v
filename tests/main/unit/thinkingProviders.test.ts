@@ -849,9 +849,11 @@ describe('opencode go chat thinking body', () => {
     expect(thinking).toEqual({ enabled: true, effort: 'low', display: 'omitted' })
   })
 
-  it('passes disable through on models without a declared ladder', () => {
+  it('floors disable requests on models without a declared ladder', () => {
+    // The Go mount rejects `none` on every transport, so a model with no
+    // declared ladder falls back to the chat transport's floor, not a pass-through.
     const thinking = opencodeThinkingFor('glm-5', { enabled: false })
-    expect(thinking).toEqual({ enabled: false })
+    expect(thinking).toEqual({ enabled: true, effort: 'low', display: 'omitted' })
   })
 
   it('honors disable on registry models with an effort: none rung (hy3)', () => {
