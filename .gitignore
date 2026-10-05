@@ -221,3 +221,13 @@ tests/**/_tmp-*.test.ts
 # are listed here. eslint.config.mjs excludes .vyotiq/** for the same reason:
 # a session's probe in there is not repo source and must not redden `eslint .`.
 /.vyotiq/audit/
+
+# Machine-local working-tree artifacts (2026-10-05). One more class of the
+# same thing: a repo-root `*.done` exit-code stamp a verification run leaves
+# beside its `*.log`, and Claude Code's per-machine local settings — which
+# records absolute paths and one-off shell allowlists for whoever ran it.
+# `.claude/CLAUDE.md`, `launch.json` and `skills/` are project-authored and
+# stay tracked; only the local settings file is dropped. Append-only block —
+# nothing above is modified, reordered, or weakened.
+*.done
+.claude/settings.local.json
