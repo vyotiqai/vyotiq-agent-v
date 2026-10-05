@@ -29,6 +29,37 @@ describe('resolveModelPrice', () => {
     expect(resolveModelPrice('custom', 'glm-5.3-flash')).toBeNull()
     expect(resolveModelPrice('opencode', '')).toBeNull()
   })
+
+  it('resolves Muse Spark contributor at Meta contributor rates', () => {
+    const resolved = resolveModelPrice('opencode', 'muse-spark-1.3-contributor')
+    expect(resolved?.price.input).toBe(0.1)
+    expect(resolved?.price.cachedInput).toBe(0.002)
+    expect(resolved?.price.output).toBe(0.2)
+  })
+
+  it('resolves Muse Spark full models above contributor (longest prefix)', () => {
+    const full = resolveModelPrice('opencode', 'muse-spark-1.3')
+    expect(full?.price.input).toBe(1.25)
+    expect(full?.price.output).toBe(4.25)
+  })
+
+  it('resolves LongCat at Meituan rates', () => {
+    const resolved = resolveModelPrice('opencode', 'longcat-2.0')
+    expect(resolved?.price.input).toBe(0.3)
+    expect(resolved?.price.cachedInput).toBe(0.006)
+    expect(resolved?.price.output).toBe(1.2)
+  })
+
+  it('prices free-tier gateway ids at $0 (free suffix beats family prefix)', () => {
+    for (const id of ['space-bunny-free', 'longcat-2.5-preview-free']) {
+      const resolved = resolveModelPrice('opencode', id)
+      expect(resolved?.price.input).toBe(0)
+      expect(resolved?.price.output).toBe(0)
+    }
+    const openRouter = resolveModelPrice('openrouter', 'meituan/longcat-2.0:free')
+    expect(openRouter?.price.input).toBe(0)
+    expect(openRouter?.price.output).toBe(0)
+  })
 })
 
 describe('estimateStepCost with opencode GLM flash', () => {

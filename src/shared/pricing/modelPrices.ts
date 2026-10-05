@@ -303,6 +303,36 @@ const RULES: PriceRule[] = [
     source: 'docs.z.ai/guides/overview/pricing, 2026-09-14'
   },
 
+  // ── OpenCode Zen: Meta Muse Spark (verified maker's mark is Meta) ──
+  {
+    provider: 'opencode',
+    prefixes: ['muse-spark-1.3-contributor', 'muse-spark-1.2-contributor'],
+    price: { input: 0.1, cachedInput: 0.002, output: 0.2 },
+    source: 'openrouter.ai/api/v1/models, 2026-10-04 (meta/muse-spark contributor pricing)'
+  },
+  {
+    provider: 'opencode',
+    prefixes: ['muse-spark-1.3', 'muse-spark-1.2', 'muse-spark-1.1'],
+    price: { input: 1.25, cachedInput: 0.15, output: 4.25 },
+    source: 'openrouter.ai/api/v1/models, 2026-10-04 (meta/muse-spark pricing)'
+  },
+
+  // ── OpenCode Zen: Meituan LongCat ──
+  {
+    provider: 'opencode',
+    prefixes: ['longcat-2.5', 'longcat-2'],
+    price: { input: 0.3, cachedInput: 0.006, output: 1.2 },
+    source: 'openrouter.ai/api/v1/models, 2026-10-04 (meituan/longcat-2.0 pricing)'
+  },
+
+  // ── OpenCode Zen: Space Bunny (limited-time stealth free model) ──
+  {
+    provider: 'opencode',
+    prefixes: ['space-bunny'],
+    price: { input: 0, output: 0 },
+    source: 'openrouter.ai/api/v1/models lists stealth/space-bunny-alpha at $0, 2026-10-04'
+  },
+
   // ── Groq ──
   {
     provider: 'groq',
@@ -394,6 +424,16 @@ export function resolveModelPrice(
 ): ResolvedModelPrice | null {
   const id = modelId.trim().toLowerCase()
   if (id.length === 0) return null
+
+  // Gateway free tiers bill nothing: OpenCode Zen `*-free` ids and OpenRouter
+  // `*:free` / `*-free` ids. Checked before prefix rules so a free variant of
+  // a priced family (e.g. `longcat-2.5-preview-free`) stays $0.
+  if (
+    (provider === 'opencode' || provider === 'openrouter') &&
+    (id.endsWith('-free') || id.endsWith(':free'))
+  ) {
+    return { price: { input: 0, output: 0 }, source: 'free-tier model id — no per-token billing' }
+  }
 
   const direct = lookup(provider, id)
   if (direct) return toResolved(direct.rule)
