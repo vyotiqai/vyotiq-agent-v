@@ -111,7 +111,7 @@ export async function clearMemoryFiles(workspacePath: string): Promise<{ notes: 
   if (existsSync(notesDir)) {
     if (!isInsideRoot(realpathSync(notesDir), root)) throw new Error('Memory notes folder escapes memory directory')
     for (const entry of await readdir(notesDir, { withFileTypes: true, encoding: 'utf8' })) {
-      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
       if (await unlinkRegularFile(join(notesDir, entry.name))) notes += 1
     }
   }
@@ -144,12 +144,21 @@ function assertUnderMemory(
   return candidate
 }
 
+function hasTraversalSegment(cleaned: string): boolean {
+  return cleaned.split(/[\\/]/).includes('..')
+}
+
 function readMemoryFileExcerpt(
   workspacePath: string,
   relPath: string,
   cap: number
 ): string {
-  const p = join(memoryRoot(workspacePath), relPath)
+  let p: string
+  try {
+    p = assertUnderMemory(workspacePath, relPath)
+  } catch {
+    return ''
+  }
   if (!existsSync(p)) return ''
   try {
     const text = readFileSync(p, 'utf8')
@@ -164,7 +173,12 @@ async function readMemoryFileExcerptAsync(
   relPath: string,
   cap: number
 ): Promise<string> {
-  const p = join(memoryRoot(workspacePath), relPath)
+  let p: string
+  try {
+    p = assertUnderMemory(workspacePath, relPath)
+  } catch {
+    return ''
+  }
   if (!existsSync(p)) return ''
   try {
     const text = await readFile(p, 'utf8')
@@ -218,11 +232,11 @@ export async function readMemoryStateAsync(
   return readMemoryFileExcerptAsync(workspacePath, 'state.md', cap)
 }
 
-/** Note filenames referenced by index.md links (`notes/<name>.md`). */
+/** Note filenames referenced by index.md markdown links (`[x](notes/<name>.md)`). */
 function indexLinkedNotes(workspacePath: string): string[] {
   const text = readMemoryIndex(workspacePath, Number.MAX_SAFE_INTEGER)
   const names = new Set<string>()
-  for (const m of text.matchAll(/notes\/([a-zA-Z0-9._-]+\.md)/g)) {
+  for (const m of text.matchAll(/\]\(\s*notes\/([a-zA-Z0-9._-]+\.md)\s*\)/g)) {
     names.add(m[1])
   }
   return [...names].sort()
@@ -239,10 +253,12 @@ export function listMemoryNotes(
   const notesDir = join(root, 'notes')
   let notes: string[] = []
   try {
-    notes = readdirSync(notesDir)
-      .filter((n) => n.endsWith('.md'))
+    notes = readdirSync(notesDir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.md'))
+      .map((e) => e.name)
       .sort()
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     notes = []
   }
   // index.md is intentionally NOT excerpted here: it is auto-injected into the
@@ -262,7 +278,7 @@ export function readMemoryFile(
   relPath: string
 ): string {
   const cleaned = relPath.replace(/^[/\\]+/, '')
-  if (cleaned.includes('..')) throw new Error('Invalid memory path')
+  if (hasTraversalSegment(cleaned)) throw new Error('Invalid memory path')
   const resolved = assertUnderMemory(workspacePath, cleaned)
   if (!existsSync(resolved)) {
     if (cleaned === 'state.md') {
@@ -280,7 +296,7 @@ export function writeMemoryFile(
 ): string {
   ensureMemoryLayout(workspacePath)
   const cleaned = relPath.replace(/^[/\\]+/, '')
-  if (cleaned.includes('..')) throw new Error('Invalid memory path')
+  if (hasTraversalSegment(cleaned)) throw new Error('Invalid memory path')
   const resolved = assertUnderMemory(workspacePath, cleaned)
   mkdirSync(dirname(resolved), { recursive: true })
   // Temp sibling + renameSyncWithRetry: on Windows a transient EPERM/EACCES/

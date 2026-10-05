@@ -41,7 +41,7 @@ export function toolMemoryList(workspace: string): string {
 export function normalizeMemoryRelPath(pathArg: string): string {
   const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
   if (!cleaned) throw new Error('path is required')
-  if (cleaned.includes('..')) throw new Error('Invalid memory path')
+  if (cleaned.split(/[\\/]/).includes('..')) throw new Error('Invalid memory path')
   // Allow index.md, state.md, notes/foo.md
   if (cleaned !== 'index.md' && cleaned !== 'state.md' && !cleaned.startsWith('notes/')) {
     throw new Error('path must be index.md, state.md, or notes/<name>.md')

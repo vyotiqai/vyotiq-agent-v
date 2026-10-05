@@ -392,7 +392,7 @@ export function resolveAgentMode(context: ToolExecutionContext): AgentInteractio
   return context.getAgentMode?.() ?? context.agentMode ?? 'agent'
 }
 
-/** Memory tools bind to the session workspace SQLite; live file tools do not. */
+/** Memory tools bind to the session workspace files; live file tools do not. */
 export function usesSessionWorkspaceIndex(name: string): boolean {
   return name === 'memory_list' || name === 'memory_read' || name === 'memory_write'
 }
