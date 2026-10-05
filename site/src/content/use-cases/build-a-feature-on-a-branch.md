@@ -25,7 +25,7 @@ In the header of the "New task" page, switch "This folder" to "New worktree" bef
 
 ## What you will see
 
-The agent writes a plan first, as it does for every Agent task. Its steps show in the record and tick off as they finish; the full plan is in the inspector's "Plan" tab. Because the brief asks it to, the agent stops at the library choice and asks you with a small form in the record. The run waits for your answer.
+The agent writes a plan first for a task this size. Its steps show in the record and tick off as they finish; the full plan is in the inspector's "Plan" tab. Because the brief asks it to, the agent stops at the library choice and asks you with a small form in the record. The run waits for your answer.
 
 When the run is over, a strip under the record says it "Works in its own worktree" and how much there is to merge.
 

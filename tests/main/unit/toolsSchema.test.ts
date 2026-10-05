@@ -280,7 +280,17 @@ describe('harness tool catalog', () => {
     // 2150 -> 2175: records store keys as [redacted:secret] (recordRedaction),
     // so a later turn sees the placeholder; without the 23-token note the model
     // can write it into a config file. HEAD sat at 2146, 4 tokens free.
-    expect(estimateTextTokens(harness)).toBeLessThan(2175)
+    // 2175 -> 2200: the delegation rule became a conditional decision, which
+    // needs a trigger (two or more independent workstreams, or one workstream
+    // large enough for a child with a narrow brief) and an explicit exception
+    // against spawning only to satisfy a quota — 24 tokens over the old ceiling.
+    // HEAD sat at 2197. The <work_style> task-list and narration clauses were cut
+    // to pay for it and have been restored: an unrelated rule is not budget.
+    // 2250 -> 2150: the desktop-driving paragraph went out with the `computer`
+    // tool it described. `screen_snip` still reads the screen and carries its own
+    // grounding and approval rules in the tool description, so the spine no
+    // longer spends 47 tokens on a tool the model cannot reach. Measures 2140.
+    expect(estimateTextTokens(harness)).toBeLessThan(2150)
   })
 
   it.skipIf(!existsSync(join(process.cwd(), 'docs', 'harness-handbook.md')))(
@@ -655,7 +665,7 @@ describe('harness tool catalog', () => {
     const spawn = AGENT_TOOLS.find((t) => t.name === 'spawn_agent_instance')
     expect(spawn).toBeDefined()
     expect(spawn!.description).toMatch(/independent workstream/i)
-    expect(spawn!.description).toMatch(/fan out when two or more independent workstreams/i)
+    expect(spawn!.description).toMatch(/fan out for any task that is not a single trivial action/i)
     expect(spawn!.description).toMatch(/no child is overloaded/i)
     expect(spawn!.description).toMatch(/spawns are never denied/)
     expect(spawn!.description).toMatch(/child never sees this conversation/i)

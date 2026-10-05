@@ -612,7 +612,7 @@ function seedPlanStubIfMissing(runDir: string): void {
  * invoke and again only when a fold rewrites history, not on every step.
  * Reading them every step meant any write in the middle of an invoke changed the
  * prefix, and the next request re-sent the whole prompt, history included,
- * uncached. That covers `create_plan` (every run publishes one, and it also
+ * uncached. That covers `create_plan` (a run that publishes one also
  * rewrites the contract's Done when), an edit to either file, and a run rename.
  * Measured 2026-09-23: all 4 `create_plan` calls were followed by a 3–12% hit
  * on 20k–58k-token prompts. A write in between reaches the model through the

@@ -60,16 +60,22 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
       .filter(Boolean)
       .join('\n')
 
-    // Harness spine: delegation decision + brief contract (strict, no small-task escape).
-    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\) every time, no matter how small the request/)
-    expect(prompt).toMatch(/one verifiable deliverable per controlled child instance/)
-    expect(prompt).toMatch(/spawned zero instances violates this policy/)
+    // Harness spine: delegation is the default for anything but a trivial action.
+    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\) for any task that is not a single trivial action/)
+    expect(prompt).toMatch(/a single read-only lookup, or a single one-line edit/)
+    expect(prompt).toMatch(/never spawn for that/)
+    expect(prompt).toMatch(/one verifiable deliverable per child instance/)
     expect(prompt).toMatch(/verified evidence/)
     expect(prompt).toMatch(/child sees nothing of this conversation/)
+    expect(prompt).not.toMatch(/no matter how small/)
+    expect(prompt).not.toMatch(/spawned zero instances/)
+    expect(prompt).not.toMatch(/Delegate to child agent instances \(root runs\) every time/)
 
-    // Mode section (root, not inline): default-on decompose trigger + anti-overuse balance.
+    // Mode section (root, not inline): conditional delegation trigger + anti-overuse balance.
+    expect(prompt).toMatch(/whether to use them is a judgment call/)
+    expect(prompt).toMatch(/Delegate for any task that is not a single trivial action/)
+    expect(prompt).toMatch(/never spawn for that/)
     expect(prompt).toMatch(/decompose the plan into a structured set/)
-    expect(prompt).toMatch(/every single time/)
     expect(prompt).toMatch(/batch independent tool calls within a step first/i)
 
     // Catalog: the five instance tools with operational lifecycle text.

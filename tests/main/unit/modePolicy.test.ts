@@ -83,10 +83,13 @@ describe('modePolicy', () => {
     expect(section).toMatch(/every plan step maps to one child agent instance/)
     expect(section).toMatch(/decompose the plan into a structured set/)
     expect(section).toMatch(/one task per instance/)
-    expect(section).toMatch(/every single time/i)
-    expect(section).toMatch(/no matter how small the request/)
-    expect(section).toMatch(/spawned zero instances/)
-    expect(section).toMatch(/complete structured brief/)
+    expect(section).toMatch(/any task that is not a single trivial action/)
+    expect(section).toMatch(/a single read-only lookup, or a single one-line edit/)
+    expect(section).toMatch(/never spawn for that/)
+    expect(section).not.toMatch(/no matter how small/)
+    expect(section).not.toMatch(/spawned zero instances/)
+    expect(section).not.toMatch(/every single time/)
+    expect(section).toMatch(/Briefs carry outcome, sub-tasks, done-when and affected paths/)
     expect(section).toMatch(/child sees nothing of this conversation/)
     expect(section).toMatch(/spawn, await, and merge lifecycle/)
     expect(section).toMatch(/batch independent tool calls within a step first/i)
@@ -241,14 +244,31 @@ describe('modePolicy', () => {
     expect(modeSectionMarkdown('ask', { autoModeSwitch: true })).not.toMatch(/`plan`/)
   })
 
-  it('Agent carries the planning discipline Plan mode used to own', () => {
+  // Planning was Plan mode's unconditional mandate. It is now a decision rule:
+  // pin the trigger that still owes a plan, the exception that does not, and
+  // the clause that keeps a plan from being a quota.
+  it('Agent plans workspace-changing work and skips the plan otherwise', () => {
     const agent = modeSectionMarkdown('agent')!
-    expect(agent).toMatch(/Plan before you act/)
+    // Trigger — a plan is owed only for work that touches the workspace, and
+    // the five disciplines of the plan itself are unchanged.
+    expect(agent).toMatch(
+      /Plan before you act on work that changes files, runs commands, or otherwise acts on the workspace/
+    )
+    expect(agent).toMatch(/inspect the workspace with reads first/)
     expect(agent).toMatch(/verified in this run/)
     expect(agent).toMatch(/runnable check/)
     expect(agent).toMatch(/`create_plan`/)
     // The whole point of the merge: publishing does not hand off to a mode.
     expect(agent).toMatch(/no mode change is needed to implement it/)
+    // Exception — an answer and a read-only lookup are not planned work.
+    expect(agent).toMatch(/A direct answer or a read-only lookup needs no plan/)
+    // No quota — a plan is never a token of thoroughness.
+    expect(agent).toMatch(/never publish one just to look thorough/)
+    // And the section must no longer read as an unconditional mandate.
+    expect(agent).not.toMatch(/Plan before you act\. Inspect the workspace/)
+    expect(agent).not.toMatch(/always plan/i)
+    expect(agent).not.toMatch(/must publish/i)
+    expect(agent).not.toMatch(/Plan mode/)
   })
 
   it('modeSectionMarkdown has no proactive switch_mode calls when autoModeSwitch is off', () => {

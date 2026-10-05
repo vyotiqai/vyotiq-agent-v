@@ -5,7 +5,7 @@ group: Tasks
 order: 3
 ---
 
-An instance is a sub-agent that a task starts for one small, independent piece of the work. In Agent mode, the agent is told to plan first and give each step to its own instance, even for a small request. Independent instances run in parallel, and the task collects and merges the results.
+An instance is a sub-agent that a task starts for one small, independent piece of the work. In Agent mode, the agent plans first and hands work to an instance when the request splits into independent pieces worth running in parallel, or when one piece is big enough to give an instance of its own; a single small edit or a direct answer stays in the main task. Independent instances run in parallel, and the task collects and merges the results.
 
 You do not start instances yourself. The agent decides to use them, in Agent mode, with these tools:
 
