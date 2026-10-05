@@ -3,7 +3,9 @@
  *
  * Honesty rules mirror `messageFooterStats.turnCost`: a number is only shown
  * when it is a provider bill or a priced estimate, and estimates are labeled
- * `est.` — never presented as a provider bill.
+ * `est.` — never presented as a provider bill. An explicitly recorded zero
+ * (free tier, local inference) is priced — `$0`, never a dash; absent cost
+ * fields mean nobody reported anything — a dash, never a zero.
  */
 
 /** Mirrors the footer caption's `$` formatting — single source for all surfaces. */
@@ -44,14 +46,19 @@ function presentCost(cost: number, estimated: boolean, title: string): RunCostDi
  * Cost to show for one run. A provider-reported bill shows as-is; once any
  * step was priced from published model rates the total is labeled `est.`
  * (the billed share is real but the estimate is not a bill). Runs with no
- * measurable cost stay tokens-only — null here.
+ * measurable cost stay tokens-only — null here — except runs priced at an
+ * explicit zero (free tier), which show `$0`.
  */
 export function runCostDisplay(
   input: { billedCost?: number; estimatedCost?: number } | undefined | null
 ): RunCostDisplay | null {
   const billed = input?.billedCost ?? 0
   const estimated = input?.estimatedCost ?? 0
-  if (!(billed > 0) && !(estimated > 0)) return null
+  if (!(billed > 0) && !(estimated > 0)) {
+    const priced = input?.billedCost != null || input?.estimatedCost != null
+    if (priced) return presentCost(0, false, 'Free model — no billing')
+    return null
+  }
   if (estimated > 0) {
     return presentCost(
       billed + estimated,
@@ -67,7 +74,8 @@ export function runCostDisplay(
  * by main, and how many of the tasks carried any cost at all. `est.` when
  * any part is an estimate or any task had no measurable cost — then the true
  * total is higher than shown. The per-task figure divides by the priced tasks
- * only; dividing by all would read low.
+ * only; dividing by all would read low. A window whose priced tasks all cost
+ * nothing shows `$0`, not a dash.
  */
 export function windowCostDisplay(totals: {
   billedCost?: number
@@ -77,9 +85,14 @@ export function windowCostDisplay(totals: {
 }): (RunCostDisplay & { perTask: number | null }) | null {
   const billed = totals.billedCost ?? 0
   const estimated = totals.estimatedCost ?? 0
-  if (!(billed > 0) && !(estimated > 0)) return null
   const priced = Math.min(totals.pricedRuns ?? totals.runs, totals.runs)
   const unpriced = Math.max(0, totals.runs - priced)
+  if (!(billed > 0) && !(estimated > 0)) {
+    if (priced > 0 && unpriced === 0) {
+      return { ...presentCost(0, false, 'Free models — no billing'), perTask: 0 }
+    }
+    return null
+  }
   const anyEstimated = estimated > 0 || unpriced > 0
   const title =
     unpriced > 0
@@ -94,7 +107,8 @@ export function windowCostDisplay(totals: {
  * Workspace/session total over run costs. Runs without measurable cost
  * contribute nothing and are counted as unpriced — their true spend is
  * unknown, so the aggregate stays `est.`-labeled whenever any portion is
- * estimated or any run is unpriced (never presented as an exact bill).
+ * estimated or any run is unpriced (never presented as an exact bill). Runs
+ * priced at an explicit zero count as priced, so an all-free set shows `$0`.
  */
 export function aggregateRunCost(
   runs: ReadonlyArray<{ billedCost?: number; estimatedCost?: number } | undefined | null>
@@ -105,14 +119,19 @@ export function aggregateRunCost(
   for (const run of runs) {
     const b = run?.billedCost ?? 0
     const e = run?.estimatedCost ?? 0
-    if (b > 0 || e > 0) {
+    if (b > 0 || e > 0 || run?.billedCost != null || run?.estimatedCost != null) {
       billed += b
       estimated += e
     } else {
       unpriced += 1
     }
   }
-  if (billed <= 0 && estimated <= 0) return null
+  if (!(billed > 0) && !(estimated > 0)) {
+    if (unpriced === 0 && runs.length > 0) {
+      return presentCost(0, false, 'Free models — no billing')
+    }
+    return null
+  }
   const anyEstimated = estimated > 0 || unpriced > 0
   const title = anyEstimated
     ? unpriced > 0

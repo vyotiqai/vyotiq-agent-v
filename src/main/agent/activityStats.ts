@@ -343,8 +343,8 @@ async function aggregateActivity(
       row.inputTokens += usage.inputTokens
       row.outputTokens += usage.outputTokens
       if (usage.cachedInputTokens != null && usage.cachedInputTokens > 0) row.cachedInputTokens += usage.cachedInputTokens
-      if (usage.billedCost != null && usage.billedCost > 0) row.billedCost = (row.billedCost ?? 0) + usage.billedCost
-      if (usage.estimatedCost != null && usage.estimatedCost > 0) row.estimatedCost = (row.estimatedCost ?? 0) + usage.estimatedCost
+      if (usage.billedCost != null && usage.billedCost >= 0) row.billedCost = (row.billedCost ?? 0) + usage.billedCost
+      if (usage.estimatedCost != null && usage.estimatedCost >= 0) row.estimatedCost = (row.estimatedCost ?? 0) + usage.estimatedCost
       taskDayMap.set(key, row)
     }
     // Per-day distinct-run count: one usage attribution per run per day.
@@ -353,8 +353,8 @@ async function aggregateActivity(
     day.outputTokens += usage.outputTokens
     billedInputTokens += usage.inputTokens
     outputTokens += usage.outputTokens
-    if ((usage.billedCost ?? 0) > 0 || (usage.estimatedCost ?? 0) > 0) pricedRunIds.add(runId)
-    if (usage.billedCost != null && usage.billedCost > 0) {
+    if ((usage.billedCost ?? -1) >= 0 || (usage.estimatedCost ?? -1) >= 0) pricedRunIds.add(runId)
+    if (usage.billedCost != null && usage.billedCost >= 0) {
       day.billedCost = (day.billedCost ?? 0) + usage.billedCost
       billedCostTotal += usage.billedCost
       withCost = true
@@ -363,7 +363,7 @@ async function aggregateActivity(
         slice.withCost = true
       }
     }
-    if (usage.estimatedCost != null && usage.estimatedCost > 0) {
+    if (usage.estimatedCost != null && usage.estimatedCost >= 0) {
       day.estimatedCost = (day.estimatedCost ?? 0) + usage.estimatedCost
       estimatedCostTotal += usage.estimatedCost
       withEstimate = true

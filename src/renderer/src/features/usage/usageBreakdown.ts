@@ -36,8 +36,10 @@ export type Breakdown = {
 }
 
 function costOf(entry: { billedCost?: number; estimatedCost?: number }): { cost: number | null; estimated: boolean } {
+  // An explicitly recorded zero (free tier) is priced — $0, not a dash.
+  if (entry.billedCost == null && entry.estimatedCost == null) return { cost: null, estimated: false }
   const cost = (entry.billedCost ?? 0) + (entry.estimatedCost ?? 0)
-  return { cost: cost > 0 ? cost : null, estimated: (entry.estimatedCost ?? 0) > 0 }
+  return { cost, estimated: (entry.estimatedCost ?? 0) > 0 }
 }
 
 export function usageBreakdown(data: HomeActivityResult): Breakdown {

@@ -32,7 +32,16 @@ describe('runCostDisplay', () => {
     expect(runCostDisplay(undefined)).toBeNull()
     expect(runCostDisplay(null)).toBeNull()
     expect(runCostDisplay({})).toBeNull()
-    expect(runCostDisplay({ billedCost: 0, estimatedCost: 0 })).toBeNull()
+  })
+
+  it('shows an explicitly priced zero as $0, not a dash', () => {
+    expect(runCostDisplay({ billedCost: 0, estimatedCost: 0 })).toEqual({
+      cost: 0,
+      text: '$0',
+      estimated: false,
+      title: 'Free model — no billing'
+    })
+    expect(runCostDisplay({ estimatedCost: 0 })).toMatchObject({ text: '$0' })
   })
 
   it('shows a provider-reported bill as-is', () => {

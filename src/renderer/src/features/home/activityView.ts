@@ -131,7 +131,11 @@ export function activitySpendSeries(
   const byDate = new Map(days.map((day) => [day.date, day]))
   return axis.map((date) => {
     const day = byDate.get(date)
-    const cost = (day?.billedCost ?? 0) + (day?.estimatedCost ?? 0)
+    const billed = day?.billedCost ?? 0
+    const estimated = day?.estimatedCost ?? 0
+    // An explicitly recorded zero (free tier) is priced — $0, not a gap.
+    const hasCost = day?.billedCost != null || day?.estimatedCost != null
+    const cost = hasCost ? billed + estimated : null
     const parsed = new Date(`${date}T00:00:00`)
     const valid = !Number.isNaN(parsed.getTime())
     return {
@@ -144,9 +148,9 @@ export function activitySpendSeries(
       dateLabel: valid
         ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : date,
-      cost: cost > 0 ? cost : null,
+      cost,
       estimated: (day?.estimatedCost ?? 0) > 0,
-      unpriced: day != null && day.runs > 0 && !(cost > 0),
+      unpriced: day != null && day.runs > 0 && cost == null,
       tokens:
         day && day.billedInputTokens + day.outputTokens > 0
           ? day.billedInputTokens + day.outputTokens
