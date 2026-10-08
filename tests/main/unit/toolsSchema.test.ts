@@ -38,13 +38,14 @@ describe('toolsSchema', () => {
   it('covers every executable built-in with a short description', () => {
     const names = AGENT_TOOLS.map((t) => t.name).sort()
     expect(names).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    // 61 + build_tool + check_done_when + screen_snip.
-    expect(names.length).toBe(64)
+    // 61 + build_tool + check_done_when + screen_snip + github_pr_checks.
+    expect(names.length).toBe(65)
     expect(names).toEqual(
       expect.arrayContaining([
         'github_pr_create',
         'github_pr_review',
         'github_issue',
+        'github_pr_checks',
         'edit_notebook',
         'lsp',
         'create_goal',
@@ -65,7 +66,7 @@ describe('toolsSchema', () => {
   it('wires a real handler for every built-in tool (no missing/stub handlers)', () => {
     const handlerNames = Object.keys(BUILTIN_HANDLERS).sort()
     expect(handlerNames).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(handlerNames).toHaveLength(64)
+    expect(handlerNames).toHaveLength(65)
     for (const name of BUILTIN_TOOL_NAMES) {
       const handler = BUILTIN_HANDLERS[name as keyof typeof BUILTIN_HANDLERS]
       expect(typeof handler, `${name} handler must be a function`).toBe('function')

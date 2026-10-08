@@ -72,6 +72,8 @@ export const ASK_SAFE_BUILTIN = new Set([
   'Skill',
   'git_status',
   'git_diff',
+  // Reads a pull request's checks and CI logs from GitHub; changes nothing.
+  'github_pr_checks',
   'lsp'
   // `diagnostics` spawns a shell — Agent-only, not Ask.
 ])

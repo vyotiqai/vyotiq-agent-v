@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   GitCommitResult,
   GitPullResult,
@@ -7,6 +7,7 @@ import type {
   GitStatusResult,
   PrCreateResult
 } from '@shared/ipc'
+import type { HunkIdentity } from '@shared/utils/hunkPatch'
 import { useGitStatus } from './useGitStatus'
 
 export type GitChrome = {
@@ -25,6 +26,15 @@ export type GitChrome = {
    * (committed from that task's Changes) the answer says what it settled.
    */
   commit: (message: string, push: boolean, mode?: 'all' | 'staged', runId?: string | null) => Promise<GitCommitResult | false>
+  /** Fold the changes into the last commit `sha` (still HEAD, not pushed) under `message`. */
+  amend: (message: string, sha: string, mode?: 'all' | 'staged', runId?: string | null) => Promise<GitCommitResult | false>
+  /** Stage one hunk of the unstaged diff, or (`unstage`) take one out of the staged diff. */
+  stageHunk: (target: { path: string; hunk: HunkIdentity; diffHash: string }, unstage: boolean) => Promise<boolean>
+  /**
+   * Switch to an existing local branch. `leaveChanges` stashes uncommitted
+   * changes on the branch being left instead of carrying them over.
+   */
+  checkout: (branch: string, leaveChanges?: boolean) => Promise<boolean>
   /**
    * Commit and open (or update) a pull request; false when it did not. With
    * `runId` the commit settles that task's edits, and `title`/`body` replace
@@ -39,6 +49,11 @@ export type GitChrome = {
   stageAll: () => Promise<boolean>
   stagePaths: (paths: string[]) => Promise<boolean>
   unstagePaths: (paths: string[]) => Promise<boolean>
+  /**
+   * Throw away the person's own changes: `worktree` drops what is not staged,
+   * `all` goes back to HEAD. Old copies go to the OS trash. Ask first.
+   */
+  discardPaths: (paths: string[], scope: 'worktree' | 'all') => Promise<boolean>
   reportNotice: (message: string, failed?: boolean) => void
   /** The sync action in flight, or null. Separate from `busy`: a fetch never blocks a commit. */
   syncing: GitSyncAction | null
@@ -54,6 +69,14 @@ export type GitChrome = {
 }
 
 export type GitSyncAction = 'fetch' | 'pull' | 'push' | 'branch'
+
+/** How often the app asks main for a background fetch while the window has focus; main spaces them out further. */
+export const BACKGROUND_FETCH_EVERY_MS = 5 * 60_000
+/**
+ * The first ask once the counts are on screen (the chrome runs while Changes
+ * is shown): at once, near enough. Main skips it after a fetch moments ago.
+ */
+const BACKGROUND_FETCH_FIRST_MS = 2_000
 
 /**
  * The workspace's git state plus commit/stage actions for the Changes panel.
@@ -112,6 +135,70 @@ export function useGitChrome(
         setNotice(commitResult.ok ? commitResult.data.detail : commitResult.error)
         setNoticeFailed(!commitResult.ok)
         return commitResult.ok ? commitResult.data : false
+      } finally {
+        setBusy(false)
+        refresh()
+      }
+    },
+    [busy, flushFilesBeforeMutation, refresh, workspacePath]
+  )
+
+  const amend = useCallback(
+    async (
+      message: string,
+      sha: string,
+      mode: 'all' | 'staged' = 'all',
+      runId?: string | null
+    ): Promise<GitCommitResult | false> => {
+      if (!workspacePath || !message.trim() || busy) return false
+      setBusy(true)
+      setNotice(null)
+      setNoticeFailed(false)
+      if (!(await flushFilesBeforeMutation())) {
+        setBusy(false)
+        return false
+      }
+      try {
+        const res = await window.vyotiq.gitAmend({
+          workspacePath,
+          message: message.trim(),
+          sha,
+          mode,
+          ...(runId ? { runId } : {})
+        })
+        setNotice(res.ok ? res.data.detail : res.error)
+        setNoticeFailed(!res.ok)
+        return res.ok ? res.data : false
+      } finally {
+        setBusy(false)
+        refresh()
+      }
+    },
+    [busy, flushFilesBeforeMutation, refresh, workspacePath]
+  )
+
+  const stageHunk = useCallback(
+    async (target: { path: string; hunk: HunkIdentity; diffHash: string }, unstage: boolean): Promise<boolean> => {
+      if (!workspacePath || busy) return false
+      setBusy(true)
+      setNotice(null)
+      setNoticeFailed(false)
+      // The diff on screen is the file on disk; an editor's unsaved text would make it stale.
+      if (!(await flushFilesBeforeMutation())) {
+        setBusy(false)
+        return false
+      }
+      try {
+        const res = await window.vyotiq.gitStageHunk({
+          workspacePath,
+          path: target.path,
+          hunk: target.hunk,
+          diffHash: target.diffHash,
+          ...(unstage ? { unstage: true } : {})
+        })
+        setNotice(res.ok ? res.data.detail : res.error)
+        setNoticeFailed(!res.ok)
+        return res.ok
       } finally {
         setBusy(false)
         refresh()
@@ -238,6 +325,30 @@ export function useGitChrome(
     [busy, flushFilesBeforeMutation, refresh, workspacePath]
   )
 
+  const discardPaths = useCallback(
+    async (paths: string[], scope: 'worktree' | 'all'): Promise<boolean> => {
+      if (!workspacePath || busy || paths.length === 0) return false
+      setBusy(true)
+      setNotice(null)
+      setNoticeFailed(false)
+      // An open editor's unsaved text is saved first, so its copy is the one kept in the trash.
+      if (!(await flushFilesBeforeMutation())) {
+        setBusy(false)
+        return false
+      }
+      try {
+        const result = await window.vyotiq.gitDiscardPaths({ workspacePath, paths, scope })
+        setNotice(result.ok ? result.data.detail : result.error)
+        setNoticeFailed(!result.ok)
+        return result.ok
+      } finally {
+        setBusy(false)
+        refresh()
+      }
+    },
+    [busy, flushFilesBeforeMutation, refresh, workspacePath]
+  )
+
   const reportNotice = useCallback((message: string, failed = false) => {
     setNotice(message)
     setNoticeFailed(failed)
@@ -309,6 +420,40 @@ export function useGitChrome(
     [runSync]
   )
 
+  const checkout = useCallback(
+    async (branch: string, leaveChanges = false): Promise<boolean> =>
+      (await runSync(
+        'branch',
+        true,
+        (path) => window.vyotiq.gitCheckout(path, branch, leaveChanges ? { leaveChanges: true } : undefined),
+        (d) => ({ text: d.detail })
+      )) !== false,
+    [runSync]
+  )
+
+  // The app's own fetch, so "N to pull" is true without a click. Asked only
+  // while the window has focus; main keeps it to one every few minutes per
+  // checkout, holds off after a failure, and stays quiet either way.
+  useEffect(() => {
+    if (!workspacePath || !enabled) return undefined
+    const ask = (): void => {
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      void window.vyotiq
+        ?.gitFetch?.({ workspacePath, background: true })
+        // A fetch that ran moved the remote-tracking refs: read ahead/behind again.
+        .then((res) => {
+          if (res.ok && !res.data.skipped) refresh()
+        })
+        .catch(() => undefined)
+    }
+    const first = window.setTimeout(ask, BACKGROUND_FETCH_FIRST_MS)
+    const every = window.setInterval(ask, BACKGROUND_FETCH_EVERY_MS)
+    return () => {
+      window.clearTimeout(first)
+      window.clearInterval(every)
+    }
+  }, [workspacePath, enabled, refresh])
+
   const createBranch = useCallback(
     async (name: string): Promise<boolean> =>
       (await runSync(
@@ -332,10 +477,14 @@ export function useGitChrome(
       noticeFailed,
       refresh,
       commit,
+      amend,
+      stageHunk,
+      checkout,
       createPr,
       stageAll,
       stagePaths,
       unstagePaths,
+      discardPaths,
       reportNotice,
       syncing,
       fetch,
@@ -353,10 +502,14 @@ export function useGitChrome(
       noticeFailed,
       refresh,
       commit,
+      amend,
+      stageHunk,
+      checkout,
       createPr,
       stageAll,
       stagePaths,
       unstagePaths,
+      discardPaths,
       reportNotice,
       syncing,
       fetch,

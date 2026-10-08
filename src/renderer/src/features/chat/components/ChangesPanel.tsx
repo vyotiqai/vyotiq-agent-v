@@ -17,8 +17,18 @@ import {
 import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
 import { Icon } from '@renderer/lib/icons'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { CHAT_RIGHT_PANEL_BODY, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
-import type { GitBranchEntry, GitChangedFile, GitLogEntry, GitStatus, TaskCommitSettled, TaskFileStat } from '@shared/ipc'
+import type {
+  GitBranchEntry,
+  GitBranchStash,
+  GitChangedFile,
+  GitLastCommit,
+  GitLogEntry,
+  GitStatus,
+  TaskCommitSettled,
+  TaskFileStat
+} from '@shared/ipc'
 import { namedGitBranch } from '@shared/utils/gitBranch'
 import type { UiItem } from '@shared/transcript'
 import type { ChatItemsStore } from '../chatStores'
@@ -47,7 +57,7 @@ import { FileBadge } from './FileBadge'
 import { RepoCommandsNotice } from './RepoCommandsNotice'
 import { ReviewChecks } from './ReviewChecks'
 import { CommitMessageField } from './CommitMessageField'
-import { latestResultText, prBodyFrom, prTitleFrom } from './prDraft'
+import { closingIssuesFrom, latestResultText, prBodyFrom, prTitleFrom } from './prDraft'
 import { ConflictResolver } from './ConflictResolver'
 import { GitSyncControls } from './GitSyncControls'
 import {
@@ -327,7 +337,14 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [menuOpen, setMenuOpen] = useState(false)
   const [commitMenuOpen, setCommitMenuOpen] = useState(false)
   /** What the commit being composed will do once its message is right. */
-  const [commitIntent, setCommitIntent] = useState<'commit' | 'push' | 'pr'>('commit')
+  const [commitIntent, setCommitIntent] = useState<'commit' | 'push' | 'pr' | 'amend'>('commit')
+  /** HEAD's commit, read while the git views are on screen: Amend is offered while it is unpushed. */
+  const [lastCommit, setLastCommit] = useState<GitLastCommit | null>(null)
+  /** The branch picked while there were uncommitted changes: the switch waits on a choice. */
+  const [switchAsk, setSwitchAsk] = useState<string | null>(null)
+  /** Changes a switch left on the current branch, offered back. */
+  const [branchStash, setBranchStash] = useState<GitBranchStash | null>(null)
+  const [stashBusy, setStashBusy] = useState(false)
   const [layout, setLayout] = useState<DiffLayout>('unified')
   /** The review reads side by side by default; the narrow tab reads top to bottom. */
   const [reviewLayout, setReviewLayout] = useState<DiffLayout>('split')
@@ -614,6 +631,25 @@ export const ChangesPanel = memo(function ChangesPanel({
     [chrome, message, commitMode, runId, onTaskCommitted, onGitMutated, refreshCommits]
   )
 
+  const sendAmend = useCallback(() => {
+    if (!lastCommit) return
+    void chrome.amend(message, lastCommit.sha, commitMode, runId).then(async (ok) => {
+      if (!ok) return
+      if (ok.task) onTaskCommitted?.(ok.task, false)
+      setMessage('')
+      setMessageGenerating(false)
+      messageGenerationSeqRef.current += 1
+      messageEditedRef.current = false
+      setComposing(false)
+      onGitMutated?.()
+      setScope('commits')
+      setSelectedCommit(null)
+      setSelectedPath(null)
+      const list = await refreshCommits()
+      setSelectedCommit(list[0] ?? null)
+    })
+  }, [chrome, message, lastCommit, commitMode, runId, onTaskCommitted, onGitMutated, refreshCommits])
+
   /** What Commit & Create PR writes the PR from — the PR tab's draft; set where the checks are read. */
   const prTextRef = useRef<{ title: string; body: string } | null>(null)
   const sendCreatePr = useCallback(() => {
@@ -708,7 +744,7 @@ export const ChangesPanel = memo(function ChangesPanel({
     [commitMode, visibleGitFiles, workspacePath]
   )
 
-  const openCompose = useCallback((intent: 'commit' | 'push' | 'pr' = 'commit') => {
+  const openCompose = useCallback((intent: 'commit' | 'push' | 'pr' | 'amend' = 'commit') => {
     const fallback = defaultCommitMessage(visibleGitFiles, visibleGitFiles.length)
     const sequence = ++messageGenerationSeqRef.current
     messageEditedRef.current = false
@@ -717,6 +753,12 @@ export const ChangesPanel = memo(function ChangesPanel({
     setMessageGenerating(false)
     setGenerationNotice(null)
     setDraftMayBeStale(false)
+    if (intent === 'amend') {
+      // Amend keeps the commit's own message to edit; nothing is drafted for it.
+      setMessage(lastCommit?.message ?? '')
+      setAgentMessage(null)
+      return
+    }
     // The line above the buttons is keyed on paths and line counts, which a
     // same-size edit leaves alone — so it only fills the field while main is
     // asked. Main keys its copy on the exact diff: the same changes come back
@@ -755,33 +797,48 @@ export const ChangesPanel = memo(function ChangesPanel({
         if (sequence !== messageGenerationSeqRef.current) return
         setMessageGenerating(false)
       })
-  }, [commitMode, visibleGitFiles, workspacePath])
+  }, [commitMode, visibleGitFiles, workspacePath, lastCommit])
 
   const { confirm, dialog: confirmDialog } = useConfirm()
 
+  const switchBranch = useCallback(
+    async (branch: string, leaveChanges: boolean) => {
+      setSwitchAsk(null)
+      closeMenus()
+      if (!(await chrome.checkout(branch, leaveChanges))) return
+      onGitMutated?.()
+      void refreshCommits()
+    },
+    [closeMenus, chrome, onGitMutated, refreshCommits]
+  )
+
+  // Uncommitted changes make the switch a choice: carry them over (git refuses
+  // when one would be overwritten) or leave them stashed on this branch.
   const checkoutBranch = useCallback(
     async (branch: string) => {
-      if (!workspacePath || !window.vyotiq?.gitCheckout) return
+      if (!workspacePath) return
       if (status && status.fileCount > 0) {
-        // Not destructive: git refuses a checkout that would overwrite a change.
-        const confirmed = await confirm(
-          `Working tree has uncommitted changes. Git will refuse to check out "${branch}" if those files would be overwritten.`,
-          { title: 'Switch branch', confirmLabel: `Check out ${branch}` }
-        )
-        if (!confirmed) return
+        setSwitchAsk(branch)
+        return
       }
-      closeMenus()
-      const res = await window.vyotiq.gitCheckout(workspacePath, branch)
-      if (res.ok) {
-        chrome.refresh()
-        onGitMutated?.()
-        void refreshCommits()
-      } else {
-        chrome.reportNotice(res.error, true)
-      }
+      await switchBranch(branch, false)
     },
-    [workspacePath, status, closeMenus, chrome, onGitMutated, refreshCommits, confirm]
+    [workspacePath, status, switchBranch]
   )
+
+  const restoreStash = useCallback(async () => {
+    if (!workspacePath || !branchStash) return
+    setStashBusy(true)
+    try {
+      const res = await window.vyotiq.gitStashRestore({ workspacePath, sha: branchStash.sha })
+      chrome.reportNotice(res.ok ? res.data.detail : res.error, !res.ok || res.data.conflicted)
+      if (res.ok && !res.data.conflicted) setBranchStash(null)
+      chrome.refresh()
+      onGitMutated?.()
+    } finally {
+      setStashBusy(false)
+    }
+  }, [workspacePath, branchStash, chrome, onGitMutated])
 
   const fileDiffStaged = useCallback(
     (file: GitChangedFile): boolean => {
@@ -892,6 +949,37 @@ export const ChangesPanel = memo(function ChangesPanel({
           canStage: (file: BrowserFileEntry) => Boolean(file.unstaged),
           canUnstage: (file: BrowserFileEntry) => Boolean(file.staged)
         }
+
+  // Your own changes, thrown away from a confirmed button: Unstaged drops what
+  // is not staged, Uncommitted goes back to HEAD. Main puts every copy git
+  // overwrites, and every untracked file, in the OS trash first.
+  const discardScope: 'worktree' | 'all' | null =
+    displayScope === 'unstaged' ? 'worktree' : displayScope === 'uncommitted' ? 'all' : null
+  const discardable = useMemo(
+    () => (discardScope ? filteredFiles.filter((f) => f.status !== 'conflicted') : []),
+    [discardScope, filteredFiles]
+  )
+  const discard = useCallback(
+    async (paths: string[]) => {
+      if (!discardScope || paths.length === 0) return
+      const one = paths.length === 1 ? gitFiles.find((f) => f.path === paths[0]) : undefined
+      const what = one ? one.path : `${paths.length} files`
+      const message =
+        one?.status === 'untracked'
+          ? `${one.path} is not tracked by git. It will be moved to the trash.`
+          : discardScope === 'worktree'
+            ? `The unstaged changes to ${what} will be thrown away; what is staged stays. A copy of each file as it is now goes to the trash.`
+            : `All changes to ${what}, staged and unstaged, will be thrown away. A copy of each file as it is now goes to the trash.`
+      const confirmed = await confirm(message, {
+        title: paths.length === 1 ? 'Discard changes' : `Discard changes to ${paths.length} files`,
+        confirmLabel: 'Discard',
+        danger: true
+      })
+      if (!confirmed) return
+      if (await chrome.discardPaths(paths, discardScope)) onGitMutated?.()
+    },
+    [discardScope, gitFiles, confirm, chrome, onGitMutated]
+  )
 
   const fetchGitDiff = useCallback(
     async (path: string) => {
@@ -1102,6 +1190,16 @@ export const ChangesPanel = memo(function ChangesPanel({
             onClick={() => stageActions.onUnstage(file.path)}
           />
         ) : null}
+        {entry && discardable.some((f) => f.path === file.path) ? (
+          <IconButton
+            icon="undo"
+            label={`Discard changes to ${file.path}`}
+            size="xs"
+            tone="muted"
+            disabled={chrome.busy || Boolean(resolveBusy)}
+            onClick={() => void discard([file.path])}
+          />
+        ) : null}
         {open}
       </>
     )
@@ -1147,7 +1245,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   // Commit & Create PR writes the pull request as the PR tab drafts it: the
   // task's title, its result and its done-when checks. No result: gh's --fill.
   const prSummary = useMemo(() => (running || !runId ? '' : latestResultText(sourceItems)), [running, runId, sourceItems])
-  const prSource = prSummary ? { title: taskTitle, summary: prSummary, checks } : null
+  const prSource = prSummary ? { title: taskTitle, summary: prSummary, checks, closes: closingIssuesFrom(sourceItems) } : null
   const prTitle = prSource ? prTitleFrom(prSource) : ''
   prTextRef.current = prSource && prTitle ? { title: prTitle, body: prBodyFrom(prSource) } : null
   const checksBlock =
@@ -1235,6 +1333,22 @@ export const ChangesPanel = memo(function ChangesPanel({
     }
   }
 
+  /** Unstaged and Staged: each hunk can be staged or unstaged on its own (not while whitespace is hidden — those hunks are not git's). */
+  const stageHunkKind = displayScope === 'unstaged' ? 'stage' : displayScope === 'staged' ? 'unstage' : null
+  const gitHunkActionsFor = (path: string): HunkActions | undefined => {
+    if (!stageHunkKind || ignoreWhitespace || !repoOk) return undefined
+    if (gitFiles.find((f) => f.path === path)?.status === 'conflicted') return undefined
+    return {
+      kind: stageHunkKind,
+      onUndo: (target) => {
+        void chrome.stageHunk(target, stageHunkKind === 'unstage').then((ok) => {
+          if (ok) onGitMutated?.()
+        })
+      },
+      busy: chrome.busy || Boolean(resolveBusy)
+    }
+  }
+
   const fileArea = (
     <ChangesColumn
       files={listFiles}
@@ -1246,7 +1360,11 @@ export const ChangesPanel = memo(function ChangesPanel({
       source={(file) =>
         displayScope === 'agent'
           ? { lines: taskLinesOf(file.path), fetchDiff: fetchTaskDiff, hunks: hunkActionsFor(file) }
-          : { fetchDiff: fetchGitDiff, binary: browserFiles.find((f) => f.path === file.path)?.binary }
+          : {
+              fetchDiff: fetchGitDiff,
+              binary: browserFiles.find((f) => f.path === file.path)?.binary,
+              hunks: gitHunkActionsFor(file.path)
+            }
       }
       layout={layout}
       wordWrap={wordWrap}
@@ -1261,6 +1379,35 @@ export const ChangesPanel = memo(function ChangesPanel({
     label: SCOPE_LABEL[key]
   }))
   const currentBranch = namedGitBranch(status?.branch)
+
+  // Changes a switch left on this branch, and HEAD's commit for Amend: read
+  // while a git view is on screen, again whenever git moves.
+  useEffect(() => {
+    if (!active || !gitView || !repoOk || !workspacePath || !window.vyotiq?.gitBranchStash) {
+      setBranchStash(null)
+      return undefined
+    }
+    let cancelled = false
+    void window.vyotiq.gitBranchStash({ workspacePath }).then((res) => {
+      if (!cancelled) setBranchStash(res.ok ? res.data : null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [active, gitView, repoOk, workspacePath, currentBranch, gitRevision, status?.fileCount])
+  useEffect(() => {
+    if (!active || !gitView || !repoOk || !workspacePath || !window.vyotiq?.gitLastCommit) {
+      setLastCommit(null)
+      return undefined
+    }
+    let cancelled = false
+    void window.vyotiq.gitLastCommit({ workspacePath }).then((res) => {
+      if (!cancelled) setLastCommit(res.ok ? res.data : null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [active, gitView, repoOk, workspacePath, currentBranch, gitRevision, status?.ahead])
   const branchOptions: MenuOption[] = (() => {
     const list: MenuOption[] = branches.map((b) => ({
       value: b.name,
@@ -1288,6 +1435,18 @@ export const ChangesPanel = memo(function ChangesPanel({
     },
     ...(displayScope === 'unstaged' && status && visibleGitFiles.length > 0
       ? [{ id: 'stage-all', label: 'Stage all', icon: 'plus' as const, separatorBefore: true, onSelect: sendStageAll }]
+      : []),
+    ...(discardable.length > 0 && !chrome.busy
+      ? [
+          {
+            id: 'discard-all',
+            label: findQuery.trim() ? 'Discard changes to shown files…' : 'Discard all changes…',
+            icon: 'undo' as const,
+            danger: true,
+            separatorBefore: displayScope !== 'unstaged',
+            onSelect: () => void discard(discardable.map((f) => f.path))
+          }
+        ]
       : []),
     ...(onViewPr ? [{ id: 'pr', label: 'View pull request', icon: 'pullRequest' as const, separatorBefore: true, onSelect: onViewPr }] : [])
   ]
@@ -1383,15 +1542,48 @@ export const ChangesPanel = memo(function ChangesPanel({
     </div>
   ) : null
   const commitLabel =
-    commitIntent === 'push' ? 'Commit & Push' : commitIntent === 'pr' ? 'Commit & Create PR' : 'Commit'
+    commitIntent === 'push'
+      ? 'Commit & Push'
+      : commitIntent === 'pr'
+        ? 'Commit & Create PR'
+        : commitIntent === 'amend'
+          ? 'Amend'
+          : 'Commit'
   const commitBusy = chrome.busy || Boolean(resolveBusy) || messageGenerating
   const submitCommit = (): void => {
     if (commitIntent === 'pr') sendCreatePr()
+    else if (commitIntent === 'amend') sendAmend()
     else sendCommit(commitIntent === 'push')
   }
+  // Amend: only a commit nobody else has — not pushed, not a merge, still HEAD.
+  const canAmend = Boolean(lastCommit && lastCommit.amendable && !lastCommit.pushed)
+  const commitMenuItems: ActionMenuItem[] = [
+    { id: 'commit', label: 'Commit…', icon: 'gitCommit', onSelect: () => openCompose('commit') },
+    ...(status?.hasRemote
+      ? [
+          { id: 'push', label: 'Commit & Push…', icon: 'arrowUp' as const, onSelect: () => openCompose('push') },
+          { id: 'pr', label: 'Commit & Create PR…', icon: 'pullRequest' as const, onSelect: () => openCompose('pr') }
+        ]
+      : []),
+    ...(canAmend && lastCommit
+      ? [
+          {
+            id: 'amend',
+            label: 'Amend last commit…',
+            icon: 'edit' as const,
+            detail: lastCommit.sha.slice(0, 7),
+            separatorBefore: true,
+            onSelect: () => openCompose('amend')
+          }
+        ]
+      : [])
+  ]
   const commitFileCount = commitMode === 'staged' ? gitFiles.filter((f) => f.staged).length : gitFiles.length
   // Where the words came from: the agent's draft, untouched, or why they may be wrong.
-  const commitNote = generationNotice
+  const commitNote =
+    commitIntent === 'amend' && lastCommit
+      ? `Amends ${lastCommit.sha.slice(0, 7)} · not pushed yet`
+      : generationNotice
     ? `No drafted message: ${generationNotice} — a plain one is in its place`
     : draftMayBeStale
       ? STALE_DRAFT_NOTE
@@ -1560,15 +1752,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               placement="down"
               align="end"
               aria-label="Commit"
-              items={[
-                { id: 'commit', label: 'Commit…', icon: 'gitCommit', onSelect: () => openCompose('commit') },
-                ...(status?.hasRemote
-                  ? [
-                      { id: 'push', label: 'Commit & Push…', icon: 'arrowUp' as const, onSelect: () => openCompose('push') },
-                      { id: 'pr', label: 'Commit & Create PR…', icon: 'pullRequest' as const, onSelect: () => openCompose('pr') }
-                    ]
-                  : [])
-              ]}
+              items={commitMenuItems}
               trigger={(t) => (
                 <Button
                   ref={t.ref}
@@ -1952,6 +2136,28 @@ export const ChangesPanel = memo(function ChangesPanel({
       {repoCommandsNotice}
       {checksBlock}
 
+      {branchStash && gitView ? (
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2 text-xs" data-branch-stash>
+          <Icon name="archive" size={13} className="shrink-0 text-tertiary" />
+          <span className="min-w-0 flex-1 truncate text-secondary">
+            Changes you left on <span className="font-mono">{branchStash.branch}</span>
+            <span className="text-tertiary">
+              {' '}
+              · {branchStash.files} {branchStash.files === 1 ? 'file' : 'files'}
+            </span>
+          </span>
+          <Button
+            size="xs"
+            pending={stashBusy}
+            disabled={stashBusy || running || chrome.busy}
+            title={running ? 'Restore when the run stops' : 'Put these changes back in the working tree'}
+            onClick={() => void restoreStash()}
+          >
+            Restore
+          </Button>
+        </div>
+      ) : null}
+
       {status?.truncated && displayScope !== 'agent' && displayScope !== 'commits' ? (
         <p className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted">
           Showing first {status.files.length} of {status.fileCount} changed files
@@ -2144,15 +2350,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                   placement="up"
                   align="end"
                   aria-label="Commit"
-                  items={[
-                    { id: 'commit', label: 'Commit…', icon: 'gitCommit', onSelect: () => openCompose('commit') },
-                    ...(status?.hasRemote
-                      ? [
-                          { id: 'push', label: 'Commit & Push…', icon: 'arrowUp' as const, onSelect: () => openCompose('push') },
-                          { id: 'pr', label: 'Commit & Create PR…', icon: 'pullRequest' as const, onSelect: () => openCompose('pr') }
-                        ]
-                      : [])
-                  ]}
+                  items={commitMenuItems}
                   trigger={(t) => (
                     <Button
                       ref={t.ref}
@@ -2177,6 +2375,31 @@ export const ChangesPanel = memo(function ChangesPanel({
         </div>
       ) : null}
       {confirmDialog}
+      <Dialog
+        open={switchAsk !== null}
+        onClose={() => setSwitchAsk(null)}
+        title={`Switch to ${switchAsk ?? ''}`}
+        description="There are uncommitted changes in this checkout."
+        className="vy-menu w-[min(92vw,28rem)] text-fg"
+        footer={
+          <>
+            <Button size="sm" variant="ghost" onClick={() => setSwitchAsk(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => switchAsk && void switchBranch(switchAsk, false)}>
+              Bring them along
+            </Button>
+            <Button size="sm" variant="primary" onClick={() => switchAsk && void switchBranch(switchAsk, true)}>
+              Leave them on {currentBranch ?? 'this branch'}
+            </Button>
+          </>
+        }
+      >
+        <p className="m-0 text-sm text-secondary" data-switch-choice>
+          Leave them: they are stashed on {currentBranch ?? 'this branch'} and offered back when you return to it.
+          Bring them: git carries them to {switchAsk}, and refuses if one would be overwritten there.
+        </p>
+      </Dialog>
     </div>
   )
 })

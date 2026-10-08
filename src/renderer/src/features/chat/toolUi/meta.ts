@@ -57,6 +57,7 @@ const SEARCH_TOOLS = new Set([
   'cancel_agent_instance',
   'git_status',
   'git_diff',
+  'github_pr_checks',
   'Skill',
   'lsp'
 ])
@@ -305,6 +306,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   github_pr_create: 'branch',
   github_pr_review: 'branch',
   github_issue: 'branch',
+  github_pr_checks: 'pullRequest',
   edit_notebook: 'file',
   lsp: 'scanSearch',
   create_plan: 'listTodo'

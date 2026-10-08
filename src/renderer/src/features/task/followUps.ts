@@ -20,11 +20,45 @@ export function coverCheckInstruction(check: Pick<DoneWhenCheck, 'id' | 'text' |
 }
 
 /** What a failing pull request check's "Hand to agent" sends. */
-export function prCheckInstruction(check: { name: string; description?: string | null; url?: string | null }, prNumber: number | null): string {
-  return (
+export function prCheckInstruction(
+  check: { name: string; description?: string | null; url?: string | null },
+  prNumber: number | null,
+  log?: { step: string | null; excerpt: string; truncated: boolean } | null
+): string {
+  const lead =
     `The “${check.name}” check failed on pull request #${prNumber ?? ''}${check.description ? ` (${check.description})` : ''}. ` +
     `Read its log${check.url ? ` at ${check.url}` : ''}, find the cause and fix it.`
-  )
+  if (!log?.excerpt.trim()) return lead
+  // The failing step as the PR panel read it, so the work starts from the error.
+  const excerpt = log.excerpt.length > CHECK_LOG_IN_INSTRUCTION ? `…\n${log.excerpt.slice(-CHECK_LOG_IN_INSTRUCTION)}` : log.excerpt
+  const fence = excerpt.includes('```') ? '~~~~' : '```'
+  return `${lead}\n\nFailing step${log.step ? ` (${log.step})` : ''}${log.truncated ? ', last lines' : ''}:\n${fence}\n${excerpt}\n${fence}`
+}
+
+/** Characters of a CI log carried in a "Hand to the agent" instruction; it can read the rest itself. */
+const CHECK_LOG_IN_INSTRUCTION = 4_000
+
+/** The issue a "Start a task" brief is written from. */
+export type IssueForBrief = { number: number; title: string; url: string; body: string }
+
+/** An issue's description carried into a brief; the agent can read the rest with github_issue. */
+const ISSUE_BODY_IN_BRIEF = 6_000
+
+/**
+ * A New task brief from a GitHub issue: what to resolve, the issue's own
+ * words, and a closing line the PR drafted from the task carries, so merging
+ * it closes the issue. The person reads and edits it before it starts.
+ */
+export function issueTaskBrief(issue: IssueForBrief): string {
+  const body = issue.body.trim()
+  const shown = body.length > ISSUE_BODY_IN_BRIEF ? `${body.slice(0, ISSUE_BODY_IN_BRIEF).trimEnd()}…` : body
+  return [
+    `Resolve GitHub issue #${issue.number}: ${issue.title.trim()}`,
+    ...(issue.url ? [issue.url] : []),
+    ...(shown ? ['', shown] : []),
+    '',
+    `Fixes #${issue.number}`
+  ].join('\n')
 }
 
 /** What a pull request review thread's "Hand to agent" / "Address all unresolved" needs of it. */
@@ -100,8 +134,9 @@ const CHECK_OPEN =
   /^The done-when check (\S+) "([\s\S]*)" was never checked\. Check it now and mark it met or not met, with the evidence\.$/
 /** `mockServiceInstruction` (shared/utils/unreachableService). */
 const MOCK = /^Mock ([\s\S]+?) instead of connecting to it, so the work can be verified without it, then carry on\.$/
+/** With the failing step's log after it when the panel had read it (`prCheckInstruction`). */
 const PR_CHECK =
-  /^The “([\s\S]+?)” check failed on pull request #(\d*)(?: \(([\s\S]*?)\))?\. Read its log(?: at \S+)?, find the cause and fix it\.$/
+  /^The “([\s\S]+?)” check failed on pull request #(\d*)(?: \(([\s\S]*?)\))?\. Read its log(?: at \S+)?, find the cause and fix it\.(?:\n\nFailing step(?: \(([^\n]*)\))?(?:, last lines)?:\n(```|~~~~)\n[\s\S]*\n\5)?$/
 const PR_REVIEW =
   /^Address (?:the review comment|the (\d+) unresolved review comments) on pull request #(\d*):\n([\s\S]+)\n(?:Make the change it asks for, or tell me why not\. Do not reply on GitHub or resolve the thread\.|For each, make the change it asks for, or tell me why not\. Do not reply on GitHub or resolve the threads\.)$/
 
@@ -120,7 +155,7 @@ export function followUpOrigin(text: string): FollowUpOrigin | null {
       kind: 'prCheck',
       icon: 'pullRequest',
       ask: `Fix the failing “${m[1]}” check${m[2] ? ` on #${m[2]}` : ''}`,
-      ...(m[3] ? { about: m[3] } : {})
+      ...(m[3] || m[4] ? { about: m[3] || m[4] } : {})
     }
   }
   m = PR_REVIEW.exec(said)

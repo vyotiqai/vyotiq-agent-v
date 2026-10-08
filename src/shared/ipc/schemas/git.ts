@@ -163,6 +163,26 @@ export const GitUnstagePathsResultSchema = z.object({
 })
 export type GitUnstagePathsResult = z.infer<typeof GitUnstagePathsResultSchema>
 
+/**
+ * Throw away the person's own changes to some files. `worktree` drops what is
+ * not staged (back to the staged copy); `all` drops staged and unstaged alike
+ * (back to HEAD). A file git does not track is moved to the OS trash.
+ */
+export const GitDiscardPathsRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  paths: z.array(z.string().min(1)).min(1).max(500),
+  scope: z.enum(['worktree', 'all'])
+})
+
+export const GitDiscardPathsResultSchema = z.object({
+  detail: z.string(),
+  /** Paths whose changes were dropped. */
+  discarded: z.array(z.string()),
+  /** How many of them had their discarded copy put in the OS trash first. */
+  backedUp: z.number().int().min(0)
+})
+export type GitDiscardPathsResult = z.infer<typeof GitDiscardPathsResultSchema>
+
 export const GitBranchEntrySchema = z.object({
   name: z.string().min(1),
   current: z.boolean()
@@ -192,25 +212,121 @@ export const GitCheckoutRequestSchema = z.object({
     .max(255)
     .refine((name) => !name.startsWith('-') && !name.includes('..') && !/[\s\\]/.test(name), {
       message: 'Invalid branch name'
-    })
+    }),
+  /**
+   * Stash uncommitted changes (untracked files too) on the branch being left,
+   * instead of carrying them over; they come back from the branch's stash.
+   */
+  leaveChanges: z.boolean().optional()
 })
 
 export const GitCheckoutResultSchema = z.object({
-  detail: z.string()
+  detail: z.string(),
+  /** The changes were stashed on the branch that was left. */
+  stashed: z.boolean().optional()
 })
 export type GitCheckoutResult = z.infer<typeof GitCheckoutResultSchema>
+
+export const GitBranchStashRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+
+/** Changes left on the current branch by a switch, waiting in `git stash`. Null when there are none. */
+export const GitBranchStashSchema = z.object({
+  /** The stash commit: stash@{n} numbers move as stashes come and go, this does not. */
+  sha: z.string().regex(/^[0-9a-f]{40,64}$/),
+  branch: z.string().min(1),
+  files: z.number().int().min(0),
+  createdAt: z.string().nullable()
+})
+export type GitBranchStash = z.infer<typeof GitBranchStashSchema>
+export const GitBranchStashResultSchema = GitBranchStashSchema.nullable()
+export type GitBranchStashResult = z.infer<typeof GitBranchStashResultSchema>
+
+export const GitStashRestoreRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  sha: z.string().regex(/^[0-9a-f]{40,64}$/, 'Invalid stash')
+})
+
+export const GitStashRestoreResultSchema = z.object({
+  detail: z.string(),
+  /** Some files came back with conflicts; the stash was kept. */
+  conflicted: z.boolean()
+})
+export type GitStashRestoreResult = z.infer<typeof GitStashRestoreResultSchema>
+
+/** One hunk of a file's diff, as `@shared/utils/hunkPatch`'s `hunkIdentity` names it. */
+export const GitHunkIdentitySchema = z.object({
+  oldStart: z.number().int().min(0),
+  oldLines: z.number().int().min(0),
+  newStart: z.number().int().min(0),
+  newLines: z.number().int().min(0),
+  hash: z.string().min(1).max(32)
+})
+
+/**
+ * Stage one hunk of the unstaged diff, or (`unstage`) take one hunk of the
+ * staged diff back out of the index. The working tree never changes.
+ */
+export const GitStageHunkRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  path: z.string().min(1).max(4096),
+  hunk: GitHunkIdentitySchema,
+  /** `diffFingerprint` of the whole diff that was on screen. */
+  diffHash: z.string().min(1).max(32),
+  unstage: z.boolean().optional()
+})
+
+export const GitStageHunkResultSchema = z.object({
+  detail: z.string()
+})
+export type GitStageHunkResult = z.infer<typeof GitStageHunkResultSchema>
+
+export const GitLastCommitRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+
+/** HEAD's commit as Amend needs it. Null with no commit or a detached HEAD. */
+export const GitLastCommitSchema = z.object({
+  sha: z.string().regex(/^[0-9a-f]{40,64}$/),
+  /** The whole message, subject and body. */
+  message: z.string(),
+  /** A remote-tracking branch holds it: amending would need a force push, so it is not offered. */
+  pushed: z.boolean(),
+  /** A merge commit or the first commit: not offered for amend here either. */
+  amendable: z.boolean()
+})
+export type GitLastCommit = z.infer<typeof GitLastCommitSchema>
+export const GitLastCommitResultSchema = GitLastCommitSchema.nullable()
+export type GitLastCommitResult = z.infer<typeof GitLastCommitResultSchema>
+
+export const GitAmendRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  message: z.string().min(1).max(2000),
+  mode: z.enum(['all', 'staged']).optional().default('all'),
+  /** The commit being amended: it must still be HEAD. */
+  sha: z.string().regex(/^[0-9a-f]{40,64}$/, 'Invalid commit'),
+  runId: RunIdSchema.optional()
+})
 
 // ── Sync: fetch / pull / push / new branch (user-initiated only) ────────────
 
 export const GitFetchRequestSchema = z.object({
-  workspacePath: z.string().min(1)
+  workspacePath: z.string().min(1),
+  /**
+   * The app's own periodic fetch, not a click: skipped when this checkout
+   * fetched a moment ago, quiet when it fails, and held off for a while after.
+   */
+  background: z.boolean().optional()
 })
 export type GitFetchRequest = z.infer<typeof GitFetchRequestSchema>
 
 export const GitFetchResultSchema = z.object({
   detail: z.string(),
   ahead: z.number().int().min(0).optional(),
-  behind: z.number().int().min(0).optional()
+  behind: z.number().int().min(0).optional(),
+  /** Background only: nothing was fetched (too soon, no upstream, or held off after a failure). */
+  skipped: z.boolean().optional()
 })
 export type GitFetchResult = z.infer<typeof GitFetchResultSchema>
 

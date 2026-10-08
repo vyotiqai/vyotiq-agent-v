@@ -161,7 +161,8 @@ export function ChatView({
   onPaneCapacityChange,
   openChangesRequest = 0,
   openChangesScope = 'uncommitted',
-  onOpenChangesRequestHandled
+  onOpenChangesRequestHandled,
+  onNewTaskWithBrief
 }: {
   items: UiItem[]
   /** When set, the inspector's leaves subscribe so ChatView skips token patches. */
@@ -224,6 +225,8 @@ export function ChatView({
   openChangesScope?: 'agent' | 'uncommitted'
   /** One-shot consumption ack — the owner resets the request so a remount cannot replay it. */
   onOpenChangesRequestHandled?: () => void
+  /** Open New task in this workspace with the brief written in — an issue's "Start a task". */
+  onNewTaskWithBrief?: (brief: string) => void
 }) {
   const paneCount = paneCountProp ?? multiPane?.panes.length ?? 1
   /**
@@ -1091,6 +1094,7 @@ export function ChatView({
                 onPrMeta={handlePrMeta}
                 onUnlink={hideInspector}
                 onHandToAgent={handToAgent}
+                onStartTask={onNewTaskWithBrief}
                 active={visiblePanelId === 'pr'}
                 runId={activeRunId}
                 items={items}

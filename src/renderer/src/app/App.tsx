@@ -3129,6 +3129,10 @@ function App() {
             openChangesRequest={openChangesRequest}
             openChangesScope={openChangesScope}
             onOpenChangesRequestHandled={consumeOpenChangesRequest}
+            onNewTaskWithBrief={(brief) => {
+              const path = focusedWorkspacePath ?? activeWorkspace
+              if (path) onNewSessionInWorkspace(path, brief)
+            }}
           />
         </ErrorBoundary>
       )}

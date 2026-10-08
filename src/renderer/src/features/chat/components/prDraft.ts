@@ -10,6 +10,27 @@ export type PrDraftSource = {
   /** The run's result: the last thing the agent said once the run ended. */
   summary: string
   checks: readonly DoneWhenCheck[]
+  /** Issues the task's brief says it fixes (`Fixes #12`): the PR closes them when it merges. */
+  closes?: readonly number[]
+}
+
+/** A closing line as GitHub reads it, alone on a line: `Fixes #12`, `Closes #3`, `Resolves #7`. */
+const CLOSING_LINE = /^[ \t]*(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)[ \t]+#(\d{1,9})[ \t]*$/gim
+
+/**
+ * The issues a task was asked to close: every closing line in the messages
+ * the person sent it. A task started from an issue carries one in its brief.
+ */
+export function closingIssuesFrom(items: readonly UiItem[]): number[] {
+  const out: number[] = []
+  for (const item of items) {
+    if (item.kind !== 'message' || item.role !== 'user') continue
+    for (const match of item.content.matchAll(CLOSING_LINE)) {
+      const n = Number(match[1])
+      if (n > 0 && !out.includes(n)) out.push(n)
+    }
+  }
+  return out
 }
 
 /** The task's latest finished result — what a PR drafted from it summarises; '' when there is none. */
@@ -59,6 +80,9 @@ function checkLine(check: DoneWhenCheck): string {
 export function prBodyFrom(source: PrDraftSource): string {
   const summary = source.summary.trim()
   if (!summary) return ''
-  if (source.checks.length === 0) return summary
-  return `${summary}\n\n## Done when\n\n${source.checks.map(checkLine).join('\n')}`
+  const body = source.checks.length === 0 ? summary : `${summary}\n\n## Done when\n\n${source.checks.map(checkLine).join('\n')}`
+  // Each issue the task was asked to fix, said the way GitHub closes it on merge.
+  const said = new Set(closingIssuesFrom([{ kind: 'message', id: '', role: 'user', content: body }]))
+  const closes = (source.closes ?? []).filter((n) => !said.has(n))
+  return closes.length > 0 ? `${body}\n\n${closes.map((n) => `Fixes #${n}`).join('\n')}` : body
 }

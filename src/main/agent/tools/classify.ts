@@ -15,6 +15,7 @@ const PARALLEL_SAFE_BUILTIN = new Set([
   'Skill',
   'git_status',
   'git_diff',
+  'github_pr_checks',
   'mcp_list_tools',
   'pull_agent_instance',
   'lsp'
@@ -173,5 +174,7 @@ export function isParallelBatchClass(cls: StepToolBatchClass): boolean {
  */
 export function isApprovalExemptTool(name: string, args?: Record<string, unknown>): boolean {
   if (name === 'lsp') return lspActionFromArgs(args) !== 'rename'
+  // Listing and reading issues change nothing on GitHub; creating one posts under the account.
+  if (name === 'github_issue') return args?.action === 'list' || args?.action === 'view'
   return APPROVAL_EXEMPT_BUILTIN.has(name) || SERIAL_APPROVAL_EXEMPT_BUILTIN.has(name)
 }

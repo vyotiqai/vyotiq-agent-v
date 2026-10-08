@@ -155,8 +155,20 @@ export const IPC = {
   gitStageAll: 'git:stage-all',
   gitStagePaths: 'git:stage-paths',
   gitUnstagePaths: 'git:unstage-paths',
+  /** Throws away the person's own changes: only from a confirmed button. */
+  gitDiscardPaths: 'git:discard-paths',
   gitBranches: 'git:branches',
   gitCheckout: 'git:checkout',
+  /** Changes a branch switch left on the current branch, waiting in `git stash`. */
+  gitBranchStash: 'git:branch-stash',
+  /** Puts those changes back: only from an explicit button. */
+  gitStashRestore: 'git:stash-restore',
+  /** Stage (or unstage) one hunk of a file's diff. */
+  gitStageHunk: 'git:stage-hunk',
+  /** HEAD's commit as Amend needs it. */
+  gitLastCommit: 'git:last-commit',
+  /** Fold changes into the last, unpushed commit: only from an explicit button. */
+  gitAmend: 'git:amend',
   /** Sync, user-initiated only: fetch every remote, pull (ff-only by default), push, new branch. */
   gitFetch: 'git:fetch',
   gitPull: 'git:pull',
@@ -201,6 +213,7 @@ export const IPC = {
   prReview: 'pr:review',
   githubIssuesList: 'github:issues-list',
   githubIssueCreate: 'github:issue-create',
+  githubIssueView: 'github:issue-view',
   mcpStatus: 'mcp:status',
   mcpRefresh: 'mcp:refresh',
   mcpSetAuthToken: 'mcp:setAuthToken',
@@ -284,6 +297,22 @@ export const IPC = {
   /** Recent open pull requests, for a branch that has none. */
   prList: 'pr:list',
   prCheckout: 'pr:checkout',
+  /** A failed GitHub Actions check's failing step, read from its job log. */
+  prCheckLog: 'pr:check-log',
+  /** Re-runs one GitHub Actions job: only from an explicit button. */
+  prCheckRerun: 'pr:check-rerun',
+  /** After a merge: back to the base branch, the merged branch deleted here and on the remote. */
+  prCleanupMerged: 'pr:cleanup-merged',
+  /** Posts on the PR's conversation under the signed-in account: only from a Send button. */
+  prComment: 'pr:comment',
+  /** Replaces the PR's description, refused when GitHub's copy changed meanwhile. */
+  prEditBody: 'pr:edit-body',
+  /** Requests or withdraws reviews. */
+  prReviewers: 'pr:reviewers',
+  /** People who can be asked for a review in the repository. */
+  prReviewerSuggestions: 'pr:reviewer-suggestions',
+  /** Turns auto-merge on or off. */
+  prAutoMerge: 'pr:auto-merge',
   githubAuthStatus: 'github:auth-status',
   githubAuthStart: 'github:auth-start',
   githubAuthCancel: 'github:auth-cancel',

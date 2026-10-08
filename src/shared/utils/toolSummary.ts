@@ -103,6 +103,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   github_pr_create: { running: 'Creating PR', done: 'Created PR' },
   github_pr_review: { running: 'Reviewing PR', done: 'Reviewed PR' },
   github_issue: { running: 'GitHub issue', done: 'GitHub issue' },
+  github_pr_checks: { running: 'Reading CI checks', done: 'Read CI checks' },
   diagnostics: { running: 'Checking', done: 'Diagnostics' },
   run_tests: { running: 'Testing', done: 'Tests' },
   edit_notebook: { running: 'Editing notebook', done: 'Edited notebook' },

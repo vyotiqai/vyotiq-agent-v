@@ -51,6 +51,24 @@ export const PrReviewSchema = z.object({
 })
 export type PrReview = z.infer<typeof PrReviewSchema>
 
+/** One comment in the pull request's main conversation (not a review thread). */
+export const PrCommentSchema = z.object({
+  author: z.string(),
+  body: z.string(),
+  createdAt: z.string().nullable(),
+  url: z.string().nullable(),
+  /** Hidden on GitHub as spam, off-topic, outdated… — shown folded, as GitHub does. */
+  minimized: z.boolean()
+})
+export type PrComment = z.infer<typeof PrCommentSchema>
+
+/** Auto-merge as GitHub has it set on the pull request. */
+export const PrAutoMergeSchema = z.object({
+  method: z.string(),
+  enabledBy: z.string().nullable()
+})
+export type PrAutoMerge = z.infer<typeof PrAutoMergeSchema>
+
 export const PrViewSchema = z.object({
   number: z.number().int().positive(),
   title: z.string(),
@@ -72,7 +90,15 @@ export const PrViewSchema = z.object({
   reviewRequests: z.array(z.string()),
   isDraft: z.boolean().default(false),
   /** GitHub's mergeability: CLEAN, BLOCKED, DIRTY, BEHIND, UNSTABLE, DRAFT… ('' when gh is too old). */
-  mergeStateStatus: z.string().default('')
+  mergeStateStatus: z.string().default(''),
+  /** The conversation's comments, oldest first (the latest 50 when there are more). */
+  comments: z.array(PrCommentSchema).optional(),
+  /** How many comments the conversation has in all. */
+  commentCount: z.number().int().min(0).optional(),
+  /** Set while auto-merge is on; null when it is off. Absent when gh could not say. */
+  autoMerge: PrAutoMergeSchema.nullable().optional(),
+  /** GitHub would take an auto-merge request from you now (the repo allows it and the PR still waits on something). */
+  canAutoMerge: z.boolean().optional()
 })
 export type PrView = z.infer<typeof PrViewSchema>
 
@@ -306,3 +332,152 @@ export const PrCheckoutResultSchema = z.object({
   detail: z.string()
 })
 export type PrCheckoutResult = z.infer<typeof PrCheckoutResultSchema>
+
+/**
+ * A check's link (`detailsUrl`), as `gh pr view` reported it. Only a GitHub
+ * Actions job link (`…/actions/runs/<run>/job/<job>`) has a log the app can
+ * read or a job it can re-run; main parses the ids out of it.
+ */
+const PrCheckUrlSchema = z.string().trim().min(1).max(2_048)
+
+export const PrCheckLogRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  url: PrCheckUrlSchema
+})
+
+export const PrCheckLogResultSchema = z.object({
+  /** The step that failed (`pnpm typecheck`), when its `Run …` header was in the log. */
+  step: z.string().nullable(),
+  /** The failing step's lines, timestamps and colour codes removed; '' when the job logged no failure. */
+  excerpt: z.string(),
+  /** Lines were dropped from the front of the excerpt to keep it readable. */
+  truncated: z.boolean(),
+  /** Whether a `##[error]` line was found; false means the excerpt is the log's tail. */
+  foundError: z.boolean()
+})
+export type PrCheckLogResult = z.infer<typeof PrCheckLogResultSchema>
+
+export const PrCheckRerunRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  url: PrCheckUrlSchema
+})
+
+export const PrCheckRerunResultSchema = z.object({
+  detail: z.string()
+})
+export type PrCheckRerunResult = z.infer<typeof PrCheckRerunResultSchema>
+
+export const PrCleanupMergedRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive()
+})
+
+export const PrCleanupMergedResultSchema = z.object({
+  detail: z.string(),
+  /** The base branch now checked out, when the workspace was on the merged branch. */
+  switchedTo: z.string().nullable(),
+  deletedLocal: z.boolean(),
+  deletedRemote: z.boolean()
+})
+export type PrCleanupMergedResult = z.infer<typeof PrCleanupMergedResultSchema>
+
+export const GithubIssueViewRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive()
+})
+
+export const GithubIssueCommentSchema = z.object({
+  author: z.string(),
+  body: z.string(),
+  createdAt: z.string().nullable()
+})
+export type GithubIssueComment = z.infer<typeof GithubIssueCommentSchema>
+
+export const GithubIssueDetailSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  url: z.string(),
+  state: z.string(),
+  author: z.string(),
+  body: z.string(),
+  labels: z.array(z.string()),
+  createdAt: z.string().nullable(),
+  /** The latest comments, oldest first; `commentCount` counts every one. */
+  comments: z.array(GithubIssueCommentSchema),
+  commentCount: z.number().int().min(0)
+})
+export type GithubIssueDetail = z.infer<typeof GithubIssueDetailSchema>
+
+/** GitHub caps an issue or PR comment, and a PR body, at 65,536 characters. */
+const GithubTextSchema = z.string().max(65_536)
+
+export const PrCommentRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive(),
+  body: GithubTextSchema.refine((s) => s.trim().length > 0, 'Comment cannot be empty')
+})
+
+export const PrCommentResultSchema = z.object({
+  detail: z.string(),
+  url: z.string().nullable()
+})
+export type PrCommentResult = z.infer<typeof PrCommentResultSchema>
+
+export const PrEditBodyRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive(),
+  body: GithubTextSchema,
+  /** The description as it was when editing began: GitHub's copy must still match it. */
+  expected: GithubTextSchema
+})
+
+export const PrEditBodyResultSchema = z.object({
+  body: z.string()
+})
+export type PrEditBodyResult = z.infer<typeof PrEditBodyResultSchema>
+
+/** A GitHub login, an `org/team` slug, or gh's `@copilot`. */
+export const GithubReviewerSchema = z
+  .string()
+  .trim()
+  .regex(/^(?:@copilot|[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\/[A-Za-z0-9._-]{1,100})?)$/, 'Not a GitHub login or team')
+
+export const PrReviewersRequestSchema = z
+  .object({
+    workspacePath: z.string().min(1),
+    number: z.number().int().positive(),
+    add: z.array(GithubReviewerSchema).max(15).default([]),
+    remove: z.array(GithubReviewerSchema).max(15).default([])
+  })
+  .refine((r) => r.add.length + r.remove.length > 0, 'Name a reviewer to add or remove')
+
+export const PrReviewersResultSchema = z.object({
+  detail: z.string(),
+  /** Who GitHub has review requested from after the change. */
+  reviewRequests: z.array(z.string())
+})
+export type PrReviewersResult = z.infer<typeof PrReviewersResultSchema>
+
+export const PrReviewerSuggestionsRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+
+export const PrReviewerSuggestionsResultSchema = z.object({
+  /** People who can be asked for a review in this repository (at most 100). */
+  logins: z.array(z.string())
+})
+export type PrReviewerSuggestionsResult = z.infer<typeof PrReviewerSuggestionsResultSchema>
+
+export const PrAutoMergeRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive(),
+  enable: z.boolean(),
+  /** How it merges once it can; only read when enabling. */
+  method: PrMergeMethodSchema.optional()
+})
+
+export const PrAutoMergeResultSchema = z.object({
+  detail: z.string(),
+  autoMerge: PrAutoMergeSchema.nullable()
+})
+export type PrAutoMergeResult = z.infer<typeof PrAutoMergeResultSchema>

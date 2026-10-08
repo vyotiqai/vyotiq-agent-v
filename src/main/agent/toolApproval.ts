@@ -234,6 +234,21 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
     }
     return action === 'rename'
   }
+  if (canonical === 'github_issue') {
+    // Listing and reading change nothing; creating posts on GitHub under the account.
+    let action: unknown
+    if (argsJson) {
+      try {
+        const parsed: unknown = JSON.parse(argsJson)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          action = (parsed as Record<string, unknown>).action
+        }
+      } catch {
+        action = undefined
+      }
+    }
+    return action !== 'list' && action !== 'view'
+  }
   if (canonical === 'run_tests') {
     // run_tests runs any sandboxed binary it is handed — `python -c …`, a
     // fetch script — while `terminal` stays gated here. Autonomy answers for

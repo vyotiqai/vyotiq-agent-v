@@ -27,16 +27,27 @@ export type HunkTarget = { path: string; hunk: HunkIdentity; diffHash: string }
 
 /**
  * What a hunk header row offers. Undo takes the hunk back out of the file;
- * Viewed is a mark of your own, as a file's is (a hunk has no Keep: Keep
- * settles a whole write, and a hunk left in is simply kept with its file).
+ * Stage and Unstage move it into or out of git's index (the file itself does
+ * not change). Viewed is a mark of your own, as a file's is (a hunk has no
+ * Keep: Keep settles a whole write, and a hunk left in is simply kept with its file).
  */
 export type HunkActions = {
+  /** Runs the row's action — Undo unless `kind` says otherwise. */
   onUndo: (target: HunkTarget) => void
+  kind?: HunkActionKind
   busy?: boolean
-  /** Why Undo cannot run now (a live run); the button stays, disabled, and says so. */
+  /** Why the action cannot run now (a live run); the button stays, disabled, and says so. */
   blockedReason?: string | null
   isViewed?: (target: HunkTarget) => boolean
   onViewed?: (target: HunkTarget, viewed: boolean) => void
+}
+
+export type HunkActionKind = 'undo' | 'stage' | 'unstage'
+
+const HUNK_ACTION: Record<HunkActionKind, { icon: 'undo' | 'plus' | 'minus'; verb: string; title: string }> = {
+  undo: { icon: 'undo', verb: 'Undo', title: 'Undo this hunk — put these lines back as they were' },
+  stage: { icon: 'plus', verb: 'Stage', title: 'Stage this hunk — the rest of the file stays unstaged' },
+  unstage: { icon: 'minus', verb: 'Unstage', title: 'Unstage this hunk — it stays in the file, unstaged' }
 }
 
 /** Shown on hover or when focus is inside the row; still in the tab order while hidden. */
@@ -244,6 +255,7 @@ export function ReviewDiffTable({
               }
               const viewed = hunkActions.isViewed?.(target) ?? false
               const at = target.hunk.newStart
+              const action = HUNK_ACTION[hunkActions.kind ?? 'undo']
               return (
                 <tr key={row.key} className="group bg-surface" data-hunk={row.key}>
                   <td colSpan={cols} className="py-0 pl-3 pr-2">
@@ -258,9 +270,9 @@ export function ReviewDiffTable({
                       <span className="sticky right-0 flex shrink-0 items-center gap-1 bg-surface pl-1 font-sans">
                         <span className={cn('flex', REVEAL)}>
                           <IconButton
-                            icon="undo"
-                            label={`Undo the hunk at line ${at}`}
-                            title={hunkActions.blockedReason ?? 'Undo this hunk — put these lines back as they were'}
+                            icon={action.icon}
+                            label={`${action.verb} the hunk at line ${at}`}
+                            title={hunkActions.blockedReason ?? action.title}
                             size="xs"
                             tone="onSurface"
                             disabled={Boolean(hunkActions.busy || hunkActions.blockedReason)}

@@ -21,11 +21,13 @@ import { Icon } from '@renderer/lib/icons'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { MarkdownContent } from '@renderer/lib/ui'
-import { CHAT_RIGHT_PANEL_BODY, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { CHAT_RIGHT_PANEL_BODY, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { formatElapsed } from '@shared/utils/timeFormat'
 import type {
   GithubAuthStatus,
+  GithubIssueDetail,
   PrCheck,
+  PrCheckLogResult,
   PrFile,
   PrMergeMethod,
   PrReview,
@@ -34,6 +36,8 @@ import type {
 } from '@shared/ipc'
 import { EmptyPanel } from './PanelChrome'
 import { PrReviewThreads } from './PrReviewThreads'
+import { PrConversation } from './PrConversation'
+import { PrReviewers } from './PrReviewers'
 import { PrOpenList } from './PrOpenList'
 import { GithubAuthPanel } from './GithubAuthPanel'
 import { type DiffLayout } from './DiffPreview'
@@ -46,10 +50,10 @@ import {
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
 import type { UiItem } from '@shared/transcript'
 import { checksRevisionOf, useRunChecks } from '@renderer/features/task/useRunChecks'
-import { latestResultText, prBodyFrom, prTitleFrom } from './prDraft'
-import { prCheckInstruction } from '@renderer/features/task/followUps'
+import { closingIssuesFrom, latestResultText, prBodyFrom, prTitleFrom } from './prDraft'
+import { issueTaskBrief, prCheckInstruction } from '@renderer/features/task/followUps'
 
-type PrTab = 'changes' | 'description' | 'commits' | 'checks' | 'reviews' | 'issues'
+type PrTab = 'changes' | 'description' | 'commits' | 'checks' | 'reviews' | 'issues' | 'issue'
 
 function formatPrState(state: string): string {
   const lower = state.trim().toLowerCase()
@@ -308,10 +312,25 @@ export function mergeSummary(pr: PrView): string {
   return [checks, verdict].filter(Boolean).join(' ')
 }
 
+/**
+ * A GitHub Actions job's link (`…/actions/runs/<run>/job/<job>`): the only
+ * kind of check with a log gh can read and a job gh can re-run. Main checks
+ * the same shape before it calls gh.
+ */
+export function isActionsJobUrl(url: string | null | undefined): boolean {
+  return /^https:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+\/actions\/runs\/\d{1,20}\/job\/\d{1,20}(?:[/?#]|$)/i.test(url?.trim() ?? '')
+}
+
 const MERGE_LABEL: Record<PrMergeMethod, string> = {
   squash: 'Squash and merge',
   merge: 'Create a merge commit',
   rebase: 'Rebase and merge'
+}
+
+/** GitHub's auto-merge method (SQUASH, MERGE, REBASE) as the merge menu words it. */
+function autoMergeWords(method: string): string {
+  const m = method.trim().toUpperCase()
+  return m === 'SQUASH' ? 'squash and merge' : m === 'REBASE' ? 'rebase and merge' : 'merge'
 }
 
 /**
@@ -368,6 +387,7 @@ export function PrPanel({
   gitRevision = 0,
   onOpenFile,
   onHandToAgent,
+  onStartTask,
   runId = null,
   items,
   running = false,
@@ -384,6 +404,8 @@ export function PrPanel({
   onOpenFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   /** Give the task an instruction — used for a failing check. */
   onHandToAgent?: (instruction: string) => void
+  /** Open New task with this brief to read and edit — an issue's "Start a task". */
+  onStartTask?: (brief: string) => void
   /** The task on screen: a new PR's title and description are written from its result and checks. */
   runId?: string | null
   items?: readonly UiItem[]
@@ -422,6 +444,21 @@ export function PrPanel({
   const [issueTitle, setIssueTitle] = useState('')
   const [issueBody, setIssueBody] = useState('')
   const [issueCreateBusy, setIssueCreateBusy] = useState(false)
+  /** The issue open in the Issue view, as GitHub last returned it. */
+  const [issueNumber, setIssueNumber] = useState<number | null>(null)
+  const [issueDetail, setIssueDetail] = useState<GithubIssueDetail | null>(null)
+  const [issueLoading, setIssueLoading] = useState(false)
+  const [issueError, setIssueError] = useState<string | null>(null)
+  /** Failed checks' logs, read once per check link and head commit. */
+  const [checkLogs, setCheckLogs] = useState<
+    Record<string, { loading: boolean; log?: PrCheckLogResult; error?: string }>
+  >({})
+  const [openLog, setOpenLog] = useState<string | null>(null)
+  const [handBusy, setHandBusy] = useState<string | null>(null)
+  const [rerunBusy, setRerunBusy] = useState<string | null>(null)
+  const [cleanupBusy, setCleanupBusy] = useState(false)
+  const [autoMergeOpen, setAutoMergeOpen] = useState(false)
+  const [autoMergeBusy, setAutoMergeBusy] = useState(false)
   const findInputRef = useRef<HTMLInputElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const prevGitRevisionRef = useRef(gitRevision)
@@ -432,6 +469,7 @@ export function PrPanel({
   const closeMenus = useCallback(() => {
     setMenuOpen(false)
     setMergeOpen(false)
+    setAutoMergeOpen(false)
   }, [])
 
   /**
@@ -744,8 +782,11 @@ export function PrPanel({
   const draftChecks = useRunChecks(workspacePath ?? null, draftRunId, checksRevision)
   const draftSummary = useMemo(() => (draftRunId && items ? latestResultText(items) : ''), [draftRunId, items])
   const draftSource = useMemo(
-    () => (draftSummary ? { title: taskTitle, summary: draftSummary, checks: draftChecks } : null),
-    [draftSummary, taskTitle, draftChecks]
+    () =>
+      draftSummary
+        ? { title: taskTitle, summary: draftSummary, checks: draftChecks, closes: closingIssuesFrom(items ?? []) }
+        : null,
+    [draftSummary, taskTitle, draftChecks, items]
   )
   const [prTitleEdit, setPrTitleEdit] = useState<string | null>(null)
   const [prBodyEdit, setPrBodyEdit] = useState<string | null>(null)
@@ -805,6 +846,10 @@ export function PrPanel({
     setFindQuery('')
     setFindOpen(false)
     setEditingTitle(false)
+    setOpenLog(null)
+    setCheckLogs({})
+    setIssueNumber(null)
+    setIssueDetail(null)
   }, [workspacePath])
 
   useEffect(() => {
@@ -847,6 +892,129 @@ export function PrPanel({
       }
     },
     [workspacePath, load, closeMenus, pr, confirm]
+  )
+
+  // A failed check's log is read per head commit: a new push is a new run.
+  const logKey = (check: PrCheck): string => `${pr?.headRefOid ?? ''}|${check.url ?? ''}`
+  const checkLogsRef = useRef(checkLogs)
+  checkLogsRef.current = checkLogs
+  const readCheckLog = useCallback(
+    async (check: PrCheck): Promise<PrCheckLogResult | null> => {
+      if (!workspacePath || !check.url || !window.vyotiq?.prCheckLog) return null
+      const key = `${pr?.headRefOid ?? ''}|${check.url}`
+      const cached = checkLogsRef.current[key]
+      if (cached?.log) return cached.log
+      setCheckLogs((prev) => ({ ...prev, [key]: { loading: true } }))
+      const res = await window.vyotiq.prCheckLog({ workspacePath, url: check.url })
+      setCheckLogs((prev) => ({ ...prev, [key]: res.ok ? { loading: false, log: res.data } : { loading: false, error: res.error } }))
+      return res.ok ? res.data : null
+    },
+    [workspacePath, pr?.headRefOid]
+  )
+
+  const toggleCheckLog = useCallback(
+    (check: PrCheck) => {
+      const key = `${pr?.headRefOid ?? ''}|${check.url ?? ''}`
+      if (openLog === key) {
+        setOpenLog(null)
+        return
+      }
+      setOpenLog(key)
+      if (!checkLogsRef.current[key]?.log) void readCheckLog(check)
+    },
+    [openLog, pr?.headRefOid, readCheckLog]
+  )
+
+  /** The instruction carries the failing step's lines when the log can be read; without them it says where the log is. */
+  const handCheckToAgent = useCallback(
+    async (check: PrCheck) => {
+      if (!onHandToAgent || !pr) return
+      const key = `${pr.headRefOid}|${check.url ?? ''}`
+      setHandBusy(key)
+      try {
+        const log = isActionsJobUrl(check.url) ? await readCheckLog(check) : null
+        onHandToAgent(prCheckInstruction(check, pr.number, log))
+      } finally {
+        setHandBusy(null)
+      }
+    },
+    [onHandToAgent, pr, readCheckLog]
+  )
+
+  const rerunCheck = useCallback(
+    async (check: PrCheck) => {
+      if (!workspacePath || !check.url || !window.vyotiq?.prCheckRerun) return
+      setRerunBusy(check.url)
+      setNotice(null)
+      try {
+        const res = await window.vyotiq.prCheckRerun({ workspacePath, url: check.url })
+        setNotice(res.ok ? res.data.detail : res.error)
+        setNoticeFailed(!res.ok)
+        // GitHub queues the job again at once; reading the PR starts the checks poll.
+        if (res.ok) void load({ quiet: true })
+      } finally {
+        setRerunBusy(null)
+      }
+    },
+    [workspacePath, load]
+  )
+
+  const cleanupMerged = useCallback(async () => {
+    if (!workspacePath || !pr || !window.vyotiq?.prCleanupMerged) return
+    const confirmed = await confirm(
+      `Switch to ${pr.baseRefName} and pull it, then delete ${pr.headRefName} here and on GitHub. A branch with commits that are not in the pull request is kept. GitHub can restore a deleted branch from the pull request.`,
+      { title: 'Clean up the merged branch', confirmLabel: 'Clean up' }
+    )
+    if (!confirmed) return
+    setCleanupBusy(true)
+    setNotice(null)
+    try {
+      const res = await window.vyotiq.prCleanupMerged({ workspacePath, number: pr.number })
+      setNotice(res.ok ? res.data.detail : res.error)
+      setNoticeFailed(!res.ok)
+      // On the base branch now, the merged pull request is no longer this branch's.
+      if (res.ok) void load()
+    } finally {
+      setCleanupBusy(false)
+    }
+  }, [workspacePath, pr, confirm, load])
+
+  /** Auto-merge on (by `method`) or off; what GitHub then has set comes back with the reload. */
+  const setAutoMerge = useCallback(
+    async (enable: boolean, method?: PrMergeMethod) => {
+      if (!workspacePath || !pr) return
+      closeMenus()
+      setAutoMergeBusy(true)
+      setNotice(null)
+      try {
+        const res = await window.vyotiq.prAutoMerge({ workspacePath, number: pr.number, enable, ...(method ? { method } : {}) })
+        setNotice(res.ok ? res.data.detail : res.error)
+        setNoticeFailed(!res.ok)
+        if (res.ok) void load({ quiet: true })
+      } finally {
+        setAutoMergeBusy(false)
+      }
+    },
+    [workspacePath, pr, closeMenus, load]
+  )
+
+  const openIssue = useCallback(
+    async (number: number) => {
+      if (!workspacePath || !window.vyotiq?.githubIssueView) return
+      setIssueNumber(number)
+      setIssueDetail(null)
+      setIssueError(null)
+      setIssueLoading(true)
+      setTab('issue')
+      try {
+        const res = await window.vyotiq.githubIssueView({ workspacePath, number })
+        if (res.ok) setIssueDetail(res.data)
+        else setIssueError(res.error)
+      } finally {
+        setIssueLoading(false)
+      }
+    },
+    [workspacePath]
   )
 
   const toggleViewed = useCallback(
@@ -1133,8 +1301,6 @@ export function PrPanel({
     : []
 
   const openState = pr ? pr.state.trim().toUpperCase() : ''
-  // Built where the record reads it back ("Fix the failing “build” check on #12").
-  const handPrompt = (check: PrCheck): string => prCheckInstruction(check, pr?.number ?? null)
 
   /** A sub-view's own row, fixed above its scroll area like Changes' commit row. */
   const back = (label: string, title: string) => (
@@ -1165,9 +1331,9 @@ export function PrPanel({
           label: 'Reviews',
           ...(reviewsTabCount != null ? { count: reviewsTabCount } : {})
         },
-        { id: 'description', label: 'About' },
-        // Issues opens from the menu; while it is open the strip says so.
-        ...(tab === 'issues' ? [{ id: 'issues' as const, label: 'Issues' }] : [])
+        { id: 'description', label: 'About', ...(pr.commentCount ? { count: pr.commentCount } : {}) },
+        // Issues opens from the menu; while it (or one issue) is open the strip says so.
+        ...(tab === 'issues' || tab === 'issue' ? [{ id: 'issues' as const, label: 'Issues' }] : [])
       ]
     : []
 
@@ -1250,7 +1416,7 @@ export function PrPanel({
             )}
             <Tabs
               size="sm"
-              value={tab}
+              value={tab === 'issue' ? 'issues' : tab}
               onChange={(id) => setTab(id)}
               label="Pull request"
               className="mt-1"
@@ -1309,6 +1475,96 @@ export function PrPanel({
 
       {loading ? (
         <p className="m-0 px-4 py-3 text-xs text-muted">Loading…</p>
+      ) : tab === 'issue' ? (
+        <div className="flex min-h-0 flex-1 flex-col" data-issue-view>
+          <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-1 pr-2 text-xs">
+            <IconButton icon="arrowLeft" label="Back to issues" size="xs" tone="muted" onClick={() => setTab('issues')} />
+            <span className="min-w-0 flex-1 truncate text-fg">
+              {issueDetail ? issueDetail.title : `Issue #${issueNumber ?? ''}`}
+            </span>
+            {issueDetail?.url ? (
+              <IconButton
+                icon="external"
+                label={`Open issue #${issueDetail.number} on GitHub`}
+                size="xs"
+                tone="muted"
+                onClick={() => void openExternal(issueDetail.url)}
+              />
+            ) : null}
+          </div>
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            {issueLoading ? (
+              <p className="m-0 text-xs text-muted">Loading issue…</p>
+            ) : issueError ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                {issueError}
+              </p>
+            ) : issueDetail ? (
+              <>
+                <p className="m-0 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                  <span className="font-mono text-caption text-tertiary">#{issueDetail.number}</span>
+                  <Badge tone={issueDetail.state.toUpperCase() === 'OPEN' ? 'success' : 'outline'}>
+                    {issueDetail.state.toLowerCase()}
+                  </Badge>
+                  <span>{issueDetail.author}</span>
+                  {issueDetail.labels.map((label) => (
+                    <Badge key={label} tone="outline">
+                      {label}
+                    </Badge>
+                  ))}
+                </p>
+                {onStartTask ? (
+                  <div className="mt-2.5 flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon="robot"
+                      title="Opens New task with a brief from this issue, to read and edit before it starts"
+                      onClick={() => onStartTask(issueTaskBrief(issueDetail))}
+                    >
+                      Start a task
+                    </Button>
+                  </div>
+                ) : null}
+                <div className="mt-3" data-issue-body>
+                  {issueDetail.body.trim() ? (
+                    <MarkdownContent content={issueDetail.body} tone="secondary" />
+                  ) : (
+                    <p className="m-0 text-xs text-muted">No description.</p>
+                  )}
+                </div>
+                {issueDetail.comments.length > 0 ? (
+                  <section className="mt-5">
+                    <h4 className={cn('mb-1', SECTION_LABEL)}>
+                      Comments
+                      {issueDetail.commentCount > issueDetail.comments.length
+                        ? ` · latest ${issueDetail.comments.length} of ${issueDetail.commentCount}`
+                        : ` · ${issueDetail.commentCount}`}
+                    </h4>
+                    {/* BORDER_DIVIDER's weight, as a divide: rows inside one list. */}
+                    <ul className="m-0 list-none divide-y divide-border/60 p-0">
+                      {issueDetail.comments.map((comment, i) => (
+                        <li key={`${comment.createdAt ?? ''}-${i}`} className="py-2 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-fg">{comment.author}</span>
+                            {comment.createdAt ? (
+                              <span className="ml-auto truncate text-caption text-tertiary">
+                                {new Date(comment.createdAt).toLocaleString()}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1">
+                            <MarkdownContent content={comment.body} tone="secondary" className="text-xs" />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </div>
       ) : tab === 'issues' ? (
         <div className="flex min-h-0 flex-1 flex-col">
           {back(pr ? 'checks' : 'the pull request', 'Issues')}
@@ -1372,10 +1628,16 @@ export function PrPanel({
               ) : (
                 <ul className="-mx-2 m-0 list-none p-0">
                   {issues.map((issue) => (
-                    <li key={issue.number} className="flex h-8 items-center gap-2 px-2 text-xs">
-                      <span className="shrink-0 font-mono text-caption text-tertiary">#{issue.number}</span>
-                      <span className="min-w-0 flex-1 truncate text-fg">{issue.title}</span>
-                      <span className="shrink-0 text-caption text-tertiary">{issue.state.toLowerCase()}</span>
+                    <li key={issue.number} className={cn('flex h-8 items-center gap-2 rounded-md px-2 text-xs', ROW_HOVER)}>
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-2 self-stretch rounded-sm text-left focus-visible:vy-focus-ring"
+                        onClick={() => void openIssue(issue.number)}
+                      >
+                        <span className="shrink-0 font-mono text-caption text-tertiary">#{issue.number}</span>
+                        <span className="min-w-0 flex-1 truncate text-fg">{issue.title}</span>
+                        <span className="shrink-0 text-caption text-tertiary">{issue.state.toLowerCase()}</span>
+                      </button>
                       {issue.url ? (
                         <IconButton
                           icon="external"
@@ -1547,11 +1809,13 @@ export function PrPanel({
       ) : (
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {tab === 'description' ? (
-            pr.body.trim() ? (
-              <MarkdownContent content={pr.body} tone="secondary" />
-            ) : (
-              <p className="m-0 text-xs text-muted">No description.</p>
-            )
+            <PrConversation
+              pr={pr}
+              workspacePath={workspacePath ?? null}
+              onReload={() => void load({ quiet: true })}
+              onNotice={showNotice}
+              onOpenExternal={(url) => void openExternal(url)}
+            />
           ) : tab === 'commits' ? (
             showConnect && pr.commits.length === 0 ? (
               githubAuthPanel
@@ -1582,7 +1846,19 @@ export function PrPanel({
                     Decision: <span className="font-medium text-fg">{pr.reviewDecision.toLowerCase().replace(/_/g, ' ')}</span>
                   </p>
                 ) : null}
-                {pr.reviewRequests.length > 0 ? (
+                {openState === 'OPEN' ? (
+                  <div className={pr.reviewDecision ? 'mt-3' : undefined}>
+                    <PrReviewers
+                      number={pr.number}
+                      requested={pr.reviewRequests}
+                      workspacePath={workspacePath ?? null}
+                      onChanged={(reviewRequests) =>
+                        setPr((prev) => (prev && prev.number === pr.number ? { ...prev, reviewRequests } : prev))
+                      }
+                      onNotice={showNotice}
+                    />
+                  </div>
+                ) : pr.reviewRequests.length > 0 ? (
                   <p className="m-0 mt-1 text-xs text-muted">Requested: {pr.reviewRequests.join(', ')}</p>
                 ) : null}
                 {(pr.latestReviews.length ? pr.latestReviews : pr.reviews).length === 0 ? (
@@ -1671,6 +1947,9 @@ export function PrPanel({
                   {pr.checks.map((c, i) => {
                     const { glyph, word } = checkState(c)
                     const duration = checkDuration(c, now)
+                    const actionsJob = glyph === 'failed' && isActionsJobUrl(c.url)
+                    const logOpen = actionsJob && openLog === logKey(c)
+                    const logState = logOpen ? checkLogs[logKey(c)] : undefined
                     return (
                       <li
                         key={`${c.name}-${i}`}
@@ -1694,13 +1973,61 @@ export function PrPanel({
                             />
                           ) : null}
                         </div>
-                        {glyph === 'failed' && (c.description || onHandToAgent) ? (
-                          <div className="mt-1.5 flex items-center gap-2 pl-6 text-xs">
+                        {glyph === 'failed' && (c.description || onHandToAgent || actionsJob) ? (
+                          <div className="mt-1.5 flex items-center gap-1.5 pl-6 text-xs">
                             <span className="min-w-0 flex-1 truncate text-danger">{c.description ?? word}</span>
+                            {actionsJob ? (
+                              <IconButton
+                                icon="terminal"
+                                label={logOpen ? `Hide the ${c.name} log` : `Show the ${c.name} log`}
+                                size="xs"
+                                tone="muted"
+                                active={logOpen}
+                                aria-expanded={logOpen}
+                                onClick={() => toggleCheckLog(c)}
+                              />
+                            ) : null}
+                            {actionsJob ? (
+                              <IconButton
+                                icon="refresh"
+                                label={`Re-run ${c.name}`}
+                                size="xs"
+                                tone="muted"
+                                disabled={rerunBusy != null}
+                                onClick={() => void rerunCheck(c)}
+                              />
+                            ) : null}
                             {onHandToAgent ? (
-                              <Button size="xs" icon="robot" onClick={() => onHandToAgent(handPrompt(c))}>
+                              <Button
+                                size="xs"
+                                icon="robot"
+                                pending={handBusy === logKey(c)}
+                                disabled={handBusy != null}
+                                onClick={() => void handCheckToAgent(c)}
+                              >
                                 Hand to the agent
                               </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {logOpen ? (
+                          <div className="mt-1.5 pl-6" data-check-log>
+                            {logState?.loading ? (
+                              <p className="m-0 text-xs text-muted">Reading the job log…</p>
+                            ) : logState?.error ? (
+                              <p className="m-0 text-xs text-danger" role="alert">
+                                {logState.error}
+                              </p>
+                            ) : logState?.log ? (
+                              <>
+                                <p className="m-0 mb-1 truncate font-mono text-caption text-tertiary">
+                                  {logState.log.step ? `Run ${logState.log.step}` : logState.log.foundError ? 'Failing step' : 'End of the log'}
+                                  {logState.log.truncated ? ' · last lines' : ''}
+                                </p>
+                                <pre className="scroll-thin m-0 max-h-64 overflow-auto rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-caption leading-4 text-fg">
+                                  {logState.log.excerpt || 'The job logged nothing.'}
+                                </pre>
+                              </>
                             ) : null}
                           </div>
                         ) : null}
@@ -1713,12 +2040,42 @@ export function PrPanel({
               <section className="mt-5">
                 <h4 className={cn('mb-2', SECTION_LABEL)}>Merge</h4>
                 {openState === 'MERGED' ? (
-                  <p className="m-0 text-xs text-muted">Merged into {pr.baseRefName}.</p>
+                  <>
+                    <p className="m-0 text-xs text-muted">Merged into {pr.baseRefName}.</p>
+                    {workspacePath ? (
+                      <div className="mt-2.5 flex items-center gap-1.5">
+                        <Button
+                          size="sm"
+                          icon="trash"
+                          pending={cleanupBusy}
+                          disabled={cleanupBusy || running}
+                          title={running ? 'Stop the task first: the clean-up switches branches' : undefined}
+                          onClick={() => void cleanupMerged()}
+                        >
+                          Clean up {pr.headRefName}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </>
                 ) : openState === 'CLOSED' ? (
                   <p className="m-0 text-xs text-muted">Closed without merging.</p>
                 ) : (
                   <>
                     {mergeSummary(pr) ? <p className="m-0 text-xs text-muted">{mergeSummary(pr)}</p> : null}
+                    {pr.autoMerge ? (
+                      <div className="mt-2 flex items-center gap-2 text-xs" data-auto-merge="on">
+                        <Icon name="clock" size={13} className="shrink-0 text-accent" />
+                        <span className="min-w-0 flex-1 text-fg">
+                          Auto-merge is on: GitHub will {autoMergeWords(pr.autoMerge.method)} once its requirements are met
+                          {pr.autoMerge.enabledBy ? <span className="text-tertiary"> · by {pr.autoMerge.enabledBy}</span> : null}
+                        </span>
+                        {workspacePath ? (
+                          <Button size="xs" variant="ghost" pending={autoMergeBusy} disabled={autoMergeBusy} onClick={() => void setAutoMerge(false)}>
+                            Turn off
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="mt-2.5 flex items-center gap-1.5">
                       <ActionMenu
                         open={mergeOpen}
@@ -1749,6 +2106,39 @@ export function PrPanel({
                           </Button>
                         )}
                       />
+                      {pr.canAutoMerge && !pr.autoMerge && workspacePath ? (
+                        <ActionMenu
+                          open={autoMergeOpen}
+                          onOpenChange={setAutoMergeOpen}
+                          placement="up"
+                          align="start"
+                          aria-label="Merge when ready"
+                          items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
+                            id: method,
+                            label: MERGE_LABEL[method],
+                            icon: method === 'squash' ? ('gitCommit' as const) : method === 'merge' ? ('gitMerge' as const) : ('gitRebase' as const),
+                            onSelect: () => void setAutoMerge(true, method)
+                          }))}
+                          trigger={(t) => (
+                            <Button
+                              ref={t.ref}
+                              size="sm"
+                              variant="secondary"
+                              icon="clock"
+                              trailingIcon="chevron"
+                              pending={autoMergeBusy}
+                              disabled={autoMergeBusy}
+                              title="GitHub merges it by itself once its checks and reviews are done"
+                              aria-expanded={t['aria-expanded']}
+                              aria-controls={t['aria-controls']}
+                              aria-haspopup={t['aria-haspopup']}
+                              onClick={t.onClick}
+                            >
+                              Merge when ready
+                            </Button>
+                          )}
+                        />
+                      ) : null}
                       <span className="flex-1" />
                       {pr.isDraft ? (
                         <Button size="sm" variant="ghost" pending={readyBusy} onClick={() => void markReady()}>

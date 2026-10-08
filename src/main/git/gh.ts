@@ -5,8 +5,19 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
 import type {
+  GithubIssueDetail,
+  PrAutoMerge,
+  PrAutoMergeResult,
   PrChangeType,
+  PrComment,
+  PrCommentResult,
+  PrEditBodyResult,
+  PrReviewersResult,
+  PrReviewerSuggestionsResult,
+  PrCheckLogResult,
+  PrCheckRerunResult,
   PrCheckoutResult,
+  PrCleanupMergedResult,
   PrCreateResult,
   PrListResult,
   PrReview,
@@ -33,7 +44,10 @@ import {
   hasGitRemote,
   isGitRepo,
   parseGitObjectId,
+  pullCurrentBranch,
   pushCurrentBranch,
+  readGitUpstream,
+  runGit,
   sanitizeRelativePaths,
   type CommitOutcome
 } from './git'
@@ -72,7 +86,7 @@ const GIT_ENV = {
   GCM_INTERACTIVE: 'never'
 }
 
-async function gh(args: string[], cwd: string, timeout = TIMEOUT_MS): Promise<string> {
+async function gh(args: string[], cwd: string, timeout = TIMEOUT_MS, maxBuffer = MAX_BUFFER): Promise<string> {
   const executable = await resolveGhExecutable()
   if (!executable) {
     throw new Error('GitHub CLI (gh) is not installed or not on PATH')
@@ -84,7 +98,7 @@ async function gh(args: string[], cwd: string, timeout = TIMEOUT_MS): Promise<st
     cwd,
     encoding: 'utf8',
     timeout,
-    maxBuffer: MAX_BUFFER,
+    maxBuffer,
     windowsHide: true,
     env
   })
@@ -164,6 +178,21 @@ type GhPrJson = {
   reviewDecision?: string
   reviewRequests?: Array<{ login?: string } | string | null>
   isDraft?: boolean
+  comments?: GhCommentJson[]
+  autoMergeRequest?: GhAutoMergeJson | null
+}
+
+type GhCommentJson = {
+  author?: { login?: string | null } | null
+  body?: string | null
+  createdAt?: string | null
+  url?: string | null
+  isMinimized?: boolean | null
+}
+
+type GhAutoMergeJson = {
+  mergeMethod?: string | null
+  enabledBy?: { login?: string | null } | null
 }
 
 function mapChangeType(raw: string | undefined): PrChangeType {
@@ -220,7 +249,9 @@ const PR_VIEW_JSON_FIELDS = [
   'reviewDecision',
   'reviewRequests',
   'isDraft',
-  'mergeStateStatus'
+  'mergeStateStatus',
+  'comments',
+  'autoMergeRequest'
 ] as const
 
 /** Older gh / reduced GraphQL surface when optional review fields are unsupported. */
@@ -311,23 +342,65 @@ function mapPrView(data: GhPrJson): PrView | null {
     reviewRequests: (data.reviewRequests ?? [])
       .map(mapReviewRequest)
       .filter((login): login is string => Boolean(login)),
-    isDraft: data.isDraft === true
+    isDraft: data.isDraft === true,
+    ...(Array.isArray(data.comments)
+      ? {
+          comments: data.comments.slice(-PR_COMMENTS_KEPT).map(mapPrComment),
+          commentCount: data.comments.length
+        }
+      : {}),
+    ...('autoMergeRequest' in data ? { autoMerge: mapAutoMerge(data.autoMergeRequest) } : {})
   }
 }
 
-/** Current branch PR, or null when none exists for this branch. Throws on gh/auth/network errors. */
-export async function prView(cwd: string): Promise<PrView | null> {
+/** The conversation's latest comments kept for the panel; the count still says how many there are. */
+const PR_COMMENTS_KEPT = 50
+/** One comment's text, as the panel keeps it. */
+const PR_COMMENT_BODY_CAP = 20_000
+
+function mapPrComment(c: GhCommentJson): PrComment {
+  return {
+    // A deleted account's comments keep their text and lose their author.
+    author: c.author?.login?.trim() || 'ghost',
+    body: capChars(c.body ?? '', PR_COMMENT_BODY_CAP),
+    createdAt: c.createdAt ?? null,
+    url: httpsUrl(c.url),
+    minimized: c.isMinimized === true
+  }
+}
+
+function mapAutoMerge(raw: GhAutoMergeJson | null | undefined): PrAutoMerge | null {
+  if (!raw) return null
+  return {
+    method: (raw.mergeMethod ?? '').trim().toUpperCase() || 'MERGE',
+    enabledBy: raw.enabledBy?.login?.trim() || null
+  }
+}
+
+/**
+ * Current branch PR (or pull request `number`), or null when none exists.
+ * Throws on gh/auth/network errors.
+ */
+export async function prView(cwd: string, number?: number): Promise<PrView | null> {
   if (!(await ghAvailable())) {
     throw new Error('GitHub CLI (gh) is not installed or not on PATH')
   }
+  const which = number === undefined ? [] : [prNumberArg(number)]
 
   const fetchJson = async (fields: readonly string[]): Promise<PrView | null> => {
-    const raw = await gh(['pr', 'view', '--json', fields.join(',')], cwd)
+    const raw = await gh(['pr', 'view', ...which, '--json', fields.join(',')], cwd)
     return mapPrView(JSON.parse(raw) as GhPrJson)
   }
 
   try {
-    return await fetchJson(PR_VIEW_JSON_FIELDS)
+    const view = await fetchJson(PR_VIEW_JSON_FIELDS)
+    // Auto-merge is offered only where GitHub says it would take it: the
+    // repository allows it and the pull request still waits on something.
+    if (view && view.autoMerge === null && !view.isDraft && view.state.toUpperCase() === 'OPEN') {
+      const can = await viewerCanEnableAutoMerge(cwd, view.number)
+      if (can !== null) view.canAutoMerge = can
+    }
+    return view
   } catch (err) {
     const message = execErrorText(err)
     if (isExpectedPrAbsence(message)) return null
@@ -1271,4 +1344,636 @@ export async function prCheckout(cwd: string, number: number): Promise<PrCheckou
   }
   const branch = await currentGitBranch(cwd)
   return { detail: branch ? `Checked out #${prNumber} on ${branch}` : `Checked out #${prNumber}` }
+}
+
+// ── Issues: one issue, read in full ─────────────────────────────────────────
+
+const ISSUE_BODY_CAP = 20_000
+const ISSUE_COMMENT_CAP = 4_000
+/** The latest comments shown; an issue with more says how many it has. */
+const ISSUE_COMMENTS_SHOWN = 20
+
+type GhIssueJson = {
+  number?: number
+  title?: string
+  body?: string | null
+  state?: string
+  url?: string
+  createdAt?: string | null
+  author?: { login?: string | null } | null
+  labels?: Array<{ name?: string | null } | null> | null
+  comments?: Array<{ author?: { login?: string | null } | null; body?: string | null; createdAt?: string | null } | null> | null
+}
+
+function capChars(text: string, cap: number): string {
+  return text.length > cap ? `${text.slice(0, cap).trimEnd()}\n\n[…cut at ${cap} characters]` : text
+}
+
+/** @internal Exported for unit tests. */
+export function mapGithubIssue(data: GhIssueJson): GithubIssueDetail | null {
+  if (typeof data.number !== 'number' || !Number.isInteger(data.number) || data.number < 1) return null
+  const comments = (data.comments ?? []).filter((c): c is NonNullable<typeof c> => Boolean(c))
+  return {
+    number: data.number,
+    title: data.title ?? '',
+    url: httpsUrl(data.url) ?? '',
+    state: data.state ?? '',
+    // A deleted account's issues keep their text and lose their author.
+    author: data.author?.login?.trim() || 'ghost',
+    body: capChars(data.body ?? '', ISSUE_BODY_CAP),
+    labels: (data.labels ?? []).map((l) => l?.name?.trim() ?? '').filter(Boolean),
+    createdAt: data.createdAt ?? null,
+    comments: comments.slice(-ISSUE_COMMENTS_SHOWN).map((c) => ({
+      author: c.author?.login?.trim() || 'ghost',
+      body: capChars(c.body ?? '', ISSUE_COMMENT_CAP),
+      createdAt: c.createdAt ?? null
+    })),
+    commentCount: comments.length
+  }
+}
+
+/** `gh issue view`: an issue's text, labels and latest comments. */
+export async function viewGithubIssue(cwd: string, number: number): Promise<GithubIssueDetail> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  if (!Number.isInteger(number) || number < 1) throw new Error('Invalid issue number')
+  let raw: string
+  try {
+    raw = await gh(
+      ['issue', 'view', String(number), '--json', 'number,title,body,state,url,author,labels,comments,createdAt'],
+      cwd
+    )
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  let data: GhIssueJson
+  try {
+    data = JSON.parse(raw) as GhIssueJson
+  } catch {
+    throw new Error('GitHub CLI returned an invalid issue')
+  }
+  const issue = mapGithubIssue(data)
+  if (!issue) throw new Error(`GitHub returned no issue #${number}`)
+  return issue
+}
+
+// ── CI: a failed check's log, and running its job again ────────────────────
+//
+// Only a GitHub Actions job has a log gh can read and a job gh can re-run.
+// Its check links to `…/actions/runs/<run id>/job/<job id>`, and that job id
+// is the job's databaseId, which is what `gh run view --job` and
+// `gh run rerun --job` take. Any other check (an external CI, a bot) only
+// links out.
+
+const ACTIONS_JOB_URL_RE = /^https:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+\/actions\/runs\/(\d{1,20})\/job\/(\d{1,20})(?:[/?#]|$)/i
+const CHECK_LOG_TIMEOUT_MS = 60_000
+/** A whole job's log can run to megabytes; it is only read to find one step. */
+const CHECK_LOG_MAX_BUFFER = 32 * 1024 * 1024
+const CHECK_LOG_MAX_LINES = 150
+const CHECK_LOG_MAX_CHARS = 12_000
+/** Lines kept from the end of a log that has no `##[error]` line. */
+const CHECK_LOG_TAIL_LINES = 60
+
+/** The run and job a GitHub Actions check links to; null for any other link. */
+export function parseActionsJobUrl(url: string | null | undefined): { runId: string; jobId: string } | null {
+  const match = ACTIONS_JOB_URL_RE.exec(url?.trim() ?? '')
+  return match ? { runId: match[1]!, jobId: match[2]! } : null
+}
+
+/**
+ * One line of `gh run view --log`: `<job>\t<step>\t<timestamp> <text>`. gh
+ * 2.98 names every step "UNKNOWN STEP", so the step is read from the log's
+ * own `##[group]Run …` headers instead. Colour codes arrive either as ESC
+ * sequences or spelled out as `^[[36;1m`.
+ */
+function cleanLogLine(line: string): string {
+  return line
+    .replace(/^[^\t\r\n]*\t[^\t\r\n]*\t/, '')
+    .replace(/^\uFEFF?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?/, '')
+    // eslint-disable-next-line no-control-regex -- ESC opens the colour codes being removed
+    .replace(/(?:\x1b|\^\[)\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\s+$/, '')
+}
+
+function shownLogLine(line: string): string | null {
+  if (line.startsWith('##[endgroup]')) return null
+  if (line.startsWith('##[group]')) return line.slice('##[group]'.length)
+  if (line.startsWith('##[error]')) return `Error: ${line.slice('##[error]'.length)}`
+  if (line.startsWith('##[warning]')) return `Warning: ${line.slice('##[warning]'.length)}`
+  return line
+}
+
+/**
+ * The part of a job log that says why it failed: the step around the last
+ * `##[error]` line, from that step's `Run …` header (its echoed command and
+ * `shell:` lines skipped) to the error. With no error line, the log's tail.
+ * Capped from the front, so the error itself is always kept.
+ */
+export function extractFailedStepLog(raw: string): PrCheckLogResult {
+  const lines = raw.split(/\r?\n/).map(cleanLogLine)
+  while (lines.length > 0 && !lines[lines.length - 1]) lines.pop()
+  let errorAt = -1
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i]!.startsWith('##[error]')) {
+      errorAt = i
+      break
+    }
+  }
+  let step: string | null = null
+  let body: string[]
+  if (errorAt === -1) {
+    body = lines.slice(-CHECK_LOG_TAIL_LINES)
+  } else {
+    let start = 0
+    for (let i = errorAt; i >= 0; i -= 1) {
+      if (lines[i]!.startsWith('##[group]Run ')) {
+        start = i
+        step = lines[i]!.slice('##[group]Run '.length).trim() || null
+        break
+      }
+    }
+    let from = start
+    if (step) {
+      // Past the header's own group: the echoed command, `shell:` and `env:`.
+      const close = lines.findIndex((line, i) => i > start && i < errorAt && line.startsWith('##[endgroup]'))
+      if (close !== -1) from = close + 1
+    }
+    body = lines.slice(from, errorAt + 1)
+  }
+  const shown = body.map(shownLogLine).filter((line): line is string => line !== null)
+  const kept = shown.length > CHECK_LOG_MAX_LINES ? shown.slice(-CHECK_LOG_MAX_LINES) : shown
+  let truncated = kept.length < shown.length
+  let excerpt = kept.join('\n')
+  if (excerpt.length > CHECK_LOG_MAX_CHARS) {
+    excerpt = excerpt.slice(-CHECK_LOG_MAX_CHARS)
+    excerpt = excerpt.slice(excerpt.indexOf('\n') + 1)
+    truncated = true
+  }
+  return { step, excerpt, truncated, foundError: errorAt !== -1 }
+}
+
+function actionsJobIds(url: string): { runId: string; jobId: string } {
+  const ids = parseActionsJobUrl(url)
+  if (!ids) {
+    throw new Error('Only a GitHub Actions check has a log and a job the app can read or re-run. Open this check on its own site.')
+  }
+  return ids
+}
+
+/** The failing step of a GitHub Actions check, from its job's log. */
+export async function prCheckLog(cwd: string, url: string): Promise<PrCheckLogResult> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  const { jobId } = actionsJobIds(url)
+  try {
+    // `--log-failed` is empty for a job that did not fail; the whole log then.
+    let raw = await gh(['run', 'view', '--job', jobId, '--log-failed'], cwd, CHECK_LOG_TIMEOUT_MS, CHECK_LOG_MAX_BUFFER)
+    if (!raw.trim()) {
+      raw = await gh(['run', 'view', '--job', jobId, '--log'], cwd, CHECK_LOG_TIMEOUT_MS, CHECK_LOG_MAX_BUFFER)
+    }
+    return extractFailedStepLog(raw)
+  } catch (err) {
+    if ((err as { code?: unknown } | null)?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      throw new Error('The job log is larger than 32 MB. Open the check on GitHub to read it.')
+    }
+    throw new Error(execErrorText(err))
+  }
+}
+
+type GhRunJobsJson = { jobs?: Array<{ databaseId?: number; name?: string; url?: string } | null> | null }
+
+/**
+ * Run one GitHub Actions job again (`gh run rerun --job`). The job is looked
+ * up in its run first, so a link whose id is not a job's databaseId is
+ * refused here rather than by a 404 from GitHub.
+ */
+export async function prCheckRerun(cwd: string, url: string): Promise<PrCheckRerunResult> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  const { runId, jobId } = actionsJobIds(url)
+  let jobs: GhRunJobsJson
+  try {
+    jobs = JSON.parse(await gh(['run', 'view', runId, '--json', 'jobs'], cwd)) as GhRunJobsJson
+  } catch (err) {
+    throw new Error(err instanceof SyntaxError ? 'GitHub CLI returned an invalid run' : execErrorText(err))
+  }
+  const target = url.trim().replace(/[?#].*$/, '')
+  const job = (jobs.jobs ?? []).find(
+    (j) => j && (String(j.databaseId) === jobId || (j.url ?? '').replace(/[?#].*$/, '') === target)
+  )
+  if (!job || typeof job.databaseId !== 'number') {
+    throw new Error(`Run ${runId} has no job ${jobId}; refresh the checks and try again.`)
+  }
+  try {
+    await gh(['run', 'rerun', runId, '--job', String(job.databaseId)], cwd)
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  return { detail: `Re-running ${job.name?.trim() || 'the job'}` }
+}
+
+// ── After a merge: tidy the branch away ─────────────────────────────────────
+
+type GhMergedPrJson = {
+  state?: string
+  headRefName?: string
+  baseRefName?: string
+  headRefOid?: string
+  isCrossRepository?: boolean
+}
+
+/** A branch name safe to hand git and GitHub's refs API: no option, no `..`, no spaces. */
+function safeBranchName(raw: string | undefined, what: string): string {
+  const name = raw?.trim() ?? ''
+  if (!name || name.startsWith('-') || name.includes('..') || /[\s\\~^:?*[]/.test(name)) {
+    throw new Error(`GitHub reported an unusable ${what} branch name`)
+  }
+  return name
+}
+
+async function gitOut(args: string[], cwd: string): Promise<string | null> {
+  try {
+    return await runGit(args, cwd)
+  } catch {
+    return null
+  }
+}
+
+function refsApiPath(branch: string): string {
+  return `repos/{owner}/{repo}/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/**
+ * After a pull request merged: switch the workspace from its branch to the
+ * base and fast-forward it, then delete the branch here and on GitHub —
+ * what GitHub's "Delete branch" button and a `git switch` + `git pull` do.
+ *
+ * Nothing is lost on the way: the local branch goes only when every commit on
+ * it is in the merged pull request, the GitHub branch only when it still
+ * points at the merged head, a fork's branch is never touched, and the switch
+ * is refused while tracked files have uncommitted changes.
+ */
+export async function prCleanupMerged(cwd: string, number: number): Promise<PrCleanupMergedResult> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const prNumber = prNumberArg(number)
+  let pr: GhMergedPrJson
+  try {
+    pr = JSON.parse(
+      await gh(['pr', 'view', prNumber, '--json', 'state,headRefName,baseRefName,headRefOid,isCrossRepository'], cwd)
+    ) as GhMergedPrJson
+  } catch (err) {
+    throw new Error(err instanceof SyntaxError ? 'GitHub CLI returned an invalid pull request' : execErrorText(err))
+  }
+  if ((pr.state ?? '').toUpperCase() !== 'MERGED') {
+    throw new Error(`Pull request #${prNumber} is not merged; its branch stays.`)
+  }
+  const head = safeBranchName(pr.headRefName, 'head')
+  const base = safeBranchName(pr.baseRefName, 'base')
+  const headOid = parseGitObjectId(pr.headRefOid)
+  const notes: string[] = []
+  let switchedTo: string | null = null
+  let deletedLocal = false
+  let deletedRemote = false
+
+  // 1. Off the merged branch, onto the base, up to date.
+  if ((await currentGitBranch(cwd)) === head) {
+    const changed = await trackedChanges(cwd)
+    if (changed.length > 0) {
+      throw new Error(
+        `Commit or discard the ${changed.length} uncommitted change${changed.length === 1 ? '' : 's'} on ${head} before cleaning it up.`
+      )
+    }
+    try {
+      // With no local base, git's own guess makes one tracking the remote's.
+      await runGit(['switch', base], cwd)
+      switchedTo = base
+    } catch (err) {
+      const said = execErrorText(err)
+      const elsewhere = /already (checked out|used by worktree) at '([^']+)'/i.exec(said)
+      notes.push(
+        elsewhere
+          ? `${base} is checked out in another worktree (${elsewhere[2]}), so this one stays on ${head}`
+          : `Could not switch to ${base}: ${said.split('\n')[0]}`
+      )
+    }
+    if (switchedTo && (await readGitUpstream(cwd))) {
+      try {
+        const pulled = await pullCurrentBranch(cwd, 'ff-only')
+        notes.push(pulled.kind === 'diverged' ? `${base} has diverged from its upstream; pull it yourself` : pulled.detail)
+      } catch (err) {
+        notes.push(err instanceof Error ? err.message : String(err))
+      }
+    }
+  }
+
+  // 2. The local branch, only when nothing on it is missing from the merge.
+  const localTip = (await gitOut(['rev-parse', '--verify', '--quiet', `refs/heads/${head}`], cwd))?.trim() || null
+  if (localTip && (await currentGitBranch(cwd)) !== head) {
+    const contained =
+      headOid != null &&
+      (localTip === headOid || (await gitOut(['merge-base', '--is-ancestor', localTip, headOid], cwd)) !== null)
+    if (contained) {
+      await runGit(['branch', '-D', head], cwd)
+      deletedLocal = true
+    } else {
+      notes.push(`Kept the local ${head}: it has commits that are not in the pull request`)
+    }
+  }
+
+  // 3. The branch on GitHub, never a fork's, only while it is the merged head.
+  if (pr.isCrossRepository) {
+    notes.push(`${head} lives on a fork, so it was left there`)
+  } else {
+    let remoteSha: string | null = null
+    let remoteGone = false
+    try {
+      const ref = JSON.parse(await gh(['api', refsApiPath(head).replace('/git/refs/', '/git/ref/')], cwd)) as {
+        object?: { sha?: string }
+      }
+      remoteSha = parseGitObjectId(ref.object?.sha)
+    } catch (err) {
+      const said = execErrorText(err)
+      if (/HTTP 404|Not Found/i.test(said)) remoteGone = true
+      else notes.push(`Could not read ${head} on GitHub: ${said.split('\n')[0]}`)
+    }
+    if (remoteGone) {
+      notes.push(`${head} was already deleted on GitHub`)
+    } else if (remoteSha && headOid && remoteSha !== headOid) {
+      notes.push(`Kept ${head} on GitHub: it has commits pushed after the merge`)
+    } else if (remoteSha) {
+      try {
+        await gh(['api', '-X', 'DELETE', refsApiPath(head)], cwd)
+        deletedRemote = true
+      } catch (err) {
+        notes.push(`Could not delete ${head} on GitHub: ${execErrorText(err).split('\n')[0]}`)
+      }
+    }
+    if (deletedRemote || remoteGone) {
+      // The remote-tracking ref it leaves behind, so the branch list says it is gone.
+      for (const remote of ((await gitOut(['remote'], cwd)) ?? '').split(/\r?\n/).map((r) => r.trim()).filter(Boolean)) {
+        if (!remote.startsWith('-')) await gitOut(['branch', '--delete', '--remotes', `${remote}/${head}`], cwd)
+      }
+    }
+  }
+
+  const deleted =
+    deletedLocal && deletedRemote
+      ? `deleted ${head} here and on GitHub`
+      : deletedLocal
+        ? `deleted ${head}`
+        : deletedRemote
+          ? `deleted ${head} on GitHub`
+          : null
+  const done = [switchedTo ? `Switched to ${switchedTo}` : null, deleted].filter(Boolean)
+  const lead = done.length > 0 ? done.join(', ') : 'Nothing to clean up'
+  return {
+    detail: [lead.charAt(0).toUpperCase() + lead.slice(1), ...notes].join('. ') + '.',
+    switchedTo,
+    deletedLocal,
+    deletedRemote
+  }
+}
+
+// ── The PR conversation, reviewers and auto-merge ───────────────────────────
+//
+// Each one changes the pull request on GitHub under the signed-in account, so
+// each is wired to one explicit button and nothing calls it on its own.
+
+/**
+ * Hand gh a text through a file of its own in the OS temp folder — an argument
+ * would hit the Windows command-line limit — and remove only that file.
+ */
+async function withTextFile<T>(text: string, run: (file: string) => Promise<T>): Promise<T> {
+  const file = join(tmpdir(), `vyotiq-gh-text-${randomUUID()}.md`)
+  await writeFile(file, text, { encoding: 'utf8', flag: 'wx' })
+  try {
+    return await run(file)
+  } finally {
+    await unlink(file).catch(() => undefined)
+  }
+}
+
+async function requireGh(): Promise<void> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+}
+
+/** Post a comment on the pull request's conversation. */
+export async function prComment(cwd: string, number: number, body: string): Promise<PrCommentResult> {
+  await requireGh()
+  const text = body.trim()
+  if (!text) throw new Error('Comment cannot be empty')
+  let out: string
+  try {
+    out = await withTextFile(text, (file) => gh(['pr', 'comment', prNumberArg(number), '--body-file', file], cwd))
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  const url = /https:\/\/\S+#issuecomment-\d+/i.exec(out)?.[0] ?? null
+  return { detail: 'Comment posted', url }
+}
+
+const sameText = (a: string, b: string): boolean => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n')
+
+/**
+ * Replace the pull request's description. GitHub has no compare-and-swap for
+ * it, so the description is read again first: when someone changed it since
+ * `expected` was shown, nothing is written and the edit is refused.
+ */
+export async function prEditBody(
+  cwd: string,
+  number: number,
+  body: string,
+  expected: string
+): Promise<PrEditBodyResult> {
+  await requireGh()
+  const n = prNumberArg(number)
+  let current: string
+  try {
+    const raw = await gh(['pr', 'view', n, '--json', 'body'], cwd)
+    current = (JSON.parse(raw) as { body?: string | null }).body ?? ''
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  if (!sameText(current, expected)) {
+    throw new Error('The description was changed on GitHub after you started editing. Refresh to see it, then edit again.')
+  }
+  if (sameText(current, body)) return { body: current }
+  try {
+    await withTextFile(body, (file) => gh(['pr', 'edit', n, '--body-file', file], cwd))
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  return { body }
+}
+
+async function readReviewRequests(cwd: string, n: string): Promise<string[]> {
+  const raw = await gh(['pr', 'view', n, '--json', 'reviewRequests'], cwd)
+  const data = JSON.parse(raw) as Pick<GhPrJson, 'reviewRequests'>
+  return (data.reviewRequests ?? []).map(mapReviewRequest).filter((login): login is string => Boolean(login))
+}
+
+/**
+ * Ask for (or withdraw) reviews. Returns who GitHub has review requested from
+ * afterwards, read back rather than assumed: a reviewer GitHub would not take
+ * makes gh fail, and one who already reviewed drops off the list.
+ */
+export async function prEditReviewers(
+  cwd: string,
+  number: number,
+  add: readonly string[],
+  remove: readonly string[]
+): Promise<PrReviewersResult> {
+  await requireGh()
+  const n = prNumberArg(number)
+  const args = ['pr', 'edit', n]
+  for (const login of add) args.push('--add-reviewer', login)
+  for (const login of remove) args.push('--remove-reviewer', login)
+  try {
+    await gh(args, cwd)
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  const reviewRequests = await readReviewRequests(cwd, n).catch(() => [])
+  const detail =
+    add.length > 0 && remove.length === 0
+      ? `Review requested from ${add.join(', ')}`
+      : remove.length > 0 && add.length === 0
+        ? `Review request withdrawn from ${remove.join(', ')}`
+        : 'Reviewers updated'
+  return { detail, reviewRequests }
+}
+
+const ASSIGNABLE_USERS_QUERY = graphqlText(`
+  query($owner: String!, $name: String!) {
+    repository(owner: $owner, name: $name) { assignableUsers(first: 100) { nodes { login } } }
+  }
+`)
+
+/** People who can be asked for a review here: the repository's assignable users, at most 100. */
+export async function prReviewerSuggestions(cwd: string): Promise<PrReviewerSuggestionsResult> {
+  await requireGh()
+  let raw: string
+  try {
+    raw = await ghGraphql(
+      [
+        ['-f', `query=${ASSIGNABLE_USERS_QUERY}`],
+        ['-F', 'owner={owner}'],
+        ['-F', 'name={repo}']
+      ],
+      cwd
+    )
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  const data = JSON.parse(raw) as {
+    data?: { repository?: { assignableUsers?: { nodes?: Array<{ login?: string | null } | null> | null } | null } | null }
+  }
+  const logins = (data.data?.repository?.assignableUsers?.nodes ?? [])
+    .map((node) => node?.login?.trim() ?? '')
+    .filter(Boolean)
+  return { logins: [...new Set(logins)].sort((a, b) => a.localeCompare(b)) }
+}
+
+const AUTO_MERGE_QUERY = graphqlText(`
+  query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      autoMergeAllowed
+      pullRequest(number: $number) { viewerCanEnableAutoMerge }
+    }
+  }
+`)
+
+/** Repositories that do not allow auto-merge, so the PR poll does not ask GitHub again every 15 seconds. */
+const autoMergeOff = new Map<string, number>()
+const AUTO_MERGE_OFF_TTL_MS = 10 * 60_000
+
+/** @internal */
+export function resetAutoMergeCacheForTests(): void {
+  autoMergeOff.clear()
+}
+
+/**
+ * Whether GitHub would take an auto-merge request on this pull request from
+ * the signed-in account: the repository allows auto-merge and the PR cannot
+ * merge yet. Null when GitHub could not be asked.
+ */
+async function viewerCanEnableAutoMerge(cwd: string, number: number): Promise<boolean | null> {
+  const off = autoMergeOff.get(cwd)
+  if (off !== undefined && Date.now() - off < AUTO_MERGE_OFF_TTL_MS) return false
+  try {
+    const raw = await ghGraphql(
+      [
+        ['-f', `query=${AUTO_MERGE_QUERY}`],
+        ['-F', 'owner={owner}'],
+        ['-F', 'name={repo}'],
+        ['-F', `number=${prNumberArg(number)}`]
+      ],
+      cwd
+    )
+    const repo = (
+      JSON.parse(raw) as {
+        data?: { repository?: { autoMergeAllowed?: boolean; pullRequest?: { viewerCanEnableAutoMerge?: boolean } | null } | null }
+      }
+    ).data?.repository
+    if (!repo) return null
+    if (repo.autoMergeAllowed === false) {
+      autoMergeOff.set(cwd, Date.now())
+      return false
+    }
+    autoMergeOff.delete(cwd)
+    return repo.pullRequest?.viewerCanEnableAutoMerge === true
+  } catch {
+    return null
+  }
+}
+
+const AUTO_MERGE_FLAG: Record<'squash' | 'merge' | 'rebase', string> = {
+  squash: '--squash',
+  merge: '--merge',
+  rebase: '--rebase'
+}
+
+/**
+ * Turn auto-merge on (GitHub merges the PR by `method` once its requirements
+ * are met) or off. The branch is never deleted by it. What GitHub has set
+ * afterwards is read back, not assumed.
+ */
+export async function prSetAutoMerge(
+  cwd: string,
+  number: number,
+  enable: boolean,
+  method: 'squash' | 'merge' | 'rebase' = 'squash'
+): Promise<PrAutoMergeResult> {
+  await requireGh()
+  const n = prNumberArg(number)
+  const args = enable
+    ? ['pr', 'merge', n, '--auto', AUTO_MERGE_FLAG[method], '--delete-branch=false']
+    : ['pr', 'merge', n, '--disable-auto']
+  try {
+    await gh(args, cwd, MERGE_TIMEOUT_MS)
+  } catch (err) {
+    throw new Error(execErrorText(err))
+  }
+  let after: Pick<GhPrJson, 'autoMergeRequest' | 'state'>
+  try {
+    after = JSON.parse(await gh(['pr', 'view', n, '--json', 'autoMergeRequest,state'], cwd)) as typeof after
+  } catch (err) {
+    throw new Error(`gh accepted the change, but reading it back failed: ${execErrorText(err).split('\n')[0]}`)
+  }
+  const autoMerge = mapAutoMerge(after.autoMergeRequest)
+  if ((after.state ?? '').toUpperCase() === 'MERGED') return { detail: 'Merged', autoMerge: null }
+  if (enable && !autoMerge) throw new Error('GitHub did not turn auto-merge on for this pull request')
+  if (!enable && autoMerge) throw new Error('GitHub still has auto-merge on for this pull request')
+  return {
+    detail: enable ? `Auto-merge on: it will ${method === 'squash' ? 'squash and merge' : method === 'rebase' ? 'rebase and merge' : 'merge'} once its requirements are met` : 'Auto-merge off',
+    autoMerge
+  }
 }

@@ -740,10 +740,10 @@ describe('ChangesPanel', () => {
     await screen.findByText('a.ts')
     fireEvent.click(await screen.findByRole('button', { name: 'Switch branch' }))
     fireEvent.click(await screen.findByRole('option', { name: 'feat' }))
-    // Uncommitted changes: the app's own dialog asks first.
-    const dialog = await screen.findByRole('dialog', { name: 'Switch branch' })
+    // Uncommitted changes: the app's own dialog asks whether they come along or stay.
+    const dialog = await screen.findByRole('dialog', { name: 'Switch to feat' })
     expect(window.vyotiq.gitCheckout).not.toHaveBeenCalled()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Check out feat' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Bring them along' }))
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toMatch(/overwritten/i)
     // A failure says so with an icon, not only in red.

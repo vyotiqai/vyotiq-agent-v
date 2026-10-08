@@ -173,6 +173,7 @@ const LOOKUP_TOOLS = new Set([
   'memory_read',
   'git_status',
   'git_diff',
+  'github_pr_checks',
   'lsp',
   'web_fetch',
   'web_search',

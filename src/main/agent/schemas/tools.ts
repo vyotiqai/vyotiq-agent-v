@@ -218,9 +218,14 @@ const githubPrReviewArgs = z.object({
 })
 
 const githubIssueArgs = z.object({
-  action: z.enum(['list', 'create']).describe('List open issues or create one'),
+  action: z.enum(['list', 'view', 'create']).describe('List open issues, read one in full, or create one'),
+  number: z.number().int().positive().optional().describe('Issue number; required when action is view'),
   title: z.string().trim().min(1).max(256).optional().describe('Required when action is create'),
   body: z.string().trim().max(8_000).optional().describe('Issue body when creating')
+})
+
+const githubPrChecksArgs = z.object({
+  number: z.number().int().positive().optional().describe('PR number; omit for the current branch PR')
 })
 
 const globArgs = z
@@ -1466,8 +1471,13 @@ export const TOOL_REGISTRY = {
   },
   github_issue: {
     description:
-      'List open GitHub issues or create one via gh. Create requires approval. Agent-only.',
+      'List open GitHub issues, read one (body, labels, latest comments), or create one via gh. Create requires approval. Agent-only.',
     schema: githubIssueArgs
+  },
+  github_pr_checks: {
+    description:
+      "A pull request's CI checks via gh, with the failing step's log for each failed GitHub Actions check. Read-only; use it to see why CI is red.",
+    schema: githubPrChecksArgs
   },
   diagnostics: {
     description:

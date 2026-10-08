@@ -562,13 +562,43 @@ export interface VyotiqApi {
     workspacePath: string
     paths: string[]
   }) => Promise<IpcResult<{ unstaged: boolean; detail: string }>>
+  /** Throw away the person's own changes; old copies go to the OS trash. Only from a confirmed button. */
+  gitDiscardPaths: (payload: {
+    workspacePath: string
+    paths: string[]
+    scope: 'worktree' | 'all'
+  }) => Promise<IpcResult<import('./ipc').GitDiscardPathsResult>>
   gitBranches: (
     workspacePath: string
   ) => Promise<IpcResult<import('./ipc').GitBranchEntry[]>>
+  /** `leaveChanges`: stash uncommitted changes on the branch being left instead of carrying them over. */
   gitCheckout: (
     workspacePath: string,
-    branch: string
-  ) => Promise<IpcResult<{ detail: string }>>
+    branch: string,
+    options?: { leaveChanges?: boolean }
+  ) => Promise<IpcResult<import('./ipc').GitCheckoutResult>>
+  /** Changes a switch left on the current branch, or null. */
+  gitBranchStash: (payload: { workspacePath: string }) => Promise<IpcResult<import('./ipc').GitBranchStashResult>>
+  /** Put changes a switch left on this branch back. Only from an explicit button. */
+  gitStashRestore: (payload: { workspacePath: string; sha: string }) => Promise<IpcResult<import('./ipc').GitStashRestoreResult>>
+  /** Stage one hunk of the unstaged diff, or unstage one of the staged diff. */
+  gitStageHunk: (payload: {
+    workspacePath: string
+    path: string
+    hunk: import('./utils/hunkPatch').HunkIdentity
+    diffHash: string
+    unstage?: boolean
+  }) => Promise<IpcResult<import('./ipc').GitStageHunkResult>>
+  /** HEAD's commit: its message and whether it was pushed. */
+  gitLastCommit: (payload: { workspacePath: string }) => Promise<IpcResult<import('./ipc').GitLastCommitResult>>
+  /** Fold changes into the last, unpushed commit. Only from an explicit button. */
+  gitAmend: (payload: {
+    workspacePath: string
+    message: string
+    sha: string
+    mode?: 'all' | 'staged'
+    runId?: string
+  }) => Promise<IpcResult<import('./ipc').GitCommitResult>>
   /** `git fetch --all`. User-initiated only. */
   gitFetch: (payload: import('./ipc').GitFetchRequest) => Promise<IpcResult<import('./ipc').GitFetchResult>>
   /** Fast-forward by default; `diverged` when both sides moved (nothing changed then). */
@@ -658,6 +688,51 @@ export interface VyotiqApi {
     workspacePath: string,
     number: number
   ) => Promise<IpcResult<import('./ipc').PrCheckoutResult>>
+  /** A failed GitHub Actions check's failing step, read from its job log. */
+  prCheckLog: (payload: {
+    workspacePath: string
+    url: string
+  }) => Promise<IpcResult<import('./ipc').PrCheckLogResult>>
+  /** Run one GitHub Actions job again. Only from an explicit button. */
+  prCheckRerun: (payload: {
+    workspacePath: string
+    url: string
+  }) => Promise<IpcResult<import('./ipc').PrCheckRerunResult>>
+  /** A merged PR's branch: switch to its base, delete it here and on GitHub when nothing would be lost. */
+  prCleanupMerged: (payload: {
+    workspacePath: string
+    number: number
+  }) => Promise<IpcResult<import('./ipc').PrCleanupMergedResult>>
+  /** Post on the PR's conversation. Only from a Send button. */
+  prComment: (payload: {
+    workspacePath: string
+    number: number
+    body: string
+  }) => Promise<IpcResult<import('./ipc').PrCommentResult>>
+  /** Replace the PR's description; `expected` is the one editing began from. */
+  prEditBody: (payload: {
+    workspacePath: string
+    number: number
+    body: string
+    expected: string
+  }) => Promise<IpcResult<import('./ipc').PrEditBodyResult>>
+  /** Request or withdraw reviews. */
+  prReviewers: (payload: {
+    workspacePath: string
+    number: number
+    add?: string[]
+    remove?: string[]
+  }) => Promise<IpcResult<import('./ipc').PrReviewersResult>>
+  prReviewerSuggestions: (payload: {
+    workspacePath: string
+  }) => Promise<IpcResult<import('./ipc').PrReviewerSuggestionsResult>>
+  /** Turn auto-merge on (merging by `method` once requirements are met) or off. */
+  prAutoMerge: (payload: {
+    workspacePath: string
+    number: number
+    enable: boolean
+    method?: import('./ipc').PrMergeMethod
+  }) => Promise<IpcResult<import('./ipc').PrAutoMergeResult>>
   githubAuthStatus: () => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
   /** `fresh`: the saved sign-in was rejected; get a new one instead of re-adopting it. */
   githubAuthStart: (request?: import('./ipc').GithubAuthStartRequest) => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
@@ -763,6 +838,11 @@ export interface VyotiqApi {
     title: string
     body?: string
   }) => Promise<IpcResult<GithubIssueCreateResult>>
+  /** One issue in full: its text, labels and latest comments. */
+  githubIssueView: (payload: {
+    workspacePath: string
+    number: number
+  }) => Promise<IpcResult<import('./ipc').GithubIssueDetail>>
   mcpStatus: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
   /** `failedOnly` retries the servers that failed to connect and leaves live ones up. */
   mcpRefresh: (payload?: {

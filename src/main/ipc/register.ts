@@ -83,8 +83,14 @@ import {
   GitStageAllRequestSchema,
   GitStagePathsRequestSchema,
   GitUnstagePathsRequestSchema,
+  GitDiscardPathsRequestSchema,
   GitBranchesRequestSchema,
   GitCheckoutRequestSchema,
+  GitBranchStashRequestSchema,
+  GitStashRestoreRequestSchema,
+  GitStageHunkRequestSchema,
+  GitLastCommitRequestSchema,
+  GitAmendRequestSchema,
   GitFetchRequestSchema,
   GitPullRequestSchema,
   GitPushRequestSchema,
@@ -112,6 +118,14 @@ import {
   PrReviewThreadReplyRequestSchema,
   PrListRequestSchema,
   PrCheckoutRequestSchema,
+  PrCheckLogRequestSchema,
+  PrCheckRerunRequestSchema,
+  PrCleanupMergedRequestSchema,
+  PrCommentRequestSchema,
+  PrEditBodyRequestSchema,
+  PrReviewersRequestSchema,
+  PrReviewerSuggestionsRequestSchema,
+  PrAutoMergeRequestSchema,
   ShellOpenExternalRequestSchema,
   GithubAuthStartRequestSchema,
   PtyCreateRequestSchema,
@@ -152,6 +166,7 @@ import {
   PrReviewRequestSchema,
   GithubIssuesListRequestSchema,
   GithubIssueCreateRequestSchema,
+  GithubIssueViewRequestSchema,
   WorkspaceEditorRecoverySaveRequestSchema,
   WorkspaceEditorRecoveryLoadRequestSchema,
   WorkspaceEditorRecoveryClearRequestSchema,
@@ -580,13 +595,20 @@ import {
   stageAll,
   stagePaths,
   unstagePaths,
+  discardPaths,
   readConflictFile,
   resolveConflict,
   fetchRemotes,
   pullCurrentBranch,
   pushBranch,
-  createGitBranch
+  createGitBranch,
+  readBranchStash,
+  restoreBranchStash,
+  stageHunk,
+  readLastCommit,
+  amendLastCommit
 } from '@main/git/git'
+import { backgroundFetch, exclusiveFetch } from '@main/git/backgroundFetch'
 import { invalidateGitStatusCache, readGitStatusCached } from '@main/git/gitStatusCache'
 import { emitGitStatusChanged } from '@main/git/gitStatusEvents'
 import { generateCommitMessage } from '@main/git/commitMessage'
@@ -604,9 +626,18 @@ import {
   prReviewThreadReply,
   prList,
   prCheckout,
+  prCheckLog,
+  prCheckRerun,
+  prCleanupMerged,
+  prComment,
+  prEditBody,
+  prEditReviewers,
+  prReviewerSuggestions,
+  prSetAutoMerge,
   reviewPullRequest,
   listGithubIssues,
-  createGithubIssue
+  createGithubIssue,
+  viewGithubIssue
 } from '@main/git/gh'
 import {
   cancelGithubAuth,
@@ -3472,6 +3503,23 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.gitDiscardPaths, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitDiscardPathsRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      try {
+        // Every file git overwrites, and every untracked one removed, goes to the OS trash.
+        return ok(await discardPaths(req.workspacePath, req.paths, req.scope, (abs) => shell.trashItem(abs)))
+      } finally {
+        invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitDiscardPaths)
+    }
+  })
+
   ipcMain.handle(IPC.gitBranches, async (event, raw) => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -3488,14 +3536,103 @@ export function registerIpc(): void {
     try {
       const req = GitCheckoutRequestSchema.parse(raw)
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      // A switch swaps the files a running task is writing.
+      if (runLiveInCheckout(req.workspacePath)) {
+        return failExpected('A task is working in this checkout. Switch branches when it stops.', IPC.gitCheckout)
+      }
       try {
-        const result = await checkoutBranch(req.workspacePath, req.branch)
+        const result = await checkoutBranch(req.workspacePath, req.branch, { leaveChanges: req.leaveChanges === true })
         return ok(result)
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitCheckout)
       } finally {
         invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
       }
     } catch (err) {
       return failFrom(err, IPC.gitCheckout)
+    }
+  })
+
+  ipcMain.handle(IPC.gitBranchStash, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitBranchStashRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await readBranchStash(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.gitBranchStash)
+    }
+  })
+
+  ipcMain.handle(IPC.gitStashRestore, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitStashRestoreRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (runLiveInCheckout(req.workspacePath)) {
+        return failExpected('A task is working in this checkout. Restore the changes when it stops.', IPC.gitStashRestore)
+      }
+      try {
+        return ok(await restoreBranchStash(req.workspacePath, req.sha))
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitStashRestore)
+      } finally {
+        invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitStashRestore)
+    }
+  })
+
+  ipcMain.handle(IPC.gitStageHunk, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitStageHunkRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      try {
+        return ok(await stageHunk(req.workspacePath, req.path, req.hunk, req.diffHash, req.unstage === true))
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitStageHunk)
+      } finally {
+        invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitStageHunk)
+    }
+  })
+
+  ipcMain.handle(IPC.gitLastCommit, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitLastCommitRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await readLastCommit(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.gitLastCommit)
+    }
+  })
+
+  ipcMain.handle(IPC.gitAmend, async (event, raw): Promise<IpcResult<GitCommitResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitAmendRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      try {
+        const result = await amendLastCommit(req.workspacePath, req.message, req.sha, req.mode ?? 'all')
+        // Amended from a task's Changes: the new commit settles what it took of that task, as Commit does.
+        const task = req.runId ? await settleTaskAfterCommit(req.workspacePath, req.runId, result) : undefined
+        return ok(task ? { ...result, task } : result)
+      } catch (err) {
+        return failExpected(formatError(err), IPC.gitAmend)
+      } finally {
+        invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
+      }
+    } catch (err) {
+      return failFrom(err, IPC.gitAmend)
     }
   })
 
@@ -3516,8 +3653,20 @@ export function registerIpc(): void {
     try {
       const req = GitFetchRequestSchema.parse(raw)
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (req.background) {
+        // The app's own periodic fetch: quiet when it fails, and the
+        // renderer hears about it only when the branch's counts moved.
+        try {
+          const result = await backgroundFetch(req.workspacePath)
+          if (result.changed) gitSyncSettled(req.workspacePath)
+          const { changed: _changed, ...rest } = result
+          return ok(rest)
+        } catch (err) {
+          return fail(formatError(err))
+        }
+      }
       try {
-        return ok(await fetchRemotes(req.workspacePath))
+        return ok(await exclusiveFetch(req.workspacePath, () => fetchRemotes(req.workspacePath)))
       } catch (err) {
         return failExpected(formatError(err), IPC.gitFetch)
       } finally {
@@ -3832,6 +3981,106 @@ export function registerIpc(): void {
         invalidateGitStatusCache(workspacePath)
         emitGitStatusChanged(workspacePath)
       }
+    }
+  })
+
+  ipcMain.handle(IPC.prCheckLog, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrCheckLogRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prCheckLog(req.workspacePath, req.url))
+    } catch (err) {
+      return failFrom(err, IPC.prCheckLog)
+    }
+  })
+
+  ipcMain.handle(IPC.prCheckRerun, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrCheckRerunRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prCheckRerun(req.workspacePath, req.url))
+    } catch (err) {
+      return failFrom(err, IPC.prCheckRerun)
+    }
+  })
+
+  ipcMain.handle(IPC.prCleanupMerged, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    let workspacePath: string | null = null
+    try {
+      const req = PrCleanupMergedRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      // Switching branches under a running task would swap its files, as a checkout does.
+      const running = listActiveRuns().filter((run) => workspacePathsEqual(run.workspacePath, req.workspacePath))
+      if (running.length > 0) {
+        return fail('A task is running in this checkout. Stop it or wait for it to finish before cleaning up the branch.')
+      }
+      workspacePath = req.workspacePath
+      return ok(await prCleanupMerged(req.workspacePath, req.number))
+    } catch (err) {
+      return failFrom(err, IPC.prCleanupMerged)
+    } finally {
+      if (workspacePath) {
+        invalidateGitStatusCache(workspacePath)
+        emitGitStatusChanged(workspacePath)
+      }
+    }
+  })
+
+  ipcMain.handle(IPC.prComment, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrCommentRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prComment(req.workspacePath, req.number, req.body))
+    } catch (err) {
+      return failFrom(err, IPC.prComment)
+    }
+  })
+
+  ipcMain.handle(IPC.prEditBody, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrEditBodyRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prEditBody(req.workspacePath, req.number, req.body, req.expected))
+    } catch (err) {
+      return failFrom(err, IPC.prEditBody)
+    }
+  })
+
+  ipcMain.handle(IPC.prReviewers, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrReviewersRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prEditReviewers(req.workspacePath, req.number, req.add, req.remove))
+    } catch (err) {
+      return failFrom(err, IPC.prReviewers)
+    }
+  })
+
+  ipcMain.handle(IPC.prReviewerSuggestions, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrReviewerSuggestionsRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prReviewerSuggestions(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.prReviewerSuggestions)
+    }
+  })
+
+  ipcMain.handle(IPC.prAutoMerge, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrAutoMergeRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prSetAutoMerge(req.workspacePath, req.number, req.enable, req.method ?? 'squash'))
+    } catch (err) {
+      return failFrom(err, IPC.prAutoMerge)
     }
   })
 
@@ -4286,6 +4535,17 @@ export function registerIpc(): void {
       }
     }
   )
+
+  ipcMain.handle(IPC.githubIssueView, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GithubIssueViewRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await viewGithubIssue(req.workspacePath, req.number))
+    } catch (err) {
+      return failFrom(err, IPC.githubIssueView)
+    }
+  })
 
   ipcMain.handle(IPC.mcpStatus, async (event, raw): Promise<IpcResult<McpStatusResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')

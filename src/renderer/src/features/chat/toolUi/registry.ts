@@ -62,6 +62,7 @@ const RESULT_ONLY_TOOLS = new Set([
   'web_search',
   'git_status',
   'git_diff',
+  'github_pr_checks',
   'memory_list',
   'Skill',
   'diagnostics',
@@ -692,6 +693,16 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     })
   },
   github_pr_review: {
+    Body: StatusMessageBody,
+    hasBody: contentHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'pullRequest',
+      opensPanel: 'pr'
+    })
+  },
+  github_pr_checks: {
     Body: StatusMessageBody,
     hasBody: contentHasBody,
     headerMeta: (tool) => ({

@@ -1,0 +1,61 @@
+ubuntu-latest	UNKNOWN STEP	﻿2026-10-04T13:16:57.3077376Z Current runner version: '2.337.0'
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:16:57.3099346Z ##[group]Runner Image Provisioner
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:16:57.3100251Z Hosted Compute Agent
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.5464762Z Removing credentials config '/home/runner/work/_temp/git-credentials-a8c571c9-069b-470c-b82e-0a7c114dd56b.config'
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.5472788Z ##[endgroup]
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.5747838Z ##[group]Run corepack enable
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.5749114Z ^[[36;1mcorepack enable^[[0m
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.5750321Z ^[[36;1mcorepack prepare pnpm@12.4.2 --activate^[[0m
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.5957874Z shell: /usr/bin/bash -e {0}
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.5958996Z ##[endgroup]
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:00.9298012Z Preparing pnpm@12.4.2 for immediate activation...
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:01.4685712Z ##[group]Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:52.8461521Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 114.3 MiB
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:52.8915636Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 114.3 MiB
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:52.9291654Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 114.3 MiB
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:52.9691124Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 114.3 MiB
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:55.3521834Z Chrome Headless Shell 153.0.8010.12 (playwright chromium-headless-shell v1243) downloaded to /home/runner/.cache/ms-playwright/chromium_headless_shell-1243
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:55.4002855Z ##[group]Run pnpm typecheck
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:55.4003264Z ^[[36;1mpnpm typecheck^[[0m
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:55.4043388Z shell: /usr/bin/bash -e {0}
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:55.4043757Z ##[endgroup]
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:55.4785193Z $ tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:59.7594140Z ##[group]Run node scripts/typecheck-tests-ratchet.mjs
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:59.7594660Z ^[[36;1mnode scripts/typecheck-tests-ratchet.mjs^[[0m
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:59.7635199Z shell: /usr/bin/bash -e {0}
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:17:59.7635746Z ##[endgroup]
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5350135Z tsconfig.tests-node.json: 1 file(s) gained type errors:
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5351854Z   tests/main/unit/editTools.test.ts: 2 (was 1)
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5353199Z     tests/main/unit/editTools.test.ts(60,7): error TS2322: Type 'Buffer<ArrayBufferLike>' is not assignable to type 'string | NonSharedBuffer'.
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5354656Z     tests/main/unit/editTools.test.ts(60,40): error TS2769: No overload matches this call.
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5361762Z tsconfig.tests-web.json: 138 errors, none new — down from 139; run with --update to lock that in
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5363244Z tsconfig.tests-e2e.json: 14 errors, none new — down from 16; run with --update to lock that in
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5410855Z ##[error]Process completed with exit code 1.
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5543507Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5544015Z with:
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5544310Z   name: gui-e2e-ubuntu-latest
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5544670Z   path: test-results/gui-e2e/
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5545001Z   retention-days: 7
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5545301Z   if-no-files-found: ignore
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5545627Z   compression-level: 6
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5545917Z   overwrite: false
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5546225Z   include-hidden-files: false
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5546562Z   archive: true
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.5547028Z ##[endgroup]
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.6862398Z No files were found with the provided path: test-results/gui-e2e/. No artifacts will be uploaded.
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.7070568Z Post job cleanup.
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.7948848Z [command]/usr/bin/git version
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.7986662Z git version 2.55.0
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8017989Z Temporarily overriding HOME='/home/runner/work/_temp/d150ce84-ce25-4e51-adf2-be1585a77981' before making global git config changes
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8019724Z Adding repository directory to the temporary git global config as a safe directory
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8023467Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/vyotiq-agent-v/vyotiq-agent-v
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8052401Z Removing SSH command configuration
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8058723Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8090436Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8305676Z Removing HTTP extra header
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8311566Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8340438Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8549246Z Removing includeIf entries pointing to credentials config files
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8556276Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.8585985Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+ubuntu-latest	UNKNOWN STEP	2026-10-04T13:18:06.9004818Z Cleaning up orphan processes

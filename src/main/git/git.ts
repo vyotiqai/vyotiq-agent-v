@@ -1,16 +1,20 @@
 import { execFile as execFileCb } from 'child_process'
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
-import { readFile, stat } from 'fs/promises'
+import { copyFile, mkdtemp, readFile, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
-import { dirname, join, resolve } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 import { promisify } from 'util'
 import type {
   GitBlameLine,
   GitBlameResult,
+  GitBranchStash,
   GitChangedFile,
+  GitLastCommit,
+  GitStashRestoreResult,
   GitStatus,
   GitStatusResult
 } from '../../shared/ipc'
+import { diffFingerprint, hunkIdentity, parseUnifiedHunks, sameHunk, type HunkIdentity } from '../../shared/utils/hunkPatch'
 import { mapLimit } from '../../shared/utils/mapLimit'
 import { isSafeWorkspaceRelPath } from '../../shared/utils/workspacePath'
 import { branchNameProblem } from '../../shared/utils/gitBranch'
@@ -1381,6 +1385,273 @@ export async function unstagePaths(
   }
 }
 
+/**
+ * The patch for one hunk of a file's diff: the diff's file header, then that
+ * hunk's lines exactly as git wrote them — CRs and `\ No newline` markers kept,
+ * which `git apply` needs to match the file.
+ */
+export function singleHunkPatch(diffText: string, target: HunkIdentity): string | null {
+  const lines = diffText.split('\n')
+  const first = lines.findIndex((line) => line.startsWith('@@ '))
+  if (first <= 0) return null
+  const header = lines.slice(0, first)
+  if (!header.some((line) => line.startsWith('--- ')) || !header.some((line) => line.startsWith('+++ '))) return null
+  const blocks: string[][] = []
+  for (const line of lines.slice(first)) {
+    if (line.startsWith('@@ ')) blocks.push([line])
+    else blocks[blocks.length - 1]!.push(line)
+  }
+  for (const block of blocks) {
+    // Ended with a newline, so a CRLF file's last line splits off its CR as every other line does.
+    const [hunk] = parseUnifiedHunks(`${block.join('\n')}\n`)
+    if (hunk && sameHunk(hunkIdentity(hunk), target)) return `${[...header, ...block].join('\n')}\n`
+  }
+  return null
+}
+
+/**
+ * Stage one hunk of a file's unstaged changes, or (`unstage`) take one hunk of
+ * its staged changes back out of the index. Only the index changes. The diff
+ * is read again and must be the one that was on screen (`diffHash`), so a file
+ * that changed in between is refused rather than staged wrong.
+ */
+export async function stageHunk(
+  cwd: string,
+  relPath: string,
+  target: HunkIdentity,
+  diffHash: string,
+  unstage = false
+): Promise<{ detail: string }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const [path] = sanitizeRelativePaths([relPath])
+  if (!path) throw new Error('Invalid path')
+  const diff = await readGitDiff(cwd, { path, staged: unstage })
+  if (!diff.ok) throw new Error(diff.error)
+  if (diffFingerprint(diff.content) !== diffHash) {
+    throw new Error(`${path} changed since its diff was shown. Look at it again, then retry.`)
+  }
+  if (diff.content.endsWith('[diff truncated]')) throw new Error('This diff is too large to stage part of it')
+  // The patch itself comes from a read with the prefixes and root-relative
+  // paths `git apply` expects, whatever diff.noprefix or diff.relative say.
+  const top = (await git(['rev-parse', '--show-toplevel'], cwd, READ_TIMEOUT_MS)).trim()
+  const raw = await git(
+    [
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--no-relative',
+      '--src-prefix=a/',
+      '--dst-prefix=b/',
+      ...(unstage ? ['--cached'] : []),
+      '--',
+      path
+    ],
+    cwd,
+    READ_TIMEOUT_MS
+  )
+  const patch = singleHunkPatch(raw.replace(/\n+$/, ''), target)
+  if (!patch) throw new Error('That hunk is no longer in the diff')
+  const dir = await mkdtemp(join(tmpdir(), 'vyotiq-hunk-'))
+  const file = join(dir, 'hunk.patch')
+  try {
+    // Written as read: each line keeps the file's own ending, CR included.
+    writeFileSync(file, patch, 'utf8')
+    const args = ['apply', '--cached', '--whitespace=nowarn', ...(unstage ? ['--reverse'] : []), file]
+    try {
+      await git(args, top || cwd, WRITE_TIMEOUT_MS)
+    } catch (err) {
+      throw new Error(`git could not ${unstage ? 'unstage' : 'stage'} that hunk: ${gitFailureText(err)}`)
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+  return { detail: `${unstage ? 'Unstaged' : 'Staged'} the hunk at line ${target.newStart} of ${path}` }
+}
+
+/** HEAD's commit for Amend: its message, and whether it was pushed. Null with no commit or a detached HEAD. */
+export async function readLastCommit(cwd: string): Promise<GitLastCommit | null> {
+  const head = await readHeadCommit(cwd)
+  if (!head || !head.branch) return null
+  const message = (await gitQuiet(['log', '-1', '--format=%B', head.sha], cwd, READ_TIMEOUT_MS))?.replace(/\s+$/, '') ?? ''
+  const parents = ((await gitQuiet(['rev-list', '--parents', '-n', '1', head.sha], cwd, READ_TIMEOUT_MS)) ?? '').trim().split(/\s+/)
+  const remote = await gitQuiet(['branch', '-r', '--contains', head.sha], cwd, READ_TIMEOUT_MS)
+  return {
+    sha: head.sha,
+    message,
+    // Unknown counts as pushed: amending a pushed commit would need a force push.
+    pushed: remote === null || remote.trim().length > 0,
+    amendable: parents.length === 2
+  }
+}
+
+/**
+ * Fold what is staged (`staged`) or every visible change (`all`) into the last
+ * commit and give it `message`. Only while that is safe: `sha` is still HEAD,
+ * it is not a merge or the first commit, and no remote-tracking branch holds it.
+ */
+export async function amendLastCommit(
+  cwd: string,
+  message: string,
+  sha: string,
+  mode: CommitMode = 'all'
+): Promise<CommitOutcome> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const text = message.trim()
+  if (!text) throw new Error('Commit message is required')
+  const last = await readLastCommit(cwd)
+  if (!last || last.sha !== sha) throw new Error('That commit is no longer the latest on this branch')
+  if (!last.amendable) throw new Error('A merge commit or the first commit cannot be amended here')
+  if (last.pushed) throw new Error('That commit has been pushed; amending it would need a force push')
+  if (mode === 'all') await stageNonNoisePaths(cwd, await listNonNoiseDirtyPaths(cwd))
+  // A compare-and-swap on HEAD, as undo does: a commit made in between fails it.
+  const now = (await gitQuiet(['rev-parse', '--verify', 'HEAD'], cwd, READ_TIMEOUT_MS))?.trim()
+  if (now !== sha) throw new Error('That commit is no longer the latest on this branch')
+  await git(['commit', '--amend', '-m', text], cwd, WRITE_TIMEOUT_MS)
+  return { committed: true, pushed: false, detail: `Amended ${sha.slice(0, 7)}` }
+}
+
+/** Moves one file to the OS trash (Electron's `shell.trashItem` in the app). */
+export type TrashFile = (absPath: string) => Promise<void>
+
+export type DiscardScope = 'worktree' | 'all'
+
+/**
+ * Put a copy of a file in the OS trash before git overwrites it, so a discard
+ * can be taken back from the Recycle Bin / Trash. The copy is made in a fresh
+ * folder of its own under the OS temp dir and only that folder is removed.
+ */
+async function trashCopyOf(abs: string, trash: TrashFile): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'vyotiq-discarded-'))
+  const copy = join(dir, basename(abs))
+  try {
+    await copyFile(abs, copy)
+    await trash(copy)
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+/**
+ * Throw away the person's own changes to `paths` (relative to `cwd`).
+ *
+ * - `worktree`: what is not staged goes; the file is back to its staged copy.
+ * - `all`: staged and unstaged go; the file is back to HEAD. A file added in
+ *   the index but not in HEAD is unstaged and then removed like an untracked one.
+ * - An untracked file is moved to the OS trash, not deleted.
+ *
+ * Every file whose contents git is about to overwrite has a copy put in the
+ * OS trash first; when that fails the file is left alone, never overwritten
+ * without one. A conflicted file is left for the conflict resolver.
+ */
+export async function discardPaths(
+  cwd: string,
+  paths: string[],
+  scope: DiscardScope,
+  trash: TrashFile
+): Promise<{ detail: string; discarded: string[]; backedUp: number }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const clean = sanitizeRelativePaths(paths)
+  if (clean.length === 0) return { detail: 'Nothing to discard', discarded: [], backedUp: 0 }
+
+  // Porcelain names paths from the repository root; strip this workspace's
+  // own prefix so they compare with the workspace-relative ones asked for.
+  const [prefixRaw, statusRaw] = await Promise.all([
+    git(['rev-parse', '--show-prefix'], cwd, READ_TIMEOUT_MS),
+    git(['status', '--porcelain=v1', '-z', '-uall', '--no-renames', '--', ...clean], cwd, READ_TIMEOUT_MS)
+  ])
+  const prefix = prefixRaw.trim()
+  const codes = new Map<string, string>()
+  for (const entry of splitNul(statusRaw)) {
+    const rel = entry.slice(3)
+    codes.set(prefix && rel.startsWith(prefix) ? rel.slice(prefix.length) : rel, entry.slice(0, 2))
+  }
+
+  const toRestoreWorktree: string[] = []
+  const toRestoreHead: string[] = []
+  const toUnstageThenTrash: string[] = []
+  const toTrash: string[] = []
+  const skipped: string[] = []
+  for (const path of clean) {
+    const xy = codes.get(path)
+    if (!xy) continue
+    const [x, y] = [xy[0]!, xy[1]!]
+    if (xy === '??') toTrash.push(path)
+    else if (x === 'U' || y === 'U' || xy === 'AA' || xy === 'DD') skipped.push(path)
+    else if (scope === 'worktree') {
+      if (y !== ' ') toRestoreWorktree.push(path)
+    } else if (x === 'A') toUnstageThenTrash.push(path)
+    else toRestoreHead.push(path)
+  }
+
+  const failures: string[] = []
+  let backedUp = 0
+  /** Copies what git is about to overwrite; false when the copy could not be kept. */
+  const backUp = async (path: string): Promise<boolean> => {
+    const abs = resolveInsideWorkspace(cwd, path)
+    try {
+      const info = await stat(abs)
+      if (!info.isFile()) return true
+    } catch {
+      // Deleted in the working tree: git brings it back, nothing here to lose.
+      return true
+    }
+    try {
+      await trashCopyOf(abs, trash)
+      backedUp += 1
+      return true
+    } catch (err) {
+      failures.push(`${path}: a copy could not be put in the trash (${err instanceof Error ? err.message : String(err)})`)
+      return false
+    }
+  }
+
+  const restoreWorktree: string[] = []
+  for (const path of toRestoreWorktree) if (await backUp(path)) restoreWorktree.push(path)
+  const restoreHead: string[] = []
+  for (const path of toRestoreHead) if (await backUp(path)) restoreHead.push(path)
+
+  const discarded: string[] = []
+  for (let i = 0; i < restoreWorktree.length; i += STAGE_PATH_BATCH) {
+    const chunk = restoreWorktree.slice(i, i + STAGE_PATH_BATCH)
+    await git(['restore', '--worktree', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    discarded.push(...chunk)
+  }
+  for (let i = 0; i < restoreHead.length; i += STAGE_PATH_BATCH) {
+    const chunk = restoreHead.slice(i, i + STAGE_PATH_BATCH)
+    await git(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    discarded.push(...chunk)
+  }
+  for (let i = 0; i < toUnstageThenTrash.length; i += STAGE_PATH_BATCH) {
+    const chunk = toUnstageThenTrash.slice(i, i + STAGE_PATH_BATCH)
+    await git(['restore', '--staged', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    toTrash.push(...chunk)
+  }
+  for (const path of toTrash) {
+    try {
+      await trash(resolveInsideWorkspace(cwd, path))
+      backedUp += 1
+      discarded.push(path)
+    } catch (err) {
+      failures.push(`${path}: could not be moved to the trash (${err instanceof Error ? err.message : String(err)})`)
+    }
+  }
+  if (skipped.length > 0) failures.push(`${plural(skipped.length, 'conflicted file', 'conflicted files')} left for the conflict resolver`)
+
+  const lead =
+    discarded.length === 0
+      ? 'Nothing was discarded'
+      : discarded.length === 1
+        ? `Discarded changes to ${discarded[0]}`
+        : `Discarded changes to ${discarded.length} files`
+  const trashed = backedUp > 0 ? ` · ${backedUp === 1 ? 'the old copy is' : 'old copies are'} in the trash` : ''
+  if (failures.length > 0 && discarded.length === 0) throw new Error(failures.join('; '))
+  return {
+    detail: `${lead}${trashed}${failures.length > 0 ? `. ${failures.join('; ')}` : ''}`,
+    discarded,
+    backedUp
+  }
+}
+
 export type GitBranchEntry = {
   name: string
   current: boolean
@@ -1405,11 +1676,27 @@ export async function listLocalBranches(cwd: string): Promise<GitBranchEntry[]> 
   return out
 }
 
-/** Check out an existing local branch. */
+/**
+ * What a switch leaves behind goes into `git stash` under this message, and
+ * only a stash carrying it for the current branch is offered back.
+ */
+export const BRANCH_STASH_PREFIX = 'vyotiq: changes left on '
+
+async function stashTop(cwd: string): Promise<string | null> {
+  return (await gitQuiet(['rev-parse', '--verify', '--quiet', 'refs/stash'], cwd, READ_TIMEOUT_MS))?.trim() || null
+}
+
+/**
+ * Check out an existing local branch. With `leaveChanges`, uncommitted
+ * changes — untracked files too — are stashed on the branch being left first,
+ * and put straight back if the checkout then fails. Without it git carries
+ * them over, or refuses when one would be overwritten.
+ */
 export async function checkoutBranch(
   cwd: string,
-  branch: string
-): Promise<{ detail: string }> {
+  branch: string,
+  opts: { leaveChanges?: boolean } = {}
+): Promise<{ detail: string; stashed?: boolean }> {
   if (!isGitRepo(cwd)) throw new Error('Not a git repository')
   const name = branch.trim()
   if (!name || name.startsWith('-') || name.includes('..') || /[\s\\]/.test(name)) {
@@ -1418,8 +1705,120 @@ export async function checkoutBranch(
   const listed = await listLocalBranches(cwd)
   const match = listed.find((entry) => entry.name === name)
   if (!match) throw new Error(`Unknown branch: ${name}`)
-  await git(['checkout', match.name], cwd, WRITE_TIMEOUT_MS)
+  if (match.current) return { detail: `Already on ${match.name}` }
+
+  if (opts.leaveChanges) {
+    const from = await currentGitBranch(cwd)
+    if (!from) throw new Error('HEAD is detached: there is no branch to leave the changes on')
+    const dirty = await git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'], cwd, READ_TIMEOUT_MS)
+    if (splitNul(dirty).some((record) => statusFor(record.slice(0, 2)) === 'conflicted')) {
+      throw new Error('Resolve the merge conflicts before switching branches')
+    }
+    if (dirty.trim()) {
+      const before = await stashTop(cwd)
+      try {
+        await git(['stash', 'push', '--include-untracked', '-m', `${BRANCH_STASH_PREFIX}${from}`], cwd, WRITE_TIMEOUT_MS)
+      } catch (err) {
+        throw new Error(`Could not stash the changes: ${gitFailureText(err)}`)
+      }
+      const after = await stashTop(cwd)
+      if (!after || after === before) throw new Error('git did not stash the changes; nothing was switched')
+      try {
+        await git(['checkout', match.name], cwd, WRITE_TIMEOUT_MS)
+      } catch (err) {
+        // Put them back where they were, on the branch that never changed.
+        await gitQuiet(['stash', 'pop', '--index'], cwd, WRITE_TIMEOUT_MS)
+        throw new Error(gitFailureText(err) || `Could not check out ${match.name}`)
+      }
+      return { detail: `Checked out ${match.name}. Your changes stay on ${from}`, stashed: true }
+    }
+  }
+
+  try {
+    await git(['checkout', match.name], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    throw new Error(gitFailureText(err) || `Could not check out ${match.name}`)
+  }
   return { detail: `Checked out ${match.name}` }
+}
+
+type StashEntry = { ref: string; sha: string; subject: string; createdAt: string | null }
+
+async function listStashes(cwd: string): Promise<StashEntry[]> {
+  const out = await gitQuiet(['stash', 'list', '--format=%gd%x1f%H%x1f%gs%x1f%cI'], cwd, READ_TIMEOUT_MS)
+  if (!out) return []
+  const entries: StashEntry[] = []
+  for (const line of out.split(/\r?\n/)) {
+    const [ref, sha, subject, createdAt] = line.split('\x1f')
+    if (!ref || !sha || subject === undefined) continue
+    entries.push({ ref, sha: sha.trim(), subject, createdAt: createdAt?.trim() || null })
+  }
+  return entries
+}
+
+/** `On <branch>: vyotiq: changes left on <branch>` — git's subject for a `stash push -m`. */
+function stashLeftOn(subject: string): string | null {
+  const i = subject.indexOf(BRANCH_STASH_PREFIX)
+  return i < 0 ? null : subject.slice(i + BRANCH_STASH_PREFIX.length).trim() || null
+}
+
+/** The newest stash a switch left on the current branch, or null. */
+export async function readBranchStash(cwd: string): Promise<GitBranchStash | null> {
+  if (!isGitRepo(cwd)) return null
+  const branch = await currentGitBranch(cwd)
+  if (!branch) return null
+  const entry = (await listStashes(cwd)).find((e) => stashLeftOn(e.subject) === branch)
+  if (!entry || !COMMIT_SHA_RE.test(entry.sha)) return null
+  // Tracked files changed, plus the untracked ones the stash keeps in its third parent.
+  const tracked = await gitQuiet(['diff', '--name-only', '-z', `${entry.sha}^1`, entry.sha], cwd, READ_TIMEOUT_MS)
+  const untracked = await gitQuiet(['ls-tree', '-r', '--name-only', '-z', `${entry.sha}^3`], cwd, READ_TIMEOUT_MS)
+  const files = new Set([...splitNul(tracked ?? ''), ...splitNul(untracked ?? '')])
+  return { sha: entry.sha, branch, files: files.size, createdAt: entry.createdAt }
+}
+
+/**
+ * Put back changes a switch left on this branch, then drop that stash. With
+ * conflicts git leaves markers in the files and the stash stays, so nothing
+ * is lost; the answer says so.
+ */
+export async function restoreBranchStash(cwd: string, sha: string): Promise<GitStashRestoreResult> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  if (!COMMIT_SHA_RE.test(sha)) throw new Error('Invalid stash')
+  const branch = await currentGitBranch(cwd)
+  const entry = (await listStashes(cwd)).find((e) => e.sha === sha)
+  if (!entry) throw new Error('Those changes are no longer in the stash')
+  if (!branch || stashLeftOn(entry.subject) !== branch) {
+    throw new Error(`Those changes were left on ${stashLeftOn(entry.subject) ?? 'another branch'}; switch to it to restore them`)
+  }
+  if ((await conflictedPaths(cwd)).length > 0) throw new Error('Resolve the merge conflicts first')
+  const apply = async (args: string[]): Promise<unknown> => {
+    try {
+      await git(args, cwd, WRITE_TIMEOUT_MS)
+      return null
+    } catch (err) {
+      return err
+    }
+  }
+  // --index puts staged changes back staged. When the index cannot take them
+  // as they were, git applies nothing and says so; then they come back unstaged.
+  let failed = await apply(['stash', 'apply', '--index', sha])
+  if (failed && /conflicts in index/i.test(gitFailureText(failed)) && (await conflictedPaths(cwd)).length === 0) {
+    failed = await apply(['stash', 'apply', sha])
+  }
+  if (failed) {
+    const conflicts = await conflictedPaths(cwd)
+    if (conflicts.length > 0) {
+      return {
+        detail: `Restored with conflicts in ${plural(conflicts.length, 'file', 'files')}; the stash is kept until you resolve them`,
+        conflicted: true
+      }
+    }
+    throw new Error(`Could not restore the changes: ${gitFailureText(failed)}`)
+  }
+  // The ref of this exact stash now: numbers shift as other stashes come and go.
+  const now = (await listStashes(cwd)).find((e) => e.sha === sha)
+  if (now) await gitQuiet(['stash', 'drop', now.ref], cwd, WRITE_TIMEOUT_MS)
+  return { detail: `Restored the changes left on ${branch}`, conflicted: false }
 }
 
 /** Read merge-conflict stages (`:1:` base, `:2:` ours, `:3:` theirs) plus the working copy. */

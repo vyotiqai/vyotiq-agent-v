@@ -10,6 +10,7 @@ import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
 import { useGitInit } from '@renderer/features/chat/components/useGitInit'
 import { useGitStatus } from '@renderer/features/chat/components/useGitStatus'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { ruleFileCountLabel, ruleRootFiles } from './ruleSummary'
 
 /** Where a new task can be moved to: the open workspaces. */
@@ -413,6 +414,13 @@ function WhereItWorks({
 function BranchSelect({ workspacePath }: { workspacePath: string }) {
   const [revision, setRevision] = useState(0)
   const git = useGitStatus(workspacePath, revision, true, 0)
+  // A branch switched anywhere else — Changes, a merged PR's Clean up — is the one named here.
+  useEffect(() => {
+    const off = window.vyotiq?.onGitStatusChanged?.((payload) => {
+      if (workspacePathsEqual(payload.workspacePath, workspacePath)) setRevision((r) => r + 1)
+    })
+    return () => off?.()
+  }, [workspacePath])
   const [branches, setBranches] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const { confirm, dialog: confirmDialog } = useConfirm()

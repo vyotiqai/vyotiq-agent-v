@@ -8,6 +8,8 @@ import { neutralizeXmlTags, OVERLAY_SECTION_TAGS } from './promptSections'
  * all three reach the model verbatim today. `terminal` is output of a command
  * that fetched remote content (`curl`, `iwr`, `gh api` …) — see
  * tools/terminalRemoteFence.ts; ordinary command output is not fenced.
+ * `github` is text anyone can write on GitHub: an issue, its comments, a CI
+ * job's log (a pull request from a fork runs its own code there).
  */
 export type UntrustedSource =
   | 'workspace_harness'
@@ -16,6 +18,7 @@ export type UntrustedSource =
   | 'skill'
   | 'workspace_rules'
   | 'terminal'
+  | 'github'
 
 export type WrapUntrustedOptions = {
   source: UntrustedSource
