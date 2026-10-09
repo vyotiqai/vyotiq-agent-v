@@ -1,0 +1,669 @@
+/*
+  The agent's reply in the record — its notes and its Result.
+
+  Type and rhythm come from measuring how ChatGPT, Claude, Gemini, Cursor and
+  Copilot set a reply (2026-10-07), held to this app's scale:
+  - The Result reads at 14px on a 24px line; a note between calls at 13/20.
+  - Headings are section labels, not document titles, and each takes more
+    room above it than below, so it belongs to what follows.
+  - One gap between blocks, tighter inside a list and a block.
+  - Links keep a faint underline, because colour alone is not a signal.
+
+  Every value reads a --vy-* token or one of the steps declared on the root,
+  so every skin and theme reaches it and the rhythm keeps one pulse.
+*/
+
+.vy-reply {
+  /* Size `sm`: a note in the work list. */
+  --reply-text: var(--text-sm);
+  --reply-leading: 20px;
+  --reply-code: var(--text-xs);
+  --reply-gap: 10px;
+  --reply-gap-inner: 6px;
+  --reply-item: 4px;
+  --reply-item-loose: 8px;
+  --reply-h1: var(--text-heading);
+  --reply-h2: var(--text-md);
+  --reply-h3: var(--text-sm);
+  --reply-h4: var(--text-xs);
+  --reply-above-1: 24px;
+  --reply-above-2: 20px;
+  --reply-above-3: 18px;
+  --reply-above-4: 16px;
+  --reply-below-1: 6px;
+  --reply-below-4: 4px;
+  --reply-break: 18px;
+
+  /* Tone `default`: code and bold one step either side of the words. */
+  --reply-ink: var(--vy-fg);
+  --reply-strong: var(--vy-fg-strong);
+  --reply-code-ink: var(--vy-secondary);
+
+  font-size: var(--reply-text);
+  line-height: var(--reply-leading);
+  color: var(--reply-ink);
+  overflow-wrap: break-word;
+}
+
+/* Size `md`: the Result, the one answer the record exists to show. */
+.vy-reply[data-size='md'] {
+  --reply-text: var(--text-md);
+  --reply-leading: 24px;
+  --reply-code: var(--text-sm);
+  --reply-gap: 14px;
+  --reply-gap-inner: 8px;
+  --reply-item: 6px;
+  --reply-item-loose: 10px;
+  --reply-h1: var(--text-title);
+  --reply-h2: var(--text-heading);
+  --reply-h3: var(--text-md);
+  --reply-h4: var(--text-sm);
+  --reply-above-1: 32px;
+  --reply-above-2: 28px;
+  --reply-above-3: 24px;
+  --reply-above-4: 20px;
+  --reply-below-1: 8px;
+  --reply-break: 24px;
+}
+
+/* Inline code a step down the ramp from the words around it: in a Result
+   naming a dozen files, mono at the prose's own ink read as a spatter of
+   heavy marks. Prose already a step down keeps its code at that step. */
+.vy-reply[data-tone='strong'] {
+  --reply-ink: var(--vy-fg-strong);
+  --reply-code-ink: var(--vy-fg);
+}
+
+.vy-reply[data-tone='secondary'] {
+  --reply-ink: var(--vy-secondary);
+  --reply-strong: var(--vy-fg);
+  --reply-code-ink: var(--vy-secondary);
+}
+
+/* A reading measure. The record's column is sized for rows and cards; a
+   paragraph across all of it ran ~115 characters a line. At the tested pane
+   width the column itself (~63ch) binds first and this cap is inert; it is
+   kept so a wide pane cannot stretch the measure back out. Code, tables and
+   diagrams keep the full column. */
+.vy-reply :is(p, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6, .vy-reply-alert, .vy-reply-details > summary) {
+  max-width: 72ch;
+}
+
+.vy-reply :is(p, li) {
+  text-wrap: pretty;
+}
+
+/* ── Rhythm: between blocks, and between siblings inside one ── */
+
+.vy-reply > [data-block] + [data-block],
+.vy-reply [data-block] > * + *,
+.vy-reply :is(.vy-reply-alert-body, .vy-reply-details, blockquote) > * + * {
+  margin-top: var(--reply-gap);
+}
+
+.vy-reply :is(.vy-reply-alert-body, blockquote) > * + * {
+  margin-top: var(--reply-gap-inner);
+}
+
+/* A heading takes more room above than below — across blocks and within one. */
+.vy-reply > [data-block]:not(:first-child):has(> h1:first-child),
+.vy-reply [data-block] > * + h1 {
+  margin-top: var(--reply-above-1);
+}
+
+.vy-reply > [data-block]:not(:first-child):has(> h2:first-child),
+.vy-reply [data-block] > * + h2 {
+  margin-top: var(--reply-above-2);
+}
+
+.vy-reply > [data-block]:not(:first-child):has(> h3:first-child),
+.vy-reply [data-block] > * + h3 {
+  margin-top: var(--reply-above-3);
+}
+
+.vy-reply > [data-block]:not(:first-child):has(> :is(h4, h5, h6):first-child),
+.vy-reply [data-block] > * + :is(h4, h5, h6) {
+  margin-top: var(--reply-above-4);
+}
+
+.vy-reply [data-block] > :is(h1, h2, h3) + *,
+.vy-reply > [data-block]:has(> :is(h1, h2, h3):last-child) + [data-block] {
+  margin-top: var(--reply-below-1);
+}
+
+.vy-reply [data-block] > :is(h4, h5, h6) + *,
+.vy-reply > [data-block]:has(> :is(h4, h5, h6):last-child) + [data-block] {
+  margin-top: var(--reply-below-4);
+}
+
+/* A rule is a section break: it gets the room of one. */
+.vy-reply [data-block] > * + hr,
+.vy-reply [data-block] > hr + *,
+.vy-reply > [data-block]:has(> hr:only-child),
+.vy-reply > [data-block]:has(> hr:only-child) + [data-block] {
+  margin-top: var(--reply-break);
+}
+
+/* ── Headings ── */
+
+.vy-reply :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  text-wrap: balance;
+  scroll-margin-top: 12px;
+}
+
+.vy-reply h1 {
+  font-size: var(--reply-h1);
+  line-height: 1.4;
+  letter-spacing: var(--vy-tracking-tight);
+  color: var(--vy-fg-strong);
+}
+
+.vy-reply h2 {
+  font-size: var(--reply-h2);
+  line-height: 1.45;
+  letter-spacing: var(--vy-tracking-tight);
+  color: var(--vy-fg-strong);
+}
+
+.vy-reply h3 {
+  font-size: var(--reply-h3);
+  line-height: 1.55;
+  color: var(--vy-fg-strong);
+}
+
+.vy-reply :is(h4, h5, h6) {
+  font-size: var(--reply-h4);
+  line-height: 1.55;
+  color: var(--vy-secondary);
+}
+
+/* ── Inline ── */
+
+.vy-reply :is(strong, b) {
+  font-weight: 600;
+  color: var(--reply-strong);
+}
+
+.vy-reply del {
+  color: var(--vy-muted);
+}
+
+/* A link — or a link to a workspace file, which opens it rather than a page. */
+.vy-reply :is(a, .vy-reply-pathlink) {
+  color: var(--vy-accent);
+  text-decoration: underline;
+  text-decoration-color: var(--vy-border-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.vy-reply .vy-reply-pathlink {
+  display: inline;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.vy-reply :is(a, .vy-reply-pathlink):hover {
+  text-decoration-color: currentColor;
+}
+
+/* Code in a sentence: mono, a step off the words, one hairline under — no grey tile. */
+.vy-reply-code {
+  padding: 0 1px;
+  font-family: var(--vy-font-mono);
+  font-size: var(--reply-code);
+  color: var(--reply-code-ink);
+}
+
+/* A workspace file: icon, quiet folder, plain name — and it opens. */
+.vy-reply-file {
+  /* Inline, not inline-flex: punctuation after a chip stays on its line. */
+  display: inline;
+  margin: 0 -2px;
+  padding: 0 3px;
+  border-radius: var(--vy-radius-sm);
+  font-family: var(--vy-font-mono);
+  font-size: var(--reply-code);
+  line-height: inherit;
+  color: var(--reply-code-ink);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.vy-reply-file > svg {
+  display: inline;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+.vy-reply-file:hover {
+  background: var(--vy-surface);
+}
+
+.vy-reply-file:hover .vy-reply-file-name {
+  text-decoration: underline;
+  text-decoration-color: var(--vy-border-strong);
+  text-underline-offset: 3px;
+}
+
+/* Mono runs a step under the text around it, always on the type scale. */
+.vy-reply h1 :is(.vy-reply-code, .vy-reply-file) {
+  font-size: var(--reply-h2);
+}
+
+.vy-reply h2 :is(.vy-reply-code, .vy-reply-file) {
+  font-size: var(--reply-h3);
+}
+
+.vy-reply :is(h4, h5, h6, th, section.footnotes) :is(.vy-reply-code, .vy-reply-file),
+.vy-reply-table td :is(.vy-reply-code, .vy-reply-file) {
+  font-size: var(--text-xs);
+}
+
+.vy-reply-kbd {
+  margin: 0 1px;
+  vertical-align: 1px;
+}
+
+/* ── Lists ── */
+
+.vy-reply :is(ul, ol) {
+  padding-left: 1.5em;
+}
+
+.vy-reply ul {
+  list-style: disc;
+}
+
+.vy-reply ul ul {
+  list-style: circle;
+}
+
+.vy-reply ul ul ul {
+  list-style: square;
+}
+
+.vy-reply ol {
+  list-style: decimal;
+}
+
+.vy-reply li::marker {
+  color: var(--vy-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.vy-reply ol > li::marker {
+  color: var(--vy-muted);
+}
+
+.vy-reply li + li,
+.vy-reply li > :is(ul, ol) {
+  margin-top: var(--reply-item);
+}
+
+/* A loose list (items written apart) keeps its items apart. */
+.vy-reply li:has(> p) + li {
+  margin-top: var(--reply-item-loose);
+}
+
+.vy-reply li > p + *,
+.vy-reply li > :is(.vy-reply-card, .vy-reply-table, .vy-reply-alert) {
+  margin-top: var(--reply-gap-inner);
+}
+
+/* Task lists: the app's check mark, no bullet; done items step back. */
+.vy-reply ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.vy-reply ul.contains-task-list ul.contains-task-list {
+  padding-left: 22px;
+}
+
+.vy-reply li.task-list-item > .vy-reply-task {
+  display: inline-flex;
+  margin-right: 8px;
+  vertical-align: -2px;
+}
+
+.vy-reply li.task-list-item:has(> .vy-reply-task[data-checked]) {
+  color: var(--vy-muted);
+}
+
+/* ── Quotes and alerts ── */
+
+.vy-reply blockquote {
+  padding-left: 14px;
+  box-shadow: inset 2px 0 0 var(--vy-border-strong);
+  color: var(--vy-secondary);
+}
+
+.vy-reply-alert {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 10px 14px 12px 12px;
+  border-radius: var(--vy-radius-lg);
+  background: var(--reply-alert-soft);
+}
+
+.vy-reply-alert-icon {
+  grid-row: 1;
+  align-self: center;
+  color: var(--reply-alert);
+}
+
+.vy-reply-alert-label {
+  grid-row: 1;
+  font-size: var(--text-xs);
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--reply-alert);
+}
+
+.vy-reply-alert-body {
+  grid-column: 2;
+  margin-top: 2px;
+  color: var(--vy-fg);
+}
+
+.vy-reply-alert-accent {
+  --reply-alert: var(--vy-accent);
+  --reply-alert-soft: var(--vy-accent-soft);
+}
+
+.vy-reply-alert-success {
+  --reply-alert: var(--vy-success);
+  --reply-alert-soft: var(--vy-success-soft);
+}
+
+.vy-reply-alert-warning {
+  --reply-alert: var(--vy-warning);
+  --reply-alert-soft: var(--vy-warning-soft);
+}
+
+.vy-reply-alert-danger {
+  --reply-alert: var(--vy-danger);
+  --reply-alert-soft: var(--vy-danger-soft);
+}
+
+/* ── Folds (<details>) ── */
+
+.vy-reply-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  border-radius: var(--vy-radius-sm);
+  color: var(--vy-secondary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.vy-reply-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.vy-reply-details > summary:hover {
+  color: var(--vy-fg-strong);
+}
+
+.vy-reply-details > :not(summary) {
+  margin-left: 18px;
+}
+
+.vy-reply .vy-reply-details > summary + * {
+  margin-top: var(--reply-gap-inner);
+}
+
+/* ── Rules, images, footnotes ── */
+
+.vy-reply hr {
+  height: 1px;
+  border: 0;
+  background: var(--vy-border);
+}
+
+.vy-reply-img {
+  max-height: 320px;
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-lg);
+}
+
+.vy-reply sup {
+  font-size: var(--text-caption);
+  line-height: 0;
+}
+
+.vy-reply .vy-reply-footref {
+  margin-left: 1px;
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.vy-reply section.footnotes {
+  padding-top: 12px;
+  border-top: 1px solid var(--vy-border);
+  font-size: var(--text-xs);
+  line-height: 18px;
+  color: var(--vy-secondary);
+}
+
+.vy-reply section.footnotes li + li {
+  margin-top: 4px;
+}
+
+/* ── Code cards (fences) — bordered, like terminal output and diffs ── */
+
+.vy-reply-card {
+  overflow: hidden;
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-lg);
+  background: var(--vy-sunken);
+}
+
+.vy-reply-diagram > svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+/* The app's ChartBlock brings its own card; inside ours it is only the drawing. */
+.vy-reply-chart [data-chart-block] {
+  margin: 0;
+}
+
+.vy-reply-chart [data-chart-block] > :not(div:last-child) {
+  display: none;
+}
+
+.vy-reply-chart [data-chart-block] > div:last-child {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* ── Views (```view) — a screen built for the answer: it reads as UI, so it sits on the page colour ── */
+
+.vy-reply-card[data-kind='view'] {
+  background: var(--vy-bg);
+}
+
+@keyframes vy-view-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes vy-view-leave {
+  from {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@keyframes vy-view-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes vy-view-changed {
+  from {
+    background-color: var(--vy-accent-soft);
+  }
+}
+
+/* Leaving: folds its height away as it fades. Drawn for a moment, then gone. */
+.vy-view-leave {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.vy-view-leave > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.vy-view-fade-out {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .vy-view-rise {
+    animation: vy-view-rise 220ms var(--vy-ease) both;
+  }
+
+  .vy-view-leave {
+    animation: vy-view-leave 220ms var(--vy-ease) both;
+  }
+
+  .vy-view-fade-out {
+    animation: vy-view-fade-out 220ms var(--vy-ease) both;
+  }
+
+  /* A value this reply changed from the earlier copy: one soft wash. */
+  .vy-view-changed {
+    border-radius: var(--vy-radius-sm);
+    animation: vy-view-changed 1400ms var(--vy-ease) both;
+  }
+}
+
+/* ── Tables: rules between rows, a header that steps back, numbers right ── */
+
+/* It scrolls sideways; 4px of room on each side keeps a focus ring at its edge from being cut. */
+.vy-reply-table {
+  overflow-x: auto;
+  padding-inline: 4px;
+  margin-inline: -4px;
+}
+
+.vy-reply-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--reply-code);
+  line-height: 20px;
+}
+
+.vy-reply[data-size='md'] .vy-reply-table table {
+  font-size: var(--text-sm);
+}
+
+.vy-reply-table :is(th, td) {
+  padding: 8px 16px 8px 0;
+  overflow-wrap: normal;
+  vertical-align: top;
+  text-align: left;
+}
+
+.vy-reply-table th {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--vy-border);
+  font-size: var(--text-xs);
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--vy-secondary);
+  white-space: nowrap;
+}
+
+/* Body rows: the colour is the named divider weight, set on each cell as BORDER_DIVIDER. */
+.vy-reply-table td {
+  min-width: 10ch;
+  max-width: 40ch;
+  border-top-width: 1px;
+  border-top-style: solid;
+}
+
+.vy-reply-table tbody tr:first-child td {
+  border-top-width: 0;
+}
+
+.vy-reply-table [data-num] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vy-reply-table .vy-reply-table-actions {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  vertical-align: middle;
+  text-align: right;
+}
+
+/* ── Streaming ── */
+
+/*
+  The caret rides the end of whatever the stream is still writing — on the
+  text line itself, so in a quote or a loose list item it follows the last
+  paragraph rather than dropping under it. Never after a table or a fence.
+*/
+.vy-reply[data-streaming] > [data-open] > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.vy-reply[data-streaming] > [data-open] > blockquote:last-child > p:last-child::after,
+.vy-reply[data-streaming] > [data-open] > .vy-reply-alert:last-child > .vy-reply-alert-body > p:last-child::after,
+.vy-reply[data-streaming] > [data-open] > :is(ul, ol):last-child > li:last-child:not(:has(> p, > ul, > ol))::after,
+.vy-reply[data-streaming] > [data-open] > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  border-radius: 1px;
+  background: var(--vy-muted);
+}
+
+@keyframes vy-reply-rise {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .vy-reply[data-streaming] > [data-open] :is(p, h1, h2, h3, h4, h5, h6, li)::after {
+    animation: vy-caret 1s steps(1) infinite;
+  }
+
+  /* A block arriving in a stream eases in rather than popping. */
+  .vy-reply[data-streaming] > [data-open] {
+    animation: vy-reply-rise 180ms var(--vy-ease) both;
+  }
+}

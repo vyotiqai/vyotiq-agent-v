@@ -162,6 +162,8 @@ let owner: string | null = null
  * owns them.
  */
 export function paintMatches(id: string, ranges: readonly Range[], current: number): void {
+  const cur = ranges[current]
+  if (cur) revealMatch(cur)
   const reg = registry()
   if (!reg) return
   owner = id
@@ -171,7 +173,6 @@ export function paintMatches(id: string, ranges: readonly Range[], current: numb
     return
   }
   reg.highlights.set('record-find', new reg.Highlight(...ranges))
-  const cur = ranges[current]
   if (cur) {
     // Painted above the other marks wherever they overlap.
     const mark = new reg.Highlight(cur) as { priority?: number }
@@ -179,6 +180,25 @@ export function paintMatches(id: string, ranges: readonly Range[], current: numb
     reg.highlights.set('record-find-current', mark)
   } else {
     reg.highlights.delete('record-find-current')
+  }
+}
+
+/** What a fold inside a reply listens for, on its `[data-find-fold]` element, to open for find. */
+export const FIND_REVEAL_EVENT = 'record-find-reveal'
+
+/**
+ * Folds the model knows nothing of live inside a reply's markdown: a
+ * `<details>` the answer wrote, a long code card cut at its first lines.
+ * The DOM still holds their text, so find counts a match there — and opens
+ * them for the current one, or it would scroll to text nobody can see.
+ */
+function revealMatch(range: Range): void {
+  const from = range.startContainer.parentElement
+  // A match in a fold's own summary is already in view.
+  const summary = from?.closest('summary')
+  for (let el = from; el; el = el.parentElement) {
+    if (el instanceof HTMLDetailsElement && !el.open && summary?.parentElement !== el) el.open = true
+    if (el.hasAttribute('data-find-fold')) el.dispatchEvent(new Event(FIND_REVEAL_EVENT))
   }
 }
 

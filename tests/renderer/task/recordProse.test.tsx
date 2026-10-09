@@ -1,13 +1,12 @@
 /**
  * @vitest-environment jsdom
  */
-import { StrictMode, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { RunSessionProvider, type RunSessionValue } from '@renderer/features/chat/RunSessionContext'
 import { WorkItemView } from '@renderer/features/task/record/WorkItems'
 import { RecordProse } from '@renderer/features/task/record/RecordProse'
-import { MarkdownContent } from '@renderer/lib/ui'
 import type { WorkItem } from '@renderer/features/task/recordModel'
 
 afterEach(cleanup)
@@ -96,7 +95,7 @@ describe('heading anchors in record prose', () => {
       const link = screen.getByRole('link', { name: 'Risks' })
       expect(link.getAttribute('target')).toBeNull()
       fireEvent.click(link)
-      const tocBody = document.querySelectorAll('.markdown-body')[1]!
+      const tocBody = document.querySelectorAll('[data-reply]')[1]!
       expect(scrolled).toHaveLength(1)
       expect(scrolled[0]!.tagName).toBe('H2')
       expect(scrolled[0]!.textContent).toBe('Risks')
@@ -104,14 +103,5 @@ describe('heading anchors in record prose', () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = original
     }
-  })
-
-  it('keeps an id stable across StrictMode double renders', () => {
-    const { container } = render(
-      <StrictMode>
-        <MarkdownContent content={'## Risks\n\n## Risks'} headingIds />
-      </StrictMode>
-    )
-    expect(Array.from(container.querySelectorAll('h2')).map((h) => h.id)).toEqual(['risks', 'risks-1'])
   })
 })

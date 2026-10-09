@@ -72,6 +72,14 @@ export function languageName(path: string): string {
   return LANGUAGE_BY_EXTENSION[extension] ?? extension.toUpperCase()
 }
 
+/** True when the name is a file type this table knows — `session.ts`, not `req.apiKey` or `os.path`. */
+export function isKnownFileType(path: string): boolean {
+  const name = path.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? ''
+  if (LANGUAGE_BY_NAME[name]) return true
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && Object.hasOwn(LANGUAGE_BY_EXTENSION, name.slice(dot + 1))
+}
+
 export function encodingLabel(encoding: WorkspaceFileEncoding, bom: boolean): string {
   const base =
     encoding === 'utf8' ? 'UTF-8' : encoding === 'utf16le' ? 'UTF-16 LE' : encoding === 'utf16be' ? 'UTF-16 BE' : 'Binary'

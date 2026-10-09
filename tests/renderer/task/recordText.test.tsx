@@ -58,9 +58,10 @@ describe('record notes', () => {
       item: { kind: 'message', id: 'n1', role: 'assistant', content: 'Looking at the watcher next.' }
     } as WorkItem
     const { container } = render(<WorkItemView item={note} />)
-    const root = container.querySelector('.markdown-body')!
-    expect(root.classList.contains('text-secondary')).toBe(true)
-    expect(root.classList.contains('text-fg')).toBe(false)
+    // A note is a reply at note size; its tone is one attribute on the root, which reply.css reads.
+    const root = container.querySelector('[data-reply]')!
+    expect(root.getAttribute('data-tone')).toBe('secondary')
+    expect(root.getAttribute('data-size')).toBe('sm')
   })
 })
 
