@@ -76,6 +76,16 @@ describe('useWorkspaceGitSummaries', () => {
     expect(result.current.errors).toEqual({})
   })
 
+  it('treats a folder with no repository as neither data nor an error', async () => {
+    // The built-in home workspace on a fresh install: it used to read
+    // "Status unavailable · Retry" in red, and Retry could never change it.
+    gitStatus.mockResolvedValue({ ok: true, data: { kind: 'not_repo' } })
+    const { result } = renderHook(() => useWorkspaceGitSummaries(['/home-scratch'], true))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.data).toEqual({})
+    expect(result.current.errors).toEqual({})
+  })
+
   it('refetches on focus and refreshVersion changes', async () => {
     const { result, rerender } = renderHook(
       ({ version }) => useWorkspaceGitSummaries(['/repo'], true, version),

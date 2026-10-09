@@ -1,4 +1,5 @@
-import { IconButton, cn, Tooltip } from '@renderer/lib/ui'
+import { useState } from 'react'
+import { ActionMenu, IconButton, cn, Tooltip, type ActionMenuItem } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import type { PtySessionInfo } from '@shared/ipc'
 import { tabMiddleClickHandlers } from './PanelChrome'
@@ -40,7 +41,8 @@ export function TerminalSessionBar({
   onSelect,
   onKill,
   onCreate,
-  onToggleSplit
+  onToggleSplit,
+  menuItems = []
 }: {
   sessions: PtySessionInfo[]
   activeId: string | null
@@ -53,8 +55,11 @@ export function TerminalSessionBar({
   onKill: (id: string) => void
   onCreate: () => void
   onToggleSplit: () => void
+  /** The row's menu: a tab with another shell, and what to do with the shown one. */
+  menuItems?: ActionMenuItem[]
 }) {
   const activeSession = sessions.find((s) => s.id === activeId) ?? null
+  const [menuOpen, setMenuOpen] = useState(false)
   return (
     <div
       className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2"
@@ -161,6 +166,29 @@ export function TerminalSessionBar({
           tone="muted"
           aria-pressed={splitId != null}
           onClick={onToggleSplit}
+        />
+      ) : null}
+      {menuItems.length > 0 ? (
+        <ActionMenu
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          placement="down"
+          align="end"
+          aria-label="Terminal actions"
+          items={menuItems}
+          trigger={(t) => (
+            <IconButton
+              ref={t.ref}
+              icon="more"
+              label="Terminal actions"
+              size="xs"
+              tone="muted"
+              aria-expanded={t['aria-expanded']}
+              aria-controls={t['aria-controls']}
+              aria-haspopup={t['aria-haspopup']}
+              onClick={t.onClick}
+            />
+          )}
         />
       ) : null}
     </div>
