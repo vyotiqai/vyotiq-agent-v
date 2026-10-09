@@ -26,3 +26,7 @@ resources/tray/manifest.json text eol=lf
 # shebang, the batch file CRLF for cmd.
 bin/vyotiq text eol=lf
 bin/*.cmd text eol=crlf
+
+# The installed app's `vyotiq` command (build/cli, shipped as resources/cli).
+build/cli/vyotiq text eol=lf
+build/cli/*.cmd text eol=crlf

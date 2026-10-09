@@ -109,3 +109,26 @@ describe('extractDeepLinkUrlFromArgv', () => {
     expect(extractDeepLinkUrlFromArgv(['exe', 'https://run/abc'])).toBeNull()
   })
 })
+
+describe('parseDeepLinkUrl — open and new', () => {
+  it('reads vyotiq://open?ws= as a workspace to open, asked about like any link', () => {
+    expect(parseDeepLinkUrl('vyotiq://open?ws=' + encodeURIComponent('/home/dev/proj'))).toEqual({
+      type: 'open_workspace',
+      workspacePath: '/home/dev/proj',
+      fromCommandLine: false
+    })
+    expect(parseDeepLinkUrl('vyotiq://open')).toBeNull()
+  })
+
+  it('reads vyotiq://new with a brief and an optional workspace', () => {
+    const brief = 'Fix the flaky test in src/a.ts\nthen run it'
+    expect(
+      parseDeepLinkUrl(`vyotiq://new?ws=${encodeURIComponent('/home/dev/proj')}&brief=${encodeURIComponent(brief)}`)
+    ).toEqual({ type: 'new_task', workspacePath: '/home/dev/proj', brief })
+    expect(parseDeepLinkUrl('vyotiq://new?brief=hi')).toEqual({ type: 'new_task', workspacePath: null, brief: 'hi' })
+  })
+
+  it('refuses a brief over the cap', () => {
+    expect(parseDeepLinkUrl(`vyotiq://new?brief=${'a'.repeat(20_001)}`)).toBeNull()
+  })
+})

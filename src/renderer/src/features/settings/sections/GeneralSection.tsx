@@ -7,8 +7,10 @@ import { LAUNCH_VIEW_OPTIONS, MAX_CHAT_PANE_OPTIONS } from '../constants'
 import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SwitchField } from '../components/SwitchField'
 import { WorkspaceOverrideList } from '../components/WorkspaceOverrideList'
 import { NetworkGroup } from '../components/NetworkGroup'
+import { CommandLineGroup } from '../components/CommandLineGroup'
 
 export function GeneralSection({
   secrets,
@@ -71,6 +73,37 @@ export function GeneralSection({
           {...form.defaultMark('maxChatPanes')}
         />
       </SettingsGroup>
+
+      <SettingsGroup title="Closing">
+        {window.vyotiq?.platform !== 'darwin' ? (
+          <SwitchField
+            id="close-to-tray"
+            title="Keep running in the tray"
+            hint="Closing the window hides it; tasks, loops and scheduled tasks keep going. Quit from the tray icon."
+            checked={settings.closeToTray ?? false}
+            disabled={form.formLocked}
+            onChange={(closeToTray) => {
+              void form.runUpdate({ closeToTray })
+            }}
+            {...form.defaultMark('closeToTray')}
+          />
+        ) : null}
+        <SwitchField
+          id="confirm-quit-running"
+          title="Ask before quitting with tasks running"
+          hint="Quitting stops running tasks; loops and scheduled tasks wait until Agent V is open again."
+          checked={settings.confirmQuitWithRunningTasks ?? true}
+          disabled={form.formLocked}
+          onChange={(confirmQuitWithRunningTasks) => {
+            void form.runUpdate({ confirmQuitWithRunningTasks })
+          }}
+          {...form.defaultMark('confirmQuitWithRunningTasks')}
+        />
+      </SettingsGroup>
+
+      {window.vyotiq?.platform === 'win32' ? (
+        <CommandLineGroup disabled={form.formLocked} onError={form.setErrorMessage} />
+      ) : null}
 
       <SettingsGroup
         title="Workspaces"

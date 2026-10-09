@@ -1,0 +1,23 @@
+#!/bin/sh
+# Agent V on the command line, for Git Bash and other sh shells on Windows
+# (cmd and PowerShell run vyotiq.cmd beside this file). Same rules:
+#
+#   vyotiq                       open Agent V
+#   vyotiq <folder>              open a folder as a workspace (. is this one)
+#   vyotiq --prompt "..." [...]  run one task with no window (Headless runs)
+#
+# VYOTIQ_APP  another Vyotiq.exe to run instead of the one this ships with.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+app=${VYOTIQ_APP:-$here/../../Vyotiq.exe}
+
+if [ ! -f "$app" ]; then
+  echo "vyotiq: no Agent V at $app" >&2
+  exit 2
+fi
+
+case $1 in
+  -*) exec "$app" --headless "$@" ;;
+esac
+# The window outlives this shell; the app reads a relative folder against
+# the directory it starts in, which is this one.
+"$app" "$@" >/dev/null 2>&1 &
