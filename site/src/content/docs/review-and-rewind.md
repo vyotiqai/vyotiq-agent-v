@@ -86,6 +86,10 @@ To change an instruction and run it again, hover it and click "Edit and rerun". 
 
 Rerun puts the files and the record back to before that instruction, as Rewind does but without the dialog, then runs the edited instruction. If the task is still running, it stops first.
 
+## Fork from here
+
+To try something else from a point in a task without losing what came after, hover an instruction and click the fork icon, "Fork from here: a new task with the record up to this instruction's result". The new task starts with the record up to that instruction and its answer, and nothing after it, in a task of its own. The original is left as it is. "Fork" in a task's menu still copies the whole task.
+
 ## Related
 
 - Commit and open a pull request from "Changes": [Git and GitHub](/docs/git-and-github)
