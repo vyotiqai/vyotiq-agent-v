@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCheckCommand } from '@main/agent/feedback/checkCommands'
+import { countsAsCheck, isCheckCommand } from '@main/agent/feedback/checkCommands'
 
 // Every string here is a command agents actually ran (userData, 2026-09).
 // The recogniser decides what counts as verification, so a false positive
@@ -157,5 +157,49 @@ describe('isCheckCommand', () => {
       expect(isCheckCommand('pnpm test; echo done')).toBe(false)
       expect(isCheckCommand('pnpm test && rm -rf dist')).toBe(false)
     })
+  })
+})
+
+describe('countsAsCheck', () => {
+  it('counts a test file run by its interpreter, which the receipt used to flag as unchecked', () => {
+    for (const command of [
+      'node test.js',
+      'node tests.mjs',
+      'node --test-reporter=spec src/math.test.js',
+      'tsx test/api.spec.ts',
+      'python test_math.py',
+      'python3 -u tests/math_test.py',
+      'py -3 test_app.py',
+      'bun run math.test.ts',
+      'deno run --allow-read add_test.ts',
+      'ruby spec/user_spec.rb',
+      'cd app && node test.js',
+      'node .\\tests\\math.test.js'
+    ]) {
+      expect(countsAsCheck(command), command).toBe(true)
+    }
+  })
+
+  it('still counts every runner isCheckCommand does', () => {
+    expect(countsAsCheck('pnpm test')).toBe(true)
+    expect(countsAsCheck('npx vitest run')).toBe(true)
+  })
+
+  it('does not count scripts that only mention a test, chained runs or inline code', () => {
+    for (const command of [
+      'node scripts/test-data-gen.js',
+      'node build.js',
+      'python manage.py runserver',
+      'node -e "require(\'./test.js\')"',
+      'node test.js | tail -5',
+      'node test.js; echo ok',
+      'cat test.js'
+    ]) {
+      expect(countsAsCheck(command), command).toBe(false)
+    }
+  })
+
+  it('leaves autonomy’s matcher narrow: an interpreter-run file is not a runner', () => {
+    expect(isCheckCommand('node test.js')).toBe(false)
   })
 })

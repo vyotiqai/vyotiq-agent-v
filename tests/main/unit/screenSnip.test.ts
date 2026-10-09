@@ -119,8 +119,8 @@ beforeEach(() => {
     { getOpacity: () => 1, getMediaSourceId: () => 'window:100:0', isDestroyed: () => false }
   ]
   fake.windowSources = [
-    { id: 'window:555:1', name: 'Vyotiq agent browser (offstage)' },
-    { id: 'window:100:1', name: 'Vyotiq' },
+    { id: 'window:555:1', name: 'Agent V agent browser (offstage)' },
+    { id: 'window:100:1', name: 'Agent V' },
     { id: 'window:200:1', name: 'My Game — settings' },
     { id: 'window:300:1', name: 'My Game' },
     { id: 'window:400:1', name: '' }
@@ -139,7 +139,7 @@ beforeEach(() => {
 describe('screen snip sources', () => {
   it('lists real windows only, never our own invisible helpers', async () => {
     const sources = await listSnipSources()
-    expect(sources.windows).toEqual(['Vyotiq', 'My Game — settings', 'My Game'])
+    expect(sources.windows).toEqual(['Agent V', 'My Game — settings', 'My Game'])
     expect(sources.displays).toEqual([
       { index: 0, width: 1280, height: 1024, primary: false },
       { index: 1, width: 1920, height: 1080, primary: true }

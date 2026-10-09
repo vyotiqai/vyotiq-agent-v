@@ -22,7 +22,12 @@ vi.mock('electron', async () => {
   class FakeSession extends EventEmitter {
     setPermissionRequestHandler = (): void => {}
     setPermissionCheckHandler = (): void => {}
-    webRequest = { onHeadersReceived: (): void => {}, onBeforeRequest: (): void => {} }
+    webRequest = {
+      onHeadersReceived: (): void => {},
+      onBeforeRequest: (): void => {},
+      onCompleted: (): void => {},
+      onErrorOccurred: (): void => {}
+    }
   }
   const sharedSession = new FakeSession()
 
