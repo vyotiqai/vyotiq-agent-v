@@ -13,6 +13,28 @@ The large box is the brief. Its placeholder says what the agent does with it: "D
 
 A good brief names the result you want and anything the agent cannot guess: the files involved, the command that runs the tests, what must not change. You can drop or paste files onto the brief to attach them, or use the paperclip. Type `@` to mention a file and `/` to run a skill or command, as on the instruction line.
 
+In an empty brief, `↑` brings back the last brief you started, and `↑` again the one before, across every task and workspace; `↓` goes the other way. Once you edit the text, the arrows move the cursor again.
+
+### Mentions
+
+`@` opens a menu of what you can hand the agent with an instruction. A chip goes in the text, and what it stands for is read when you send.
+
+| Mention | What goes with the instruction |
+| --- | --- |
+| A file or folder | The file's text (an image goes as an image), or the folder's listing |
+| "Branch diff" | What the branch changed since it left its base, uncommitted work included |
+| "Uncommitted changes" | The working tree against `HEAD`, as a diff |
+| "Terminal output" | The last lines of your newest terminal tab, without colour codes |
+| "Typecheck errors" / "Lint problems" | The project's check, run when you send |
+| "Browser page" | The page open in the agent's browser, with its screenshot |
+| "Commits" | Pick a recent commit: its diff |
+| "Docs", "Rules", "Past tasks" | A doc file, a rule's text, or the start of an earlier task |
+| A web address | Type `@https://…`: the page, read as text (the browser allowlist applies) |
+| An issue or pull request | Type `@#123`: the GitHub issue, or the pull request with its files |
+| A code symbol | Type a name shaped like code, such as `@useComposer` or `@MAX_FILES`: where it is defined, with the lines around it |
+
+### What the agent will see
+
 Beside the brief, "What the agent will see" lists the context this workspace gives the agent before it starts. Rules, Memory, Index and Tools each open the place where you change them.
 
 | Row | What it shows |
@@ -58,6 +80,7 @@ The model menu beside Agent / Ask picks the model and, for models that reason, t
 
 - "Start task" starts the run. The shortcut is `Ctrl+Enter` (`⌘↵` on macOS).
 - "Save as draft" puts the brief, its checks and its attachments aside, and empties the page. When you continue a draft, the button reads "Update draft".
+- "Schedule…" runs this brief later, or again and again, as a new task each time. See [Scheduled tasks](/docs/scheduled-tasks).
 
 Beside "Start task", one line says how tools ask before they run, for example "Asks before edits and commands · MCP tools ask first". "Change" opens Settings, "Agent", which also has "New tasks start in a worktree".
 
@@ -77,13 +100,14 @@ You can speak a brief or an instruction instead of typing it. Press `Ctrl+M` to 
 
 The default is OpenAI, which uses your OpenAI key. Without that key, "the mic cannot start". If the chosen engine is not ready, pressing the mic opens "Dictate with", where you can install a model for this PC or pick OpenAI or OpenRouter.
 
-For "This PC", install a model first. Models download from Hugging Face once and then run offline. Dictation on this PC understands English only.
+For "This PC", install a model first. Models download from Hugging Face once and then run offline. Whisper Tiny, Whisper Small and Moonshine Base understand English only; Whisper Small (multilingual) understands about 100 languages and takes "Language" in Settings, "Voice" (leave it empty to detect the language).
 
 | Model | Download |
 | --- | --- |
 | Whisper Tiny | ~41 MB |
 | Whisper Small | ~249 MB |
 | Moonshine Base | ~123 MB |
+| Whisper Small (multilingual) | ~250 MB |
 
 The model that suits your PC's memory is marked "Best for this PC": Whisper Small with 8 GB of RAM or more, Whisper Tiny below that.
 

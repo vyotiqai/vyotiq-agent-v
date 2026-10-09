@@ -68,4 +68,20 @@ describe('buildSlashDisplayList', () => {
     const display = buildSlashDisplayList('', items)
     expect(display.map((c) => c.id)).toEqual(['skill:a', 'skill:b'])
   })
+
+  it('lists every ready command before any skill still to install', () => {
+    // Typing `/` listed 15 catalog skills, each with Install, above /compact.
+    const items = [
+      cmd({ id: 'skill:pdf', trigger: 'pdf', group: 'Skills', kind: 'skill', availability: 'not_installed' }),
+      cmd({ id: 'skill:mine', trigger: 'mine', group: 'Skills', kind: 'skill' }),
+      cmd({ id: 'builtin:compact', trigger: 'compact', group: 'App' }),
+      cmd({ id: 'cmd:deploy', trigger: 'deploy', group: 'Commands', kind: 'workspace' })
+    ]
+    expect(buildSlashDisplayList('', items).map((c) => c.id)).toEqual([
+      'skill:mine',
+      'builtin:compact',
+      'cmd:deploy',
+      'skill:pdf'
+    ])
+  })
 })

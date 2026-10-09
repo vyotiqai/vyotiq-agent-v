@@ -202,4 +202,17 @@ describe('slashCommandPresentation', () => {
       ['Alpha graph', 4, 1]
     ])
   })
+
+  it('heads the trailing band of skills still to install "More skills"', () => {
+    const blocks = buildSlashMenuBlocks([
+      cmd({ id: 'skill:w', trigger: 'write-tests', group: 'Skills', kind: 'skill' }),
+      cmd({ id: 'builtin:goal', trigger: 'goal', group: 'App' }),
+      cmd({ id: 'skill:pdf', trigger: 'pdf', group: 'Skills', kind: 'skill', availability: 'not_installed', packageId: 'pdf' })
+    ])
+    expect(blocks.map((b) => [b.label, b.startIndex, b.items.length])).toEqual([
+      ['Skills', 0, 1],
+      ['Commands', 1, 1],
+      ['More skills', 2, 1]
+    ])
+  })
 })

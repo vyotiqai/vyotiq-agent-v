@@ -211,6 +211,8 @@ describe('mentionModel', () => {
     })
     expect(items.filter((i) => i.kind !== 'nav').map((i) => [i.label, 'subtitle' in i ? i.subtitle : null])).toEqual([
       ['Branch diff', 'what feat/stream-backpressure changed, uncommitted included'],
+      ['Uncommitted changes', 'the working tree against HEAD'],
+      ['Terminal output', 'the end of your newest terminal tab'],
       ['Typecheck errors', 'checked when you send'],
       ['Lint problems', 'checked when you send'],
       ['Browser page', 'prefer browser tools this instruction']
@@ -219,6 +221,7 @@ describe('mentionModel', () => {
       'Files and folders',
       'Docs',
       'Rules',
+      'Commits',
       'Past tasks'
     ])
     // A detached head has no branch to name.
@@ -395,5 +398,30 @@ describe('mentionModel', () => {
     }
     // Root files are injected as-is, so an alwaysApply: false in one is ignored.
     expect(isAutoInjectedWorkspaceRule('AGENTS.md', '---\nalwaysApply: false\n---\nx')).toBe(true)
+  })
+
+  it('reads a typed address, an issue number and a code-shaped name as mentions', () => {
+    const root = (query: string) => buildRootMentionItems({ query, recentFiles: [], matchingFiles: [], includeCodebase: true })
+    expect(root('https://example.com/docs/a')[0]).toMatchObject({ kind: 'url', url: 'https://example.com/docs/a', label: 'example.com/docs/a' })
+    expect(root('#42')[0]).toMatchObject({ kind: 'issue', number: 42, label: '#42' })
+    expect(root('useComposerMentions').some((i) => i.kind === 'symbol')).toBe(true)
+    expect(root('MAX_FILES').some((i) => i.kind === 'symbol')).toBe(true)
+    // A plain word is a search for files and lists, not a symbol.
+    expect(root('branch').some((i) => i.kind === 'symbol')).toBe(false)
+  })
+
+  it('round-trips the new chips through a draft', () => {
+    const mentions = [
+      { kind: 'changes' as const },
+      { kind: 'terminal' as const },
+      { kind: 'commit' as const, sha: 'abc1234def', subject: 'fix: a | b' },
+      { kind: 'url' as const, url: 'https://example.com/a?b=1' },
+      { kind: 'issue' as const, number: 7 },
+      { kind: 'symbol' as const, name: 'ToolRow' }
+    ]
+    for (const m of mentions) expect(decodeMentionPayload(mentionMarker(m).slice(1, -1))).toEqual(m)
+    expect(decodeMentionPayload('url:javascript%3Aalert(1)')).toBeNull()
+    expect(decodeMentionPayload('commit:not-a-sha')).toBeNull()
+    expect(decodeMentionPayload('symbol:plainword')).toBeNull()
   })
 })

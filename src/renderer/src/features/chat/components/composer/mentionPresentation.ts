@@ -23,15 +23,21 @@ export function mentionItemSection(item: MentionMenuItem): MentionSectionId | nu
     case 'branch':
     case 'browser':
     case 'lints':
+    case 'changes':
+    case 'terminal':
+    case 'url':
+    case 'issue':
       return 'context'
     case 'file':
     case 'folder':
+    case 'symbol':
       return 'files'
     case 'nav':
       return 'browse'
     case 'docs':
     case 'rule':
     case 'chat':
+    case 'commit':
     case 'show-more':
       return null
     default: {

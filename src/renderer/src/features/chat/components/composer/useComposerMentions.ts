@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { RunSummary } from '@shared/ipc'
+import type { GitLogEntry, RunSummary } from '@shared/ipc'
 import {
   buildChatMentionItems,
+  buildCommitMentionItems,
   buildDocsMentionItems,
   buildFileMentionItems,
   buildRootMentionItems,
@@ -197,6 +198,32 @@ export function useComposerMentions({
     }
   }, [token, view, workspacePath])
 
+  // Recent commits when entering the commits view
+  const [commits, setCommits] = useState<GitLogEntry[]>([])
+  const [commitsLoading, setCommitsLoading] = useState(false)
+  useEffect(() => {
+    if (!token || view !== 'commits' || !workspacePath || !window.vyotiq?.gitLog) {
+      setCommitsLoading(false)
+      return
+    }
+    let cancelled = false
+    setCommitsLoading(true)
+    void window.vyotiq
+      .gitLog({ workspacePath, limit: 50 })
+      .then((res) => {
+        if (!cancelled) setCommits(res.ok ? res.data : [])
+      })
+      .catch(() => {
+        if (!cancelled) setCommits([])
+      })
+      .finally(() => {
+        if (!cancelled) setCommitsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, view, workspacePath])
+
   // Past chats when entering chats view
   useEffect(() => {
     if (!token || view !== 'chats' || !workspacePath || !window.vyotiq?.listRuns) {
@@ -272,6 +299,16 @@ export function useComposerMentions({
         : rules
       return buildRuleMentionItems(filtered.slice(0, 40))
     }
+    if (view === 'commits') {
+      if (!hasWorkspace) return []
+      const q = token.query.trim().toLowerCase()
+      const filtered = q
+        ? commits.filter(
+            (c) => c.subject.toLowerCase().includes(q) || c.sha.startsWith(q) || c.author.toLowerCase().includes(q)
+          )
+        : commits
+      return buildCommitMentionItems(filtered.slice(0, 40))
+    }
     if (view === 'chats') {
       const q = token.query.trim().toLowerCase()
       const filtered = q
@@ -300,6 +337,7 @@ export function useComposerMentions({
     docPaths,
     rules,
     runs,
+    commits,
     recentFiles,
     taskFiles,
     hasWorkspace,
@@ -315,6 +353,7 @@ export function useComposerMentions({
   const menuLoading =
     loading ||
     (view === 'chats' && chatsLoading) ||
+    (view === 'commits' && commitsLoading) ||
     (view === 'docs' && docsLoading) ||
     (view === 'rules' && rulesLoading)
   const open = Boolean(token && !dismissed)
@@ -343,6 +382,7 @@ export function useComposerMentions({
           (item.view === 'files' ||
             item.view === 'docs' ||
             item.view === 'rules' ||
+            item.view === 'commits' ||
             item.view === 'chats') &&
           !workspacePath
         ) {
@@ -389,6 +429,28 @@ export function useComposerMentions({
         }
         case 'chat':
           mention = { kind: 'chat', runId: item.runId, title: item.label }
+          break
+        case 'changes':
+          if (!workspacePath) return null
+          mention = { kind: 'changes' }
+          break
+        case 'terminal':
+          mention = { kind: 'terminal' }
+          break
+        case 'commit':
+          if (!workspacePath) return null
+          mention = { kind: 'commit', sha: item.sha, subject: item.label }
+          break
+        case 'url':
+          mention = { kind: 'url', url: item.url }
+          break
+        case 'issue':
+          if (!workspacePath) return null
+          mention = { kind: 'issue', number: item.number }
+          break
+        case 'symbol':
+          if (!workspacePath) return null
+          mention = { kind: 'symbol', name: item.name }
           break
         default: {
           const _exhaustive: never = item
