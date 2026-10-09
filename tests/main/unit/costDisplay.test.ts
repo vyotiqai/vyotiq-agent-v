@@ -142,4 +142,10 @@ describe('windowCostDisplay', () => {
     )
     expect(windowCostDisplay({ runs: 4, pricedRuns: 0 })).toBeNull()
   })
+
+  it('is nothing, not $0, when no task reported a cost (main leaves pricedRuns out then)', () => {
+    expect(windowCostDisplay({ runs: 2 })).toBeNull()
+    // Every task priced at an explicit zero is still free, and says so.
+    expect(windowCostDisplay({ billedCost: 0, runs: 2, pricedRuns: 2 })).toMatchObject({ text: '$0', perTask: 0 })
+  })
 })
