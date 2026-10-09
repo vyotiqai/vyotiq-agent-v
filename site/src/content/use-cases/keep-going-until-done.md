@@ -26,6 +26,6 @@ A "Goal" bar sits above the instruction line with the objective, and "Pause" and
 
 ## What to check
 
-- A goal does not approve anything. While you are away, every edit and command that asks is denied if nobody answers within 15 minutes. Decide before you leave what may run without asking: [Approvals](/docs/approvals) covers "Always allow", setting "Ask before" to "Nothing", and "Unattended mode", which still asks before edits, commands and commits.
-- A question from the agent waits for your answer unless "Unattended mode" is on and "Questions while unattended" is set to "Skip the question".
+- A goal does not approve anything. While you are away, every edit and command that asks is denied if nobody answers within 15 minutes. Decide before you leave what may run without asking: [Approvals](/docs/approvals) covers "Always allow", setting "Ask before" to "Nothing", and "Approve low-risk tools on their own", which still asks before edits, commands and commits.
+- A question from the agent waits for your answer unless "When the agent asks a question" is set to "Skip the question".
 - Review the result the next morning like any other task: the record shows every step it took.

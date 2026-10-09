@@ -101,7 +101,7 @@ describe('SetupPage', () => {
     expect(screen.getByText('Connect a provider first')).toBeTruthy()
 
     listModels.mockResolvedValue({ ok: true, data: { models: [] } })
-    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check Ollama again' }))
     await waitFor(() => expect(step(1).dataset.state).toBe('done'))
     expect(listModels).toHaveBeenCalledTimes(2)
     expect(listModels).toHaveBeenLastCalledWith({ provider: 'ollama', forceRefresh: true })
@@ -114,8 +114,43 @@ describe('SetupPage', () => {
     const props = renderSetup({ settings: { ...OLLAMA, provider: 'openai' } })
     expect(step(1).textContent).toContain('OpenAI · needs an API key')
     expect(listModels).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /Add a key or choose a provider/ }))
+    fireEvent.click(screen.getByRole('button', { name: /More providers in Settings/ }))
     expect(props.onChangeProvider).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers a key from the environment and a local server, and saves a pasted key', async () => {
+    window.vyotiq = {
+      listModels,
+      pathForFile,
+      setupDetect: vi.fn(async () => ({
+        ok: true,
+        data: {
+          envKeys: [{ provider: 'anthropic', envVar: 'ANTHROPIC_API_KEY' }],
+          local: [{ id: 'lmstudio', name: 'LM Studio', baseUrl: 'http://127.0.0.1:1234/v1', models: ['qwen3-8b'] }]
+        }
+      }))
+    } as unknown as typeof window.vyotiq
+    const onUseEnvKey = vi.fn(async () => null)
+    const onUseLocal = vi.fn(async () => null)
+    const onSaveKey = vi.fn(async () => null)
+    renderSetup({ settings: { ...OLLAMA, provider: 'openai' }, onUseEnvKey, onUseLocal, onSaveKey })
+
+    const envRow = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-setup-env-key="anthropic"]')
+      if (!el) throw new Error('no env row')
+      return el
+    })
+    expect(envRow.textContent).toContain('ANTHROPIC_API_KEY')
+    fireEvent.click(screen.getByRole('button', { name: 'Use this key' }))
+    await waitFor(() => expect(onUseEnvKey).toHaveBeenCalledWith('anthropic'))
+
+    expect(document.querySelector('[data-setup-local="lmstudio"]')?.textContent).toContain('running · 1 model')
+    fireEvent.click(screen.getByRole('button', { name: 'Use it' }))
+    await waitFor(() => expect(onUseLocal).toHaveBeenCalledWith(expect.objectContaining({ id: 'lmstudio' })))
+
+    fireEvent.change(screen.getByLabelText('Anthropic API key'), { target: { value: 'sk-ant-pasted-key-0000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSaveKey).toHaveBeenCalledWith('anthropic', 'sk-ant-pasted-key-0000'))
   })
 
   it('a saved key is the encrypted one on this device', async () => {
@@ -168,7 +203,7 @@ describe('SetupPage', () => {
     const recommended = screen.getByRole('radio', { name: /Edits and commands/ })
     expect(recommended.getAttribute('aria-checked')).toBe('true')
     fireEvent.keyDown(recommended, { key: 'End' })
-    expect(screen.getByRole('radio', { name: /Unattended/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('radio', { name: /^Nothing/ }).getAttribute('aria-checked')).toBe('true')
 
     fireEvent.click(start)
     expect(onStart).toHaveBeenCalledWith('C:\\work\\site', 'off')

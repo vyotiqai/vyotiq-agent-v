@@ -119,7 +119,8 @@ function syncHint(runtime: CodeIndexRuntimeStatus): string {
 
 function factsHint(facts: IndexFacts | undefined): string | undefined {
   if (!facts || facts.files == null) return undefined
-  const files = `${facts.files.toLocaleString()} ${facts.files === 1 ? 'file' : 'files'}`
+  // Source files only: tests, docs and config are not indexed.
+  const files = `${facts.files.toLocaleString()} source ${facts.files === 1 ? 'file' : 'files'}`
   const age = facts.indexedAt ? relativeTimeAgo(facts.indexedAt) : ''
   return age ? `${files} · updated ${age}` : files
 }
