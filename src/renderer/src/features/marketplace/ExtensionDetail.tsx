@@ -96,6 +96,7 @@ export function ExtensionDetail({
   ]
     .filter(Boolean)
     .join(' · ')
+  const update = item.installed ? controller.updates.get(item.installed.id) : undefined
   const description =
     item.entry?.description ||
     item.installed?.description ||
@@ -133,6 +134,28 @@ export function ExtensionDetail({
       </div>
       {description ? (
         <p className="mt-3 text-sm leading-[21px] text-secondary">{description}</p>
+      ) : null}
+      {item.builtIn ? (
+        <p className="mt-2 text-xs text-muted" data-built-in>
+          Built in already: {item.builtIn}. Installing this gives the agent two tools for the same job.
+        </p>
+      ) : null}
+      {update ? (
+        <div className="mt-3 flex items-center gap-2 text-xs" data-package-update>
+          <Icon name="arrowUp" size={13} className="shrink-0 text-accent" />
+          <span className="min-w-0 flex-1 text-fg">
+            {update.latest} is out <span className="text-tertiary">· you have {update.current}</span>
+          </span>
+          <Button
+            size="xs"
+            variant="secondary"
+            pending={controller.busyTargetId === update.id}
+            disabled={controller.formLocked}
+            onClick={() => void controller.updatePackage(update)}
+          >
+            Update
+          </Button>
+        </div>
       ) : null}
 
       {item.kind === 'mcp' ? (
@@ -889,7 +912,7 @@ function LocalSkillBody({
     else pushToast(`Deleted ${skill.name}.`, 'success')
   }
 
-  const from = skill.origin === 'cursor' ? ' Read from .cursor/skills.' : ''
+  const from = skill.origin && skill.origin !== 'vyotiq' ? ` Read from ${skill.relativePath.split('/').slice(0, -2).join('/')}.` : ''
   return (
     <>
       <Actions>

@@ -84,6 +84,21 @@ export type ExtensionItem = {
   userRule?: UserRule
   projectRule?: ProjectRuleItem
   scope?: ExtensionScope
+  /** What the agent already does without this package, when the package repeats it. */
+  builtIn?: string
+}
+
+/**
+ * Catalog packages that repeat a tool the agent already has. Nothing on their
+ * cards said so, and installing one gave the model two tools for each job.
+ */
+export const BUILT_IN_OVERLAP: Readonly<Record<string, string>> = {
+  filesystem: 'reading, editing and searching files',
+  memory: 'memory notes (memory_read, memory_write)',
+  fetch: 'fetching web pages (web_fetch)',
+  git: 'git status, diff and commit',
+  playwright: 'driving a browser (the agent’s own browser)',
+  'chrome-devtools': 'driving a browser (the agent’s own browser)'
 }
 
 export type ExtensionInputs = {
@@ -230,7 +245,8 @@ export function buildExtensionItems(input: ExtensionInputs): ExtensionItem[] {
       by: entry?.publisher ?? (item ? SOURCE_BY[item.installSource] : 'Registry'),
       line: entry?.description || item?.description || '',
       entry,
-      installed: item
+      installed: item,
+      ...(BUILT_IN_OVERLAP[source.id] ? { builtIn: BUILT_IN_OVERLAP[source.id] } : {})
     }
     if (!item) {
       return {
@@ -379,7 +395,11 @@ export function buildExtensionItems(input: ExtensionInputs): ExtensionItem[] {
       by: workspaceName,
       line: rule.description || rule.path,
       group: 'installed',
-      state: { kind: 'rule', applies: rule.applies ?? (rule.alwaysApply ? 'always' : 'request') },
+      // Off here: the file stays, the prompt stops carrying it.
+      state:
+        workspaceOverrideForId(overrides, 'rules', rule.path) === false
+          ? { kind: 'off-here' }
+          : { kind: 'rule', applies: rule.applies ?? (rule.alwaysApply ? 'always' : 'request') },
       projectRule: rule
     })
   }
@@ -517,6 +537,8 @@ export function extensionSwitch(
   if (item.group === 'discover') return null
   const on = !(item.state.kind === 'off' || item.state.kind === 'off-here')
   if (item.userRule) return { on: item.userRule.enabled, locked: false }
+  // A rule file is the workspace's own: its switch is this workspace's Off here.
+  if (item.projectRule) return { on, locked: !ctx.hasWorkspace }
   if (item.scope) return { on, locked: false }
   if (item.plugin && item.server) {
     // A server shipped in a package follows it; only this workspace's Off here

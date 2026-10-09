@@ -334,3 +334,90 @@ describe('Add an MCP server', () => {
     )
   })
 })
+
+describe('Search the MCP Registry', () => {
+  it('hands a picked server to the paste view, with its required environment ready to fill', async () => {
+    installBridge({
+      mcpRegistrySearch: vi.fn(async () =>
+        ok([
+          {
+            name: 'io.github.example/postgres',
+            title: 'Postgres',
+            description: 'Query a Postgres database',
+            version: '1.2.0',
+            repository: null,
+            launch: 'npx -y @example/postgres-mcp',
+            remote: false,
+            env: [
+              { name: 'DATABASE_URL', description: 'Connection string', required: true, secret: true },
+              { name: 'LOG_LEVEL', description: '', required: false, secret: false }
+            ]
+          }
+        ])
+      ),
+      marketplaceDetectMcp: vi.fn(async () =>
+        detected({ server: { ...fetchServer, id: 'postgres', name: 'postgres', command: 'npx', args: ['-y', '@example/postgres-mcp'] } })
+      )
+    })
+    const dialog = await openDialog()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Search the MCP Registry…' }))
+    const search = await screen.findByRole('dialog', { name: 'Search the MCP Registry' })
+    fireEvent.change(within(search).getByRole('textbox', { name: 'Search the MCP Registry' }), { target: { value: 'postgres' } })
+    await waitFor(() => expect(bridge.mcpRegistrySearch).toHaveBeenCalledWith('postgres'))
+    fireEvent.click(await within(search).findByRole('button', { name: /Postgres/ }))
+
+    const back = await screen.findByRole('dialog', { name: 'Add an MCP server' })
+    expect((within(back).getByLabelText('Paste a URL, npm package, npx command or JSON') as HTMLTextAreaElement).value).toBe(
+      'npx -y @example/postgres-mcp'
+    )
+    await waitFor(() => expect(bridge.marketplaceDetectMcp).toHaveBeenCalled())
+    await waitFor(() => expect(within(back).getByDisplayValue('DATABASE_URL=')).toBeTruthy())
+  })
+})
+
+describe('Check packages for updates', () => {
+  it('finds a newer version and installs it from the same source', async () => {
+    const pkg = {
+      id: 'acme-skill',
+      kind: 'skill' as const,
+      name: 'Acme skill',
+      version: '1.0.0',
+      description: '',
+      enabled: true,
+      installSource: 'npm' as const,
+      installedAt: '2026-10-01T00:00:00.000Z',
+      packagePath: 'acme-skill/1.0.0',
+      origin: { target: '@acme/skill', ref: '1.0.0' }
+    }
+    installBridge({
+      marketplaceListInstalled: vi.fn(async () => ok({ schemaVersion: 1 as const, items: [pkg] })),
+      marketplaceCheckUpdates: vi.fn(async () =>
+        ok({
+          updates: [{ id: 'acme-skill', name: 'Acme skill', source: 'npm' as const, current: '1.0.0', latest: '1.1.0', target: '@acme/skill' }],
+          checked: 1,
+          failed: []
+        })
+      ),
+      marketplaceInstall: vi.fn(async () => ok({ item: { ...pkg, version: '1.1.0', packagePath: 'acme-skill/1.1.0' } })),
+      marketplacePackageContents: vi.fn(async () => ok(null))
+    })
+    render(<MarketplaceView settings={settings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Skills/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check packages for updates' }))
+    await waitFor(() => expect(bridge.marketplaceCheckUpdates).toHaveBeenCalled())
+    const row = await waitFor(() => {
+      const el = document.querySelector('[data-extension-key="skill:acme-skill"]')
+      if (!el) throw new Error('no row')
+      return el as HTMLElement
+    })
+    fireEvent.click(within(row).getAllByRole('button')[0]!)
+    const banner = await waitFor(() => {
+      const el = document.querySelector('[data-package-update]')
+      if (!el) throw new Error('no banner')
+      return el as HTMLElement
+    })
+    expect(banner.textContent).toMatch(/1\.1\.0 is out/)
+    fireEvent.click(within(banner).getByRole('button', { name: 'Update' }))
+    await waitFor(() => expect(bridge.marketplaceInstall).toHaveBeenCalledWith({ source: 'npm', target: '@acme/skill' }))
+  })
+})

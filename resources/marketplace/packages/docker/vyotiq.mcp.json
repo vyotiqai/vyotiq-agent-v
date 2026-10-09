@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "docker",
+  "name": "Docker MCP Toolkit",
+  "version": "1.0.0",
+  "description": "The servers you enabled in Docker Desktop’s MCP Toolkit, through its gateway. Needs Docker Desktop with the MCP Toolkit on.",
+  "transport": "stdio",
+  "command": "docker",
+  "args": [
+    "mcp",
+    "gateway",
+    "run"
+  ],
+  "env": {},
+  "requires": [
+    "docker"
+  ],
+  "auth": "none",
+  "docsUrl": "https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/"
+}

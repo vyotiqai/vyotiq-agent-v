@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { DetectedMcpServer, McpApplyDetectedRequest, McpDetectResult, McpTransport } from '@shared/ipc'
+import type { DetectedMcpServer, McpApplyDetectedRequest, McpDetectResult, McpRegistryServer, McpTransport } from '@shared/ipc'
 import type { MarketplaceOverrideKind } from '@shared/domain/marketplaceEnablement'
 import { classifyMcpInput, tokenizeCommand } from '@shared/utils/mcpClassify'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
@@ -107,7 +107,9 @@ export function AddMcpDialog({
   onUseCatalog: (catalogId: string) => void
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [view, setView] = useState<'paste' | 'import'>('paste')
+  const [view, setView] = useState<'paste' | 'import' | 'registry'>('paste')
+  /** Environment names a registry pick needs, filled into Environment once detected. */
+  const pendingEnvRef = useRef<string[] | null>(null)
   const [input, setInput] = useState('')
   const [detection, setDetection] = useState<Detection>({ phase: 'idle' })
   const [server, setServer] = useState<DetectedMcpServer | null>(null)
@@ -130,7 +132,10 @@ export function AddMcpDialog({
     setDetection({ phase: 'done', result })
     setServer(result.server ?? null)
     setArgsLine(argsToLine(result.server?.args))
-    setEnvLine(envToLine(result.server?.env))
+    const pending = pendingEnvRef.current
+    pendingEnvRef.current = null
+    const known = envToLine(result.server?.env)
+    setEnvLine(pending && pending.length > 0 ? [known, ...pending.map((name) => `${name}=`)].filter(Boolean).join(' ') : known)
     setServerDirty(false)
     setOverwrite(false)
   }, [])
@@ -303,7 +308,7 @@ export function AddMcpDialog({
     <Dialog
       open
       onClose={onClose}
-      title={view === 'paste' ? 'Add an MCP server' : 'Import MCP servers'}
+      title={view === 'paste' ? 'Add an MCP server' : view === 'registry' ? 'Search the MCP Registry' : 'Import MCP servers'}
       icon="mcp"
       useNativeDialog={false}
       padded={false}
@@ -430,6 +435,15 @@ export function AddMcpDialog({
           )}
           {error ? <ErrorLine>{error}</ErrorLine> : null}
         </div>
+      ) : view === 'registry' ? (
+        <McpRegistrySearch
+          disabled={locked}
+          onPick={(picked) => {
+            pendingEnvRef.current = picked.env.filter((v) => v.required).map((v) => v.name)
+            setView('paste')
+            setInput(picked.launch)
+          }}
+        />
       ) : (
         <div className="min-h-0 space-y-3 overflow-y-auto px-4 py-4">
           <p className="text-xs text-muted">
@@ -470,11 +484,23 @@ export function AddMcpDialog({
         >
           {view === 'paste' ? 'Import from Cursor or Claude…' : 'Paste one instead'}
         </button>
+        {view === 'paste' ? (
+          <button
+            type="button"
+            className="rounded-sm text-xs text-muted hover:text-fg focus-visible:vy-focus-ring"
+            onClick={() => {
+              setError(null)
+              setView('registry')
+            }}
+          >
+            Search the MCP Registry…
+          </button>
+        ) : null}
         <span className="flex-1" />
         <Button size="sm" variant="ghost" onClick={onClose}>
           Cancel
         </Button>
-        {view === 'paste' ? (
+        {view === 'registry' ? null : view === 'paste' ? (
           <Button size="sm" variant="primary" pending={submitting} disabled={locked || !canAdd} onClick={() => void add()}>
             {many ? `Import ${pasted.selected.size}` : 'Add and connect'}
           </Button>
@@ -491,6 +517,87 @@ export function AddMcpDialog({
         )}
       </div>
     </Dialog>
+  )
+}
+
+/**
+ * The official MCP Registry, searched as you type. Picking a server hands its
+ * launch line to the paste view, where it is detected and reviewed like
+ * anything pasted; nothing runs from here.
+ */
+function McpRegistrySearch({ disabled, onPick }: { disabled: boolean; onPick: (server: McpRegistryServer) => void }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<McpRegistryServer[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const seqRef = useRef(0)
+  const searchRef = useRef<HTMLInputElement>(null)
+  // Opening the search is asking to type in it.
+  useEffect(() => {
+    searchRef.current?.focus()
+  }, [])
+  useEffect(() => {
+    const seq = ++seqRef.current
+    const timer = window.setTimeout(() => {
+      setSearching(true)
+      void window.vyotiq.mcpRegistrySearch(query).then((res) => {
+        if (seq !== seqRef.current) return
+        setSearching(false)
+        if (res.ok) {
+          setResults(res.data)
+          setFailure(null)
+        } else {
+          setFailure(res.error)
+        }
+      })
+    }, query ? DETECT_DEBOUNCE_MS : 0)
+    return () => window.clearTimeout(timer)
+  }, [query])
+  return (
+    <div className="min-h-0 space-y-3 overflow-y-auto px-4 py-4" data-mcp-registry>
+      <Input
+        size="sm"
+        ref={searchRef}
+        placeholder="Search servers: postgres, github, docker…"
+        aria-label="Search the MCP Registry"
+        value={query}
+        disabled={disabled}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <p className="m-0 text-xs text-muted">
+        From registry.modelcontextprotocol.io. Anyone can publish there: read what a server runs before you add it.
+      </p>
+      {failure ? <ErrorLine>{failure}</ErrorLine> : null}
+      {searching && !results ? (
+        <p role="status" className="m-0 text-xs text-muted">
+          Searching…
+        </p>
+      ) : results && results.length === 0 ? (
+        <p className="m-0 text-xs text-muted">No servers Agent V can launch match that.</p>
+      ) : results ? (
+        <ul className="m-0 list-none divide-y divide-border/60 border-y border-border p-0">
+          {results.map((server) => (
+            <li key={server.name}>
+              <button
+                type="button"
+                disabled={disabled}
+                className="flex w-full min-w-0 flex-col items-start gap-0.5 rounded-sm px-1 py-2 text-left hover:bg-surface focus-visible:vy-focus-ring"
+                onClick={() => onPick(server)}
+              >
+                <span className="flex w-full min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate text-sm text-fg">{server.title ?? server.name}</span>
+                  {server.version ? <span className="shrink-0 font-mono text-caption text-tertiary">{server.version}</span> : null}
+                  <span className="flex-1" />
+                  <span className="shrink-0 text-caption text-tertiary">{server.remote ? 'Remote' : 'Local'}</span>
+                </span>
+                {server.description ? <span className="line-clamp-2 text-xs text-muted">{server.description}</span> : null}
+                <span className="max-w-full truncate font-mono text-caption text-tertiary">{server.launch}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   )
 }
 

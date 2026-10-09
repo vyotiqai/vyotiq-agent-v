@@ -1,7 +1,10 @@
-import { useEffect, useId, useState } from 'react'
-import type { ToolCatalogEntry, ToolCatalogResult } from '@shared/ipc'
+import { useEffect, useId, useState, type ReactNode } from 'react'
+import type { AgentToolSource, ToolCatalogEntry, ToolCatalogResult } from '@shared/ipc'
 import { Icon, type IconName } from '@renderer/lib/icons'
-import { cn } from '@renderer/lib/ui'
+import { Button, IconButton, cn, pushToast } from '@renderer/lib/ui'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
+import { useConfirm } from '@renderer/lib/hooks/useConfirm'
+import { copyText } from '@renderer/lib/markdown/copyText'
 
 const REASON_LABELS: Record<NonNullable<ToolCatalogEntry['reason']>, string> = {
   'server-disabled': 'server disabled',
@@ -55,7 +58,7 @@ export function toolCatalogSummary(catalog: ToolCatalogResult | null): string | 
   return `${active} of ${catalog.entries.length} tools active`
 }
 
-function ToolRow({ entry, prefix }: { entry: ToolCatalogEntry; prefix?: string }) {
+function ToolRow({ entry, prefix, actions }: { entry: ToolCatalogEntry; prefix?: string; actions?: ReactNode }) {
   // Inside a server's group the `mcp__<server>__` prefix repeats its heading.
   const name = prefix && entry.name.startsWith(prefix) ? entry.name.slice(prefix.length) : entry.name
   const modes = SHOWN_MODES.filter((mode) => entry.modes.includes(mode)).join(' · ')
@@ -74,6 +77,7 @@ function ToolRow({ entry, prefix }: { entry: ToolCatalogEntry; prefix?: string }
       <span className="shrink-0 text-tertiary">
         {!entry.active && entry.reason ? REASON_LABELS[entry.reason] : modes}
       </span>
+      {actions ? <span className="flex shrink-0 items-center">{actions}</span> : null}
     </li>
   )
 }
@@ -89,7 +93,8 @@ function ToolGroup({
   warn = false,
   defaultOpen = false,
   prefix,
-  entries
+  entries,
+  rowActions
 }: {
   title: string
   icon: IconName
@@ -99,6 +104,8 @@ function ToolGroup({
   defaultOpen?: boolean
   prefix?: string
   entries: ToolCatalogEntry[]
+  /** Buttons at a row's end (an agent-built tool's View code and Delete). */
+  rowActions?: (entry: ToolCatalogEntry) => ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [all, setAll] = useState(false)
@@ -149,7 +156,7 @@ function ToolGroup({
       {open && expandable ? (
         <ul id={listId} className="m-0 list-none p-0 pb-2 pl-7">
           {shown.map((entry) => (
-            <ToolRow key={entry.name} entry={entry} prefix={prefix} />
+            <ToolRow key={entry.name} entry={entry} prefix={prefix} actions={rowActions?.(entry)} />
           ))}
           {hidden > 0 ? (
             <li>
@@ -174,6 +181,31 @@ function ToolGroup({
  * at all and would otherwise vanish from the page.
  */
 export function ToolCatalog({ catalog }: { catalog: ToolCatalogResult }) {
+  const [viewing, setViewing] = useState<AgentToolSource | null>(null)
+  const { confirm, dialog: confirmDialog } = useConfirm()
+  const viewCode = async (name: string): Promise<void> => {
+    const res = await window.vyotiq.agentToolSource(name)
+    if (!res.ok) {
+      pushToast(res.error, 'error')
+      return
+    }
+    setViewing(res.data)
+  }
+  const deleteTool = async (name: string): Promise<void> => {
+    const yes = await confirm(`Delete the tool ${name}?`, {
+      details: 'Its file goes to the trash. Runs stop seeing it from their next step.',
+      confirmLabel: 'Delete',
+      danger: true
+    })
+    if (!yes) return
+    const res = await window.vyotiq.agentToolDelete(name)
+    if (!res.ok) {
+      pushToast(res.error, 'error')
+      return
+    }
+    setViewing((cur) => (cur?.name === name ? null : cur))
+    pushToast(res.data.trashed ? `Moved ${name} to the trash` : `Deleted ${name}`, 'success')
+  }
   const builtins = catalog.entries.filter((entry) => entry.source === 'builtin')
   const agentBuilt = catalog.entries.filter((entry) => entry.source === 'agent')
   const mcpByServer = new Map<string, ToolCatalogEntry[]>()
@@ -204,6 +236,12 @@ export function ToolCatalog({ catalog }: { catalog: ToolCatalogResult }) {
           note="Written by a run — each call asks you, and asks again whenever the code changes"
           defaultOpen
           entries={agentBuilt}
+          rowActions={(entry) => (
+            <>
+              <IconButton icon="code" label={`View the code of ${entry.name}`} size="xs" tone="muted" onClick={() => void viewCode(entry.name)} />
+              <IconButton icon="trash" label={`Delete ${entry.name}`} size="xs" tone="muted" onClick={() => void deleteTool(entry.name)} />
+            </>
+          )}
         />
       ) : null}
       {servers.map((server) => {
@@ -225,6 +263,37 @@ export function ToolCatalog({ catalog }: { catalog: ToolCatalogResult }) {
           />
         )
       })}
+      <Dialog
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        title={viewing ? viewing.name : 'Tool'}
+        icon="code"
+        size="lg"
+        footer={
+          viewing ? (
+            <>
+              <Button size="sm" variant="ghost" icon="copy" onClick={() => void copyText(viewing.source)}>
+                Copy
+              </Button>
+              <Button size="sm" variant="ghost" icon="trash" onClick={() => void deleteTool(viewing.name)}>
+                Delete
+              </Button>
+            </>
+          ) : null
+        }
+      >
+        {viewing ? (
+          <div className="min-w-0" data-agent-tool-source>
+            <p className="m-0 mb-2 truncate font-mono text-caption text-tertiary" title={viewing.path}>
+              {viewing.path}
+            </p>
+            <pre className="m-0 max-h-[60vh] overflow-auto rounded-md border border-border bg-sunken p-3 font-mono text-xs text-fg">
+              {viewing.source}
+            </pre>
+          </div>
+        ) : null}
+      </Dialog>
+      {confirmDialog}
     </div>
   )
 }

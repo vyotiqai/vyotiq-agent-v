@@ -1,6 +1,6 @@
 import type { MarketplaceKind, MarketplaceOverrides } from '../ipc'
 
-export type MarketplaceOverrideKind = 'mcp' | 'skills' | 'plugins'
+export type MarketplaceOverrideKind = 'mcp' | 'skills' | 'plugins' | 'rules'
 
 /** Resolve effective enablement: workspace override wins when present. */
 export function effectiveMarketplaceEnabled(

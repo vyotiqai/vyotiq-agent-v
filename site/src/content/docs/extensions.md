@@ -19,7 +19,7 @@ Extensions add tools and know-how to the agent. Open Extensions with its icon at
 
 Each tab groups its list into "Needs you", "Installed" and "Discover". "Discover" holds catalog entries you have not added yet, each with "Add". An added row has an on/off switch, and a server that needs an account has "Sign in". Select a row to see its detail pane on the right.
 
-The app ships with a catalog of 29 MCP servers, 9 skills and 4 packages. The "Design level-up" skill is added for you on first launch. Skills and rules are covered in [Rules and skills](/docs/rules-and-skills).
+The app ships with a catalog of 33 MCP servers, 9 skills and 4 packages; among the servers are Brave Search, Postgres, Docker's MCP Toolkit and GitLab. The "Design level-up" skill is added for you on first launch. Skills and rules are covered in [Rules and skills](/docs/rules-and-skills).
 
 ## Adding an MCP server
 
@@ -30,6 +30,8 @@ The app ships with a catalog of 29 MCP servers, 9 skills and 4 packages. The "De
 5. Click "Add and connect". When the JSON holds several servers, the button reads "Import 2", "Import 3" and so on.
 
 The first time you add something that is not bundled, a dialog titled "Acknowledge marketplace risk" asks you to confirm that packages and MCP endpoints are unsigned.
+
+Looking for a server the catalog does not have? "Search the MCP Registry…" searches the official registry (registry.modelcontextprotocol.io) as you type. Each result shows whether it runs on this machine or remotely, and the line it would run. Picking one fills the paste field with that line, so it is detected and reviewed like anything pasted; the environment variables it needs are filled in as `NAME=` for you to complete. Anyone can publish to the registry, so read what a server runs before you add it.
 
 Already set up servers in another app? "Import from Cursor or Claude…" reads the Cursor and Claude Desktop config files on this machine and lets you pick which servers to bring over. Imported servers are added to every workspace.
 
@@ -42,10 +44,11 @@ A local server runs a command, and that command must be on your PATH. The catalo
 | Command | Comes with | Used by |
 | --- | --- | --- |
 | `npx` | Node.js | Filesystem, Memory, Sequential thinking, Playwright, Chrome DevTools |
-| `uvx` | uv | Fetch, Time, Git |
+| `uvx` | uv | Fetch, Time, Git, Postgres |
 | `git` | Git | Git, alongside `uvx` |
+| `docker` | Docker Desktop | Docker MCP Toolkit |
 
-A server you add yourself needs whatever command it runs, such as `docker`.
+`npx` also runs Brave Search. A server you add yourself needs whatever command it runs.
 
 If that command is missing, the server shows under "Needs you", and its detail pane says it "was not found on PATH, so this server cannot start", with "Locate binary…" and "Retry". A catalog server also gets an install button, such as "Install uvx".
 
@@ -59,7 +62,9 @@ Select an added MCP server, skill or package, and its detail pane shows "Where i
 | "This workspace" | On only in the workspace you are in |
 | "Off here" | Off in this workspace |
 
-With no workspace open, the choices are "All workspaces" and "Off". A user rule offers only those two. A server that comes inside a package follows the package: its choices are "With" plus the package's name, or "Off here". Skill folders and workspace rule files have no such choice. Each row's ⋯ menu has the same choices, with the middle one reading "This workspace only".
+With no workspace open, the choices are "All workspaces" and "Off". A user rule offers only those two. A server that comes inside a package follows the package: its choices are "With" plus the package's name, or "Off here". Skill folders have no such choice.
+
+A workspace's own rule file (`AGENTS.md`, `CLAUDE.md`, or a file in `.cursor/rules` or `.vyotiq/rules`) has a switch for this workspace: off, it reads "Off here" and stops reaching the agent's prompt, while the file stays where it is and can still be @-mentioned. With no workspace open the switch is locked. Each row's ⋯ menu has the same choices, with the middle one reading "This workspace only".
 
 ## MCP tools load on demand
 
@@ -77,9 +82,19 @@ You can change this in two places:
 
 Under "Configuration", "Never allow" blocks tools by name and "Allow only" limits the server to the tools you list, one name per line.
 
+## When a server asks you something
+
+A server can ask a question while one of its tools runs:
+
+- **A form**, such as booking details. It appears on the task's question card, like the agent's own questions.
+- **A link to open**, such as a sign-in or a payment page. The card shows the whole address with "Open it in my browser" and "Don't open it". Only `https` links are offered, and nothing opens unless you say so.
+- **An answer from your model** (MCP "sampling"), such as a summary. The card shows what the server asks and its instructions, with "Allow once" and "Deny". Allowed, the utility model (or the task's model) answers with no tools, and the spend shows in Usage under "Side calls" as "MCP server requests".
+
+With "When the agent asks a question" set to "Skip the question", all three are declined without asking.
+
 ## MCP tools ask by default
 
-MCP tools come from outside Agent V, so they ask before they run. "MCP tools always ask" in Settings, "Agent", is on by default; its note reads "Even when approvals are off." An MCP tool you allow with "Always allow" stops asking. "Unattended mode" does not approve MCP tools: they count as high-risk, so they still ask. See [Approvals](/docs/approvals).
+MCP tools come from outside Agent V, so they ask before they run. "MCP tools always ask" in Settings, "Agent", is on by default; its note reads "Even when approvals are off." An MCP tool you allow with "Always allow" stops asking. "Approve low-risk tools on their own" does not approve MCP tools: they count as high-risk, so they still ask. See [Approvals](/docs/approvals).
 
 ## Registry and trust
 
@@ -89,6 +104,10 @@ The gear button at the end of the tab row opens "Registry and trust":
 - **"Trust":** "I understand packages and MCP endpoints are unsigned". You tick it once before installing anything that is not bundled.
 - **"MCP servers":** "Reconnect all MCP servers" stops every running server and starts it again.
 - **"Install from source":** install a package from a "Folder or zip", "Git", "npm" or a "Remote MCP" URL with an optional "Token".
+
+## Keeping packages up to date
+
+Bundled packages update with the app. For one you added from npm, git or a registry, the refresh button at the end of the tab row, "Check packages for updates", asks each source for its latest version without downloading anything; a notice says what it found. A package with a newer version shows "{version} is out · you have {version}" in its detail pane with "Update", which installs it again from the same source, keeping its on/off setting. Packages added before this check existed did not record where they came from, so they cannot be checked; adding one again records it.
 
 ## Packages
 

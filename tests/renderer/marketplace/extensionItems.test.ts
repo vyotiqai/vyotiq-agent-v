@@ -137,6 +137,15 @@ describe('an MCP package from the catalog', () => {
     expect(extensionStateLabel(item.state)).toBe('Add')
   })
 
+  it('says when a package repeats a tool the agent already has', () => {
+    const items = build({
+      catalog: [entry({ id: 'filesystem', kind: 'mcp' }), entry({ id: 'fetch', kind: 'mcp' }), entry({ id: 'linear', kind: 'mcp' })]
+    })
+    expect(only(items, 'mcp:filesystem').builtIn).toMatch(/editing and searching files/)
+    expect(only(items, 'mcp:fetch').builtIn).toMatch(/web_fetch/)
+    expect(only(items, 'mcp:linear').builtIn).toBeUndefined()
+  })
+
   it('reports a live connection with its tool count', () => {
     const item = installedMcp({ status: { connected: true, toolCount: 3 } })
     expect(item.state).toEqual({ kind: 'connected', tools: 3 })
@@ -528,9 +537,20 @@ describe('the row switch', () => {
       ]
     })
     expect(extensionSwitch(only(items, 'user-rule:r1'), ws)).toEqual({ on: false, locked: false })
-    expect(extensionSwitch(only(items, 'rule:.vyotiq/rules/a.md'), ws)).toBeNull()
+    expect(extensionSwitch(only(items, 'rule:.vyotiq/rules/a.md'), ws)).toEqual({ on: true, locked: false })
     expect(extensionSwitch(only(items, 'local:/home/x/SKILL.md'), ws)).toBeNull()
     expect(extensionSwitch(only(items, 'skill:fresh'), ws)).toBeNull()
+  })
+
+  it('switches a workspace rule file off here, and only with a workspace open', () => {
+    const items = build({
+      projectRules: [{ path: 'CLAUDE.md', alwaysApply: true, applies: 'always' }],
+      overrides: { rules: { 'CLAUDE.md': false } }
+    })
+    const rule = only(items, 'rule:CLAUDE.md')
+    expect(rule.state).toEqual({ kind: 'off-here' })
+    expect(extensionSwitch(rule, ws)).toEqual({ on: false, locked: false })
+    expect(extensionSwitch(rule, { hasWorkspace: false })).toEqual({ on: false, locked: true })
   })
 
   it('lets a server in a package switch only its own Off here', () => {
