@@ -12,6 +12,7 @@ import { parseChartSpec } from '@shared/chartSpec'
 import { langFromPath, resolveLang, useHighlight, type Token } from './highlight'
 import { FileRef } from './refs'
 import { FIND_REVEAL_EVENT } from '../../recordFind'
+import { ViewFence } from './view/ViewFence'
 
 /*
   Fenced code, in one card family: a 32px head that says what the code is
@@ -25,6 +26,7 @@ import { FIND_REVEAL_EVENT } from '../../recordFind'
     ```diff                           a change, signed + / − in a gutter
     ```sh  /  ```console              commands; Copy leaves out prompts and output
     ```mermaid  /  ```chart           drawn once the fence closes
+    ```view                           a screen built for this answer, drawn as it streams
 */
 
 type Info = { lang: string; path?: string; start?: number; end?: number }
@@ -83,6 +85,7 @@ export function CodeFence({ lang, meta, text, streaming }: { lang: string; meta?
   const info = parseInfo(lang, meta)
   const l = info.lang.toLowerCase()
   if (l === 'mermaid') return <Diagram source={text} streaming={streaming} />
+  if (l === 'view') return <ViewFence text={text} streaming={streaming} onPlain={() => <Code text={text} info={info} streaming={false} />} />
   if (l === 'chart' && !streaming) {
     const spec = parseChartSpec(text)
     if (spec) return <Chart spec={spec} source={text} />

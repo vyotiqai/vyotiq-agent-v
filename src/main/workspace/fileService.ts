@@ -1229,6 +1229,30 @@ async function unlinkIfPresent(path: string): Promise<void> {
   }
 }
 
+const RECOVERY_GITIGNORE_REL = '.vyotiq/.gitignore'
+/**
+ * The recovery mirror holds unsaved editor buffers: never something to
+ * commit, and in a repository whose own .gitignore doesn't name it, `git add .`
+ * would. This file keeps it out, and names itself so it adds nothing new to
+ * git status either. Written only where `.vyotiq/` has no .gitignore of its
+ * own — one the project wrote is the project's to change.
+ */
+const RECOVERY_GITIGNORE = '# Written by Agent V: unsaved editor buffers kept for crash recovery.\neditor-recovery.json\n.gitignore\n'
+
+async function keepRecoveryOutOfGit(workspacePath: string, vyotiqDir: string): Promise<void> {
+  const path = join(vyotiqDir, '.gitignore')
+  if (existsSync(path)) return
+  try {
+    assertNoSymlinkPath(workspacePath, RECOVERY_GITIGNORE_REL, true)
+    await atomicWriteFileAsync(path, RECOVERY_GITIGNORE, 0o644, () => {
+      assertNoSymlinkPath(workspacePath, RECOVERY_GITIGNORE_REL, true)
+      assertResolvedInsideWorkspace(workspaceRoot(workspacePath), vyotiqDir)
+    })
+  } catch {
+    // Recovery itself is saved; only the ignore line is missing, as it was before.
+  }
+}
+
 async function saveEditorRecoveryUnsafe(
   workspacePath: string,
   snapshot: WorkspaceEditorRecoverySnapshot
@@ -1247,6 +1271,7 @@ async function saveEditorRecoveryUnsafe(
       assertNoSymlinkPath(workspacePath, RECOVERY_PROJECT_REL, true)
       assertResolvedInsideWorkspace(workspaceRoot(workspacePath), projectParent)
     })
+    await keepRecoveryOutOfGit(workspacePath, projectParent)
     await unlinkIfPresent(recoveryAppTombstonePath(workspacePath))
   } catch (err) {
     if (err instanceof WorkspaceFileError && err.code === 'RECOVERY') throw err
@@ -1291,6 +1316,8 @@ async function loadEditorRecoveryUnsafe(workspacePath: string): Promise<{
     readRecoveryFile(appPath),
     projectPath ? readRecoveryFile(projectPath, workspacePath) : Promise.resolve(null)
   ])
+  // A mirror written before the ignore file existed is kept out of git from the next open, not the next save.
+  if (projectPath && projectSnapshot) await keepRecoveryOutOfGit(workspacePath, dirname(projectPath))
   const tombstone = await readRecoveryTombstone(recoveryAppTombstonePath(workspacePath))
   const clearTime = tombstone ? Date.parse(tombstone.clearedAt) : Number.NEGATIVE_INFINITY
   const currentApp = appSnapshot && Date.parse(appSnapshot.savedAt) > clearTime ? appSnapshot : null

@@ -18,7 +18,9 @@ const PARALLEL_SAFE_BUILTIN = new Set([
   'github_pr_checks',
   'mcp_list_tools',
   'pull_agent_instance',
-  'lsp'
+  'lsp',
+  // Draws a view in the record from its own arguments; touches nothing.
+  'show_view'
 ])
 
 /** Single-file writes that may overlap when normalized paths are disjoint. */

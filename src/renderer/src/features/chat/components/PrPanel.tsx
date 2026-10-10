@@ -102,7 +102,21 @@ function prEmptyBody(error: string | null): string {
   if (GITHUB_AUTH_ERROR.test(error)) {
     return 'Connect GitHub, then refresh the pull request panel.'
   }
-  return error
+  return prErrorLine(error)
+}
+
+/**
+ * What gh said, in a line. Main leads an error with gh's own words and
+ * follows with the command it ran (for `gh pr view`, two dozen JSON field
+ * names), which tells you nothing here.
+ */
+export function prErrorLine(error: string): string {
+  const said = error
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !/^Command failed:/i.test(line))
+  const line = said ?? 'GitHub did not answer. Refresh to try again.'
+  return line.length > 240 ? `${line.slice(0, 239)}…` : line
 }
 
 function viewedStorageKey(workspacePath: string, prNumber: number): string {
@@ -1435,7 +1449,7 @@ export function PrPanel({
           role={noticeFailed ? 'alert' : 'status'}
         >
           <Icon name={noticeFailed ? 'warningCircle' : 'checkCircle'} size={14} className="mt-0.5" />
-          <span className="min-w-0 [overflow-wrap:anywhere]">{notice}</span>
+          <span className="min-w-0 [overflow-wrap:anywhere]">{noticeFailed ? prErrorLine(notice) : notice}</span>
         </p>
       ) : null}
 

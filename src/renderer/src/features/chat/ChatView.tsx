@@ -518,14 +518,14 @@ export function ChatView({
     },
     [setRightPanel, workspacePath]
   )
-  // A file asked for from outside this view (the palette) opens here once
+  // A file asked for from outside this view (the palette, a pinned view) opens here once
   // this view is showing that workspace.
   const fileRequest = useWorkspaceFileRequest()
   useEffect(() => {
     if (!fileRequest || !workspacePath) return
     if (!workspacePathsEqual(fileRequest.workspacePath, workspacePath)) return
     consumeWorkspaceFileRequest(fileRequest.seq)
-    openWorkspaceFile(fileRequest.path)
+    openWorkspaceFile(fileRequest.path, fileRequest.options)
   }, [fileRequest, workspacePath, openWorkspaceFile])
   const handleWorkspaceFileOpened = useCallback((request: WorkspaceFileOpenRequest): void => {
     setRequestedFilePath((current) =>

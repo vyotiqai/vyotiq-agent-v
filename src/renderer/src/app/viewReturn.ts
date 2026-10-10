@@ -1,4 +1,4 @@
-export type AppView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage'
+export type AppView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage' | 'screen'
 
 export type ViewReturns = {
   /** Where Settings' Back goes. */

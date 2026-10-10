@@ -24,6 +24,11 @@ export type RunSessionValue = {
    * one way to undo them all (it asks first). Only that run's pane gets it.
    */
   pendingWrites?: { runId: string; count: number; onUndo: () => void }
+  /**
+   * Send text as your next message in this task, like typing it: a button or
+   * a form in a ```view the agent drew. Queued while a run is live.
+   */
+  onSay?: (text: string) => void
 }
 
 const RunSessionContext = createContext<RunSessionValue>({
@@ -35,7 +40,8 @@ const RunSessionContext = createContext<RunSessionValue>({
   onOpenWorkspaceFile: undefined,
   onOpenPanel: undefined,
   onOpenAgentTerminal: undefined,
-  pendingWrites: undefined
+  pendingWrites: undefined,
+  onSay: undefined
 })
 
 export const RunSessionProvider = RunSessionContext.Provider

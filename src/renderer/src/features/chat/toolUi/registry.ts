@@ -655,6 +655,16 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       }
     }
   },
+  // The view itself is drawn after the run's work (RunViews); its row names it.
+  show_view: {
+    Body: StatusMessageBody,
+    hasBody: statusMessageHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary || summarizeToolArgs(tool.name, tool.argsPreview),
+      icon: 'grid'
+    })
+  },
   create_plan: {
     Body: StatusMessageBody,
     hasBody: statusMessageHasBody,

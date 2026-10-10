@@ -373,4 +373,35 @@ describe('TerminalPanel — what this task ran', () => {
     await screen.findByRole('tab', { name: 'cmd' })
     expect(screen.queryByRole('tab', { name: 'This task' })).toBeNull()
   })
+
+  it('makes one shell for a command asked to run in a tab that was not open, and runs it there', async () => {
+    let listed: PtySessionInfo[] = []
+    const ptyCreate = vi.fn().mockImplementation(async () => {
+      const made = { ...session, id: `sess-${ptyCreate.mock.calls.length}` }
+      listed = [...listed, made]
+      return { ok: true, data: made }
+    })
+    const ptyWrite = vi.fn().mockResolvedValue({ ok: true, data: true })
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        ptyList: vi.fn().mockImplementation(async () => ({ ok: true, data: listed })),
+        ptyCreate,
+        ptyKill: vi.fn().mockResolvedValue({ ok: true, data: true }),
+        ptyWrite,
+        ptyResize: vi.fn().mockResolvedValue({ ok: true, data: true }),
+        onPtyData: vi.fn().mockReturnValue(() => undefined),
+        onPtyExit: vi.fn().mockReturnValue(() => undefined)
+      }
+    })
+    // Asked before the tab exists (a view's Run, a command card's Run in my terminal).
+    const { requestRunInTerminal, resetTerminalRunRequestsForTests } = await import('@renderer/features/chat/terminalRequests')
+    resetTerminalRunRequestsForTests()
+    requestRunInTerminal('/ws', 'pnpm test')
+    render(<TerminalPanel workspacePath="/ws" visible />)
+    await waitFor(() => expect(ptyWrite).toHaveBeenCalledWith('sess-1', 'pnpm test\r', '/ws'))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(ptyCreate).toHaveBeenCalledTimes(1)
+  })
 })

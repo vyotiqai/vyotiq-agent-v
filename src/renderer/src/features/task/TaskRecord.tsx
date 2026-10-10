@@ -22,6 +22,9 @@ import { Brief } from './record/Brief'
 import { ReceiptLine } from './record/Receipt'
 import { RecordRow, RunDivider } from './record/RecordLayout'
 import { RecordProse } from './record/RecordProse'
+import { RunViews } from './record/RunViews'
+import { ViewEraContext } from './record/reply/view/live'
+import { answerHeadline } from './record/plainText'
 import { Steps, instancesOf, placeKey } from './record/Steps'
 import {
   BrokeAtContext,
@@ -159,7 +162,7 @@ function runTools(run: RecordRun): ToolItem[] {
   const add = (list: readonly WorkItem[]): void => {
     for (const w of list) {
       if (w.kind === 'explore') out.push(...w.tools)
-      else if (w.kind === 'tool' || w.kind === 'card' || w.kind === 'instance' || w.kind === 'plan') out.push(w.tool)
+      else if (w.kind === 'tool' || w.kind === 'card' || w.kind === 'instance' || w.kind === 'plan' || w.kind === 'view') out.push(w.tool)
     }
   }
   add(run.setup)
@@ -457,6 +460,8 @@ function RunBody({
   )
   const stopped = useMemo(() => (state === 'stopped' ? stoppedDetail(run, tools) : undefined), [state, run, tools])
   return (
+    // Views in an earlier run's answer stop following their sources: that answer was about then.
+    <ViewEraContext.Provider value={isLast}>
     <FirstRuleGrantContext.Provider value={firstRuleGrant}>
     <BrokeAtContext.Provider value={brokeAt}>
     <EditMarksContext.Provider value={marks}>
@@ -495,6 +500,7 @@ function RunBody({
           </div>
         </RecordRow>
       ) : null}
+      <RunViews run={run} />
       {run.result ? (
         <ResultRow
           text={run.result.text}
@@ -547,6 +553,7 @@ function RunBody({
     </EditMarksContext.Provider>
     </BrokeAtContext.Provider>
     </FirstRuleGrantContext.Provider>
+    </ViewEraContext.Provider>
   )
 }
 
@@ -571,7 +578,8 @@ function HistoryRun({
   const cost = usage ? turnCost(usage) : null
   const duration = runDuration(run)
   // The answer's first line, as words: "Checks recorded: **4 met**" showed its asterisks.
-  const answerLine = run.result?.text.split('\n').find((l) => l.trim())
+  // An answer that opens with a view is named by the view's title, not its JSON.
+  const answerLine = run.result ? answerHeadline(run.result.text) : undefined
   const title = answerLine != null ? plainLine(answerLine) : run.text || (run.command ? `/${run.command}` : '')
   return (
     <div data-history-run={run.n}>

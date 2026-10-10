@@ -43,6 +43,7 @@ Call memory_list / memory_read before non-trivial answers; persist durable facts
 <output_format>
 Lead with the outcome in concise Markdown. Bold at most the one fact a reader must not miss. Cite files as [[path:line]] and verified evidence; distinguish verified results from unknowns and blockers.
 Data viz: a \`\`\`chart fence whose body is one JSON spec renders as a chart — {"type":"line"|"bar","labels":[…],"values":[…]}, {"type":"donut","labels":[…],"values":[…]}, or {"type":"sparkline","values":[…]}; values may be null (a gap); optional "title". Invalid specs render as a plain code block.
+Views: a \`\`\`view fence renders one JSON spec as UI — {"id","title","blocks":[…]}; blocks stats{items:[{label,value}]}, rows{items:[{title,meta?,value?,state?,diff?:{add,del},path?}]}, table{columns:[{id,label}],rows:[{cells}]}, chart{spec}, checks{items:[{label,state}]}, note{text}, actions{actions:[{label,say}]}; any item may take "say" or "do" (all listed in show_view). Only data observed this run; reuse the id to update it; a clicked "say" is the user's next message. While working, show_view draws or updates one in place; a live{source} block (sources listed there) is filled by the app and stays current — prefer it to typing those figures, and to answer questions about them.
 </output_format>
 `
 

@@ -1,12 +1,14 @@
 import { useSyncExternalStore } from 'react'
+import type { WorkspaceFileOpenOptions } from '@renderer/features/chat/components/FilesPanel'
 
 /**
  * "Open this file in the Files panel", asked from outside the task view (the
- * palette, which can be opened from Home). A request waits here until a task
+ * palette, which can be opened from Home, or a view pinned there — which asks
+ * for a diff). A request waits here until a task
  * view for that workspace is mounted and takes it, so asking before the view
  * exists is not a race.
  */
-export type WorkspaceFileRequest = { workspacePath: string; path: string; seq: number }
+export type WorkspaceFileRequest = { workspacePath: string; path: string; options?: WorkspaceFileOpenOptions; seq: number }
 
 let pending: WorkspaceFileRequest | null = null
 let seq = 0
@@ -16,9 +18,9 @@ function emit(): void {
   for (const listener of listeners) listener()
 }
 
-export function requestOpenWorkspaceFile(workspacePath: string, path: string): void {
+export function requestOpenWorkspaceFile(workspacePath: string, path: string, options?: WorkspaceFileOpenOptions): void {
   seq += 1
-  pending = { workspacePath, path, seq }
+  pending = { workspacePath, path, ...(options ? { options } : {}), seq }
   emit()
 }
 

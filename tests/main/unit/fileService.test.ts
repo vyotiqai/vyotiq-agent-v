@@ -397,6 +397,23 @@ describe('editor recovery persistence', () => {
     expect((await loadEditorRecovery(root)).snapshot).toBeNull()
   })
 
+  it('keeps the project copy out of git without touching a .gitignore the project wrote', async () => {
+    const snapshot: WorkspaceEditorRecoverySnapshot = { version: 1, activeTabId: null, savedAt: new Date().toISOString(), tabs: [] }
+    const session = await loadEditorRecovery(root)
+    await saveEditorRecovery(root, snapshot, session.sessionToken, 1)
+    const ignore = readFileSync(join(root, '.vyotiq', '.gitignore'), 'utf8')
+    expect(ignore.split('\n')).toEqual(expect.arrayContaining(['editor-recovery.json', '.gitignore']))
+
+    // A mirror from before the ignore file: opening the workspace adds it.
+    rmSync(join(root, '.vyotiq', '.gitignore'))
+    const reopened = await loadEditorRecovery(root)
+    expect(existsSync(join(root, '.vyotiq', '.gitignore'))).toBe(true)
+
+    writeFileSync(join(root, '.vyotiq', '.gitignore'), 'notes/\n')
+    await saveEditorRecovery(root, snapshot, reopened.sessionToken, 2)
+    expect(readFileSync(join(root, '.vyotiq', '.gitignore'), 'utf8')).toBe('notes/\n')
+  })
+
   it('scopes recovery generations to the loaded renderer session', async () => {
     const snapshot: WorkspaceEditorRecoverySnapshot = {
       version: 1,

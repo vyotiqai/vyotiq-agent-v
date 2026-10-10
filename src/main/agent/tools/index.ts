@@ -113,6 +113,8 @@ import { basename, join } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { askQuestionThroughRenderer, isAgentQuestionSupersededError } from '../agentQuestion'
+import { parseViewSpec, viewDrops } from '../../../shared/viewSpec'
+import { describeLiveBlocks } from './viewLiveReads'
 import {
   ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE,
   ASK_QUESTION_NO_ANSWER_GUIDANCE,
@@ -683,7 +685,8 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       runId: context.runId,
       toolCallId: context.toolCallId,
       ...(form.title ? { title: form.title } : {}),
-      questions: form.questions
+      questions: form.questions,
+      ...(form.view ? { view: form.view } : {})
     }
     // The invoke snapshot, like the approval gate's autonomousMode (loop.ts):
     // Unattended mode is decided once per turn, not mid-step.
@@ -717,6 +720,35 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
           : message
       )
     }
+  },
+  show_view: async (workspace, args, signal, context) => {
+    throwIfAborted(signal)
+    // The record draws the call's own arguments; this tells the model whether
+    // they make a view, what the record could not use, and what its live
+    // blocks show the user, so what it writes next agrees with them.
+    const spec = parseViewSpec(JSON.stringify(args))
+    const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim().slice(0, 80) : 'View'
+    if (!spec) {
+      return toolFail(
+        'show_view',
+        title,
+        'Not shown: a view needs an id, a title and at least one valid block (stats, rows, table, chart, checks, note, actions, form, live). Check each block against the tool description and call again.'
+      )
+    }
+    const drops = viewDrops(args)
+    const left = [
+      drops.blocks > 0 ? `${drops.blocks} invalid ${drops.blocks === 1 ? 'block was' : 'blocks were'} left out` : '',
+      drops.items > 0 ? `${drops.items} invalid or extra ${drops.items === 1 ? 'item was' : 'items were'} left out of the blocks shown` : ''
+    ].filter(Boolean)
+    const live = await describeLiveBlocks(spec, workspace, context.runId)
+    throwIfAborted(signal)
+    return toolOk(
+      'show_view',
+      spec.title,
+      `Shown "${spec.title}" (id ${spec.id}, ${spec.blocks.length} ${spec.blocks.length === 1 ? 'block' : 'blocks'}${
+        left.length > 0 ? `; ${left.join('; ')}` : ''
+      }). Call show_view with id "${spec.id}" to update it in place.${live ? `\n${live}` : ''}`
+    )
   },
   switch_mode: async (_workspace, args, signal, context) => {
     throwIfAborted(signal)

@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { ChangesPanel } from '@renderer/features/chat/components/ChangesPanel'
 import type { UiItem } from '@shared/transcript'
 import { requestCommitBox, takeCommitRequest } from '@renderer/features/chat/commitRequest'
+import { requestOpenCommit } from '@renderer/features/chat/commitOpenRequests'
 
 beforeEach(() => {
   Object.defineProperty(window, 'vyotiq', {
@@ -415,6 +416,16 @@ describe('ChangesPanel', () => {
     expect(screen.getAllByText('abc1234').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Back to commits' }))
     expect(await screen.findByRole('list', { name: 'Commits' })).toBeTruthy()
+  })
+
+  it('opens the commit a view asked for, with its files', async () => {
+    renderGit()
+    await screen.findByText('a.ts')
+    requestOpenCommit('/ws', 'abc1234')
+    await waitFor(() => {
+      expect(window.vyotiq.gitCommitFiles).toHaveBeenCalledWith({ workspacePath: '/ws', sha: 'abc1234567890' })
+    })
+    expect(screen.getAllByText('abc1234').length).toBeGreaterThan(0)
   })
 
   it('composes a commit with the agent-written message, then commits without pushing', async () => {

@@ -115,6 +115,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   cancel_agent_instance: { running: 'Cancelling instance', done: 'Cancelled instance' },
   build_tool: { running: 'Building a tool', done: 'Built a tool' },
   ask_question: { running: 'Asking', done: 'Asked' },
+  show_view: { running: 'Drawing a view', done: 'Showed a view' },
   switch_mode: { running: 'Switching mode', done: 'Switched mode' }
 }
 
@@ -198,7 +199,7 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
     const status = args.status
     if (typeof status === 'string' && status.trim()) return truncate(status.trim())
   }
-  if (name === 'create_plan') {
+  if (name === 'create_plan' || name === 'show_view') {
     const title = args.title
     if (typeof title === 'string' && title.trim()) return truncate(title.trim())
   }

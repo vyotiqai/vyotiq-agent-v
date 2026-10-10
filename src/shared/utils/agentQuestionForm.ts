@@ -1,6 +1,7 @@
 /** Typed ask_question form items and legacy → canonical normalization. */
 
 import { parseJsonish } from './jsonish'
+import { parseViewSpec, VIEW_SPEC_MAX_CHARS } from '../viewSpec'
 
 export const AGENT_QUESTION_TYPES = ['single', 'multi', 'boolean', 'text'] as const
 export type AgentQuestionType = (typeof AGENT_QUESTION_TYPES)[number]
@@ -48,6 +49,24 @@ export type AgentQuestionAnswer = {
 export type NormalizedAskQuestionForm = {
   title?: string
   questions: AgentQuestionItem[]
+  /**
+   * A view shown above the questions (what the choice is between), as the
+   * JSON of its parsed spec. One that makes no view is left out: the
+   * question is still worth asking without it.
+   */
+  view?: string
+}
+
+/**
+ * The question's view, read as a ```view is; undefined when it makes none.
+ * Read back it can come out longer than it went in (array rows become cells),
+ * and one over the bridge's cap would fail the whole question, not just the view.
+ */
+function readQuestionView(raw: unknown): string | undefined {
+  if (raw == null) return undefined
+  const spec = parseViewSpec(typeof raw === 'string' ? raw : JSON.stringify(raw))
+  const json = spec ? JSON.stringify(spec) : undefined
+  return json && json.length <= VIEW_SPEC_MAX_CHARS ? json : undefined
 }
 
 function uniqueTrimmedStrings(values: unknown): string[] {
@@ -176,6 +195,7 @@ export function normalizeAskQuestionArgs(
     typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined
   const titleError = validateTitle(title)
   if (titleError) return { ok: false, error: titleError }
+  const view = readQuestionView(args.view)
   let questionsInput = args.questions
   if (typeof questionsInput === 'string') {
     const parsed = parseJsonish(questionsInput)
@@ -209,7 +229,7 @@ export function normalizeAskQuestionArgs(
       ids.add(parsed.id)
       questions.push(parsed)
     }
-    return { ok: true, form: { ...(title ? { title } : {}), questions } }
+    return { ok: true, form: { ...(title ? { title } : {}), questions, ...(view ? { view } : {}) } }
   }
 
   if (questionsInput != null) {
@@ -261,7 +281,7 @@ export function normalizeAskQuestionArgs(
 
   return {
     ok: true,
-    form: { ...(title ? { title } : {}), questions: [item] }
+    form: { ...(title ? { title } : {}), questions: [item], ...(view ? { view } : {}) }
   }
 }
 

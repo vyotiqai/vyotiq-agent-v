@@ -125,8 +125,12 @@ const CANCEL_RECOVERY_TIMEOUT_MS = 5_000
 const CANCEL_BACKGROUND_RETRY_MS = 45_000
 const CANCEL_BACKGROUND_RETRY_EVERY_MS = 5_000
 
-/** Writing tools need full args for the Changes panel diffs; everything else is capped. */
-const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete'])
+/**
+ * Writing tools need full args for the Changes panel diffs, and show_view for
+ * the view the record draws from them (its spec caps itself at 24k); everything
+ * else is capped.
+ */
+const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete', 'show_view'])
 
 /**
  * Ceiling on how much of a writing tool's arguments the transcript retains.
@@ -4760,7 +4764,8 @@ export function createChatStreamController(
           type: q.type,
           ...(q.options?.length ? { options: q.options } : {}),
           ...(q.allowCustom === true ? { allowCustom: true } : {})
-        }))
+        })),
+        ...(request.view ? { view: request.view } : {})
       },
       at: new Date().toISOString()
     }

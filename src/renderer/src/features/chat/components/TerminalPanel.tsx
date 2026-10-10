@@ -22,6 +22,7 @@ import { prunePtyOutputBuffers } from '@shared/utils/ptyOutputBuffer'
 import { getPtyOutputBuffers, ensurePtyOutputBufferListener } from './ptyOutputBuffers'
 import { EmptyPanel } from './PanelChrome'
 import { TerminalSessionBar } from './TerminalSessionBar'
+import { onTerminalRunRequest, takeTerminalRunRequest } from '../terminalRequests'
 
 ensurePtyOutputBufferListener()
 
@@ -491,6 +492,28 @@ export function TerminalPanel({
     setActiveId(mirror.id)
     setSplitId((cur) => (cur === mirror.id ? null : cur))
   }, [showAgentRequest, sessions])
+
+  // "Run in my terminal" from a command card: the person's own shell (made if
+  // there is none), brought forward, with the command typed and entered.
+  const [runRequestTick, setRunRequestTick] = useState(0)
+  useEffect(() => onTerminalRunRequest(() => setRunRequestTick((n) => n + 1)), [])
+  useEffect(() => {
+    if (!listReady || !workspacePath) return
+    const request = takeTerminalRunRequest(workspacePath)
+    if (!request) return
+    const shell = sessions.find((s) => s.backend !== 'agent')
+    // This request makes the shell. The auto-create below runs in the same
+    // pass on a freshly opened tab and made a second, empty one, which then
+    // took the front and hid the command's output.
+    if (!shell) autoCreateAttemptedRef.current = true
+    void (async () => {
+      const id = shell?.id ?? (await createSession(true))
+      if (!id) return
+      setChosenView('sessions')
+      setActiveId(id)
+      void window.vyotiq?.ptyWrite?.(id, `${request.command}\r`, workspacePath)
+    })()
+  }, [runRequestTick, listReady, sessions, workspacePath, createSession])
 
   // Auto-create only when the dock tab is visible (manual open / focused tab).
   // Scrollback for live sessions is restored from ptyOutputBuffers on remount.

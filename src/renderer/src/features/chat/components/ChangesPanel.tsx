@@ -32,6 +32,7 @@ import type {
 import { namedGitBranch } from '@shared/utils/gitBranch'
 import type { UiItem } from '@shared/transcript'
 import type { ChatItemsStore } from '../chatStores'
+import { onCommitOpenRequest, takeCommitOpenRequest } from '../commitOpenRequests'
 import { useChatLiveItems } from './ChatStreamLeaves'
 import { EmptyPanel } from './PanelChrome'
 import { type DiffLayout } from './DiffPreview'
@@ -374,6 +375,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   const findInputRef = useRef<HTMLInputElement>(null)
   const commitInputRef = useRef<HTMLTextAreaElement>(null)
   const commitsSeqRef = useRef(0)
+  /** A commit a view asked to open: selected once the list it belongs to is read. */
+  const wantCommitRef = useRef<string | null>(null)
   const commitFilesSeqRef = useRef(0)
   const branchesSeqRef = useRef(0)
   const messageGenerationSeqRef = useRef(0)
@@ -449,11 +452,33 @@ export const ChangesPanel = memo(function ChangesPanel({
         return []
       }
       setCommits(res.data)
+      const want = wantCommitRef.current
+      if (want) {
+        wantCommitRef.current = null
+        const hit = res.data.find((c) => c.sha.toLowerCase().startsWith(want.toLowerCase()))
+        if (hit) setSelectedCommit(hit)
+        else chrome.reportNotice(`Commit ${want.slice(0, 7)} is not among the latest ${res.data.length} on this branch`)
+      }
       return res.data
     } finally {
       if (seq === commitsSeqRef.current) setCommitsBusy(false)
     }
   }, [workspacePath, chrome])
+
+  // A view's commit row: show its files, on the commits list.
+  useEffect(() => {
+    const take = (): void => {
+      const request = takeCommitOpenRequest(workspacePath ?? null)
+      if (!request) return
+      wantCommitRef.current = request.sha
+      setScope('commits')
+      setSelectedPath(null)
+      setSelectedCommit(null)
+      void refreshCommits()
+    }
+    take()
+    return onCommitOpenRequest(take)
+  }, [workspacePath, refreshCommits])
 
   const refreshBranches = useCallback(async () => {
     if (!workspacePath || !window.vyotiq?.gitBranches) {

@@ -60,6 +60,10 @@ function workText(w: WorkItem): string {
       return `${w.tool.tool.summary ?? ''}\n${w.tool.tool.status === 'fail' ? (w.tool.tool.content ?? '') : ''}`
     case 'plan':
       return w.title ?? ''
+    case 'view': {
+      const args = parseArgsRecord(w.tool.tool.argsPreview)
+      return [args?.title, args?.subtitle].filter((v): v is string => typeof v === 'string').join('\n')
+    }
     case 'error':
       return w.message
     case 'notice':

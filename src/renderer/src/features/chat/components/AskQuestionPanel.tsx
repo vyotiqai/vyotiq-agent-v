@@ -18,6 +18,8 @@ import {
 import { questionTypeHint } from '@shared/utils/agentQuestionForm'
 import type { UiAgentQuestion, UiAgentQuestionAnswer } from '@shared/transcript'
 import { QuestionField } from './askQuestion/QuestionFields'
+import { ViewCard } from '@renderer/features/task/record/reply/view/ViewFence'
+import { parseViewSpec } from '@shared/viewSpec'
 
 type FieldState = { values: string[]; customText: string }
 
@@ -132,9 +134,10 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
   useLayoutEffect(() => {
     const root = rootRef.current
     if (!root || !captureFocus || typingElsewhere(root)) return
-    const first = root.querySelector<HTMLElement>(
-      'button:not([disabled]), textarea:not([disabled]), input:not([disabled])'
-    )
+    // The question's own first control: a button in the view above it is not the answer.
+    const first = Array.from(
+      root.querySelectorAll<HTMLElement>('button:not([disabled]), textarea:not([disabled]), input:not([disabled])')
+    ).find((el) => !el.closest('[data-kind="view"]'))
     first?.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per form shape, not on focus changes
   }, [questionShapeKey])
@@ -177,6 +180,8 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
 
   const multi = question.questions.length > 1
   const quickSubmit = isQuickSubmitForm(question)
+  // What the choice is between, laid out by the agent; re-read like any view.
+  const view = useMemo(() => (question.view ? parseViewSpec(question.view) : null), [question.view])
   const titled = Boolean(question.title?.trim())
   // Untitled multi: one label ("4 questions") — avoid "Questions" + "4 questions".
   const headerTitle = titled
@@ -318,6 +323,11 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
       ) : (
         <>
           <div className={cn(QUESTION_GATE_BODY, 'flex flex-col gap-3')}>
+            {view ? (
+              <div className="pb-1">
+                <ViewCard spec={view} streaming={false} chrome={false} heading />
+              </div>
+            ) : null}
             {question.questions.map((item, index) => {
               // By index: a question id may hold spaces, and aria-labelledby
               // splits on them.

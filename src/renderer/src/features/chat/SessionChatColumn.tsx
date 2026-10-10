@@ -394,7 +394,8 @@ export function SessionChatColumn({
       onOpenWorkspaceFile,
       onOpenAgentTerminal,
       onOpenPanel,
-      pendingWrites
+      pendingWrites,
+      onSay: sendFollowUp
     }),
     [
       workspacePath,
@@ -405,7 +406,8 @@ export function SessionChatColumn({
       onOpenWorkspaceFile,
       onOpenAgentTerminal,
       onOpenPanel,
-      pendingWrites
+      pendingWrites,
+      sendFollowUp
     ]
   )
 

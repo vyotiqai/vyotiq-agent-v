@@ -18,6 +18,7 @@ import {
   ASK_QUESTION_ARGS_HINT
 } from '../../../shared/utils/agentQuestionForm'
 import type { ToolDefinition } from '../providers/types'
+import { VIEW_SOURCE_IDS } from '../../../shared/viewSources'
 import { toolCallArgumentsUnusable, wireToolCallArguments } from '../toolArgWire'
 import { duplicateTopLevelJsonKeyError } from '../../../shared/utils/jsonish'
 import { zodToJsonSchema } from './zodToJsonSchema'
@@ -835,6 +836,12 @@ const askQuestionItemCatalog = z.object({
 })
 
 /** Model-facing schema (no z.union — zodToJsonSchema has no union form). */
+/** A view's blocks, as the model writes them; parseViewSpec reads them leniently. */
+const viewBlocksArg = z
+  .array(z.record(z.string(), z.unknown().describe('A field of the block: type, items, source… (see the tool description)')))
+  .min(1)
+  .max(12)
+
 const askQuestionArgs = z.object({
   title: z
     .string()
@@ -866,7 +873,18 @@ const askQuestionArgs = z.object({
   allowCustom: z
     .boolean()
     .optional()
-    .describe('Legacy: allow a custom text answer with options (default true)')
+    .describe('Legacy: allow a custom text answer with options (default true)'),
+  view: z
+    .object({ id: z.string().max(64).optional(), title: z.string().max(80), blocks: viewBlocksArg })
+    .optional()
+    .describe('Optional view above the questions, shaped as show_view takes it: what the choice is between')
+})
+
+const showViewArgs = z.object({
+  id: z.string().min(1).max(64).describe('Stable id; call again with the same id to update this view in place'),
+  title: z.string().min(1).max(80),
+  subtitle: z.string().max(160).optional(),
+  blocks: viewBlocksArg.describe('Blocks, in order; see the tool description')
 })
 
 const switchModeArgs = z
@@ -1411,6 +1429,10 @@ export const TOOL_REGISTRY = {
     description:
       'Ask the user a typed form in the transcript (single, multi, boolean, text; prefer 1–2 focused questions). Each questions[] item needs prompt; type defaults to single when options are given, else text. Never call with {} — pass questions[] or a legacy question/prompt. Blocks until the user answers or skips (no timeout). Ask it alone: tool calls after it in the same step are not run, because they were written before the answer — re-issue them next step if the answer still calls for them.',
     schema: askQuestionArgs
+  },
+  show_view: {
+    description: `Draw a view in the task record while you work, or update it in place by calling again with the same id. Shape: {id,title,subtitle?,blocks}. Blocks: stats{items:[{label,value,hint?,tone?}]}; rows{title?,items:[{title,lead?,meta?,value?,state?,diff?:{add,del},path?}],more?}; table{columns:[{id,label}],rows:[{cells}]}; chart{spec}; checks{items:[{label,state}]}; note{text}; actions{actions:[{label,say|do}]}; form{fields:[{kind:choice|switch|text,id,label,options?}],submit:{label,say:"…{fieldId}…"}} (a question that doesn't wait; the answer is the user's next message); live{source,title?,limit?}, filled from the app's own read and kept current — prefer it to typing those figures; the result says what it shows. Sources: ${VIEW_SOURCE_IDS.join(', ')}. Any item may take say (the user's next message) or do: {action:open|diff,path}, {action:stage|unstage,paths}, {action:commit,sha}, {action:run,command} (user confirms), {action:panel,panel}, {action:link,url}`,
+    schema: showViewArgs
   },
   switch_mode: {
     description:

@@ -45,6 +45,26 @@ While the run is live, a "Now" row shows what the agent is doing at that moment.
 
 When the run ends, the agent's closing answer appears under "Result", with the files it changed. Each file opens in Changes. Until you review them, the edits are counted as "{N} files changed, not kept yet" with "Review changes". After review the line says what happened, for example "Kept, not committed yet" with "Commit…".
 
+The answer, and everything else the agent writes in the record, can be acted on where it stands:
+
+| In the answer | What you can do |
+| --- | --- |
+| A file path, such as `src/auth/session.ts:58` | Click it to open the file in the Files tab at that line. A bare file name, such as `index.ts`, opens the one file of that name; when the workspace has several, Files lists them to pick from |
+| A heading, in an answer of several parts | "Copy this section" copies the part under it |
+| A code block | "Copy" copies it, and "Wrap" wraps long lines. A block over 20 lines folds; "Show all {N} lines" opens it |
+| A shell block | "Copy commands" copies the commands without their `$` prompts or output |
+| A diff | Shows a `+`/`−` sign on each changed line and the lines added and removed |
+| A table | "Copy table" offers "Copy as Markdown" and "Copy as CSV" |
+| A diagram or chart | Drawn once its block is complete; "Source" or "Data" shows what it was drawn from |
+| A view: figures, rows, a table, checks, buttons or a short form the agent laid out for the answer | Drawn as it is written, each row once it is whole. A button, or a row that offers one, either sends its words as your next instruction or does something in the app: opens a file, its diff or a commit, stages files, opens a tab, opens a web page, or runs a command in your terminal, which asks first and shows the command. A button that opens a web page names the site beside its label; a row that opens one asks first and shows the address. Hover it to see which. A part marked "Live from git" (or GitHub, Usage, this task) is the app's own read, kept current, never the model's figures. In an earlier run's answer it stops following: it keeps the read it had and says when that was ("From git at 14:32", with "Refresh"), or waits for "Read now", so it never contradicts the answer around it. When a later answer updates the same view, the earlier one folds to "Updated below". "Data" shows what it was drawn from, live parts included; "Copy" copies it as Markdown |
+| Math | `$$…$$` inside a sentence, a `$$` block on its own lines, a ` ```math ` block, and the `\(…\)` and `\[…\]` other models write are typeset. A single `$` stays text, so prices and `$HOME` read as written |
+
+Images load only when the app made them; a link to an image elsewhere shows as a link to open instead.
+
+The agent can also draw a view while it works: a table of what it is migrating that ticks each row to done, or the tests as they run. Its views sit after the work and above the answer, one place per view, each updated where it stands, and they stay there once the work folds. The work keeps a "Showed a view" row for each update. A question the agent asks can carry a view too, above the question, laying out what the choice is between.
+
+Ask about the workspace's state in the composer like anything else ("what's uncommitted?", "how is CI doing?", "what did I spend this week?") and the answer comes as a view with live parts. Hover a view with live parts for "Pin to Home": it keeps those parts under "Screens" on Home, which shows only once something is pinned. A pinned view opens on its saved layout with every value read fresh, with no model call, and "Open task" goes back to the task it came from. Everything the agent typed, figures and notes alike, is left out, since it would go stale there. Each pinned view on Home says what it shows first ("3 uncommitted", "2 failing"), read live, and its menu renames it, moves it up or down, or unpins it; "Unpin" on the open view does the same. Home holds 12 pinned views: pinning another asks you to unpin one first, and views from a workspace that isn't open are counted under a line that lists them, to unpin.
+
 Each instruction you send after the brief starts a new run under a "Run {n}" divider, and earlier runs fold into "History". Hover a brief for "Edit and rerun" and for rewinding to before it ([Review and rewind](/docs/review-and-rewind)).
 
 ## The receipt

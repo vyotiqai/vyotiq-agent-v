@@ -14,6 +14,8 @@ import { usePendingAsks } from './usePendingAsks'
 import { NeedsYouSection, type ProviderIssue, type WaitingTask } from './components/NeedsYouSection'
 import { WorkspacesSection } from './components/WorkspacesSection'
 import { ThisWeekSection } from './components/ThisWeekSection'
+import { ScreensSection } from './components/ScreensSection'
+import type { PinnedScreen } from '@renderer/features/screens/screensStore'
 
 export type { ProviderIssue } from './components/NeedsYouSection'
 
@@ -39,6 +41,8 @@ export type HomePageProps = {
   onOpenMcpServer?: (serverId: string) => void
   onReviewChangesInWorkspace?: (workspacePath: string) => void
   onOpenUsage: () => void
+  /** A view pinned from a task, opened on its saved layout. */
+  onOpenScreen?: (pinned: PinnedScreen) => void
   refreshVersion?: number
 }
 
@@ -63,6 +67,7 @@ export function HomePage({
   onOpenMcpServer,
   onReviewChangesInWorkspace,
   onOpenUsage,
+  onOpenScreen,
   refreshVersion = 0
 }: HomePageProps) {
   const hasWorkspaces = openWorkspaces.length > 0
@@ -122,6 +127,7 @@ export function HomePage({
               onOpenMcpServer={onOpenMcpServer}
               onRetryMcp={() => void mcp.retry()}
             />
+            {onOpenScreen ? <ScreensSection openWorkspaces={openWorkspaces} onOpenScreen={onOpenScreen} /> : null}
             <div className="mt-10 grid gap-12 @3xl:grid-cols-[minmax(0,1fr)_280px]">
               <WorkspacesSection
                 paths={openWorkspaces}

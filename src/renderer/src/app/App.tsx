@@ -94,6 +94,10 @@ import {
 } from '@renderer/lib/drafts/taskDraftStore'
 import type { IpcResult, ReopenWritesResult, ResolveWritesResult, TaskDraft } from '@shared/ipc'
 import { bumpTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
+import type { AppView } from './viewReturn'
+import type { ScreenRequest } from '../features/screens/ScreenPage'
+import type { WorkspaceFileOpenOptions } from '../features/chat/components/FilesPanel'
+import type { PinnedScreen } from '../features/screens/screensStore'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -110,6 +114,9 @@ const SetupPage = lazy(() =>
 )
 const UsagePage = lazy(() =>
   import('../features/usage/UsagePage').then((m) => ({ default: m.UsagePage }))
+)
+const ScreenPage = lazy(() =>
+  import('../features/screens/ScreenPage').then((m) => ({ default: m.ScreenPage }))
 )
 
 /**
@@ -175,7 +182,8 @@ const SETTINGS_BACK_LABELS = {
   chat: 'Back to the task',
   home: 'Back to Home',
   usage: 'Back to Usage',
-  marketplace: 'Back to Extensions'
+  marketplace: 'Back to Extensions',
+  screen: 'Back to the screen'
 } as const
 
 function modelsRefreshKeyFor(
@@ -343,7 +351,18 @@ function App() {
   const focusedOpenInstance =
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'home' | 'usage'>('chat')
+  const [view, setView] = useState<AppView>('chat')
+  // The pinned view on show, and where closing it goes: the view it was opened from.
+  const [screenRequest, setScreenRequest] = useState<ScreenRequest | null>(null)
+  const [screenReturn, setScreenReturn] = useState<Exclude<AppView, 'screen'>>('home')
+  const openScreen = useCallback(
+    (pinned: PinnedScreen): void => {
+      setScreenRequest((was) => ({ pinned, nonce: (was?.nonce ?? 0) + 1 }))
+      if (view !== 'screen') setScreenReturn(view)
+      setView('screen')
+    },
+    [view]
+  )
   const previousViewRef = useRef(view)
   // Where Settings' Back goes: the view it was opened from, recorded as the
   // view changes (during render, so the first frame already names it).
@@ -2887,10 +2906,10 @@ function App() {
     onExportRunInWorkspace: (path: string, runId: string) => void onExportRunInWorkspace(path, runId),
     onCopyRunLinkInWorkspace,
     onLoadOlderRuns: (path: string) => void loadOlderWorkspaceRuns(path),
-    onOpenWorkspaceFile: (path: string, file: string) => {
+    onOpenWorkspaceFile: (path: string, file: string, options?: WorkspaceFileOpenOptions) => {
       if (!activeWorkspace || !workspacePathsEqual(path, activeWorkspace)) void switchWorkspace(path)
       setView('chat')
-      requestOpenWorkspaceFile(path, file)
+      requestOpenWorkspaceFile(path, file, options)
     }
   }
 
@@ -3080,7 +3099,19 @@ function App() {
               }}
               onReviewChangesInWorkspace={(path) => void onReviewChangesInWorkspace(path)}
               onOpenUsage={() => setView('usage')}
+              onOpenScreen={openScreen}
               refreshVersion={homeRefreshVersion}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      ) : view === 'screen' && screenRequest ? (
+        <ErrorBoundary title="The screen couldn't render" resetKey={`screen:${screenRequest.nonce}`}>
+          <Suspense fallback={<ViewSuspenseFallback />}>
+            <ScreenPage
+              request={screenRequest}
+              onClose={() => setView(screenReturn)}
+              onOpenTask={(path, runId) => void onSelectRunInWorkspace(path, runId)}
+              onOpenWorkspaceFile={(path, file, options) => shellWorkspaceProps.onOpenWorkspaceFile(path, file, options)}
             />
           </Suspense>
         </ErrorBoundary>

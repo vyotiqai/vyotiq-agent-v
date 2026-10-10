@@ -58,6 +58,8 @@ export type WorkItem =
   /** Sub-agent instances: spawn, await, pull, merge. */
   | { kind: 'instance'; id: string; tool: ToolItem }
   | { kind: 'plan'; id: string; tool: ToolItem; title: string | null }
+  /** A view the agent drew while it worked (show_view): drawn, not listed. */
+  | { kind: 'view'; id: string; tool: ToolItem }
   /** What the agent said between steps of work. */
   | { kind: 'note'; id: string; item: MessageItem; text: string }
   | { kind: 'thought'; id: string; item: MessageItem; text: string; streaming: boolean }
@@ -345,7 +347,7 @@ function toolsOf(work: readonly WorkItem[]): ToolItem[] {
   const out: ToolItem[] = []
   for (const w of work) {
     if (w.kind === 'explore') out.push(...w.tools)
-    else if (w.kind === 'card' || w.kind === 'tool' || w.kind === 'instance' || w.kind === 'plan') out.push(w.tool)
+    else if (w.kind === 'card' || w.kind === 'tool' || w.kind === 'instance' || w.kind === 'plan' || w.kind === 'view') out.push(w.tool)
   }
   return out
 }
@@ -487,6 +489,11 @@ function flush(bucket: Bucket): void {
     if (INSTANCE_TOOLS.has(item.tool.name)) {
       closeGroup()
       bucket.work.push({ kind: 'instance', id: rowKey(item), tool: item })
+      continue
+    }
+    if (item.tool.name === 'show_view') {
+      closeGroup()
+      bucket.work.push({ kind: 'view', id: rowKey(item), tool: item })
       continue
     }
     if (isProminentPresentation(item.tool)) {

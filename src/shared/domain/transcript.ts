@@ -17,7 +17,8 @@ import {
 import { summarizeToolArgs } from '../utils/toolSummary'
 import { truncateToolArgsPreview } from '../utils/toolResultIpc'
 
-const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete'])
+/** Writing tools (the Changes panel parses their diffs) and show_view (the record draws its arguments). */
+const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete', 'show_view'])
 
 function uiArgsPreview(name: string, args: string | undefined): string | undefined {
   if (!args) return undefined
@@ -92,6 +93,8 @@ export type UiAgentQuestion = {
   toolCallId: string
   title?: string
   questions: UiAgentQuestionItem[]
+  /** A view the agent laid out above the questions (JSON of a parsed spec). */
+  view?: string
 }
 
 /** Structured answer payload submitted for a pending question form. */

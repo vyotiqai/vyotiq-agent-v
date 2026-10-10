@@ -12,6 +12,7 @@ import {
   AGENT_QUESTION_MAX_TITLE_CHARS
 } from '../../utils/agentQuestionForm'
 import { EXTRA_ROOT_MAX_CHARS, MAX_EXTRA_ROOTS } from '../../extraRoots'
+import { VIEW_SPEC_MAX_CHARS } from '../../viewSpec'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -2026,7 +2027,9 @@ export const AgentQuestionRequestSchema = z.object({
   runId: z.string().min(1),
   toolCallId: z.string().min(1),
   title: z.string().min(1).max(AGENT_QUESTION_MAX_TITLE_CHARS).optional(),
-  questions: z.array(AgentQuestionItemSchema).min(1).max(AGENT_QUESTION_MAX_ITEMS)
+  questions: z.array(AgentQuestionItemSchema).min(1).max(AGENT_QUESTION_MAX_ITEMS),
+  /** A view shown above the questions: the JSON of a parsed ```view spec, read again where it is drawn. */
+  view: z.string().max(VIEW_SPEC_MAX_CHARS).optional()
 })
 export type AgentQuestionRequest = z.infer<typeof AgentQuestionRequestSchema>
 export type AgentQuestionItem = z.infer<typeof AgentQuestionItemSchema>

@@ -1,3 +1,5 @@
+import { parseViewSpec, parseViewSpecStreaming } from '@shared/viewSpec'
+
 /**
  * Text as the record shows it. A plan's step, a child's report title, a
  * brief's `code` span: the record sets markdown and backticks as type, so the
@@ -27,6 +29,37 @@ export function plainProse(text: string): string {
  */
 export function plainLine(line: string): string {
   return untick(plainProse(line)).trim()
+}
+
+const FENCE_OPEN = /^\s{0,3}(`{3,}|~{3,})\s*([\w-]*)/
+
+/**
+ * The line an answer is named by in History: its first line of words. A
+ * fenced block is skipped — a code block's first line is not a summary, and a
+ * ```view's is a brace — except that a view met first names the answer by
+ * its title.
+ */
+export function answerHeadline(text: string): string | undefined {
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    const open = FENCE_OPEN.exec(line)
+    if (!open) {
+      if (line.trim()) return line
+      continue
+    }
+    const [, mark, lang] = open
+    const close = new RegExp(`^\\s{0,3}${mark![0] === '`' ? '`' : '~'}{${mark!.length},}\\s*$`)
+    let end = i + 1
+    while (end < lines.length && !close.test(lines[end]!)) end++
+    if (lang!.toLowerCase() === 'view') {
+      const body = lines.slice(i + 1, end).join('\n')
+      const title = (parseViewSpec(body) ?? parseViewSpecStreaming(body))?.title
+      if (title) return title
+    }
+    i = end
+  }
+  return undefined
 }
 
 /**

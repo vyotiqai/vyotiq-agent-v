@@ -50,7 +50,7 @@ import type { WaitingTask } from './navigator/NotificationsRow'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 import { useNavigatorView } from './navigator/useNavigatorView'
 
-export type ShellView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage'
+export type ShellView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage' | 'screen'
 
 export type AppShellProps = {
   view: ShellView

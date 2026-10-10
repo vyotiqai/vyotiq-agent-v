@@ -410,6 +410,7 @@ export function sameWork(a: WorkItem, b: WorkItem): boolean {
     case 'card':
     case 'instance':
     case 'tool':
+    case 'view':
       return a.tool === (b as typeof a).tool
     case 'plan':
       return a.tool === (b as typeof a).tool && a.title === (b as typeof a).title
@@ -482,6 +483,9 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
       )
     case 'instance':
       return <InstanceItem item={item.tool} />
+    case 'view':
+      // Drawn once, after the work (RunViews); here it is the line that says when.
+      return <ToolLine item={item.tool} />
     case 'tool':
       return (
         <WithApproval id={item.tool.id} grant={item.tool.tool.approvedBy}>
@@ -1582,6 +1586,7 @@ export function workIsLive(w: WorkItem): boolean {
     case 'instance':
     case 'plan':
     case 'tool':
+    case 'view':
       return w.tool.tool.status === 'running'
     case 'explore':
       return w.tools.some((t) => t.tool.status === 'running')

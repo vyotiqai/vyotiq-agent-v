@@ -48,6 +48,8 @@ export const ASK_SAFE_BUILTIN = new Set([
   'list_dir',
   'browser_search',
   'ask_question',
+  // Draws a view in the record; changes nothing.
+  'show_view',
   // Browse-only: click/type/fill/press_key/select can mutate live sites.
   'browser_navigate',
   'browser_snapshot',
