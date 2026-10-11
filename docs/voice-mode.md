@@ -345,7 +345,20 @@ and that can trigger a false barge-in. Defences, in order:
 2. While `speaking`, a higher voiced threshold and a longer confirm window
    for barge-in.
 3. Ignore STT partials that match the text currently being spoken (a fuzzy
-   match on the last ~2 s of TTS text).
+   match on the last ~2 s of TTS text). **Built** (D-31, `voice/echoGuard.ts`):
+   the session remembers what the agent said (up to 300 words of the current
+   stretch of speech). While its audio plays, and for 2.5 s after it stops or
+   is cut off, a transcript made at least 75% of those words, in order, is an
+   echo: it isn't shown as your caption, and a finished echo turn is dropped
+   as a false start, never sent to the agent. One or two words count only
+   while audio is actually playing and only as an exact run of what was said,
+   so "yes" right after "Say yes or no." is your answer. A false start now
+   returns the orb to Working when the run is still going (a cough mid-run
+   used to show Listening).
+   Limit: if the echo was loud enough to trigger barge-in, the reply has
+   already stopped by the time its words are recognised; that reply stays
+   quiet (B5). The duck-then-confirm stage (§6.2, D-25) is the fix if this
+   happens in real use.
 4. Push-to-talk, and a "headphones recommended" hint the first time voice
    mode is used on speakers.
 
@@ -1287,7 +1300,7 @@ with the feature off.
   - [x] 28 more tests (voice total: 179); prompt-assembly and run-launch suites unchanged
   - [x] 5b: approvals by voice (2026-10-11). The followed run's approval is read out ("It wants to run pnpm test. Say yes or no.") and the orb shows Needs you; a whole-utterance yes/no answers it (`once` / `deny`) and is not sent as a message; anything else is a message; risky (`danger`) approvals and Approve by voice off always say "on screen"; a click on the card clears the wait. Hook: `watchToolApprovals` in `agent/toolApproval.ts`. 8 tests
   - [x] 5c: questions by voice (2026-10-11). The followed run's `ask_question` is read out with its choices; a clear pick, yes/no or free-text reply answers a one-question form as the card would; everything else goes as a message, which the agent already reads as the answer (D-29). Hook: `watchAgentQuestions` in `agent/agentQuestion.ts`; matching in `voice/questionByVoice.ts`. 14 tests
-  - [ ] Echo filter on captions (§6.4 item 3)
+  - [x] Echo filter (2026-10-11, D-31): the agent's own words picked up by the mic are neither captions nor messages; a false start mid-run returns to Working (`voice/echoGuard.ts`). 10 tests
 - [x] Phase 6 · Voice bar and orb (2026-10-11), first cut — not yet seen on real hardware
   - [x] Voice button (waveform) beside dictation's mic on the instruction line; `Ctrl/Cmd+Shift+M` and the palette's "Voice mode" go to the line last used (no double start in a split view) (`VoiceModeButton.tsx`)
   - [x] Voice bar in place of the line's box: orb · caption (yours in `text-fg`, the agent's in `text-muted`) · time · listener with cloud/lock; Mute · Stop speaking · Stop the agent · hint or problem with its fix · End (`VoiceBar.tsx`)
@@ -1346,6 +1359,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-27 | 2026-10-11 | Voice mode is started from the task's instruction line only (not the New task brief) in this cut: a session needs a task to steer. Starting a task by voice from the brief can follow | Superseded by D-30 |
 | D-28 | 2026-10-11 | The bar's single-letter keys (M, Space) yield to any text field, empty or not; the app's `isTypingIn` treats an empty field as not typing, which is right for chords but wrong for bare letters | Decided |
 | D-30 | 2026-10-11 | Voice mode on New task (Ajay: yes). The first spoken turn starts the task with everything the brief holds, typed text first, and the session is handed to the new task's line; there is no "confirm before starting" step, because the brief's Start task has none either and the task can be stopped by voice ("stop") | Decided |
+| D-31 | 2026-10-11 | The echo filter errs towards letting words through: only during playback plus a 2.5 s tail, 75% in-order word match, and one- or two-word transcripts only by exact run while audio plays. Dropping something you really said is worse than an occasional echo; push-to-talk and headphones remain the strong defences | Decided |
 | D-29 | 2026-10-11 | Questions by voice answer only what's unambiguous, and only one-question forms; everything else is sent as a message, which the existing superseded path hands to the model as the likely answer. No separate setting: unlike approvals, a wrong answer to a question grants nothing | Decided |
 
 ---

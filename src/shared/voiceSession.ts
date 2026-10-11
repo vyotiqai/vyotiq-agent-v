@@ -25,7 +25,8 @@ export type VoiceSessionEvent =
   | { type: 'ready' }
   | { type: 'speech_start' }
   /** Speech stopped without producing words (a cough, a door). */
-  | { type: 'false_start' }
+  /** Not a turn after all (a cough, the agent's own echo); `runActive` returns to the agent's work. */
+  | { type: 'false_start'; runActive?: boolean }
   | { type: 'end_of_turn' }
   /** The first audio of a reply (an answer or a progress cue) started playing. */
   | { type: 'audio_start' }
@@ -85,7 +86,7 @@ export function nextVoiceState(state: VoiceSessionState, event: VoiceSessionEven
       return null
     case 'hearing':
       if (event.type === 'end_of_turn') return 'thinking'
-      if (event.type === 'false_start') return 'listening'
+      if (event.type === 'false_start') return event.runActive ? 'working' : 'listening'
       if (event.type === 'mute') return 'paused'
       if (event.type === 'connection_lost') return 'reconnecting'
       return null

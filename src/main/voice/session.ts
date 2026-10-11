@@ -25,6 +25,7 @@ import { VoiceError, toVoiceError } from './errors'
 import { PauseDetector } from './pauseDetector'
 import type { SttEvent, SttProvider, SttSession, TtsStream } from './providers/types'
 import { ReplySpeaker } from './replySpeaker'
+import { EchoGuard } from './echoGuard'
 import { approvalAnswer, isStopPhrase, toSpeakable } from './speechText'
 import { answerableByVoice, describeQuestion, questionAnswer } from './questionByVoice'
 
@@ -121,6 +122,8 @@ export class VoiceSession {
   private unwatchQuestions: (() => void) | null = null
   /** The followed run's question waiting on the person, if any. */
   private question: AgentQuestionRequest | null = null
+  /** What the agent just said, to recognise it coming back through the mic (§6.4). */
+  private readonly echo = new EchoGuard()
 
   constructor(private readonly deps: VoiceSessionDeps) {
     this.id = (deps.newId ?? randomUUID)()
@@ -130,6 +133,7 @@ export class VoiceSession {
     this.reply = new ReplySpeaker({
       openTts: (contextId) => this.openReplyTts(contextId),
       say: (contextId, text) => {
+        this.echo.said(text, this.now())
         if (this.timing && this.timing.firstSayAt === undefined) this.timing.firstSayAt = this.now()
         if (this.deps.settings().captions) this.emitEvent({ kind: 'say', contextId, text })
       },
@@ -188,11 +192,13 @@ export class VoiceSession {
         })
       }
       this.playing.add(contextId)
+      this.echo.setPlaying(true, this.now())
       this.dispatch({ type: 'audio_start' })
       this.pause.setAgentSpeaking(true)
       return
     }
     if (!this.playing.delete(contextId) || this.playing.size > 0) return
+    this.echo.setPlaying(false, this.now())
     this.pause.setAgentSpeaking(false)
     this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
   }
@@ -329,6 +335,7 @@ export class VoiceSession {
     this.unwatchApprovals?.()
     this.unwatchApprovals = null
     this.approval = null
+    this.echo.reset()
     this.unwatchQuestions?.()
     this.unwatchQuestions = null
     this.question = null
@@ -351,6 +358,8 @@ export class VoiceSession {
         this.onSpeechStart()
         return
       case 'partial':
+        // The agent's own voice coming back isn't your caption.
+        if (this.echo.isEcho(event.text, this.now())) return
         if (this.deps.settings().captions) this.emitEvent({ kind: 'partial', text: event.text })
         return
       case 'final':
@@ -382,6 +391,7 @@ export class VoiceSession {
       this.emitEvent({ kind: 'flush', contextId })
     }
     this.playing.clear()
+    this.echo.setPlaying(false, this.now())
     this.pause.setAgentSpeaking(false)
     this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
   }
@@ -399,6 +409,7 @@ export class VoiceSession {
       this.emitEvent({ kind: 'flush', contextId })
     }
     this.playing.clear()
+    this.echo.setPlaying(false, this.now())
     this.pause.setAgentSpeaking(false)
     this.dispatch({ type: 'barge_in' })
   }
@@ -408,8 +419,10 @@ export class VoiceSession {
     this.pause.reset()
     this.ring = []
     this.ringSamples = 0
-    if (!text) {
-      this.dispatch({ type: 'false_start' })
+    // Nothing said, or only the agent's own words picked up by the mic (§6.4):
+    // not a turn, and never a message to the agent.
+    if (!text || this.echo.isEcho(text, this.now())) {
+      this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
       return
     }
     if (!this.dispatch({ type: 'end_of_turn' })) return
