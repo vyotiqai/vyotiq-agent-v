@@ -200,9 +200,10 @@ describe('connection', () => {
     try {
       capture()
       const { o, events } = opts()
-      const pending = deepgramFlux.open(o)
+      // Handle the rejection before the clock moves: it happens during the advance.
+      const rejected = expect(deepgramFlux.open(o)).rejects.toThrow(/did not connect/)
       await vi.advanceTimersByTimeAsync(10_001)
-      await expect(pending).rejects.toThrow(/did not connect/)
+      await rejected
       expect(events).toContainEqual(expect.objectContaining({ kind: 'error', code: 'offline', retryable: true }))
     } finally {
       vi.useRealTimers()
