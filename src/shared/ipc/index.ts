@@ -1,5 +1,6 @@
 export * from './schemas/providers'
 export * from './schemas/settings'
+export * from './schemas/voice'
 export * from './schemas/notifications'
 export * from './schemas/workspace'
 export * from './schemas/taskDrafts'

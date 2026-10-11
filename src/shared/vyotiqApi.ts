@@ -191,6 +191,12 @@ import type {
   NotificationMutateRequest,
   NotificationAction
 } from './ipc'
+import type {
+  VoiceClearKeyRequest,
+  VoiceKeyStatus,
+  VoiceSetKeyRequest,
+  VoiceSetKeyResult
+} from './ipc/schemas/voice'
 import type { GoogleAdcStatus, ProxyStatus } from './domain/network'
 
 /** Host OS from preload `process.platform`. */
@@ -475,6 +481,11 @@ export interface VyotiqApi {
   dictationMicAccess: () => Promise<IpcResult<DictationMicAccess>>
   /** Open the OS page where microphone access is switched on. */
   dictationOpenMicSettings: () => Promise<IpcResult<boolean>>
+  /** Which voice-mode vendor keys are set (never the keys themselves). */
+  voiceKeyStatus: () => Promise<IpcResult<VoiceKeyStatus>>
+  /** Check a vendor key with the vendor, then save it. A rejected key fails with `voice:rejected_key`. */
+  voiceSetKey: (payload: VoiceSetKeyRequest) => Promise<IpcResult<VoiceSetKeyResult>>
+  voiceClearKey: (payload: VoiceClearKeyRequest) => Promise<IpcResult<VoiceKeyStatus>>
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

@@ -86,3 +86,10 @@ export const VoiceKeyStatusSchema = z.object({
   chat: z.object({ openai: z.boolean(), openrouter: z.boolean() })
 })
 export type VoiceKeyStatus = z.infer<typeof VoiceKeyStatusSchema>
+
+export const VoiceSetKeyResultSchema = z.object({
+  /** `unchecked`: saved, but the vendor couldn't be reached to confirm it. */
+  check: z.enum(['verified', 'unchecked']),
+  status: VoiceKeyStatusSchema
+})
+export type VoiceSetKeyResult = z.infer<typeof VoiceSetKeyResultSchema>

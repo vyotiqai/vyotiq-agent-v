@@ -268,6 +268,9 @@ const api: VyotiqApi = {
   dictationDeleteCache: (payload) => ipcRenderer.invoke(IPC.dictationDeleteCache, payload),
   dictationMicAccess: () => ipcRenderer.invoke(IPC.dictationMicAccess),
   dictationOpenMicSettings: () => ipcRenderer.invoke(IPC.dictationOpenMicSettings),
+  voiceKeyStatus: () => ipcRenderer.invoke(IPC.voiceKeyStatus),
+  voiceSetKey: (payload) => ipcRenderer.invoke(IPC.voiceSetKey, payload),
+  voiceClearKey: (payload) => ipcRenderer.invoke(IPC.voiceClearKey, payload),
   onDictationStatus: (handler) => {
     const listener = (_: IpcRendererEvent, status: unknown): void => {
       const parsed = DictationRuntimeStatusSchema.safeParse(status)

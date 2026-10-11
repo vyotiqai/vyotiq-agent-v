@@ -424,6 +424,16 @@ import { dictationKeywordsFromFiles } from '../dictation/keywords'
 import { dictationFinalModelId, prepareLocalDictation } from '../dictation/local'
 import { isDictationError } from '../dictation/errors'
 import { dictationMicAccess, openMicSettings } from '../dictation/micAccess'
+import { isVoiceError } from '../voice/errors'
+import { voiceKeyStatus } from '../voice/keys'
+import { removeVoiceKey, saveVoiceKey } from '../voice/keyService'
+import {
+  VoiceClearKeyRequestSchema,
+  VoiceSetKeyRequestSchema,
+  type VoiceKeyStatus,
+  type VoiceSetKeyResult
+} from '../../shared/ipc/schemas/voice'
+import { voiceIpcCode } from '../../shared/voice'
 import {
   listPendingToolApprovals,
   resolveToolApproval
@@ -2103,6 +2113,37 @@ export function registerIpc(): void {
     const files = peekWorkspaceFileListCached(req.workspacePath)
     return files ? { keywords: dictationKeywordsFromFiles(files) } : {}
   }
+
+  ipcMain.handle(IPC.voiceKeyStatus, async (event): Promise<IpcResult<VoiceKeyStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(voiceKeyStatus())
+    } catch (err) {
+      return failFrom(err, IPC.voiceKeyStatus)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceSetKey, async (event, raw): Promise<IpcResult<VoiceSetKeyResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSetKeyRequestSchema.parse(raw)
+      return ok(await saveVoiceKey(req.vendor, req.key))
+    } catch (err) {
+      // A refused key is an answer for the row to show, not a handler fault.
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceSetKey)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceClearKey, async (event, raw): Promise<IpcResult<VoiceKeyStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceClearKeyRequestSchema.parse(raw)
+      return ok(await removeVoiceKey(req.vendor))
+    } catch (err) {
+      return failFrom(err, IPC.voiceClearKey)
+    }
+  })
 
   ipcMain.handle(IPC.dictationMicAccess, async (event): Promise<IpcResult<DictationMicAccess>> => {
     if (!senderOk(event)) return fail('Invalid sender')

@@ -824,7 +824,7 @@ written 0600, and never sent to the renderer; the renderer only sees
 keep using `getSecret('openai' | 'openrouter')`, so one key serves the model and
 voice.
 
-**Checking a key.** *Add key* runs a cheap authenticated call in main (list
+**Checking a key.** *Add key* runs a cheap authenticated call in main (`keyService.ts`; the per-vendor endpoints are rechecked in the spike, and only a 401/403/402 refuses a key, so a moved endpoint can't lock a good key out) (list
 voices or models) before saving, and shows the outcome on the row: ✓ verified,
 ✕ rejected (with the vendor's reason mapped to plain words), or ⚠ couldn't reach
 the vendor (saved anyway, verified on first use).
@@ -1213,7 +1213,7 @@ with the feature off.
 - [ ] Phase 0: remaining questions (Q1, Q3, Q5, Q7, Q9): taking the recommendations unless Ajay says otherwise
 - [ ] Ajay's local code pushed to GitHub; branch updated onto it (no longer blocking, D-19)
 - [ ] Phase 1 · Spike: needs real keys, a mic and speakers on Windows/macOS; can't run in the cloud workspace, so it moves to the first hands-on session. Phase 2 doesn't depend on it
-- [ ] Phase 2 · Foundations
+- [x] Phase 2 · Foundations (2026-10-11)
   - [x] Provider catalog, auto/fallback resolution, error codes (`src/shared/voice.ts`)
   - [x] `Settings.voice` schema + defaults, in settings export (`src/shared/ipc/schemas/voice.ts`)
   - [x] Voice key namespace in `secrets.ts`; key status without exposing keys (`src/main/voice/keys.ts`)
@@ -1222,9 +1222,10 @@ with the feature off.
   - [x] Streaming `<spoken>` parser + display strip (`src/shared/spokenSummary.ts`)
   - [x] Session state machine as a pure function (`src/shared/voiceSession.ts`)
   - [x] Tests: 49 new, passing; typecheck and lint clean
-  - [ ] Fixture STT/TTS adapters
-  - [ ] Renderer player (Web Audio queue, ducking, output level)
-  - [ ] IPC channels for keys and catalog
+  - [x] Fixture STT/TTS adapters (`src/main/voice/providers/fixture.ts`)
+  - [x] Key check before save + IPC `voice:keyStatus`, `voice:setKey`, `voice:clearKey` (`src/main/voice/keyService.ts`)
+  - [x] Renderer player: gapless Web Audio queue, 60 ms jitter buffer, duck to 20%, 30 ms fade on barge-in, output level (`features/voice/voicePlayer.ts`)
+  - [x] 12 more tests (67 total for voice); IPC contract test updated; test-typecheck ratchet: no new errors
 - [ ] Phase 3 · Speaking
 - [ ] Phase 4 · Listening
 - [ ] Phase 4b · More providers
