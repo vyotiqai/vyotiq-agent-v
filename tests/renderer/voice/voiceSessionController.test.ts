@@ -31,7 +31,8 @@ function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
       }
     }),
     voiceFollow: vi.fn(async () => ({ ok: true, data: true })),
-    voicePlayback: vi.fn(async () => ({ ok: true, data: true }))
+    voicePlayback: vi.fn(async () => ({ ok: true, data: true })),
+    voiceInterrupt: vi.fn(async () => ({ ok: true, data: true }))
   }
   const openCapture: OpenMicCapture = vi.fn(async (o) => {
     onSamples = o.onSamples

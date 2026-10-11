@@ -299,6 +299,21 @@ export class VoiceSession {
     }
   }
 
+  /**
+   * "Stop speaking" (the bar's button, Esc): silence the reply without it
+   * counting as the person talking. The run carries on.
+   */
+  interruptSpeech(): void {
+    if (this.stateValue !== 'speaking') return
+    const flushed = this.reply.interrupt()
+    for (const contextId of new Set([...this.playing, ...(flushed ? [flushed] : [])])) {
+      this.emitEvent({ kind: 'flush', contextId })
+    }
+    this.playing.clear()
+    this.pause.setAgentSpeaking(false)
+    this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
+  }
+
   private onSpeechStart(): void {
     const s = this.stateValue
     if (!AGENT_FLOOR_STATES.has(s)) {

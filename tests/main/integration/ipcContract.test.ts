@@ -153,6 +153,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   voiceMute: IPC.voiceMute,
   voiceFollow: IPC.voiceFollow,
   voicePlayback: IPC.voicePlayback,
+  voiceInterrupt: IPC.voiceInterrupt,
   listRuns: IPC.listRuns,
   listOlderRuns: IPC.listOlderRuns,
   loadRun: IPC.loadRun,

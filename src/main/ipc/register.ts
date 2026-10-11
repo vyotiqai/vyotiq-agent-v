@@ -2280,6 +2280,17 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.voiceInterrupt, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSessionRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.interruptSpeech()
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceInterrupt)
+    }
+  })
+
   ipcMain.handle(IPC.voicePlayback, async (event, raw): Promise<IpcResult<boolean>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {

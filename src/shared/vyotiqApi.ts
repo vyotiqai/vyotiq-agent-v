@@ -521,6 +521,8 @@ export interface VyotiqApi {
   voiceFollow: (payload: VoiceFollowRequest) => Promise<IpcResult<boolean>>
   /** The player started or drained a reply's audio. */
   voicePlayback: (payload: VoicePlaybackRequest) => Promise<IpcResult<boolean>>
+  /** Stop speaking now (the run carries on). */
+  voiceInterrupt: (payload: VoiceSessionRequest) => Promise<IpcResult<boolean>>
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

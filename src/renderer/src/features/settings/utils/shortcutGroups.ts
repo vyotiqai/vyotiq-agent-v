@@ -32,6 +32,7 @@ const GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> = [
       'approval-deny',
       'cycleMode',
       'dictation',
+      'voiceMode',
       'edit-last',
       'find',
       'jump-latest',

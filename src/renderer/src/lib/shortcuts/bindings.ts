@@ -13,6 +13,7 @@ export type ShortcutId =
   | 'find'
   | 'refresh'
   | 'dictation'
+  | 'voiceMode'
   | 'cycleMode'
   | 'panelTerminal'
   | 'panelChanges'
@@ -75,6 +76,7 @@ export const SHORTCUT_BINDINGS: Record<ShortcutId, ShortcutBinding> = {
   find: { id: 'find', key: 'f', mod: true },
   refresh: { id: 'refresh', key: 'r', mod: true },
   dictation: { id: 'dictation', key: 'm', mod: true },
+  voiceMode: { id: 'voiceMode', key: 'm', mod: true, shift: 'require' },
   cycleMode: { id: 'cycleMode', key: '.', mod: true, shift: 'allow' },
   panelTerminal: { id: 'panelTerminal', key: '`', mod: true },
   panelChanges: { id: 'panelChanges', key: 'e', mod: true },

@@ -56,6 +56,7 @@ type Bridge = Pick<
   | 'onVoiceEvent'
   | 'voiceFollow'
   | 'voicePlayback'
+  | 'voiceInterrupt'
   | 'onVoiceAudioOut'
 >
 
@@ -235,6 +236,16 @@ export class VoiceSessionController {
   /** The agent's voice level 0..1 while it speaks, for the orb. */
   speakingLevel(): number {
     return this.player?.level() ?? 0
+  }
+
+  /** Stop speaking now; the agent keeps working. */
+  interrupt(): void {
+    if (this.sessionId) void this.bridge().voiceInterrupt({ sessionId: this.sessionId })
+  }
+
+  /** The session id, while one is open (for tests and the bar's data attributes). */
+  get id(): string | null {
+    return this.sessionId
   }
 
   setMuted(muted: boolean): void {

@@ -1253,7 +1253,18 @@ with the feature off.
   - [x] Renderer: reply playback + captions in the controller; turn routing for Redirect / Stop the agent / Just stop talking and stop phrases (`turnRouting.ts`)
   - [x] 28 more tests (voice total: 179); prompt-assembly and run-launch suites unchanged
   - [ ] 5b: approvals and `ask_question` by voice (B9, §7.5); echo filter on captions (§6.4 item 3)
-- [ ] Phase 6 · UI polish
+- [x] Phase 6 · Voice bar and orb (2026-10-11), first cut — not yet seen on real hardware
+  - [x] Voice button (waveform) beside dictation's mic on the instruction line; `Ctrl/Cmd+Shift+M` and the palette's "Voice mode" go to the line last used (no double start in a split view) (`VoiceModeButton.tsx`)
+  - [x] Voice bar in place of the line's box: orb · caption (yours in `text-fg`, the agent's in `text-muted`) · time · listener with cloud/lock; Mute · Stop speaking · Stop the agent · hint or problem with its fix · End (`VoiceBar.tsx`)
+  - [x] Orb: a distinct shape or motion per state, token colours via `currentColor`, level-driven size in an animation frame (no re-renders), still under reduced motion (`VoiceOrb.tsx`)
+  - [x] Keys: Esc stops speaking, Esc twice ends (never stops the run: `escape.ts` defers to `[data-voice-bar]`); M mutes; hold Space to talk; none of them in a text field
+  - [x] Plain-language problems with one fix each: Voice settings / Open mic settings / Try again (`voiceCopy.ts`); a speaking problem is a quiet note, replies stay on screen
+  - [x] Earcons: start, end, turn accepted; synthesised, quiet, off in Settings (`earcons.ts`)
+  - [x] One session per window, owned by one line; the line keeps the store pointed at its task's send/stop (`voiceMode.ts`); `voice:interrupt` for Stop speaking
+  - [x] WCAG review against the repo's `wcag-desktop` skill: 24px targets with ≥4px gaps, state announced in a polite live region, no meaning in hue alone, informative text in `text-muted` or stronger
+  - [x] 15 more tests (voice total: 222); composer, task, settings, shortcut and palette suites pass
+  - [ ] Seen and tuned in all five skins × light/dark, at the narrowest pane, and at large text (needs the running app)
+- [ ] Phase 6b · Polish after first real use
 - [ ] Phase 7 · Hardening
 
 ---
@@ -1290,6 +1301,8 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-24 | 2026-10-11 | The voice bar opens the mic **before** asking main for a session, so a blocked or missing mic fails at once and nothing is billed | Decided |
 | D-25 | 2026-10-11 | Barge-in is one step for now: main's local speech detector (200 ms voiced, stricter while the agent speaks) stops speech at once, rather than §6.2's duck-then-confirm. Simpler and fast; if coughs cut the agent off in real use, add the duck stage | Proposed |
 | D-26 | 2026-10-11 | The voice_reply prompt section is keyed by workspace, not run: it must be in the very first step's prompt, before the renderer knows the run id. While voice is open on a workspace, every reply there is written to be heard | Decided |
+| D-27 | 2026-10-11 | Voice mode is started from the task's instruction line only (not the New task brief) in this cut: a session needs a task to steer. Starting a task by voice from the brief can follow | Proposed |
+| D-28 | 2026-10-11 | The bar's single-letter keys (M, Space) yield to any text field, empty or not; the app's `isTypingIn` treats an empty field as not typing, which is right for chords but wrong for bare letters | Decided |
 
 ---
 

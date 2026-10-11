@@ -56,6 +56,10 @@ import { useComposerAudio, isAudioFile, MAX_AUDIO_FILES } from './useComposerAud
 import { useTake } from './take/useTake'
 import { TakeStrip } from './take/TakeStrip'
 import { MicControl } from './take/MicControl'
+import { VoiceBar } from '@renderer/features/voice/VoiceBar'
+import { VoiceModeButton } from '@renderer/features/voice/VoiceModeButton'
+import { useVoiceMode } from '@renderer/features/voice/voiceMode'
+import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
 import { useComposerModels } from './useComposerModels'
 import { deriveModelReadiness, modelReadinessBlocksSend, modelReadinessSendReason } from './modelReadiness'
 import { ModelReadinessBanner } from './ModelReadinessBanner'
@@ -1060,6 +1064,20 @@ export function Composer({
 
   const isInline = variant === 'inline'
   const isLine = variant === 'line'
+  // Voice mode (docs/voice-mode.md §13): this line's own id, stable across its task getting a run id.
+  const voiceOwner = useId()
+  const voice = useVoiceMode()
+  const voiceOn = isLine && voice.owner === voiceOwner
+  const runningRef = useRef(running)
+  runningRef.current = running
+  const runIdRef = useRef(activeRunId ?? null)
+  runIdRef.current = activeRunId ?? null
+  const voiceTarget: VoiceRunTarget = {
+    running: () => runningRef.current,
+    runId: () => runIdRef.current,
+    send: async (text, opts) => Boolean(await onSend(text, undefined, undefined, opts.steer ? { steer: true } : undefined)),
+    stop: () => onStop?.()
+  }
   const isBrief = variant === 'brief'
 
   useLayoutEffect(() => {
@@ -1407,6 +1425,9 @@ export function Composer({
               screenshot={browserScreenshot}
             />
             <MicControl take={take} disabled={inputLocked} />
+            {isLine && workspacePath ? (
+              <VoiceModeButton owner={voiceOwner} workspacePath={workspacePath} disabled={inputLocked} />
+            ) : null}
             {/* Stop lives in the line's own row now that the task header is gone. */}
             {isLine && running && onStop ? (
               <Tooltip content="Stop the run (Esc)">
@@ -1638,6 +1659,16 @@ export function Composer({
               </ul>
             ) : null}
 
+            {voiceOn ? (
+              // Voice mode: the bar takes the box's place; the record stays above it.
+              <VoiceBar
+                owner={voiceOwner}
+                workspacePath={workspacePath ?? null}
+                target={voiceTarget}
+                onOpenVoiceSettings={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('voice') : undefined}
+                className={COMPOSER_BOX_BLEED}
+              />
+            ) : (
             <form
               onSubmit={submit}
               className={cn(
@@ -1656,6 +1687,7 @@ export function Composer({
                 {controls(lineAction, { context: true, takeSendLabel: running ? 'Queue' : 'Send' })}
               </div>
             </form>
+            )}
           </div>
         </div>
 

@@ -36,6 +36,7 @@ const ICON: Record<string, IconName> = {
   find: 'search',
   refresh: 'refresh',
   dictation: 'mic',
+  voiceMode: 'waveform',
   cycleMode: 'repeat',
   panelTerminal: 'terminal',
   panelChanges: 'diff',
