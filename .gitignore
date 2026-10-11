@@ -138,6 +138,9 @@ venv/
 # to do, and what bounds it; a security boundary documented only on one machine
 # is no boundary at all.
 !/docs/agent-tools.md
+# Hand-authored design for voice mode, kept current as the feature is built on
+# feat/voice-mode; the PR and the code review read it.
+!/docs/voice-mode.md
 # Hand-authored, no .docx source: how to run and extend the coding eval
 # (scripts/eval-coding.mjs), which has no other documentation.
 !/docs/evals.md
