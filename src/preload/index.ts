@@ -12,6 +12,8 @@ import {
   UpdaterStatePayloadSchema,
   DictationRuntimeStatusSchema,
   DictationLiveEventSchema,
+  VoiceAudioOutSchema,
+  VoiceSpeakEndSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
   ToolCatalogResultSchema,
@@ -271,6 +273,29 @@ const api: VyotiqApi = {
   voiceKeyStatus: () => ipcRenderer.invoke(IPC.voiceKeyStatus),
   voiceSetKey: (payload) => ipcRenderer.invoke(IPC.voiceSetKey, payload),
   voiceClearKey: (payload) => ipcRenderer.invoke(IPC.voiceClearKey, payload),
+  voiceSpeak: (payload) => ipcRenderer.invoke(IPC.voiceSpeak, payload),
+  voiceStopSpeaking: (payload) => ipcRenderer.invoke(IPC.voiceStopSpeaking, payload),
+  voiceListVoices: (payload) => ipcRenderer.invoke(IPC.voiceListVoices, payload),
+  onVoiceAudioOut: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceAudioOutSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceAudioOut, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceAudioOut, listener)
+    }
+  },
+  onVoiceSpeakEnd: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceSpeakEndSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceSpeakEnd, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceSpeakEnd, listener)
+    }
+  },
   onDictationStatus: (handler) => {
     const listener = (_: IpcRendererEvent, status: unknown): void => {
       const parsed = DictationRuntimeStatusSchema.safeParse(status)

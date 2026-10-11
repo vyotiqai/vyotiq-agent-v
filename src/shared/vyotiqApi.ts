@@ -192,10 +192,17 @@ import type {
   NotificationAction
 } from './ipc'
 import type {
+  VoiceAudioOut,
   VoiceClearKeyRequest,
   VoiceKeyStatus,
+  VoiceListVoicesRequest,
+  VoiceOptionInfo,
   VoiceSetKeyRequest,
-  VoiceSetKeyResult
+  VoiceSetKeyResult,
+  VoiceSpeakEnd,
+  VoiceSpeakRequest,
+  VoiceSpeakResult,
+  VoiceStopSpeakingRequest
 } from './ipc/schemas/voice'
 import type { GoogleAdcStatus, ProxyStatus } from './domain/network'
 
@@ -486,6 +493,13 @@ export interface VyotiqApi {
   /** Check a vendor key with the vendor, then save it. A rejected key fails with `voice:rejected_key`. */
   voiceSetKey: (payload: VoiceSetKeyRequest) => Promise<IpcResult<VoiceSetKeyResult>>
   voiceClearKey: (payload: VoiceClearKeyRequest) => Promise<IpcResult<VoiceKeyStatus>>
+  /** Speak text aloud (a voice preview, or an answer's spoken summary); stops anything already speaking. */
+  voiceSpeak: (payload: VoiceSpeakRequest) => Promise<IpcResult<VoiceSpeakResult>>
+  voiceStopSpeaking: (payload: VoiceStopSpeakingRequest) => Promise<IpcResult<boolean>>
+  /** Voices for a speaking provider, fetched with your key. */
+  voiceListVoices: (payload: VoiceListVoicesRequest) => Promise<IpcResult<VoiceOptionInfo[]>>
+  onVoiceAudioOut: (handler: (chunk: VoiceAudioOut) => void) => () => void
+  onVoiceSpeakEnd: (handler: (end: VoiceSpeakEnd) => void) => () => void
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

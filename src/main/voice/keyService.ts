@@ -34,8 +34,8 @@ const VERIFY: Readonly<Record<VoiceKeyVendor, VerifyRequest>> = {
     headers: (key) => ({ 'xi-api-key': key })
   },
   cartesia: {
-    url: 'https://api.cartesia.ai/voices',
-    headers: (key) => ({ 'X-API-Key': key, 'Cartesia-Version': '2026-08-14' })
+    url: 'https://api.cartesia.ai/voices?limit=1',
+    headers: (key) => ({ Authorization: `Bearer ${key}`, 'Cartesia-Version': '2026-08-14' })
   }
 }
 

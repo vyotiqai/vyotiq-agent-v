@@ -27,6 +27,8 @@ export const PUSH_CHANNEL_NAMES = [
   'codeIndexStatusEvent',
   'dictationStatusEvent',
   'dictationLiveEvent',
+  'voiceAudioOut',
+  'voiceSpeakEnd',
   'githubAuthStatusEvent',
   'skillsChanged',
   'notificationsChanged',

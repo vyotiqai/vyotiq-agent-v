@@ -427,11 +427,17 @@ import { dictationMicAccess, openMicSettings } from '../dictation/micAccess'
 import { isVoiceError } from '../voice/errors'
 import { voiceKeyStatus } from '../voice/keys'
 import { removeVoiceKey, saveVoiceKey } from '../voice/keyService'
+import { listVoices, speak, stopSpeaking } from '../voice/speaker'
 import {
   VoiceClearKeyRequestSchema,
+  VoiceListVoicesRequestSchema,
   VoiceSetKeyRequestSchema,
+  VoiceSpeakRequestSchema,
+  VoiceStopSpeakingRequestSchema,
   type VoiceKeyStatus,
-  type VoiceSetKeyResult
+  type VoiceOptionInfo,
+  type VoiceSetKeyResult,
+  type VoiceSpeakResult
 } from '../../shared/ipc/schemas/voice'
 import { voiceIpcCode } from '../../shared/voice'
 import {
@@ -2142,6 +2148,52 @@ export function registerIpc(): void {
       return ok(await removeVoiceKey(req.vendor))
     } catch (err) {
       return failFrom(err, IPC.voiceClearKey)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceSpeak, async (event, raw): Promise<IpcResult<VoiceSpeakResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSpeakRequestSchema.parse(raw)
+      const sender = event.sender
+      return ok(
+        speak(
+          req,
+          {
+            audio: (chunk) => {
+              if (!sender.isDestroyed()) sender.send(IPC.voiceAudioOut, chunk)
+            },
+            end: (utteranceId, error) => {
+              if (!sender.isDestroyed()) sender.send(IPC.voiceSpeakEnd, { utteranceId, ...(error ? { error } : {}) })
+            }
+          },
+          getSettings().voice
+        )
+      )
+    } catch (err) {
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceSpeak)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceStopSpeaking, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      stopSpeaking(VoiceStopSpeakingRequestSchema.parse(raw ?? {}).utteranceId)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceStopSpeaking)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceListVoices, async (event, raw): Promise<IpcResult<VoiceOptionInfo[]>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceListVoicesRequestSchema.parse(raw)
+      return ok(await listVoices(req.provider, req.refresh))
+    } catch (err) {
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceListVoices)
     }
   })
 

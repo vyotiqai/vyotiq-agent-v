@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { STT_PROVIDER_IDS, TTS_PROVIDER_IDS, VOICE_KEY_VENDORS } from '../../voice'
+import { STT_PROVIDER_IDS, TTS_PROVIDER_IDS, VOICE_ERROR_CODES, VOICE_KEY_VENDORS } from '../../voice'
 
 export const SttProviderIdSchema = z.enum(STT_PROVIDER_IDS)
 export const TtsProviderIdSchema = z.enum(TTS_PROVIDER_IDS)
@@ -93,3 +93,52 @@ export const VoiceSetKeyResultSchema = z.object({
   status: VoiceKeyStatusSchema
 })
 export type VoiceSetKeyResult = z.infer<typeof VoiceSetKeyResultSchema>
+
+// ── Speaking (preview, read an answer aloud) ────────────────────────────────
+
+export const VoiceSpeakRequestSchema = z.object({
+  text: z.string().min(1).max(200_000),
+  /** `answer`: speak its <spoken> block or a short summary; `plain`: exactly this text. */
+  kind: z.enum(['answer', 'plain']),
+  provider: TtsProviderIdSchema.optional(),
+  voiceId: z.string().max(200).optional(),
+  speed: z.number().min(0.25).max(4).optional()
+})
+export type VoiceSpeakRequest = z.infer<typeof VoiceSpeakRequestSchema>
+
+export const VoiceSpeakResultSchema = z.object({
+  utteranceId: z.string(),
+  provider: TtsProviderIdSchema,
+  voiceId: z.string()
+})
+export type VoiceSpeakResult = z.infer<typeof VoiceSpeakResultSchema>
+
+export const VoiceStopSpeakingRequestSchema = z.object({ utteranceId: z.string().optional() })
+export type VoiceStopSpeakingRequest = z.infer<typeof VoiceStopSpeakingRequestSchema>
+
+export const VoiceListVoicesRequestSchema = z.object({ provider: TtsProviderIdSchema, refresh: z.boolean().optional() })
+export type VoiceListVoicesRequest = z.infer<typeof VoiceListVoicesRequestSchema>
+
+export const VoiceOptionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  custom: z.boolean().optional(),
+  previewUrl: z.string().optional()
+})
+export type VoiceOptionInfo = z.infer<typeof VoiceOptionSchema>
+
+/** Main → renderer: one chunk of speech. `pcm` crosses IPC as a typed array (structured clone), not base64 (D-09). */
+export const VoiceAudioOutSchema = z.object({
+  utteranceId: z.string(),
+  seq: z.number().int().min(0),
+  sampleRate: z.number().int().min(8000).max(48000),
+  pcm: z.instanceof(Int16Array)
+})
+export type VoiceAudioOut = z.infer<typeof VoiceAudioOutSchema>
+
+export const VoiceSpeakEndSchema = z.object({
+  utteranceId: z.string(),
+  error: z.enum(VOICE_ERROR_CODES).optional()
+})
+export type VoiceSpeakEnd = z.infer<typeof VoiceSpeakEndSchema>
