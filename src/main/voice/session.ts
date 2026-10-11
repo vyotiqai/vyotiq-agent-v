@@ -19,13 +19,13 @@ import {
   type VoiceKeySource
 } from '../../shared/voice'
 import { AGENT_FLOOR_STATES, nextVoiceState, type VoiceSessionEvent, type VoiceSessionState } from '../../shared/voiceSession'
-import type { AgentEvent } from '../../shared/ipc'
+import type { AgentEvent, ToolApprovalRequest } from '../../shared/ipc'
 import type { VoiceEvent, VoiceSettings } from '../../shared/ipc/schemas/voice'
 import { VoiceError, toVoiceError } from './errors'
 import { PauseDetector } from './pauseDetector'
 import type { SttEvent, SttProvider, SttSession, TtsStream } from './providers/types'
 import { ReplySpeaker } from './replySpeaker'
-import { isStopPhrase } from './speechText'
+import { approvalAnswer, isStopPhrase, toSpeakable } from './speechText'
 
 /** Reconnect waits (§15): five tries, then give up. */
 export const RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 4000] as const
@@ -52,6 +52,13 @@ export type VoiceSessionDeps = {
   openTts?: (contextId: string, onError: (code: VoiceErrorCode) => void) => TtsStream | null
   /** Subscribe to a run's events (the run tap); returns the unsubscribe. */
   tapRun?: (runId: string, fn: (event: AgentEvent) => void) => () => void
+  /** Approvals being asked and settled, any run (§7.5). */
+  watchApprovals?: (watcher: {
+    asked: (request: ToolApprovalRequest) => void
+    settled: (requestId: string, runId: string) => void
+  }) => () => void
+  /** Answer an approval, as the card would. */
+  resolveApproval?: (answer: { requestId: string; runId: string; decision: 'once' | 'deny' }) => boolean
   now?: () => number
   setTimer?: (fn: () => void, ms: number) => unknown
   clearTimer?: (handle: unknown) => void
@@ -82,6 +89,9 @@ export class VoiceSession {
   /** Replies whose audio has started playing and not yet drained. */
   private playing = new Set<string>()
   private speakErrorShown = false
+  private unwatchApprovals: (() => void) | null = null
+  /** The followed run's approval waiting on the person, if any. */
+  private approval: ToolApprovalRequest | null = null
 
   constructor(private readonly deps: VoiceSessionDeps) {
     this.id = (deps.newId ?? randomUUID)()
@@ -152,6 +162,11 @@ export class VoiceSession {
   /** Open the listener. Resolves once listening; a failure leaves the session in `error`. */
   async start(): Promise<void> {
     if (!this.dispatch({ type: 'start' })) return
+    this.unwatchApprovals ??=
+      this.deps.watchApprovals?.({
+        asked: (req) => this.onApprovalAsked(req),
+        settled: (requestId) => this.onApprovalSettled(requestId)
+      }) ?? null
     try {
       await this.connect()
       this.dispatch({ type: 'ready' })
@@ -260,6 +275,9 @@ export class VoiceSession {
     this.stopKeepAlive()
     this.untap?.()
     this.untap = null
+    this.unwatchApprovals?.()
+    this.unwatchApprovals = null
+    this.approval = null
     this.followedRun = null
     this.reply.dispose()
     this.playing.clear()
@@ -341,7 +359,47 @@ export class VoiceSession {
       return
     }
     if (!this.dispatch({ type: 'end_of_turn' })) return
+    if (this.answerApprovalByVoice(text)) return
     this.emitEvent({ kind: 'turn', turnId: (this.deps.newId ?? randomUUID)(), text, stop: isStopPhrase(text) })
+  }
+
+  // ── Approvals by voice (§7.5, B9) ──────────────────────────────────────
+
+  /** Whether a spoken answer may settle this approval (never a risky one). */
+  private voiceMayAnswer(req: ToolApprovalRequest): boolean {
+    return this.deps.settings().approveByVoice && !req.danger && Boolean(this.deps.resolveApproval)
+  }
+
+  private onApprovalAsked(req: ToolApprovalRequest): void {
+    if (this.stateValue === 'off' || req.runId !== this.followedRun) return
+    this.approval = req
+    this.dispatch({ type: 'needs_you' })
+    const what = describeApproval(req)
+    this.reply.announce(
+      req.danger
+        ? `It wants to ${what}, which could be risky. Approve or deny it on screen.`
+        : this.voiceMayAnswer(req)
+          ? `It wants to ${what}. Say yes or no.`
+          : `It wants to ${what}. Approve or deny it on screen.`
+    )
+  }
+
+  private onApprovalSettled(requestId: string): void {
+    if (this.approval?.requestId !== requestId) return
+    this.approval = null
+    this.dispatch({ type: 'answered' })
+  }
+
+  /** A whole-utterance yes/no answers the pending approval instead of becoming a message. */
+  private answerApprovalByVoice(text: string): boolean {
+    const req = this.approval
+    if (!req || !this.voiceMayAnswer(req)) return false
+    const decision = approvalAnswer(text)
+    if (!decision) return false
+    const ok = this.deps.resolveApproval?.({ requestId: req.requestId, runId: req.runId, decision }) ?? false
+    if (!ok) return false
+    this.emitEvent({ kind: 'say', contextId: `approval:${req.requestId}`, text: decision === 'once' ? 'Allowed.' : 'Denied.' })
+    return true
   }
 
   // ── Reconnect (§15) ──────────────────────────────────────────────────────
@@ -420,4 +478,14 @@ export class VoiceSession {
       /* the window went away */
     }
   }
+}
+
+/** What an approval asks for, in a few spoken words (§7.5). */
+export function describeApproval(req: Pick<ToolApprovalRequest, 'name' | 'summary'>): string {
+  const name = req.name.toLowerCase()
+  const summary = toSpeakable(req.summary).replace(/[.]+$/, '').slice(0, 120)
+  if (/terminal|shell|command|bash/.test(name)) return summary ? `run ${summary}` : 'run a command'
+  if (/edit|write|patch|create|replace|delete/.test(name)) return summary ? `change ${summary}` : 'change a file'
+  if (/fetch|browser|navigate/.test(name)) return summary ? `open ${summary}` : 'open a web page'
+  return summary ? `use ${req.name}: ${summary}` : `use ${req.name}`
 }

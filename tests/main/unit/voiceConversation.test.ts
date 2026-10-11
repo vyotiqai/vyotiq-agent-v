@@ -298,3 +298,149 @@ describe('VoiceSession conversation', () => {
     expect(h.taps.size).toBe(0)
   })
 })
+
+describe('approvals by voice', () => {
+  function approvalHarness(over: Partial<VoiceSettings> = {}) {
+    const events: VoiceEvent[] = []
+    const stt: FixtureSttSession[] = []
+    const said: string[] = []
+    let watcher: { asked: (r: never) => void; settled: (id: string, run: string) => void } | null = null
+    const resolveApproval = vi.fn(() => true)
+    const settings: VoiceSettings = { ...DEFAULT_VOICE_SETTINGS, ...over }
+    let n = 0
+    const session = new VoiceSession({
+      emit: (e) => {
+        events.push(e)
+        if (e.kind === 'say') said.push(e.text)
+      },
+      settings: () => settings,
+      keys: () => ({ voice: { deepgram: true }, chat: {} }),
+      readKey: () => 'k',
+      sttProvider: (id) => ({
+        id,
+        open: async (o) => {
+          const s = await openFixtureStt(o)
+          stt.push(s)
+          return s
+        }
+      }),
+      openTts: (contextId) =>
+        openFixtureTts({
+          apiKey: '',
+          model: '',
+          voiceId: '',
+          speed: 1,
+          contextId,
+          signal: new AbortController().signal,
+          onAudio: () => {},
+          onError: () => {}
+        }),
+      tapRun: () => () => {},
+      watchApprovals: (w) => {
+        watcher = w as never
+        return () => {
+          watcher = null
+        }
+      },
+      resolveApproval,
+      setTimer: () => null,
+      clearTimer: () => {},
+      newId: () => `id${++n}`
+    })
+    const ask = (over2: Record<string, unknown> = {}) =>
+      watcher!.asked({
+        requestId: 'a1',
+        runId: R,
+        toolCallId: 't1',
+        name: 'run_terminal',
+        summary: 'pnpm test',
+        argsPreview: '{}',
+        mutating: true,
+        ...over2
+      } as never)
+    return { session, events, said, stt: () => stt.at(-1)!, ask, resolveApproval, watcher: () => watcher }
+  }
+
+  it('reads the approval out and a spoken yes allows it once, without sending a message', async () => {
+    const h = approvalHarness()
+    await h.session.start()
+    h.stt().say('run the tests')
+    h.session.follow(R)
+    h.ask()
+    expect(h.session.state).toBe('waiting_on_you')
+    expect(h.said.at(-1)).toBe('It wants to run pnpm test. Say yes or no.')
+    const turnsBefore = h.events.filter((e) => e.kind === 'turn').length
+    h.stt().say('Yes.')
+    expect(h.resolveApproval).toHaveBeenCalledWith({ requestId: 'a1', runId: R, decision: 'once' })
+    expect(h.events.filter((e) => e.kind === 'turn')).toHaveLength(turnsBefore)
+    expect(h.said.at(-1)).toBe('Allowed.')
+  })
+
+  it('no denies; anything else is a message to the agent', async () => {
+    const h = approvalHarness()
+    await h.session.start()
+    h.session.follow(R)
+    h.ask()
+    h.stt().say('no thanks')
+    expect(h.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ decision: 'deny' }))
+    h.ask({ requestId: 'a2' })
+    h.resolveApproval.mockClear()
+    h.stt().say('yes but use the other script')
+    expect(h.resolveApproval).not.toHaveBeenCalled()
+    expect(h.events.at(-1)).toMatchObject({ kind: 'turn', text: 'yes but use the other script' })
+  })
+
+  it('a risky action is never approved by voice', async () => {
+    const h = approvalHarness()
+    await h.session.start()
+    h.session.follow(R)
+    h.ask({ danger: 'deletes files outside the workspace' })
+    expect(h.said.at(-1)).toContain('could be risky. Approve or deny it on screen.')
+    h.stt().say('yes')
+    expect(h.resolveApproval).not.toHaveBeenCalled()
+  })
+
+  it('respects Approve by voice being off, and ignores other runs', async () => {
+    const h = approvalHarness({ approveByVoice: false })
+    await h.session.start()
+    h.session.follow(R)
+    h.ask({ runId: 'someone-else' })
+    expect(h.session.state).toBe('listening')
+    h.ask()
+    expect(h.said.at(-1)).toContain('Approve or deny it on screen.')
+    h.stt().say('yes')
+    expect(h.resolveApproval).not.toHaveBeenCalled()
+  })
+
+  it('a click on the card clears the wait', async () => {
+    const h = approvalHarness()
+    await h.session.start()
+    h.session.follow(R)
+    h.ask()
+    h.watcher()!.settled('a1', R)
+    expect(h.session.state).toBe('thinking')
+  })
+
+  it('stop stops watching', async () => {
+    const h = approvalHarness()
+    await h.session.start()
+    await h.session.stop()
+    expect(h.watcher()).toBeNull()
+  })
+})
+
+describe('approval wording and answers', () => {
+  it('describes approvals in a few words', async () => {
+    const { describeApproval } = await import('@main/voice/session')
+    expect(describeApproval({ name: 'edit_file', summary: 'src/main/loop.ts' })).toBe('change loop')
+    expect(describeApproval({ name: 'web_fetch', summary: '' })).toBe('open a web page')
+  })
+
+  it('only takes a whole-utterance yes or no', async () => {
+    const { approvalAnswer } = await import('@main/voice/speechText')
+    expect(approvalAnswer('Yes!')).toBe('once')
+    expect(approvalAnswer('go ahead')).toBe('once')
+    expect(approvalAnswer("Don't")).toBe('deny')
+    expect(approvalAnswer('yes, and also run lint')).toBeNull()
+  })
+})

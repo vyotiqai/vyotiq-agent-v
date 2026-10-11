@@ -185,6 +185,15 @@ export class ReplySpeaker {
     reply.stream.end()
   }
 
+  /**
+   * Say one line now, even after a barge-in: the agent is asking the person
+   * something (an approval), which is exactly when they're listening.
+   */
+  announce(text: string): void {
+    this.quiet = false
+    this.speakOnce(text)
+  }
+
   /** A whole line said on its own (a cue, a failure), separate from the reply. */
   private speakOnce(text: string): void {
     if (this.quiet) return

@@ -105,6 +105,32 @@ export function oldestPendingToolApprovalAt(runId: string): string | undefined {
   return oldest
 }
 
+/**
+ * Listeners for approvals being asked and settled (voice mode reads them out
+ * and takes a spoken yes/no; docs/voice-mode.md §7.5). Read-only: a watcher
+ * answers through `resolveToolApproval` like the card does.
+ */
+export type ToolApprovalWatcher = {
+  asked: (request: ToolApprovalRequest) => void
+  settled: (requestId: string, runId: string) => void
+}
+const approvalWatchers = new Set<ToolApprovalWatcher>()
+
+export function watchToolApprovals(watcher: ToolApprovalWatcher): () => void {
+  approvalWatchers.add(watcher)
+  return () => approvalWatchers.delete(watcher)
+}
+
+function tellWatchers(fn: (w: ToolApprovalWatcher) => void): void {
+  for (const w of [...approvalWatchers]) {
+    try {
+      fn(w)
+    } catch {
+      /* a watcher's failure is its own */
+    }
+  }
+}
+
 /** Total approvals waiting across all runs — drives the taskbar badge. */
 export function countPendingToolApprovals(): number {
   return pending.size
@@ -455,6 +481,7 @@ function askThroughRenderer(
       pending.delete(request.requestId)
       notifyBadgeChange()
       clearWaiters()
+      tellWatchers((w) => w.settled(request.requestId, request.runId))
       resolve(decision)
     }
     const cancel = (err: Error): void => {
@@ -463,6 +490,7 @@ function askThroughRenderer(
       pending.delete(request.requestId)
       notifyBadgeChange()
       clearWaiters()
+      tellWatchers((w) => w.settled(request.requestId, request.runId))
       reject(err)
     }
     function onAbort(): void {
@@ -487,6 +515,7 @@ function askThroughRenderer(
       settle('timeout')
     }, TOOL_APPROVAL_TIMEOUT_MS)
     sender(request)
+    tellWatchers((w) => w.asked(request))
   })
 }
 

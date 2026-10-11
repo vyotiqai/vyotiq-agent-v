@@ -223,3 +223,26 @@ export function isStopPhrase(utterance: string): boolean {
     .trim()
   return STOP_PHRASES.has(norm)
 }
+
+function normaliseUtterance(utterance: string): string {
+  return utterance
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s']/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const YES = new Set(['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'do it', 'allow', 'allow it', 'approve', 'approve it', 'yes please', 'go for it', 'fine', 'yes go ahead'])
+const NO = new Set(['no', 'nope', 'nah', 'deny', 'deny it', "don't", 'do not', "don't do it", 'no thanks', 'skip', 'skip it', 'no don\'t'])
+
+/**
+ * A spoken answer to an approval (§7.5): `once` for yes, `deny` for no, null
+ * for anything else (which goes to the agent as a message). Whole utterance
+ * only, like the stop phrases: "yes but use the other file" is a message.
+ */
+export function approvalAnswer(utterance: string): 'once' | 'deny' | null {
+  const norm = normaliseUtterance(utterance)
+  if (YES.has(norm)) return 'once'
+  if (NO.has(norm)) return 'deny'
+  return null
+}

@@ -10,6 +10,7 @@ import { VoiceError } from './errors'
 import { sttProvider, ttsProvider } from './providers/registry'
 import { VoiceSession } from './session'
 import { addRunEventTap } from '../agent/runEventTap'
+import { resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
 import { setVoiceReplyWorkspace } from './voiceReply'
 import {
   clampSpeed,
@@ -96,7 +97,9 @@ export async function startVoiceSession(
     sttProvider,
     keyterms,
     openTts: (contextId, onError) => openSessionTts(owner, channels.audio, contextId, onError),
-    tapRun: addRunEventTap
+    tapRun: addRunEventTap,
+    watchApprovals: watchToolApprovals,
+    resolveApproval: (answer) => resolveToolApproval(answer)
   })
   sessions.set(session.id, { session, owner })
   byOwner.set(owner.id, session.id)

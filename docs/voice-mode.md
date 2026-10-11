@@ -1252,7 +1252,8 @@ with the feature off.
   - [x] Session follows the run each turn went to; speaking state driven by the player's start/drain reports; barge-in flushes the speakers (`session.ts`); IPC `voice:follow`, `voice:playback`; events `say`, `flush`
   - [x] Renderer: reply playback + captions in the controller; turn routing for Redirect / Stop the agent / Just stop talking and stop phrases (`turnRouting.ts`)
   - [x] 28 more tests (voice total: 179); prompt-assembly and run-launch suites unchanged
-  - [ ] 5b: approvals and `ask_question` by voice (B9, §7.5); echo filter on captions (§6.4 item 3)
+  - [x] 5b: approvals by voice (2026-10-11). The followed run's approval is read out ("It wants to run pnpm test. Say yes or no.") and the orb shows Needs you; a whole-utterance yes/no answers it (`once` / `deny`) and is not sent as a message; anything else is a message; risky (`danger`) approvals and Approve by voice off always say "on screen"; a click on the card clears the wait. Hook: `watchToolApprovals` in `agent/toolApproval.ts`. 8 tests
+  - [ ] `ask_question` by voice (a spoken answer to the agent's own questions); echo filter on captions (§6.4 item 3)
 - [x] Phase 6 · Voice bar and orb (2026-10-11), first cut — not yet seen on real hardware
   - [x] Voice button (waveform) beside dictation's mic on the instruction line; `Ctrl/Cmd+Shift+M` and the palette's "Voice mode" go to the line last used (no double start in a split view) (`VoiceModeButton.tsx`)
   - [x] Voice bar in place of the line's box: orb · caption (yours in `text-fg`, the agent's in `text-muted`) · time · listener with cloud/lock; Mute · Stop speaking · Stop the agent · hint or problem with its fix · End (`VoiceBar.tsx`)
