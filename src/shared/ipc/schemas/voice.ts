@@ -1,5 +1,9 @@
 import { z } from 'zod'
+import { VOICE_SESSION_STATES } from '../../voiceSession'
 import { STT_PROVIDER_IDS, TTS_PROVIDER_IDS, VOICE_ERROR_CODES, VOICE_KEY_VENDORS } from '../../voice'
+
+/** Int16 PCM over IPC; any backing buffer (the mic's may not be a plain ArrayBuffer). */
+const Int16PcmSchema = z.custom<Int16Array>((v) => v instanceof Int16Array, 'expected Int16Array')
 
 export const SttProviderIdSchema = z.enum(STT_PROVIDER_IDS)
 export const TtsProviderIdSchema = z.enum(TTS_PROVIDER_IDS)
@@ -133,7 +137,7 @@ export const VoiceAudioOutSchema = z.object({
   utteranceId: z.string(),
   seq: z.number().int().min(0),
   sampleRate: z.number().int().min(8000).max(48000),
-  pcm: z.instanceof(Int16Array)
+  pcm: Int16PcmSchema
 })
 export type VoiceAudioOut = z.infer<typeof VoiceAudioOutSchema>
 
@@ -142,3 +146,62 @@ export const VoiceSpeakEndSchema = z.object({
   error: z.enum(VOICE_ERROR_CODES).optional()
 })
 export type VoiceSpeakEnd = z.infer<typeof VoiceSpeakEndSchema>
+
+// ── Live session ────────────────────────────────────────────────────────────
+
+export const VoiceStartRequestSchema = z.object({
+  /** The task's workspace: its file names become words to listen for. */
+  workspacePath: z.string().min(1).max(4096).optional()
+})
+export type VoiceStartRequest = z.infer<typeof VoiceStartRequestSchema>
+
+export const VoiceStartResultSchema = z.object({ sessionId: z.string() })
+export type VoiceStartResult = z.infer<typeof VoiceStartResultSchema>
+
+export const VoiceSessionRequestSchema = z.object({ sessionId: z.string().min(1).max(100) })
+export type VoiceSessionRequest = z.infer<typeof VoiceSessionRequestSchema>
+
+/** 16 kHz mono Int16 mic audio, ~128 ms a chunk, as a typed array (D-09). */
+export const VoiceAudioInSchema = z.object({
+  sessionId: z.string().min(1).max(100),
+  pcm: Int16PcmSchema.refine((a) => a.length <= 16000 * 2, 'chunk too long')
+})
+export type VoiceAudioIn = z.infer<typeof VoiceAudioInSchema>
+
+export const VoicePttRequestSchema = z.object({ sessionId: z.string().min(1).max(100), down: z.boolean() })
+export type VoicePttRequest = z.infer<typeof VoicePttRequestSchema>
+
+export const VoiceMuteRequestSchema = z.object({ sessionId: z.string().min(1).max(100), muted: z.boolean() })
+export type VoiceMuteRequest = z.infer<typeof VoiceMuteRequestSchema>
+
+export const VoiceSessionStateSchema = z.enum(VOICE_SESSION_STATES)
+
+/** Main → renderer, everything the voice bar shows (docs/voice-mode.md §11). */
+export const VoiceEventSchema = z.discriminatedUnion('kind', [
+  z.object({ sessionId: z.string(), kind: z.literal('state'), state: VoiceSessionStateSchema }),
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('engine'),
+    stt: SttProviderIdSchema,
+    sttFellBackFrom: SttProviderIdSchema.optional()
+  }),
+  /** Unsettled words of the turn in progress, for captions. */
+  z.object({ sessionId: z.string(), kind: z.literal('partial'), text: z.string() }),
+  /** A finished turn: the renderer sends it to the agent like a typed message (D-07). */
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('turn'),
+    turnId: z.string(),
+    text: z.string(),
+    /** The whole turn was a stop phrase ("stop", "never mind"): cancel, don't send. */
+    stop: z.boolean()
+  }),
+  z.object({ sessionId: z.string(), kind: z.literal('reconnecting'), attempt: z.number().int() }),
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('error'),
+    code: z.enum(VOICE_ERROR_CODES),
+    retryable: z.boolean()
+  })
+])
+export type VoiceEvent = z.infer<typeof VoiceEventSchema>

@@ -6,7 +6,8 @@
 
 export type VoiceSocket = {
   readonly readyState: number
-  send(data: string): void
+  /** JSON control frames as text; raw audio as binary. */
+  send(data: string | ArrayBufferView | ArrayBuffer): void
   close(code?: number, reason?: string): void
   onopen: ((ev: unknown) => void) | null
   onmessage: ((ev: { data: unknown }) => void) | null

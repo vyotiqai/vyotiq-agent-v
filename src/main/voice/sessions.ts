@@ -1,0 +1,60 @@
+/**
+ * Live voice sessions by window (docs/voice-mode.md §11): one per sender,
+ * closed when its window goes away and on quit. The IPC handlers stay thin;
+ * everything stateful is here and in `VoiceSession`.
+ */
+import { getSettings } from '../settings/settings'
+import { DEFAULT_VOICE_SETTINGS, type VoiceEvent } from '../../shared/ipc/schemas/voice'
+import { readVoiceSourceKey, voiceKeyAvailability } from './keys'
+import { VoiceError } from './errors'
+import { sttProvider } from './providers/registry'
+import { VoiceSession } from './session'
+
+type Owner = { id: number; isDestroyed(): boolean; send(channel: string, payload: unknown): void; once?(ev: 'destroyed', fn: () => void): unknown }
+
+const sessions = new Map<string, { session: VoiceSession; owner: Owner }>()
+const byOwner = new Map<number, string>()
+
+export async function startVoiceSession(owner: Owner, channel: string, keyterms: readonly string[]): Promise<string> {
+  // One session per window: starting again replaces the old one.
+  const previous = byOwner.get(owner.id)
+  if (previous) await stopVoiceSession(previous)
+  const session = new VoiceSession({
+    emit: (event: VoiceEvent) => {
+      if (!owner.isDestroyed()) owner.send(channel, event)
+    },
+    settings: () => ({ ...DEFAULT_VOICE_SETTINGS, ...getSettings().voice }),
+    keys: () => voiceKeyAvailability(),
+    readKey: (source) => {
+      if (source.kind === 'none') return ''
+      const key = readVoiceSourceKey(source)
+      if (!key) throw new VoiceError('no_key', 'No key for the listener')
+      return key
+    },
+    sttProvider,
+    keyterms
+  })
+  sessions.set(session.id, { session, owner })
+  byOwner.set(owner.id, session.id)
+  owner.once?.('destroyed', () => void stopVoiceSession(session.id))
+  await session.start()
+  return session.id
+}
+
+/** The session, but only for the window that owns it. */
+export function voiceSessionFor(ownerId: number, sessionId: string): VoiceSession | null {
+  const entry = sessions.get(sessionId)
+  return entry && entry.owner.id === ownerId ? entry.session : null
+}
+
+export async function stopVoiceSession(sessionId: string): Promise<void> {
+  const entry = sessions.get(sessionId)
+  if (!entry) return
+  sessions.delete(sessionId)
+  if (byOwner.get(entry.owner.id) === sessionId) byOwner.delete(entry.owner.id)
+  await entry.session.stop()
+}
+
+export async function stopAllVoiceSessions(): Promise<void> {
+  await Promise.all([...sessions.keys()].map((id) => stopVoiceSession(id)))
+}

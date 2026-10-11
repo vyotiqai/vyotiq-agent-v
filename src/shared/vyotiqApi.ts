@@ -192,6 +192,13 @@ import type {
   NotificationAction
 } from './ipc'
 import type {
+  VoiceAudioIn,
+  VoiceEvent,
+  VoiceMuteRequest,
+  VoicePttRequest,
+  VoiceSessionRequest,
+  VoiceStartRequest,
+  VoiceStartResult,
   VoiceAudioOut,
   VoiceClearKeyRequest,
   VoiceKeyStatus,
@@ -500,6 +507,14 @@ export interface VyotiqApi {
   voiceListVoices: (payload: VoiceListVoicesRequest) => Promise<IpcResult<VoiceOptionInfo[]>>
   onVoiceAudioOut: (handler: (chunk: VoiceAudioOut) => void) => () => void
   onVoiceSpeakEnd: (handler: (end: VoiceSpeakEnd) => void) => () => void
+  /** Open a live voice session for this window (one at a time). */
+  voiceStart: (payload: VoiceStartRequest) => Promise<IpcResult<VoiceStartResult>>
+  voiceStop: (payload: VoiceSessionRequest) => Promise<IpcResult<boolean>>
+  /** One chunk of 16 kHz mono mic audio. */
+  voiceAudio: (payload: VoiceAudioIn) => Promise<IpcResult<boolean>>
+  voicePtt: (payload: VoicePttRequest) => Promise<IpcResult<boolean>>
+  voiceMute: (payload: VoiceMuteRequest) => Promise<IpcResult<boolean>>
+  onVoiceEvent: (handler: (event: VoiceEvent) => void) => () => void
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

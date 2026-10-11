@@ -46,6 +46,7 @@ import { flushBeforeQuit, type EditorFlushStatus } from '@main/quitFlush'
 import { shutdownTokenizerPool } from '@main/agent/context/tokenizerPool'
 import { shutdownDictationUtilityClients } from '@main/dictation/whisperUtilityClient'
 import { closeAllLiveTakes } from '@main/dictation/liveOpenAI'
+import { stopAllVoiceSessions } from '@main/voice/sessions'
 import {
   getWorkspaces,
   interruptOrphanRunsForWorkspaces
@@ -551,7 +552,8 @@ if (HEADLESS) {
         ['egress ledger', flushEgressRunLedgers()],
         ['MCP servers', shutdownMcpServers()],
         ['dictation utility', shutdownDictationUtilityClients()],
-        ['dictation live sessions', Promise.resolve(closeAllLiveTakes())]
+        ['dictation live sessions', Promise.resolve(closeAllLiveTakes())],
+        ['voice sessions', stopAllVoiceSessions()]
       ]
       for (const [label, task] of shutdowns) {
         try {

@@ -428,8 +428,15 @@ import { isVoiceError } from '../voice/errors'
 import { voiceKeyStatus } from '../voice/keys'
 import { removeVoiceKey, saveVoiceKey } from '../voice/keyService'
 import { listVoices, speak, stopSpeaking } from '../voice/speaker'
+import { startVoiceSession, stopVoiceSession, voiceSessionFor } from '../voice/sessions'
 import {
+  VoiceAudioInSchema,
   VoiceClearKeyRequestSchema,
+  VoiceMuteRequestSchema,
+  VoicePttRequestSchema,
+  VoiceSessionRequestSchema,
+  VoiceStartRequestSchema,
+  type VoiceStartResult,
   VoiceListVoicesRequestSchema,
   VoiceSetKeyRequestSchema,
   VoiceSpeakRequestSchema,
@@ -2194,6 +2201,63 @@ export function registerIpc(): void {
     } catch (err) {
       if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
       return failFrom(err, IPC.voiceListVoices)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceStart, async (event, raw): Promise<IpcResult<VoiceStartResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceStartRequestSchema.parse(raw ?? {})
+      // The open workspace's names, so "run agent" can come out as runAgent; only from a list already walked.
+      const files =
+        req.workspacePath && isOpenWorkspace(req.workspacePath) ? peekWorkspaceFileListCached(req.workspacePath) : null
+      const keyterms = files ? dictationKeywordsFromFiles(files).slice(0, 100) : []
+      return ok({ sessionId: await startVoiceSession(event.sender, IPC.voiceEvent, keyterms) })
+    } catch (err) {
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceStart)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceStop, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSessionRequestSchema.parse(raw)
+      if (voiceSessionFor(event.sender.id, req.sessionId)) await stopVoiceSession(req.sessionId)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceStop)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceAudio, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    const parsed = VoiceAudioInSchema.safeParse(raw)
+    if (!parsed.success) return fail('Invalid audio')
+    // Hot path (~8 a second): no logging, no throw.
+    voiceSessionFor(event.sender.id, parsed.data.sessionId)?.pushAudio(parsed.data.pcm)
+    return ok(true)
+  })
+
+  ipcMain.handle(IPC.voicePtt, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoicePttRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.ptt(req.down)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voicePtt)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceMute, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceMuteRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.setMuted(req.muted)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceMute)
     }
   })
 

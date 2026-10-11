@@ -1237,7 +1237,13 @@ with the feature off.
   - [x] `<spoken>` block hidden from the displayed and copied answer
   - [x] 34 more tests (voice total: 101). Full unit suites: 8,701 pass; the 36 that fail here fail identically on untouched `main` in this workspace (no network, setup scripts skipped), so none are from this branch
   - [ ] Hear it: first run with a real key on Windows/macOS (needs Ajay at his computer)
-- [ ] Phase 4 · Listening
+- [x] Phase 4 · Listening (2026-10-11), not yet heard on real hardware
+  - [x] Listeners: Deepgram Flux (turn events; eager end-of-turn ignored, D-05), AssemblyAI v3, ElevenLabs Scribe (commit-based), OpenAI realtime (same protocol as dictation), This PC (beta, per-turn local Whisper) (`src/main/voice/providers/stt/`), on a shared socket base (`socketStt.ts`)
+  - [x] Pause detector: ends turns for listeners without turn detection; fast local speech-start for barge-in; stricter while the agent speaks (`pauseDetector.ts`)
+  - [x] Live session: state machine, captions, finished turns with stop-phrase flag, push-to-talk, mute with keepalive, reconnect 250 ms→4 s ×5 with the turn so far replayed, typed errors (`session.ts`); one session per window, closed with the window and on quit (`sessions.ts`)
+  - [x] IPC `voice:start`, `voice:stop`, `voice:audio`, `voice:ptt`, `voice:mute`; push `voice:event`. Mic audio crosses as `Int16Array` too (D-09 complete)
+  - [x] Renderer controller: opens the mic first (a blocked mic fails before anything is billed), streams audio, follows events, hands each turn on (`features/voice/voiceSessionController.ts`)
+  - [x] 50 more tests (voice total: 151)
 - [ ] Phase 4b · More providers
 - [ ] Phase 5 · Conversation
 - [ ] Phase 6 · UI polish
@@ -1259,7 +1265,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-06 | 2026-10-11 | Reuse dictation's mic capture, segmenter, level meter, OpenAI realtime client and key storage | Proposed |
 | D-07 | 2026-10-11 | A finished turn is sent through the renderer's chat controller like a typed message, not a new main-side entry | Proposed |
 | D-08 | 2026-10-11 | One new text tag, `<spoken>`; no vendor expressiveness tags (SSML, `[laughs]`) in v1 | Proposed |
-| D-09 | 2026-10-11 | IPC audio: main → renderer sends `Int16Array` by structured clone (no base64; ~33% smaller, no encode/decode). Renderer → main mic audio decided in Phase 4 | Decided (main → renderer) |
+| D-09 | 2026-10-11 | IPC audio crosses as `Int16Array` by structured clone both ways (no base64; ~33% smaller, no encode/decode) | Decided |
 | D-10 | 2026-10-11 | Text is redacted before it goes to the TTS vendor | Proposed |
 | D-11 | 2026-10-11 | Voice mode lives in a bar docked on the task pane, in place of the composer (§13.1). Ajay had no preference; this was the recommendation | Decided |
 | D-12 | 2026-10-11 | Talking while the agent works steers the run (follow-up + promote); a stop phrase cancels it (§6.3) | Decided (Ajay) |
@@ -1273,6 +1279,8 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-20 | 2026-10-11 | Speaking speed is four presets (Slower 0.85×, Normal, Faster 1.15×, Fastest 1.3×) on the existing `Segmented` control rather than a slider: the design system has no slider primitive, presets read faster, and each is clamped to the provider's range at use. A fine slider can follow if presets prove too coarse | Proposed |
 | D-21 | 2026-10-11 | Read aloud sits beside Copy on the receipt line of every finished answer, not in the answer body: it's an action on the whole answer, and the receipt already holds those | Proposed |
 | D-22 | 2026-10-11 | ElevenLabs opens one websocket per spoken reply for now. Keeping one socket warm for the whole session (§14 "warm sockets") lands with the live session in Phase 5, where it saves the handshake on every turn | Proposed |
+| D-23 | 2026-10-11 | Mic chunks travel over `invoke` like dictation's `liveAudio` (about 8 a second), not a fire-and-forget `send`: it keeps the IPC contract test's invoke/push split and needs no new channel kind. Revisit only if the latency logging in §14 shows it matters | Proposed |
+| D-24 | 2026-10-11 | The voice bar opens the mic **before** asking main for a session, so a blocked or missing mic fails at once and nothing is billed | Decided |
 
 ---
 

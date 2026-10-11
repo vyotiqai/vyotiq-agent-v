@@ -13,6 +13,7 @@ import {
   DictationRuntimeStatusSchema,
   DictationLiveEventSchema,
   VoiceAudioOutSchema,
+  VoiceEventSchema,
   VoiceSpeakEndSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
@@ -276,6 +277,21 @@ const api: VyotiqApi = {
   voiceSpeak: (payload) => ipcRenderer.invoke(IPC.voiceSpeak, payload),
   voiceStopSpeaking: (payload) => ipcRenderer.invoke(IPC.voiceStopSpeaking, payload),
   voiceListVoices: (payload) => ipcRenderer.invoke(IPC.voiceListVoices, payload),
+  voiceStart: (payload) => ipcRenderer.invoke(IPC.voiceStart, payload),
+  voiceStop: (payload) => ipcRenderer.invoke(IPC.voiceStop, payload),
+  voiceAudio: (payload) => ipcRenderer.invoke(IPC.voiceAudio, payload),
+  voicePtt: (payload) => ipcRenderer.invoke(IPC.voicePtt, payload),
+  voiceMute: (payload) => ipcRenderer.invoke(IPC.voiceMute, payload),
+  onVoiceEvent: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceEventSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceEvent, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceEvent, listener)
+    }
+  },
   onVoiceAudioOut: (handler) => {
     const listener = (_: IpcRendererEvent, payload: unknown): void => {
       const parsed = VoiceAudioOutSchema.safeParse(payload)

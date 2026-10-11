@@ -60,8 +60,8 @@ class FakeSocket implements VoiceSocket {
     readonly url: string,
     readonly headers: Record<string, string>
   ) {}
-  send(data: string): void {
-    this.sent.push(JSON.parse(data) as Record<string, unknown>)
+  send(data: string | ArrayBufferView | ArrayBuffer): void {
+    if (typeof data === 'string') this.sent.push(JSON.parse(data) as Record<string, unknown>)
   }
   close(): void {
     this.closed = true
