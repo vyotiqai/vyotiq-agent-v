@@ -192,6 +192,8 @@ import type {
   NotificationAction
 } from './ipc'
 import type {
+  VoiceFollowRequest,
+  VoicePlaybackRequest,
   VoiceAudioIn,
   VoiceEvent,
   VoiceMuteRequest,
@@ -515,6 +517,10 @@ export interface VyotiqApi {
   voicePtt: (payload: VoicePttRequest) => Promise<IpcResult<boolean>>
   voiceMute: (payload: VoiceMuteRequest) => Promise<IpcResult<boolean>>
   onVoiceEvent: (handler: (event: VoiceEvent) => void) => () => void
+  /** Speak the replies of this run (after sending it a voice turn). */
+  voiceFollow: (payload: VoiceFollowRequest) => Promise<IpcResult<boolean>>
+  /** The player started or drained a reply's audio. */
+  voicePlayback: (payload: VoicePlaybackRequest) => Promise<IpcResult<boolean>>
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

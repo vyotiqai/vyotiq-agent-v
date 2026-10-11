@@ -61,3 +61,20 @@ export function formatResponseStyle(input: ResponseStyleInput): string {
   if (lines.length === 0) return ''
   return wrapPromptSection('response_style', lines.join('\n'))
 }
+
+/**
+ * Voice mode is open on this workspace: the reply will be heard
+ * (docs/voice-mode.md §8.6). Fixed text, so it costs one prompt-cache miss
+ * when voice starts or stops, not one per step.
+ */
+export const VOICE_REPLY_TEXT = [
+  'The person is talking with you by voice and hears your reply read aloud.',
+  'Begin your final reply with a <spoken> block: one to three short spoken sentences in plain, natural speech, with no code, file paths, markdown, lists or long numbers. Say what you did or found, and end with what happens next or one direct question.',
+  'Put everything detailed in the written reply after the block; in the spoken part, point to it ("the diff\'s on screen").',
+  'Be warm and direct and match their tone; don\'t gush, apologise repeatedly, restate their question or repeat what you said earlier. If you\'re unsure, say so plainly. If a word that matters may have been misheard, ask before acting on it.',
+  'Between tool calls, narrate in a few words at most.'
+].join('\n')
+
+export function formatVoiceReply(active: boolean): string {
+  return active ? wrapPromptSection('voice_reply', VOICE_REPLY_TEXT) : ''
+}

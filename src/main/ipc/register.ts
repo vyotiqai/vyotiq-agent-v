@@ -433,6 +433,8 @@ import {
   VoiceAudioInSchema,
   VoiceClearKeyRequestSchema,
   VoiceMuteRequestSchema,
+  VoiceFollowRequestSchema,
+  VoicePlaybackRequestSchema,
   VoicePttRequestSchema,
   VoiceSessionRequestSchema,
   VoiceStartRequestSchema,
@@ -2212,7 +2214,13 @@ export function registerIpc(): void {
       const files =
         req.workspacePath && isOpenWorkspace(req.workspacePath) ? peekWorkspaceFileListCached(req.workspacePath) : null
       const keyterms = files ? dictationKeywordsFromFiles(files).slice(0, 100) : []
-      return ok({ sessionId: await startVoiceSession(event.sender, IPC.voiceEvent, keyterms) })
+      const sessionId = await startVoiceSession(
+        event.sender,
+        { events: IPC.voiceEvent, audio: IPC.voiceAudioOut },
+        keyterms,
+        req.workspacePath ?? null
+      )
+      return ok({ sessionId })
     } catch (err) {
       if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
       return failFrom(err, IPC.voiceStart)
@@ -2258,6 +2266,28 @@ export function registerIpc(): void {
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.voiceMute)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceFollow, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceFollowRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.follow(req.runId)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceFollow)
+    }
+  })
+
+  ipcMain.handle(IPC.voicePlayback, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoicePlaybackRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.playback(req.contextId, req.phase)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voicePlayback)
     }
   })
 

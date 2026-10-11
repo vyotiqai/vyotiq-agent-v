@@ -58,6 +58,7 @@ import { readGoal } from './runGoal'
 import { launchRunFollowUpOrStart } from './launchRunInvoke'
 import { emitGoalUpdate } from './goalEvents'
 import { planGoalRelaunch } from './goalRelaunchPlan'
+import { tapRunEvent } from './runEventTap'
 
 /**
  * Per-run relaunch budget + pending delayed-relaunch timers (module scope so
@@ -232,6 +233,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): Promise<vo
           }
         }
         batcher.push(ev as AgentEvent)
+        tapRunEvent(ev as AgentEvent)
         noteInstanceChildEvent(runId, ev as AgentEvent)
         noteRunActivity(runId, ev as AgentEvent)
         if (terminal) markRunTurnComplete(runId, invokeId)

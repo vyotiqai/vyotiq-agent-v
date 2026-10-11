@@ -197,6 +197,10 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
     stop: z.boolean()
   }),
   z.object({ sessionId: z.string(), kind: z.literal('reconnecting'), attempt: z.number().int() }),
+  /** What the agent is saying, a sentence at a time, for captions. */
+  z.object({ sessionId: z.string(), kind: z.literal('say'), contextId: z.string(), text: z.string() }),
+  /** Barge-in: drop this reply's queued audio from the speakers now. */
+  z.object({ sessionId: z.string(), kind: z.literal('flush'), contextId: z.string() }),
   z.object({
     sessionId: z.string(),
     kind: z.literal('error'),
@@ -205,3 +209,13 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
   })
 ])
 export type VoiceEvent = z.infer<typeof VoiceEventSchema>
+
+export const VoiceFollowRequestSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(200) })
+export type VoiceFollowRequest = z.infer<typeof VoiceFollowRequestSchema>
+
+export const VoicePlaybackRequestSchema = z.object({
+  sessionId: z.string().min(1).max(100),
+  contextId: z.string().min(1).max(100),
+  phase: z.enum(['started', 'drained'])
+})
+export type VoicePlaybackRequest = z.infer<typeof VoicePlaybackRequestSchema>

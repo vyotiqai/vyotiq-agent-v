@@ -6,6 +6,7 @@
  */
 import { randomUUID } from 'crypto'
 import { extractSpokenBlock } from '../../shared/spokenSummary'
+import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import {
   clampSpeed,
   resolveModel,
@@ -69,7 +70,8 @@ export function speak(opts: SpeakOptions, sink: SpeakSink, settings: VoiceSettin
   if (!resolved.ok) throw new VoiceError('no_key', 'No text-to-speech provider has a key')
   const entry = ttsEntry(resolved.id)
   const apiKey = requireVoiceSourceKey(entry.key)
-  const text = opts.kind === 'answer' ? spokenTextForAnswer(opts.text) : opts.text.trim()
+  // Never send a secret the agent read to a speech vendor (D-10).
+  const text = redactSecretsInText(opts.kind === 'answer' ? spokenTextForAnswer(opts.text) : opts.text.trim())
   if (!text) throw new VoiceError('engine_failed', 'Nothing to say')
 
   stopSpeaking()

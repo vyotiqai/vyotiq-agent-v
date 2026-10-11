@@ -10,6 +10,7 @@ import { parseVoiceIpcCode, type SttProviderId, type VoiceErrorCode } from '@sha
 import type { VoiceSessionState } from '@shared/voiceSession'
 import { MicCaptureError, openMicCapture, type MicCapture, type OpenMicCapture } from '@renderer/lib/audio/micCapture'
 import { levelFromRms, rmsOfInt16 } from '@renderer/lib/audio/segmenter'
+import { VoicePlayer, type PlayerAudioContext } from './voicePlayer'
 
 export type VoiceSnapshot = {
   state: VoiceSessionState
@@ -17,6 +18,8 @@ export type VoiceSnapshot = {
   partial: string
   /** The last turn you finished, until the next one starts. */
   lastTurn: string
+  /** What the agent is saying right now, for captions. */
+  saying: string
   listener: SttProviderId | null
   listenerFellBackFrom: SttProviderId | null
   /** Your mic level 0..1, for the orb. */
@@ -31,6 +34,7 @@ export const IDLE_VOICE: VoiceSnapshot = {
   state: 'off',
   partial: '',
   lastTurn: '',
+  saying: '',
   listener: null,
   listenerFellBackFrom: null,
   micLevel: 0,
@@ -44,14 +48,26 @@ export type VoiceTurn = { turnId: string; text: string; stop: boolean }
 
 type Bridge = Pick<
   typeof window.vyotiq,
-  'voiceStart' | 'voiceStop' | 'voiceAudio' | 'voicePtt' | 'voiceMute' | 'onVoiceEvent'
+  | 'voiceStart'
+  | 'voiceStop'
+  | 'voiceAudio'
+  | 'voicePtt'
+  | 'voiceMute'
+  | 'onVoiceEvent'
+  | 'voiceFollow'
+  | 'voicePlayback'
+  | 'onVoiceAudioOut'
 >
 
 export type VoiceControllerDeps = {
   bridge?: () => Bridge
   openCapture?: OpenMicCapture
-  /** A finished turn: send it to the agent (or cancel the run for a stop phrase). */
-  onTurn: (turn: VoiceTurn) => void
+  /**
+   * A finished turn: send it to the agent (or cancel the run for a stop
+   * phrase). Return the run it went to, so its reply is spoken.
+   */
+  onTurn: (turn: VoiceTurn) => Promise<string | null> | string | null | void
+  createAudioContext?: () => PlayerAudioContext
 }
 
 export function micFailureCode(err: unknown): VoiceErrorCode {
@@ -69,7 +85,13 @@ export class VoiceSessionController {
   private sessionId: string | null = null
   private capture: MicCapture | null = null
   private offEvents: (() => void) | null = null
+  private offAudio: (() => void) | null = null
   private starting = false
+  private player: VoicePlayer | null = null
+  /** Replies main told us about (by `say`), whose audio we play. */
+  private replies = new Set<string>()
+  /** Replies whose audio started and hasn't drained. */
+  private sounding = new Set<string>()
 
   constructor(private readonly deps: VoiceControllerDeps) {}
 
@@ -102,6 +124,10 @@ export class VoiceSessionController {
     const bridge = this.bridge()
     // Listen before starting, so the first state events aren't missed.
     this.offEvents = bridge.onVoiceEvent((e) => this.onEvent(e))
+    this.offAudio = bridge.onVoiceAudioOut((chunk) => {
+      if (!this.replies.has(chunk.utteranceId)) return
+      this.ensurePlayer().enqueue({ pcm: chunk.pcm, sampleRate: chunk.sampleRate, contextId: chunk.utteranceId })
+    })
     // Open the mic first: a blocked mic should fail before anything is billed.
     try {
       this.capture = await (this.deps.openCapture ?? openMicCapture)({
@@ -151,8 +177,18 @@ export class VoiceSessionController {
         this.set({ partial: e.text })
         return
       case 'turn':
-        this.set({ partial: '', lastTurn: e.text })
-        this.deps.onTurn({ turnId: e.turnId, text: e.text, stop: e.stop })
+        this.set({ partial: '', lastTurn: e.text, saying: '' })
+        void this.routeTurn({ turnId: e.turnId, text: e.text, stop: e.stop })
+        return
+      case 'say':
+        this.replies.add(e.contextId)
+        this.set({ saying: e.text })
+        return
+      case 'flush':
+        this.replies.delete(e.contextId)
+        this.sounding.delete(e.contextId)
+        this.player?.cancel(e.contextId)
+        this.set({ saying: '' })
         return
       case 'reconnecting':
         this.set({ reconnectAttempt: e.attempt })
@@ -161,6 +197,44 @@ export class VoiceSessionController {
         this.set({ error: e.code })
         return
     }
+  }
+
+  private async routeTurn(turn: VoiceTurn): Promise<void> {
+    const id = this.sessionId
+    let runId: string | null | void = null
+    try {
+      runId = await this.deps.onTurn(turn)
+    } catch {
+      runId = null
+    }
+    if (runId && id && id === this.sessionId) void this.bridge().voiceFollow({ sessionId: id, runId })
+  }
+
+  private ensurePlayer(): VoicePlayer {
+    if (!this.player) {
+      this.player = new VoicePlayer({
+        createContext: this.deps.createAudioContext,
+        onContextStart: (contextId) => {
+          this.sounding.add(contextId)
+          const id = this.sessionId
+          if (id) void this.bridge().voicePlayback({ sessionId: id, contextId, phase: 'started' })
+        },
+        onIdle: () => {
+          const id = this.sessionId
+          const drained = [...this.sounding]
+          this.sounding.clear()
+          if (this.snap.saying) this.set({ saying: '' })
+          if (!id) return
+          for (const contextId of drained) void this.bridge().voicePlayback({ sessionId: id, contextId, phase: 'drained' })
+        }
+      })
+    }
+    return this.player
+  }
+
+  /** The agent's voice level 0..1 while it speaks, for the orb. */
+  speakingLevel(): number {
+    return this.player?.level() ?? 0
   }
 
   setMuted(muted: boolean): void {
@@ -187,6 +261,13 @@ export class VoiceSessionController {
     this.capture = null
     this.offEvents?.()
     this.offEvents = null
+    this.offAudio?.()
+    this.offAudio = null
+    this.replies.clear()
+    this.sounding.clear()
+    const player = this.player
+    this.player = null
+    void player?.close()
   }
 }
 

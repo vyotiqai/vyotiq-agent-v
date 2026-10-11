@@ -282,6 +282,8 @@ const api: VyotiqApi = {
   voiceAudio: (payload) => ipcRenderer.invoke(IPC.voiceAudio, payload),
   voicePtt: (payload) => ipcRenderer.invoke(IPC.voicePtt, payload),
   voiceMute: (payload) => ipcRenderer.invoke(IPC.voiceMute, payload),
+  voiceFollow: (payload) => ipcRenderer.invoke(IPC.voiceFollow, payload),
+  voicePlayback: (payload) => ipcRenderer.invoke(IPC.voicePlayback, payload),
   onVoiceEvent: (handler) => {
     const listener = (_: IpcRendererEvent, payload: unknown): void => {
       const parsed = VoiceEventSchema.safeParse(payload)

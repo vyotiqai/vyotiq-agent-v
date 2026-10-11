@@ -19,10 +19,12 @@ import {
   type VoiceKeySource
 } from '../../shared/voice'
 import { AGENT_FLOOR_STATES, nextVoiceState, type VoiceSessionEvent, type VoiceSessionState } from '../../shared/voiceSession'
+import type { AgentEvent } from '../../shared/ipc'
 import type { VoiceEvent, VoiceSettings } from '../../shared/ipc/schemas/voice'
 import { VoiceError, toVoiceError } from './errors'
 import { PauseDetector } from './pauseDetector'
-import type { SttEvent, SttProvider, SttSession } from './providers/types'
+import type { SttEvent, SttProvider, SttSession, TtsStream } from './providers/types'
+import { ReplySpeaker } from './replySpeaker'
 import { isStopPhrase } from './speechText'
 
 /** Reconnect waits (§15): five tries, then give up. */
@@ -43,6 +45,14 @@ export type VoiceSessionDeps = {
   readKey: (source: VoiceKeySource) => string
   sttProvider: (id: SttProviderId) => SttProvider
   keyterms?: readonly string[]
+  /**
+   * A text-to-speech stream for one spoken piece of the reply; null when no
+   * speaking provider is usable (the session then stays text-only).
+   */
+  openTts?: (contextId: string, onError: (code: VoiceErrorCode) => void) => TtsStream | null
+  /** Subscribe to a run's events (the run tap); returns the unsubscribe. */
+  tapRun?: (runId: string, fn: (event: AgentEvent) => void) => () => void
+  now?: () => number
   setTimer?: (fn: () => void, ms: number) => unknown
   clearTimer?: (handle: unknown) => void
   newId?: () => string
@@ -66,12 +76,69 @@ export class VoiceSession {
   private generation = 0
   private readonly setTimer: (fn: () => void, ms: number) => unknown
   private readonly clearTimer: (handle: unknown) => void
+  private readonly reply: ReplySpeaker
+  private untap: (() => void) | null = null
+  private followedRun: string | null = null
+  /** Replies whose audio has started playing and not yet drained. */
+  private playing = new Set<string>()
+  private speakErrorShown = false
 
   constructor(private readonly deps: VoiceSessionDeps) {
     this.id = (deps.newId ?? randomUUID)()
     this.pause = new PauseDetector(deps.settings().endOfTurnPatience)
     this.setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
     this.clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>))
+    this.reply = new ReplySpeaker({
+      openTts: (contextId) => this.openReplyTts(contextId),
+      say: (contextId, text) => {
+        if (this.deps.settings().captions) this.emitEvent({ kind: 'say', contextId, text })
+      },
+      onToolStart: () => this.dispatch({ type: 'tool_start' }),
+      onRunEnd: () => this.dispatch({ type: 'run_done' }),
+      speakProgress: () => this.deps.settings().speakProgress,
+      newId: deps.newId ?? randomUUID,
+      now: deps.now ?? Date.now,
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer
+    })
+  }
+
+  private openReplyTts(contextId: string): TtsStream | null {
+    if (!this.deps.openTts) return null
+    return this.deps.openTts(contextId, (code) => {
+      // Say it once a session: the reply is still on screen.
+      if (this.speakErrorShown) return
+      this.speakErrorShown = true
+      this.emitEvent({ kind: 'error', code, retryable: false })
+    })
+  }
+
+  /**
+   * Follow the run the last turn was sent to: its reply is spoken. Called
+   * by the renderer after each turn it sends (D-07); the same run again for a
+   * follow-up just starts a new spoken turn.
+   */
+  follow(runId: string): void {
+    if (this.stateValue === 'off') return
+    if (this.followedRun !== runId) {
+      this.untap?.()
+      this.untap = this.deps.tapRun ? this.deps.tapRun(runId, (ev) => this.reply.handle(ev)) : null
+      this.followedRun = runId
+    }
+    this.reply.beginTurn()
+  }
+
+  /** The renderer's player: a reply's audio started, or everything queued for it played. */
+  playback(contextId: string, phase: 'started' | 'drained'): void {
+    if (phase === 'started') {
+      this.playing.add(contextId)
+      this.dispatch({ type: 'audio_start' })
+      this.pause.setAgentSpeaking(true)
+      return
+    }
+    if (!this.playing.delete(contextId) || this.playing.size > 0) return
+    this.pause.setAgentSpeaking(false)
+    this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
   }
 
   get state(): VoiceSessionState {
@@ -191,6 +258,11 @@ export class VoiceSession {
     if (this.reconnectTimer) this.clearTimer(this.reconnectTimer)
     this.reconnectTimer = null
     this.stopKeepAlive()
+    this.untap?.()
+    this.untap = null
+    this.followedRun = null
+    this.reply.dispose()
+    this.playing.clear()
     this.ctrl.abort()
     const stt = this.stt
     this.stt = null
@@ -229,8 +301,19 @@ export class VoiceSession {
 
   private onSpeechStart(): void {
     const s = this.stateValue
-    if (AGENT_FLOOR_STATES.has(s)) this.dispatch({ type: 'barge_in' })
-    else this.dispatch({ type: 'speech_start' })
+    if (!AGENT_FLOOR_STATES.has(s)) {
+      this.dispatch({ type: 'speech_start' })
+      return
+    }
+    // Barge-in (§6.2): stop speaking now and clear the speakers. What happens
+    // to the run is the renderer's call when this turn ends (steer / cancel).
+    const flushed = this.reply.interrupt()
+    for (const contextId of new Set([...this.playing, ...(flushed ? [flushed] : [])])) {
+      this.emitEvent({ kind: 'flush', contextId })
+    }
+    this.playing.clear()
+    this.pause.setAgentSpeaking(false)
+    this.dispatch({ type: 'barge_in' })
   }
 
   private onEndOfTurn(raw: string): void {

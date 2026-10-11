@@ -104,6 +104,8 @@ export const IPC = {
   voicePtt: 'voice:ptt',
   voiceMute: 'voice:mute',
   voiceEvent: 'voice:event',
+  voiceFollow: 'voice:follow',
+  voicePlayback: 'voice:playback',
   listRuns: 'runs:list',
   listOlderRuns: 'runs:listOlder',
   loadRun: 'runs:load',

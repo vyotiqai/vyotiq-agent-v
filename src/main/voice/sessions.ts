@@ -7,23 +7,85 @@ import { getSettings } from '../settings/settings'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent } from '../../shared/ipc/schemas/voice'
 import { readVoiceSourceKey, voiceKeyAvailability } from './keys'
 import { VoiceError } from './errors'
-import { sttProvider } from './providers/registry'
+import { sttProvider, ttsProvider } from './providers/registry'
 import { VoiceSession } from './session'
+import { addRunEventTap } from '../agent/runEventTap'
+import { setVoiceReplyWorkspace } from './voiceReply'
+import {
+  clampSpeed,
+  resolveModel,
+  resolveTtsProvider,
+  ttsEntry,
+  type VoiceErrorCode
+} from '../../shared/voice'
+import type { VoiceSettings } from '../../shared/ipc/schemas/voice'
+import type { TtsStream } from './providers/types'
+
+function currentVoiceSettings(): VoiceSettings {
+  return { ...DEFAULT_VOICE_SETTINGS, ...getSettings().voice }
+}
+
+/**
+ * A speaking stream for one piece of a session's reply, with the person's
+ * provider, voice and speed; audio goes straight to the window. Null when
+ * no speaking provider has a key.
+ */
+function openSessionTts(
+  owner: Owner,
+  audioChannel: string,
+  contextId: string,
+  onError: (code: VoiceErrorCode) => void
+): TtsStream | null {
+  const settings = currentVoiceSettings()
+  const resolved = resolveTtsProvider(settings.ttsProvider, voiceKeyAvailability())
+  if (!resolved.ok) {
+    onError('no_key')
+    return null
+  }
+  const entry = ttsEntry(resolved.id)
+  const apiKey = entry.key.kind === 'none' ? '' : readVoiceSourceKey(entry.key)
+  if (apiKey === null) {
+    onError('no_key')
+    return null
+  }
+  let seq = 0
+  return ttsProvider(entry.id).stream({
+    apiKey,
+    model: resolveModel(entry.models, settings.tts[entry.id]?.model),
+    voiceId: settings.tts[entry.id]?.voiceId ?? entry.defaultVoice.id,
+    speed: clampSpeed(settings.speed, entry.caps.speed),
+    contextId,
+    signal: new AbortController().signal,
+    onAudio: (chunk) => {
+      if (!owner.isDestroyed()) {
+        owner.send(audioChannel, { utteranceId: contextId, seq: seq++, sampleRate: chunk.sampleRate, pcm: chunk.pcm })
+      }
+    },
+    onError
+  })
+}
 
 type Owner = { id: number; isDestroyed(): boolean; send(channel: string, payload: unknown): void; once?(ev: 'destroyed', fn: () => void): unknown }
 
 const sessions = new Map<string, { session: VoiceSession; owner: Owner }>()
 const byOwner = new Map<number, string>()
 
-export async function startVoiceSession(owner: Owner, channel: string, keyterms: readonly string[]): Promise<string> {
+export type VoiceChannels = { events: string; audio: string }
+
+export async function startVoiceSession(
+  owner: Owner,
+  channels: VoiceChannels,
+  keyterms: readonly string[],
+  workspacePath: string | null = null
+): Promise<string> {
   // One session per window: starting again replaces the old one.
   const previous = byOwner.get(owner.id)
   if (previous) await stopVoiceSession(previous)
   const session = new VoiceSession({
     emit: (event: VoiceEvent) => {
-      if (!owner.isDestroyed()) owner.send(channel, event)
+      if (!owner.isDestroyed()) owner.send(channels.events, event)
     },
-    settings: () => ({ ...DEFAULT_VOICE_SETTINGS, ...getSettings().voice }),
+    settings: currentVoiceSettings,
     keys: () => voiceKeyAvailability(),
     readKey: (source) => {
       if (source.kind === 'none') return ''
@@ -32,11 +94,15 @@ export async function startVoiceSession(owner: Owner, channel: string, keyterms:
       return key
     },
     sttProvider,
-    keyterms
+    keyterms,
+    openTts: (contextId, onError) => openSessionTts(owner, channels.audio, contextId, onError),
+    tapRun: addRunEventTap
   })
   sessions.set(session.id, { session, owner })
   byOwner.set(owner.id, session.id)
   owner.once?.('destroyed', () => void stopVoiceSession(session.id))
+  // While it's open, replies in this workspace are written to be heard.
+  setVoiceReplyWorkspace(session.id, workspacePath)
   await session.start()
   return session.id
 }
@@ -51,6 +117,7 @@ export async function stopVoiceSession(sessionId: string): Promise<void> {
   const entry = sessions.get(sessionId)
   if (!entry) return
   sessions.delete(sessionId)
+  setVoiceReplyWorkspace(sessionId, null)
   if (byOwner.get(entry.owner.id) === sessionId) byOwner.delete(entry.owner.id)
   await entry.session.stop()
 }

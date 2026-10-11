@@ -9,6 +9,8 @@ type Bare<E = VoiceEvent> = E extends VoiceEvent ? Omit<E, 'sessionId'> : never
 function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
   let handler: ((e: VoiceEvent) => void) | null = null
   let onSamples: ((pcm: Int16Array) => void) | null = null
+  let audioHandler: ((c: { utteranceId: string; seq: number; sampleRate: number; pcm: Int16Array }) => void) | null = null
+  const sources: Array<{ onended: (() => void) | null }> = []
   const stopCapture = vi.fn()
   const bridge = {
     voiceStart: vi.fn(async () => startResult),
@@ -21,7 +23,15 @@ function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
       return () => {
         handler = null
       }
-    })
+    }),
+    onVoiceAudioOut: vi.fn((h: (c: { utteranceId: string; seq: number; sampleRate: number; pcm: Int16Array }) => void) => {
+      audioHandler = h
+      return () => {
+        audioHandler = null
+      }
+    }),
+    voiceFollow: vi.fn(async () => ({ ok: true, data: true })),
+    voicePlayback: vi.fn(async () => ({ ok: true, data: true }))
   }
   const openCapture: OpenMicCapture = vi.fn(async (o) => {
     onSamples = o.onSamples
@@ -31,7 +41,28 @@ function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
   const c = new VoiceSessionController({
     bridge: () => bridge as never,
     openCapture,
-    onTurn: (t) => turns.push(t)
+    onTurn: (t) => {
+      turns.push(t)
+      return 'run-7'
+    },
+    createAudioContext: () =>
+      ({
+        currentTime: 0,
+        state: 'running',
+        destination: {},
+        createBuffer: (_c: number, length: number, rate: number) => ({
+          duration: length / rate,
+          getChannelData: () => new Float32Array(length)
+        }),
+        createBufferSource: () => {
+          const src = { buffer: null, onended: null, connect: vi.fn(), start: vi.fn(), stop: vi.fn() }
+          sources.push(src)
+          return src
+        },
+        createGain: () => ({ gain: { value: 1, setTargetAtTime: vi.fn() }, connect: vi.fn() }),
+        createAnalyser: () => ({ fftSize: 0, connect: vi.fn(), getFloatTimeDomainData: vi.fn() }),
+        close: vi.fn(async () => {})
+      }) as never
   })
   return {
     c,
@@ -40,6 +71,8 @@ function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
     stopCapture,
     emit: (e: Bare) => handler?.({ ...e, sessionId: 's1' } as VoiceEvent),
     samples: (pcm: Int16Array) => onSamples?.(pcm),
+    audio: (utteranceId: string) => audioHandler?.({ utteranceId, seq: 0, sampleRate: 24000, pcm: new Int16Array(240) }),
+    sources,
     openCapture
   }
 }
@@ -106,5 +139,31 @@ describe('VoiceSessionController', () => {
     expect(t.bridge.voiceStop).toHaveBeenCalledWith({ sessionId: 's1' })
     expect(t.c.snapshot.state).toBe('off')
     expect(t.c.active).toBe(false)
+  })
+
+  it('follows the run each turn went to', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'turn', turnId: 't1', text: 'go', stop: false })
+    await vi.waitFor(() => expect(t.bridge.voiceFollow).toHaveBeenCalledWith({ sessionId: 's1', runId: 'run-7' }))
+  })
+
+  it('plays reply audio it was told about, reports start and drain, and flushes on barge-in', async () => {
+    const t = setup()
+    await t.c.start()
+    t.audio('unknown')
+    expect(t.sources).toHaveLength(0)
+    t.emit({ kind: 'say', contextId: 'c1', text: 'Done.' })
+    expect(t.c.snapshot.saying).toBe('Done.')
+    t.audio('c1')
+    expect(t.bridge.voicePlayback).toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'started' })
+    t.sources[0]!.onended?.()
+    expect(t.bridge.voicePlayback).toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'drained' })
+    t.emit({ kind: 'say', contextId: 'c2', text: 'Next.' })
+    t.audio('c2')
+    t.emit({ kind: 'flush', contextId: 'c2' })
+    expect(t.c.snapshot.saying).toBe('')
+    t.audio('c2')
+    expect(t.sources).toHaveLength(2)
   })
 })

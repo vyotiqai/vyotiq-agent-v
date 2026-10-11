@@ -26,7 +26,8 @@ import { capImagesPerRequest, stripUnsupportedModalitiesFromMessages, wireCapsFr
 import { trimToolResults } from './toolTrim'
 import { hydrateToolImages } from './toolImages'
 import { buildWorkspaceRulesSection } from './rules'
-import { formatResponseStyle, formatUserRules } from './userRules'
+import { formatResponseStyle, formatUserRules, formatVoiceReply } from './userRules'
+import { isVoiceReplyActive } from '../../voice/voiceReply'
 import { readMemoryIndexAsync, readMemoryStateAsync } from './memory'
 import { buildWorkspaceSnapshotAsync } from './workspaceSnapshot'
 import { perfLog, perfNow } from './perfDebug'
@@ -843,13 +844,19 @@ export async function assembleContext(
 
   const estimateStarted = perfNow()
   const userRules = formatUserRules(input.userRules ?? [])
-  const responseStyleSection = formatResponseStyle({
-    identity: input.identity,
-    persona: input.persona,
-    tone: input.tone,
-    responseLanguage: input.responseLanguage,
-    responseVerbosity: input.responseVerbosity
-  })
+  const voiceReply = formatVoiceReply(isVoiceReplyActive([input.workspacePath, input.memoryWorkspacePath]))
+  const responseStyleSection = [
+    formatResponseStyle({
+      identity: input.identity,
+      persona: input.persona,
+      tone: input.tone,
+      responseLanguage: input.responseLanguage,
+      responseVerbosity: input.responseVerbosity
+    }),
+    voiceReply
+  ]
+    .filter(Boolean)
+    .join('\n\n')
   const systemParts = {
     harness: input.harness,
     workspace,
