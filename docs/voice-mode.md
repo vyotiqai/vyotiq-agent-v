@@ -6,7 +6,7 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated on every commit to the `feat/voice-mode` branch.
 
-> **Status:** built through Phase 6 plus approvals by voice and most of Phase 7, on
+> **Status:** built through Phase 6 plus approvals and questions by voice and most of Phase 7, on
 > `feat/voice-mode`, as local commits in the voice worktree (not pushed; D-19). Not yet run on
 > real hardware: the first run with real keys, a mic and speakers is the next real test.
 > PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft, holds the design only until pushed).
@@ -444,8 +444,28 @@ we know it's the answer, even before the step ends.
   on screen. Spoken "yes / allow / go ahead" means `once`; "no / deny" means
   `deny`. **Recommended:** voice can never answer an approval marked `danger`,
   or give `session`/`always`. Those need a click. (Q5)
-- **Questions** (`ask_question`): the question is spoken; your next turn is
-  the answer. Multiple choice accepts an option's label or its number.
+- **Questions** (`ask_question`) — built (D-29). The question is spoken with
+  its choices when there are four or fewer ("Which database should I use?
+  Postgres, SQLite or MySQL."); a yes/no question ends "Yes or no?"; a form
+  with several questions says "They're on screen, or just tell me what you
+  want." A reply that clearly answers a one-question form settles it as the
+  card would, and the agent says "Got it.":
+  - single choice: the option's name, said alone or inside a sentence ("let's
+    go with Postgres"), or its position ("the second one", "option 3", "the
+    last one"); naming two options is unclear;
+  - multiple choice: every option named;
+  - yes/no: the approval words (§7.5 above), whole utterance only;
+  - free text: the whole reply;
+  - a question that allows its own answer: a short reply (eight words or
+    fewer) that names no option.
+
+  Anything else — an unclear pick, a long reply, a stop phrase, a form with
+  several questions — goes to the agent as an ordinary message. That already
+  closes the card and tells the model "the user sent a message instead; treat
+  it as the answer if it addresses the question"
+  (`ASK_QUESTION_SUPERSEDED_GUIDANCE`), so a miss costs precision, never the
+  answer. Hook: `watchAgentQuestions` in `agent/agentQuestion.ts`; matching in
+  `voice/questionByVoice.ts`.
 
 ### 7.6 Mode
 
@@ -1252,7 +1272,8 @@ with the feature off.
   - [x] Renderer: reply playback + captions in the controller; turn routing for Redirect / Stop the agent / Just stop talking and stop phrases (`turnRouting.ts`)
   - [x] 28 more tests (voice total: 179); prompt-assembly and run-launch suites unchanged
   - [x] 5b: approvals by voice (2026-10-11). The followed run's approval is read out ("It wants to run pnpm test. Say yes or no.") and the orb shows Needs you; a whole-utterance yes/no answers it (`once` / `deny`) and is not sent as a message; anything else is a message; risky (`danger`) approvals and Approve by voice off always say "on screen"; a click on the card clears the wait. Hook: `watchToolApprovals` in `agent/toolApproval.ts`. 8 tests
-  - [ ] `ask_question` by voice (a spoken answer to the agent's own questions); echo filter on captions (§6.4 item 3)
+  - [x] 5c: questions by voice (2026-10-11). The followed run's `ask_question` is read out with its choices; a clear pick, yes/no or free-text reply answers a one-question form as the card would; everything else goes as a message, which the agent already reads as the answer (D-29). Hook: `watchAgentQuestions` in `agent/agentQuestion.ts`; matching in `voice/questionByVoice.ts`. 14 tests
+  - [ ] Echo filter on captions (§6.4 item 3)
 - [x] Phase 6 · Voice bar and orb (2026-10-11), first cut — not yet seen on real hardware
   - [x] Voice button (waveform) beside dictation's mic on the instruction line; `Ctrl/Cmd+Shift+M` and the palette's "Voice mode" go to the line last used (no double start in a split view) (`VoiceModeButton.tsx`)
   - [x] Voice bar in place of the line's box: orb · caption (yours in `text-fg`, the agent's in `text-muted`) · time · listener with cloud/lock; Mute · Stop speaking · Stop the agent · hint or problem with its fix · End (`VoiceBar.tsx`)
@@ -1309,6 +1330,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-26 | 2026-10-11 | The voice_reply prompt section is keyed by workspace, not run: it must be in the very first step's prompt, before the renderer knows the run id. While voice is open on a workspace, every reply there is written to be heard | Decided |
 | D-27 | 2026-10-11 | Voice mode is started from the task's instruction line only (not the New task brief) in this cut: a session needs a task to steer. Starting a task by voice from the brief can follow | Proposed |
 | D-28 | 2026-10-11 | The bar's single-letter keys (M, Space) yield to any text field, empty or not; the app's `isTypingIn` treats an empty field as not typing, which is right for chords but wrong for bare letters | Decided |
+| D-29 | 2026-10-11 | Questions by voice answer only what's unambiguous, and only one-question forms; everything else is sent as a message, which the existing superseded path hands to the model as the likely answer. No separate setting: unlike approvals, a wrong answer to a question grants nothing | Decided |
 
 ---
 

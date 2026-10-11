@@ -12,6 +12,7 @@ import { sttProvider, ttsProvider } from './providers/registry'
 import { VoiceSession } from './session'
 import { addRunEventTap } from '../agent/runEventTap'
 import { resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
+import { resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
 import { setVoiceReplyWorkspace } from './voiceReply'
 import {
   clampSpeed,
@@ -101,6 +102,8 @@ export async function startVoiceSession(
     tapRun: addRunEventTap,
     watchApprovals: watchToolApprovals,
     resolveApproval: (answer) => resolveToolApproval(answer),
+    watchQuestions: watchAgentQuestions,
+    resolveQuestion: (answer) => resolveAgentQuestion(answer),
     logLatency: (t) => logger.info('Voice turn latency', { scope: 'voice', ...t })
   })
   sessions.set(session.id, { session, owner })

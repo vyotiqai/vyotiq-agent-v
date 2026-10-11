@@ -19,13 +19,14 @@ import {
   type VoiceKeySource
 } from '../../shared/voice'
 import { AGENT_FLOOR_STATES, nextVoiceState, type VoiceSessionEvent, type VoiceSessionState } from '../../shared/voiceSession'
-import type { AgentEvent, ToolApprovalRequest } from '../../shared/ipc'
+import type { AgentEvent, AgentQuestionAnswer, AgentQuestionRequest, ToolApprovalRequest } from '../../shared/ipc'
 import type { VoiceEvent, VoiceSettings } from '../../shared/ipc/schemas/voice'
 import { VoiceError, toVoiceError } from './errors'
 import { PauseDetector } from './pauseDetector'
 import type { SttEvent, SttProvider, SttSession, TtsStream } from './providers/types'
 import { ReplySpeaker } from './replySpeaker'
 import { approvalAnswer, isStopPhrase, toSpeakable } from './speechText'
+import { answerableByVoice, describeQuestion, questionAnswer } from './questionByVoice'
 
 /** Reconnect waits (§15): five tries, then give up. */
 export const RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 4000] as const
@@ -71,6 +72,13 @@ export type VoiceSessionDeps = {
     asked: (request: ToolApprovalRequest) => void
     settled: (requestId: string, runId: string) => void
   }) => () => void
+  /** The agent's own questions (`ask_question`) being asked and settled, any run (§7.5). */
+  watchQuestions?: (watcher: {
+    asked: (request: AgentQuestionRequest) => void
+    settled: (requestId: string, runId: string) => void
+  }) => () => void
+  /** Answer the agent's question, as its card would. */
+  resolveQuestion?: (answer: { requestId: string; runId: string; answers: AgentQuestionAnswer[] }) => boolean
   /** Per-turn timings, for tuning (§14). Timings only; never words. */
   logLatency?: (timings: TurnLatency) => void
   /** Answer an approval, as the card would. */
@@ -110,6 +118,9 @@ export class VoiceSession {
   private timing: { endOfTurnAt: number; followedAt?: number; firstSayAt?: number } | null = null
   /** The followed run's approval waiting on the person, if any. */
   private approval: ToolApprovalRequest | null = null
+  private unwatchQuestions: (() => void) | null = null
+  /** The followed run's question waiting on the person, if any. */
+  private question: AgentQuestionRequest | null = null
 
   constructor(private readonly deps: VoiceSessionDeps) {
     this.id = (deps.newId ?? randomUUID)()
@@ -201,6 +212,11 @@ export class VoiceSession {
       this.deps.watchApprovals?.({
         asked: (req) => this.onApprovalAsked(req),
         settled: (requestId) => this.onApprovalSettled(requestId)
+      }) ?? null
+    this.unwatchQuestions ??=
+      this.deps.watchQuestions?.({
+        asked: (req) => this.onQuestionAsked(req),
+        settled: (requestId) => this.onQuestionSettled(requestId)
       }) ?? null
     try {
       await this.connect()
@@ -313,6 +329,9 @@ export class VoiceSession {
     this.unwatchApprovals?.()
     this.unwatchApprovals = null
     this.approval = null
+    this.unwatchQuestions?.()
+    this.unwatchQuestions = null
+    this.question = null
     this.followedRun = null
     this.reply.dispose()
     this.playing.clear()
@@ -395,6 +414,7 @@ export class VoiceSession {
     }
     if (!this.dispatch({ type: 'end_of_turn' })) return
     if (this.answerApprovalByVoice(text)) return
+    if (this.answerQuestionByVoice(text)) return
     this.timing = { endOfTurnAt: this.now() }
     this.emitEvent({ kind: 'turn', turnId: (this.deps.newId ?? randomUUID)(), text, stop: isStopPhrase(text) })
   }
@@ -435,6 +455,43 @@ export class VoiceSession {
     const ok = this.deps.resolveApproval?.({ requestId: req.requestId, runId: req.runId, decision }) ?? false
     if (!ok) return false
     this.emitEvent({ kind: 'say', contextId: `approval:${req.requestId}`, text: decision === 'once' ? 'Allowed.' : 'Denied.' })
+    return true
+  }
+
+  // ── The agent's questions by voice (§7.5) ──────────────────────────────
+
+  private onQuestionAsked(req: AgentQuestionRequest): void {
+    if (this.stateValue === 'off' || req.runId !== this.followedRun) return
+    this.question = req
+    this.dispatch({ type: 'needs_you' })
+    this.reply.announce(describeQuestion(req))
+  }
+
+  private onQuestionSettled(requestId: string): void {
+    if (this.question?.requestId !== requestId) return
+    this.question = null
+    this.dispatch({ type: 'answered' })
+  }
+
+  /**
+   * A reply that clearly answers the one question settles it, as the card
+   * would. Anything else (a stop phrase, an unclear pick, a form with
+   * several questions) goes on as a message, which the agent reads as the
+   * answer when it is one.
+   */
+  private answerQuestionByVoice(text: string): boolean {
+    const req = this.question
+    if (!req || !this.deps.resolveQuestion || isStopPhrase(text) || !answerableByVoice(req)) return false
+    const item = req.questions[0]!
+    const values = questionAnswer(item, text)
+    if (!values) return false
+    const ok = this.deps.resolveQuestion({
+      requestId: req.requestId,
+      runId: req.runId,
+      answers: [{ questionId: item.id, values }]
+    })
+    if (!ok) return false
+    this.emitEvent({ kind: 'say', contextId: `question:${req.requestId}`, text: 'Got it.' })
     return true
   }
 
