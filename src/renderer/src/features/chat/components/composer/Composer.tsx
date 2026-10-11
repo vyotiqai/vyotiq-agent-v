@@ -1452,7 +1452,13 @@ export function Composer({
             />
             <MicControl take={take} disabled={inputLocked} />
             {(isLine || isBrief) && workspacePath ? (
-              <VoiceModeButton owner={voiceOwner} workspacePath={workspacePath} disabled={inputLocked} />
+              <VoiceModeButton
+                owner={voiceOwner}
+                workspacePath={workspacePath}
+                disabled={inputLocked}
+                placement={isBrief ? 'down' : 'up'}
+                onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
+              />
             ) : null}
             {/* Stop lives in the line's own row now that the task header is gone. */}
             {isLine && running && onStop ? (

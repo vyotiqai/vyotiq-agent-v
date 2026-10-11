@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { VoiceBar } from '@renderer/features/voice/VoiceBar'
+import { FIRST_TIP, VoiceBar } from '@renderer/features/voice/VoiceBar'
 import { VoiceModeButton } from '@renderer/features/voice/VoiceModeButton'
 import { VoiceOrb } from '@renderer/features/voice/VoiceOrb'
-import { resetVoiceModeForTests, startVoiceMode, useVoiceMode } from '@renderer/features/voice/voiceMode'
+import { endVoiceMode, resetVoiceModeForTests, startVoiceMode, useVoiceMode } from '@renderer/features/voice/voiceMode'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot } from '@renderer/features/voice/voiceSessionController'
 import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
 import { VOICE_SESSION_STATES } from '@shared/voiceSession'
@@ -179,6 +179,29 @@ describe('VoiceBar', () => {
     await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
     render(<Bar running />)
     expect(screen.getByRole('button', { name: 'Stop the agent' })).toBeTruthy()
+  })
+
+  it('says when it listens with another service than the one picked', async () => {
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() => fake.update({ listener: 'openai', listenerFellBackFrom: 'deepgram' }))
+    render(<Bar />)
+    const token = document.querySelector<HTMLElement>('[data-voice-engine="openai"]')!
+    expect(token.getAttribute('data-voice-fell-back')).toBe('deepgram')
+    expect(token.title).toContain('no Deepgram Flux key')
+    expect(token.textContent).toContain('instead of Deepgram Flux')
+  })
+
+  it('shows the first-use tip until the first session ends', async () => {
+    localStorage.removeItem('vyotiq.voice.firstTipSeen')
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    const first = render(<Bar />)
+    expect(screen.getByText(FIRST_TIP)).toBeTruthy()
+    await act(() => endVoiceMode())
+    first.unmount()
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    render(<Bar />)
+    expect(screen.queryByText(FIRST_TIP)).toBeNull()
+    expect(screen.getByText('Hold Space to talk · M mutes')).toBeTruthy()
   })
 
   it('End ends voice mode', async () => {

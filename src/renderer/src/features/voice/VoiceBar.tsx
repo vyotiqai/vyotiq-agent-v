@@ -24,6 +24,26 @@ function formatTime(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+/** Shown in the hint row until the first session ends (§13.5). */
+export const FIRST_TIP = 'Talk naturally · interrupt any time · headphones work best'
+const FIRST_TIP_KEY = 'vyotiq.voice.firstTipSeen'
+
+function firstTipSeen(): boolean {
+  try {
+    return localStorage.getItem(FIRST_TIP_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function markFirstTipSeen(): void {
+  try {
+    localStorage.setItem(FIRST_TIP_KEY, '1')
+  } catch {
+    /* blocked storage: the tip shows again next time, which is harmless */
+  }
+}
+
 /** Esc twice within this window ends voice mode. */
 const DOUBLE_ESC_MS = 2000
 
@@ -48,6 +68,7 @@ export function VoiceBar({
   const controller = voiceController()
   // The session's clock, not this bar's: it keeps counting when the brief hands over to the task.
   const [mountedAt] = useState(() => Date.now())
+  const [showFirstTip] = useState(() => !firstTipSeen())
   const startedAt = sessionStartedAt ?? mountedAt
   const [now, setNow] = useState(() => Date.now())
   const [escArmed, setEscArmed] = useState(false)
@@ -69,7 +90,9 @@ export function VoiceBar({
     const opening = controller.snapshot.state === 'off' || controller.snapshot.state === 'connecting'
     if (opening) playEarcon('start', settings.earcons)
     return () => {
-      if (voiceModeOwner() === null) playEarcon('end', settings.earcons)
+      if (voiceModeOwner() !== null) return
+      playEarcon('end', settings.earcons)
+      markFirstTipSeen()
     }
     // Once per session, with the setting as it was when it opened.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -134,6 +157,7 @@ export function VoiceBar({
 
   const listener = v.listener ? sttEntry(v.listener) : null
   const local = listener?.key.kind === 'none'
+  const fellBackFrom = v.listenerFellBackFrom ? sttEntry(v.listenerFellBackFrom) : null
   const problem = v.state === 'error' && v.error ? voiceProblem(v.error) : null
   const speakingProblem = v.state !== 'error' && v.error ? voiceProblem(v.error) : null
   const level = v.state === 'speaking' ? () => controller.speakingLevel() : () => controller.snapshot.micLevel
@@ -162,7 +186,9 @@ export function VoiceBar({
       ? 'Hold Space to talk'
       : v.state === 'speaking'
         ? 'Talk to interrupt · Esc stops speaking'
-        : 'Hold Space to talk · M mutes'
+        : showFirstTip
+          ? FIRST_TIP
+          : 'Hold Space to talk · M mutes'
 
   return (
     <div
@@ -189,11 +215,18 @@ export function VoiceBar({
         {listener ? (
           <span
             className="flex shrink-0 items-center gap-1 text-caption text-tertiary"
-            title={listener.privacy}
+            // Never a silent fallback (§9.5): the listener you picked had no key, so say which one is in use.
+            title={fellBackFrom ? `Listening with ${listener.label}: no ${fellBackFrom.label} key. ${listener.privacy}` : listener.privacy}
             data-voice-engine={listener.id}
+            data-voice-fell-back={fellBackFrom?.id}
           >
-            <Icon name={local ? 'lock' : 'cloud'} size={12} />
+            {fellBackFrom ? (
+              <Icon name="warningCircle" size={12} className="text-warning" />
+            ) : (
+              <Icon name={local ? 'lock' : 'cloud'} size={12} />
+            )}
             {listener.label}
+            {fellBackFrom ? <span className="sr-only">{`, instead of ${fellBackFrom.label}, which has no key`}</span> : null}
           </span>
         ) : null}
       </div>

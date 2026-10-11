@@ -89,6 +89,55 @@ describe('voice mode on the instruction line', () => {
     await vi.waitFor(() => expect(document.querySelector('[data-composer-shell]')).toBeTruthy())
   })
 
+  it('with no listening key, opens “Talk with” instead of starting, and Add key goes to settings', async () => {
+    const onOpenSettings = vi.fn()
+    window.vyotiq = {
+      ...window.vyotiq,
+      voiceKeyStatus: vi.fn(async () => ({ ok: true as const, data: { voice: {}, chat: { openai: false, openrouter: false } } }))
+    } as never
+    render(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running={false}
+        hasWorkspace
+        secrets={emptySecretStatus()}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={vi.fn()}
+        variant="line"
+        workspacePath="/repo"
+        slashHandlers={{ onOpenSettings } as never}
+      />
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Talk with the agent' }))
+    })
+    const panel = await screen.findByRole('dialog', { name: 'Talk with' })
+    expect(document.querySelector('[data-voice-bar]')).toBeNull()
+    expect(within(panel).getByText('Deepgram Flux')).toBeTruthy()
+    const openai = panel.querySelector<HTMLElement>('[data-voice-setup-choice="openai"]')!
+    fireEvent.click(within(openai).getByRole('button', { name: 'Add key' }))
+    expect(onOpenSettings).toHaveBeenCalledWith('providers')
+  })
+
+  it('starts straight away when a listening key is there', async () => {
+    window.vyotiq = {
+      ...window.vyotiq,
+      voiceKeyStatus: vi.fn(async () => ({
+        ok: true as const,
+        data: { voice: { deepgram: { set: true, last4: 'abcd' } }, chat: { openai: false, openrouter: false } }
+      }))
+    } as never
+    renderLine('/repo')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Talk with the agent' }))
+    })
+    await vi.waitFor(() => expect(document.querySelector('[data-voice-bar]')).toBeTruthy())
+    expect(screen.queryByRole('dialog', { name: 'Talk with' })).toBeNull()
+  })
+
   it('has no voice button without a workspace', () => {
     renderLine(null)
     expect(screen.queryByRole('button', { name: 'Talk with the agent' })).toBeNull()

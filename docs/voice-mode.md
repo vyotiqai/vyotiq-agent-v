@@ -742,6 +742,10 @@ The cloud "Whisper" option is the OpenAI realtime row above. Local Whisper is th
   removed or rejected, the session falls back to the next provider in the order
   that has a working key, and the engine token in the bar says so ("Speaking
   with OpenAI, ElevenLabs key rejected"). It never falls back silently.
+  **Built for listening** (2026-10-11): the bar's engine token shows a warning
+  glyph instead of the cloud, its tooltip reads "Listening with OpenAI: no
+  Deepgram Flux key", and screen readers hear the same. Speaking fallback is
+  shown in Settings → Voice; the bar doesn't report it yet.
 - **Fallback during a session** (a provider fails mid-session): see §15.
 
 ### 9.6 Adding a provider later
@@ -972,7 +976,16 @@ static shapes and the label carries the state.
   prompt there (`followVoiceRun`), so every reply after the first is written
   to be heard; the first falls back to the spoken summary (§8.2).
 - **First use:** the *Set up voice* popover (§9.5), then a one-time tip:
-  "Talk naturally. Interrupt any time. Headphones work best."
+  "Talk naturally. Interrupt any time. Headphones work best." **Built**
+  (2026-10-11): with no listening key, the voice button opens **Talk with**
+  beside it (the same shape as dictation's "Dictate with"): the four
+  listening services in Automatic's order, Deepgram marked Recommended, each
+  with what it's good at and where audio goes, and *Add key* to Settings →
+  Voice (Providers for OpenAI, whose key is the chat key). It checks the keys
+  on every press, so a key added since just works. The tip
+  ("Talk naturally · interrupt any time · headphones work best") sits in the
+  bar's hint row until the first session ends; a per-viewer flag in
+  localStorage, so blocked storage only means seeing it again.
 
 ### 13.6 Keys while a session is open
 
