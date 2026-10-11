@@ -944,6 +944,20 @@ static shapes and the label carries the state.
   It's free in `lib/shortcuts/bindings.ts`, and mod chords forbid Shift by
   default, so it doesn't also fire dictation.
 - **Command palette:** "Start voice mode".
+- **On New task** — built (D-30). The voice bar takes the brief's place and
+  says "Listening. Say what you want done." The first thing you say starts
+  the task, exactly as Start task would: after anything already typed in the
+  brief, with its checks, added folders, attachments, worktree choice and
+  draft. The session then moves to the new task's instruction line, and the
+  conversation carries on there; its clock keeps counting and no earcons
+  play for the move. How: the brief marks a handoff just before sending, and
+  the first instruction line to appear in the next 10 s takes the session
+  (`beginVoiceHandoff` / `registerVoiceLine` in `voiceMode.ts`); if the brief
+  turns into that line in place, it simply keeps it. The run id to follow is
+  read from whichever line owns the session by then. A task started in a new
+  worktree runs in another folder: following its run points the voice-reply
+  prompt there (`followVoiceRun`), so every reply after the first is written
+  to be heard; the first falls back to the spoken summary (§8.2).
 - **First use:** the *Set up voice* popover (§9.5), then a one-time tip:
   "Talk naturally. Interrupt any time. Headphones work best."
 
@@ -1285,6 +1299,7 @@ with the feature off.
   - [x] WCAG review against the repo's `wcag-desktop` skill: 24px targets with ≥4px gaps, state announced in a polite live region, no meaning in hue alone, informative text in `text-muted` or stronger
   - [x] 15 more tests (voice total: 222); composer, task, settings, shortcut and palette suites pass
   - [ ] Seen and tuned in all five skins × light/dark, at the narrowest pane, and at large text (needs the running app)
+  - [x] Voice mode on New task (2026-10-11, D-30): the bar in the brief's place, the first turn starts the task with the brief's checks, folders, attachments and worktree choice, and the session is handed to the task's line (clock and quiet earcons carried over); a worktree task's replies are written to be heard from its second reply. 5 tests
 - [ ] Phase 6b · Polish after first real use
 - [ ] Phase 7 · Hardening (2026-10-11, mostly done)
   - [x] Reconnect with backoff and replay (Phase 4); offline/provider errors worded with a fix (Phase 6)
@@ -1328,8 +1343,9 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-24 | 2026-10-11 | The voice bar opens the mic **before** asking main for a session, so a blocked or missing mic fails at once and nothing is billed | Decided |
 | D-25 | 2026-10-11 | Barge-in is one step for now: main's local speech detector (200 ms voiced, stricter while the agent speaks) stops speech at once, rather than §6.2's duck-then-confirm. Simpler and fast; if coughs cut the agent off in real use, add the duck stage | Proposed |
 | D-26 | 2026-10-11 | The voice_reply prompt section is keyed by workspace, not run: it must be in the very first step's prompt, before the renderer knows the run id. While voice is open on a workspace, every reply there is written to be heard | Decided |
-| D-27 | 2026-10-11 | Voice mode is started from the task's instruction line only (not the New task brief) in this cut: a session needs a task to steer. Starting a task by voice from the brief can follow | Proposed |
+| D-27 | 2026-10-11 | Voice mode is started from the task's instruction line only (not the New task brief) in this cut: a session needs a task to steer. Starting a task by voice from the brief can follow | Superseded by D-30 |
 | D-28 | 2026-10-11 | The bar's single-letter keys (M, Space) yield to any text field, empty or not; the app's `isTypingIn` treats an empty field as not typing, which is right for chords but wrong for bare letters | Decided |
+| D-30 | 2026-10-11 | Voice mode on New task (Ajay: yes). The first spoken turn starts the task with everything the brief holds, typed text first, and the session is handed to the new task's line; there is no "confirm before starting" step, because the brief's Start task has none either and the task can be stopped by voice ("stop") | Decided |
 | D-29 | 2026-10-11 | Questions by voice answer only what's unambiguous, and only one-question forms; everything else is sent as a message, which the existing superseded path hands to the model as the likely answer. No separate setting: unlike approvals, a wrong answer to a question grants nothing | Decided |
 
 ---

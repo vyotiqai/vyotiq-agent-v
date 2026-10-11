@@ -428,7 +428,7 @@ import { isVoiceError } from '../voice/errors'
 import { voiceKeyStatus } from '../voice/keys'
 import { removeVoiceKey, saveVoiceKey } from '../voice/keyService'
 import { listVoices, speak, stopSpeaking } from '../voice/speaker'
-import { startVoiceSession, stopVoiceSession, voiceSessionFor } from '../voice/sessions'
+import { followVoiceRun, startVoiceSession, stopVoiceSession, voiceSessionFor } from '../voice/sessions'
 import {
   VoiceAudioInSchema,
   VoiceClearKeyRequestSchema,
@@ -2273,7 +2273,7 @@ export function registerIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const req = VoiceFollowRequestSchema.parse(raw)
-      voiceSessionFor(event.sender.id, req.sessionId)?.follow(req.runId)
+      followVoiceRun(event.sender.id, req.sessionId, req.runId)
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.voiceFollow)

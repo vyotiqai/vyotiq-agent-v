@@ -16,6 +16,8 @@ export type VoiceRunTarget = {
   send: (text: string, opts: { steer: boolean }) => Promise<boolean>
   /** Stop the run (the composer's Stop). */
   stop: () => Promise<void> | void
+  /** The New task brief: a turn here starts the task (§13.5). */
+  brief?: boolean
 }
 
 export type VoiceRouteResult =

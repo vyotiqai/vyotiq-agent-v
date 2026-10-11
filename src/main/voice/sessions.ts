@@ -13,6 +13,7 @@ import { VoiceSession } from './session'
 import { addRunEventTap } from '../agent/runEventTap'
 import { resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
 import { resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
+import { getRunWorkspace } from '../agent/runRegistry'
 import { setVoiceReplyWorkspace } from './voiceReply'
 import {
   clampSpeed,
@@ -113,6 +114,19 @@ export async function startVoiceSession(
   setVoiceReplyWorkspace(session.id, workspacePath)
   await session.start()
   return session.id
+}
+
+/**
+ * Follow a run with this window's session. A task started by voice in a new
+ * worktree runs in a folder the session didn't open on: from then on, replies
+ * there are written to be heard too (D-30).
+ */
+export function followVoiceRun(ownerId: number, sessionId: string, runId: string): void {
+  const session = voiceSessionFor(ownerId, sessionId)
+  if (!session) return
+  const workspace = getRunWorkspace(runId)
+  if (workspace) setVoiceReplyWorkspace(sessionId, workspace)
+  session.follow(runId)
 }
 
 /** The session, but only for the window that owns it. */

@@ -7,7 +7,7 @@ import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
 import { playEarcon } from './earcons'
 import { VoiceOrb } from './VoiceOrb'
 import { voiceProblem } from './voiceCopy'
-import { endVoiceMode, setVoiceTarget, startVoiceMode, useVoiceMode, voiceController } from './voiceMode'
+import { endVoiceMode, setVoiceTarget, startVoiceMode, useVoiceMode, voiceController, voiceModeOwner } from './voiceMode'
 import type { VoiceRunTarget } from './turnRouting'
 
 /*
@@ -32,6 +32,7 @@ export function VoiceBar({
   workspacePath,
   target,
   onOpenVoiceSettings,
+  idleCaption = 'Listening. Talk any time.',
   className
 }: {
   owner: string
@@ -39,11 +40,15 @@ export function VoiceBar({
   /** The task this line drives: send, stop and run state, current every render. */
   target: VoiceRunTarget
   onOpenVoiceSettings?: () => void
+  /** What the bar says while it listens; the brief asks for the task. */
+  idleCaption?: string
   className?: string
 }) {
-  const { snapshot: v, settings } = useVoiceMode()
+  const { snapshot: v, settings, startedAt: sessionStartedAt } = useVoiceMode()
   const controller = voiceController()
-  const [startedAt] = useState(() => Date.now())
+  // The session's clock, not this bar's: it keeps counting when the brief hands over to the task.
+  const [mountedAt] = useState(() => Date.now())
+  const startedAt = sessionStartedAt ?? mountedAt
   const [now, setNow] = useState(() => Date.now())
   const [escArmed, setEscArmed] = useState(false)
   const lastEsc = useRef(0)
@@ -59,8 +64,13 @@ export function VoiceBar({
   }, [])
 
   useEffect(() => {
-    playEarcon('start', settings.earcons)
-    return () => playEarcon('end', settings.earcons)
+    // A bar taking over a running session (brief → task) opens quietly, and
+    // one handing it over closes quietly: the session goes on.
+    const opening = controller.snapshot.state === 'off' || controller.snapshot.state === 'connecting'
+    if (opening) playEarcon('start', settings.earcons)
+    return () => {
+      if (voiceModeOwner() === null) playEarcon('end', settings.earcons)
+    }
     // Once per session, with the setting as it was when it opened.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -139,7 +149,7 @@ export function VoiceBar({
     ) : (
       <span className="text-muted">
         {v.state === 'listening'
-          ? 'Listening. Talk any time.'
+          ? idleCaption
           : v.state === 'reconnecting'
             ? `Reconnecting${v.reconnectAttempt > 1 ? ` (try ${v.reconnectAttempt})` : ''}…`
             : VOICE_STATE_LABEL[v.state]}

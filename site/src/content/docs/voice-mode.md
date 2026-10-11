@@ -15,6 +15,8 @@ Open a task and press the waveform button beside the microphone on the instructi
 
 The instruction line becomes the voice bar. The record stays above it. Press "End", or `Esc` twice, to go back to typing.
 
+You can also start on **New task**. Press the waveform button in the brief and say what you want done: that starts the task, with any checks, folders and attachments you already added, and the conversation carries on in it.
+
 ## The voice bar
 
 - **The orb** shows whose turn it is. It breathes while it listens, follows your voice while you talk, turns while the agent thinks or works, and follows the agent's voice while it speaks. Each state has its own shape, and it holds still if your system asks for reduced motion.

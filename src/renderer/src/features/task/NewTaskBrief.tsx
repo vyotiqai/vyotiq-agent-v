@@ -74,7 +74,8 @@ export function NewTaskBrief({
   onWorktreeChange,
   extraRoots = NO_FOLDERS,
   onAddFolder,
-  onExtraRootsChange
+  onExtraRootsChange,
+  voice
 }: {
   workspacePath: string | null
   targets?: NewTaskTargets
@@ -121,6 +122,11 @@ export function NewTaskBrief({
   /** Add folder…: the OS picker, checked by main. Absent hides the row. */
   onAddFolder?: () => void
   onExtraRootsChange?: (next: string[]) => void
+  /**
+   * Voice mode's bar, while it's open here: it takes the brief's place, and
+   * the first thing said starts the task (docs/voice-mode.md §13.5).
+   */
+  voice?: ReactNode
 }) {
   const [draftCheck, setDraftCheck] = useState('')
 
@@ -187,92 +193,96 @@ export function NewTaskBrief({
         <div className="mx-auto grid w-full max-w-[1040px] grid-cols-1 gap-10 px-5 pb-12 pt-6 @[720px]:grid-cols-[minmax(0,1fr)_260px] @[720px]:gap-12 @[720px]:px-8">
           <div className="min-w-0">
             {banners}
-            <div
-              className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
-              data-brief
-              // The composer's shell: Ctrl+. typed in the brief switches this box's mode.
-              data-composer-shell
-              onDragOver={onDragOver}
-              onDrop={onDrop}
-            >
-              {fileInput}
-              <div className="px-4 pt-3.5">{input}</div>
-              {attachments ? <div className="px-4 pt-2">{attachments}</div> : null}
-              {/* The checks the run is judged against are part of the brief:
-                  the field for the next one is always there, so the first
-                  check is one click into it, not two. */}
-              <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
-                {checks.length > 0 ? (
-                  <ul className="m-0 list-none p-0" aria-label="Done when">
-                    {checks.map((text, index) => (
-                      <li key={`${index}:${text}`} className="group flex h-7 items-center gap-2.5">
-                        <StatusGlyph state="queued" size={14} />
-                        <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
-                          {text}
-                        </span>
-                        <IconButton
-                          icon="close"
-                          label={`Remove “${text}”`}
-                          size="xs"
-                          tone="muted"
-                          className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                          onClick={() => onChecksEdit(checks.filter((_, i) => i !== index))}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {checks.length < MAX_CHECKS ? (
-                  <label className="group/check flex h-7 cursor-text items-center gap-2.5">
-                    {/* The field has no box of its own inside the brief's: its + says where focus is. */}
-                    <Icon name="plus" size={14} className="shrink-0 text-tertiary group-focus-within/check:text-fg" />
-                    <input
-                      value={draftCheck}
-                      maxLength={CHECK_MAX_CHARS}
-                      onChange={(e) => setDraftCheck(e.target.value)}
-                      onKeyDown={onCheckKeyDown}
-                      placeholder="Done when… a command passes, a file exists"
-                      aria-label="New check"
-                      className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
-                    />
-                  </label>
-                ) : null}
-              </div>
-              {onAddFolder ? (
-                <AddedFolders
-                  roots={extraRoots}
-                  onAdd={onAddFolder}
-                  onRemove={(root) => onExtraRootsChange?.(extraRoots.filter((r) => r !== root))}
-                />
-              ) : null}
-              <div className="pb-1 pl-4 pr-3 @container">{controls}</div>
-            </div>
-            {menus}
-
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Button
-                variant="primary"
-                size="md"
-                title={startBlockedReason ?? `Start task (${startChord()})`}
-                disabled={!canStart}
-                onClick={onStart}
-              >
-                Start task
-              </Button>
-              {draft ? (
-                <Button
-                  variant="ghost"
-                  size="md"
-                  disabled={!draft.canSave || draft.saving}
-                  pending={draft.saving}
-                  title={draft.canSave ? undefined : 'Write a brief or a check first'}
-                  onClick={draft.onSave}
+            {voice ?? (
+              <>
+                <div
+                  className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
+                  data-brief
+                  // The composer's shell: Ctrl+. typed in the brief switches this box's mode.
+                  data-composer-shell
+                  onDragOver={onDragOver}
+                  onDrop={onDrop}
                 >
-                  {draft.continuing ? 'Update draft' : 'Save as draft'}
-                </Button>
-              ) : null}
-              {approval ? <ApprovalNote approval={approval} onOpenSettings={onOpenSettings} /> : null}
-            </div>
+                  {fileInput}
+                  <div className="px-4 pt-3.5">{input}</div>
+                  {attachments ? <div className="px-4 pt-2">{attachments}</div> : null}
+                  {/* The checks the run is judged against are part of the brief:
+                      the field for the next one is always there, so the first
+                      check is one click into it, not two. */}
+                  <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
+                    {checks.length > 0 ? (
+                      <ul className="m-0 list-none p-0" aria-label="Done when">
+                        {checks.map((text, index) => (
+                          <li key={`${index}:${text}`} className="group flex h-7 items-center gap-2.5">
+                            <StatusGlyph state="queued" size={14} />
+                            <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
+                              {text}
+                            </span>
+                            <IconButton
+                              icon="close"
+                              label={`Remove “${text}”`}
+                              size="xs"
+                              tone="muted"
+                              className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                              onClick={() => onChecksEdit(checks.filter((_, i) => i !== index))}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {checks.length < MAX_CHECKS ? (
+                      <label className="group/check flex h-7 cursor-text items-center gap-2.5">
+                        {/* The field has no box of its own inside the brief's: its + says where focus is. */}
+                        <Icon name="plus" size={14} className="shrink-0 text-tertiary group-focus-within/check:text-fg" />
+                        <input
+                          value={draftCheck}
+                          maxLength={CHECK_MAX_CHARS}
+                          onChange={(e) => setDraftCheck(e.target.value)}
+                          onKeyDown={onCheckKeyDown}
+                          placeholder="Done when… a command passes, a file exists"
+                          aria-label="New check"
+                          className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                  {onAddFolder ? (
+                    <AddedFolders
+                      roots={extraRoots}
+                      onAdd={onAddFolder}
+                      onRemove={(root) => onExtraRootsChange?.(extraRoots.filter((r) => r !== root))}
+                    />
+                  ) : null}
+                  <div className="pb-1 pl-4 pr-3 @container">{controls}</div>
+                </div>
+                {menus}
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="primary"
+                    size="md"
+                    title={startBlockedReason ?? `Start task (${startChord()})`}
+                    disabled={!canStart}
+                    onClick={onStart}
+                  >
+                    Start task
+                  </Button>
+                  {draft ? (
+                    <Button
+                      variant="ghost"
+                      size="md"
+                      disabled={!draft.canSave || draft.saving}
+                      pending={draft.saving}
+                      title={draft.canSave ? undefined : 'Write a brief or a check first'}
+                      onClick={draft.onSave}
+                    >
+                      {draft.continuing ? 'Update draft' : 'Save as draft'}
+                    </Button>
+                  ) : null}
+                  {approval ? <ApprovalNote approval={approval} onOpenSettings={onOpenSettings} /> : null}
+                </div>
+              </>
+            )}
           </div>
 
           {workspacePath ? (
