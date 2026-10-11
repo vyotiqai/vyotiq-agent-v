@@ -1008,7 +1008,7 @@ the catalog default first and labelled *Recommended*.
 - Without a key, the picker shows the catalog's built-in default names and a
   note that previews need a key.
 
-**Speed:**
+**Speed** (as built: four presets, D-20; the slider below was the first sketch):
 
 - A slider limited to the provider's range from the catalog, snapping to 0.05.
 - ▶ Preview speaks one fixed sentence ("Done. I fixed the failing test and the
@@ -1226,6 +1226,7 @@ with the feature off.
   - [x] Key check before save + IPC `voice:keyStatus`, `voice:setKey`, `voice:clearKey` (`src/main/voice/keyService.ts`)
   - [x] Renderer player: gapless Web Audio queue, 60 ms jitter buffer, duck to 20%, 30 ms fade on barge-in, output level (`features/voice/voicePlayer.ts`)
   - [x] 12 more tests (67 total for voice); IPC contract test updated; test-typecheck ratchet: no new errors
+- [x] Voice mode settings, first cut (2026-10-11, ahead of Phase 6 because Ajay asked for it): provider pickers with Automatic and privacy lines, model per provider, speaking speed, language, all vendor keys with check-on-save, behaviour switches; search entries; 6 tests (`features/settings/sections/VoiceModeSettings.tsx`). Voice picker with preview comes with the speaking engines in Phase 3
 - [ ] Phase 3 · Speaking
 - [ ] Phase 4 · Listening
 - [ ] Phase 4b · More providers
@@ -1260,6 +1261,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-17 | 2026-10-11 | Voice agent behaviour spec B1–B12 (§8.6): brief, quick acknowledgements, stops when interrupted, doesn't repeat itself, warm but not fake-cheery, summary spoken + details on screen | Decided (Ajay) |
 | D-18 | 2026-10-11 | Wake word, stronger privacy indicators and deeper failure recovery are **v2** (§23) | Decided (Ajay) |
 | D-19 | 2026-10-11 | Build on the GitHub copy now instead of waiting for Ajay's local code (supersedes D-14). New code goes in new files; edits to shared files stay small and additive, to keep the later merge easy. Commits stay local until Ajay says to push | Decided (Ajay) |
+| D-20 | 2026-10-11 | Speaking speed is four presets (Slower 0.85×, Normal, Faster 1.15×, Fastest 1.3×) on the existing `Segmented` control rather than a slider: the design system has no slider primitive, presets read faster, and each is clamped to the provider's range at use. A fine slider can follow if presets prove too coarse | Proposed |
 
 ---
 
