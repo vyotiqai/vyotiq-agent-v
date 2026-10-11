@@ -19,6 +19,9 @@ advice and has not been reviewed by a lawyer.
   workspace memory are processed **on your own machine**.
 - Voice dictation sends audio to **OpenAI** by default, with your key. You can switch it to
   OpenRouter, or to a local engine that keeps audio on your machine (§7).
+- **Voice mode**, when you turn it on, sends your speech to the listening provider you chose
+  and the agent's short spoken replies to the speaking provider you chose, each with **your**
+  key. It is off until you press its button, and nothing is recorded to disk (§7).
 - There is **no Vyotiq account**, no sign-in, no hosted workspace, and no Vyotiq server that
   your code or prompts pass through.
 - Model requests go **directly from your machine to the provider you configured**, using
@@ -146,6 +149,39 @@ Dictation has three engines, chosen in Settings → Voice:
   offline.
 
 Audio sent to OpenAI or OpenRouter is governed by that provider's terms, as in §5.
+
+### Voice mode
+
+Voice mode is a spoken conversation with the agent on a task (`docs/voice-mode.md`). It is
+off until you press the voice button on a task (or its shortcut), and it stops when you end
+it, close the window or quit. While it is on:
+
+- **Your speech** goes, as it is captured, to the listening provider chosen in Settings →
+  Voice → Listens with, using your key for that provider
+  (`src/main/voice/providers/stt/`):
+  - Deepgram — `wss://api.deepgram.com/v2/listen`
+  - AssemblyAI — `wss://streaming.assemblyai.com/v3/ws`
+  - ElevenLabs — `wss://api.elevenlabs.io/v1/speech-to-text/realtime`
+  - OpenAI — `wss://api.openai.com/v1/realtime`
+  - This PC — no upload; your dictation model transcribes each turn on your machine
+- **Text to be spoken** goes to the speaking provider chosen under Speaks with, using your
+  key for that provider (`src/main/voice/providers/tts/`): ElevenLabs
+  (`api.elevenlabs.io`), Cartesia (`api.cartesia.ai`), OpenAI (`api.openai.com`) or
+  OpenRouter (`openrouter.ai`). What is sent is the short spoken summary of each reply, a
+  few words about slow steps ("Running the tests."), an approval question, or, when you press
+  Read aloud on an answer, that answer's summary. Text that looks like a secret is redacted
+  before it is sent (`redactSecretsInText`).
+- **Your workspace's file names** (up to 100 identifiers such as `runAgent`) may be sent to
+  the listening provider as vocabulary hints, so it spells your code's names correctly.
+- **Nothing is stored.** Audio is not written to disk. Your spoken turns become ordinary
+  messages in the task record, like typed ones.
+- **Keys** for Deepgram, AssemblyAI, ElevenLabs and Cartesia are stored like your other keys:
+  encrypted with your operating system's secure storage, in main only; the window sees whether
+  a key is set and its last four characters (`src/main/settings/secrets.ts`). Adding a key
+  makes one read-only request to that provider to check it.
+- **Voice previews** in Settings send one fixed sentence to the speaking provider.
+
+Audio and text sent to these providers are governed by each provider's terms, as in §5.
 
 ## 8. Code indexing
 

@@ -444,3 +444,59 @@ describe('approval wording and answers', () => {
     expect(approvalAnswer('yes, and also run lint')).toBeNull()
   })
 })
+
+describe('turn latency (§14)', () => {
+  it('logs end-of-turn → sent → first sentence → first audio, and no words', async () => {
+    let clock = 1000
+    const logged: unknown[] = []
+    const taps = new Map<string, (e: AgentEvent) => void>()
+    const stt: FixtureSttSession[] = []
+    const session = new VoiceSession({
+      emit: () => {},
+      settings: () => DEFAULT_VOICE_SETTINGS,
+      keys: () => ({ voice: { deepgram: true }, chat: {} }),
+      readKey: () => 'k',
+      sttProvider: (id) => ({
+        id,
+        open: async (o) => {
+          const s = await openFixtureStt(o)
+          stt.push(s)
+          return s
+        }
+      }),
+      openTts: (contextId) =>
+        openFixtureTts({
+          apiKey: '',
+          model: '',
+          voiceId: '',
+          speed: 1,
+          contextId,
+          signal: new AbortController().signal,
+          onAudio: () => {},
+          onError: () => {}
+        }),
+      tapRun: (runId, fn) => {
+        taps.set(runId, fn)
+        return () => taps.delete(runId)
+      },
+      logLatency: (t) => logged.push(t),
+      now: () => clock,
+      setTimer: () => null,
+      clearTimer: () => {},
+      newId: () => `id${Math.random()}`
+    })
+    await session.start()
+    stt[0]!.say('secret plan words')
+    clock += 40
+    session.follow(R)
+    clock += 900
+    taps.get(R)!(delta('<spoken>Done. </spoken>'))
+    clock += 150
+    session.playback('ctx', 'started')
+    expect(logged).toEqual([{ listener: 'deepgram', submitMs: 40, firstTextMs: 940, firstAudioMs: 1090 }])
+    expect(JSON.stringify(logged)).not.toContain('secret')
+    // Only the first audio of a turn is timed.
+    session.playback('ctx2', 'started')
+    expect(logged).toHaveLength(1)
+  })
+})

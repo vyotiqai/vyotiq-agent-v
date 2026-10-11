@@ -89,6 +89,7 @@ Nothing is uploaded to a Vyotiq server. The places Agent V connects to are:
 - **models.dev**, at start, for model details such as context windows and the OpenCode Go model list.
 - **Cloudflare (1.1.1.1)**, a small request to check that you are online: every 15 seconds while the Agent V window is visible, and every 2 seconds while a run waits for the network.
 - **OpenAI or OpenRouter**, when you dictate with one of them. OpenAI is the default. Pick "This PC" under Settings, "Voice", "Runs on" to keep audio on your computer.
+- **The voice providers you choose**, while [voice mode](/docs/voice-mode) is on: your speech to the one that listens (Deepgram, AssemblyAI, ElevenLabs or OpenAI; This PC uploads nothing), and the agent's short spoken replies to the one that speaks (ElevenLabs, Cartesia, OpenAI or OpenRouter), each with your key. Adding a key sends one request to check it.
 - **MCP servers you add, web pages** the agent opens or fetches, and the search engine set in Settings, "Tools", "Search engine" (DuckDuckGo unless you change it), when the agent searches the web.
 - **Whatever a command reaches.** Commands the agent runs in the terminal, such as a package install or a `git push`, use the network like any other program.
 

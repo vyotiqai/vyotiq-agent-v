@@ -6,11 +6,10 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated on every commit to the `feat/voice-mode` branch.
 
-> **Status:** Phase 2 (foundations) in progress on `feat/voice-mode`, built on
-> the GitHub copy of `main` (D-19). Commits stay local in the voice worktree
-> until Ajay says to push. Design: Q2, Q4, Q6, Q8 answered; multi-provider
-> with your own keys, Voice settings, behaviour spec and v2 backlog added.
-> PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft).
+> **Status:** built through Phase 6 plus approvals by voice and most of Phase 7, on
+> `feat/voice-mode`, as local commits in the voice worktree (not pushed; D-19). Not yet run on
+> real hardware: the first run with real keys, a mic and speakers is the next real test.
+> PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft, holds the design only until pushed).
 
 ---
 
@@ -1266,7 +1265,13 @@ with the feature off.
   - [x] 15 more tests (voice total: 222); composer, task, settings, shortcut and palette suites pass
   - [ ] Seen and tuned in all five skins × light/dark, at the narrowest pane, and at large text (needs the running app)
 - [ ] Phase 6b · Polish after first real use
-- [ ] Phase 7 · Hardening
+- [ ] Phase 7 · Hardening (2026-10-11, mostly done)
+  - [x] Reconnect with backoff and replay (Phase 4); offline/provider errors worded with a fix (Phase 6)
+  - [x] PRIVACY.md §7 "Voice mode": every listening and speaking endpoint, what is sent and what isn't, vocabulary hints, redaction, keys, previews; summary bullet. README: dictation bullet corrected (it said no audio ever leaves the app, untrue for cloud dictation) and a Voice mode bullet. **Ajay: the policy's effective date is unchanged; bump it when this ships**
+  - [x] Site docs: new "Voice mode" page (Tasks), "What leaves your computer" and keyboard shortcuts updated
+  - [x] Per-turn latency log: end of turn → sent → first sentence → first audio, timings only (`logLatency`, scope `voice`)
+  - [ ] GUI end-to-end spec with Chromium's fake mic under `VYOTIQ_E2E_FIXTURE=1` (`tests/gui-e2e/voice.spec.ts`): needs a built Electron app and a display; the cloud workspace installs without Electron's binary. Write it when the branch is next built on a full machine
+  - [ ] Silence pause for billing (R-09) and the proxy check for websockets (R-04): need real providers to verify
 
 ---
 

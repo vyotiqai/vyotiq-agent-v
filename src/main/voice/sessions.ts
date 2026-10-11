@@ -4,6 +4,7 @@
  * everything stateful is here and in `VoiceSession`.
  */
 import { getSettings } from '../settings/settings'
+import { logger } from '../../shared/logger'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent } from '../../shared/ipc/schemas/voice'
 import { readVoiceSourceKey, voiceKeyAvailability } from './keys'
 import { VoiceError } from './errors'
@@ -99,7 +100,8 @@ export async function startVoiceSession(
     openTts: (contextId, onError) => openSessionTts(owner, channels.audio, contextId, onError),
     tapRun: addRunEventTap,
     watchApprovals: watchToolApprovals,
-    resolveApproval: (answer) => resolveToolApproval(answer)
+    resolveApproval: (answer) => resolveToolApproval(answer),
+    logLatency: (t) => logger.info('Voice turn latency', { scope: 'voice', ...t })
   })
   sessions.set(session.id, { session, owner })
   byOwner.set(owner.id, session.id)

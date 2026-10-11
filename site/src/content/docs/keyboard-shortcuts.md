@@ -44,6 +44,7 @@ The command palette (`Ctrl+K`) also runs things without a shortcut: "Usage", "In
 | `↑` | Edit the last prompt (in an empty instruction line) |
 | `Esc` | Stop the run |
 | `Ctrl+M` | Dictation |
+| `Ctrl+Shift+M` | Voice mode: start / end |
 
 ## Approvals
 
@@ -101,6 +102,10 @@ See [Appearance](/docs/appearance) for the text size setting.
 ## Dictation keys
 
 `Ctrl+M` starts a take anywhere you can type a brief or an instruction. Press it again to insert the words. With "Hold to talk" on in Settings, "Voice", you hold the shortcut while you speak and let go to insert. See [Writing a task](/docs/writing-a-task#dictation).
+
+## Voice mode keys
+
+`Ctrl+Shift+M` starts or ends [voice mode](/docs/voice-mode) on the task's instruction line. While it is on, `Esc` stops the agent speaking (twice ends voice mode), `M` mutes, and holding `Space` is push to talk.
 
 ## In the navigator
 

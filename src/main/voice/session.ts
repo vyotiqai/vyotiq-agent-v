@@ -34,6 +34,20 @@ const RING_SAMPLES = 16000 * 10
 /** Keep a muted listener's connection alive this often. */
 const KEEPALIVE_MS = 5000
 
+/**
+ * How long one turn took, measured from the moment the listener decided you
+ * had finished (docs/voice-mode.md §14). Null where a stage didn't happen.
+ */
+export type TurnLatency = {
+  listener: SttProviderId | null
+  /** Your turn reached the agent (sent and followed). */
+  submitMs: number | null
+  /** The first sentence of the reply was ready to speak. */
+  firstTextMs: number | null
+  /** The first audio started playing. */
+  firstAudioMs: number
+}
+
 /** An event without its session id; the session stamps it. */
 type Emitted = VoiceEvent extends infer E ? (E extends { sessionId: string } ? Omit<E, 'sessionId'> : never) : never
 
@@ -57,6 +71,8 @@ export type VoiceSessionDeps = {
     asked: (request: ToolApprovalRequest) => void
     settled: (requestId: string, runId: string) => void
   }) => () => void
+  /** Per-turn timings, for tuning (§14). Timings only; never words. */
+  logLatency?: (timings: TurnLatency) => void
   /** Answer an approval, as the card would. */
   resolveApproval?: (answer: { requestId: string; runId: string; decision: 'once' | 'deny' }) => boolean
   now?: () => number
@@ -90,6 +106,8 @@ export class VoiceSession {
   private playing = new Set<string>()
   private speakErrorShown = false
   private unwatchApprovals: (() => void) | null = null
+  /** The turn being timed, from your last word to the agent's first sound. */
+  private timing: { endOfTurnAt: number; followedAt?: number; firstSayAt?: number } | null = null
   /** The followed run's approval waiting on the person, if any. */
   private approval: ToolApprovalRequest | null = null
 
@@ -101,6 +119,7 @@ export class VoiceSession {
     this.reply = new ReplySpeaker({
       openTts: (contextId) => this.openReplyTts(contextId),
       say: (contextId, text) => {
+        if (this.timing && this.timing.firstSayAt === undefined) this.timing.firstSayAt = this.now()
         if (this.deps.settings().captions) this.emitEvent({ kind: 'say', contextId, text })
       },
       onToolStart: () => this.dispatch({ type: 'tool_start' }),
@@ -136,11 +155,27 @@ export class VoiceSession {
       this.followedRun = runId
     }
     this.reply.beginTurn()
+    if (this.timing && this.timing.followedAt === undefined) this.timing.followedAt = this.now()
+  }
+
+  private now(): number {
+    return (this.deps.now ?? Date.now)()
   }
 
   /** The renderer's player: a reply's audio started, or everything queued for it played. */
   playback(contextId: string, phase: 'started' | 'drained'): void {
     if (phase === 'started') {
+      const t = this.timing
+      if (t) {
+        this.timing = null
+        const at = this.now()
+        this.deps.logLatency?.({
+          listener: this.sttId,
+          submitMs: t.followedAt !== undefined ? t.followedAt - t.endOfTurnAt : null,
+          firstTextMs: t.firstSayAt !== undefined ? t.firstSayAt - t.endOfTurnAt : null,
+          firstAudioMs: at - t.endOfTurnAt
+        })
+      }
       this.playing.add(contextId)
       this.dispatch({ type: 'audio_start' })
       this.pause.setAgentSpeaking(true)
@@ -360,6 +395,7 @@ export class VoiceSession {
     }
     if (!this.dispatch({ type: 'end_of_turn' })) return
     if (this.answerApprovalByVoice(text)) return
+    this.timing = { endOfTurnAt: this.now() }
     this.emitEvent({ kind: 'turn', turnId: (this.deps.newId ?? randomUUID)(), text, stop: isStopPhrase(text) })
   }
 
