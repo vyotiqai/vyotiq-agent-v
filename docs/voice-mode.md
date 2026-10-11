@@ -1304,7 +1304,7 @@ with the feature off.
   - [x] Renderer controller: opens the mic first (a blocked mic fails before anything is billed), streams audio, follows events, hands each turn on (`features/voice/voiceSessionController.ts`)
   - [x] 50 more tests (voice total: 151)
 - [ ] Phase 4b · More providers
-- [ ] Phase 5 · Conversation (2026-10-11): 5a done, 5b open
+- [x] Phase 5 · Conversation (2026-10-11): 5a, 5b (approvals) and 5c (questions) done; echo filter done (Phase 7)
   - [x] Run event tap: the loop's events, before IPC batching and UI gating (`src/main/agent/runEventTap.ts`, one line in `startAgentRun.ts`)
   - [x] `voice_reply` prompt section in the stable zone while voice is open on the workspace; byte-identical prompt when it isn't (`context/userRules.ts`, `voice/voiceReply.ts`)
   - [x] Reply speaker: `<spoken>` spoken as it streams, cleaned per whole sentence (a word split across deltas stays whole), fallback summary, narration silent, one progress cue for slow tools, failure line, quiet after barge-in until the next turn, secrets redacted before any text leaves for a vendor (D-10) (`voice/replySpeaker.ts`)
