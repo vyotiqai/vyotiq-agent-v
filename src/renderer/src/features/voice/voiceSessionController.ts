@@ -28,6 +28,8 @@ export type VoiceSnapshot = {
   reconnectAttempt: number
   muted: boolean
   deviceLabel: string
+  /** Slow steps marked with a sound (spoken progress off); counts up. */
+  cues: number
 }
 
 export const IDLE_VOICE: VoiceSnapshot = {
@@ -41,7 +43,8 @@ export const IDLE_VOICE: VoiceSnapshot = {
   error: null,
   reconnectAttempt: 0,
   muted: false,
-  deviceLabel: ''
+  deviceLabel: '',
+  cues: 0
 }
 
 export type VoiceTurn = { turnId: string; text: string; stop: boolean }
@@ -190,6 +193,9 @@ export class VoiceSessionController {
         this.sounding.delete(e.contextId)
         this.player?.cancel(e.contextId)
         this.set({ saying: '' })
+        return
+      case 'cue':
+        this.set({ cues: this.snapshot.cues + 1 })
         return
       case 'reconnecting':
         this.set({ reconnectAttempt: e.attempt })

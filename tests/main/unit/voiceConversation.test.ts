@@ -117,11 +117,19 @@ describe('ReplySpeaker', () => {
     expect(h.deps.onToolStart).toHaveBeenCalledTimes(3)
   })
 
-  it('no cues when spoken progress is off', () => {
-    const h = speakerHarness({ speakProgress: () => false })
+  it('no spoken cues when spoken progress is off; a slow step gets the soft sound instead', () => {
+    const quietCue = vi.fn()
+    const h = speakerHarness({ speakProgress: () => false, quietCue })
     h.speaker.beginTurn()
     h.speaker.handle(toolStart('a', 'grep', 'TODO'))
-    expect(h.timers).toHaveLength(0)
+    h.tick(CUE_DELAY_MS)
+    expect(h.said).toEqual([])
+    expect(h.streams).toHaveLength(0)
+    expect(quietCue).toHaveBeenCalledTimes(1)
+    const silent = speakerHarness({ speakProgress: () => false })
+    silent.speaker.beginTurn()
+    silent.speaker.handle(toolStart('a', 'grep', 'TODO'))
+    expect(silent.timers).toHaveLength(0)
   })
 
   it('goes quiet on barge-in until the next turn', () => {
@@ -498,5 +506,19 @@ describe('turn latency (§14)', () => {
     // Only the first audio of a turn is timed.
     session.playback('ctx2', 'started')
     expect(logged).toHaveLength(1)
+  })
+})
+
+describe('voice_reply and helper instances', () => {
+  it('is never asked of a helper instance, whose answer goes to the parent agent', async () => {
+    const { voiceReplyWanted } = await import('@main/voice/voiceReply')
+    setVoiceReplyWorkspace('s2', '/repo')
+    try {
+      expect(voiceReplyWanted({ workspacePath: '/repo' })).toBe(true)
+      expect(voiceReplyWanted({ workspacePath: '/repo/.worktrees/x', memoryWorkspacePath: '/repo' })).toBe(true)
+      expect(voiceReplyWanted({ workspacePath: '/repo', inlineInstance: true })).toBe(false)
+    } finally {
+      setVoiceReplyWorkspace('s2', null)
+    }
   })
 })

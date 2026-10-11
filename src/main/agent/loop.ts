@@ -2627,6 +2627,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             pathScopeShared: isScopeSharedInstance
           }) ?? undefined,
         loopHint: assembleLoopHint,
+        inlineInstance: isInlineInstance,
         taskList: formatTodosContextSection(stepTodos),
         activeGoal: isInlineInstance ? undefined : formatActiveGoalSection(stepGoal),
         providerId,

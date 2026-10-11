@@ -38,6 +38,7 @@ sections are updated on every commit to the `feat/voice-mode` branch.
 21. [Decision log](#21-decision-log)
 22. [References](#22-references)
 23. [Next version (v2 backlog)](#23-next-version-v2-backlog)
+24. [Wiring audit](#24-wiring-audit)
 
 ---
 
@@ -712,7 +713,7 @@ speaking.
 | **AssemblyAI Universal Streaming** | `universal-3-6-pro` (default), `universal-streaming-english`, `universal-streaming-multilingual` | `wss://streaming.assemblyai.com/v3/ws` (US/EU residency hosts exist) | `Turn` messages with `end_of_turn`; `end_of_turn_confidence_threshold`, `min_turn_silence`, `max_turn_silence`; `ForceEndpoint` for push-to-talk | `keyterms_prompt` ≤ 100, updatable | AssemblyAI | `Authorization` header without `Bearer`; 50–1000 ms chunks |
 | **ElevenLabs Scribe Realtime** | `scribe_v2_realtime` | `wss://api.elevenlabs.io/v1/speech-to-text/realtime` | Commit-based: we commit on our local pause detector or push-to-talk release (VAD commit mode to evaluate in Phase 1) | to check | ElevenLabs | JSON chunks with base64 PCM 16 kHz; partial and committed transcripts |
 | **OpenAI realtime transcription** | `gpt-live-transcribe` | `wss://api.openai.com/v1/realtime?intent=transcription` | Server VAD, or our local pause detector (as dictation runs it today) | `prompt` / `keywords` | OpenAI (reused) | Code already exists in `dictation/liveOpenAI.ts` |
-| **This PC** (Whisper / Moonshine, beta) | `whisper-small.en`, `whisper-tiny.en`, `moonshine-base` | Local utility process | Local pause detector | — | none | Already built for dictation. Not streaming: each turn is transcribed when it ends, so replies start later. Offline and private. A bonus, not cloud-first |
+| **This PC** (Whisper / Moonshine, beta) | dictation's installed model (no separate picker; see §24) | Local utility process | Local pause detector | — | none | Already built for dictation. Not streaming: each turn is transcribed when it ends, so replies start later. Offline and private. A bonus, not cloud-first |
 
 **Whisper, to be precise.** OpenAI's hosted Whisper (`whisper-1`) is batch-only
 (upload a file, get text back), so it can't produce live captions or detect turns.
@@ -1414,3 +1415,59 @@ Each needs its own short design before it's built.
 | **Expressive TTS markup** | Vendor tags (pauses, emphasis, emotion) where the provider supports them | `supportsMarkup` capability flag already in the interface (D-08) |
 | **Voice-only mode switching** | "Switch to ask mode", "use the faster model" by voice | §7.6 |
 | **Multiple languages per session** | Auto-detect and reply in the language spoken | Needs multilingual STT models + a matching voice |
+
+---
+
+## 24. Wiring audit
+
+A check of every piece against what it's connected to, on 2026-10-11, after
+Phase 7. Each row was checked by reading the code path end to end, not by the
+checklist above.
+
+### 24.1 Wired and tested
+
+| Piece | Path, start to end |
+| --- | --- |
+| IPC (17 channels) | `channels.ts` → `vyotiqApi.ts` → `preload/index.ts` (zod-checked push listeners) → `register.ts` (`senderOk` + zod) → `ipcContract.test.ts`; every invoke channel has a renderer caller (settings, speech playback, or the session controller's bridge) |
+| Settings (13 fields) | Every field is read where it acts: providers/models/voice/speed in `sessions.ts`/`speaker.ts`, language in all four cloud listeners, interrupt mode in `turnRouting.ts`, patience in the pause detector and listeners, push-to-talk in `session.ts`, approve-by-voice in `session.ts`, captions in `session.ts`, earcons in the bar, spoken progress in `replySpeaker.ts` |
+| Keys | Encrypted per vendor in `secrets.ts`; status/set/clear over IPC; checked on save; read only in main; the renderer sees set + last 4 |
+| Agent bridge | Run tap in `startAgentRun.ts` → `ReplySpeaker`; `voice_reply` in the stable prompt zone; approvals and questions through their watchers; follow-up promote for steer; stop for cancel |
+| Spoken summary on screen | Stripped from the answer (`TaskRecord`), copy (`Receipt`), narration notes (`WorkItems`), PR drafts (`prDraft.ts`) and find (`recordFind.ts`); kept raw only for Read aloud, which speaks it |
+| Lifecycle | One session per window; ends on window destroy, on quit, on End/Esc Esc; brief → task handoff; mic and listener closed on stop |
+
+### 24.2 Gaps found and fixed in this audit
+
+| Gap | Effect | Fix |
+| --- | --- | --- |
+| Helper instances got `voice_reply` | A sub-agent run in the same workspace was told to open with `<spoken>`, and that went back to the parent as part of its result | `voiceReplyWanted()` skips inline instances (`loop.ts` passes `inlineInstance`) |
+| PR draft kept `<spoken>` | A PR drafted after a voice answer had the spoken block in its body | `latestResultText` strips it |
+| Narration notes showed `<spoken>` | If the model spoke, then turned to tools, the note showed the raw block | Stripped where notes render |
+| Find matched hidden text | Searching the record could hit words only in the spoken block | Find searches what's shown |
+| Speaking key missing was worded as listening | "Voice mode needs a key for a listening provider" when the *speaking* side had no key | Speaking problems have their own wording and a Voice settings button |
+| Spoken progress off promised a sound | Settings said "Off plays a soft sound instead"; nothing played | A `cue` event and a soft two-note earcon for slow steps |
+| Read aloud during a conversation | Two voices at once | Starting voice mode stops Read aloud; the button is off while a session is open |
+| Voice mode during a dictation take | Two mic captures, and the take's field hidden by the bar | The voice button is off while a take is open |
+| This PC transcribed everything since the last turn | Silence, and the agent's own voice from the speakers, went into your next turn | The listener keeps only a 0.5 s lead-in from your speech start |
+| This PC offered a model picker that chose nothing | It always runs dictation's installed model | One entry, "Same model as dictation"; no picker |
+
+### 24.3 Not implemented (and why)
+
+| Item | Where specced | Why not yet |
+| --- | --- | --- |
+| Title-bar "listening" indicator when the window is in the background | §13.8 | The top 36px band must be verified with the Electron e2e (repo rule); needs the built app |
+| Speaking-provider fallback shown in the bar | §9.5 | Shown in Settings → Voice; the bar reports listener fallback only |
+| Duck-then-confirm barge-in | §6.2, D-25 | One-step stop is simpler; add the duck stage if coughs or echo cut the agent off in real use |
+| Voice-only mode switching, wake word, mini window, multilingual, expressive markup | §23 | v2 backlog |
+| Dictation in another pane while voice mode is on | — | Both would capture the mic; rare, and each pane's mic is visibly on. Worth a guard after real use |
+| `voice_reply` reaches other tasks in the same workspace while voice is open | D-26 | Keyed by workspace so the first step has it; harmless (the block is stripped everywhere it's shown) but costs a few tokens on those runs |
+
+### 24.4 Needs the real app or hardware
+
+- First run with real keys, mic and speakers (Phase 1 spike): echo on
+  speakers, latency per provider (`TurnLatency` is logged), vendor formats.
+- Look across the five skins × light/dark, the narrowest pane and large text.
+- GUI e2e `tests/gui-e2e/voice.spec.ts` with Chromium's fake mic under
+  `VYOTIQ_E2E_FIXTURE=1`.
+- Websockets through a proxy (R-04) and silence-pause billing (R-09).
+- Rebase onto Ajay's newer local code; merge `main` once #62/#64 land.
+

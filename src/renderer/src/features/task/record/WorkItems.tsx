@@ -38,6 +38,7 @@ import { RecordProse } from './RecordProse'
 import { foldRepeats, type RepeatRun } from './repeats'
 import { TickedText } from './TickedText'
 import { plainLine } from './plainText'
+import { stripSpokenBlock } from '@shared/spokenSummary'
 
 export { plainLine, plainProse } from './plainText'
 
@@ -491,7 +492,8 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
     case 'plan':
       return <PlanItem title={item.title} running={item.tool.tool.status === 'running'} />
     case 'note':
-      return <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+      // A spoken summary before the model turned to tools is for the ear, not the record.
+      return <RecordProse text={stripSpokenBlock(item.text)} streaming={Boolean(item.item.streaming)} tone="secondary" />
     case 'thought':
       return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought id={item.id} text={item.text} />
     case 'error':

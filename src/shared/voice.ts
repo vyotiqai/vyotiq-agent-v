@@ -125,11 +125,9 @@ export const STT_CATALOG: readonly SttCatalogEntry[] = [
     label: 'This PC',
     trait: 'Private and offline · slower replies',
     key: { kind: 'none' },
-    models: [
-      { id: 'whisper-small.en', label: 'Whisper Small', recommended: true },
-      { id: 'whisper-tiny.en', label: 'Whisper Tiny' },
-      { id: 'moonshine-base', label: 'Moonshine Base' }
-    ],
+    // It runs dictation's installed model (Whisper or Moonshine), chosen in
+    // dictation's settings; a second picker here would choose nothing.
+    models: [{ id: 'dictation', label: 'Same model as dictation', recommended: true }],
     caps: { turnDetection: false, keyterms: false, streaming: false, languages: 'en' },
     privacy: 'Audio stays on this PC',
     beta: true

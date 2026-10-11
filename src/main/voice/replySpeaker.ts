@@ -35,6 +35,8 @@ export type ReplySpeakerDeps = {
   /** The run ended; `failed` when it errored. */
   onRunEnd: () => void
   speakProgress: () => boolean
+  /** A slow step started and spoken progress is off: the renderer plays a soft sound. */
+  quietCue?: () => void
   newId: () => string
   now: () => number
   setTimer: (fn: () => void, ms: number) => unknown
@@ -209,16 +211,19 @@ export class ReplySpeaker {
   // ── Progress cues (§8.4) ─────────────────────────────────────────────────
 
   private scheduleCue(toolCallId: string, name: string, summary: string): void {
-    if (this.quiet || !this.deps.speakProgress()) return
+    if (this.quiet) return
+    const spoken = this.deps.speakProgress()
     const cue = cueForTool(name, summary)
-    if (!cue) return
+    // Off still marks a slow step, with a sound (§8.4); only known kinds of step get either.
+    if (!cue || (!spoken && !this.deps.quietCue)) return
     const timer = this.deps.setTimer(() => {
       this.cueTimers.delete(toolCallId)
       if (this.quiet || this.reply) return
       const now = this.deps.now()
       if (now - this.lastCueAt < CUE_GAP_MS) return
       this.lastCueAt = now
-      this.speakOnce(cue)
+      if (spoken) this.speakOnce(cue)
+      else this.deps.quietCue?.()
     }, CUE_DELAY_MS)
     this.cueTimers.set(toolCallId, timer)
   }

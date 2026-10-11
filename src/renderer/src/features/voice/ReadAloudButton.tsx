@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { IconButton, pushToast } from '@renderer/lib/ui'
 import { speakText, stopSpeech, useSpeech } from './speechPlayback'
+import { useVoiceMode } from './voiceMode'
 
 /**
  * Reads an answer aloud: its `<spoken>` summary, or its first few sentences
@@ -9,6 +10,8 @@ import { speakText, stopSpeech, useSpeech } from './speechPlayback'
  */
 export function ReadAloudButton({ text, owner }: { text: string; owner: string }) {
   const { active, phase, error } = useSpeech(owner)
+  // One voice at a time: during a conversation the agent's replies are already spoken.
+  const inConversation = useVoiceMode().owner !== null
 
   useEffect(() => {
     if (error) pushToast(error, 'error')
@@ -23,6 +26,7 @@ export function ReadAloudButton({ text, owner }: { text: string; owner: string }
       tone="muted"
       active={active}
       aria-pressed={active}
+      disabled={inConversation && !active}
       data-read-aloud={active ? phase : 'idle'}
       onClick={() => (active ? stopSpeech() : void speakText(owner, { text, kind: 'answer' }))}
     />

@@ -4,7 +4,7 @@ import { deepgramFlux, fluxUrl } from '@main/voice/providers/stt/deepgramFlux'
 import { assemblyAi, assemblyAiUrl } from '@main/voice/providers/stt/assemblyai'
 import { elevenLabsScribe, scribeUrl } from '@main/voice/providers/stt/elevenlabsScribe'
 import { openAiRealtime } from '@main/voice/providers/stt/openaiRealtime'
-import { makeLocalStt } from '@main/voice/providers/stt/local'
+import { LEAD_IN_SAMPLES, makeLocalStt } from '@main/voice/providers/stt/local'
 import type { SttEvent, SttOpenOptions, SttProvider } from '@main/voice/providers/types'
 
 class FakeSocket implements VoiceSocket {
@@ -223,5 +223,19 @@ describe('This PC (local)', () => {
     const req = (transcribe.mock.calls[0] as unknown[])[0] as { pcm16k: string; engine: string }
     expect(req.engine).toBe('local')
     expect(Buffer.from(req.pcm16k, 'base64').length).toBe(6)
+  })
+
+  it('drops what came before your speech, keeping half a second of lead-in', async () => {
+    const transcribe = vi.fn(async () => ({ text: 'hi' }))
+    const { o } = opts()
+    const session = await makeLocalStt(transcribe as never).open(o)
+    // Ten seconds of the room (or the agent's voice), then you.
+    for (let i = 0; i < 100; i++) session.pushAudio(new Int16Array(1600))
+    session.speechStarted?.()
+    session.pushAudio(new Int16Array(3200))
+    session.endTurn()
+    await vi.waitFor(() => expect(transcribe).toHaveBeenCalled())
+    const req = (transcribe.mock.calls[0] as unknown[])[0] as { pcm16k: string }
+    expect(Buffer.from(req.pcm16k, 'base64').length / 2).toBe(LEAD_IN_SAMPLES + 3200)
   })
 })

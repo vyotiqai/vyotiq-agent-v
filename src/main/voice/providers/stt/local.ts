@@ -9,6 +9,8 @@ import type { SttEvent, SttOpenOptions, SttProvider, SttSession } from '../types
 
 /** Enough for any spoken turn; longer is cut to its last minute. */
 const MAX_TURN_SAMPLES = 16000 * 60
+/** Kept from before speech starts: the detector needs ~200 ms to be sure, and words begin before that. */
+export const LEAD_IN_SAMPLES = 16000 / 2
 
 type Transcribe = typeof transcribeLocalDictation
 
@@ -29,6 +31,18 @@ export class LocalSttSession implements SttSession {
     this.chunks.push(pcm16k)
     this.samples += pcm16k.length
     while (this.samples > MAX_TURN_SAMPLES && this.chunks.length > 1) this.samples -= this.chunks.shift()!.length
+  }
+
+  speechStarted(): void {
+    // Only the lead-in survives: the silence and any agent audio before it would be transcribed too.
+    const keep: Int16Array[] = []
+    let kept = 0
+    for (let i = this.chunks.length - 1; i >= 0 && kept < LEAD_IN_SAMPLES; i--) {
+      keep.unshift(this.chunks[i]!)
+      kept += this.chunks[i]!.length
+    }
+    this.chunks = keep
+    this.samples = kept
   }
 
   endTurn(): void {

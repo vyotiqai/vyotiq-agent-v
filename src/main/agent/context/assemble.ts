@@ -27,7 +27,7 @@ import { trimToolResults } from './toolTrim'
 import { hydrateToolImages } from './toolImages'
 import { buildWorkspaceRulesSection } from './rules'
 import { formatResponseStyle, formatUserRules, formatVoiceReply } from './userRules'
-import { isVoiceReplyActive } from '../../voice/voiceReply'
+import { voiceReplyWanted } from '../../voice/voiceReply'
 import { readMemoryIndexAsync, readMemoryStateAsync } from './memory'
 import { buildWorkspaceSnapshotAsync } from './workspaceSnapshot'
 import { perfLog, perfNow } from './perfDebug'
@@ -844,7 +844,7 @@ export async function assembleContext(
 
   const estimateStarted = perfNow()
   const userRules = formatUserRules(input.userRules ?? [])
-  const voiceReply = formatVoiceReply(isVoiceReplyActive([input.workspacePath, input.memoryWorkspacePath]))
+  const voiceReply = formatVoiceReply(voiceReplyWanted(input))
   const responseStyleSection = [
     formatResponseStyle({
       identity: input.identity,

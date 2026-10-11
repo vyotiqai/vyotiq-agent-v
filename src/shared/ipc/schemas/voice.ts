@@ -199,6 +199,8 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
   z.object({ sessionId: z.string(), kind: z.literal('reconnecting'), attempt: z.number().int() }),
   /** What the agent is saying, a sentence at a time, for captions. */
   z.object({ sessionId: z.string(), kind: z.literal('say'), contextId: z.string(), text: z.string() }),
+  /** A slow step started and spoken progress is off: a soft sound instead of words (§8.4). */
+  z.object({ sessionId: z.string(), kind: z.literal('cue') }),
   /** Barge-in: drop this reply's queued audio from the speakers now. */
   z.object({ sessionId: z.string(), kind: z.literal('flush'), contextId: z.string() }),
   z.object({

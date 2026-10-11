@@ -28,6 +28,12 @@ export interface SttSession {
   setKeyterms?(terms: readonly string[]): void
   /** Keep an idle connection open (while muted). */
   keepAlive?(): void
+  /**
+   * The session's own detector heard you start talking. A listener that
+   * buffers whole turns drops what came before (silence, the agent's voice
+   * from the speakers), keeping a short lead-in.
+   */
+  speechStarted?(): void
   close(): Promise<void>
 }
 

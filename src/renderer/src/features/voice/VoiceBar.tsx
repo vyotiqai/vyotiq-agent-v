@@ -6,7 +6,7 @@ import { Button, cn } from '@renderer/lib/ui'
 import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
 import { playEarcon } from './earcons'
 import { VoiceOrb } from './VoiceOrb'
-import { voiceProblem } from './voiceCopy'
+import { speakingProblem, voiceProblem } from './voiceCopy'
 import { endVoiceMode, setVoiceTarget, startVoiceMode, useVoiceMode, voiceController, voiceModeOwner } from './voiceMode'
 import type { VoiceRunTarget } from './turnRouting'
 
@@ -98,6 +98,13 @@ export function VoiceBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // A soft sound for a slow step, when spoken progress is off.
+  const lastCues = useRef(v.cues)
+  useEffect(() => {
+    if (v.cues > lastCues.current) playEarcon('work', settings.earcons)
+    lastCues.current = v.cues
+  }, [v.cues, settings.earcons])
+
   // A tick when a turn is accepted.
   useEffect(() => {
     if (v.lastTurn && v.lastTurn !== lastTurn.current) {
@@ -159,7 +166,8 @@ export function VoiceBar({
   const local = listener?.key.kind === 'none'
   const fellBackFrom = v.listenerFellBackFrom ? sttEntry(v.listenerFellBackFrom) : null
   const problem = v.state === 'error' && v.error ? voiceProblem(v.error) : null
-  const speakingProblem = v.state !== 'error' && v.error ? voiceProblem(v.error) : null
+  // An error outside the error state is always the speaking side: the listener's errors end the session.
+  const voiceTrouble = v.state !== 'error' && v.error ? speakingProblem(v.error) : null
   const level = v.state === 'speaking' ? () => controller.speakingLevel() : () => controller.snapshot.micLevel
 
   // Caption: your words while you talk; the agent's while it speaks; else what's happening.
@@ -273,10 +281,15 @@ export function VoiceBar({
               </Button>
             ) : null}
           </span>
-        ) : speakingProblem ? (
+        ) : voiceTrouble ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-warning" role="status">
             <Icon name="warningCircle" size={13} className="shrink-0" />
-            <span className="truncate">{`${speakingProblem.message} Replies are on screen.`}</span>
+            <span className="truncate">{`${voiceTrouble.message} Replies are on screen.`}</span>
+            {voiceTrouble.fix === 'settings' && onOpenVoiceSettings ? (
+              <Button size="xs" variant="ghost" onClick={onOpenVoiceSettings}>
+                Voice settings
+              </Button>
+            ) : null}
           </span>
         ) : (
           <span className="min-w-0 flex-1 truncate text-caption text-tertiary" aria-live={escArmed ? 'polite' : undefined}>

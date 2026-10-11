@@ -1455,7 +1455,8 @@ export function Composer({
               <VoiceModeButton
                 owner={voiceOwner}
                 workspacePath={workspacePath}
-                disabled={inputLocked}
+                // A dictation take owns the mic and the field until it's inserted or discarded.
+                disabled={inputLocked || takeOpen}
                 placement={isBrief ? 'down' : 'up'}
                 onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
               />

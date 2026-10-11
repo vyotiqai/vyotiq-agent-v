@@ -16,6 +16,19 @@ export function isVoiceReplyActive(paths: ReadonlyArray<string | null | undefine
   return paths.some((p) => p != null && open.has(normalise(p)))
 }
 
+/**
+ * Whether this prompt should ask for a spoken summary: voice mode is open on
+ * its workspace, and it isn't a helper instance (whose answer goes back to
+ * the parent agent, not to anyone's ears).
+ */
+export function voiceReplyWanted(input: {
+  workspacePath?: string | null
+  memoryWorkspacePath?: string | null
+  inlineInstance?: boolean
+}): boolean {
+  return !input.inlineInstance && isVoiceReplyActive([input.workspacePath, input.memoryWorkspacePath])
+}
+
 function normalise(p: string): string {
   return p.replace(/[\\/]+$/, '').toLowerCase()
 }

@@ -27,3 +27,26 @@ export function voiceProblem(code: VoiceErrorCode): VoiceProblem {
       return { message: 'Voice mode stopped unexpectedly.', fix: 'retry' }
   }
 }
+
+/**
+ * A problem with the agent's speaking voice during a session. The
+ * conversation goes on with replies on screen, so it is worded for the voice,
+ * not the session (a missing key here is a speaking key, not a listening one).
+ */
+export function speakingProblem(code: VoiceErrorCode): VoiceProblem {
+  switch (code) {
+    case 'no_key':
+      return { message: 'No speaking voice has a key.', fix: 'settings' }
+    case 'rejected_key':
+      return { message: 'The speaking provider rejected its key.', fix: 'settings' }
+    case 'out_of_credit':
+      return { message: 'The speaking provider is out of credit.', fix: 'settings' }
+    case 'rate_limited':
+      return { message: 'The speaking provider is busy.', fix: null }
+    case 'offline':
+    case 'provider_down':
+      return { message: 'Can’t reach the speaking provider.', fix: null }
+    default:
+      return { message: 'The agent’s voice stopped working.', fix: null }
+  }
+}

@@ -140,6 +140,7 @@ export class VoiceSession {
       onToolStart: () => this.dispatch({ type: 'tool_start' }),
       onRunEnd: () => this.dispatch({ type: 'run_done' }),
       speakProgress: () => this.deps.settings().speakProgress,
+      quietCue: () => this.emitEvent({ kind: 'cue' }),
       newId: deps.newId ?? randomUUID,
       now: deps.now ?? Date.now,
       setTimer: this.setTimer,
@@ -279,7 +280,10 @@ export class VoiceSession {
     this.remember(pcm)
     this.stt?.pushAudio(pcm)
     for (const ev of this.pause.push(pcm)) {
-      if (ev.kind === 'speech_start') this.onSpeechStart()
+      if (ev.kind === 'speech_start') {
+        this.stt?.speechStarted?.()
+        this.onSpeechStart()
+      }
       // Listeners with their own turn model decide; the rest end on our pause.
       else if (!this.turnDetection && !ptt && ev.speechMs > 0) this.stt?.endTurn()
     }

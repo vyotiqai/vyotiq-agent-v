@@ -12,6 +12,7 @@ import { useSyncExternalStore } from 'react'
 import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from '@shared/ipc/schemas/voice'
 import { getDictationState } from '@renderer/features/chat/components/composer/take/dictationStore'
 import { routeVoiceTurn, type VoiceRunTarget } from './turnRouting'
+import { stopSpeech } from './speechPlayback'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot, type VoiceTurn } from './voiceSessionController'
 
 type ModeState = {
@@ -93,6 +94,8 @@ export async function startVoiceMode(owner: string, opts: { workspacePath?: stri
   const c = ensureController()
   if (mode.owner && mode.owner !== owner) await c.stop()
   handoff = null
+  // A read-aloud still playing would talk over the conversation.
+  stopSpeech()
   emit({ owner, startedAt: Date.now() })
   await c.start({
     workspacePath: opts.workspacePath ?? undefined,
