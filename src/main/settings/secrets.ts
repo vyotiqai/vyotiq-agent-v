@@ -10,6 +10,7 @@ import {
   type SecretsStatus
 } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
+import { VOICE_KEY_VENDORS, type VoiceKeyVendor } from '../../shared/voice'
 
 type SecretsFile = Record<string, string>
 
@@ -523,6 +524,49 @@ export function clearVideoEngineKey(engine: string): void {
   delete data[k]
   writeFile(data)
   logger.info('Video engine key cleared', { scope: 'secrets', provider: engine })
+}
+
+/**
+ * Keys for voice-mode vendors that are not chat providers (Deepgram,
+ * ElevenLabs…); see src/shared/voice.ts. OpenAI and OpenRouter voice use the
+ * chat-provider keys above.
+ */
+const VOICE_KEY_PREFIX = 'voice:'
+
+function voiceKeyName(vendor: VoiceKeyVendor): string {
+  if (!(VOICE_KEY_VENDORS as readonly string[]).includes(vendor)) {
+    throw new Error(`Invalid voice vendor: ${vendor}`)
+  }
+  return `${VOICE_KEY_PREFIX}${vendor}`
+}
+
+export function setVoiceKey(vendor: VoiceKeyVendor, key: string): void {
+  const trimmed = key.trim()
+  if (!trimmed) throw new Error('API key cannot be empty')
+  const data = readMutableSecretsFile()
+  data[voiceKeyName(vendor)] = encryptBlob(trimmed)
+  writeFile(data)
+  logger.info('Voice key saved', { scope: 'secrets', provider: vendor })
+}
+
+export function getVoiceKey(vendor: VoiceKeyVendor): string | null {
+  const encrypted = readFile()[voiceKeyName(vendor)]
+  if (!encrypted) return null
+  return decryptBlobCached(encrypted)
+}
+
+export function hasVoiceKey(vendor: VoiceKeyVendor): boolean {
+  const encrypted = readFile()[voiceKeyName(vendor)]
+  return typeof encrypted === 'string' && encrypted.length > 0
+}
+
+export function clearVoiceKey(vendor: VoiceKeyVendor): void {
+  const data = readMutableSecretsFile()
+  const k = voiceKeyName(vendor)
+  if (!(k in data)) return
+  delete data[k]
+  writeFile(data)
+  logger.info('Voice key cleared', { scope: 'secrets', provider: vendor })
 }
 
 const MCP_SERVER_SECRETS_PREFIX = 'mcp-server:'

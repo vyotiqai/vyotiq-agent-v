@@ -70,6 +70,7 @@ export const EXPORTED_KEYS: readonly Key[] = [
   'autoCheckUpdates',
   'codeIndex',
   'dictation',
+  'voice',
   'autonomousMode',
   'autonomousSkipQuestions',
   'storage',

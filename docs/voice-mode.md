@@ -6,14 +6,11 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated on every commit to the `feat/voice-mode` branch.
 
-> **Status:** design reviewed in part (2026-10-11: Q2, Q4, Q6, Q8 answered; then
-> multi-provider with your own keys, Voice settings, behaviour spec and v2 backlog added).
-> No implementation code yet: it is **waiting on Ajay's newer local code
-> reaching GitHub** (Q8), so the build doesn't start on stale files.
+> **Status:** Phase 2 (foundations) in progress on `feat/voice-mode`, built on
+> the GitHub copy of `main` (D-19). Commits stay local in the voice worktree
+> until Ajay says to push. Design: Q2, Q4, Q6, Q8 answered; multi-provider
+> with your own keys, Voice settings, behaviour spec and v2 backlog added.
 > PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft).
->
-> **Branch:** `feat/voice-mode` (draft PR). Built against `main` at `0febc99`
-> (2026-10-04). Ajay's local checkout is newer than GitHub; see [§16](#16-risks).
 
 ---
 
@@ -1214,9 +1211,20 @@ with the feature off.
 - [x] Phase 0: design doc drafted (2026-10-11)
 - [x] Phase 0: blocking questions answered (Q2, Q4, Q6, Q8) — 2026-10-11
 - [ ] Phase 0: remaining questions (Q1, Q3, Q5, Q7, Q9): taking the recommendations unless Ajay says otherwise
-- [ ] Ajay's local code pushed to GitHub; branch updated onto it
-- [ ] Phase 1 · Spike
+- [ ] Ajay's local code pushed to GitHub; branch updated onto it (no longer blocking, D-19)
+- [ ] Phase 1 · Spike: needs real keys, a mic and speakers on Windows/macOS; can't run in the cloud workspace, so it moves to the first hands-on session. Phase 2 doesn't depend on it
 - [ ] Phase 2 · Foundations
+  - [x] Provider catalog, auto/fallback resolution, error codes (`src/shared/voice.ts`)
+  - [x] `Settings.voice` schema + defaults, in settings export (`src/shared/ipc/schemas/voice.ts`)
+  - [x] Voice key namespace in `secrets.ts`; key status without exposing keys (`src/main/voice/keys.ts`)
+  - [x] Provider interfaces (`src/main/voice/providers/types.ts`), `VoiceError`
+  - [x] Speech text cleaning, sentence splitter, fallback summary, stop phrases (`src/main/voice/speechText.ts`)
+  - [x] Streaming `<spoken>` parser + display strip (`src/shared/spokenSummary.ts`)
+  - [x] Session state machine as a pure function (`src/shared/voiceSession.ts`)
+  - [x] Tests: 49 new, passing; typecheck and lint clean
+  - [ ] Fixture STT/TTS adapters
+  - [ ] Renderer player (Web Audio queue, ducking, output level)
+  - [ ] IPC channels for keys and catalog
 - [ ] Phase 3 · Speaking
 - [ ] Phase 4 · Listening
 - [ ] Phase 4b · More providers
@@ -1250,6 +1258,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-16 | 2026-10-11 | A dedicated **Voice mode** settings group: provider pickers, per-vendor key management with verification, voice + speed with preview, behaviour toggles (§13.7) | Decided (Ajay) |
 | D-17 | 2026-10-11 | Voice agent behaviour spec B1–B12 (§8.6): brief, quick acknowledgements, stops when interrupted, doesn't repeat itself, warm but not fake-cheery, summary spoken + details on screen | Decided (Ajay) |
 | D-18 | 2026-10-11 | Wake word, stronger privacy indicators and deeper failure recovery are **v2** (§23) | Decided (Ajay) |
+| D-19 | 2026-10-11 | Build on the GitHub copy now instead of waiting for Ajay's local code (supersedes D-14). New code goes in new files; edits to shared files stay small and additive, to keep the later merge easy. Commits stay local until Ajay says to push | Decided (Ajay) |
 
 ---
 
