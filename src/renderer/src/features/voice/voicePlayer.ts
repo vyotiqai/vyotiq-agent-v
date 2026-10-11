@@ -4,7 +4,7 @@
  * one AudioContext clock, so playback is gapless however the chunks were cut.
  *
  * No <audio> element and no blob: URLs: the renderer CSP has no `blob:` in
- * `media-src`, and a test bans `URL.createObjectURL` in the renderer.
+ * `media-src`, and a test keeps object URLs out of the renderer.
  */
 
 /** Wait this long before the first chunk of a reply, to absorb network jitter. */

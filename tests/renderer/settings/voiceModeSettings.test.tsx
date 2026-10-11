@@ -5,6 +5,7 @@ import { VoiceModeSettings, voiceKeyProblem } from '@renderer/features/settings/
 import { DEFAULT_SETTINGS, emptySecretStatus, type Settings } from '@shared/ipc'
 import type { SettingsFormState } from '@renderer/features/settings/hooks/useSettingsForm'
 import type { VoiceKeyStatus } from '@shared/ipc/schemas/voice'
+import { resetSpeechForTests } from '@renderer/features/voice/speechPlayback'
 
 const noKeys: VoiceKeyStatus = {
   voice: { deepgram: { set: false }, assemblyai: { set: false }, elevenlabs: { set: false }, cartesia: { set: false } },
@@ -27,16 +28,37 @@ function makeForm(settings: Partial<Settings> = {}) {
 let voiceKeyStatus: ReturnType<typeof vi.fn>
 let voiceSetKey: ReturnType<typeof vi.fn>
 let voiceClearKey: ReturnType<typeof vi.fn>
+let voiceListVoices: ReturnType<typeof vi.fn>
+let voiceSpeak: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   voiceKeyStatus = vi.fn(async () => ({ ok: true, data: noKeys }))
   voiceSetKey = vi.fn()
   voiceClearKey = vi.fn()
-  ;(window as unknown as { vyotiq: unknown }).vyotiq = { voiceKeyStatus, voiceSetKey, voiceClearKey, platform: 'win32' }
+  voiceListVoices = vi.fn(async () => ({
+    ok: true,
+    data: [
+      { id: 'alloy', label: 'Alloy', description: 'Neutral' },
+      { id: 'nova', label: 'Nova' }
+    ]
+  }))
+  voiceSpeak = vi.fn(async () => ({ ok: true, data: { utteranceId: 'p1', provider: 'openai', voiceId: 'nova' } }))
+  ;(window as unknown as { vyotiq: unknown }).vyotiq = {
+    voiceKeyStatus,
+    voiceSetKey,
+    voiceClearKey,
+    voiceListVoices,
+    voiceSpeak,
+    voiceStopSpeaking: vi.fn(async () => ({ ok: true, data: true })),
+    onVoiceAudioOut: () => () => {},
+    onVoiceSpeakEnd: () => () => {},
+    platform: 'win32'
+  }
 })
 
 afterEach(() => {
   cleanup()
+  resetSpeechForTests()
   vi.restoreAllMocks()
 })
 
@@ -97,6 +119,30 @@ describe('Settings → Voice mode', () => {
     render(<VoiceModeSettings form={form} secrets={emptySecretStatus()} />)
     fireEvent.click(screen.getByRole('radio', { name: 'Stop the agent' }))
     expect(runUpdate).toHaveBeenCalledWith({ voice: expect.objectContaining({ interruptMode: 'cancel' }) })
+  })
+
+  it('lists the provider’s voices and previews the chosen one at the chosen speed', async () => {
+    const { form } = makeForm({
+      voice: { ...DEFAULT_SETTINGS.voice, speed: 1.15, tts: { openai: { voiceId: 'nova' } } }
+    })
+    render(<VoiceModeSettings form={form} secrets={{ ...emptySecretStatus(), openai: true }} />)
+    await waitFor(() => expect(voiceListVoices).toHaveBeenCalledWith({ provider: 'openai' }))
+    const row = document.querySelector('[data-settings-field="voice-voice"]')!
+    await waitFor(() => expect(row.textContent).toContain('2 voices'))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    await waitFor(() =>
+      expect(voiceSpeak).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'plain', provider: 'openai', voiceId: 'nova', speed: 1.15 })
+      )
+    )
+  })
+
+  it('without a key, the preview is off and says why', async () => {
+    const { form } = makeForm()
+    render(<VoiceModeSettings form={form} secrets={emptySecretStatus()} />)
+    const row = document.querySelector('[data-settings-field="voice-voice"]')!
+    expect(row.textContent).toContain('Add your ElevenLabs key')
+    expect((screen.getByRole('button', { name: 'Preview' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('locks the language for an English-only listener', () => {

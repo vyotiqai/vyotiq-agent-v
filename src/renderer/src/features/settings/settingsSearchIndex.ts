@@ -434,6 +434,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'voice'
   },
   {
+    id: 'voice-voice',
+    title: 'Voice',
+    keywords: ['voice mode','voice','speaker','preview','sound','accent','clone','elevenlabs','cartesia','alloy','nova'],
+    section: 'voice'
+  },
+  {
     id: 'voice-speed',
     title: 'Speaking speed',
     keywords: ['voice mode','voice','speed','rate','faster','slower'],

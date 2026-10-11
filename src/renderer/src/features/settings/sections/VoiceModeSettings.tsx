@@ -13,6 +13,7 @@ import {
   TTS_CATALOG,
   VOICE_KEY_VENDORS,
   VOICE_KEY_VENDOR_LABEL,
+  clampSpeed,
   keySourceReady,
   parseVoiceIpcCode,
   resolveModel,
@@ -28,7 +29,9 @@ import {
   type VoiceKeyVendor
 } from '@shared/voice'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Input, cn } from '@renderer/lib/ui'
+import { Button, Input, Menu, cn, selectTriggerClass } from '@renderer/lib/ui'
+import { speakText, stopSpeech, useSpeech } from '@renderer/features/voice/speechPlayback'
+import type { VoiceOptionInfo } from '@shared/ipc/schemas/voice'
 import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup } from '../components/SettingsField'
@@ -72,6 +75,110 @@ const LANGUAGE_OPTIONS: readonly SettingsOption<string>[] = [
   { value: 'ja', label: 'Japanese' },
   { value: 'nl', label: 'Dutch' }
 ]
+
+/** What Preview says: short, and in the voice of a finished task. */
+export const PREVIEW_LINE = 'Done. I fixed the failing test, and the diff is on screen.'
+
+/** The voice picker for the current speaking provider, with a Preview. */
+function VoicePicker({
+  provider,
+  providerLabel,
+  value,
+  fallback,
+  speed,
+  keyReady,
+  keysVersion,
+  locked,
+  changed,
+  onChange
+}: {
+  provider: TtsProviderId
+  providerLabel: string
+  value: string
+  fallback: { id: string; label: string }
+  speed: number
+  keyReady: boolean
+  /** Bumps when keys change, so the list is fetched again with the new key. */
+  keysVersion: string
+  locked: boolean
+  changed: boolean
+  onChange: (voiceId: string) => void
+}) {
+  const [voices, setVoices] = useState<VoiceOptionInfo[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const preview = useSpeech('preview')
+
+  useEffect(() => {
+    let live = true
+    setVoices(null)
+    setLoadError(null)
+    void window.vyotiq.voiceListVoices?.({ provider })?.then((res) => {
+      if (!live) return
+      if (res.ok) setVoices(res.data)
+      else setLoadError(`Couldn’t load ${providerLabel} voices.`)
+    })
+    return () => {
+      live = false
+    }
+  }, [provider, providerLabel, keysVersion])
+
+  const list = voices ?? []
+  const current = value || fallback.id || list[0]?.id || ''
+  const options = list.map((v) => ({
+    value: v.id,
+    label: v.description ? `${v.label} · ${v.description}` : v.label,
+    group: v.custom ? 'Your voices' : list.some((x) => x.custom) ? 'Library' : undefined
+  }))
+  if (current && !options.some((o) => o.value === current)) {
+    options.unshift({ value: current, label: current === fallback.id ? fallback.label : current, group: undefined })
+  }
+
+  const hint = !keyReady
+    ? `Add your ${providerLabel} key to hear previews and see all its voices.`
+    : loadError ?? (voices === null ? 'Loading voices…' : `${list.length} voices`)
+
+  return (
+    <SettingsField
+      id="voice-voice"
+      title="Voice"
+      hint={hint}
+      changed={changed}
+      below={preview.error ? <p className="m-0 text-xs text-danger" role="alert">{preview.error}</p> : null}
+    >
+      <div className="flex items-center gap-2">
+        <div style={{ minWidth: 260 }}>
+          <Menu
+            aria-label="Voice"
+            value={current}
+            options={options}
+            searchable={options.length > 12}
+            placement="down"
+            disabled={locked || options.length === 0}
+            triggerClassName={cn(selectTriggerClass({ quiet: !changed, mono: false }), 'w-full')}
+            onChange={(next) => {
+              if (next !== value) onChange(next)
+            }}
+          />
+        </div>
+        <Button
+          size="xs"
+          variant="secondary"
+          icon={preview.active ? 'stop' : 'play'}
+          disabled={!keyReady || !current}
+          aria-pressed={preview.active}
+          data-voice-preview={preview.active ? preview.phase : 'idle'}
+          onClick={() =>
+            preview.active
+              ? stopSpeech()
+              : void speakText('preview', { text: PREVIEW_LINE, kind: 'plain', provider, voiceId: current, speed })
+          }
+        >
+          {preview.active ? 'Stop' : 'Preview'}
+        </Button>
+      </div>
+    </SettingsField>
+  )
+}
 
 /** The words for a key the vendor refused or we couldn't check (§13.7 "States and copy"). */
 export function voiceKeyProblem(code: VoiceErrorCode | 'unchecked', vendor: string): string {
@@ -388,6 +495,18 @@ export function VoiceModeSettings({
             onChange={(model) => patch({ tts: { ...voice.tts, [tts.id]: { ...voice.tts[tts.id], model } } })}
           />
         ) : null}
+        <VoicePicker
+          provider={tts.id}
+          providerLabel={tts.label}
+          value={voice.tts[tts.id]?.voiceId ?? ''}
+          fallback={tts.defaultVoice}
+          speed={clampSpeed(voice.speed, tts.caps.speed)}
+          keyReady={keySourceReady(tts.key, keys)}
+          keysVersion={JSON.stringify(keys)}
+          locked={locked}
+          changed={Boolean(voice.tts[tts.id]?.voiceId)}
+          onChange={(voiceId) => patch({ tts: { ...voice.tts, [tts.id]: { ...voice.tts[tts.id], voiceId } } })}
+        />
         <SegmentedField
           id="voice-speed"
           title="Speaking speed"

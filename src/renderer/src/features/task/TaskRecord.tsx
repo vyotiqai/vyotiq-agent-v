@@ -37,6 +37,7 @@ import {
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { requestCommitBox } from '@renderer/features/chat/commitRequest'
 import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
+import { stripSpokenBlock } from '@shared/spokenSummary'
 
 export type TaskRecordProps = {
   model: RecordModel
@@ -497,7 +498,7 @@ function RunBody({
       ) : null}
       {run.result ? (
         <ResultRow
-          text={run.result.text}
+          text={stripSpokenBlock(run.result.text)}
           streaming={run.result.streaming}
           checks={live ? [] : checks}
           files={changedFiles}
@@ -525,6 +526,7 @@ function RunBody({
         feedback={isLast && !live ? props.runFeedback : undefined}
         checks={checks}
         summary={run.result && !run.result.streaming ? run.result.text : undefined}
+        readAloudId={`answer:${sessionRunId ?? 'record'}:${run.n}`}
         outcome={state === 'stopped' || state === 'failed' ? state : undefined}
         outcomeDetail={stopped}
         actions={
@@ -571,7 +573,7 @@ function HistoryRun({
   const cost = usage ? turnCost(usage) : null
   const duration = runDuration(run)
   // The answer's first line, as words: "Checks recorded: **4 met**" showed its asterisks.
-  const answerLine = run.result?.text.split('\n').find((l) => l.trim())
+  const answerLine = run.result ? stripSpokenBlock(run.result.text).split('\n').find((l) => l.trim()) : undefined
   const title = answerLine != null ? plainLine(answerLine) : run.text || (run.command ? `/${run.command}` : '')
   return (
     <div data-history-run={run.n}>

@@ -1227,7 +1227,16 @@ with the feature off.
   - [x] Renderer player: gapless Web Audio queue, 60 ms jitter buffer, duck to 20%, 30 ms fade on barge-in, output level (`features/voice/voicePlayer.ts`)
   - [x] 12 more tests (67 total for voice); IPC contract test updated; test-typecheck ratchet: no new errors
 - [x] Voice mode settings, first cut (2026-10-11, ahead of Phase 6 because Ajay asked for it): provider pickers with Automatic and privacy lines, model per provider, speaking speed, language, all vendor keys with check-on-save, behaviour switches; search entries; 6 tests (`features/settings/sections/VoiceModeSettings.tsx`). Voice picker with preview comes with the speaking engines in Phase 3
-- [ ] Phase 3 · Speaking
+- [x] Phase 3 · Speaking (2026-10-11), not yet heard on real hardware
+  - [x] ElevenLabs (multi-context websocket), Cartesia (websocket), OpenAI + OpenRouter (`/audio/speech`, two sentences in flight, in order) (`src/main/voice/providers/tts/`)
+  - [x] Provider registry with fixtures under `VYOTIQ_E2E_FIXTURE` (`providers/registry.ts`); websocket seam (`socket.ts`)
+  - [x] Speaker service: one utterance at a time, `<spoken>` block or fallback summary, voice lists cached a day (`speaker.ts`)
+  - [x] IPC `voice:speak`, `voice:stopSpeaking`, `voice:voices`; pushes `voice:audio-out`, `voice:speak-end`
+  - [x] Renderer playback store + **Read aloud** button beside Copy on every finished answer (`features/voice/speechPlayback.ts`, `ReadAloudButton.tsx`)
+  - [x] Voice picker with ▶ Preview in Settings → Voice (your own voices grouped first)
+  - [x] `<spoken>` block hidden from the displayed and copied answer
+  - [x] 34 more tests (voice total: 101). Full unit suites: 8,701 pass; the 36 that fail here fail identically on untouched `main` in this workspace (no network, setup scripts skipped), so none are from this branch
+  - [ ] Hear it: first run with a real key on Windows/macOS (needs Ajay at his computer)
 - [ ] Phase 4 · Listening
 - [ ] Phase 4b · More providers
 - [ ] Phase 5 · Conversation
@@ -1250,7 +1259,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-06 | 2026-10-11 | Reuse dictation's mic capture, segmenter, level meter, OpenAI realtime client and key storage | Proposed |
 | D-07 | 2026-10-11 | A finished turn is sent through the renderer's chat controller like a typed message, not a new main-side entry | Proposed |
 | D-08 | 2026-10-11 | One new text tag, `<spoken>`; no vendor expressiveness tags (SSML, `[laughs]`) in v1 | Proposed |
-| D-09 | 2026-10-11 | IPC audio encoding: base64 (as dictation) vs transferable `ArrayBuffer` | Open |
+| D-09 | 2026-10-11 | IPC audio: main → renderer sends `Int16Array` by structured clone (no base64; ~33% smaller, no encode/decode). Renderer → main mic audio decided in Phase 4 | Decided (main → renderer) |
 | D-10 | 2026-10-11 | Text is redacted before it goes to the TTS vendor | Proposed |
 | D-11 | 2026-10-11 | Voice mode lives in a bar docked on the task pane, in place of the composer (§13.1). Ajay had no preference; this was the recommendation | Decided |
 | D-12 | 2026-10-11 | Talking while the agent works steers the run (follow-up + promote); a stop phrase cancels it (§6.3) | Decided (Ajay) |
@@ -1262,6 +1271,8 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-18 | 2026-10-11 | Wake word, stronger privacy indicators and deeper failure recovery are **v2** (§23) | Decided (Ajay) |
 | D-19 | 2026-10-11 | Build on the GitHub copy now instead of waiting for Ajay's local code (supersedes D-14). New code goes in new files; edits to shared files stay small and additive, to keep the later merge easy. Commits stay local until Ajay says to push | Decided (Ajay) |
 | D-20 | 2026-10-11 | Speaking speed is four presets (Slower 0.85×, Normal, Faster 1.15×, Fastest 1.3×) on the existing `Segmented` control rather than a slider: the design system has no slider primitive, presets read faster, and each is clamped to the provider's range at use. A fine slider can follow if presets prove too coarse | Proposed |
+| D-21 | 2026-10-11 | Read aloud sits beside Copy on the receipt line of every finished answer, not in the answer body: it's an action on the whole answer, and the receipt already holds those | Proposed |
+| D-22 | 2026-10-11 | ElevenLabs opens one websocket per spoken reply for now. Keeping one socket warm for the whole session (§14 "warm sockets") lands with the live session in Phase 5, where it saves the handshake on every turn | Proposed |
 
 ---
 
