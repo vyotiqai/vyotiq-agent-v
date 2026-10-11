@@ -6,7 +6,8 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated on every commit to the `feat/voice-mode` branch.
 
-> **Status:** design reviewed in part (2026-10-11: Q2, Q4, Q6 and Q8 answered).
+> **Status:** design reviewed in part (2026-10-11: Q2, Q4, Q6, Q8 answered; then
+> multi-provider with your own keys, Voice settings, behaviour spec and v2 backlog added).
 > No implementation code yet: it is **waiting on Ajay's newer local code
 > reaching GitHub** (Q8), so the build doesn't start on stale files.
 > PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft).
@@ -25,7 +26,7 @@ sections are updated on every commit to the `feat/voice-mode` branch.
 5. [The session state machine](#5-the-session-state-machine)
 6. [Turn-taking and barge-in](#6-turn-taking-and-barge-in)
 7. [Connecting to the agent loop](#7-connecting-to-the-agent-loop)
-8. [What gets spoken: the speech text pipeline](#8-what-gets-spoken-the-speech-text-pipeline)
+8. [What gets spoken: the speech text pipeline](#8-what-gets-spoken-the-speech-text-pipeline) (incl. [§8.6 voice agent behaviour spec](#86-voice-agent-behaviour-spec))
 9. [Providers and models](#9-providers-and-models)
 10. [Audio formats and transport](#10-audio-formats-and-transport)
 11. [IPC contract](#11-ipc-contract)
@@ -40,6 +41,7 @@ sections are updated on every commit to the `feat/voice-mode` branch.
 20. [Build plan](#20-build-plan)
 21. [Decision log](#21-decision-log)
 22. [References](#22-references)
+23. [Next version (v2 backlog)](#23-next-version-v2-backlog)
 
 ---
 
@@ -188,10 +190,15 @@ src/main/voice/
     types.ts                                SttProvider, TtsProvider interfaces (§9.1)
     registry.ts                             id → adapter, plus capability flags
     stt/deepgramFlux.ts
+    stt/assemblyai.ts
+    stt/elevenlabsScribe.ts
     stt/openaiRealtime.ts                   wraps dictation/liveOpenAI.ts
+    stt/local.ts                            wraps dictation's local engine (beta)
     stt/fixture.ts                          scripted, for tests and VYOTIQ_E2E_FIXTURE
     tts/elevenlabs.ts
+    tts/cartesia.ts
     tts/openai.ts
+    tts/openrouter.ts                       OpenAI-compatible speech endpoint
     tts/fixture.ts
   socket.ts                                 shared websocket wrapper: open timeout,
                                             keepalive, reconnect with backoff, proxy
@@ -379,7 +386,7 @@ the prompt cache: the prefix must stay byte-identical across steps (see
 `docs/architecture.md`, "The prompt"). The section is fixed for the life of the
 session, so it costs one cache miss when voice starts or stops, not one per step.
 
-Draft text:
+Draft text (superseded by the fuller draft in §8.6):
 
 > The person is talking to you by voice and will hear your reply read aloud.
 > Begin your final reply with a `<spoken>` block: one to three short spoken
@@ -534,6 +541,42 @@ without choppy prosody:
   recommended pattern). OpenAI TTS (HTTP): one request per sentence, the next
   request started while the previous one plays.
 
+### 8.6 Voice agent behaviour spec
+
+The rules for how it sounds, and why (Ajay asked for this to be spelled out,
+2026-10-11). They're carried out in three places: the `voice_reply` prompt
+section (§7.2), the speech text pipeline (§8.3–8.5) and the session state
+machine (§5). Each rule names where it lives.
+
+| # | Rule | Why | Where it's enforced |
+| --- | --- | --- | --- |
+| B1 | **Brief by default.** One to three spoken sentences. Go longer only when you ask for detail ("walk me through it") | Long speech is the most common way voice assistants fail; listening is slower than reading | Prompt (`<spoken>` length) + fallback cap (§8.2) |
+| B2 | **Know the medium.** Code, lists, paths, diffs and numbers-heavy output go on screen; the voice says what it is and where ("The diff's on screen, three files") | A fenced block read aloud is useless | Prompt + `speechText.ts` |
+| B3 | **No dead air.** Acknowledge within ~100 ms of your turn ending (earcon + orb). If the first words take more than ~1.5 s, a short spoken acknowledgement ("Sure, let me look.") is allowed once per turn | Silence feels like it didn't hear you | Session timers (§13.8); acknowledgement from a small fixed phrase set in main, not the model, so it costs nothing and never says anything wrong |
+| B4 | **Say what it's doing during long work.** One short cue when a slow tool starts ("Running the tests."), never more than one every ~6 s, nothing for tools under 1.5 s | Long silence while working feels broken; a running commentary is grating | Progress cues (§8.4) |
+| B5 | **Stop the moment you talk.** No "sorry, go ahead", no finishing the sentence, no repeating what it already said when it resumes | Interrupting is the most natural thing people do | Barge-in (§6.2); prompt: "if interrupted, don't repeat what you already said" |
+| B6 | **Don't repeat itself.** It doesn't restate your question or recap what it said in an earlier turn unless asked | Repetition is far more annoying spoken than written | Prompt |
+| B7 | **Warm, steady personality; not fake-cheery.** Friendly and direct; matches your register (serious when you are, lighter when you are); a little humour when it fits; never over-apologises or gushes | Over-enthusiasm reads as insincere when spoken | Prompt (`voice_reply` tone lines); respects the user's own Tone / Persona settings (`response_style`) when set |
+| B8 | **Honest about uncertainty and failure.** "I'm not sure this fixes it; the test is flaky." "That failed, the error's on screen." It never covers a failure with confident speech | The voice must not be more confident than the record | Prompt + failure lines from run status (§7.3) |
+| B9 | **Confirm before risky actions, by voice too.** Reads approvals as a short question, accepts yes/no for ordinary ones, requires a click for risky ones | Mishearing must never delete things | §7.5 |
+| B10 | **Repeat back when unsure what it heard.** When transcript confidence is low on a word that matters (a file name, "delete"), it asks: "Did you say *delete* the branch?" | Speech recognition makes mistakes; agents act on words | STT confidence (where the provider gives it) + prompt; low-confidence words highlighted in the record |
+| B11 | **Plain words for numbers and names.** "about two hundred milliseconds", "the loop file" rather than reading a full path or a 12-digit number | Natural to hear | `speechText.ts` + prompt |
+| B12 | **Ends turns clearly.** Finishes with what happens next or a direct question, so you know it's your turn ("Want me to run the full suite?"). No trailing "Let me know if you need anything else" | Clear hand-back is how spoken turn-taking works | Prompt |
+
+**Draft `voice_reply` prompt section** (replaces the shorter draft in §7.2;
+tuned in Phase 5):
+
+> The person is talking with you by voice and hears your reply read aloud.
+> Begin your final reply with a `<spoken>` block: one to three short spoken
+> sentences in plain, natural speech: no code, file paths, markdown, lists or
+> long numbers. Say what you did or found, and end with what happens next or
+> one direct question. Put everything detailed in the written reply after the
+> block; in the spoken part, point to it ("the diff's on screen").
+> Be warm and direct and match their tone; don't gush, apologise repeatedly,
+> restate their question or repeat what you said earlier. If you're unsure,
+> say so plainly. If a word that matters may have been misheard, ask before
+> acting on it. Between tool calls, narrate in a few words at most.
+
 ---
 
 ## 9. Providers and models
@@ -614,53 +657,77 @@ Rules every adapter follows:
 - There's a `fixture` adapter for each side, used by tests and by
   `VYOTIQ_E2E_FIXTURE=1`.
 
-### 9.2 Speech to text
+### 9.2 You choose the providers and bring the keys
 
-| | **Deepgram Flux** (default) | OpenAI realtime transcription (alternative) |
-| --- | --- | --- |
-| Model | `flux-general-en`; `flux-general-multi` for other languages | `gpt-live-transcribe` (as dictation uses today) |
-| Endpoint | `wss://api.deepgram.com/v2/listen` (Flux needs `/v2`) | `wss://api.openai.com/v1/realtime?intent=transcription` |
-| Audio in | `linear16`, 16 kHz, ~80 ms chunks (2,560 bytes) | PCM 24 kHz (upsampled from 16 kHz in main, existing code) |
-| Turn detection | Built in: `EndOfTurn`, optional `EagerEndOfTurn` / `TurnResumed`; `eot_threshold` 0.5–1.0 (default 0.7), `eot_timeout_ms` 500–60000 (default 5000) | Server VAD (silence-based) or our local pause detector |
-| Vocabulary | `keyterms` (≤ 100, replaceable mid-stream with `Configure`) | `prompt` / `keywords` (existing) |
-| Key | New: Deepgram key | Reuses the OpenAI key you already have |
-| Why | Made for voice agents. Turn detection is a model, not a timer; that's the biggest UX difference | No new account; code already exists and is tested |
+Voice mode has no single fixed vendor (Ajay, 2026-10-11, D-15). Each
+direction, **Listens with** (STT) and **Speaks with** (TTS), is a choice from a
+catalog. You add your own API key for each vendor you use. One key per vendor
+covers both directions: an ElevenLabs key powers ElevenLabs listening *and*
+speaking.
 
-Workspace identifiers go in as key terms (≤ 100 for Deepgram), the same idea
-as dictation's `dictationKeywordsFromFiles`, so "run agent" can come out as
-`runAgent`.
+- Keys you already gave Agent V for the model (OpenAI, OpenRouter) are reused.
+  The row says "Using your OpenAI key from Providers" instead of asking again.
+- Vendors that aren't LLM providers (Deepgram, ElevenLabs, AssemblyAI, Cartesia)
+  get keys in Settings → Voice (§13.7).
+- The catalog lives in `src/shared/voice.ts`: one entry per provider, with its
+  label, which directions it supports, its key source, its models, its
+  capabilities and its privacy line ("Audio goes to Deepgram"). Settings, the
+  voice bar and the fallback logic all read from this catalog. Nothing is
+  hard-coded per vendor in the UI.
 
-### 9.3 Text to speech
+### 9.3 Speech to text options
 
-| | **ElevenLabs** (default) | OpenAI TTS (alternative) |
-| --- | --- | --- |
-| Model | `eleven_flash_v2_5` (low latency; ~75 ms inference; ~100–150 ms to first byte over websocket in NA/EU) | `gpt-4o-mini-tts` |
-| Transport | Websocket `wss://api.elevenlabs.io/v1/text-to-speech/{voice}/multi-stream-input?model_id=…` | HTTP `POST /v1/audio/speech`, streamed response |
-| Text in | Streamed; `flush` per sentence; one context per reply; barge-in = `close_context` | One request per sentence |
-| Audio out | `pcm_24000` (or `pcm_16000`) | `pcm` (24 kHz, 16-bit) |
-| Speed | `voice_settings.speed` (range to confirm in the spike) | `speed` 0.25–4.0 |
-| Voices | Large library + your own cloned voices (`listVoices`) | Fixed set (`alloy`, `nova`…); `instructions` steer delivery |
-| Key | New: ElevenLabs key | Reuses the OpenAI key |
-| Limits | ≤ 5 concurrent contexts per socket; 20 s inactivity timeout (raise to 180 s) | Per-request; ordinary rate limits |
+| Provider | Model(s) | Endpoint | Turn detection | Vocabulary | Key | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Deepgram Flux** (recommended) | `flux-general-en`, `flux-general-multi` | `wss://api.deepgram.com/v2/listen` | Model-based `EndOfTurn` (`eot_threshold` 0.5–1.0, default 0.7; `eot_timeout_ms` default 5000) | `keyterms` ≤ 100, updatable mid-stream | Deepgram | Built for voice agents; 16 kHz linear16, 80 ms chunks |
+| **AssemblyAI Universal Streaming** | `universal-3-6-pro` (default), `universal-streaming-english`, `universal-streaming-multilingual` | `wss://streaming.assemblyai.com/v3/ws` (US/EU residency hosts exist) | `Turn` messages with `end_of_turn`; `end_of_turn_confidence_threshold`, `min_turn_silence`, `max_turn_silence`; `ForceEndpoint` for push-to-talk | `keyterms_prompt` ≤ 100, updatable | AssemblyAI | `Authorization` header without `Bearer`; 50–1000 ms chunks |
+| **ElevenLabs Scribe Realtime** | `scribe_v2_realtime` | `wss://api.elevenlabs.io/v1/speech-to-text/realtime` | Commit-based: we commit on our local pause detector or push-to-talk release (VAD commit mode to evaluate in Phase 1) | to check | ElevenLabs | JSON chunks with base64 PCM 16 kHz; partial and committed transcripts |
+| **OpenAI realtime transcription** | `gpt-live-transcribe` | `wss://api.openai.com/v1/realtime?intent=transcription` | Server VAD, or our local pause detector (as dictation runs it today) | `prompt` / `keywords` | OpenAI (reused) | Code already exists in `dictation/liveOpenAI.ts` |
+| **This PC** (Whisper / Moonshine, beta) | `whisper-small.en`, `whisper-tiny.en`, `moonshine-base` | Local utility process | Local pause detector | — | none | Already built for dictation. Not streaming: each turn is transcribed when it ends, so replies start later. Offline and private. A bonus, not cloud-first |
 
-### 9.4 Defaults and fallbacks
+**Whisper, to be precise.** OpenAI's hosted Whisper (`whisper-1`) is batch-only
+(upload a file, get text back), so it can't produce live captions or detect turns.
+The cloud "Whisper" option is the OpenAI realtime row above. Local Whisper is the
+*This PC* row.
 
-The defaults asked for are **Deepgram + ElevenLabs**: the best quality and
-latency, but two new accounts and keys. The recommended behaviour (Q6):
+### 9.4 Text to speech options
 
-- Settings default to Deepgram + ElevenLabs.
-- **If those keys aren't set but an OpenAI key is**, voice mode still works on
-  OpenAI for both sides, and the voice bar says which engine is in use. The
-  first press doesn't fail. That fixes dictation finding #12 ("the default
-  fails") for voice.
-- If no usable key exists, pressing the voice button opens a **Set up voice**
-  popover with three rows (Deepgram, ElevenLabs, OpenAI), each with *Add key*.
-  It doesn't fail.
+| Provider | Model(s) | Transport | Streams text in? | Barge-in | Speed | Key | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **ElevenLabs** (recommended) | `eleven_flash_v2_5` (fast); higher-quality models selectable | WS `…/v1/text-to-speech/{voice}/multi-stream-input` | Yes, `flush` per sentence | `close_context` | `voice_settings.speed` (range to confirm) | ElevenLabs | ~100–150 ms to first byte (NA/EU); ≤ 5 contexts per socket; cloned voices appear in the list |
+| **Cartesia Sonic** | `sonic-3.6`, `sonic-latest` | WS `wss://api.cartesia.ai/tts/websocket` | Yes, `continue: true` per chunk, `context_id` | `{ context_id, cancel: true }` | 0.6–1.5 | Cartesia | Raw `pcm_s16le` at 24 kHz; also has volume and emotion controls; versioned API (`cartesia_version`) |
+| **OpenAI** | `gpt-4o-mini-tts` | HTTP `POST /v1/audio/speech`, streamed | Per sentence | Abort the request | 0.25–4.0 | OpenAI (reused) | `instructions` steer the delivery ("calm, brief"); fixed voice set |
+| **OpenRouter** | `openai/gpt-4o-mini-tts-…`, Gemini, Mistral Voxtral, Azure MAI-Voice and others | HTTP `POST /api/v1/audio/speech` (OpenAI-compatible) | Per sentence | Abort the request | `speed` where the model supports it | OpenRouter (reused) | Model list comes from `GET /api/v1/models?output_modalities=speech`; one key covers many voices |
+| **Deepgram** | Aura / Flux TTS | `/v2/speak` | to verify | to verify | 0.5–1.5 | Deepgram | One vendor for both directions with a single key. Details checked in Phase 1 before it's listed |
 
-Also worth knowing (not in v1): OpenRouter now proxies TTS (OpenAI-compatible
-`/api/v1/audio/speech`), so an OpenRouter key could power the OpenAI-style TTS
-adapter. Deepgram also sells TTS (`/v2/speak`), which would mean one vendor and
-one key for both directions. The provider layer makes either a small addition.
+### 9.5 Picking a default, and what happens without keys
+
+- **No key at all:** pressing the voice button opens **Set up voice** (§13.5).
+  It lists every provider, recommended first, each with *Add key*. It never fails
+  with an error.
+- **Out of the box:** Listens with = the first provider in the order Deepgram,
+  AssemblyAI, ElevenLabs, OpenAI that has a key. Speaks with = the first in the
+  order ElevenLabs, Cartesia, OpenAI, OpenRouter that has a key. If you only
+  have an OpenAI key, both are OpenAI and it just works (D-13).
+- **Your choice wins.** Once you pick a provider, it's used. If its key is later
+  removed or rejected, the session falls back to the next provider in the order
+  that has a working key, and the engine token in the bar says so ("Speaking
+  with OpenAI, ElevenLabs key rejected"). It never falls back silently.
+- **Fallback during a session** (a provider fails mid-session): see §15.
+
+### 9.6 Adding a provider later
+
+1. Write the adapter in `src/main/voice/providers/{stt|tts}/<id>.ts` against the
+   §9.1 interface, with error mapping to `VoiceErrorCode`.
+2. Add a catalog entry in `src/shared/voice.ts` (label, directions, key source,
+   models, capabilities, privacy line).
+3. If the vendor's key is new, add it to the `VoiceKeyVendor` union. The key
+   store, the settings rows and the IPC are generic over it.
+4. Add an adapter test against a fake socket, and add the endpoint to
+   `PRIVACY.md`.
+
+No UI change is needed: the settings rows, voice lists and engine token are
+built from the catalog.
 
 ---
 
@@ -712,7 +779,9 @@ All channels follow the five-place rule in `docs/architecture.md` (channel,
 | `voice:voices` | invoke | `{ provider }` | List voices for the picker |
 | `voice:preview` | invoke | `{ provider, voiceId, speed }` | Speak a sample line in Settings |
 | `voice:status` | invoke | — | Which providers have keys; which will be used |
-| `voice:setKey` / `voice:clearKey` | invoke | `{ provider, key }` | Deepgram / ElevenLabs keys (OpenAI/OpenRouter keep using `setSecret`) |
+| `voice:setKey` / `voice:clearKey` | invoke | `{ vendor: VoiceKeyVendor, key }` | Voice-only vendor keys, verified before save (§12). OpenAI/OpenRouter keep using `setSecret` |
+| `voice:keyStatus` | invoke | — | Per vendor `{ set, last4?, lastVerified?, lastError? }` |
+| `voice:catalog` | invoke | — | The provider catalog with each entry's resolved key state |
 
 `voice:event` kinds: `state`, `partial` (caption), `final`, `turn_ended { text }`,
 `speaking { contextId, text }` (what's being said, for captions),
@@ -732,26 +801,38 @@ keys, like `dictation`):
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `sttProvider` | `'deepgram' \| 'openai'` | `'deepgram'` | Auto-fallback per §9.4 |
-| `ttsProvider` | `'elevenlabs' \| 'openai'` | `'elevenlabs'` | |
-| `voiceId` | `Record<TtsProviderId, string>` | provider's default | Per provider, so switching back keeps your pick |
-| `speed` | number | `1.0` | Clamped to the provider's range |
-| `language` | ISO-639-1 or `''` | `''` (English) | `''`/`en` → `flux-general-en`; others → `flux-general-multi` + hint |
+| `sttProvider` | `SttProviderId \| 'auto'` | `'auto'` | `'auto'` = the first in the §9.5 order with a key. Ids: `deepgram`, `assemblyai`, `elevenlabs`, `openai`, `local` |
+| `ttsProvider` | `TtsProviderId \| 'auto'` | `'auto'` | Ids: `elevenlabs`, `cartesia`, `openai`, `openrouter` (+ `deepgram` once verified) |
+| `stt` | `Partial<Record<SttProviderId, { model?: string }>>` | `{}` | Per-provider model choice; empty = catalog default |
+| `tts` | `Partial<Record<TtsProviderId, { model?: string; voiceId?: string }>>` | `{}` | Per provider, so switching back keeps your voice |
+| `speed` | number | `1.0` | Clamped to the provider's range in the catalog |
+| `language` | ISO-639-1 or `''` | `''` (English) | Each adapter maps it (e.g. Flux `-en` vs `-multi` + hint) |
 | `deviceId` | string | shared with dictation | One mic choice for the app |
-| `interruptMode` | `'steer' \| 'cancel' \| 'off'` | `'steer'` | §6.3 |
+| `interruptMode` | `'steer' \| 'cancel' \| 'off'` | `'steer'` | §6.3 (D-12) |
 | `speakProgress` | boolean | `true` | Spoken cues (§8.4); off = earcon only |
 | `pushToTalkOnly` | boolean | `false` | No automatic turns; hold to talk |
-| `endOfTurnPatience` | `'quick' \| 'normal' \| 'patient'` | `'normal'` | Maps to `eot_threshold`/timeout (0.6/3 s, 0.7/5 s, 0.85/8 s), tuned in testing |
+| `endOfTurnPatience` | `'quick' \| 'normal' \| 'patient'` | `'normal'` | Each STT adapter maps this to its own knobs (Flux `eot_threshold`/timeout, AssemblyAI confidence/silence, local pause length) |
 | `approveByVoice` | boolean | `true` | Only `once`/`deny` on non-danger approvals (§7.5) |
-| `captions` | boolean | `true` | Live transcript under the orb |
+| `captions` | boolean | `true` | Live transcript in the voice bar |
+| `earcons` | boolean | `true` | Start, end and turn-accepted sounds (§13.8) |
 
-**Keys.** Deepgram and ElevenLabs aren't LLM providers, and `SecretProvider`
-only accepts `ProviderId | custom:*`. They get their own namespace in
-`secrets.ts`, the same pattern as `setVideoEngineKey`/`getVideoEngineKey`
-(encrypted with `safeStorage`, never sent to the renderer; the renderer only
-sees "set / not set"). OpenAI keeps using `getSecret('openai')`.
+**Keys.** Voice vendors that aren't LLM providers can't use `SecretProvider`,
+which only accepts `ProviderId | custom:*`. They get their own namespace in
+`secrets.ts`: `setVoiceKey(vendor, key)`, `getVoiceKey(vendor)`,
+`clearVoiceKey(vendor)` and `voiceKeyStatus()`, the same pattern as
+`setVideoEngineKey`/`getVideoEngineKey`. Keys are encrypted with `safeStorage`,
+written 0600, and never sent to the renderer; the renderer only sees
+`{ set, lastVerified?, lastError? }`. `VoiceKeyVendor` is
+`'deepgram' | 'assemblyai' | 'elevenlabs' | 'cartesia'`. OpenAI and OpenRouter
+keep using `getSecret('openai' | 'openrouter')`, so one key serves the model and
+voice.
 
-Settings UI: a **Voice mode** group in Settings → Voice, below Dictation (§13.7).
+**Checking a key.** *Add key* runs a cheap authenticated call in main (list
+voices or models) before saving, and shows the outcome on the row: ✓ verified,
+✕ rejected (with the vendor's reason mapped to plain words), or ⚠ couldn't reach
+the vendor (saved anyway, verified on first use).
+
+Settings UI: §13.7.
 
 ---
 
@@ -847,7 +928,7 @@ static shapes and the label carries the state.
   It's free in `lib/shortcuts/bindings.ts`, and mod chords forbid Shift by
   default, so it doesn't also fire dictation.
 - **Command palette:** "Start voice mode".
-- **First use:** the *Set up voice* popover (§9.4), then a one-time tip:
+- **First use:** the *Set up voice* popover (§9.5), then a one-time tip:
   "Talk naturally. Interrupt any time. Headphones work best."
 
 ### 13.6 Keys while a session is open
@@ -865,21 +946,108 @@ with the same precedence.
 
 ### 13.7 Settings → Voice
 
-Same `FormGroup`/`FormRow` grammar as the page today, with changed rows
-marked:
+Voice mode gets its own group at the top of Settings → Voice; Dictation and
+Microphone follow. It uses the page's existing `FormGroup` / `FormRow` grammar.
+Values at their default are `text-muted`, so anything you changed stands out on
+its own (CLAUDE.md "Emphasis comes from the neighbours").
 
-- **Voice mode**
-  - *Listens with*: Deepgram / OpenAI, with key status and *Add key* on the row
-  - *Speaks with*: ElevenLabs / OpenAI, key status
-  - *Voice*: a picker with ▶ preview per voice (`voice:preview`)
-  - *Speed*: slider with the provider's range, ▶ preview
-  - *Language*
-  - *When you interrupt*: Steer the agent / Stop the agent / Just stop talking
-  - *Progress updates*: Spoken / Sound only
-  - *Turn ending*: Quick / Normal / Patient
-  - *Push-to-talk only*
-  - *Approve by voice*
-- **Microphone** (shared with dictation): device + live level meter (existing)
+```
+Voice mode
+─────────────────────────────────────────────────────────────────────────────
+Listens with      [ Deepgram Flux        ▾ ]   ☁ Audio goes to Deepgram
+                    Model  flux-general-en ▾
+Speaks with       [ ElevenLabs           ▾ ]   ☁ Reply text goes to ElevenLabs
+                    Model  eleven_flash_v2_5 ▾
+Voice             [ Rachel · warm, calm  ▾ ]   ▶ Preview
+Speed             ──────●──────  1.0×           ▶ Preview
+Language          [ English              ▾ ]
+
+Keys
+  Deepgram        ✓ Verified            ••••3f9a     Replace · Remove
+  ElevenLabs      ✓ Verified            ••••a120     Replace · Remove
+  AssemblyAI      Not set                            Add key
+  Cartesia        Not set                            Add key
+  OpenAI          ✓ From Providers                   Manage in Providers
+  OpenRouter      Not set                            Manage in Providers
+
+Behaviour
+  When you interrupt     ( Steer the agent | Stop the agent | Just stop talking )
+  Progress updates       ( Spoken | Sound only )
+  Turn ending            ( Quick | Normal | Patient )
+  Push-to-talk only      [ ]
+  Approve by voice       [✓]  once/deny only; risky actions always need a click
+  Captions               [✓]
+  Sounds                 [✓]
+  Shortcut               Ctrl Shift M
+
+Microphone (shared with dictation)
+  Input           [ MacBook Pro Microphone ▾ ]  ▮▮▮▮▯▯▯▯ live level
+```
+
+**Provider pickers** (`Listens with`, `Speaks with`):
+
+- A menu (`vy-menu`, `MENU_ROW`) listing every catalog provider for that
+  direction. Each row has the provider name, a one-line trait ("Fastest turn
+  detection", "Runs on this PC") and a trailing key state: ✓, *Add key*, or
+  *From Providers*.
+- A provider without a key can still be selected. The row then shows *Add key*
+  inline, and the voice bar won't use it until the key works. Choosing it is
+  never disabled (the same rule as dictation finding #11).
+- An *Automatic* option at the top shows what it resolves to: "Automatic ·
+  Deepgram Flux".
+- The **privacy line** to the right always says where audio or text goes for
+  the current choice, with `cloud` or `lock` icons from `lib/icons`.
+
+**Model** sub-row: shown only when the provider has more than one model, with
+the catalog default first and labelled *Recommended*.
+
+**Voice picker:**
+
+- Lists voices from `voice:voices` for the selected TTS provider, fetched in
+  main with your key and cached for 24 h.
+- Each row: name, the vendor's descriptors (accent, gender, style), a ▶ preview,
+  and a badge for your own cloned voices.
+- Has a search field when there are more than 12 voices.
+- Without a key, the picker shows the catalog's built-in default names and a
+  note that previews need a key.
+
+**Speed:**
+
+- A slider limited to the provider's range from the catalog, snapping to 0.05.
+- ▶ Preview speaks one fixed sentence ("Done. I fixed the failing test and the
+  diff is on screen.") at that speed and voice.
+- A preview cancels any preview already playing.
+
+**Keys block:**
+
+- One row per vendor in the catalog, whether or not it's selected, so all keys
+  are managed in one place.
+- *Add key* opens an inline field with `type="password"` and *Save* / *Cancel*.
+  Saving verifies the key first (§12).
+- *Replace* works the same way. *Remove* asks for a short confirm when the key
+  is in use: "Voice mode uses this key. Remove it?".
+- OpenAI and OpenRouter rows link to Settings → Providers and don't duplicate
+  key entry.
+- The masked tail (`••••3f9a`) comes from main, which returns the last four
+  characters only.
+
+**States and copy:**
+
+| Situation | Row shows |
+| --- | --- |
+| Key verified | `✓ Verified` (`text-muted`) |
+| Key rejected | `✕ Key rejected: check it in your Deepgram dashboard` + *Replace* (danger icon + words, not colour alone) |
+| Out of credit / rate limited | `⚠ Deepgram says this account is out of credit` + link to the vendor's billing page |
+| Can't reach vendor | `⚠ Couldn't reach Deepgram: saved, will check on first use` |
+| Provider selected, no key | Picker row tinted `bg-warning-soft` + *Add key* |
+
+Accessibility (checked with the `wcag-desktop` skill):
+
+- Every control is keyboard-reachable with `focus-visible:vy-focus-ring`.
+- Previews announce "Playing preview" in a polite live region.
+- Key fields have visible labels.
+- Status text pairs icon and words.
+- Slider values are announced ("1.1 times").
 
 ### 13.8 UX details that make it feel right
 
@@ -959,7 +1127,7 @@ session is open but quiet. Deepgram gets `KeepAlive` while muted.
 | R-04 | Node's global `WebSocket` may ignore the proxy | Test behind a proxy; explicit proxy agent in `socket.ts` if needed |
 | R-05 | Model ignores the `<spoken>` instruction | §8.2 fallback summary |
 | R-06 | A voice turn edits files from a misheard instruction | Captions show what was heard; approvals apply unchanged; never start runs on eager end-of-turn (D-05); low-confidence words highlighted |
-| R-07 | Two new vendors, two new keys | OpenAI fallback (§9.4); setup popover |
+| R-07 | Many providers means many adapters to build and keep working as vendor APIs change | One interface, catalog-driven UI, adapter tests against fake sockets; ship the recommended + OpenAI adapters first (Phases 3–4), the rest in Phase 4b; recheck vendor docs each phase |
 | R-08 | macOS builds are unsigned, so entitlements (incl. `audio-input`) aren't applied (comment in `build/entitlements.mac.plist`) | Same situation as dictation today; mic works via `NSMicrophoneUsageDescription`. Note for release |
 | R-09 | Cost runs while the session sits open | STT bills per second of streamed audio: pause STT streaming after ~60 s of silence (local VAD still listens), resume on speech |
 
@@ -988,7 +1156,8 @@ Answers go in the decision log (§21) and this list is kept current.
 - **Audio leaves the machine** in voice mode, to the STT provider, and the
   agent's text goes to the TTS provider. The engine token says so on every
   session. `PRIVACY.md` gets a new section next to §7 (Voice dictation) naming
-  Deepgram, ElevenLabs and OpenAI and their endpoints. The README's "No audio
+  every catalog provider and its endpoints (Deepgram, AssemblyAI, ElevenLabs,
+  Cartesia, OpenAI, OpenRouter), generated from the catalog so it can't drift. The README's "No audio
   leaves the app" line is already untrue for cloud dictation and should be
   corrected in the same change.
 - **Nothing is recorded to disk.** Audio isn't kept after it's sent. Only the
@@ -1033,8 +1202,9 @@ with the feature off.
 | 0 | This design doc | Questions answered, decisions logged |
 | 1 · Spike | Throwaway script: mic → Flux → `EndOfTurn`; text → ElevenLabs → Web Audio; measure latency and echo on Windows/macOS | Numbers recorded in §14; R-02, R-04 resolved |
 | 2 · Foundations | `shared/voice.ts`, schemas, channels, settings, key namespace, provider interfaces, fixture adapters, `speechText.ts`, `<spoken>` parser, player | Unit tests green; nothing visible yet |
-| 3 · Speaking | TTS adapters (ElevenLabs, OpenAI); the `speaker` replay button on answers (a small, shippable slice that exercises TTS + player end to end) | You can hear a past answer read out |
+| 3 · Speaking | Voice key store + catalog; TTS adapters (ElevenLabs, OpenAI, OpenRouter); the `speaker` replay button on answers (a small, shippable slice that exercises TTS + player end to end) | You can hear a past answer read out |
 | 4 · Listening | STT adapters (Deepgram Flux, OpenAI realtime), the session state machine, turn → message via the renderer controller | A spoken question starts a run |
+| 4b · More providers | AssemblyAI, ElevenLabs Scribe, Cartesia, local Whisper/Moonshine (beta); Deepgram TTS once verified | Every catalog provider passes its adapter tests and a manual call with a real key |
 | 5 · Conversation | Event tap, `voice_reply` prompt section, spoken summary, progress cues, barge-in (duck/confirm/stop), steer/cancel, approvals and questions by voice | Full loop with interruption |
 | 6 · UI polish | Voice bar, orb, captions, settings group, set-up popover, earcons, shortcuts, reduced motion, a11y review | Passes `wcag-desktop` review in all 5 skins × 2 themes |
 | 7 · Hardening | Reconnect/backoff, offline, proxy, silence pause, latency logging, PRIVACY.md and README, e2e spec | All tests green; manual checklist done |
@@ -1049,6 +1219,7 @@ with the feature off.
 - [ ] Phase 2 · Foundations
 - [ ] Phase 3 · Speaking
 - [ ] Phase 4 · Listening
+- [ ] Phase 4b · More providers
 - [ ] Phase 5 · Conversation
 - [ ] Phase 6 · UI polish
 - [ ] Phase 7 · Hardening
@@ -1062,7 +1233,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | ID | Date | Decision | Status |
 | --- | --- | --- | --- |
 | D-01 | 2026-10-11 | Cloud speech providers first; local engines later through the same interfaces | Decided (Ajay) |
-| D-02 | 2026-10-11 | Defaults: Deepgram (STT) and ElevenLabs (TTS); OpenAI as the alternative for both | Decided (Ajay) |
+| D-02 | 2026-10-11 | Defaults: Deepgram (STT) and ElevenLabs (TTS); OpenAI as the alternative for both | Superseded by D-15 (now the *recommended* picks, not fixed) |
 | D-03 | 2026-10-11 | Agent V's own loop stays the brain; no speech-to-speech model in its place (it can't run Agent V's tools, approvals or record) | Proposed |
 | D-04 | 2026-10-11 | Provider sockets, keys, turn-taking and the agent bridge live in main; mic and playback in the renderer. Required anyway by the renderer CSP (no `wss:`, no `blob:` media) | Proposed |
 | D-05 | 2026-10-11 | Never start an agent run on an *eager* end-of-turn; it could act on half a sentence | Proposed |
@@ -1073,8 +1244,12 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-10 | 2026-10-11 | Text is redacted before it goes to the TTS vendor | Proposed |
 | D-11 | 2026-10-11 | Voice mode lives in a bar docked on the task pane, in place of the composer (§13.1). Ajay had no preference; this was the recommendation | Decided |
 | D-12 | 2026-10-11 | Talking while the agent works steers the run (follow-up + promote); a stop phrase cancels it (§6.3) | Decided (Ajay) |
-| D-13 | 2026-10-11 | Without Deepgram/ElevenLabs keys, voice falls back to OpenAI automatically and says so (§9.4) | Decided (Ajay) |
+| D-13 | 2026-10-11 | Without Deepgram/ElevenLabs keys, voice falls back to OpenAI automatically and says so (§9.5) | Decided (Ajay) |
 | D-14 | 2026-10-11 | Implementation code waits until Ajay's newer local code is on GitHub; this branch is then updated onto it (R-01) | Decided (Ajay) |
+| D-15 | 2026-10-11 | No fixed vendor: every catalog provider is selectable per direction; users bring their own keys; one key per vendor covers both directions; OpenAI/OpenRouter keys are reused from Providers (§9.2) | Decided (Ajay) |
+| D-16 | 2026-10-11 | A dedicated **Voice mode** settings group: provider pickers, per-vendor key management with verification, voice + speed with preview, behaviour toggles (§13.7) | Decided (Ajay) |
+| D-17 | 2026-10-11 | Voice agent behaviour spec B1–B12 (§8.6): brief, quick acknowledgements, stops when interrupted, doesn't repeat itself, warm but not fake-cheery, summary spoken + details on screen | Decided (Ajay) |
+| D-18 | 2026-10-11 | Wake word, stronger privacy indicators and deeper failure recovery are **v2** (§23) | Decided (Ajay) |
 
 ---
 
@@ -1094,3 +1269,24 @@ Vendors (checked 2026-10-11; recheck model ids and limits in Phase 1):
 - ElevenLabs multi-context websocket: <https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/multi-context-web-socket.md>
 - ElevenLabs latency guide: <https://elevenlabs.io/docs/api-reference/reducing-latency>
 - OpenRouter TTS (OpenAI-compatible speech endpoint, model list): <https://openrouter.ai/docs/features/multimodal/tts>
+- AssemblyAI streaming websocket (v3): <https://assemblyai.com/docs/streaming/api-spec/streaming-websocket>
+- ElevenLabs Scribe realtime (server side): <https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/server-side-streaming.md>
+- Cartesia TTS websocket: <https://docs.cartesia.ai/api-reference/tts/websocket>
+
+---
+
+## 23. Next version (v2 backlog)
+
+Out of scope for v1 and written down so they aren't lost (Ajay, 2026-10-11).
+Each needs its own short design before it's built.
+
+| Item | What | Notes |
+| --- | --- | --- |
+| **Wake word** | "Hey Agent V" starts a turn without a press, fully hands-free | Needs an always-on **local** keyword spotter (audio must not stream to the cloud while idle). Clear always-on indicator; off by default; per-workspace opt-in |
+| **Privacy indicators, stronger** | A persistent, OS-level "mic is live" indicator (tray/dock badge + title-bar dot) whenever the mic is open, even when the window is hidden; a per-session log of what was sent where ("12 s of audio to Deepgram, 340 characters to ElevenLabs") | v1 has the engine token and title-bar indicator (§13.8); v2 makes it system-wide and auditable |
+| **Friendlier failure handling, deeper** | Vendor-specific credit/quota detection with a "top up" link; automatic switch to the next provider mid-turn without losing the turn; "Did you mean…?" repair when a turn's transcript is low-confidence across the board | v1 maps errors to plain words with a fix button (§12, §15); v2 recovers by itself |
+| **Floating mini window** | Talk to Agent V while in your editor | Considered for v1 surface (§13.1), deferred |
+| **Local / offline engines first-class** | Streaming local STT (and local TTS, e.g. Piper/Kokoro-class models) behind the same interfaces | v1 has local Whisper/Moonshine as a non-streaming beta |
+| **Expressive TTS markup** | Vendor tags (pauses, emphasis, emotion) where the provider supports them | `supportsMarkup` capability flag already in the interface (D-08) |
+| **Voice-only mode switching** | "Switch to ask mode", "use the faster model" by voice | §7.6 |
+| **Multiple languages per session** | Auto-detect and reply in the language spoken | Needs multilingual STT models + a matching voice |
