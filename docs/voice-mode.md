@@ -6,9 +6,10 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated on every commit to the `feat/voice-mode` branch.
 
-> **Status:** design, under review. No implementation code has been written.
-> Implementation starts after the open questions in [§17](#17-open-questions)
-> are answered.
+> **Status:** design reviewed in part (2026-10-11: Q2, Q4, Q6 and Q8 answered).
+> No implementation code yet: it is **waiting on Ajay's newer local code
+> reaching GitHub** (Q8), so the build doesn't start on stale files.
+> PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft).
 >
 > **Branch:** `feat/voice-mode` (draft PR). Built against `main` at `0febc99`
 > (2026-10-04). Ajay's local checkout is newer than GitHub; see [§16](#16-risks).
@@ -968,16 +969,16 @@ session is open but quiet. Deepgram gets `KeepAlive` while muted.
 
 Answers go in the decision log (§21) and this list is kept current.
 
-| # | Question | Recommendation |
+| # | Question | Recommendation / answer |
 | --- | --- | --- |
 | Q1 | Spoken replies change the product's "never chatbot-like" stance (dictation decision 6). OK to revisit? | Yes, with brief speech + "details on screen" |
-| Q2 | Where does voice mode live? | Docked bar replacing the composer on the task pane (§13.1) |
+| Q2 | Where does voice mode live? | **Answered:** no preference → going with the docked bar (D-11) |
 | Q3 | What is spoken? | `<spoken>` summary of the final answer + short tool cues (§8) |
-| Q4 | Talking while the agent works: steer, cancel, or just stop the voice? | Steer by default; "stop" cancels (§6.3) |
+| Q4 | Talking while the agent works: steer, cancel, or just stop the voice? | **Answered:** steer by default; "stop" cancels (D-12) |
 | Q5 | Approvals by voice? | Yes for `once`/`deny` on non-danger only (§7.5) |
-| Q6 | Ship with Deepgram + ElevenLabs required, or fall back to OpenAI automatically? | Auto-fallback to OpenAI so the first press works |
+| Q6 | Ship with Deepgram + ElevenLabs required, or fall back to OpenAI automatically? | **Answered:** auto-fallback to OpenAI (D-13) |
 | Q7 | A separate (faster) model for voice turns? | Setting, default = task model |
-| Q8 | Can you push your local code to GitHub before implementation starts? | Yes, to avoid building on stale files (R-01) |
+| Q8 | Can you push your local code to GitHub before implementation starts? | **Answered:** yes, Ajay pushes first; implementation waits for it (D-14) |
 | Q9 | One big PR, or this design PR followed by stacked PRs per phase? | One branch, one draft PR, with commits per phase and this doc updated on each |
 
 ---
@@ -1041,7 +1042,9 @@ with the feature off.
 ### Progress
 
 - [x] Phase 0: design doc drafted (2026-10-11)
-- [ ] Phase 0: open questions answered
+- [x] Phase 0: blocking questions answered (Q2, Q4, Q6, Q8) — 2026-10-11
+- [ ] Phase 0: remaining questions (Q1, Q3, Q5, Q7, Q9): taking the recommendations unless Ajay says otherwise
+- [ ] Ajay's local code pushed to GitHub; branch updated onto it
 - [ ] Phase 1 · Spike
 - [ ] Phase 2 · Foundations
 - [ ] Phase 3 · Speaking
@@ -1068,6 +1071,10 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-08 | 2026-10-11 | One new text tag, `<spoken>`; no vendor expressiveness tags (SSML, `[laughs]`) in v1 | Proposed |
 | D-09 | 2026-10-11 | IPC audio encoding: base64 (as dictation) vs transferable `ArrayBuffer` | Open |
 | D-10 | 2026-10-11 | Text is redacted before it goes to the TTS vendor | Proposed |
+| D-11 | 2026-10-11 | Voice mode lives in a bar docked on the task pane, in place of the composer (§13.1). Ajay had no preference; this was the recommendation | Decided |
+| D-12 | 2026-10-11 | Talking while the agent works steers the run (follow-up + promote); a stop phrase cancels it (§6.3) | Decided (Ajay) |
+| D-13 | 2026-10-11 | Without Deepgram/ElevenLabs keys, voice falls back to OpenAI automatically and says so (§9.4) | Decided (Ajay) |
+| D-14 | 2026-10-11 | Implementation code waits until Ajay's newer local code is on GitHub; this branch is then updated onto it (R-01) | Decided (Ajay) |
 
 ---
 
