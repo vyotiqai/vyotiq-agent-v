@@ -3,6 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { IPC } from '@shared/channels'
 import { PUSH_CHANNELS as SHARED_PUSH_CHANNELS } from '../../helpers/ipcChannelRoles'
+import { readIpcRegistrationSource } from '../../helpers/ipcRegistrationSource'
 import type { VyotiqApi } from '@shared/vyotiqApi'
 
 /** Invoke channels exposed on VyotiqApi (push listeners + sync send excluded). */
@@ -110,6 +111,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   restoreHunk: IPC.runsRestoreHunk,
   homeActivity: IPC.homeActivity,
   usageExportCsv: IPC.usageExportCsv,
+  usageBudget: IPC.usageBudget,
   exportRunJson: IPC.runsExportJson,
   importRun: IPC.runsImport,
   setGoalStatus: IPC.runsSetGoalStatus,
@@ -123,6 +125,34 @@ const VYOTIQ_INVOKE_MAP: Record<
   runFeedbackSet: IPC.runFeedbackSet,
   respondToolApproval: IPC.toolApprovalResponse,
   listPendingToolApprovals: IPC.toolApprovalListPending,
+  toolSecretSet: IPC.toolSecretSet,
+  gitBranchDelete: IPC.gitBranchDelete,
+  gitDiscardUndo: IPC.gitDiscardUndo,
+  prCommentsAll: IPC.prCommentsAll,
+  ptyRename: IPC.ptyRename,
+  terminalKeptList: IPC.terminalKeptList,
+  terminalKeptStop: IPC.terminalKeptStop,
+  editorOpen: IPC.editorOpen,
+  editorList: IPC.editorList,
+  agentToolSource: IPC.agentToolSource,
+  hooksOverview: IPC.hooksOverview,
+  setupDetect: IPC.setupDetect,
+  composerFetchUrl: IPC.composerFetchUrl,
+  setupUseEnvKey: IPC.setupUseEnvKey,
+  mcpRegistrySearch: IPC.mcpRegistrySearch,
+  marketplaceCheckUpdates: IPC.marketplaceCheckUpdates,
+  hooksDecide: IPC.hooksDecide,
+  hooksForget: IPC.hooksForget,
+  hooksOpenFile: IPC.hooksOpenFile,
+  agentToolDelete: IPC.agentToolDelete,
+  prLeaveMergeQueue: IPC.prLeaveMergeQueue,
+  gitBranchRename: IPC.gitBranchRename,
+  gitStashList: IPC.gitStashList,
+  gitStashApply: IPC.gitStashApply,
+  gitStashDropAny: IPC.gitStashDropAny,
+  gitIntegrate: IPC.gitIntegrate,
+  toolSecretClear: IPC.toolSecretClear,
+  toolSecretStatus: IPC.toolSecretStatus,
   respondAgentQuestion: IPC.agentQuestionResponse,
   listPendingAgentQuestions: IPC.agentQuestionListPending,
   extractAttachment: IPC.attachmentExtract,
@@ -171,6 +201,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   gitInit: IPC.gitInit,
   gitAllowRepoCommands: IPC.gitAllowRepoCommands,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
+  promptStructure: IPC.promptStructure,
+  promptStructureCancel: IPC.promptStructureCancel,
   gitDiff: IPC.gitDiff,
   gitBranchDiff: IPC.gitBranchDiff,
   gitBlame: IPC.gitBlame,
@@ -210,6 +242,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   gitCheckout: IPC.gitCheckout,
   gitBranchStash: IPC.gitBranchStash,
   gitStashRestore: IPC.gitStashRestore,
+  gitStashDrop: IPC.gitStashDrop,
   gitStageHunk: IPC.gitStageHunk,
   gitLastCommit: IPC.gitLastCommit,
   gitAmend: IPC.gitAmend,
@@ -246,6 +279,12 @@ const VYOTIQ_INVOKE_MAP: Record<
   workspaceListRules: IPC.workspaceListRules,
   agentContext: IPC.agentContext,
   clearWorkspaceMemory: IPC.workspaceClearMemory,
+  listDeletedRuns: IPC.runsDeletedList,
+  restoreDeletedRun: IPC.runsDeletedRestore,
+  purgeDeletedRuns: IPC.runsDeletedPurge,
+  workspaceMemoryNotes: IPC.workspaceMemoryNotes,
+  workspaceMemoryNoteRead: IPC.workspaceMemoryNoteRead,
+  workspaceMemoryNoteDelete: IPC.workspaceMemoryNoteDelete,
   workspaceDiagnostics: IPC.workspaceDiagnostics,
   windowMinimize: IPC.windowMinimize,
   windowMaximize: IPC.windowMaximize,
@@ -259,6 +298,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   telemetryStatus: IPC.telemetryStatus,
   stopTrace: IPC.traceStop,
   getAppInfo: IPC.appInfo,
+  cliPathStatus: IPC.cliPathStatus,
+  cliPathSet: IPC.cliPathSet,
   getSandboxCapability: IPC.sandboxCapability,
   workspaceGrep: IPC.workspaceGrep,
   gitConflictFile: IPC.gitConflictFile,
@@ -311,6 +352,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   listNotifications: IPC.notificationsList,
   markNotificationsRead: IPC.notificationsMarkRead,
   dismissNotifications: IPC.notificationsDismiss,
+  notificationsRemoteTest: IPC.notificationsRemoteTest,
   consumeDeepLink: IPC.deepLinkConsume
 }
 
@@ -374,6 +416,7 @@ const VYOTIQ_PUSH_MAP: Record<
   onSkillsChanged: IPC.skillsChanged,
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
+  onTrayCommand: IPC.trayCommand,
   onDeepLinkOpened: IPC.deepLinkOpened,
   onScheduleWorktreeOpen: IPC.schedulesWorktreeOpen,
   onAppearanceCustomCssChanged: IPC.appearanceCustomCssChanged,
@@ -463,10 +506,7 @@ describe('main/renderer IPC contract', () => {
   })
 
   it('registers ipcMain handlers for all invoke channels', () => {
-    const registerSrc = readFileSync(
-      join(process.cwd(), 'src/main/ipc/register.ts'),
-      'utf8'
-    )
+    const registerSrc = readIpcRegistrationSource()
     for (const channel of [
       ...Object.values(VYOTIQ_INVOKE_MAP),
       ...Object.values(VYOTIQ_NAMESPACE_INVOKE_MAP)

@@ -101,8 +101,8 @@ test('Settings names what a run wrote, and says calls are re-approved when it ch
   // The catalog lists what the run wrote in its own group, open from the start.
   const group = page.locator('[data-tool-group="Agent-built tools"]')
   await expect(group).toBeVisible({ timeout: 20_000 })
-  // Reading the module means opening the file, so the one thing the list can
-  // do is say how it is gated.
+  // The group says how the tool is gated, and its row can show the code or delete it.
+  await expect(group.getByRole('button', { name: /^View the code of / })).toBeVisible()
   await expect(group.getByText(/each call asks you, and asks again whenever the code changes/)).toBeVisible()
   await expect(group.getByText(TOOL_DESCRIPTION)).toBeVisible()
 })

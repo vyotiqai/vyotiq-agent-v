@@ -79,7 +79,7 @@ function prEmptyTitle(error: string | null): string {
     return 'GitHub CLI not found'
   }
   if (/not a git repository/i.test(error)) return 'Not a git repository'
-  if (/no git remote|no remotes|no default remote|unable to determine base repository|could not determine base repository/i.test(error)) {
+  if (NO_REMOTE_RE.test(error)) {
     return 'GitHub repository not configured'
   }
   if (/no initial commit/i.test(error)) return 'No commits yet'
@@ -88,12 +88,15 @@ function prEmptyTitle(error: string | null): string {
   return 'Pull request unavailable'
 }
 
+/** The panel's error when the checkout has no GitHub remote yet. */
+const NO_REMOTE_RE = /no git remote|no remotes|no default remote|unable to determine base repository|could not determine base repository/i
+
 function prEmptyBody(error: string | null): string {
   if (!error) return 'Commit and push, then open one — or let the agent do both.'
   if (/not a git repository/i.test(error)) {
     return 'Open a workspace that contains a Git repository to use pull requests.'
   }
-  if (/no git remote|no remotes|no default remote|unable to determine base repository|could not determine base repository/i.test(error)) {
+  if (NO_REMOTE_RE.test(error)) {
     return 'Agent V will connect the matching GitHub repository or create a private one when you create a pull request.'
   }
   if (/no initial commit/i.test(error)) {
@@ -125,6 +128,8 @@ function viewedStorageKey(workspacePath: string, prNumber: number): string {
 
 /** How often to re-ask gh while a check is in flight. */
 const PR_CHECKS_POLL_MS = 15_000
+/** Reads after a re-run, until GitHub shows the job queued. */
+const RERUN_FOLLOW_UP_MS = [5_000, 15_000, 30_000, 60_000]
 /** Give up watching one head commit after this long. */
 const PR_CHECKS_POLL_MAX_MS = 30 * 60_000
 
@@ -313,7 +318,9 @@ export function mergeSummary(pr: PrView): string {
   const verdict = pr.isDraft
     ? 'It is a draft — mark it ready for review to merge.'
     : status === 'BLOCKED'
-      ? 'Branch protection blocks the merge.'
+      ? pr.mergeQueueRequired
+        ? 'The merge queue takes it once its requirements are met.'
+        : 'Branch protection blocks the merge.'
       : status === 'DIRTY'
         ? `The branch conflicts with ${pr.baseRefName}.`
         : status === 'BEHIND'
@@ -358,7 +365,9 @@ export function prMergeBlockedReason(pr: PrView): string | null {
   if (state === 'MERGED') return 'Already merged.'
   if (state === 'CLOSED') return 'The pull request is closed.'
   const status = (pr.mergeStateStatus ?? '').trim().toUpperCase()
-  if (status === 'BLOCKED') return 'Branch protection blocks the merge.'
+  // A merge queue takes a PR that still waits on checks or reviews: gh sets it
+  // to join the queue once they are met.
+  if (status === 'BLOCKED' && !pr.mergeQueueRequired) return 'Branch protection blocks the merge.'
   if (status === 'DIRTY') return `The branch conflicts with ${pr.baseRefName}.`
   return null
 }
@@ -463,6 +472,8 @@ export function PrPanel({
   const [issueDetail, setIssueDetail] = useState<GithubIssueDetail | null>(null)
   const [issueLoading, setIssueLoading] = useState(false)
   const [issueError, setIssueError] = useState<string | null>(null)
+  /** Bumped per issue opened and per workspace: an answer for an older one is dropped. */
+  const issueSeqRef = useRef(0)
   /** Failed checks' logs, read once per check link and head commit. */
   const [checkLogs, setCheckLogs] = useState<
     Record<string, { loading: boolean; log?: PrCheckLogResult; error?: string }>
@@ -473,6 +484,7 @@ export function PrPanel({
   const [cleanupBusy, setCleanupBusy] = useState(false)
   const [autoMergeOpen, setAutoMergeOpen] = useState(false)
   const [autoMergeBusy, setAutoMergeBusy] = useState(false)
+  const [dequeueBusy, setDequeueBusy] = useState(false)
   const findInputRef = useRef<HTMLInputElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const prevGitRevisionRef = useRef(gitRevision)
@@ -655,6 +667,18 @@ export function PrPanel({
     return () => window.clearInterval(timer)
   }, [pr])
 
+  /**
+   * A re-run is queued on GitHub a little after `gh run rerun` returns, so the
+   * reload right after it can still say "failed" and start no poll. A few
+   * quiet reads catch the check going pending; the poll above takes it from there.
+   */
+  const [rerunAt, setRerunAt] = useState<number | null>(null)
+  useEffect(() => {
+    if (rerunAt === null) return undefined
+    const timers = RERUN_FOLLOW_UP_MS.map((ms) => window.setTimeout(() => void loadRef.current({ quiet: true, poll: true }), ms))
+    return () => timers.forEach((t) => window.clearTimeout(t))
+  }, [rerunAt])
+
   const hadGhAuthRef = useRef(false)
 
   const applyAuthStatus = useCallback(
@@ -811,8 +835,20 @@ export function PrPanel({
     setPrBodyEdit(null)
   }, [workspacePath, runId])
 
+  const { confirm, dialog: confirmDialog } = useConfirm()
+
   const createPr = useCallback(async () => {
     if (!workspacePath || !window.vyotiq?.prCreate || createBusy) return
+    // With no remote, main connects the GitHub repository named after this
+    // folder or, when there is none, creates one and pushes to it. Creating a
+    // repository is a bigger step than the button says: ask for it on its own.
+    if (error && NO_REMOTE_RE.test(error)) {
+      const ok = await confirm(
+        'This checkout has no GitHub remote. Agent V will connect your GitHub repository with this folder’s name, or create a new private repository if you have none, and push this branch to it before opening the draft pull request.',
+        { title: 'Connect or create a GitHub repository', confirmLabel: 'Continue' }
+      )
+      if (!ok) return
+    }
     setCreateBusy(true)
     setNotice(null)
     setNoticeFailed(false)
@@ -832,7 +868,7 @@ export function PrPanel({
     } finally {
       setCreateBusy(false)
     }
-  }, [workspacePath, createBusy, load, draftSource, prTitle, prBody])
+  }, [workspacePath, createBusy, load, draftSource, prTitle, prBody, error, confirm])
 
   const showNotice = useCallback((message: string, failed: boolean) => {
     setNotice(message)
@@ -864,6 +900,11 @@ export function PrPanel({
     setCheckLogs({})
     setIssueNumber(null)
     setIssueDetail(null)
+    setIssueError(null)
+    setIssueLoading(false)
+    issueSeqRef.current += 1
+    // An issue of the last repository is not this one's: back to the list, read here.
+    setTab((current) => (current === 'issue' ? 'issues' : current))
   }, [workspacePath])
 
   useEffect(() => {
@@ -877,14 +918,16 @@ export function PrPanel({
     titleInputRef.current?.select()
   }, [editingTitle])
 
-  const { confirm, dialog: confirmDialog } = useConfirm()
-
   const merge = useCallback(
     async (method: PrMergeMethod) => {
       if (!workspacePath || !window.vyotiq?.prMerge || !pr) return
       const confirmed = await confirm(
-        `Merge pull request #${pr.number} into ${pr.baseRefName}? This cannot be undone from the app.`,
-        { title: MERGE_LABEL[method], confirmLabel: MERGE_LABEL[method], danger: true }
+        pr.mergeQueueRequired
+          ? `Add pull request #${pr.number} to the merge queue for ${pr.baseRefName}? GitHub merges it, the way the queue is set to, once the queue's checks pass.`
+          : `Merge pull request #${pr.number} into ${pr.baseRefName}? This cannot be undone from the app.`,
+        pr.mergeQueueRequired
+          ? { title: 'Add to merge queue', confirmLabel: 'Add to queue' }
+          : { title: MERGE_LABEL[method], confirmLabel: MERGE_LABEL[method], danger: true }
       )
       if (!confirmed) return
       setMergeBusy(true)
@@ -912,16 +955,32 @@ export function PrPanel({
   const logKey = (check: PrCheck): string => `${pr?.headRefOid ?? ''}|${check.url ?? ''}`
   const checkLogsRef = useRef(checkLogs)
   checkLogsRef.current = checkLogs
+  const logReadsRef = useRef(new Map<string, Promise<PrCheckLogResult | null>>())
+  const logWorkspaceRef = useRef(workspacePath)
+  logWorkspaceRef.current = workspacePath
   const readCheckLog = useCallback(
     async (check: PrCheck): Promise<PrCheckLogResult | null> => {
       if (!workspacePath || !check.url || !window.vyotiq?.prCheckLog) return null
       const key = `${pr?.headRefOid ?? ''}|${check.url}`
       const cached = checkLogsRef.current[key]
       if (cached?.log) return cached.log
-      setCheckLogs((prev) => ({ ...prev, [key]: { loading: true } }))
-      const res = await window.vyotiq.prCheckLog({ workspacePath, url: check.url })
-      setCheckLogs((prev) => ({ ...prev, [key]: res.ok ? { loading: false, log: res.data } : { loading: false, error: res.error } }))
-      return res.ok ? res.data : null
+      // One download per log: a reopen or a hand-off while it loads waits for the same read.
+      const inFlight = logReadsRef.current.get(key)
+      if (inFlight) return inFlight
+      const read = (async (): Promise<PrCheckLogResult | null> => {
+        setCheckLogs((prev) => ({ ...prev, [key]: { loading: true } }))
+        const res = await window.vyotiq.prCheckLog({ workspacePath, url: check.url! })
+        // A log of the last workspace is not kept for this one.
+        if (logWorkspaceRef.current !== workspacePath) return null
+        setCheckLogs((prev) => ({ ...prev, [key]: res.ok ? { loading: false, log: res.data } : { loading: false, error: res.error } }))
+        return res.ok ? res.data : null
+      })()
+      logReadsRef.current.set(key, read)
+      try {
+        return await read
+      } finally {
+        logReadsRef.current.delete(key)
+      }
     },
     [workspacePath, pr?.headRefOid]
   )
@@ -934,7 +993,7 @@ export function PrPanel({
         return
       }
       setOpenLog(key)
-      if (!checkLogsRef.current[key]?.log) void readCheckLog(check)
+      if (!checkLogsRef.current[key]?.log && !logReadsRef.current.has(key)) void readCheckLog(check)
     },
     [openLog, pr?.headRefOid, readCheckLog]
   )
@@ -964,8 +1023,11 @@ export function PrPanel({
         const res = await window.vyotiq.prCheckRerun({ workspacePath, url: check.url })
         setNotice(res.ok ? res.data.detail : res.error)
         setNoticeFailed(!res.ok)
-        // GitHub queues the job again at once; reading the PR starts the checks poll.
-        if (res.ok) void load({ quiet: true })
+        // Reading the PR starts the checks poll once GitHub shows the job queued again.
+        if (res.ok) {
+          void load({ quiet: true })
+          setRerunAt(Date.now())
+        }
       } finally {
         setRerunBusy(null)
       }
@@ -1012,9 +1074,24 @@ export function PrPanel({
     [workspacePath, pr, closeMenus, load]
   )
 
+  const leaveMergeQueue = useCallback(async () => {
+    if (!workspacePath || !pr) return
+    setDequeueBusy(true)
+    setNotice(null)
+    try {
+      const res = await window.vyotiq.prLeaveMergeQueue({ workspacePath, number: pr.number })
+      setNotice(res.ok ? res.data.detail : res.error)
+      setNoticeFailed(!res.ok)
+      if (res.ok) void load({ quiet: true })
+    } finally {
+      setDequeueBusy(false)
+    }
+  }, [workspacePath, pr, load])
+
   const openIssue = useCallback(
     async (number: number) => {
       if (!workspacePath || !window.vyotiq?.githubIssueView) return
+      const seq = ++issueSeqRef.current
       setIssueNumber(number)
       setIssueDetail(null)
       setIssueError(null)
@@ -1022,10 +1099,12 @@ export function PrPanel({
       setTab('issue')
       try {
         const res = await window.vyotiq.githubIssueView({ workspacePath, number })
+        // Another issue was opened meanwhile, or another workspace: that one shows.
+        if (seq !== issueSeqRef.current) return
         if (res.ok) setIssueDetail(res.data)
         else setIssueError(res.error)
       } finally {
-        setIssueLoading(false)
+        if (seq === issueSeqRef.current) setIssueLoading(false)
       }
     },
     [workspacePath]
@@ -1085,25 +1164,48 @@ export function PrPanel({
   const showOpenPrs =
     canCreatePr && !showGhInstall && !showConnect && !auth?.pending && (!error || /no pull request/i.test(error))
   /**
-   * Where a new pull request would go, before it exists: this branch and the
+   * Where a new pull request would go, before it exists: this branch, the
    * default branch it is compared with — the same base git reads for the
-   * branch's diff. Only while the form shows.
+   * branch's diff — and how many commits it is ahead. Read only while a
+   * written PR is on offer.
    */
-  const showNewPrForm = !loading && !pr && canCreatePr && Boolean(draftSource)
-  const [newPrBranches, setNewPrBranches] = useState<{ head: string; base: string | null } | null>(null)
+  const newPrCandidate = !loading && !pr && canCreatePr && Boolean(draftSource)
+  /** `undefined` while it is read; `null` when git could not say. */
+  const [newPrBranches, setNewPrBranches] = useState<
+    { head: string; base: string | null; commits: number } | null | undefined
+  >(undefined)
+  /**
+   * The form is for a branch with work to propose. A task that answered a
+   * question, the default branch (git finds no base apart from it), or a
+   * branch with nothing ahead of its base has an answer but nothing a pull
+   * request could carry. When git cannot say, the form shows as before.
+   */
+  const newPrOnDefault = Boolean(newPrBranches && !newPrBranches.base)
+  const showNewPrForm =
+    newPrCandidate &&
+    (newPrBranches === null || Boolean(newPrBranches?.base && newPrBranches.commits > 0))
   useEffect(() => {
     const read = window.vyotiq?.gitBranchDiff
-    if (!showNewPrForm || !workspacePath || !read) {
+    if (!newPrCandidate || !workspacePath) {
+      setNewPrBranches(undefined)
+      return undefined
+    }
+    if (!read) {
       setNewPrBranches(null)
       return undefined
     }
+    // A re-read (new commits) keeps the last answer on screen until it lands.
     let cancelled = false
     read(workspacePath)
       .then((res) => {
         if (cancelled) return
         setNewPrBranches(
           res.ok && res.data.branch
-            ? { head: res.data.branch, base: res.data.base ? res.data.base.replace(/^origin\//, '') : null }
+            ? {
+                head: res.data.branch,
+                base: res.data.base ? res.data.base.replace(/^origin\//, '') : null,
+                commits: res.data.commits
+              }
             : null
         )
       })
@@ -1113,7 +1215,7 @@ export function PrPanel({
     return () => {
       cancelled = true
     }
-  }, [showNewPrForm, workspacePath, gitRevision])
+  }, [newPrCandidate, workspacePath, gitRevision])
 
   const ghInstallActions = (
     <Button size="sm"
@@ -1680,7 +1782,7 @@ export function PrPanel({
             />
           ) : showConnect || auth?.pending ? (
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">{githubAuthPanel}</div>
-          ) : canCreatePr && draftSource ? (
+          ) : showNewPrForm ? (
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
               <form
                 className="space-y-2"
@@ -1690,13 +1792,7 @@ export function PrPanel({
                 }}
               >
                 <h4 className={SECTION_LABEL}>New pull request</h4>
-                {newPrBranches && newPrBranches.head === newPrBranches.base ? (
-                  // Main refuses a PR from the default branch into itself: say so before Create does.
-                  <p className="m-0 text-caption text-muted" data-new-pr-branches="default">
-                    On <code className="font-mono">{newPrBranches.head}</code>, the default branch — a pull request needs a
-                    branch of its own. Commit & Create PR in Changes makes one.
-                  </p>
-                ) : newPrBranches ? (
+                {newPrBranches ? (
                   <p
                     className="m-0 truncate font-mono text-caption text-muted"
                     title={newPrBranches.base ? `${newPrBranches.head} → ${newPrBranches.base}` : newPrBranches.head}
@@ -1748,7 +1844,17 @@ export function PrPanel({
             <EmptyPanel
               icon="pullRequest"
               title={prEmptyTitle(error)}
-              body={prEmptyBody(error)}
+              body={
+                newPrOnDefault && newPrBranches ? (
+                  // Main refuses a PR from the default branch into itself: say so before Create does.
+                  <span data-new-pr-branches="default">
+                    On <code className="font-mono">{newPrBranches.head}</code>, the default branch — a pull request
+                    needs a branch of its own. Commit & Create PR in Changes makes one.
+                  </span>
+                ) : (
+                  prEmptyBody(error)
+                )
+              }
               centered
               actions={
                 <>
@@ -2056,7 +2162,8 @@ export function PrPanel({
                 {openState === 'MERGED' ? (
                   <>
                     <p className="m-0 text-xs text-muted">Merged into {pr.baseRefName}.</p>
-                    {workspacePath ? (
+                    {/* A branch merged into itself (a fork's main) is not one to tidy away; main also refuses the default branch. */}
+                    {workspacePath && pr.headRefName !== pr.baseRefName ? (
                       <div className="mt-2.5 flex items-center gap-1.5">
                         <Button
                           size="sm"
@@ -2080,7 +2187,9 @@ export function PrPanel({
                       <div className="mt-2 flex items-center gap-2 text-xs" data-auto-merge="on">
                         <Icon name="clock" size={13} className="shrink-0 text-accent" />
                         <span className="min-w-0 flex-1 text-fg">
-                          Auto-merge is on: GitHub will {autoMergeWords(pr.autoMerge.method)} once its requirements are met
+                          {pr.mergeQueueRequired
+                            ? 'Auto-merge is on: it joins the merge queue once its requirements are met'
+                            : `Auto-merge is on: GitHub will ${autoMergeWords(pr.autoMerge.method)} once its requirements are met`}
                           {pr.autoMerge.enabledBy ? <span className="text-tertiary"> · by {pr.autoMerge.enabledBy}</span> : null}
                         </span>
                         {workspacePath ? (
@@ -2090,37 +2199,66 @@ export function PrPanel({
                         ) : null}
                       </div>
                     ) : null}
-                    <div className="mt-2.5 flex items-center gap-1.5">
-                      <ActionMenu
-                        open={mergeOpen}
-                        onOpenChange={setMergeOpen}
-                        placement="up"
-                        align="start"
-                        aria-label="Merge method"
-                        items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
-                          id: method,
-                          label: MERGE_LABEL[method],
-                          icon: method === 'squash' ? ('gitCommit' as const) : method === 'merge' ? ('gitMerge' as const) : ('gitRebase' as const),
-                          onSelect: () => void merge(method)
-                        }))}
-                        trigger={(t) => (
-                          <Button
-                            ref={t.ref}
-                            size="sm"
-                            variant="primary"
-                            trailingIcon="chevron"
-                            disabled={prMergeBlockedReason(pr) != null || mergeBusy}
-                            title={prMergeBlockedReason(pr) ?? undefined}
-                            aria-expanded={t['aria-expanded']}
-                            aria-controls={t['aria-controls']}
-                            aria-haspopup={t['aria-haspopup']}
-                            onClick={t.onClick}
-                          >
-                            {mergeBusy ? 'Merging…' : 'Squash and merge'}
+                    {pr.mergeQueue ? (
+                      <div className="mt-2 flex items-center gap-2 text-xs" data-merge-queue="queued">
+                        <Icon name="clock" size={13} className="shrink-0 text-accent" />
+                        <span className="min-w-0 flex-1 text-fg">
+                          In the merge queue for {pr.baseRefName}
+                          {pr.mergeQueue.position ? <span className="text-tertiary"> · position {pr.mergeQueue.position}</span> : null}
+                        </span>
+                        {workspacePath ? (
+                          <Button size="xs" variant="ghost" pending={dequeueBusy} disabled={dequeueBusy} onClick={() => void leaveMergeQueue()}>
+                            Leave the queue
                           </Button>
-                        )}
-                      />
-                      {pr.canAutoMerge && !pr.autoMerge && workspacePath ? (
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="mt-2.5 flex items-center gap-1.5">
+                      {pr.mergeQueue || (pr.mergeQueueRequired && pr.autoMerge) ? null : pr.mergeQueueRequired ? (
+                        // The queue picks how it merges, so there is no method to choose.
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          icon="gitMerge"
+                          pending={mergeBusy}
+                          disabled={prMergeBlockedReason(pr) != null || mergeBusy}
+                          title={prMergeBlockedReason(pr) ?? undefined}
+                          onClick={() => void merge('squash')}
+                        >
+                          Add to merge queue
+                        </Button>
+                      ) : (
+                        <ActionMenu
+                          open={mergeOpen}
+                          onOpenChange={setMergeOpen}
+                          placement="up"
+                          align="start"
+                          aria-label="Merge method"
+                          items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
+                            id: method,
+                            label: MERGE_LABEL[method],
+                            icon: method === 'squash' ? ('gitCommit' as const) : method === 'merge' ? ('gitMerge' as const) : ('gitRebase' as const),
+                            onSelect: () => void merge(method)
+                          }))}
+                          trigger={(t) => (
+                            <Button
+                              ref={t.ref}
+                              size="sm"
+                              variant="primary"
+                              trailingIcon="chevron"
+                              disabled={prMergeBlockedReason(pr) != null || mergeBusy}
+                              title={prMergeBlockedReason(pr) ?? undefined}
+                              aria-expanded={t['aria-expanded']}
+                              aria-controls={t['aria-controls']}
+                              aria-haspopup={t['aria-haspopup']}
+                              onClick={t.onClick}
+                            >
+                              {mergeBusy ? 'Merging…' : 'Squash and merge'}
+                            </Button>
+                          )}
+                        />
+                      )}
+                      {pr.canAutoMerge && !pr.autoMerge && !pr.mergeQueueRequired && workspacePath ? (
                         <ActionMenu
                           open={autoMergeOpen}
                           onOpenChange={setAutoMergeOpen}

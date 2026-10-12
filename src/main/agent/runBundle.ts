@@ -159,7 +159,7 @@ export async function buildRunBundle(
     format: RUN_BUNDLE_FORMAT,
     version: RUN_BUNDLE_VERSION,
     exportedAt: now.toISOString(),
-    app: { name: 'Vyotiq', ...(appVersion ? { version: appVersion } : {}) },
+    app: { name: 'Agent V', ...(appVersion ? { version: appVersion } : {}) },
     task: {
       runId,
       title: taskTitleFromGoal(goal),
@@ -212,10 +212,10 @@ export function parseRunBundle(text: string): RunBundle {
   }
   const head = raw as { format?: unknown; version?: unknown } | null
   if (!head || typeof head !== 'object' || head.format !== RUN_BUNDLE_FORMAT) {
-    throw new RunBundleError('The file is not a Vyotiq task export.')
+    throw new RunBundleError('The file is not an Agent V task export.')
   }
   if (typeof head.version === 'number' && head.version > RUN_BUNDLE_VERSION) {
-    throw new RunBundleError(`The task was exported by a newer Vyotiq (format version ${head.version}). Update to import it.`)
+    throw new RunBundleError(`The task was exported by a newer Agent V (format version ${head.version}). Update to import it.`)
   }
   const parsed = RunBundleSchema.safeParse(raw)
   if (!parsed.success) {

@@ -42,6 +42,7 @@ import { NotificationsRow, type WaitingTask } from './NotificationsRow'
 import { UpdateChip } from './UpdateChip'
 import { DEFAULT_NAVIGATOR_VIEW, isCollapsed, type NavigatorView } from './useNavigatorView'
 import { requestScheduledTasks } from '@renderer/features/schedules/scheduleRequests'
+import { requestRecentlyDeleted } from '@renderer/features/deleted/RecentlyDeletedDialog'
 
 export type NavigatorPlace = 'home' | 'extensions' | 'usage' | 'settings' | 'task' | 'other'
 
@@ -70,6 +71,8 @@ export type NavigatorProps = {
   /** True for a task open in any pane (split view). */
   isRunOpen?: (workspacePath: string, runId: string) => boolean
   openPaths: readonly string[]
+  /** The app's own scratch folder: its group shows only once it holds something. */
+  homeWorkspacePath?: string | null
   activePath: string | null
   runsByWorkspacePath: Readonly<
     Record<
@@ -172,6 +175,9 @@ export function FirstRunNavigator({ workspaceName, widthPx }: { workspaceName: s
 
 type Draft = { workspacePath: string; draft: TaskDraft }
 
+/** Navigator widths below this show New task as an icon, so the workspace name keeps its room. */
+const NEW_TASK_LABEL_MIN_WIDTH = 360
+
 /**
  * The navigator, in three zones fenced by the same hairline:
  *
@@ -194,15 +200,51 @@ export function Navigator(props: NavigatorProps) {
   const updateView: ViewUpdate = props.onViewChange ?? setOwnView
   const filterOn = navFilterActive(view)
 
+  // Tasks marked unread by hand (the row menu), for this session; opening one
+  // reads it again.
+  const [markedUnread, setMarkedUnread] = useState<ReadonlySet<string>>(() => new Set())
+  const openRunId = props.selected?.runId ?? null
+  useEffect(() => {
+    if (!openRunId) return
+    setMarkedUnread((prev) => {
+      if (!prev.has(openRunId)) return prev
+      const next = new Set(prev)
+      next.delete(openRunId)
+      return next
+    })
+  }, [openRunId])
+
   const unreadRunIds = useMemo(() => {
-    const ids = new Set<string>()
+    const ids = new Set<string>(markedUnread)
     for (const item of props.notifications.items) {
       if (item.read) continue
       if (item.kind !== 'run_done' && item.kind !== 'run_error') continue
       if (item.action?.type === 'open_run') ids.add(item.action.runId)
     }
     return ids
-  }, [props.notifications.items])
+  }, [props.notifications.items, markedUnread])
+
+  const notificationItems = props.notifications.items
+  const markRead = props.notifications.onMarkRead
+  const toggleUnread = useCallback(
+    (_workspacePath: string, runId: string, unread: boolean): void => {
+      if (unread) {
+        // Read: its finished notices too, so the inbox agrees.
+        for (const item of notificationItems) {
+          if (!item.read && item.action?.type === 'open_run' && item.action.runId === runId) markRead({ id: item.id })
+        }
+        setMarkedUnread((prev) => {
+          if (!prev.has(runId)) return prev
+          const next = new Set(prev)
+          next.delete(runId)
+          return next
+        })
+      } else {
+        setMarkedUnread((prev) => new Set(prev).add(runId))
+      }
+    },
+    [notificationItems, markRead]
+  )
 
   // Drafts, scoped like tasks: the workspace the navigator is filtered to, or all.
   const drafts = useMemo(
@@ -369,8 +411,12 @@ export function Navigator(props: NavigatorProps) {
   // What each waiting task waits on, so its row can say it — and take Allow once or Deny.
   const { asks, respond } = useWaitingAsks(props.activeRuns, openPaths, props.rowActions.onRespondApproval)
   const rowActions = useMemo<NavigatorRowActions>(
-    () => (respond ? { ...props.rowActions, onRespondApproval: respond } : props.rowActions),
-    [props.rowActions, respond]
+    () => ({
+      ...props.rowActions,
+      onToggleUnread: toggleUnread,
+      ...(respond ? { onRespondApproval: respond } : {})
+    }),
+    [props.rowActions, respond, toggleUnread]
   )
   const rowExtras: RowExtras = {
     checkedKeys: checked,
@@ -392,17 +438,30 @@ export function Navigator(props: NavigatorProps) {
         : [],
     [sections, props.activeRunsLoaded]
   )
-  const shownDrafts = searching ? [] : draftsPassFilter(view) ? drafts : []
+  const showDrafts = !searching && draftsPassFilter(view)
+  const shownDrafts = useMemo(() => (showDrafts ? drafts : []), [showDrafts, drafts])
   const hiddenCount = countRows(sections) + drafts.length - countRows(shownSections) - shownDrafts.length
 
   // Every workspace at once: one block each, so their tasks never interleave.
   // One workspace (or one picked): a single block, named by the switcher alone.
   const grouped = scopePath == null && openPaths.length > 1
+  const homePath = props.homeWorkspacePath ?? null
   const blocks = useMemo<NavWorkspaceBlock[]>(() => {
-    if (grouped) return groupSectionsByWorkspace(shownSections, openPaths, activePath)
+    if (grouped) {
+      // The app's scratch folder is always open but nobody chose it: an empty
+      // "home — No tasks yet." under every real workspace is only noise.
+      return groupSectionsByWorkspace(shownSections, openPaths, activePath).filter(
+        (block) =>
+          !homePath ||
+          !workspacePathsEqual(block.path, homePath) ||
+          block.sections.length > 0 ||
+          shownDrafts.some((d) => workspacePathsEqual(d.workspacePath, block.path)) ||
+          (activePath != null && workspacePathsEqual(activePath, homePath))
+      )
+    }
     const path = scopePath ?? openPaths[0]
     return path ? [{ path, name: formatWorkspaceName(path), sections: shownSections }] : []
-  }, [grouped, shownSections, openPaths, activePath, scopePath])
+  }, [grouped, shownSections, shownDrafts, openPaths, activePath, scopePath, homePath])
 
   // A restart interrupts every live task, whatever the switcher shows.
   const runningCount = useMemo(() => {
@@ -504,13 +563,21 @@ export function Navigator(props: NavigatorProps) {
               archiveAllDone={props.onArchiveMany && doneKeys.length > 0 ? () => props.onArchiveMany?.(doneKeys) : undefined}
               doneCount={doneKeys.length}
               canArchive={Boolean(props.onArchiveMany)}
+              deletedPath={scopePath ?? activePath ?? openPaths[0] ?? null}
             />
           ) : null}
           {hasWorkspace ? (
             <Tooltip content={`New task (${shortcutLabel('newChat')})`} side="bottom">
-              <Button size="xs" variant="secondary" onClick={props.onNewTask} data-navigator-new-task>
-                New task
-              </Button>
+              {/* At the default width the label squeezed the workspace name to
+                  "VYOTIQ - AGE…": a narrow navigator keeps the name and shows
+                  the button as its mark. */}
+              {props.widthPx < NEW_TASK_LABEL_MIN_WIDTH ? (
+                <IconButton icon="plus" label="New task" size="xs" onClick={props.onNewTask} data-navigator-new-task />
+              ) : (
+                <Button size="xs" variant="secondary" onClick={props.onNewTask} data-navigator-new-task>
+                  New task
+                </Button>
+              )}
             </Tooltip>
           ) : (
             // A disabled Button shows its title as a tooltip itself.
@@ -971,7 +1038,8 @@ function ViewMenu({
   onChange,
   archiveAllDone,
   doneCount = 0,
-  canArchive = false
+  canArchive = false,
+  deletedPath = null
 }: {
   view: NavigatorView
   grouped: boolean
@@ -981,6 +1049,8 @@ function ViewMenu({
   archiveAllDone?: () => void
   doneCount?: number
   canArchive?: boolean
+  /** The workspace whose Recently deleted the menu opens: the one listed, or the active one. */
+  deletedPath?: string | null
 }) {
   const [open, setOpen] = useState(false)
   const filterOn = navFilterActive(view)
@@ -1049,6 +1119,15 @@ function ViewMenu({
       separatorBefore: true,
       onSelect: () => void requestScheduledTasks()
     },
+    ...(deletedPath
+      ? [
+          {
+            id: 'recently-deleted',
+            label: 'Recently deleted…',
+            onSelect: () => void requestRecentlyDeleted(deletedPath)
+          }
+        ]
+      : []),
     ...(filterOn
       ? [
           {

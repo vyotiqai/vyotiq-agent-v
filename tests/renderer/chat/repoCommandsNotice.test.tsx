@@ -28,7 +28,7 @@ describe('RepoCommandsNotice', () => {
   it('lists each skipped setting as the repository wrote it', () => {
     stubAllow({ ok: true, data: { allowed: 2 } })
     render(<RepoCommandsNotice workspacePath="/w" repoCommands={repoCommands} inset="px-3" onAllowed={() => {}} />)
-    expect(screen.getByRole('status').textContent).toContain("Vyotiq's git skips them")
+    expect(screen.getByRole('status').textContent).toContain("Agent V's git skips them")
     const items = screen.getAllByRole('listitem').map((li) => li.textContent)
     expect(items).toEqual(['core.fsmonitorsh .git/hooks/watch', 'filter.crypt.clean"/usr/bin/git-crypt" clean'])
   })

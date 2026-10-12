@@ -11,6 +11,7 @@ import {
   tryRegisterRunAbort
 } from './runRegistry'
 import { startAgentRunInBackground } from './startAgentRun'
+import { budgetHoldReason } from './spendBudget'
 
 export function resolveRunWebContents(fallback?: WebContents | null): WebContents | null {
   const current = getMainWindow()
@@ -42,6 +43,9 @@ export function launchRunFollowUpOrStart(input: {
   if (!runExists(input.workspacePath, input.runId)) {
     return { ok: false, error: 'Run not found' }
   }
+  // A loop's or goal's next turn is new work: it waits, like a send, once a budget is spent.
+  const held = budgetHoldReason()
+  if (held) return { ok: false, error: held }
 
   // Recover the run dir for follow-up hydration below.
   const runDir = resolveRunDir(input.workspacePath, input.runId)

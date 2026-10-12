@@ -8,7 +8,7 @@ import { logger } from '../../../shared/logger'
 import { lowerProcessPriority } from '../processPriority'
 import { TERMINAL_DEFAULT_TIMEOUT_MS } from '../../../shared/agentTimeouts'
 import { childProxyEnv } from '../../net/proxy'
-import { sandboxDenialHint, type SandboxLaunch } from '../sandbox/wrap'
+import { sandboxDenialHint, wrappedSpawnOptions, type SandboxLaunch, type WrappedCommand } from '../sandbox/wrap'
 
 const KILL_TREE_WAIT_MS = 5_000
 
@@ -466,7 +466,7 @@ export function selfKillCommandMessage(
   )
   if (!hostToken.test(command)) return null
   return [
-    `Refused: this command would kill the Vyotiq app itself. The agent host runs as ${hostImageNames.join(' / ')}; a name-based kill (Stop-Process / taskkill /IM / kill) terminates the host, ends this run, and loses all in-flight work.`,
+    `Refused: this command would kill the Agent V app itself. The agent host runs as ${hostImageNames.join(' / ')}; a name-based kill (Stop-Process / taskkill /IM / kill) terminates the host, ends this run, and loses all in-flight work.`,
     'Kill verified orphan PIDs instead — never by image name:',
     `  Get-CimInstance Win32_Process -Filter "Name = '<image>.exe'" | Select-Object ProcessId, ExecutablePath, CommandLine`,
     `  Stop-Process -Id <pid> -Force   # per verified orphan only; never PID ${process.pid} (this app) or its process tree`,
@@ -1078,6 +1078,22 @@ export function sanitizedTerminalEnv(
 }
 
 /**
+ * The env for a command the agent runs: the sanitized one, with pnpm told not
+ * to install before `pnpm run` / `pnpm exec`. pnpm 12 checks a project's
+ * deps first and reinstalls when they look stale. In an instance worktree,
+ * whose node_modules is a junction to its parent's, that install rewrote
+ * every top-level link in the parent checkout's node_modules to point into
+ * the worktree, and when the worktree was removed they all dangled
+ * (2026-10-07); in the main checkout it can delete node_modules/.pnpm under
+ * the running app. Only the `pnpm_config_` spelling works: pnpm 12 ignores
+ * `npm_config_verify_deps_before_run`. The user's own terminal keeps
+ * `sanitizedTerminalEnv`: an install they run is theirs to run.
+ */
+export function agentCommandEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  return { ...sanitizedTerminalEnv(source), pnpm_config_verify_deps_before_run: 'false' }
+}
+
+/**
  * NuGet/MSBuild (92c049d6) call Path.Combine(CommonApplicationData, …) and
  * crash with `path1` null when ProgramData is stripped from the child env.
  */
@@ -1186,10 +1202,10 @@ export async function toolTerminal(
       return
     }
 
-    const launch = opts.sandbox ? opts.sandbox.wrap(spec.bin, spec.args) : spec
+    const launch: WrappedCommand = opts.sandbox ? opts.sandbox.wrap(spec.bin, spec.args) : spec
     const child = spawn(launch.bin, launch.args, {
       cwd,
-      env: sanitizedTerminalEnv(),
+      ...wrappedSpawnOptions(launch, agentCommandEnv()),
       windowsHide: true
     })
     if (child.pid) lowerProcessPriority(child.pid)

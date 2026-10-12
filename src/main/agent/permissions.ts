@@ -39,7 +39,7 @@ import type { SkillToolAllow } from './skills/allowedTools'
  * paths count, and the app's data folder anywhere in the text is denied.
  */
 
-export type PermissionSource = 'settings' | 'workspace' | 'built-in' | 'skill'
+export type PermissionSource = 'settings' | 'workspace' | 'ignore' | 'built-in' | 'skill'
 export type SourcedPermissionRule = PermissionRule & { source: Exclude<PermissionSource, 'skill'> }
 
 export type PermissionVerdict = {
@@ -258,6 +258,16 @@ function toolPaths(name: string, args: Record<string, unknown> | undefined): Arr
       const p = stringArg(args, ...PATH_KEYS)
       return p ? [{ path: p, kind: 'delete' }] : []
     }
+    case 'move': {
+      // The source goes away and the destination is written: a rule that
+      // protects either one holds the move.
+      const from = stringArg(args, 'from')
+      const to = stringArg(args, 'to')
+      return [
+        ...(from ? [{ path: from, kind: 'delete' as const }] : []),
+        ...(to ? [{ path: to, kind: 'write' as const }] : [])
+      ]
+    }
     case 'git_apply': {
       const patch = typeof args?.patch === 'string' ? args.patch : ''
       const check = args?.check === true
@@ -297,6 +307,7 @@ type Call = {
 const SOURCE_WORDS: Record<PermissionSource, string> = {
   settings: 'your settings',
   workspace: WORKSPACE_PERMISSIONS_FILE,
+  ignore: 'the workspace’s ignore file',
   'built-in': 'built in',
   skill: 'a skill’s allowed-tools'
 }
@@ -368,6 +379,8 @@ export function createPermissionPolicy(input: PermissionPolicyInput): Permission
   }
 
   const permissionsFiles = allRoots.map((r) => lib.join(r, ...WORKSPACE_PERMISSIONS_FILE.split('/')))
+  // Its ignore files are rules too: the agent may not loosen them either.
+  const ignoreFiles = allRoots.flatMap((r) => WORKSPACE_IGNORE_FILES.map((name) => lib.join(r, name)))
 
   const skillsDir =
     input.personalSkillsDir === null ? null : lib.resolve(input.personalSkillsDir ?? lib.join(homeDir, '.vyotiq', 'skills'))
@@ -679,6 +692,19 @@ export function createPermissionPolicy(input: PermissionPolicyInput): Permission
       }
       if (fact.kind === 'mention') mentionsPermissionsFile ??= fact
     }
+    let mentionsIgnoreFile: PathFact | undefined
+    for (const fact of call.facts) {
+      if (!ignoreFiles.some((file) => fold(fact.abs) === fold(file))) continue
+      if (fact.kind === 'write' || fact.kind === 'delete') {
+        return {
+          effect: 'deny',
+          source: 'built-in',
+          rule: `protected: ${lib.basename(fact.abs)}`,
+          reason: `Blocked: ${fact.shown} keeps paths away from the agent, which the agent cannot change. ${NO_RETRY}`
+        }
+      }
+      if (fact.kind === 'mention') mentionsIgnoreFile ??= fact
+    }
 
     // 2. Configured rules: deny, then ask, then allow.
     const matched = compiled.filter((cr) => ruleMatches(cr, call))
@@ -708,6 +734,14 @@ export function createPermissionPolicy(input: PermissionPolicyInput): Permission
         source: 'built-in',
         rule: `protected: ${WORKSPACE_PERMISSIONS_FILE}`,
         reason: `Names ${WORKSPACE_PERMISSIONS_FILE}, this workspace's permission rules`
+      }
+    }
+    if (mentionsIgnoreFile) {
+      return {
+        effect: 'ask',
+        source: 'built-in',
+        rule: `protected: ${lib.basename(mentionsIgnoreFile.abs)}`,
+        reason: `Names ${mentionsIgnoreFile.shown}, which keeps paths away from the agent`
       }
     }
     const skillChange = call.facts.find(changesPersonalSkills)
@@ -824,6 +858,42 @@ export function readWorkspacePermissions(workspaceRoot: string): WorkspacePermis
   return out
 }
 
+/**
+ * Files at a workspace's root that keep paths away from the agent, in the
+ * gitignore shape other agents use. Each pattern becomes a deny rule on any
+ * tool that names the path.
+ */
+export const WORKSPACE_IGNORE_FILES = ['.vyotiqignore', '.aiignore', '.cursorignore'] as const
+
+/**
+ * The deny rules a workspace's ignore files make. Lines are gitignore
+ * patterns: `#` comments and blanks are skipped, a trailing `/` is dropped (a
+ * folder covers what is in it), and a `!` re-include is skipped, since a
+ * folder's file cannot widen what the agent may touch. A leading `/` is
+ * dropped too, so a root-only name matches at any depth: stricter, never looser.
+ */
+export function readWorkspaceIgnoreRules(workspaceRoot: string): SourcedPermissionRule[] {
+  const rules: SourcedPermissionRule[] = []
+  const seen = new Set<string>()
+  for (const name of WORKSPACE_IGNORE_FILES) {
+    let text: string
+    try {
+      text = readFileSync(path.join(workspaceRoot, name), 'utf8')
+    } catch {
+      continue
+    }
+    for (const line of text.split(/\r?\n/)) {
+      let pattern = line.trim()
+      if (!pattern || pattern.startsWith('#') || pattern.startsWith('!')) continue
+      pattern = pattern.replace(/^\/+/, '').replace(/\/+$/, '')
+      if (!pattern || pattern.length > 500 || seen.has(pattern)) continue
+      seen.add(pattern)
+      rules.push({ effect: 'deny', path: pattern, source: 'ignore' })
+    }
+  }
+  return rules
+}
+
 /** Electron's userData, or null outside the app (a unit test without a stub). */
 export function appUserDataDir(): string | null {
   try {
@@ -859,6 +929,7 @@ export function loadRunPermissionPolicy(input: {
   for (const folder of folders) {
     const loaded = readWorkspacePermissions(folder)
     rules.push(...loaded.rules)
+    rules.push(...readWorkspaceIgnoreRules(folder))
     if (loaded.ignoredAllow > 0 || loaded.invalid > 0 || loaded.error) {
       input.onFileProblem?.({
         path: workspacePermissionsPath(folder),

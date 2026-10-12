@@ -6,6 +6,8 @@ export const HooksFileViewSchema = z.object({
   exists: z.boolean(),
   /** "PreToolUse (terminal): ./check.sh", one per hook. */
   commands: z.array(z.string()),
+  /** Entries this app does not run (an unsupported event or hook type), as `Event (why)`. */
+  skipped: z.array(z.string()).default([]),
   /** Why the file is not used (not JSON, not a hooks file), when it is there but unusable. */
   error: z.string().nullable()
 })

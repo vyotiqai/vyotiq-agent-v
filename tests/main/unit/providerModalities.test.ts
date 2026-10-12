@@ -345,13 +345,16 @@ describe('context window catalog extraction', () => {
     expect(models[0]?.contextWindow).toBe(49_152)
   })
 
-  it('contextWindowFromOllamaShow prefers model_info over num_ctx', () => {
+  it('contextWindowFromOllamaShow prefers the num_ctx the server runs with over the architecture maximum', () => {
+    // The OpenAI-compatible endpoint cannot raise num_ctx, so a prompt sized
+    // for the 128k maximum was cut from the front.
     expect(
       contextWindowFromOllamaShow({
         model_info: { 'llama.context_length': 128_000 },
         parameters: 'num_ctx 4096\n'
       })
-    ).toBe(128_000)
+    ).toBe(4096)
+    expect(contextWindowFromOllamaShow({ model_info: { 'llama.context_length': 128_000 } })).toBe(128_000)
     expect(
       contextWindowFromOllamaShow({
         parameters: 'num_ctx                        8192\n'

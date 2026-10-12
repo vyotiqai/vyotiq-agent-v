@@ -7,7 +7,7 @@ order: 3
 
 An instance is a sub-agent that a task starts for one small, independent piece of the work. In Agent mode, the agent plans first and hands work to an instance when the request splits into independent pieces worth running in parallel, or when one piece is big enough to give an instance of its own; a single small edit or a direct answer stays in the main task. Independent instances run in parallel, and the task collects and merges the results.
 
-You do not start instances yourself. The agent decides to use them, in Agent mode, with these tools:
+You do not start instances yourself, though you can define [agent types](/docs/agent-types) for the agent to start: helpers with their own instructions, tools and model. The agent decides to use instances, in Agent mode, with these tools:
 
 | Tool | What it does |
 | --- | --- |
@@ -21,7 +21,7 @@ Starting, waiting on, reading and cancelling instances never ask for approval. T
 
 In the record, each instance has a row that follows it, such as "Running instance" and then "Instance finished", "Instance failed" or "Instance cancelled", with its short id and an "Open" button. Instances started together share one block headed by their count, such as "3 instances". Each instance's short id also appears on the plan step it carries out. Click the id to open that instance.
 
-While a task runs, the navigator lists its instances in a fold under it, such as "3 instances · 2 going". When an instance needs your approval or has a question, the parent's record shows "Needs you" with an "Open instance" button. You answer in the instance's own record.
+While a task runs, the navigator lists its instances in a fold under it, such as "3 instances · 2 going". Each is named by the plan step it was started for, as the parent's record names it, or else by the outcome it was asked for; when siblings' names open with the same words, the rows leave them out. While the task waits on several, its line says so, such as "Waiting on 2 instances". When an instance needs your approval or has a question, the parent's record shows "Needs you" with an "Open instance" button. You answer in the instance's own record.
 
 ## The brief an instance gets
 
@@ -45,7 +45,7 @@ An instance never sees the parent's conversation. Everything it knows comes from
 - **Spend.** "Spend limit per task" counts what the task's instances spend.
 - **No nested instances.** Only a top-level task can start instances. An instance's page says it "Reports back to its parent · cannot start instances of its own".
 - **Instructions come from the parent.** An instance's page has no instruction line of its own: "Instances take instructions from their parent task." "Add an instruction to the parent" takes you back to the parent's instruction line. The page has a "Stop" button while the instance runs.
-- **No restarts.** An instance does not keep running after the app restarts.
+- **Restarts.** When the app quits while instances run, each one's work is committed to its branch. Resuming the task (opening it with "Resume interrupted runs" on, or its Continue otherwise) brings its instances back too: each one gets its checkout back from its branch and carries on from where it stopped, and the task is told which came back. One whose branch is gone, or that would go past "Instances at once", stays stopped, and the task is told why.
 
 ## Isolation
 
@@ -73,6 +73,6 @@ Worktrees need git on your PATH. See [Git and GitHub](/docs/git-and-github).
 - **Pull** reads more: the final report (up to about 60,000 characters), an outline, or the newest messages.
 - **Merge** brings the branch of an instance that finished successfully into the parent, one branch at a time. It is refused before it starts when the parent has uncommitted or untracked changes to files the branch also changed. A merge that conflicts is undone and fails. Resolve the conflict in the parent, then merge again. Merged files can be rewound like any other edit of that turn.
 
-With "Unattended mode" on, merging an instance still asks for your approval, unless "Ask before" is "Nothing" or you chose "Always allow" for it. See [Approvals](/docs/approvals).
+With "Approve low-risk tools on their own" on, merging an instance still asks for your approval, unless "Ask before" is "Nothing" or you chose "Always allow" for it. See [Approvals](/docs/approvals).
 
 For a worked example, see [Split a job into parallel parts](/use-cases/split-a-job-across-instances).

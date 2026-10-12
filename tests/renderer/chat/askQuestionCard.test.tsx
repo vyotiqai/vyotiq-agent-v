@@ -41,9 +41,9 @@ describe('AskQuestionPanel', () => {
     expect(screen.getByText('A')).toBeTruthy()
   })
 
-  it('still needs Submit for a single choice with an Other… field', async () => {
+  it('answers a single choice on a click, and sends a typed answer with Submit', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
-    render(
+    const { unmount } = render(
       <AskQuestionPanel
         question={baseQuestion({
           questions: [
@@ -53,11 +53,27 @@ describe('AskQuestionPanel', () => {
         onSubmit={onSubmit}
       />
     )
-
     fireEvent.click(screen.getByRole('radio', { name: 'A' }))
-    expect(onSubmit).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }))
     expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['A'] }])
+    unmount()
+
+    const typed = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AskQuestionPanel
+        question={baseQuestion({
+          questions: [
+            { id: 'q1', prompt: 'Which database?', type: 'single', options: ['SQLite', 'Postgres'], allowCustom: true }
+          ]
+        })}
+        onSubmit={typed}
+      />
+    )
+    expect(screen.queryByRole('button', { name: 'Submit answer' })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Something else'), { target: { value: 'MySQL' } })
+    // Typing never sends a half-written word.
+    expect(typed).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }))
+    expect(typed).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['MySQL'] }])
   })
 
   it('skips the form with empty answers', async () => {
@@ -461,37 +477,40 @@ describe('AskQuestionPanel focus and keyboard', () => {
     ])
   })
 
-  it('keeps typed Other text when an option is picked, and returns to it on focus', () => {
+  it('keeps typed text when an option is picked in a multi-question form, and returns to it on focus', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(
       <AskQuestionPanel
         question={baseQuestion({
           questions: [
-            { id: 'q1', prompt: 'Which?', type: 'single', options: ['A', 'B'], allowCustom: true }
+            { id: 'q1', prompt: 'Which?', type: 'single', options: ['A', 'B'], allowCustom: true },
+            { id: 'q2', prompt: 'Notes', type: 'text' }
           ]
         })}
         onSubmit={onSubmit}
       />
     )
-    const other = screen.getByLabelText('Other answer')
+    const other = screen.getByLabelText('Something else')
     fireEvent.change(other, { target: { value: 'Mine' } })
     fireEvent.click(screen.getByRole('radio', { name: 'A' }))
     expect((other as HTMLInputElement).value).toBe('Mine')
     expect(screen.getByRole('radio', { name: 'A' }).getAttribute('aria-checked')).toBe('true')
     fireEvent.focus(other)
     expect(screen.getByRole('radio', { name: 'A' }).getAttribute('aria-checked')).toBe('false')
-    fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }))
-    expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['Mine'] }])
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 })
 
 describe('AskQuestionPanel number keys', () => {
-  it('picks an option by its number and continues on Enter', async () => {
+  it('picks an option by its number in a form with more than one question', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(
       <AskQuestionPanel
         question={baseQuestion({
-          questions: [{ id: 'q1', prompt: 'Which path?', type: 'single', options: ['A', 'B', 'C'], allowCustom: true }]
+          questions: [
+            { id: 'q1', prompt: 'Which path?', type: 'single', options: ['A', 'B', 'C'], allowCustom: true },
+            { id: 'q2', prompt: 'Why?', type: 'text' }
+          ]
         })}
         onSubmit={onSubmit}
       />
@@ -504,9 +523,6 @@ describe('AskQuestionPanel number keys', () => {
     expect(c.getAttribute('aria-checked')).toBe('true')
     expect(document.activeElement).toBe(c)
     expect(onSubmit).not.toHaveBeenCalled()
-
-    fireEvent.keyDown(c, { key: 'Enter' })
-    expect(onSubmit).toHaveBeenCalledWith('q1', [{ questionId: 'q1', values: ['C'] }])
   })
 
   it('answers a quick form on the number alone', () => {

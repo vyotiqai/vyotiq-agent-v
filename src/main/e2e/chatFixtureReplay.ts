@@ -6,7 +6,7 @@ import { logger } from '../../shared/logger'
 import { clearRunAbort, streamSignalFor } from '../agent/runRegistry'
 import { commandGuardFor, createApprovalGate, type ToolApprovalGate } from '../agent/toolApproval'
 import { appUserDataDir, loadRunPermissionPolicy } from '../agent/permissions'
-import { persistAlwaysAllow } from '../agent/toolApprovalStore'
+import { persistAllowRules, persistAlwaysAllow } from '../agent/toolApprovalStore'
 import { persistTaskAllow, readTaskAllowlist } from '../agent/taskApprovalStore'
 import { getSettings } from '../settings/settings'
 import { findWorkspaceSettingsOverride, readWorkspacesState } from '../workspace/workspaces'
@@ -97,6 +97,7 @@ function fixtureApprovalGate(input: { runId: string; invokeId: number; workspace
     workspaceAllowlist: (effective.toolApproval ?? DEFAULT_SETTINGS.toolApproval).allowlist,
     signal,
     persistAlways: (toolName) => persistAlwaysAllow(input.workspacePath, toolName),
+    persistRules: (rules) => persistAllowRules(input.workspacePath, rules),
     taskAllowlist: readTaskAllowlist(runDir),
     persistTask: (toolName) => void persistTaskAllow(runDir, toolName),
     commandGuard: commandGuardFor(input.workspacePath, getSettings().terminalShell),

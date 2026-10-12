@@ -95,3 +95,21 @@ describe('buildStepToolCatalog', () => {
     expect(result.perTool.reduce((n, p) => n + p.tokens, 0)).toBe(result.estimate)
   })
 })
+
+describe('held-back builtins', () => {
+  it('keeps the optional builtins off the wire until admitted, and sends all when eager', async () => {
+    const { wireBuiltinTools, deferredBuiltinsLine, OPTIONAL_BUILTIN_NAMES } = await import('@main/agent/context/toolsBudget')
+    const tools = [{ name: 'read' }, { name: 'browser_hover' }, { name: 'browser_navigate' }, { name: 'merge_agent_instance' }]
+    expect(OPTIONAL_BUILTIN_NAMES.has('browser_hover')).toBe(true)
+    expect(OPTIONAL_BUILTIN_NAMES.has('browser_navigate')).toBe(false)
+    const first = wireBuiltinTools(tools, new Set(), 'on-demand')
+    expect(first.wire.map((t) => t.name)).toEqual(['read', 'browser_navigate'])
+    expect(first.deferred.map((t) => t.name)).toEqual(['browser_hover', 'merge_agent_instance'])
+    expect(wireBuiltinTools(tools, new Set(['browser_hover']), 'on-demand').wire.map((t) => t.name)).toContain('browser_hover')
+    expect(wireBuiltinTools(tools, new Set(), 'eager').deferred).toEqual([])
+    const line = deferredBuiltinsLine(['browser_hover'], true)
+    expect(line).toContain('request_mcp_tools')
+    expect(deferredBuiltinsLine(['browser_hover'], false)).not.toContain('request_mcp_tools')
+    expect(deferredBuiltinsLine([], true)).toBe('')
+  })
+})

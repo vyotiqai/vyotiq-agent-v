@@ -105,7 +105,7 @@ function paste(dialog: HTMLElement, text: string): void {
   })
 }
 
-const addButton = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: 'Add and connect' }) as HTMLButtonElement
+const addButton = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /^(Add and connect|Run it)$/ }) as HTMLButtonElement
 
 describe('argument and environment lines', () => {
   it('quotes only what needs it, so the line reads back the same', () => {
@@ -419,5 +419,26 @@ describe('Check packages for updates', () => {
     expect(banner.textContent).toMatch(/1\.1\.0 is out/)
     fireEvent.click(within(banner).getByRole('button', { name: 'Update' }))
     await waitFor(() => expect(bridge.marketplaceInstall).toHaveBeenCalledWith({ source: 'npm', target: '@acme/skill' }))
+  })
+})
+
+describe('Add an MCP server: confirmation in the dialog', () => {
+  it('shows the command it will run and the one-time warning, and acknowledges in-app (no native box)', async () => {
+    const ack = vi.fn(async () => ok({ ...settings, marketplace: { registryUrl: '', remoteInstallAcked: true } }))
+    installBridge({ marketplaceAckRemoteInstall: ack })
+    const dialog = await openDialog({
+      settings: { ...settings, marketplace: { registryUrl: '', remoteInstallAcked: false } }
+    })
+    paste(dialog, 'uvx mcp-server-fetch')
+    const notice = await waitFor(() => {
+      const el = dialog.querySelector('[data-mcp-run-notice]')
+      if (!el) throw new Error('no notice yet')
+      return el as HTMLElement
+    })
+    expect(notice.textContent).toMatch(/unsigned/i)
+    expect(notice.textContent).toContain('uvx mcp-server-fetch')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Run it' }))
+    await waitFor(() => expect(bridge.marketplaceApplyDetectedMcp).toHaveBeenCalledTimes(1))
+    expect(ack).toHaveBeenCalledWith(true, { confirmedInApp: true })
   })
 })

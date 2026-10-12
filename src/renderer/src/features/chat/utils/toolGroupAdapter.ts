@@ -103,6 +103,61 @@ function compositeMixedLabels(tools: ToolGroupNestedTool[]): { running: string; 
   return { running, done }
 }
 
+/**
+ * TOOL_LABELS keeps a few noun phrases ('Git diff', 'Diagnostics') that break a
+ * joined verb list ('Grepped and git diff'). The join-reachable ones get quiet
+ * verb forms here — used only while compositing, never as the row label.
+ */
+const JOIN_VERB_FORMS: Record<string, { running: string; done: string }> = {
+  git_diff: { running: 'diffing', done: 'diffed' },
+  git_status: { running: 'checking git', done: 'checked git' },
+  git_commit: { running: 'committing', done: 'committed' },
+  github_issue: { running: 'checking issues', done: 'checked issues' },
+  github_pr_checks: { running: 'checking CI', done: 'checked CI' },
+  github_pr_comments: { running: 'reading review comments', done: 'read review comments' },
+  lsp: { running: 'querying', done: 'queried' },
+  codebase_search: { running: 'searching', done: 'searched' },
+  concept_search: { running: 'searching', done: 'searched' },
+  web_search: { running: 'searching the web', done: 'searched the web' },
+  diagnostics: { running: 'checking', done: 'checked' },
+  run_tests: { running: 'testing', done: 'tested' },
+  mcp_list_tools: { running: 'listing', done: 'listed' },
+  mcp_list_resources: { running: 'listing', done: 'listed' },
+  mcp_list_prompts: { running: 'listing', done: 'listed' },
+  mcp_read_resource: { running: 'reading', done: 'read' },
+  mcp_get_prompt: { running: 'fetching', done: 'fetched' },
+  await_agent_instance: { running: 'awaiting', done: 'awaited' },
+  browser_snapshot: { running: 'capturing', done: 'captured' },
+  browser_tabs: { running: 'switching tabs', done: 'switched tabs' },
+  browser_back: { running: 'going back', done: 'went back' },
+  browser_forward: { running: 'going forward', done: 'went forward' },
+  browser_wait_for_url: { running: 'waiting', done: 'waited' },
+  browser_wait_for_text: { running: 'waiting', done: 'waited' },
+  browser_handle_dialog: { running: 'handling', done: 'handled' }
+}
+
+const IRREGULAR_PAST_VERBS = new Set(['read', 'ran', 'wrote', 'set', 'built', 'held', 'went'])
+
+/**
+ * True when a composite part reads as a verb in this tense. The first word
+ * decides it, so a verb phrase ('writing memory') qualifies and a noun phrase
+ * ('git diff') never does — joining the latter is what produced
+ * 'Grepped and git diff'.
+ */
+function readsAsVerb(part: string, state: 'running' | 'done'): boolean {
+  const head = (part.split(/\s+/)[0] ?? '').replace(/[^a-z]/gi, '')
+  if (!head) return false
+  if (state === 'running') return head.endsWith('ing')
+  return head.endsWith('ed') || IRREGULAR_PAST_VERBS.has(head)
+}
+
+function joinVerbPart(name: string, rows: UiToolRow[], state: 'running' | 'done'): string {
+  const form = JOIN_VERB_FORMS[name]
+  if (form) return form[state]
+  const row = rows.find((item) => item.name === name)
+  return toolLabel(name, state, row?.content).toLowerCase()
+}
+
 function groupLabels(
   tools: ToolGroupNestedTool[],
   rows: UiToolRow[]
@@ -131,14 +186,8 @@ function groupLabels(
     // Same category (e.g. glob+grep): join per-tool verbs, not the generic category label.
     const unique = [...new Set(names.filter(Boolean))]
     if (unique.length > 0) {
-      const runningParts = unique.map((n) => {
-        const row = rows.find((item) => item.name === n)
-        return toolLabel(n, 'running', row?.content).toLowerCase()
-      })
-      const doneParts = unique.map((n) => {
-        const row = rows.find((item) => item.name === n)
-        return toolLabel(n, 'done', row?.content).toLowerCase()
-      })
+      const runningParts = unique.map((n) => joinVerbPart(n, rows, 'running'))
+      const doneParts = unique.map((n) => joinVerbPart(n, rows, 'done'))
       if (
         runningParts.every((p) => p !== 'running') &&
         doneParts.every((p) => p !== 'done')
@@ -152,6 +201,15 @@ function groupLabels(
         if (
           new Set(runningVerb).size === 1 &&
           new Set(doneVerb).size === 1
+        ) {
+          return categoryLabels(first.category)
+        }
+        // A part whose head word is not a verb (`MCP resources`, `Take
+        // Screenshot`) cannot be folded into a verb list — joining it emitted
+        // 'Grepped and git diff'. Fall back to the category verb instead.
+        if (
+          !runningParts.every((part) => readsAsVerb(part, 'running')) ||
+          !doneParts.every((part) => readsAsVerb(part, 'done'))
         ) {
           return categoryLabels(first.category)
         }

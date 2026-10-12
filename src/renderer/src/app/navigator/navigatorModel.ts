@@ -205,10 +205,34 @@ function instancesOf(
       ...(child.agentType ? { agentType: child.agentType } : {})
     }
   })
+  const titles = distinctTitles(out.map((i) => i.title))
+  for (const [n, i] of out.entries()) i.title = titles[n]!
   // Still going first, then by id: a row that moved every time a child
   // reported would be hard to keep an eye on.
   const going = (i: NavInstance): number => Number(i.state === 'running' || i.state === 'needs')
   return out.sort((a, b) => going(b) - going(a) || a.runId.localeCompare(b.runId))
+}
+
+/** About what an instance row shows of its title before it is cut. */
+const SHARED_OPENING_MIN = 16
+
+/**
+ * Sibling titles without the words they all open with. Six children asked
+ * for "A written analysis of …" each read as that much in a row this narrow;
+ * what follows is what tells them apart. A short shared opening ("Audit the")
+ * still leaves room to read the rest, so it stays; titles that differ nowhere
+ * else stay whole too (their short ids do the telling).
+ */
+export function distinctTitles(titles: readonly string[]): string[] {
+  if (titles.length < 2) return [...titles]
+  const words = titles.map((t) => t.split(' '))
+  let shared = 0
+  while (words.every((w) => shared < w.length - 1 && w[shared] === words[0]![shared])) shared++
+  if (words[0]!.slice(0, shared).join(' ').length < SHARED_OPENING_MIN) return [...titles]
+  return words.map((w) => {
+    const rest = w.slice(shared).join(' ')
+    return rest.charAt(0).toUpperCase() + rest.slice(1)
+  })
 }
 
 type Placement = { section: NavSectionKey; state: TaskState; label: string; meta: NavMeta }

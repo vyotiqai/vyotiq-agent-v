@@ -19,6 +19,8 @@ export type AppShortcutHandlers = {
   onNextNeedsYou?: () => void
   /** Alt ↑ / ↓ — open the task above or below the open one in the list. */
   onStepTask?: (delta: -1 | 1) => void
+  /** Alt ← / → — back and forward through the views and tasks visited. */
+  onNavigate?: (delta: -1 | 1) => void
   onNewChat: () => void
   /** Ctrl/Cmd+Shift+H — show the Home launch surface. */
   onOpenHome?: () => void
@@ -47,6 +49,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onOpenSearch,
     onNextNeedsYou,
     onStepTask,
+    onNavigate,
     onNewChat,
     onOpenHome,
     onSwitchWorkspaceByIndex,
@@ -92,6 +95,16 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         if (shouldBlockAppShortcut(e.target) || isTypingIn(e.target)) return
         e.preventDefault()
         onStepTask(step)
+        return
+      }
+
+      const nav = matchShortcut(e, 'navBack') ? -1 : matchShortcut(e, 'navForward') ? 1 : 0
+      if (nav !== 0) {
+        if (!onNavigate) return
+        // Never while typing: there Alt ←/→ moves the caret by word on macOS.
+        if (shouldBlockAppShortcut(e.target) || isTypingIn(e.target)) return
+        e.preventDefault()
+        onNavigate(nav)
         return
       }
 
@@ -186,6 +199,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onOpenSearch,
     onNextNeedsYou,
     onStepTask,
+    onNavigate,
     onNewChat,
     onOpenHome,
     onSwitchWorkspaceByIndex,

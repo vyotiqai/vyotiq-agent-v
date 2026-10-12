@@ -4,6 +4,7 @@ import {
   spawnAgentInstance,
   waitForChildTerminal,
   cancelChildInstance,
+  messageChildInstance,
   formatAgentInstanceLabel,
   mergeAgentInstanceBranch,
   pullChildRun,
@@ -75,6 +76,7 @@ export const instanceHandlers = {
       stepId: readString(args, 'step_id') || undefined,
       readOnly: args.read_only === true || typeOnlyReads,
       ...(agentType ? { agentType } : {}),
+      ...(readString(args, 'model') ? { model: readString(args, 'model') } : {}),
       emitParentEvent: context.emitAgentEvent
     })
     if (!result.ok) return toolFail('spawn_agent_instance', 'spawn', result.error)
@@ -82,7 +84,9 @@ export const instanceHandlers = {
       ? `\nworktree_branch: ${result.worktreeBranch}\nWhen done, merge one branch at a time with merge_agent_instance (refused only if your uncommitted or untracked changes overlap the branch's changed files).`
       : ''
     const notes: string[] = []
-    if (result.modelNote) notes.push(`agent_type "${agentType?.name}": ${result.modelNote}`)
+    if (result.modelNote) {
+      notes.push(readString(args, 'model') ? `model: ${result.modelNote}` : `agent_type "${agentType?.name}": ${result.modelNote}`)
+    }
     if (result.sharedBecause) {
       notes.push(
         `No worktree (${result.sharedBecause}): the child runs in this workspace inside path_scope, where terminal is refused. For a child that only reads, pass read_only: true.`
@@ -188,6 +192,22 @@ export const instanceHandlers = {
     await recordMergedInstanceChanges(workspace, context, result)
     invalidateAfterWorkspaceMutation(workspace)
     return toolOk('merge_agent_instance', formatAgentInstanceLabel(childRunId), result.detail)
+  },
+  message_agent_instance: async (workspace, args, signal, context) => {
+    throwIfAborted(signal)
+    if (!context.runId) {
+      return toolFail('message_agent_instance', 'message', 'message_agent_instance requires an active run')
+    }
+    const childRunId = readString(args, 'run_id')
+    if (!childRunId) return toolFail('message_agent_instance', 'message', 'run_id is required')
+    const label = formatAgentInstanceLabel(childRunId)
+    const result = messageChildInstance(workspace, context.runId, childRunId, readString(args, 'message') ?? '')
+    if (!result.ok) return toolFail('message_agent_instance', label, result.error)
+    return toolOk(
+      'message_agent_instance',
+      label,
+      `${label}\nqueued: it reads the message at its next step (${result.queueLength} waiting). Await it as before.`
+    )
   },
   cancel_agent_instance: async (workspace, args, signal, context) => {
     throwIfAborted(signal)

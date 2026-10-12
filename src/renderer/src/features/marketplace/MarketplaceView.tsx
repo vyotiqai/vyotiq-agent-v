@@ -401,6 +401,14 @@ export function MarketplaceView({
               }}
             />
             {addButton}
+            <IconButton
+              icon="refresh"
+              label="Check packages for updates"
+              size="xs"
+              tone="muted"
+              disabled={controller.checkingUpdates}
+              onClick={() => void controller.checkUpdates()}
+            />
             <IconButton icon="gear" label="Registry and trust" size="xs" tone="muted" onClick={() => setTrustOpen(true)} />
           </div>
 

@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema, DictationEngineSchema } from './settings'
-import { ProviderIdSchemaAny } from './providers'
+import { ProviderIdSchemaAny, type ProviderIdAny } from './providers'
 import { RunScheduledSchema } from './schedules'
+import { STRUCTURED_FROM_MAX_CHARS } from './promptStructure'
 import {
   AGENT_QUESTION_MAX_ANSWER_CHARS,
   AGENT_QUESTION_MAX_ANSWER_VALUES,
@@ -23,6 +24,8 @@ export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 export const MAX_ATTACHMENT_DATA_CHARS = Math.ceil(MAX_ATTACHMENT_BYTES * (4 / 3)) + 128
 /** Extracted text kept per attachment, so one document cannot eat the context. */
 export const MAX_ATTACHMENT_CHARS = 120_000
+/** A plan step's title as an instance carries it (main clips it to this). */
+export const STEP_TITLE_MAX = 200
 
 /** Inline audio for providers that accept audio data URLs / inline bytes. */
 export const MAX_AUDIO_BYTES = 16 * 1024 * 1024
@@ -156,12 +159,19 @@ export const ChatMessageSchema = z.object({
   /** Loop-injected protocol turn (goal continue / plan nudge). Persisted for
    * the model, but never rendered as a user chat bubble. */
   synthetic: z.boolean().optional(),
+  /** An assistant reply that stopped at the output limit (the record marks it). */
+  cutOff: z.boolean().optional(),
   /**
    * A user follow-up the loop applied while the agent was still mid-turn (Send
    * now / steer), rather than after it finished. The record keeps the plan
    * going across it instead of starting the next run from nothing.
    */
   midTurn: z.literal(true).optional(),
+  /**
+   * A user message sent as a brief that Structure wrote: the words the person
+   * typed before it, for the record's "what you wrote". Never sent to a model.
+   */
+  structuredFrom: z.string().min(1).max(STRUCTURED_FROM_MAX_CHARS).optional(),
   /**
    * ISO timestamp: when the user sent a user message (turn-duration start);
    * when an assistant message finished streaming; when a tool result settled.
@@ -218,10 +228,24 @@ export const RunStatusSchema = z.object({
     })
     .optional(),
   /**
+   * The parent's plan step an inline instance was spawned for, as that step
+   * was titled then: the name the parent's record gives it, so its row in the
+   * navigator reads the same.
+   */
+  stepTitle: z.string().min(1).max(STEP_TITLE_MAX).optional(),
+  /** That step's id (todo id): its title is read from the parent's list as it stands. */
+  stepId: z.string().min(1).max(80).optional(),
+  /**
    * Started by `Vyotiq --headless` (main/headless) rather than from a window:
    * the record is ordinary, this only says nobody watched it run.
    */
   headless: z.literal(true).optional(),
+  /**
+   * The process running a headless run. A window's boot sweep leaves a
+   * `running` record alone while this process is alive, rather than marking
+   * another process's run interrupted.
+   */
+  ownerPid: z.number().int().positive().optional(),
   /**
    * Read in from a task bundle (Export as JSON): a finished record to read,
    * never resumed — a new instruction is refused; Fork continues it.
@@ -434,7 +458,9 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     /** Images the tool returned (screenshots), read via `runs:readArtifact`. */
     images: z.array(ToolImageRefSchema).max(16).optional(),
     /** Who let a gated call run, and for how long; absent when the gate never held it. */
-    approvedBy: ToolApprovalGrantSchema.optional()
+    approvedBy: ToolApprovalGrantSchema.optional(),
+    /** How long the call waited on you (an approval) before it ran or was denied, in ms. */
+    waitedMs: z.number().int().min(0).optional()
   }),
   z.object({
     /** Live progress from a long-running tool, shown under the tool row. */
@@ -458,6 +484,8 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     at: z.string().optional(),
     /** The plan step (todo id) the parent spawned it for. */
     stepId: z.string().min(1).optional(),
+    /** That step's title when it was spawned: what the parent's record names it. */
+    stepTitle: z.string().min(1).max(STEP_TITLE_MAX).optional(),
     /** The user-defined helper type it was spawned as (agentTypes.ts). */
     agentType: z.string().min(1).max(64).optional(),
     /** While it runs: the step it is on and what it is doing (live only, never persisted). */
@@ -511,7 +539,9 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
           arguments: z.string()
         })
       )
-      .optional()
+      .optional(),
+    /** The reply stopped at the output limit. */
+    cutOff: z.boolean().optional()
   }),
   z.object({
     /** In-progress LLM summarization of older history (auto or manual). */
@@ -571,7 +601,13 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     reason: IncompleteReasonSchema,
     step: z.number().int().min(1).optional(),
     /** Human-readable explanation shown next to the Continue action. */
-    message: z.string()
+    message: z.string(),
+    /**
+     * The loop recovered on its own (cut-off reply, empty reply, repetition,
+     * tool burst) and keeps going. The record shows it as a note; it is never
+     * the turn's failure state.
+     */
+    continuing: z.boolean().optional()
   }),
   z.object({
     /**
@@ -967,6 +1003,8 @@ export const RunSummarySchema = z.object({
   extraRoots: z.array(z.string().min(1)).max(MAX_EXTRA_ROOTS).optional(),
   /** The helper type an inline instance was spawned as — a muted label on its row. */
   agentType: z.string().min(1).max(64).optional(),
+  /** The parent's plan step an inline instance serves, by its title: the row's name. */
+  stepTitle: z.string().min(1).max(STEP_TITLE_MAX).optional(),
   /** Started by a repeating schedule: the row's repeat icon and its tooltip. */
   scheduled: RunScheduledSchema.optional(),
   /** Provider-reported cost for the run when the provider bills it. */
@@ -1462,6 +1500,20 @@ export const UsageExportResultSchema = z.object({
 })
 export type UsageExportResult = z.infer<typeof UsageExportResultSchema>
 
+/** One budget against what was spent in its period (US dollars). */
+export const BudgetPeriodStatusSchema = z.object({ spentUsd: z.number().min(0), limitUsd: z.number().positive() })
+
+/** Usage's budget line: today's and this month's spend across every workspace, against the budgets. */
+export const UsageBudgetStatusSchema = z.object({
+  /** Null when there is no daily budget. */
+  day: BudgetPeriodStatusSchema.nullable(),
+  /** Null when there is no monthly budget. */
+  month: BudgetPeriodStatusSchema.nullable(),
+  /** Why new work is held, when "Hold new work at the budget" is holding it. */
+  held: z.string().nullable()
+})
+export type UsageBudgetStatus = z.infer<typeof UsageBudgetStatusSchema>
+
 /** One local-day bucket of usage derived from run receipts. */
 export const HomeActivityDaySchema = z.object({
   /** Local calendar day (YYYY-MM-DD) of the receipt's writtenAt. */
@@ -1626,11 +1678,29 @@ export const HomeActivityResultSchema = z.object({
     /** Token total (input+output) of the prior equal-length window, when > 0. */
     previousTokens: z.number().int().min(0).optional(),
     /** Distinct runs with activity in the prior equal-length window, when > 0. */
-    previousRuns: z.number().int().min(0).optional()
+    previousRuns: z.number().int().min(0).optional(),
+    /**
+     * Model calls made beside the task's own steps — compaction summaries,
+     * commit messages — by site. Already inside the totals above; listed so
+     * the spend they make is visible on its own. Absent when there were none.
+     */
+    sideCalls: z
+      .array(
+        z.object({
+          site: z.enum(['compaction', 'commit_message', 'mcp_sampling', 'prompt_structure']),
+          calls: z.number().int().min(0),
+          billedInputTokens: z.number().int().min(0),
+          outputTokens: z.number().int().min(0),
+          billedCost: z.number().finite().optional(),
+          estimatedCost: z.number().finite().optional()
+        })
+      )
+      .optional()
   }),
   generatedAt: z.string().min(1)
 })
 export type HomeActivityResult = z.infer<typeof HomeActivityResultSchema>
+export type HomeActivitySideCall = NonNullable<HomeActivityResult['totals']['sideCalls']>[number]
 
 export const RunReceiptSchema = z.object({
   version: z.literal(RUN_RECEIPT_VERSION),
@@ -1949,6 +2019,35 @@ export type SetLoopResult = z.infer<typeof SetLoopResultSchema>
  * A gated tool call waiting on the user. The loop is parked on this request, so
  * the renderer must either answer it or cancel the run.
  */
+/** One row of an edit approval's preview: a context, removed or added line, or a hunk break (`@`). */
+export const ApprovalChangeLineSchema = z.object({
+  kind: z.enum([' ', '-', '+', '@']),
+  text: z.string(),
+  /** Line number in the file before the edit (context and removed rows), when known. */
+  oldNo: z.number().int().min(1).optional(),
+  /** Line number after the edit (context and added rows), when known. */
+  newNo: z.number().int().min(1).optional()
+})
+export type ApprovalChangeLine = z.infer<typeof ApprovalChangeLineSchema>
+
+/**
+ * What an edit would change, built in main from the call's full arguments
+ * (main/agent/approvalChangePreview.ts) — and, for a whole-file write, from
+ * the file on disk. `rewrite`: the file could not be read to diff against.
+ */
+export const ApprovalChangePreviewSchema = z.object({
+  path: z.string().min(1),
+  action: z.enum(['create', 'modify', 'rewrite']),
+  add: z.number().int().min(0),
+  del: z.number().int().min(0),
+  lines: z.array(ApprovalChangeLineSchema),
+  /** Rows past the cap, counted and not sent. */
+  hiddenLines: z.number().int().min(0),
+  /** str_replace with replace_all: the rows stand for every match. */
+  everyMatch: z.literal(true).optional()
+})
+export type ApprovalChangePreview = z.infer<typeof ApprovalChangePreviewSchema>
+
 export const ToolApprovalRequestSchema = z.object({
   requestId: z.string().min(1),
   runId: z.string().min(1),
@@ -1966,14 +2065,37 @@ export const ToolApprovalRequestSchema = z.object({
    */
   alwaysAllowCommand: z.string().nullable().optional(),
   /**
+   * Terminal only: the program alone (`npm` beside `npm test`), when the card
+   * may also offer to always allow every command it runs. Absent for shells,
+   * package runners and programs that delete, push or reach the network.
+   */
+  alwaysAllowProgram: z.string().min(1).optional(),
+  /**
    * Set when the command guard stopped a shell command that can destroy work
    * beyond a rewind (a delete outside the workspace, a force push, a download
    * piped into a shell…): what it would do, in plain words. It asks whatever
    * the approval mode says, and the card offers only Allow once and Deny.
    */
-  danger: z.string().min(1).optional()
+  danger: z.string().min(1).optional(),
+  /**
+   * How long the card waits before it is denied, in ms; null when it waits
+   * for an answer however long that takes (Settings › Agent). Absent on
+   * requests from before the setting: the default 15 minutes.
+   */
+  timeoutMs: z.number().int().min(0).nullable().optional(),
+  /** `edit` / `str_replace`: the change as −/+ rows. Absent when it could not be built. */
+  changePreview: ApprovalChangePreviewSchema.optional(),
+  /**
+   * `edit` / `str_replace` on a file inside a folder: the workspace's top
+   * folder it sits in (`src`), which the card offers to always allow edits
+   * under. Absent for a file at the root or outside the workspace.
+   */
+  alwaysAllowFolder: z.string().min(1).max(200).optional()
 })
 export type ToolApprovalRequest = z.infer<typeof ToolApprovalRequestSchema>
+
+/** The longest note a deny carries to the agent. */
+export const APPROVAL_NOTE_MAX = 2000
 
 /** `session` is "Allow for this task": kept with the task, so its follow-ups do not ask again. */
 export const ToolApprovalDecisionSchema = z.enum(['once', 'session', 'always', 'deny'])
@@ -1982,9 +2104,29 @@ export type ToolApprovalDecision = z.infer<typeof ToolApprovalDecisionSchema>
 export const ToolApprovalResponseSchema = z.object({
   requestId: z.string().min(1),
   runId: z.string().min(1),
-  decision: ToolApprovalDecisionSchema
+  decision: ToolApprovalDecisionSchema,
+  /** With Deny: what to do instead, handed to the agent with the refusal. */
+  note: z.string().trim().min(1).max(APPROVAL_NOTE_MAX).optional(),
+  /**
+   * With Allow once on a command: the command as the person edited it. It
+   * runs in place of the agent's, once, and the agent is told it changed.
+   */
+  editedCommand: z.string().trim().min(1).max(20_000).optional(),
+  /**
+   * With Always on an edit: allow edits under the request's
+   * `alwaysAllowFolder` only, not the tool everywhere.
+   */
+  allowFolder: z.literal(true).optional(),
+  /**
+   * With Always on a command: allow the request's `alwaysAllowProgram` (every
+   * `npm …`), not only `alwaysAllowCommand` (`npm test`).
+   */
+  allowProgram: z.literal(true).optional()
 })
 export type ToolApprovalResponse = z.infer<typeof ToolApprovalResponseSchema>
+
+/** What a decision may carry besides itself: a deny's note, an edited command. */
+export type ToolApprovalExtras = Pick<ToolApprovalResponse, 'note' | 'editedCommand' | 'allowFolder' | 'allowProgram'>
 
 export const ListPendingToolApprovalsRequestSchema = z.object({
   runId: RunIdSchema
@@ -2129,6 +2271,23 @@ export const DeleteRunRequestSchema = z.object({
   runId: RunIdSchema
 })
 export type DeleteRunRequest = z.infer<typeof DeleteRunRequestSchema>
+
+/** A task in Recently deleted, restorable for 30 days. */
+export type DeletedRunSummary = {
+  runId: string
+  deletedAt: string
+  goal?: string
+  /** Helper instances that went with it. */
+  instances: string[]
+  bytes: number
+}
+
+export const DeletedRunsListRequestSchema = z.object({ workspacePath: z.string().min(1) })
+/** Restore, or remove for good; no runId with purge empties Recently deleted. */
+export const DeletedRunActionRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema.optional()
+})
 
 export const ExportRunRequestSchema = z.object({
   workspacePath: z.string().min(1),
@@ -2551,6 +2710,21 @@ export type WorkspaceClearMemoryRequest = z.infer<typeof WorkspaceClearMemoryReq
 /** How many notes were removed (index.md and state.md are not counted). */
 export type WorkspaceClearMemoryResult = { notes: number }
 
+/** Settings › Agent › Memory: one note to read or delete (`notes/<name>.md` or `state.md`). */
+export const WorkspaceMemoryNoteRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  path: z.string().min(1).max(300)
+})
+export type WorkspaceMemoryNoteRequest = z.infer<typeof WorkspaceMemoryNoteRequestSchema>
+
+export type WorkspaceMemoryNote = {
+  path: string
+  bytes: number
+  mtimeMs: number
+  title: string
+  indexed: boolean
+}
+
 export const WorkspaceAgentContextResultSchema = z.object({
   workspaceName: z.string().min(1),
   branch: z.string().nullable(),
@@ -2719,10 +2893,17 @@ export type ComposerSendExtras = {
    */
   worktree?: boolean
   /**
+   * Also start the same brief on this model, each copy in its own new
+   * worktree, to compare. Renderer only: App starts the two tasks.
+   */
+  compareWith?: { provider: ProviderIdAny; model: string }
+  /**
    * While a run is live: send it now instead of queueing it for the turn's end
    * (Shift+Enter) — queued, then promoted as "Send now" does. Renderer only.
    */
   steer?: boolean
+  /** The draft was rewritten by Structure: the words typed before it, kept on the message. */
+  structuredFrom?: string
 }
 
 export function buildUserContent(

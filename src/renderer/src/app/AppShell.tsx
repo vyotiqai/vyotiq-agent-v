@@ -39,6 +39,7 @@ import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import { ShortcutsHelpDialog } from '@renderer/features/help/ShortcutsHelpDialog'
 import { RepeatTaskDialog } from '@renderer/features/schedules/RepeatTaskDialog'
 import { ScheduledTasksDialog } from '@renderer/features/schedules/ScheduledTasksDialog'
+import { RecentlyDeletedDialog } from '@renderer/features/deleted/RecentlyDeletedDialog'
 import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
 import { exportTaskJson } from '@renderer/features/task/taskBundle'
 import { TitleBar } from './TitleBar'
@@ -100,6 +101,12 @@ export type AppShellProps = {
   onRetryRunInWorkspace?: (path: string, runId: string) => void
   /** The task header's Fork, from the row menu. */
   onForkRunInWorkspace?: (path: string, runId: string) => void
+  /** Open a task in a new pane beside the focused one. */
+  onOpenRunBesideInWorkspace?: (path: string, runId: string) => void
+  /** Back (-1) and Forward (1) through the views and tasks visited. */
+  onNavigate?: (delta: -1 | 1) => void
+  /** A task came back from Recently deleted: list the workspace's tasks again. */
+  onRunsRestored?: (path: string) => void
   onPauseGoalInWorkspace?: (path: string, runId: string, live: boolean) => void
   onStopLoopInWorkspace?: (path: string, runId: string) => void
   /** `pinnedRunKey` of every pinned task. */
@@ -138,6 +145,8 @@ export type AppShellProps = {
    * chosen in Set up, if one is.
    */
   firstRun?: { workspace: string | null } | null
+  /** The app's own scratch folder; the navigator hides its group while it is empty. */
+  homeWorkspacePath?: string | null
   /** New task briefs put aside, for the navigator's Drafts group. */
   drafts?: NavigatorProps['drafts']
 }
@@ -160,6 +169,7 @@ function placeOf(view: ShellView): NavigatorPlace {
 function AppShellInner(props: AppShellProps) {
   const {
     view,
+    onOpenUsage,
     workspacePath,
     openWorkspaces = [],
     runsByWorkspacePath = {},
@@ -405,6 +415,14 @@ function AppShellInner(props: AppShellProps) {
     const res = await window.vyotiq.runsSearch({ workspacePaths, query })
     return res.ok ? res.data : null
   }, [])
+  // Ctrl K searches what was said in every open workspace's tasks, too.
+  // A ref, so a re-render (a running task's activity) doesn't restart the palette's pause.
+  const paletteSearchPathsRef = useRef(openWorkspaces)
+  paletteSearchPathsRef.current = openWorkspaces
+  const searchPaletteRuns = useCallback(async (query: string) => {
+    const paths = paletteSearchPathsRef.current
+    return paths.length > 0 ? searchRuns(paths.slice(0, 20), query) : null
+  }, [searchRuns])
   const update = useUpdaterState()
   // Keycaps in the palette follow a rebound shortcut.
   const shortcutsVersion = useShortcutsVersion()
@@ -421,6 +439,7 @@ function AppShellInner(props: AppShellProps) {
         canAddWorkspace: Boolean(props.onAddWorkspace),
         appearance: props.onAppearanceChange ? (props.appearance ?? null) : null,
         hasTask: view === 'chat' && focusedRun != null,
+        inTaskView: view === 'chat',
         canImportTask: Boolean(props.onImportTask && workspacePath)
       })
     ]
@@ -443,6 +462,7 @@ function AppShellInner(props: AppShellProps) {
     onOpenSearch: () => setPaletteOpen(true),
     onNextNeedsYou,
     onStepTask,
+    onNavigate: props.onNavigate,
     onNewChat: onNewTask,
     onOpenHome,
     onSwitchWorkspaceByIndex: switchWorkspaceByIndex,
@@ -471,13 +491,16 @@ function AppShellInner(props: AppShellProps) {
         case 'open_update':
           requestUpdatePanel()
           return
+        case 'open_usage':
+          onOpenUsage()
+          return
         default: {
           const exhaustive: never = action
           return exhaustive
         }
       }
     },
-    [openTask, onOpenSettingsSection, onOpenSettings]
+    [openTask, onOpenSettingsSection, onOpenSettings, onOpenUsage]
   )
 
   // Every task waiting on you across the open workspaces, in the list's order:
@@ -540,6 +563,7 @@ function AppShellInner(props: AppShellProps) {
       selected={focusedRun}
       isRunOpen={props.isRunOpenInPane}
       openPaths={openWorkspaces}
+      homeWorkspacePath={props.homeWorkspacePath ?? null}
       activePath={workspacePath}
       runsByWorkspacePath={runsByWorkspacePath}
       activeRuns={activeRuns}
@@ -594,7 +618,13 @@ function AppShellInner(props: AppShellProps) {
         onTogglePin: props.onTogglePinnedRun,
         onToggleArchive: props.onToggleArchivedRun,
         onRespondApproval: props.onRespondApproval,
-        onRepeat: (path, runId, title) => void requestRepeatTask({ workspacePath: path, runId, title })
+        onRepeat: (path, runId, title) => void requestRepeatTask({ workspacePath: path, runId, title }),
+        onOpenBeside: props.onOpenRunBesideInWorkspace,
+        onRevealFolder: (path) => {
+          void window.vyotiq?.workspaceFileReveal?.({ workspacePath: path, path: '.' }).then((res) => {
+            if (res && !res.ok) pushToast(res.error, 'error')
+          })
+        }
       }}
       pinnedKeys={pinnedKeys}
       archivedKeys={archivedKeys}
@@ -708,6 +738,7 @@ function AppShellInner(props: AppShellProps) {
         commands={commands}
         settingsCommands={paletteSettingsCommands}
         searchFiles={searchFiles}
+        searchRuns={searchPaletteRuns}
         changedFiles={changedFiles}
         newTaskIn={newTaskPath ? { name: formatWorkspaceName(newTaskPath) } : null}
         onOpenTask={(row, beside) => {
@@ -721,6 +752,7 @@ function AppShellInner(props: AppShellProps) {
         onRunCommand={(id) =>
           runPaletteCommand(id, {
             workspaces: openWorkspaces,
+            activeWorkspacePath: workspacePath,
             onOpenSettings: props.onOpenSettings,
             onOpenHome: props.onOpenHome,
             onOpenUsage: props.onOpenUsage,
@@ -752,6 +784,12 @@ function AppShellInner(props: AppShellProps) {
       />
       <RepeatTaskDialog />
       <ScheduledTasksDialog onOpenTask={openTask} />
+      <RecentlyDeletedDialog
+        onRestored={(path, runId) => {
+          props.onRunsRestored?.(path)
+          openTask(path, runId)
+        }}
+      />
     </div>
   )
 }

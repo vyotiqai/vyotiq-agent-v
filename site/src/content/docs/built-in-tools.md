@@ -1,11 +1,19 @@
 ---
 title: Built-in tools
-description: Web reading and search without the browser, reading the browser's console, the workspace's memory, and tools that load only when a task needs them.
+description: Moving and renaming files, web reading and search without the browser, reading the browser's console, the workspace's memory, and tools that load only when a task needs them.
 group: Extend
 order: 5
 ---
 
 Settings, "Tools", "Catalog" lists every tool the agent has: the built-in ones, the ones runs wrote ([Agent-built tools](/docs/agent-built-tools)), and each MCP server's. This page covers the built-in tools that need a word of their own.
+
+## Moving and renaming files
+
+**`move`** moves or renames a file or a folder inside the workspace: `from` and `to`, plus `overwrite` to replace a file that is already at `to`. It is one change rather than a copy, an edit and a delete, so the agent no longer rewrites a whole file to rename it.
+
+- It asks before it runs in the default approval mode, as a delete does, and the approval card says where the file goes.
+- It is undoable like an edit: Changes shows the file gone from its old place and added at the new one, and Undo puts it back.
+- It stays inside the workspace: a path outside it, the workspace folder itself, or a folder moved into itself is refused.
 
 ## Reading and searching the web
 

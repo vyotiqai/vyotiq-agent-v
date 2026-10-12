@@ -1,8 +1,10 @@
-import type { CSSProperties, ReactNode, Ref } from 'react'
-import { IconButton, Tabs, cn, type TabItem } from '@renderer/lib/ui'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from 'react'
+import { ActionMenu, IconButton, Tabs, cn, type ActionMenuItem, type TabItem } from '@renderer/lib/ui'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import type { ChatRightPanelId } from '@renderer/lib/utils/layout'
+import { stripEdgeMask, useStripEdges } from '@renderer/lib/hooks/useStripEdges'
+import { fitTabs } from './tabOverflow'
 
 /** The strip's order — Alt 1–6 follow it. */
 export const INSPECTOR_TABS: readonly ChatRightPanelId[] = ['changes', 'files', 'terminal', 'browser', 'pr', 'plan']
@@ -15,6 +17,59 @@ export const INSPECTOR_TAB_LABEL: Record<ChatRightPanelId, string> = {
   browser: 'Browser',
   pr: 'PR',
   plan: 'Plan'
+}
+
+/** `gap-2` between row tabs, and the xs "More panels" button (size-6). */
+const TAB_GAP_PX = 8
+const MORE_BUTTON_PX = 24
+/** Each tab controls `dock-panel-<id>`; also how a measured tab names itself. */
+const PANEL_ID_PREFIX = 'dock-panel-'
+
+/**
+ * The tabs that don't fit the strip, measured live: each tab's width is
+ * remembered from when it was last shown, so a hidden one comes back as soon
+ * as there is room for it.
+ */
+function useHiddenTabs(
+  wrapRef: RefObject<HTMLDivElement | null>,
+  ids: readonly ChatRightPanelId[],
+  active: ChatRightPanelId,
+  /** Changes when a tab's content (a count, a live dot) can change its width. */
+  contentKey: string
+): ChatRightPanelId[] {
+  const [hidden, setHidden] = useState<ChatRightPanelId[]>([])
+  const widths = useRef(new Map<ChatRightPanelId, number>())
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const measure = (): void => {
+      for (const tab of wrap.querySelectorAll<HTMLElement>(`[role="tab"][aria-controls^="${PANEL_ID_PREFIX}"]`)) {
+        const width = tab.offsetWidth
+        const id = tab.getAttribute('aria-controls')!.slice(PANEL_ID_PREFIX.length) as ChatRightPanelId
+        if (width > 0) widths.current.set(id, width)
+      }
+      const available = wrap.clientWidth
+      // Nothing measured (jsdom, a collapsed pane): leave every tab out on the strip.
+      if (available <= 0 || widths.current.size === 0) {
+        setHidden((prev) => (prev.length === 0 ? prev : []))
+        return
+      }
+      const next = fitTabs({
+        ids,
+        widthOf: (id) => widths.current.get(id) ?? 0,
+        available,
+        gap: TAB_GAP_PX,
+        moreWidth: MORE_BUTTON_PX,
+        active
+      }).hidden
+      setHidden((prev) => (prev.length === next.length && prev.every((id, i) => id === next[i]) ? prev : next))
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(wrap)
+    return () => observer?.disconnect()
+  }, [wrapRef, ids, active, contentKey, hidden])
+  return hidden
 }
 
 /** How long a {@link InspectorTabState.detail} may be before the host truncates it. */
@@ -76,6 +131,23 @@ export function Inspector({
     }
   })
   const style: CSSProperties | undefined = expanded ? undefined : { width }
+  const stripRef = useRef<HTMLDivElement>(null)
+  const contentKey = INSPECTOR_TABS.map((id) => `${state[id]?.count ?? ''}${state[id]?.live ? '*' : ''}`).join('|')
+  const hidden = useHiddenTabs(stripRef, INSPECTOR_TABS, tab, contentKey)
+  const shown = hidden.length === 0 ? items : items.filter((item) => !hidden.includes(item.id))
+  const edges = useStripEdges(stripRef, tab, { strip: '[role="tablist"]', current: '[aria-selected="true"]' })
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreItems: ActionMenuItem[] = hidden.map((id) => {
+    const s = state[id]
+    return {
+      id,
+      label: INSPECTOR_TAB_LABEL[id],
+      ...(s?.count ? { detail: String(s.count) } : s?.live ? { detail: 'working now' } : {}),
+      onSelect: () => onSelect(id)
+    }
+  })
+  // A hidden tab with something waiting or working marks the button, as its tab would.
+  const moreSignals = hidden.some((id) => Boolean(state[id]?.count) || Boolean(state[id]?.live))
   return (
     <section
       ref={sectionRef}
@@ -92,16 +164,50 @@ export function Inspector({
       {bare ? null : (
         // pl-3: each row-size tab pads its label 4px for the ring, so labels start at 16px.
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2" data-inspector-tabs>
-          <Tabs
-            items={items}
-            value={tab}
-            onChange={onSelect}
-            size="row"
-            label="Inspector"
-            panelIdPrefix="dock-panel-"
-            // A narrow inspector scrolls its strip sideways.
-            className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none]"
-          />
+          <div ref={stripRef} className="flex min-w-0 flex-1 items-center gap-2 self-stretch">
+            <Tabs
+              items={shown}
+              value={tab}
+              onChange={onSelect}
+              size="row"
+              label="Inspector"
+              panelIdPrefix={PANEL_ID_PREFIX}
+              // A narrow inspector scrolls its strip sideways; an edge with
+              // tabs past it fades, so a cut label reads as more, not a typo.
+              className={cn(
+                'min-w-0 flex-1 overflow-x-auto [scrollbar-width:none]',
+                stripEdgeMask(edges)
+              )}
+            />
+            {hidden.length > 0 ? (
+              <ActionMenu
+                open={moreOpen}
+                onOpenChange={setMoreOpen}
+                placement="down"
+                align="end"
+                aria-label="More panels"
+                items={moreItems}
+                trigger={(t) => (
+                  <span className="relative inline-flex shrink-0" data-inspector-more>
+                    <IconButton
+                      ref={t.ref}
+                      icon="more"
+                      label={`More panels: ${hidden.map((id) => INSPECTOR_TAB_LABEL[id]).join(', ')}`}
+                      size="xs"
+                      tone="muted"
+                      aria-expanded={t['aria-expanded']}
+                      aria-controls={t['aria-controls']}
+                      aria-haspopup={t['aria-haspopup']}
+                      onClick={t.onClick}
+                    />
+                    {moreSignals ? (
+                      <span aria-hidden="true" className="pointer-events-none absolute right-0.5 top-0.5 size-1.5 rounded-full bg-accent" />
+                    ) : null}
+                  </span>
+                )}
+              />
+            ) : null}
+          </div>
           <IconButton
             icon={expanded ? 'collapse' : 'expand'}
             label={
@@ -126,3 +232,4 @@ export function Inspector({
     </section>
   )
 }
+

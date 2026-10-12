@@ -62,11 +62,16 @@ test('a finished run keeps every step’s work in its step, in order', async () 
   // The run ends with its answer as the record's result.
   const result = window.locator('section[aria-label="Result"]')
   await expect(result).toContainText('RECORD_ORDER_DONE', { timeout: 30_000 })
-  // The run is over: the composer offers no Stop.
-  await expect(window.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i })).toHaveCount(0, {
-    timeout: 15_000
-  })
+  // The run is over, so there is nothing to stop: Stop is gone and the action
+  // reads Send.
+  const line = window.locator('[data-composer-line]')
+  await expect(line.getByRole('button', { name: /^stop$/i })).toHaveCount(0, { timeout: 15_000 })
+  await expect(line.getByRole('button', { name: /^send$/i })).toBeVisible({ timeout: 15_000 })
 
+  // Answered, the run folds its work behind one line; open it.
+  const work = window.locator('[data-work-fold="done"] > div > button')
+  await expect(work).toHaveAttribute('aria-expanded', 'false')
+  await work.click()
   const step1 = window.locator('[data-step="1"]')
   const step2 = window.locator('[data-step="2"]')
   await expect(step1).toHaveAttribute('data-step-state', 'done')

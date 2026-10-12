@@ -1,11 +1,11 @@
-# Vyotiq
+# Agent V
 
 [![CI](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml/badge.svg)](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-Vyotiq ("Agent V") is an Electron desktop app for handing real work on a real repository to a coding agent. You give it a task; it works in your checkout with terminal, file, git and browser tools, and the app keeps a record of the work — every step, every change, the checks it was held to and whether they held — beside the files, terminal, browser and pull request it worked in. It works with many model providers, and voice dictation transcribes on-device with Whisper.
+Agent V, by Vyotiq, is an Electron desktop app for handing real work on a real repository to a coding agent. You give it a task; it works in your checkout with terminal, file, git and browser tools, and the app keeps a record of the work — every step, every change, the checks it was held to and whether they held — beside the files, terminal, browser and pull request it worked in. It works with many model providers, and you can dictate briefs by voice.
 
-This is version 1.1.0. Release notes: [release-notes/v1.1.0.md](release-notes/v1.1.0.md).
+This is version 1.2.0. Release notes: [release-notes/v1.2.0.md](release-notes/v1.2.0.md).
 
 ## Features
 
@@ -18,12 +18,12 @@ This is version 1.1.0. Release notes: [release-notes/v1.1.0.md](release-notes/v1
 - **Worktrees** — start a task on its own branch in its own folder, then merge it back or discard it.
 - **Multiple model providers** — OpenAI, Anthropic, Google Gemini, Amazon Bedrock, Google Vertex AI, Ollama (local models), DeepSeek, Groq, OpenRouter, xAI, Mistral, or any custom OpenAI-compatible endpoint, plus an OpenCode provider. Model lists are fetched per provider where the API supports it.
 - **Permission rules** — allow, ask or deny a tool, a command or a path, in Settings or in a workspace's own `.vyotiq/permissions.json` (deny and ask only). Secret files such as `.env` and SSH keys ask before the agent touches them.
-- **Command sandbox** — opt in and the commands the agent runs can read the disk but write only the workspace, temp and package caches, with network access optional. macOS (sandbox-exec) and Linux (bubblewrap); off by default, and never applied to the terminal you type into.
+- **Command sandbox** — opt in and the commands the agent runs can read the disk but write only the workspace, temp and package caches. macOS (sandbox-exec) and Linux (bubblewrap) can also cut the network; Windows runs them at low integrity, which confines writes only. Off by default, and never applied to the terminal you type into.
 - **Usage** — what tasks cost and how they went over 7, 30 or 90 days or a range you pick: spend and tokens by day, by workspace and by task, model mix, tool failures, and edits no check followed. Export it as CSV, one row per task per day.
 - **Export and import** — save a task as Markdown to read, or as JSON to import into another workspace or machine, where it opens as a read-only record; fork it to carry on.
 - **An agent that acts on your checkout** — two modes, Ask (reads and answers) and Agent (plans, edits and runs commands). The built-in tool catalog includes a terminal, file tools (read, edit, search, glob, grep, codebase search), git tools (status, diff, commit, apply patch), GitHub tools (pull requests, issues), typecheck/lint/test runners, browser automation, notebook editing, and language-server queries.
 - **Helper instances** — a task can fan work out to helper instances, each on its own git worktree branch, merged back into the task's branch. Settings caps how many run at once.
-- **Local Whisper dictation** — voice dictation is transcribed entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app. The model weights are fetched from Hugging Face into the app's user data directory the first time you use dictation, so the feature needs one download before it works offline.
+- **Voice dictation** — by default your recorded audio goes to OpenAI's transcription API with your OpenAI key; OpenRouter, with your OpenRouter key, is the other cloud engine. Choose **Local** in Settings → Voice and Whisper or Moonshine transcribes on your machine on the ONNX runtime, and no audio leaves it. Local models aren't bundled: the first time you pick one, its weights download from Hugging Face into the app's user data directory, and after that local dictation works offline. See [PRIVACY.md](PRIVACY.md) §7.
 - **Skills and marketplace** — skills ship with the app as marketplace resources and can be loaded into a run; plugin rules are supported alongside skill files.
 - **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog. Connection attempts widen Node's 250ms per-address window, so a reachable host that publishes several A/AAAA records is not reported as unreachable.
 - **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
@@ -46,7 +46,7 @@ This is version 1.1.0. Release notes: [release-notes/v1.1.0.md](release-notes/v1
 
 ## Platforms
 
-Vyotiq builds for **Windows** (NSIS installer), **macOS** (dmg and zip), and **Linux** (AppImage, deb, rpm). Target definitions are in `electron-builder.yml`.
+Agent V builds for **Windows** (NSIS installer), **macOS** (dmg and zip), and **Linux** (AppImage, deb, rpm). Target definitions are in `electron-builder.yml`.
 
 ## Downloads
 
@@ -88,6 +88,7 @@ pnpm start   # launch that build (it does not rebuild — run pnpm build first)
 pnpm typecheck     # tsc over the main- and renderer-side configs
 pnpm lint          # eslint .
 pnpm test          # vitest suite
+pnpm smoke:boot    # start the built app once and exit (after pnpm build)
 pnpm test:coverage # vitest with coverage (this is what CI runs)
 pnpm test:watch    # vitest in watch mode
 ```

@@ -31,6 +31,9 @@ export function shouldDeferAppEscapeStop(opts?: {
   // An open dictation take — Esc discards it (restorable), it does not stop the run
   if (document.querySelector('[data-take-open]')) return true
 
+  // Structure writing a brief, or asking before it — Esc cancels that, not the run
+  if (document.querySelector('[data-structure-open]')) return true
+
   // Inline cancel-edit composer — Escape cancels the edit
   const inline = document.querySelector('[data-composer-inline]')
   if (inline && document.activeElement && inline.contains(document.activeElement)) {

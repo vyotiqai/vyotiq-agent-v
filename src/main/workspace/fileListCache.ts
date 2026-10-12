@@ -17,7 +17,8 @@ import { canonicalizeWorkspacePath, isWindowsStylePath } from '../../shared/util
  */
 
 /** The cap each picker walked with. */
-const WALK_CAP = 8_000
+export const FILE_LIST_WALK_CAP = 8_000
+const WALK_CAP = FILE_LIST_WALK_CAP
 
 /** Closing a workspace drops its list; this bounds only a close that never reached here. */
 export const FILE_LIST_MAX_WORKSPACES = 8

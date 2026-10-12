@@ -32,6 +32,7 @@ const api = {
   workspaceLspStatus: vi.fn(),
   workspaceLspRequest: vi.fn(),
   workspaceGrep: vi.fn(),
+  workspaceSuggestPaths: vi.fn(),
   gitDiff: vi.fn(),
   gitBlame: vi.fn(),
   writeClipboard: vi.fn(() => true),
@@ -210,6 +211,7 @@ beforeEach(() => {
     data: { kind: 'diagnostics', items: [] }
   })
   api.gitDiff.mockResolvedValue({ ok: true, data: { content: '' } })
+  api.workspaceSuggestPaths.mockResolvedValue({ ok: true, data: { paths: [], dirs: [], total: 0 } })
   api.gitBlame.mockResolvedValue({
     ok: true,
     data: { kind: 'unavailable', detail: 'No git history' }
@@ -522,6 +524,47 @@ describe('FilesPanel', () => {
     expect(api.workspaceFileRead).not.toHaveBeenCalled()
   })
 
+  it('opens a bare file name (an answer cites `note.ts`) where the workspace has it', async () => {
+    api.workspaceSuggestPaths.mockResolvedValue({
+      ok: true,
+      data: { paths: ['src/note.ts', 'src/notes.md'], dirs: [], total: 2 }
+    })
+    render(<FilesPanel workspacePath={workspacePath} active openPath={{ workspacePath, path: 'note.ts' }} />)
+    await waitFor(() => expect(api.workspaceFileRead).toHaveBeenCalledWith({ workspacePath, path: 'src/note.ts' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('offers the places a bare name is in when there are several, and opens the one picked', async () => {
+    api.workspaceSuggestPaths.mockResolvedValue({
+      ok: true,
+      data: { paths: ['src/note.ts', 'lib/deep/note.ts'], dirs: [], total: 2 }
+    })
+    const handled = vi.fn()
+    render(
+      <FilesPanel
+        workspacePath={workspacePath}
+        active
+        openPath={{ workspacePath, path: 'note.ts' }}
+        onOpenPathHandled={handled}
+      />
+    )
+    const choices = await screen.findByRole('group', { name: 'Files named note.ts' })
+    expect(choices.textContent).toContain('is in 2 places')
+    expect(api.workspaceFileRead).not.toHaveBeenCalled()
+    // The request is answered either way, so it is not replayed.
+    await waitFor(() => expect(handled).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'lib/deep/note.ts' }))
+    await waitFor(() => expect(api.workspaceFileRead).toHaveBeenCalledWith({ workspacePath, path: 'lib/deep/note.ts' }))
+    expect(screen.queryByRole('group', { name: 'Files named note.ts' })).toBeNull()
+  })
+
+  it('offers no "Open externally" for a file that is not there', async () => {
+    api.workspaceFileRead.mockResolvedValueOnce({ ok: false, error: 'File not found: src/gone.ts' })
+    render(<FilesPanel workspacePath={workspacePath} active openPath={{ workspacePath, path: 'src/gone.ts' }} />)
+    expect((await screen.findByRole('alert')).textContent).toContain('File not found')
+    expect(screen.queryByRole('button', { name: 'Open externally' })).toBeNull()
+  })
+
   it('uses real file-management IPC for creating a file', async () => {
     render(<FilesPanel workspacePath={workspacePath} active />)
     await screen.findByText('README.md')
@@ -550,6 +593,36 @@ describe('FilesPanel', () => {
     expect(screen.getByRole('menuitem', { name: 'Open' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy relative path' }))
     expect(api.writeClipboard).toHaveBeenCalledWith('README.md')
+  })
+
+  it('moves a deleted entry to the trash, and asks before deleting for good', async () => {
+    api.workspaceFileDelete
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'Could not move README.md to the trash: no recycle bin',
+        code: 'TRASH_FAILED'
+      })
+      .mockResolvedValueOnce({ ok: true, data: { path: 'README.md', kind: 'file', trashed: false } })
+    render(<FilesPanel workspacePath={workspacePath} active />)
+    fireEvent.contextMenu(await screen.findByText('README.md'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }))
+    await waitFor(() => {
+      expect(api.workspaceFileDelete).toHaveBeenCalledWith({
+        workspacePath,
+        path: 'README.md',
+        recursive: true
+      })
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete permanently' }))
+    await waitFor(() => {
+      expect(api.workspaceFileDelete).toHaveBeenLastCalledWith({
+        workspacePath,
+        path: 'README.md',
+        recursive: true,
+        permanent: true
+      })
+    })
   })
 
   it('does not apply a mutation completion after switching workspaces', async () => {
@@ -931,6 +1004,20 @@ describe('FilesPanel', () => {
       return el as HTMLElement
     })
     expect(header.textContent).toContain('agent read L1–20')
+  })
+
+  it('dots a closed folder that holds a file this task changed, and only while closed', async () => {
+    const marks = new Map([
+      ['README.md', { read: { startLine: 1 } }],
+      ['src/note.ts', { change: 'M' as const }]
+    ])
+    render(<FilesPanel workspacePath={workspacePath} active agentMarks={marks} />)
+    const src = (await screen.findByText('src')).closest('button') as HTMLElement
+    expect(src.querySelector('[data-folder-changed]')?.getAttribute('title')).toBe('Holds files this task changed')
+    expect(screen.getByText('README.md').closest('button')?.querySelector('[data-folder-changed]')).toBeNull()
+    fireEvent.click(src)
+    expect(await screen.findByText('note.ts')).toBeTruthy()
+    expect(src.querySelector('[data-folder-changed]')).toBeNull()
   })
 
   it('narrows the tree to what this task changed, and the folders that hold it', async () => {

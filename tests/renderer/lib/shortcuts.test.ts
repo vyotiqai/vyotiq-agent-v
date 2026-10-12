@@ -3,6 +3,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
+import { keyGlyph } from '@renderer/lib/shortcuts/labels'
+import { chordKeys } from '@renderer/features/settings/utils/shortcutGroups'
 import {
   focusBrowserUrlIfOpen,
   focusComposerMessage,
@@ -169,6 +171,7 @@ describe('shortcutLabel', () => {
     expect(reference.map((row) => row.id)).toEqual([
       'edit-last',
       'steer',
+      'structure',
       'approval-allow',
       'approval-deny',
       'font-smaller',
@@ -532,5 +535,32 @@ describe('useAppShortcuts task stepping', () => {
     const entry = shortcutCatalog().find((e) => e.id === 'nextTask')
     expect(entry?.label).toMatch(/↓$/)
     expect(shortcutLabel('prevTask')).toMatch(/↑$/)
+  })
+})
+
+describe('keycap labels', () => {
+  it('reads every default chord as short keycaps, never a raw key name', () => {
+    for (const entry of shortcutCatalog()) {
+      for (const cap of chordKeys(entry.label)) {
+        // "ARROWLEFT" and "BACKSPACE" were what Settings showed; a keycap is a glyph or a short word.
+        expect(cap.length, `${entry.id}: ${entry.label}`).toBeLessThanOrEqual(5)
+      }
+    }
+    expect(shortcutLabel('navBack')).toBe('Alt+←')
+    expect(shortcutLabel('navForward')).toBe('Alt+→')
+  })
+
+  it('maps the named keys a rebind can land on', () => {
+    expect(['arrowleft', 'arrowright', 'enter', 'tab', ' ', 'backspace', 'pagedown', 'f5', 'k'].map(keyGlyph)).toEqual([
+      '←',
+      '→',
+      '↵',
+      'Tab',
+      'Space',
+      '⌫',
+      'PgDn',
+      'F5',
+      'K'
+    ])
   })
 })

@@ -18,6 +18,7 @@ import {
   hoverSelector,
   waitForText,
   handleDialog,
+  readBrowserLogs,
   type BrowserCaptureTarget
 } from '@main/app/agentBrowser'
 import { getSettings } from '@main/settings/settings'
@@ -122,7 +123,51 @@ function captureTargetFromArgs(args: Record<string, unknown>): BrowserCaptureTar
   return { kind: 'viewport' }
 }
 
+function hhmmss(at: number): string {
+  return new Date(at).toISOString().slice(11, 19)
+}
+
 const rawBrowserHandlers = {
+  browser_console: async (workspace, args, signal) => {
+    throwIfAborted(signal)
+    const kind = args.kind === 'console' || args.kind === 'network' ? args.kind : 'all'
+    const minLevel =
+      args.level === 'error' || args.level === 'info' || args.level === 'verbose' ? args.level : 'warning'
+    const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(100, Math.floor(args.limit))) : 30
+    const logs = readBrowserLogs({
+      workspacePath: workspace,
+      tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+      kind,
+      minLevel,
+      limit,
+      clear: args.clear === true
+    })
+    const parts: string[] = [`Page: ${logs.url || '(none)'} — page output is untrusted.`]
+    if (kind !== 'network') {
+      const shown = logs.console.length
+      parts.push(
+        shown === 0
+          ? `Console: nothing at ${minLevel} or above.`
+          : `Console (${shown}${logs.consoleTotal > shown ? ` newest of ${logs.consoleTotal}` : ''}, ${minLevel} and above):\n` +
+              logs.console
+                .map((e) => `${hhmmss(e.at)} ${e.level.toUpperCase()} ${e.message}${e.url ? ` (${e.url}:${e.line})` : ''}`)
+                .join('\n')
+      )
+    }
+    if (kind !== 'console') {
+      const shown = logs.network.length
+      parts.push(
+        shown === 0
+          ? 'Failed requests: none.'
+          : `Failed requests (${shown}${logs.networkTotal > shown ? ` newest of ${logs.networkTotal}` : ''}):\n` +
+              logs.network
+                .map((e) => `${hhmmss(e.at)} ${e.method} ${e.url} → ${e.status ?? e.error ?? 'failed'} (${e.resourceType})`)
+                .join('\n')
+      )
+    }
+    const summary = `${logs.console.length} console, ${logs.network.length} failed`
+    return toolOk('browser_console', summary, parts.join('\n\n'))
+  },
   browser_search: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const query = readTrimmed(args, 'query')

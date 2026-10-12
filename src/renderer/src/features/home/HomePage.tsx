@@ -14,6 +14,7 @@ import { usePendingAsks } from './usePendingAsks'
 import { NeedsYouSection, type ProviderIssue, type WaitingTask } from './components/NeedsYouSection'
 import { WorkspacesSection } from './components/WorkspacesSection'
 import { ThisWeekSection } from './components/ThisWeekSection'
+import { ComingUpSection } from './components/ComingUpSection'
 import { ScreensSection } from './components/ScreensSection'
 import type { PinnedScreen } from '@renderer/features/screens/screensStore'
 
@@ -128,6 +129,7 @@ export function HomePage({
               onRetryMcp={() => void mcp.retry()}
             />
             {onOpenScreen ? <ScreensSection openWorkspaces={openWorkspaces} onOpenScreen={onOpenScreen} /> : null}
+            <ComingUpSection openWorkspaces={openWorkspaces} refreshVersion={refreshVersion} />
             <div className="mt-10 grid gap-12 @3xl:grid-cols-[minmax(0,1fr)_280px]">
               <WorkspacesSection
                 paths={openWorkspaces}

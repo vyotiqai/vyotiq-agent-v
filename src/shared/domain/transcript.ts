@@ -1,4 +1,4 @@
-import type { ChatMessage, MessageContent, PersistedEvent, ToolApprovalGrant, ToolImageRef } from '../ipc'
+import type { ApprovalChangePreview, ChatMessage, MessageContent, PersistedEvent, ToolApprovalGrant, ToolImageRef } from '../ipc'
 import {
   contentAudios,
   contentImageArtifacts,
@@ -43,6 +43,8 @@ export type UiToolRow = {
   images?: ToolImageRef[]
   /** Who let this gated call run (from its tool_result); absent when nothing held it. */
   approvedBy?: ToolApprovalGrant
+  /** How long it waited on your approval, in ms (from its tool_result). */
+  waitedMs?: number
 }
 
 export type UiGroupTiming = {
@@ -72,10 +74,18 @@ export type UiToolApproval = {
   mutating: boolean
   /** Terminal: what "Always allow" remembers, or null when it cannot be offered. See ToolApprovalRequest. */
   alwaysAllowCommand?: string | null
+  /** Terminal: the program-wide allow the card may also offer (`npm`). See ToolApprovalRequest. */
+  alwaysAllowProgram?: string
   /** Set when the command guard stopped this command; see ToolApprovalRequest.danger. */
   danger?: string
   /** When the request reached the renderer (ISO) — the wait's start. */
   requestedAt?: string
+  /** How long until it is denied (ms); null: it waits. See ToolApprovalRequest.timeoutMs. */
+  timeoutMs?: number | null
+  /** Edits: the change as −/+ rows. See ToolApprovalRequest.changePreview. */
+  changePreview?: ApprovalChangePreview
+  /** Edits: the folder "Always allow edits under" covers. See ToolApprovalRequest.alwaysAllowFolder. */
+  alwaysAllowFolder?: string
 }
 
 /** One field in a pending ask_question form. */
@@ -130,6 +140,10 @@ export type UiItem =
        * before it.
        */
       midTurn?: true
+      /** A user message Structure wrote: the words the person typed before it. */
+      structuredFrom?: string
+      /** An assistant reply that stopped at the output limit. */
+      cutOff?: true
     }
   | {
       kind: 'tool'
@@ -660,7 +674,8 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
         images: images.length ? images : undefined,
         attachments: attachments.length ? attachments : undefined,
         ...(m.at ? { at: m.at } : {}),
-        ...(m.midTurn ? { midTurn: true as const } : {})
+        ...(m.midTurn ? { midTurn: true as const } : {}),
+        ...(m.structuredFrom ? { structuredFrom: m.structuredFrom } : {})
       })
       continue
     }
@@ -680,7 +695,8 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
           role: 'assistant',
           content: stripToolShapedAssistantText(text),
           thinking,
-          ...(m.at ? { at: m.at } : {})
+          ...(m.at ? { at: m.at } : {}),
+          ...(m.cutOff ? { cutOff: true as const } : {})
         })
       }
       if (m.toolCalls?.length) {
@@ -931,6 +947,7 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
   const endAtById = new Map<string, string>()
   const todoContentById = new Map<string, string>()
   const approvedById = new Map<string, ToolApprovalGrant>()
+  const waitedById = new Map<string, number>()
   let runStartAt: string | undefined
   let runDoneAt: string | undefined
   let lastTerminal: 'done' | 'cancelled' | 'error' | null = null
@@ -977,6 +994,7 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
           todoContentById.set(resultId, row.event.content)
         }
         if (row.event.approvedBy) approvedById.set(resultId, row.event.approvedBy)
+        if (row.event.waitedMs) waitedById.set(resultId, row.event.waitedMs)
       }
       continue
     }
@@ -999,7 +1017,11 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
       todoContent && todoContent !== stamped.tool.content
         ? { ...stamped, tool: { ...stamped.tool, content: todoContent } }
         : stamped
-    const withAt = approvedBy ? { ...withContent, tool: { ...withContent.tool, approvedBy } } : withContent
+    const waitedMs = waitedById.get(item.id)
+    const withAt =
+      approvedBy || waitedMs
+        ? { ...withContent, tool: { ...withContent.tool, ...(approvedBy ? { approvedBy } : {}), ...(waitedMs ? { waitedMs } : {}) } }
+        : withContent
     if (ok === undefined) return withAt
     return {
       ...withAt,

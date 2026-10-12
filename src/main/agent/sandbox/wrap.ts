@@ -6,11 +6,32 @@
 import type { AgentSandboxNetwork } from '../../../shared/ipc'
 import { orderedRules, type SandboxPolicy } from './policy'
 
-export type SandboxMechanism = 'seatbelt' | 'bubblewrap'
+export type SandboxMechanism = 'seatbelt' | 'bubblewrap' | 'low-integrity'
 
 export const SANDBOX_EXEC_PATH = '/usr/bin/sandbox-exec'
 
-export type WrappedCommand = { bin: string; args: string[] }
+export type WrappedCommand = {
+  bin: string
+  args: string[]
+  /** Windows only: the first word of the command line, when `bin`'s path must not be it. */
+  argv0?: string
+  /** Windows only: `args` are already one command line; Node must not quote them. */
+  windowsVerbatimArguments?: boolean
+  /** Variables laid over the command's environment (the low-integrity temp folder). */
+  env?: Record<string, string>
+}
+
+/** spawn() options for a wrapped command, laid over the caller's own. */
+export function wrappedSpawnOptions(
+  launch: WrappedCommand,
+  env: NodeJS.ProcessEnv | undefined
+): { env: NodeJS.ProcessEnv | undefined; argv0?: string; windowsVerbatimArguments?: boolean } {
+  return {
+    env: launch.env ? { ...(env ?? process.env), ...launch.env } : env,
+    ...(launch.argv0 ? { argv0: launch.argv0 } : {}),
+    ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {})
+  }
+}
 
 /**
  * A ready sandbox for one command: what the spawn site needs and nothing
@@ -21,6 +42,11 @@ export type SandboxLaunch = {
   label: string
   network: AgentSandboxNetwork
   wrap: (bin: string, args: string[]) => WrappedCommand
+  /**
+   * Work to finish before the first command (Windows: labelling the folders
+   * it may write). prepareAgentSandboxReady awaits it; absent elsewhere.
+   */
+  ready?: () => Promise<void>
 }
 
 /** A string literal for SBPL. Paths go in as `-D` params; this is for fixed text. */
@@ -103,7 +129,7 @@ export function bwrapArgv(
 }
 
 export function wrapSandboxedCommand(
-  mechanism: SandboxMechanism,
+  mechanism: Exclude<SandboxMechanism, 'low-integrity'>,
   policy: SandboxPolicy,
   bin: string,
   args: readonly string[],
@@ -115,12 +141,16 @@ export function wrapSandboxedCommand(
 }
 
 export function describeSandbox(mechanism: SandboxMechanism, network: AgentSandboxNetwork): string {
-  return `workspace-write via ${mechanism}, network ${network === 'deny' ? 'denied' : 'allowed'}`
+  const via = mechanism === 'low-integrity' ? 'low integrity' : mechanism
+  return `workspace-write via ${via}, network ${network === 'deny' ? 'denied' : 'allowed'}`
 }
 
-/** Writes outside the writable roots: EPERM from Seatbelt, EROFS from bwrap's read-only root. */
+/**
+ * Writes outside the writable roots: EPERM from Seatbelt, EROFS from bwrap's
+ * read-only root, "Access is denied" / EACCES at low integrity on Windows.
+ */
 const WRITE_DENIAL_RE =
-  /Operation not permitted|\bEPERM\b|Read-only file system|\bEROFS\b|sandbox-exec:|\bdeny\(\d+\)/i
+  /Operation not permitted|\bEPERM\b|Read-only file system|\bEROFS\b|sandbox-exec:|\bdeny\(\d+\)|Access is denied|Access to the path .+ is denied|\bEACCES\b/i
 /** What a command sees with no network: no route, or no DNS. */
 const NETWORK_DENIAL_RE =
   /Network is unreachable|\bENETUNREACH\b|Could not resolve host|Temporary failure in name resolution|\bEAI_AGAIN\b|getaddrinfo ENOTFOUND|Name or service not known/i

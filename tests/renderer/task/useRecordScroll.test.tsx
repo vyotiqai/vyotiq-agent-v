@@ -3,6 +3,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
+import type { UiItem } from '@shared/transcript'
+import { TaskPane, type TaskPaneProps } from '@renderer/features/task/TaskPane'
 import { useRecordScroll } from '@renderer/features/task/useRecordScroll'
 
 /** A scroll box jsdom can reason about: fixed viewport, growable content. */
@@ -257,5 +259,56 @@ describe('useRecordScroll', () => {
       box.el.dispatchEvent(new Event('scroll'))
     })
     expect(api().isFollowing()).toBe(false)
+  })
+})
+
+/** The way back to a live run, hung where the record's trailing facts end. */
+describe('the pane’s “Jump to now”', () => {
+  it('docks to the record column’s right edge, not over its middle', () => {
+    window.vyotiq = {
+      readRunArtifact: vi.fn().mockResolvedValue({ ok: true, data: { exists: false, content: '' } })
+    } as unknown as typeof window.vyotiq
+    const items: UiItem[] = [
+      { kind: 'message', id: 'user-0', role: 'user', content: 'Dock the pill', at: '2026-10-01T09:00:00.000Z' },
+      { kind: 'message', id: 'a-1', role: 'assistant', content: 'On it.', at: '2026-10-01T09:00:01.000Z' }
+    ]
+    const props: TaskPaneProps = {
+      workspacePath: '/ws',
+      runId: 'r1',
+      items,
+      running: true,
+      pendingRun: false,
+      turnFailed: false,
+      turnStatus: 'done',
+      compacting: false,
+      showThinking: false,
+      run: null,
+      onStop: vi.fn(),
+      actions: {},
+      messageCount: 2,
+      composer: null
+    }
+    const { container } = render(<TaskPane {...props} />)
+    // jsdom lays nothing out: give the record a long body with its reader near
+    // the top, then let go as a wheel turned up does. The pane's own scroll
+    // hook says away, and the way back appears.
+    const box = container.querySelector('[data-record-scroll]') as HTMLDivElement
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 2000 })
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 400 })
+    Object.defineProperty(box, 'scrollTop', { configurable: true, get: () => 200, set: () => {} })
+    act(() => {
+      box.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }))
+    })
+    const pill = container.querySelector('[data-jump-to-now]')
+    expect(pill).not.toBeNull()
+    expect(pill!.textContent).toContain('Jump to now')
+    expect(pill!.querySelector('kbd')?.textContent).toBe('End')
+    // The band around it mirrors the column (RECORD_MAX, px-4) and ends on its
+    // right edge — a trailing fact, never centered over the prose.
+    const band = pill!.parentElement!
+    expect(band.classList.contains('justify-end')).toBe(true)
+    expect(band.classList.contains('justify-center')).toBe(false)
+    expect(band.classList.contains('max-w-[780px]')).toBe(true)
+    expect(band.classList.contains('px-4')).toBe(true)
   })
 })

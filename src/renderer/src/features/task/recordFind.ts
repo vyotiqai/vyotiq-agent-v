@@ -11,15 +11,17 @@ import './recordFind.css'
  * The record folds most of itself away — closed steps, earlier runs — so a
  * search over the DOM alone would miss them. The model decides what has to be
  * open for a match to be seen; the DOM then gives the exact ranges to mark and
- * scroll to. Tool output is not searched: it loads only when a card opens.
+ * scroll to. A command's output is searched as far as the record holds it (a
+ * long one is held cut, the rest loading when its card opens): a match opens
+ * the card. Other tool output is not searched.
  * Text is matched as the record shows it — markdown marks and code ticks
  * dropped — so a fold is opened only for a match the page then has.
  */
 
 /**
  * Keys of the folds a match needs open: `run:<n>` for an earlier run,
- * `step:<n>:<key>` for a step, `loose:<n>:<list>` for a settled run's work
- * outside its steps, `thought:<id>` for a thought shown as one line,
+ * `work:<n>` for the line a run's work folds behind, `step:<n>:<key>` for
+ * a step, `thought:<id>` for a thought shown as one line,
  * `brief:<n>` for a brief whose words are folded, and
  * `repeats:<id>` for the line a call repeated unchanged folds to.
  */
@@ -27,12 +29,34 @@ export const RecordOpenContext = createContext<ReadonlySet<string>>(new Set())
 
 export const runOpenKey = (n: number): string => `run:${n}`
 export const stepOpenKey = (runN: number, stepKey: string): string => `step:${runN}:${stepKey}`
-export const looseOpenKey = (runN: number, list: 'setup' | 'after'): string => `loose:${runN}:${list}`
+/** The one line a settled run's work folds behind. */
+export const workOpenKey = (runN: number): string => `work:${runN}`
 export const thoughtOpenKey = (id: string): string => `thought:${id}`
 /** A brief folded to six lines, or a follow-up the app wrote, shown as its ask. */
 export const briefOpenKey = (runN: number): string => `brief:${runN}`
 /** A repeat line's id already reads `repeats:<its first row's id>`. */
 export const repeatOpenKey = (id: string): string => id
+/** A command card whose output holds a match. */
+export const cardOpenKey = (id: string): string => `card:${id}`
+/** The earlier rows a long work list keeps behind one line, by the list's first row. */
+export const earlierOpenKey = (firstId: string): string => `earlier:${firstId}`
+
+/**
+ * A work list longer than this shows its latest rows and keeps the rest
+ * behind a "Show more" line: a 5,000-call run opened in full was 60k nodes
+ * and a second per keypress.
+ */
+export const WORK_PAGE = 200
+
+/** The rows a list of this length keeps folded at first. */
+export function earlierCount(length: number): number {
+  return Math.max(0, length - WORK_PAGE)
+}
+
+/** A terminal card's output, as far as the record holds it. */
+function commandOutput(w: WorkItem): string {
+  return w.kind === 'card' && w.tool.tool.name === 'terminal' ? (w.tool.tool.content ?? '') : ''
+}
 
 /** Markdown — a note, a Result — as its words: what the page shows of it. */
 const shownProse = (text: string | null | undefined): string => (text ? plainLine(text) : '')
@@ -68,6 +92,8 @@ function workText(w: WorkItem): string {
       return w.message
     case 'notice':
       return w.item.text
+    case 'said':
+      return untick(w.text)
     case 'explore':
     case 'compaction':
       return ''
@@ -82,6 +108,11 @@ function has(text: string | null | undefined, q: string): boolean {
   return Boolean(text) && text!.toLowerCase().includes(q)
 }
 
+/** Its row text or, for a command, its output. */
+function matches(w: WorkItem, q: string): boolean {
+  return has(workText(w), q) || has(commandOutput(w), q)
+}
+
 /** The folds to open so every match in the model is on screen. */
 export function foldsToOpen(runs: readonly RecordRun[], query: string): Set<string> {
   const q = query.trim().toLowerCase()
@@ -91,28 +122,32 @@ export function foldsToOpen(runs: readonly RecordRun[], query: string): Set<stri
     const isLast = i === runs.length - 1
     const inBrief = has(untick(run.text), q)
     if (inBrief) open.add(briefOpenKey(run.n))
-    let inRun = inBrief || has(run.command, q) || has(shownProse(run.result?.text), q)
-    for (const [name, list] of [['setup', run.setup], ['after', run.after]] as const) {
-      if (!list.some((w) => has(workText(w), q))) continue
-      open.add(looseOpenKey(run.n, name))
-      inRun = true
-    }
+    let inWork = false
+    // Work outside any step folds only with the line it sits behind.
+    if ([...run.setup, ...run.after].some((w) => matches(w, q))) inWork = true
     for (const step of run.steps) {
-      if (has(plainLine(step.title), q)) inRun = true
-      // Work between steps is never folded inside one: only its run must open.
-      if (step.between.some((w) => has(workText(w), q))) inRun = true
-      if (step.work.some((w) => has(workText(w), q))) {
+      if (has(plainLine(step.title), q)) inWork = true
+      // Work between steps is never folded inside one: only the work line must open.
+      if (step.between.some((w) => matches(w, q))) inWork = true
+      if (step.work.some((w) => matches(w, q))) {
         open.add(stepOpenKey(run.n, step.key))
-        inRun = true
+        inWork = true
       }
     }
+    if (inWork) open.add(workOpenKey(run.n))
+    const inRun = inWork || inBrief || has(run.command, q) || has(shownProse(run.result?.text), q)
     if (inRun && !isLast) open.add(runOpenKey(run.n))
     for (const list of [run.setup, run.after, ...run.steps.flatMap((s) => [s.work, s.between])]) {
       // A thought shows one line until opened; one that matches opens in full.
       for (const w of list) if (w.kind === 'thought' && has(untick(w.text), q)) open.add(thoughtOpenKey(w.id))
+      // A command whose output matches opens its card, where the output shows.
+      for (const w of list) if (w.kind === 'card' && has(commandOutput(w), q)) open.add(cardOpenKey(w.tool.id))
+      // A long list's earlier rows show in full when one of them matches.
+      const earlier = earlierCount(list.length)
+      if (earlier > 0 && list.slice(0, earlier).some((w) => matches(w, q))) open.add(earlierOpenKey(list[0]!.id))
       // A call repeated unchanged folds its earlier rows to one line: that opens too.
       for (const row of foldRepeats(list)) {
-        if (row.kind === 'repeats' && row.earlier.some((w) => has(workText(w), q))) open.add(repeatOpenKey(row.id))
+        if (row.kind === 'repeats' && row.earlier.some((w) => matches(w, q))) open.add(repeatOpenKey(row.id))
       }
     }
   })

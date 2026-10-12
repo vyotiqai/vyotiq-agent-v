@@ -62,7 +62,11 @@ export const BRANDS = {
   intercom: 'intercom',
   stripe: 'stripe',
   hubspot: 'hubspot',
-  'chrome-devtools': 'googlechrome'
+  'chrome-devtools': 'googlechrome',
+  'brave-search': 'brave',
+  postgres: 'postgresql',
+  docker: 'docker',
+  gitlab: 'gitlab'
 }
 
 /** Catalog id -> Font Awesome free-brands export, for marks Simple Icons lacks. */

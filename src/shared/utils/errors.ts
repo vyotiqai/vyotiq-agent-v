@@ -194,6 +194,34 @@ const RETRYABLE_INCOMPLETE_REASONS = new Set([
 ])
 
 /** Continue / retry affordance for transient provider, stream, and circuit-open failures. */
+/**
+ * What a failed turn's error row offers besides Retry: another model (the
+ * provider refused this request or model, or the account can't pay for it)
+ * and the provider's settings (a key or base URL to fix). Typing in the
+ * composer cannot fix a request the provider rejects.
+ */
+export function turnFailureNextSteps(code: string | null | undefined): {
+  switchModel: boolean
+  providerSettings: boolean
+} {
+  switch (code) {
+    case 'PROVIDER_REQUEST':
+    case 'PROVIDER_BILLING':
+      return { switchModel: true, providerSettings: true }
+    case 'PROVIDER_AUTH':
+    case 'PROVIDER_KEYCHAIN':
+    case 'PROVIDER_KEY_DECRYPT':
+      return { switchModel: false, providerSettings: true }
+    case 'PROVIDER_HTTP':
+    case 'PROVIDER_NETWORK':
+    case 'PROVIDER_TIMEOUT':
+    case 'PROVIDER_STREAM':
+      return { switchModel: true, providerSettings: false }
+    default:
+      return { switchModel: false, providerSettings: false }
+  }
+}
+
 export function isRetryableTurnFailure(opts: {
   errorCode?: string | null
   incompleteReason?: string | null

@@ -1,6 +1,8 @@
 import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { openInEditor } from '@renderer/lib/openInEditor'
 import type { ToolApprovalDecision } from '@shared/ipc'
 import { approvalAsk, questionAsk } from '@shared/needsYouText'
+import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { Icon } from '@renderer/lib/icons'
 import { Button, CheckMark, DiffStat, IconButton, StatusGlyph, Tooltip, cn, type TaskState } from '@renderer/lib/ui'
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from '@renderer/lib/ui/ContextMenu'
@@ -47,6 +49,20 @@ export type NavigatorRowActions = {
   onToggleArchive?: (workspacePath: string, runId: string) => void
   /** Allow once or Deny a waiting approval from the row, through the task's own controller. */
   onRespondApproval?: (workspacePath: string, runId: string, requestId: string, decision: ToolApprovalDecision) => Promise<void>
+  /** Open the task in a new pane beside the focused one. */
+  onOpenBeside?: (workspacePath: string, runId: string) => void
+  /** Mark a read task unread again, or an unread one read. */
+  onToggleUnread?: (workspacePath: string, runId: string, unread: boolean) => void
+  /** Show the task's workspace folder in the file manager. */
+  onRevealFolder?: (workspacePath: string) => void
+}
+
+/** "Show in Explorer" / "Reveal in Finder" / "Show in folder". */
+function revealLabel(): string {
+  const platform = typeof window !== 'undefined' ? window.vyotiq?.platform : undefined
+  if (platform === 'win32') return 'Show folder in Explorer'
+  if (platform === 'darwin') return 'Reveal folder in Finder'
+  return 'Show folder'
 }
 
 /**
@@ -175,6 +191,19 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
         onSelect: () => onToggleArchive(workspacePath, runId)
       })
     }
+    // Somewhere to look at it: beside the task you are on, unread again for later.
+    if (actions.onOpenBeside && !selected && !open) {
+      const onOpenBeside = actions.onOpenBeside
+      items.push({ id: 'open-beside', label: 'Open beside', onSelect: () => onOpenBeside(workspacePath, runId) })
+    }
+    if (actions.onToggleUnread && !live) {
+      const onToggleUnread = actions.onToggleUnread
+      items.push({
+        id: 'unread',
+        label: row.unread ? 'Mark as read' : 'Mark as unread',
+        onSelect: () => onToggleUnread(workspacePath, runId, row.unread)
+      })
+    }
     items.push({ id: 'rename', label: 'Rename', onSelect: () => setRenaming(true) })
     if (actions.onExport) {
       const onExport = actions.onExport
@@ -205,6 +234,15 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
       const onCopyLink = actions.onCopyLink
       items.push({ id: 'copy-link', label: 'Copy link', onSelect: () => onCopyLink(workspacePath, runId) })
     }
+    if (actions.onRevealFolder) {
+      const onRevealFolder = actions.onRevealFolder
+      items.push({ id: 'reveal-folder', label: revealLabel(), onSelect: () => onRevealFolder(workspacePath) })
+    }
+    items.push({
+      id: 'open-folder-editor',
+      label: 'Open folder in editor',
+      onSelect: () => void openInEditor({ workspacePath })
+    })
     items.push({ type: 'separator', id: 'sep-danger' })
     items.push({
       id: 'delete',
@@ -214,7 +252,7 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
       onSelect: () => setConfirmingDelete(true)
     })
     return items
-  }, [actions, retryable, goalActive, interrupted, stoppedByYou, live, loopArmed, row.archived, row.pinned, row.title, runId, workspacePath])
+  }, [actions, retryable, goalActive, interrupted, stoppedByYou, live, loopArmed, row.archived, row.pinned, row.title, row.unread, runId, workspacePath, selected, open])
 
   const dimmed = row.archived || row.state === 'done' || row.state === 'stopped'
   const showGlyph = row.state !== groupState
@@ -485,6 +523,24 @@ export function commandOf(ask: PendingAsk | null): string | null {
   }
 }
 
+/** "Awaiting instance 58bcbfed", as main's activity line writes it. */
+const AWAITING_INSTANCE = /^Awaiting instance (\S+)$/
+
+/**
+ * What a task waiting on its instances is waiting on: "Waiting on 2 instances"
+ * while several are going (naming the one it happens to await first hid the
+ * rest), else the awaited one by name, "Waiting on Map src/main". Null when
+ * the short id names none of the task's own, so the raw activity stands.
+ */
+function awaitedInstanceTitle(row: NavRow): string | null {
+  const m = AWAITING_INSTANCE.exec(row.activity ?? '')
+  if (!m) return null
+  const going = row.instances?.filter((i) => i.state === 'running' || i.state === 'needs') ?? []
+  if (going.length > 1) return `Waiting on ${going.length} instances`
+  const child = row.instances?.find((i) => formatAgentInstanceShortId(i.runId) === m[1])
+  return child ? `Waiting on ${child.title}` : null
+}
+
 /**
  * The row's second line, inside its button: what a running task is doing, what
  * a waiting one asks (a command as the command), what a task in review changed
@@ -493,8 +549,12 @@ export function commandOf(ask: PendingAsk | null): string | null {
 function secondLine(row: NavRow, ask: PendingAsk | null, note: string | null): ReactNode {
   if (row.state === 'running' && row.activity) {
     return (
-      <span className="-mt-1 block min-w-0 truncate text-xs vy-text-live" data-nav-activity>
-        {row.activity}
+      <span
+        className="-mt-1 block min-w-0 truncate text-xs vy-text-live"
+        data-nav-activity
+        title={row.activity}
+      >
+        {awaitedInstanceTitle(row) ?? row.activity}
       </span>
     )
   }
@@ -592,6 +652,10 @@ function RowInstances({
 }) {
   const [open, setOpen] = useState(true)
   const going = instances.filter((i) => i.state === 'running' || i.state === 'needs').length
+  // The same brief given to several children reads as one row repeated; count
+  // the titles so only the shared ones need their short id to tell them apart.
+  const titleCounts = new Map<string, number>()
+  for (const i of instances) titleCounts.set(i.title, (titleCounts.get(i.title) ?? 0) + 1)
   const label = `${instances.length} ${instances.length === 1 ? 'instance' : 'instances'}`
   return (
     <div className="pb-1 pl-2 pr-2" data-nav-instances>
@@ -624,6 +688,11 @@ function RowInstances({
                 <StatusGlyph state={i.state} size={12} label />
                 {/* The name first, cut only when it alone is too long; the activity has the room left. */}
                 <span className={cn('min-w-0 truncate', i.runId === current ? 'text-fg-strong' : 'text-secondary')}>{i.title}</span>
+                {(titleCounts.get(i.title) ?? 0) > 1 ? (
+                  <span className="shrink-0 font-mono text-tertiary" data-instance-id>
+                    {formatAgentInstanceShortId(i.runId)}
+                  </span>
+                ) : null}
                 {i.agentType ? (
                   <span className="max-w-[12ch] shrink-0 truncate text-tertiary" data-agent-type>
                     {i.agentType}

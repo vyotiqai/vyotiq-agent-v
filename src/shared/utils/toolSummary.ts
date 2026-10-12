@@ -58,6 +58,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   list_dir: { running: 'Listing', done: 'Listed' },
   str_replace: { running: 'Editing', done: 'Edited' },
   delete: { running: 'Deleting', done: 'Deleted' },
+  move: { running: 'Moving', done: 'Moved' },
   todo_write: { running: 'Updating tasks', done: 'Updated tasks' },
   create_goal: { running: 'Setting goal', done: 'Set goal' },
   update_goal: { running: 'Updating goal', done: 'Updated goal' },
@@ -68,6 +69,8 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   browser_navigate: { running: 'Browsing', done: 'Browsed' },
   // Navigate + snapshot in agent browser (not a SERP hit list).
   browser_search: { running: 'Searching', done: 'Searched' },
+  browser_console: { running: 'Reading the console', done: 'Read the console' },
+  memory_delete: { running: 'Forgetting', done: 'Forgot' },
   browser_snapshot: { running: 'Snapshotting', done: 'Snapshot' },
   browser_click: { running: 'Clicking', done: 'Clicked' },
   browser_type: { running: 'Typing', done: 'Typed' },
@@ -104,6 +107,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   github_pr_review: { running: 'Reviewing PR', done: 'Reviewed PR' },
   github_issue: { running: 'GitHub issue', done: 'GitHub issue' },
   github_pr_checks: { running: 'Reading CI checks', done: 'Read CI checks' },
+  github_pr_comments: { running: 'Reading review comments', done: 'Read review comments' },
   diagnostics: { running: 'Checking', done: 'Diagnostics' },
   run_tests: { running: 'Testing', done: 'Tests' },
   edit_notebook: { running: 'Editing notebook', done: 'Edited notebook' },
@@ -113,6 +117,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   pull_agent_instance: { running: 'Pulling instance', done: 'Pulled instance' },
   merge_agent_instance: { running: 'Merging instance', done: 'Merged instance' },
   cancel_agent_instance: { running: 'Cancelling instance', done: 'Cancelled instance' },
+  message_agent_instance: { running: 'Messaging instance', done: 'Messaged instance' },
   build_tool: { running: 'Building a tool', done: 'Built a tool' },
   ask_question: { running: 'Asking', done: 'Asked' },
   show_view: { running: 'Drawing a view', done: 'Showed a view' },
@@ -168,6 +173,11 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
   if (name === 'edit_notebook') {
     const path = args.target_notebook ?? args.path
     if (typeof path === 'string') return formatPathTarget(path)
+  }
+  if (name === 'move') {
+    const from = typeof args.from === 'string' ? args.from : ''
+    const to = typeof args.to === 'string' ? args.to : ''
+    if (from && to) return truncate(`${formatPathLabel(sanitizeDisplayPath(from))} → ${formatPathLabel(sanitizeDisplayPath(to))}`)
   }
   if (name === 'list_dir') {
     const path = args.path
@@ -350,6 +360,10 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
       const path = extractPathFromTerminalCommand(command)
       if (path) return formatPathTarget(path)
       return truncate(sanitizeCommandForDisplay(command))
+    }
+    if (args.kill === true) return 'Stop a background process'
+    if (typeof args.input === 'string' && args.input.length > 0) {
+      return truncate(`Answer a prompt: ${args.input.replace(/\s+/g, ' ').trim()}`)
     }
   }
   if (name === 'memory_read' || name === 'memory_write' || name === 'memory_list') {

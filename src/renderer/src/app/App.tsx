@@ -30,6 +30,7 @@ import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { applyShortcutOverrides, focusComposerMessage, notifyShortcutListeners } from '@renderer/lib/shortcuts'
 import { useFocusComposerSoon } from './useFocusComposerSoon'
 import { useLiveAnnouncer } from '@renderer/lib/a11y'
+import { useAccessibilitySupport } from '@renderer/lib/a11y/useAccessibilitySupport'
 import type {
   ProviderIdAny,
   SecretProvider,
@@ -94,10 +95,13 @@ import {
 } from '@renderer/lib/drafts/taskDraftStore'
 import type { IpcResult, ReopenWritesResult, ResolveWritesResult, TaskDraft } from '@shared/ipc'
 import { bumpTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
-import type { AppView } from './viewReturn'
+import { nextViewReturns, type AppView, type ViewReturns } from './viewReturn'
 import type { ScreenRequest } from '../features/screens/ScreenPage'
 import type { WorkspaceFileOpenOptions } from '../features/chat/components/FilesPanel'
 import type { PinnedScreen } from '../features/screens/screensStore'
+import { useNavHistory, type NavLocation } from './useNavHistory'
+import { branchesLostOnDelete, deleteTasksMessage } from './deleteTaskCopy'
+import { setCustomModelPrices } from '@shared/pricing/modelPrices'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -220,6 +224,7 @@ function formatStorageBytes(n: number): string {
 
 function App() {
   const { LiveRegion } = useLiveAnnouncer()
+  useAccessibilitySupport()
   const {
     settings,
     secrets,
@@ -355,22 +360,18 @@ function App() {
   // The pinned view on show, and where closing it goes: the view it was opened from.
   const [screenRequest, setScreenRequest] = useState<ScreenRequest | null>(null)
   const [screenReturn, setScreenReturn] = useState<Exclude<AppView, 'screen'>>('home')
-  const openScreen = useCallback(
-    (pinned: PinnedScreen): void => {
-      setScreenRequest((was) => ({ pinned, nonce: (was?.nonce ?? 0) + 1 }))
-      if (view !== 'screen') setScreenReturn(view)
-      setView('screen')
-    },
-    [view]
-  )
   const previousViewRef = useRef(view)
   // Where Settings' Back goes: the view it was opened from, recorded as the
   // view changes (during render, so the first frame already names it).
-  const [settingsReturn, setSettingsReturn] = useState<Exclude<typeof view, 'settings'>>('chat')
+  // Extensions closes the same way.
+  const [viewReturns, setViewReturns] = useState<ViewReturns>({ settings: 'chat', marketplace: 'chat' })
+  const settingsReturn = viewReturns.settings
+  const marketplaceReturn = viewReturns.marketplace
   const [viewSeen, setViewSeen] = useState(view)
   if (view !== viewSeen) {
     setViewSeen(view)
-    if (view === 'settings' && viewSeen !== 'settings') setSettingsReturn(viewSeen)
+    const next = nextViewReturns(viewSeen, view, viewReturns)
+    if (next !== viewReturns) setViewReturns(next)
   }
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
@@ -481,7 +482,11 @@ function App() {
         theme: settings.theme,
         fontScale: settings.fontScale,
         skinId: settings.skinId,
-        customCssPath: settings.customCssPath
+        customCssPath: settings.customCssPath,
+        reduceMotion: settings.reduceMotion,
+        contrast: settings.contrast,
+        alwaysShowFocusRing: settings.alwaysShowFocusRing,
+        announceVerbosity: settings.announceVerbosity
       })
     )
   }, [
@@ -489,6 +494,10 @@ function App() {
     settings.fontScale,
     settings.skinId,
     settings.customCssPath,
+    settings.reduceMotion,
+    settings.contrast,
+    settings.alwaysShowFocusRing,
+    settings.announceVerbosity,
     hydrate
   ])
 
@@ -803,6 +812,9 @@ function App() {
         case 'open_update':
           requestUpdatePanel()
           return
+        case 'open_usage':
+          setView('usage')
+          return
         default: {
           const _exhaustive: never = action
           return _exhaustive
@@ -817,16 +829,57 @@ function App() {
   // A link can name any folder on disk, and opening one runs git in it. A
   // folder the person never opened themselves asks first.
   const { confirm: confirmLinkFolder, dialog: linkFolderDialog } = useConfirm()
+  /** `vyotiq://new`: set below, once New task's opener exists. */
+  const newTaskWithBriefRef = useRef<(path: string, brief: string) => void>(() => {})
 
   /** Route a vyotiq:// payload to the right chat, adding the workspace if needed. */
   const handleDeepLinkPayload = useCallback(
     async (payload: import('@shared/ipc').DeepLinkPayload): Promise<void> => {
       const { target } = payload
       if (!target) {
-        pushToast('Unrecognised Vyotiq link.', 'error')
+        pushToast('Unrecognised Agent V link.', 'error')
         return
       }
-      if (target.type !== 'open_run') return
+      /** Open `path` as a workspace if it isn't one, asking first when a link names a folder never opened. */
+      const ensureWorkspace = async (path: string, fromLink: boolean): Promise<boolean> => {
+        if (openWorkspaces.some((open) => workspacePathsEqual(open, path))) return true
+        const opened = (registry?.recentPaths ?? []).some((recent) => workspacePathsEqual(recent, path))
+        if (fromLink && !opened) {
+          const allowed = await confirmLinkFolder(
+            "An Agent V link wants to open a folder that isn't one of your workspaces. Open it only if you expected this link.",
+            {
+              title: 'Open a folder from a link',
+              confirmLabel: 'Open folder',
+              details: (
+                <code className="block font-mono text-xs text-fg [overflow-wrap:anywhere]" data-link-folder>
+                  {path}
+                </code>
+              )
+            }
+          )
+          if (!allowed) return false
+        }
+        const added = await addWorkspace(path)
+        if (!added) pushToast('Could not open that folder as a workspace.', 'error')
+        return Boolean(added)
+      }
+      if (target.type === 'open_workspace') {
+        if (!(await ensureWorkspace(target.workspacePath, !target.fromCommandLine))) return
+        await switchWorkspace(target.workspacePath)
+        setView('chat')
+        return
+      }
+      if (target.type === 'new_task') {
+        // Filled in, never sent: a link from another program must not start a paid run.
+        const path = target.workspacePath ?? focusedWorkspacePath ?? activeWorkspace
+        if (!path) {
+          pushToast('Open a workspace first, then use the link again.', 'error')
+          return
+        }
+        if (target.workspacePath && !(await ensureWorkspace(path, true))) return
+        newTaskWithBriefRef.current(path, target.brief)
+        return
+      }
       let path = target.workspacePath
       if (!path) {
         // No ws hint: resolve the run against workspaces we already know about.
@@ -840,33 +893,20 @@ function App() {
         }
         path = match[0]
       }
-      const isOpen = openWorkspaces.some((open) => workspacePathsEqual(open, path))
-      if (!isOpen) {
-        const opened = (registry?.recentPaths ?? []).some((recent) => workspacePathsEqual(recent, path))
-        if (!opened) {
-          const allowed = await confirmLinkFolder(
-            "A Vyotiq link wants to open a folder that isn't one of your workspaces. Open it only if you expected this link.",
-            {
-              title: 'Open a folder from a link',
-              confirmLabel: 'Open folder',
-              details: (
-                <code className="block font-mono text-xs text-fg [overflow-wrap:anywhere]" data-link-folder>
-                  {path}
-                </code>
-              )
-            }
-          )
-          if (!allowed) return
-        }
-        const added = await addWorkspace(path)
-        if (!added) {
-          pushToast('Could not open the workspace for that link.', 'error')
-          return
-        }
-      }
+      if (!(await ensureWorkspace(path, true))) return
       await onSelectRunInWorkspace(path, target.runId)
     },
-    [addWorkspace, confirmLinkFolder, contexts, onSelectRunInWorkspace, openWorkspaces, registry?.recentPaths]
+    [
+      activeWorkspace,
+      addWorkspace,
+      confirmLinkFolder,
+      contexts,
+      focusedWorkspacePath,
+      onSelectRunInWorkspace,
+      openWorkspaces,
+      registry?.recentPaths,
+      switchWorkspace
+    ]
   )
 
   // Consume a link that arrived before mount (cold start / recreate-window),
@@ -980,6 +1020,43 @@ function App() {
     )
   }, [focusedParentRunId, openRunTab, setOpenInstanceForParent])
 
+  // The tray menu: a task to open, or a new one (the window is already shown).
+  useEffect(() => {
+    const unsub = window.vyotiq?.onTrayCommand?.((command) => {
+      if (command.type === 'open_run') void onSelectRunInWorkspace(command.workspacePath, command.runId)
+      else onNewChat()
+    })
+    return () => {
+      unsub?.()
+    }
+  }, [onSelectRunInWorkspace, onNewChat])
+
+  // Back and Forward (Alt ← / →, the mouse's buttons): the views and the
+  // task in front, as visited.
+  const navLocation = useMemo<NavLocation>(
+    () => ({
+      view,
+      workspacePath: view === 'chat' ? (focusedWorkspacePath ?? null) : null,
+      runId: view === 'chat' ? focusedParentRunId : null
+    }),
+    [view, focusedWorkspacePath, focusedParentRunId]
+  )
+  const goToNavLocation = useCallback(
+    (target: NavLocation) => {
+      if (target.view === 'chat' && target.workspacePath && target.runId) {
+        void onSelectRunInWorkspace(target.workspacePath, target.runId)
+        return
+      }
+      setView(target.view)
+    },
+    [onSelectRunInWorkspace]
+  )
+  const navHistory = useNavHistory(navLocation, goToNavLocation)
+  const onNavigate = useCallback(
+    (delta: -1 | 1) => (delta < 0 ? navHistory.back() : navHistory.forward()),
+    [navHistory]
+  )
+
   const focusComposerSoon = useFocusComposerSoon()
 
   // Async when the target workspace differs (switch IPC runs first), so focus
@@ -1009,6 +1086,16 @@ function App() {
       focusComposerSoon()
     },
     [focusComposerSoon, newChatInWorkspace, setComposerDraftForPane]
+  )
+  newTaskWithBriefRef.current = onNewSessionInWorkspace
+
+  const openScreen = useCallback(
+    (pinned: PinnedScreen): void => {
+      setScreenRequest((was) => ({ pinned, nonce: (was?.nonce ?? 0) + 1 }))
+      if (view !== 'screen') setScreenReturn(view)
+      setView('screen')
+    },
+    [view]
   )
 
   // Where a new task's brief can move: the open workspaces, named as the navigator names them.
@@ -1106,6 +1193,17 @@ function App() {
       text: string,
       images: string[] | undefined,
       files: AttachedFile[] | undefined,
+      extras: import('@shared/ipc').ComposerSendExtras,
+      pin?: { provider: ProviderIdAny; model: string }
+    ) => Promise<boolean>
+  >(async () => false)
+  /** Run on two models (startComparisonRef.current, below). */
+  const startComparisonRef = useRef<
+    (
+      parentPath: string,
+      text: string,
+      images: string[] | undefined,
+      files: AttachedFile[] | undefined,
       extras: import('@shared/ipc').ComposerSendExtras
     ) => Promise<boolean>
   >(async () => false)
@@ -1155,6 +1253,9 @@ function App() {
       extras: import('@shared/ipc').ComposerSendExtras | undefined,
       binding: { workspacePath: string; runId: string | null }
     ): Promise<boolean> => {
+      if (extras?.compareWith && !binding.runId) {
+        return startComparisonRef.current(binding.workspacePath, text, images, files, extras)
+      }
       if (extras?.worktree && !binding.runId) {
         return startInNewWorktreeRef.current(binding.workspacePath, text, images, files, extras)
       }
@@ -1219,8 +1320,8 @@ function App() {
    * there through the same gate, queue and controller as any new task. The
    * draft it continued is spent in the workspace it was saved in.
    */
-  startInNewWorktreeRef.current = async (parentPath, text, images, files, extras) => {
-    const { worktree: _worktree, draftId, ...rest } = extras
+  startInNewWorktreeRef.current = async (parentPath, text, images, files, extras, pin) => {
+    const { worktree: _worktree, compareWith: _compareWith, draftId, ...rest } = extras
     const made = await window.vyotiq.createTaskWorktree(parentPath, text)
     if (!made.ok) {
       pushToast(made.error, 'error')
@@ -1236,6 +1337,8 @@ function App() {
     setOpenInstanceByParent({})
     setView('chat')
     await newChatInWorkspace(path)
+    // A comparison pins each copy to its own model before the first send.
+    if (pin) getRunControllerRef.current(null, path)?.setProviderModel(pin.provider, pin.model)
     const sendExtras = Object.keys(rest).length > 0 ? rest : undefined
     const sent = await gateSendWithOnboarding(
       (t, i, f, e) =>
@@ -1273,6 +1376,36 @@ function App() {
       void deleteTaskDraftFor(parentPath, draftId)
     }
     // Either way the brief now lives in the worktree, so the page it came from empties.
+    return true
+  }
+
+  /**
+   * Run on two models: the same brief twice, each in a new worktree of this
+   * workspace and pinned to its model — the one picked, and the one to
+   * compare with. Both land in the navigator under their worktrees.
+   */
+  startComparisonRef.current = async (parentPath, text, images, files, extras) => {
+    const { compareWith, draftId, ...rest } = extras
+    if (!compareWith) return false
+    const picked =
+      getRunControllerRef.current(null, parentPath)?.providerModel ?? getDefaultProviderModelForWorkspace(parentPath)
+    const first = await startInNewWorktreeRef.current(
+      parentPath,
+      text,
+      images,
+      files,
+      { ...rest, ...(draftId ? { draftId } : {}), worktree: true },
+      picked ?? undefined
+    )
+    if (!first) return false
+    // The draft was spent by the first; the second is the same brief on the other model.
+    const second = await startInNewWorktreeRef.current(parentPath, text, images, files, { ...rest, worktree: true }, compareWith)
+    pushToast(
+      second
+        ? `Started on ${picked?.model ?? 'your model'} and ${compareWith.model}, each in its own worktree. Open them side by side to compare.`
+        : `Started on ${picked?.model ?? 'your model'}; the copy on ${compareWith.model} didn’t start.`,
+      second ? 'info' : 'error'
+    )
     return true
   }
 
@@ -1888,6 +2021,11 @@ function App() {
 
   const operationalError = settingsError ?? workspaceError
 
+  // Prices set in Settings: the model picker's cost hints read them too.
+  useEffect(() => {
+    setCustomModelPrices(settings.customModelPrices)
+  }, [settings.customModelPrices])
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -1951,7 +2089,7 @@ function App() {
     rename: (path: string, runId: string, title: string) => Promise<void>
     exportRun: (path: string, runId: string) => Promise<void>
     deleteRun: (path: string, runId: string) => Promise<void>
-    fork: (path: string, runId: string) => Promise<void>
+    fork: (path: string, runId: string, forkIndex?: number) => Promise<void>
     togglePin: (path: string, runId: string) => void
     isPinned: (path: string, runId: string) => boolean
     toggleArchive: (path: string, runId: string) => void
@@ -2043,7 +2181,7 @@ function App() {
           .map((entry) => ({
             id: entry.id,
             itemId: entry.id,
-            preview: entry.text.replace(/s+/g, ' ').trim(),
+            preview: entry.text.replace(/\s+/g, ' ').trim(),
             text: entry.text,
             offline: true
           }))
@@ -2224,6 +2362,7 @@ function App() {
           onEditAndResend={(editMessageIndex, text, images, files, extras) =>
             paneCtrl?.editAndResend(editMessageIndex, text, images, files, extras) ?? false
           }
+          onPreviewRewind={(userMessageIndex) => paneCtrl?.previewRewindToUserMessage(userMessageIndex) ?? Promise.resolve(null)}
           onRevertToUserMessage={(userMessageIndex, runN) =>
             confirmRevertToUserMessage(
               userMessageIndex,
@@ -2274,7 +2413,7 @@ function App() {
           onDismissRunError={paneCtrl ? (itemId) => paneCtrl.dismissRunError(itemId) : undefined}
           onApprovalDecision={
             paneCtrl
-              ? (requestId, decision) => paneCtrl.respondToApproval(requestId, decision)
+              ? (requestId, decision, extras) => paneCtrl.respondToApproval(requestId, decision, extras)
               : undefined
           }
           onQuestionSubmit={
@@ -2301,6 +2440,9 @@ function App() {
             onExportJson: pane.runId ? () => void exportTaskJson(pane.workspacePath, pane.runId!) : undefined,
             onCopyLink: pane.runId ? () => onCopyRunLinkInWorkspace(pane.workspacePath, pane.runId!) : undefined,
             onFork: pane.runId ? () => void paneRunActionsRef.current.fork(pane.workspacePath, pane.runId!) : undefined,
+            onForkAt: pane.runId
+              ? (forkIndex) => void paneRunActionsRef.current.fork(pane.workspacePath, pane.runId!, forkIndex)
+              : undefined,
             onTogglePin: pane.runId ? () => paneRunActionsRef.current.togglePin(pane.workspacePath, pane.runId!) : undefined,
             isPinned: pane.runId ? () => paneRunActionsRef.current.isPinned(pane.workspacePath, pane.runId!) : undefined,
             onToggleArchive: pane.runId
@@ -2313,7 +2455,12 @@ function App() {
               ? () => {
                   const runId = pane.runId!
                   void (async () => {
-                    const ok = await confirm(`Delete “${paneRun ? runTitle(paneRun) : 'this task'}”? Its record and checkpoints are removed; files it changed stay as they are.`, {
+                    const message = deleteTasksMessage({
+                      count: 1,
+                      title: paneRun ? runTitle(paneRun) : undefined,
+                      branches: branchesLostOnDelete([runId], paneContext?.instanceRuns)
+                    })
+                    const ok = await confirm(message, {
                       title: 'Delete task',
                       confirmLabel: 'Delete',
                       danger: true
@@ -2430,6 +2577,24 @@ function App() {
     if (nextPins !== settings.pinnedRuns || nextArchived !== settings.archivedRuns) {
       void update({ pinnedRuns: [...nextPins], archivedRuns: [...nextArchived] })
     }
+    // Recently deleted keeps it 30 days; Undo is one click away for now.
+    pushToast('Task deleted', {
+      icon: 'trash',
+      detail: 'In Recently deleted for 30 days',
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          void window.vyotiq.restoreDeletedRun(path, runId).then((restored) => {
+            if (!restored.ok) {
+              pushToast(restored.error, 'error')
+              return
+            }
+            refreshWorkspaceRuns(path)
+            void onSelectRunInWorkspace(path, runId)
+          })
+        }
+      }
+    })
   }
 
   /**
@@ -2440,7 +2605,13 @@ function App() {
   const onDeleteRunsInWorkspace = async (items: ReadonlyArray<{ workspacePath: string; runId: string }>): Promise<void> => {
     if (items.length === 0 || !window.vyotiq?.deleteRun) return
     const ok = await confirm(
-      `Delete ${items.length === 1 ? 'this task' : `these ${items.length} tasks`}? Their records and checkpoints are removed; files they changed stay as they are.`,
+      deleteTasksMessage({
+        count: items.length,
+        branches: items.reduce(
+          (sum, { workspacePath: path, runId }) => sum + branchesLostOnDelete([runId], contexts[path]?.instanceRuns),
+          0
+        )
+      }),
       { title: items.length === 1 ? 'Delete task' : 'Delete tasks', confirmLabel: 'Delete', danger: true }
     )
     if (!ok) return
@@ -2518,9 +2689,13 @@ function App() {
     }
   }
 
-  /** Fork: the task's conversation as a new, finished task, opened where you are. */
-  const onForkRunInWorkspace = async (path: string, runId: string): Promise<void> => {
-    const res = await window.vyotiq.forkRun(path, runId)
+  /**
+   * Fork: the task's conversation as a new, finished task, opened where you
+   * are — all of it, or (from an instruction's "Fork from here") the first
+   * `forkIndex` messages.
+   */
+  const onForkRunInWorkspace = async (path: string, runId: string, forkIndex?: number): Promise<void> => {
+    const res = await window.vyotiq.forkRun(path, runId, forkIndex)
     if (!res.ok) {
       pushToast(`Couldn’t fork the task: ${res.error}`, 'error')
       return
@@ -2936,6 +3111,7 @@ function App() {
     <AppShell
       view={view}
       workspacePath={activeWorkspace}
+      homeWorkspacePath={scratchPath?.path ?? null}
       firstRun={view === 'home' && setupFirstRun ? { workspace: setupChosenWorkspace } : null}
       drafts={{ items: taskDrafts, actions: draftActions, open: openDraft }}
       onOpenSettings={() => {
@@ -2968,6 +3144,13 @@ function App() {
       onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
       onRetryRunInWorkspace={(path, runId) => void onRetryRunInWorkspace(path, runId)}
       onForkRunInWorkspace={(path, runId) => void paneRunActionsRef.current.fork(path, runId)}
+      onNavigate={onNavigate}
+      onRunsRestored={refreshWorkspaceRuns}
+      onOpenRunBesideInWorkspace={(path, runId) => {
+        const focused = getFocusedPane()
+        if (!focused) return
+        handleSessionDrop(focused.paneId, 'right', { workspacePath: path, runId })
+      }}
       onImportTask={(path) => void onImportTaskInWorkspace(path)}
       onPauseGoalInWorkspace={(path, runId, live) => void onPauseGoalInWorkspace(path, runId, live)}
       onStopLoopInWorkspace={(path, runId) => void onStopLoopInWorkspace(path, runId)}
@@ -3045,7 +3228,7 @@ function App() {
             onFocusServerConsumed={() => setMarketplaceFocusServerId(null)}
             onFocusSkillConsumed={() => setMarketplaceFocusSkillPath(null)}
             onFocusRuleConsumed={() => setMarketplaceFocusRulePath(null)}
-            onClose={() => setView('chat')}
+            onClose={() => setView(marketplaceReturn)}
           />
           </Suspense>
         </ErrorBoundary>
@@ -3068,6 +3251,38 @@ function App() {
               onChooseFolder={setupChooseFolder}
               onOpenPath={setupOpenPath}
               onStart={setupStart}
+              onUseEnvKey={async (provider) => {
+                const res = await window.vyotiq.setupUseEnvKey(provider)
+                if (!res.ok) return res.error
+                await refresh()
+                const saved = await update({ provider, model: defaultModelFor(provider) })
+                return saved.ok ? null : saved.error
+              }}
+              onUseLocal={async (server) => {
+                // A server typed in by URL: ask it what it serves, so the
+                // first task does not go out on a default it lacks.
+                let served = server.models
+                if (served.length === 0 && server.id !== 'ollama') {
+                  const listed = await window.vyotiq.listModels({ provider: 'custom', baseUrl: server.baseUrl })
+                  if (!listed.ok) return listed.error
+                  served = listed.data.models.filter((m) => !m.isPlaceholder).map((m) => m.id)
+                  if (served.length === 0) {
+                    return `${server.baseUrl} answered with no models. Load a model in the server, then connect again.`
+                  }
+                }
+                const model = served[0] ?? defaultModelFor(server.id === 'ollama' ? 'ollama' : 'custom')
+                const saved =
+                  server.id === 'ollama'
+                    ? await update({ provider: 'ollama', ollamaBaseUrl: server.baseUrl, model })
+                    : await update({ provider: 'custom', customOpenAiBaseUrl: server.baseUrl, model })
+                return saved.ok ? null : saved.error
+              }}
+              onSaveKey={async (provider, key) => {
+                const res = await saveSecret(provider, key)
+                if (!res.ok) return res.error
+                const saved = await update({ provider, model: defaultModelFor(provider) })
+                return saved.ok ? null : saved.error
+              }}
               next={setupSend ? 'send' : setupFirstRun ? 'first-task' : 'task'}
             />
           </Suspense>

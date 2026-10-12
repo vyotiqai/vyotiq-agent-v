@@ -83,6 +83,9 @@ export function windowCostDisplay(totals: {
   runs: number
   pricedRuns?: number
 }): (RunCostDisplay & { perTask: number | null }) | null {
+  // Nothing priced at all: main then omits pricedRuns too, and reading that
+  // as "every task priced" showed "$0 · $0 a task" beside rows of dashes.
+  if (totals.billedCost == null && totals.estimatedCost == null) return null
   const billed = totals.billedCost ?? 0
   const estimated = totals.estimatedCost ?? 0
   const priced = Math.min(totals.pricedRuns ?? totals.runs, totals.runs)

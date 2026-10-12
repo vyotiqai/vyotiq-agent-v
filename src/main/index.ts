@@ -3,7 +3,24 @@ import { join } from 'path'
 import { electronApp } from '@electron-toolkit/utils'
 import { watchWindowShortcuts } from '@main/app/windowShortcuts'
 import { createWindow, applyWindowChrome, getMainWindow } from '@main/app/window'
-import { createTray, destroyTray } from '@main/app/tray'
+import {
+  createTray,
+  destroyTray,
+  hideToTray,
+  trayAvailable,
+  type TrayMenuSource,
+  type TrayTask
+} from '@main/app/tray'
+import { resolveRunDir } from '@main/storage/paths'
+import { noticeTaskTitle } from '@main/notifications/runNotices'
+import type { TrayCommand } from '@shared/ipc'
+import {
+  chooseOnClose,
+  confirmQuit,
+  type CloseAnswer,
+  type CloseChoice,
+  type CloseQuestion
+} from '@main/app/quitGuard'
 import { planSecondInstanceAction } from '@main/app/secondInstance'
 import { handleDeepLinkArgv, registerDeepLinks } from '@main/app/deepLinks'
 import { applyBadgeNow, notifyBadgeChange, setBadgeProvider } from '@main/app/badges'
@@ -16,7 +33,8 @@ import { VIDEO_SCHEMES } from '@main/video/schemes'
 import { registerMediaProtocol } from '@main/video/mediaProtocol'
 import { cancelAllRenderJobs } from '@main/video/renderHost'
 import { widenHappyEyeballsWindow } from '@main/net/happyEyeballs'
-import { applyEarlyNodeProxy, applyNetworkSettings } from '@main/net/proxy'
+import { applyEarlyNodeProxy, applyNetworkSettings, proxyLoginAnswer, setProxyCredentialsSource } from '@main/net/proxy'
+import { getToolSecret } from '@main/settings/secrets'
 import { installNodeCaCertificates, recoverFuseStrippedExtraCaCerts } from '@main/net/caCertificates'
 import { closeAgentBrowser } from '@main/app/agentBrowser'
 import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptySessions'
@@ -24,12 +42,14 @@ import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
 import { startTaskScheduler, stopTaskScheduler } from './schedules/taskScheduler'
-import { initAutoUpdater, applyUpdateCheckSchedule } from '@main/updater'
+import { initAutoUpdater, applyUpdateCheckSchedule, setUpdateChannelSource } from '@main/updater'
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
 import { primeLoginShellPath } from '@main/agent/mcp/binaries'
 import { resolveEffectiveMcpServers, repairMissingPackageDependencies, installDefaultBundledPackages, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
-import { getSettings } from '@main/settings/settings'
+import { enqueueSettingsMutation, getSettings, setSettings } from '@main/settings/settings'
+import { installPriceSources } from '@main/agent/pricing'
+import { purgeExpiredDeletedRuns } from '@main/agent/deletedRuns'
 import { migrateLegacySessions } from '@main/storage/migrations/migrateSessions'
 import { migrateWorkspaceRuns } from './storage/migrateWorkspaceRuns'
 import { sweepRetentionAuto } from '@main/storage/retention'
@@ -40,19 +60,28 @@ import {
   collectProtectedInstanceRunIds,
   flushEventAppends,
   flushMessageAppends,
-  flushStatusWrites
+  flushStatusWrites,
+  loadStatus
 } from '@main/agent/state'
 import { flushBeforeQuit, type EditorFlushStatus } from '@main/quitFlush'
 import { shutdownTokenizerPool } from '@main/agent/context/tokenizerPool'
 import { shutdownDictationUtilityClients } from '@main/dictation/whisperUtilityClient'
 import { closeAllLiveTakes } from '@main/dictation/liveOpenAI'
 import {
+  findWorkspaceSettingsOverride,
   getWorkspaces,
   interruptOrphanRunsForWorkspaces
 } from '@main/workspace/workspaces'
+import { setRulesOffSource } from '@main/agent/context/rules'
+import { setSamplingModelSource } from '@main/agent/mcp'
+import { mcpSamplingModel } from '@main/agent/mcpSamplingModel'
 import { cancelAndWaitActiveRuns, listActiveRuns } from '@main/agent/runRegistry'
-import { countPendingToolApprovals } from '@main/agent/toolApproval'
-import { countPendingAgentQuestions } from '@main/agent/agentQuestion'
+import {
+  countPendingToolApprovals,
+  listPendingToolApprovals,
+  setApprovalTimeoutSource
+} from '@main/agent/toolApproval'
+import { countPendingAgentQuestions, listPendingAgentQuestions } from '@main/agent/agentQuestion'
 import { pruneStaleInstanceWorktreesBestEffort } from '@main/git/instanceWorktree'
 import { initMainLogging, rendererUnresponsiveForMs } from './logging/init'
 import { setFatalFlush } from './logging/fatalExit'
@@ -110,6 +139,8 @@ protocol.registerSchemesAsPrivileged(VIDEO_SCHEMES)
 // If startup crashes return, bisect flags here (do not leave permanent disable-gpu-sandbox).
 
 let quitting = false
+/** The quit question is on screen: another quit request waits for its answer. */
+let quitDecisionPending = false
 let editorFlushSequence = 0
 const EDITOR_FLUSH_TIMEOUT_MS = 4_500
 /** Bound on awaiting child-process teardown in before-quit (fatal path). */
@@ -165,6 +196,93 @@ const flushedOnClose = new WeakSet<BrowserWindow>()
  * report a clean 'acknowledged' without the renderer ever having been asked to
  * save. Ask here, before teardown, and remember the answer for `before-quit`.
  */
+/** The close question is on screen: a second X waits for its answer. */
+let closeDecisionPending = false
+
+/** Task titles by run id, read once per run while it is live. */
+const trayTitles = new Map<string, { title: string; instance: boolean }>()
+
+function trayTitleFor(workspacePath: string, runId: string): { title: string; instance: boolean } {
+  const cached = trayTitles.get(runId)
+  if (cached) return cached
+  let entry = { title: 'Untitled task', instance: false }
+  try {
+    const status = loadStatus(resolveRunDir(workspacePath, runId))
+    entry = { title: noticeTaskTitle(status, runId), instance: status?.inlineInstance === true }
+  } catch {
+    // An unreadable status still lists the task; it just has no title.
+  }
+  trayTitles.set(runId, entry)
+  return entry
+}
+
+/** What the tray menu lists: the running tasks (not their helper instances), waiting ones marked. */
+function trayMenuSource(): TrayMenuSource {
+  const sendToWindow = (command: TrayCommand): void => {
+    const win = getMainWindow()
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+    win.webContents.send(IPC.trayCommand, command)
+  }
+  return {
+    tasks: () => {
+      const runs = listActiveRuns()
+      const live = new Set(runs.map((run) => run.runId))
+      for (const runId of trayTitles.keys()) if (!live.has(runId)) trayTitles.delete(runId)
+      const out: TrayTask[] = []
+      for (const run of runs) {
+        const { title, instance } = trayTitleFor(run.workspacePath, run.runId)
+        if (instance) continue
+        const waiting =
+          listPendingToolApprovals(run.runId).length > 0 || listPendingAgentQuestions(run.runId).length > 0
+        out.push({ workspacePath: run.workspacePath, runId: run.runId, title, waiting })
+      }
+      return out
+    },
+    onOpenTask: (task) => sendToWindow({ type: 'open_run', workspacePath: task.workspacePath, runId: task.runId }),
+    onNewTask: () => sendToWindow({ type: 'new_task' }),
+    onStopAll: () => {
+      const count = listActiveRuns().length
+      if (count === 0) return
+      void dialog
+        .showMessageBox({
+          type: 'question',
+          title: 'Stop all tasks',
+          message: `Stop ${count} running task${count === 1 ? '' : 's'}?`,
+          detail: 'Each one stops where it is, as Stop does in the task.',
+          buttons: ['Stop all', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true
+        })
+        .then(async (result) => {
+          if (result.response !== 0) return
+          const stopped = await cancelAndWaitActiveRuns()
+          if (stopped.timedOut.length > 0) {
+            logger.warn('Some tasks did not stop in time', { scope: 'main', timedOut: stopped.timedOut })
+          }
+        })
+        .catch((err: unknown) => logger.warn('Stop all from the tray failed', { scope: 'main', err }))
+    }
+  }
+}
+
+/** Show the quit question over the window (or alone, with none). */
+async function askCloseQuestion(win: BrowserWindow | null, question: CloseQuestion): Promise<CloseAnswer> {
+  const options = {
+    type: 'question' as const,
+    title: 'Tasks are running',
+    message: question.message,
+    detail: question.detail,
+    buttons: question.buttons,
+    defaultId: question.hide ?? question.cancel,
+    cancelId: question.cancel,
+    noLink: true,
+    ...(question.checkboxLabel ? { checkboxLabel: question.checkboxLabel, checkboxChecked: false } : {})
+  }
+  const result = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+  return { response: result.response, checkboxChecked: result.checkboxChecked }
+}
+
 function attachEditorFlushOnClose(win: BrowserWindow): BrowserWindow {
   editorFlushFromClose = null
   win.on('close', (event) => {
@@ -172,8 +290,39 @@ function attachEditorFlushOnClose(win: BrowserWindow): BrowserWindow {
     // must fall through.
     if (quitting || flushedOnClose.has(win) || win.isDestroyed()) return
     event.preventDefault()
-    flushedOnClose.add(win)
+    if (closeDecisionPending) return
+    closeDecisionPending = true
     void (async () => {
+      // macOS keeps the app running with no window, as every Mac app does.
+      let choice: CloseChoice = 'quit'
+      if (process.platform !== 'darwin') {
+        const settings = getSettings()
+        try {
+          choice = await chooseOnClose({
+            activeRuns: listActiveRuns().length,
+            closeToTray: settings.closeToTray === true,
+            confirmQuit: settings.confirmQuitWithRunningTasks !== false,
+            trayAvailable: trayAvailable(),
+            ask: (question) => askCloseQuestion(win, question),
+            rememberTray: () => {
+              void enqueueSettingsMutation(() => setSettings({ closeToTray: true })).catch((err: unknown) =>
+                logger.warn('Could not save "keep running in the tray"', { scope: 'main', err })
+              )
+            }
+          })
+        } catch (err) {
+          logger.warn('Close question failed; closing', { scope: 'main', err })
+          choice = 'quit'
+        }
+      }
+      closeDecisionPending = false
+      if (win.isDestroyed()) return
+      if (choice === 'cancel') return
+      if (choice === 'hide') {
+        hideToTray(win)
+        return
+      }
+      flushedOnClose.add(win)
       editorFlushFromClose = await requestRendererEditorFlush(win)
       if (!win.isDestroyed()) win.close()
     })()
@@ -241,11 +390,12 @@ if (HEADLESS) {
   app.quit()
 } else {
   registerDeepLinks()
-  app.on('second-instance', (_event, argv) => {
-    // Windows/Linux: a vyotiq:// activation arrives in the second instance's
-    // argv. Handle it before focusing so the link survives a wedged-window
-    // recreate (the pending slot is drained by the renderer on mount).
-    handleDeepLinkArgv(argv)
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    // Windows/Linux: a vyotiq:// activation, or a folder to open, arrives in
+    // the second instance's argv. Handle it before focusing so the link
+    // survives a wedged-window recreate (the pending slot is drained by the
+    // renderer on mount).
+    handleDeepLinkArgv(argv, workingDirectory)
     const win = getMainWindow() ?? BrowserWindow.getAllWindows()[0]
     const unresponsiveForMs = rendererUnresponsiveForMs()
     const plan = planSecondInstanceAction({ hasWindow: !!win, unresponsiveForMs })
@@ -325,7 +475,29 @@ if (HEADLESS) {
     // The app window plays workspace/run media through vyotiq-media; the
     // privileged-scheme registration above ran before ready.
     registerMediaProtocol()
+    // The manual proxy's sign-in: user name in settings, password in the key vault.
+    setProxyCredentialsSource(() => ({
+      username: getSettings().network?.proxyUsername ?? '',
+      password: getToolSecret('proxy')
+    }))
+    app.on('login', (event, _webContents, _details, authInfo, callback) => {
+      const creds = proxyLoginAnswer(authInfo)
+      if (!creds) return
+      event.preventDefault()
+      callback(creds.username, creds.password ?? '')
+    })
     await applyNetworkSettings(getSettings().network)
+    // Prices set in Settings and the models.dev catalog, behind the table.
+    installPriceSources()
+    // How long an approval card waits before the call is denied (0: no limit).
+    setApprovalTimeoutSource(() => getSettings().approvalTimeoutMinutes ?? 15)
+    // An MCP server's sampling request is answered by the workspace's model, once allowed.
+    setSamplingModelSource(mcpSamplingModel)
+    // Rule files switched off in a workspace leave its prompt.
+    setRulesOffSource((workspacePath) => {
+      const rules = findWorkspaceSettingsOverride(getWorkspaces(), workspacePath)?.marketplaceOverrides?.rules ?? {}
+      return new Set(Object.keys(rules).filter((path) => rules[path] === false))
+    })
     // Recover the user's real PATH before any MCP server is spawned. A macOS app
     // launched from Finder inherits only /usr/bin:/bin:/usr/sbin:/sbin, which
     // hides nvm's node and uv. Bounded and best-effort; no-op off macOS.
@@ -358,6 +530,13 @@ if (HEADLESS) {
       // minutes, so startup stays responsive and steady-state memory bounded.
       const active = workspaces.activePath
       if (active) warmWorkspaceIndexes(active)
+      // Recently deleted keeps a task 30 days; past that it goes for good.
+      // In the background: it walks every deleted run, and startup does not wait on it.
+      for (const path of workspaces.openPaths) {
+        void purgeExpiredDeletedRuns(path).catch((err) =>
+          logger.warn('Recently deleted cleanup skipped a workspace', { scope: 'main', err })
+        )
+      }
       const n = await interruptOrphanRunsForWorkspaces(workspaces)
       if (n > 0) {
         logger.info(`Interrupted ${n} orphan run(s)`, { scope: 'main' })
@@ -403,6 +582,7 @@ if (HEADLESS) {
     // first paint. The Settings "Automatic checks" switch gates both, and
     // re-applies live from the setSettings handler.
     initAutoUpdater()
+    setUpdateChannelSource(() => getSettings().updateChannel ?? 'stable')
     applyUpdateCheckSchedule(getSettings().autoCheckUpdates !== false)
     startLoadPerfMonitor()
     try {
@@ -447,7 +627,7 @@ if (HEADLESS) {
     applyBadgeNow()
     // The tray polls the run registry rather than being pushed at: run starts
     // and finishes are already chatty, and the tray only needs a count.
-    createTray({ getActiveRunCount: () => listActiveRuns().length })
+    createTray({ getActiveRunCount: () => listActiveRuns().length, menu: trayMenuSource() })
     initCustomCssWatchFromSettings()
     // Windows/Linux cold start: the OS launches us with the URL in our own argv.
     handleDeepLinkArgv(process.argv)
@@ -497,8 +677,8 @@ if (HEADLESS) {
     void dialog
       .showMessageBox({
         type: 'error',
-        title: 'Vyotiq failed to start',
-        message: 'Vyotiq failed to start. Check the logs for details.',
+        title: 'Agent V failed to start',
+        message: 'Agent V failed to start. Check the logs for details.',
         buttons: ['Quit'],
         defaultId: 0
       })
@@ -513,11 +693,27 @@ if (HEADLESS) {
   app.on('before-quit', (event) => {
     if (quitting) return
     event.preventDefault()
-    quitting = true
-    // No repeating task may start a run while the others are being stopped.
-    stopTaskScheduler()
+    if (quitDecisionPending) return
+    quitDecisionPending = true
 
     void (async () => {
+      // A quit from the menu, the tray or Ctrl+Q with tasks running asks
+      // first; one already chosen (the close question, an update) does not.
+      let proceed = true
+      try {
+        proceed = await confirmQuit({
+          activeRuns: listActiveRuns().length,
+          confirmQuit: getSettings().confirmQuitWithRunningTasks !== false,
+          ask: (question) => askCloseQuestion(BrowserWindow.getFocusedWindow() ?? getMainWindow(), question)
+        })
+      } catch (err) {
+        logger.warn('Quit question failed; quitting', { scope: 'main', err })
+      }
+      quitDecisionPending = false
+      if (!proceed) return
+      quitting = true
+      // No repeating task may start a run while the others are being stopped.
+      stopTaskScheduler()
       try {
         const quiesced = await cancelAndWaitActiveRuns()
         if (quiesced.timedOut.length > 0) {
@@ -567,7 +763,7 @@ if (HEADLESS) {
       const win = BrowserWindow.getFocusedWindow() ?? getMainWindow()
       const showQuitAnywayDialog = async (): Promise<'wait' | 'quit'> => {
         const message =
-          'Vyotiq is still saving run data. Quit anyway? Unsaved data may be lost.'
+          'Agent V is still saving run data. Quit anyway? Unsaved data may be lost.'
         const result = win
           ? await dialog.showMessageBox(win, {
               type: 'warning',

@@ -793,6 +793,72 @@ export async function addInstanceWorktree(
   )
 }
 
+/**
+ * Check an interrupted instance's kept branch out again, at the path it had,
+ * so the instance can resume after an app restart. The branch already holds
+ * the parent's forwarded baseline and the instance's own commits, so nothing
+ * is forwarded again; only node_modules is linked back in.
+ */
+export async function reattachInstanceWorktree(
+  workspacePath: string,
+  runId: string,
+  branch: string,
+  pathScope?: string[]
+): Promise<AddInstanceWorktreeResult> {
+  return withGitWorktreeMutex(workspacePath, async () => {
+    if (!isSafeInstanceBranch(branch)) {
+      return { ok: false, error: `not an instance branch: ${branch}` }
+    }
+    if (!(await gitAvailable())) return { ok: false, error: 'git is not available' }
+    if (!isGitRepo(workspacePath)) return { ok: false, error: 'Not a git repository' }
+    try {
+      await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], workspacePath, READ_TIMEOUT_MS)
+    } catch {
+      return { ok: false, error: `its branch ${branch} no longer exists` }
+    }
+    const worktreePath = instanceWorktreePath(workspacePath, runId)
+    let porcelain = ''
+    try {
+      porcelain = await git(['worktree', 'list', '--porcelain'], workspacePath, READ_TIMEOUT_MS)
+    } catch {
+      /* best-effort */
+    }
+    if (branchCheckedOutElsewhere(porcelain, branch, worktreePath)) {
+      return { ok: false, error: `its branch ${branch} is checked out elsewhere` }
+    }
+    mkdirSync(join(worktreePath, '..'), { recursive: true })
+    if (existsSync(worktreePath)) {
+      try {
+        await removeInstanceWorktreeUnlocked(workspacePath, worktreePath)
+      } catch {
+        rmSync(worktreePath, { recursive: true, force: true })
+      }
+    }
+    try {
+      // A stale registration for this path (the checkout was deleted, the
+      // admin entry was not) makes `worktree add` refuse it.
+      await git(['worktree', 'prune'], workspacePath, WRITE_TIMEOUT_MS)
+    } catch {
+      /* best-effort */
+    }
+    try {
+      const cones = pathScopeToConeDirs(pathScope ?? [])
+      if (cones.length > 0) {
+        await git(['worktree', 'add', '--no-checkout', worktreePath, branch], workspacePath, WRITE_TIMEOUT_MS)
+        await applySparseConeCheckout(worktreePath, branch, cones)
+      } else {
+        await git(['worktree', 'add', worktreePath, branch], workspacePath, WRITE_TIMEOUT_MS)
+      }
+      markPendingInstanceWorktree(workspacePath, runId)
+      await linkNodeModulesBestEffort(workspacePath, worktreePath)
+      return { ok: true, worktreePath, branch }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: `could not check its branch out again: ${message}` }
+    }
+  })
+}
+
 function pathScopeToConeDirs(pathScope: string[]): string[] {
   const dirs = new Set<string>()
   for (const raw of pathScope) {
@@ -1178,7 +1244,7 @@ export async function commitDirtyInstanceWorktree(worktreePath: string): Promise
     await git(
       [
         '-c',
-        'user.name=Vyotiq Agent',
+        'user.name=Agent V',
         '-c',
         'user.email=agent@vyotiq.local',
         'commit',

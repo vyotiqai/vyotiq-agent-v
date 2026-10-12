@@ -67,10 +67,24 @@ describe('PrPanel new pull request', () => {
     expect(window.vyotiq.gitBranchDiff).toHaveBeenCalledWith('/ws')
   })
 
-  it('names only the branch when git finds no base to compare with', async () => {
+  it('offers no form on the default branch, and says a PR needs a branch', async () => {
     stubBridge(vi.fn().mockResolvedValue({ ok: true, data: { content: '', branch: 'main', base: null, commits: 0 } }))
     render(<PrPanel workspacePath="/ws" runId="run-1" items={items} taskTitle="Fix the swap" />)
-    await waitFor(() => expect(document.querySelector('[data-new-pr-branches]')?.textContent).toBe('main'))
+    await waitFor(() =>
+      expect(document.querySelector('[data-new-pr-branches="default"]')?.textContent).toMatch(/^On main, the default branch/)
+    )
+    expect(screen.queryByRole('textbox', { name: 'Pull request title' })).toBeNull()
+  })
+
+  it('offers no form for a branch with nothing ahead of its base', async () => {
+    // A task that only answered a question: there is a result, but no commits to propose.
+    stubBridge(
+      vi.fn().mockResolvedValue({ ok: true, data: { content: '', branch: 'fix/swap', base: 'origin/main', commits: 0 } })
+    )
+    render(<PrPanel workspacePath="/ws" runId="run-1" items={items} taskTitle="Fix the swap" />)
+    await waitFor(() => expect(window.vyotiq.gitBranchDiff).toHaveBeenCalled())
+    await screen.findByText('No pull request')
+    expect(screen.queryByRole('textbox', { name: 'Pull request title' })).toBeNull()
   })
 
   it('shows no line when the branch cannot be read, and the form still works', async () => {

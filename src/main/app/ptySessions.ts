@@ -13,6 +13,7 @@ import {
   sanitizedTerminalEnv
 } from '../agent/tools/terminal'
 import type { PtySessionInfo } from '../../shared/ipc'
+import type { PtyShellChoice } from '../../shared/ipc/schemas/pty'
 import { getMainWindow } from './window'
 import { flushTerminalMirror, setTerminalMirrorSink } from '../agent/tools/terminalMirrorSink'
 import { installForklessConptyKill } from './conptyKill'
@@ -65,34 +66,44 @@ function scrollbackText(handle: PtyHandle): string {
     : handle.scrollbackChunks.join('')
 }
 
-function shellTitle(): string {
-  const resolved = resolveTerminalShell(getSettings().terminalShell ?? 'auto')
-  if (resolved === 'powershell') return 'PowerShell'
-  if (resolved === 'cmd') return 'cmd'
-  return 'bash'
+/** The program's name without its folder or `.exe`: `C:\…\nu.exe` → `nu`. */
+export function shellProgramTitle(path: string): string {
+  return path.trim().replace(/^["']|["']$/g, '').replace(/^.*[\\/]/, '').replace(/\.(exe|cmd|bat|com)$/i, '') || 'shell'
 }
 
-function shellBinAndArgs(): { file: string; args: string[] } {
-  const preference = getSettings().terminalShell ?? 'auto'
-  const resolved = resolveTerminalShell(preference)
+/**
+ * The program a terminal tab runs, and its tab title. `default` follows the
+ * Shell program setting when one is set, else the Shell setting the agent
+ * uses too; a tab picked from New terminal's menu names its shell outright.
+ */
+export function resolvePtyShell(
+  choice: PtyShellChoice = 'default',
+  opts: { customPath?: string; platform?: NodeJS.Platform } = {}
+): { file: string; args: string[]; title: string } {
+  const platform = opts.platform ?? process.platform
+  if (choice === 'wsl') return { file: 'wsl.exe', args: [], title: 'WSL' }
+  const custom = (opts.customPath ?? '').trim().replace(/^["']|["']$/g, '')
+  if (choice === 'default' && custom) return { file: custom, args: [], title: shellProgramTitle(custom) }
+  const resolved = choice === 'default' ? resolveTerminalShell(getSettings().terminalShell ?? 'auto') : choice
   if (resolved === 'powershell') {
     // Prefer pwsh on PATH (same as agent terminal tool), else Windows PowerShell 5.x.
-    const file =
-      process.platform === 'win32'
-        ? commandOnPath('pwsh')
-          ? 'pwsh'
-          : 'powershell.exe'
-        : 'pwsh'
-    return { file, args: ['-NoLogo'] }
+    const file = platform === 'win32' ? (commandOnPath('pwsh') ? 'pwsh' : 'powershell.exe') : 'pwsh'
+    return { file, args: ['-NoLogo'], title: 'PowerShell' }
   }
-  if (resolved === 'cmd') {
-    return { file: 'cmd.exe', args: [] }
-  }
-  if (resolved === 'bash') {
-    return { file: 'bash', args: ['-l'] }
-  }
+  if (resolved === 'cmd') return { file: 'cmd.exe', args: [], title: 'cmd' }
+  if (resolved === 'bash') return { file: 'bash', args: ['-l'], title: 'bash' }
   const shell = process.env.SHELL || '/bin/bash'
-  return { file: shell, args: ['-l'] }
+  return { file: shell, args: ['-l'], title: shellProgramTitle(shell) }
+}
+
+/** Rename a tab. The mirror of the agent's commands keeps its name. */
+export function renamePty(id: string, title: string, workspacePath?: string): boolean {
+  const handle = sessions.get(id)
+  if (!handle || handle.backend.kind === 'agent') return false
+  if (workspacePath && !workspacePathsEqual(handle.workspacePath, workspacePath)) return false
+  handle.title = title.trim().slice(0, 60) || handle.title
+  sendToMainWindow(IPC.ptySessionsChanged, { workspacePath: handle.workspacePath })
+  return true
 }
 
 function tryLoadPty(): typeof import('node-pty') | null {
@@ -130,11 +141,11 @@ export function createPtySession(opts: {
   cwd: string
   cols?: number
   rows?: number
+  shell?: PtyShellChoice
   sendTo: BrowserWindow
 }): PtySessionInfo {
   const id = randomUUID()
-  const title = shellTitle()
-  const { file, args } = shellBinAndArgs()
+  const { file, args, title } = resolvePtyShell(opts.shell, { customPath: getSettings().terminalShellPath })
   const nodePty = tryLoadPty()
   // Placeholder until backend is ready so early data is retained for recreate replay.
   const handle: PtyHandle = {

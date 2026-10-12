@@ -206,9 +206,21 @@
   --vy-font-scale: 0.92;
 }
 
+/* The default scale resolves from the base token above; stated here so the
+   preset mapping reads complete next to small/large. */
+[data-font-scale="default"] {
+  --vy-font-scale: 1;
+}
+
 [data-font-scale="large"] {
   --vy-font-scale: 1.08;
 }
+
+/*
+  Numeric scales (0.85–2.0) set --vy-font-scale inline on the element carrying
+  data-font-scale (useAppearance applyToDocument), so any step applies without
+  a selector per value; presets resolve through the mapping above.
+*/
 
 /* ─── Skin palettes: 4 skins × 2 themes (Default is the base above) ─────────── */
 
@@ -550,6 +562,20 @@
   -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
 }
 
+/** A sideways strip with more past an edge: that edge fades, so the cut reads as "more". */
+@utility mask-fade-start {
+  mask-image: linear-gradient(to right, transparent 0, black 20px);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 20px);
+}
+@utility mask-fade-end {
+  mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
+}
+@utility mask-fade-x {
+  mask-image: linear-gradient(to right, transparent 0, black 20px, black calc(100% - 20px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 20px, black calc(100% - 20px), transparent 100%);
+}
+
 /** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */
 @utility diff-row-add {
   background: var(--vy-diff-add);
@@ -698,6 +724,13 @@
     outline-offset: 2px;
   }
 
+  /* Sticky focus ring (Settings → Appearance → Accessibility): the outline
+     shows on mouse focus too, not just keyboard focus. */
+  [data-focus-ring='always'] :focus {
+    outline: 2px solid var(--vy-focus);
+    outline-offset: 2px;
+  }
+
   ::selection {
     background-color: var(--vy-accent-soft);
     color: var(--vy-fg-strong);
@@ -808,6 +841,25 @@
       scroll-behavior: auto !important;
     }
   }
+
+  /*
+    Forced reduce-motion (Settings → Appearance → Accessibility → Reduce
+    motion → On): the same kill-switch as the OS media query above, honoured
+    no matter what the OS says. `system` (the default) leaves motion to the
+    media query; `off` adds no rules, so the app keeps its motion.
+  */
+  [data-reduce-motion='on']:focus-within {
+    scroll-behavior: auto;
+  }
+
+  [data-reduce-motion='on'] *,
+  [data-reduce-motion='on'] *::before,
+  [data-reduce-motion='on'] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @utility sr-only {
@@ -860,10 +912,46 @@
   }
 }
 
+/*
+  Forced contrast (Settings → Appearance → Accessibility → Contrast → More):
+  token-only strengthening — borders take the strong weight and the lower
+  text steps move up the ramp, so nothing here invents a color.
+*/
+[data-contrast='more'] {
+  --vy-border: var(--vy-border-strong);
+  --vy-muted: var(--vy-secondary);
+  --vy-tertiary: var(--vy-secondary);
+}
+
+[data-contrast='more'] :focus-visible,
+[data-contrast='more'] .skip-link:focus-visible {
+  outline-width: 3px;
+}
+
 @media (forced-colors: active) {
   :focus-visible,
-  .skip-link:focus-visible {
+  .skip-link:focus-visible,
+  [data-focus-ring='always'] :focus {
     outline: 2px solid Highlight;
+  }
+
+  /* Structural surfaces keep their edges in the system palette. */
+  .vy-menu,
+  dialog,
+  input,
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable='false']) {
+    border: 1px solid ButtonText;
+  }
+
+  ::selection {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  a {
+    color: LinkText;
   }
 }
 
@@ -918,7 +1006,7 @@
   h2 {
     font-size: var(--text-heading);
 
-    /* The one section boundary in a record: h2 is a section's own name, so it
+    /* The one section boundary in a document: h2 is a section's own name, so it
        gets the hairline under it that opens the block. h3 and below are labels
        inside a section and must not draw one, or every sub-heading would. */
     border-bottom: 1px solid var(--vy-border);
@@ -1034,8 +1122,7 @@
   /* Emphasis from contrast, not mass: the semibold every skin loads.
      Preflight's `bolder` drew Segoe's 700 and a faked bold in Jakarta (no 700
      is loaded), so a bold run outweighed the sentence around it. No colour of
-     its own: the Result's body already sits at `--vy-fg-strong`, so a colour
-     here was a no-op there and a jump to heading ink everywhere else. */
+     its own: a colour here was a jump to heading ink. */
   strong,
   b {
     font-weight: 600;
@@ -1094,31 +1181,13 @@
   }
 }
 
-/* The agent's words in the record keep a reading measure. The column is sized
-   for rows and cards; a paragraph across all of it ran ~115 characters a line
-   at 13px. At 14px the redesign probe measured the prose column itself at
-   643px — 1ch resolves to 10.24px, so the column is already ~63ch and is
-   the binding constraint at that pane width, not this cap. The 80ch it
-   replaced resolved to 819.84px, so it could only ever bind on a pane wider
-   than 820px and never did at the tested width. 72ch is 737.86px: above
-   ~738px of pane it binds, below that the column binds first and the cap is
-   inert. It is kept so a wide pane cannot stretch the measure back out. Code,
-   tables and diagrams keep the full column, and the rows' right edge is
-   untouched (prose has none of its own). */
-.record-prose > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) {
-  max-width: 72ch;
-}
-
 /* Inline code a step down the text ramp from the words around it. Mono at the
-   prose's own ink read as a spatter of heavy marks across a paragraph — a
-   Result named a dozen files and flags, each brighter than the sentence it sat
-   in. The chip and the face still say "code"; the ink no longer shouts it.
-   Prose already a step down (`secondary`) keeps its code at that step. */
-.markdown-body[data-tone='strong'] :is(:not(pre) > code, [data-code-chip]) {
-  color: var(--vy-fg);
-}
-
-.markdown-body[data-tone='default'] :is(:not(pre) > code, [data-code-chip]) {
+   prose's own ink read as a spatter of heavy marks across a paragraph naming a
+   dozen files and flags, each brighter than the sentence it sat in. The face
+   still says "code"; the ink no longer shouts it. Prose already a step down
+   (`secondary`) keeps its code at that step. The agent's replies do the same
+   in features/task/record/reply/reply.css. */
+.markdown-body[data-tone='default'] :not(pre) > code {
   color: var(--vy-secondary);
 }
 

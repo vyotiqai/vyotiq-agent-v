@@ -430,6 +430,11 @@ export function applyToolCallToKnownPaths(
     invalidateKnownPathsAfterDelete(known, deleted)
     return
   }
+  if (name === 'move' && typeof args.from === 'string' && args.from.trim()) {
+    // What was read at the old path is no longer there.
+    invalidateKnownPathsAfterDelete(known, normalizeWorkspaceRelPath(args.from))
+    return
+  }
   for (const path of inspectPathsFromToolCall(name, args, resultContent)) {
     known.add(path)
   }
@@ -468,6 +473,14 @@ export function applyToolCallToMutationPaths(
   const deleted = deletePathFromToolCall(name, args)
   if (deleted) {
     mutations.add(normalizeWorkspaceRelPath(deleted))
+    return
+  }
+  if (name === 'move') {
+    // Both ends change: git_commit stages the removal and the new file.
+    for (const key of ['from', 'to']) {
+      const raw = args[key]
+      if (typeof raw === 'string' && raw.trim()) mutations.add(normalizeWorkspaceRelPath(raw))
+    }
     return
   }
   for (const path of editPathsFromToolCall(name, args)) {

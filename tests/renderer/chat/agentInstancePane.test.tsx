@@ -61,6 +61,103 @@ function meterLabel(view: RenderResult): string | null {
   return view.queryByRole('button', { name: /Context window/ })?.getAttribute('aria-label') ?? null
 }
 
+describe('AgentInstancePane goal', () => {
+  it('reads the parent’s goal as a reply at the brief’s size, not as raw markdown', () => {
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: 'goal-1' })
+    const view = render(
+      <AgentInstancePane
+        workspacePath="/ws"
+        instanceRunId="goal-1"
+        instanceMeta={{ instanceRunId: 'goal-1', phase: 'started', goal: 'Fix the **flaky** checkout in `src/a.ts`.' }}
+        getController={() => controller}
+        onClose={() => {}}
+      />
+    )
+    const goal = view.container.querySelector('[data-reply]')!
+    expect(goal.getAttribute('data-size')).toBe('md')
+    expect(goal.getAttribute('data-tone')).toBe('strong')
+    expect(goal.querySelector('strong')!.textContent).toBe('flaky')
+    expect(goal.textContent).not.toContain('**')
+  })
+})
+
+describe('AgentInstancePane header', () => {
+  const ids = ['a1111111', 'b2222222', 'c3333333', 'd4444444', 'e5555555', 'f6666666', 'g7777777'].map(
+    (head) => `${head}-0000-4000-8000-000000000000`
+  )
+  const siblings = Object.fromEntries(
+    ids.map((id, i) => [id, { instanceRunId: id, phase: 'started' as const, stepTitle: `Map area ${i + 1}` }])
+  )
+
+  function renderHeader(): RenderResult {
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: ids[3]! })
+    return render(
+      <AgentInstancePane
+        workspacePath="/ws"
+        instanceRunId={ids[3]!}
+        instanceMeta={siblings[ids[3]!]}
+        siblings={siblings}
+        onOpenInstance={() => {}}
+        getController={() => controller}
+        onClose={() => {}}
+      />
+    )
+  }
+
+  it('gives the title its width and lets the sibling chips take what is left', () => {
+    const view = renderHeader()
+    const header = view.container.querySelector('[data-instance-header]')!
+    expect(header.querySelector('h1')!.textContent).toBe('Map area 4')
+    const strip = header.querySelector<HTMLElement>('[data-instance-siblings]')!
+    // flex-basis 0: the chips grow into spare room and never squeeze the title.
+    expect(strip.classList.contains('basis-0')).toBe(true)
+    expect(strip.classList.contains('flex-1')).toBe(true)
+    expect(strip.classList.contains('overflow-x-auto')).toBe(true)
+    expect(strip.classList.contains('min-w-14')).toBe(true)
+    const chips = view.getAllByRole('group', { name: 'Instances of this task' })[0]!.querySelectorAll('button')
+    expect(chips).toHaveLength(7)
+    expect(chips[3]!.getAttribute('aria-current')).toBe('page')
+    // The current chip says the id; the header does not say it again.
+    expect(header.querySelector('[title="Instance id"]')).toBeNull()
+  })
+
+  it('fades the edge that hides chips', () => {
+    const proto = HTMLDivElement.prototype
+    const scrollWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollWidth')
+    const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')
+    Object.defineProperty(proto, 'scrollWidth', { configurable: true, get: () => 400 })
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => 100 })
+    try {
+      const view = renderHeader()
+      const strip = view.container.querySelector<HTMLElement>('[data-instance-siblings]')!
+      expect(strip.classList.contains('mask-fade-end')).toBe(true)
+      expect(strip.classList.contains('mask-fade-x')).toBe(false)
+    } finally {
+      delete (proto as unknown as Record<string, unknown>).scrollWidth
+      delete (proto as unknown as Record<string, unknown>).clientWidth
+      if (scrollWidth) Object.defineProperty(Element.prototype, 'scrollWidth', scrollWidth)
+      if (clientWidth) Object.defineProperty(Element.prototype, 'clientWidth', clientWidth)
+    }
+  })
+
+  it('keeps no chip strip floor for a lone instance', () => {
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: ids[0]! })
+    const view = render(
+      <AgentInstancePane
+        workspacePath="/ws"
+        instanceRunId={ids[0]!}
+        instanceMeta={siblings[ids[0]!]}
+        getController={() => controller}
+        onClose={() => {}}
+      />
+    )
+    const strip = view.container.querySelector<HTMLElement>('[data-instance-siblings]')!
+    expect(strip.classList.contains('min-w-0')).toBe(true)
+    expect(strip.querySelector('button')).toBeNull()
+    expect(view.container.querySelector('[title="Instance id"]')!.textContent).toBe('a1111111')
+  })
+})
+
 describe('AgentInstancePane controller identity churn', () => {
   it('keeps the first live controller when getController churns identity per render', async () => {
     // The WM map can hand back a NEW live controller each render. The pre-guard

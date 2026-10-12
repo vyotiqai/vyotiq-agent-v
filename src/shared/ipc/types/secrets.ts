@@ -57,3 +57,15 @@ export const SetSecretRequestSchema = z.object({
 export const ClearSecretRequestSchema = z.object({
   provider: SecretProviderSchema
 })
+
+/** Keys for services tools use that are not model providers (web_search's APIs). */
+/** Keys for tools and the app itself: web_search's engines, and the manual proxy's password. */
+export const ToolSecretNameSchema = z.enum(['brave', 'tavily', 'proxy', 'notify'])
+export type ToolSecretName = z.infer<typeof ToolSecretNameSchema>
+export type ToolSecretStatus = Record<ToolSecretName, boolean>
+
+export const SetToolSecretRequestSchema = z.object({
+  name: ToolSecretNameSchema,
+  key: z.string().trim().min(1, 'The key cannot be empty').max(2000)
+})
+export const ClearToolSecretRequestSchema = z.object({ name: ToolSecretNameSchema })

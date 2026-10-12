@@ -4,12 +4,17 @@
  */
 import { existsSync } from 'fs'
 import { spawnSync } from 'child_process'
+import { app } from 'electron'
 import type { SandboxCapability } from '../../../shared/ipc'
 import { SANDBOX_EXEC_PATH, type SandboxMechanism } from './wrap'
+import type { LowIntegrityShells } from './windows'
+import { prepareLowIntegrityShells } from './windowsSetup'
 
 export type DetectedSandbox = SandboxCapability & {
   /** sandbox-exec or the bwrap binary; null when unavailable. */
   executable: string | null
+  /** Windows: the low-labelled shell copies commands run under. */
+  shells?: LowIntegrityShells | null
 }
 
 export type SandboxCapabilityDeps = {
@@ -18,18 +23,15 @@ export type SandboxCapabilityDeps = {
   /** PATH as the app sees it, for finding bwrap. */
   pathEnv: string
   /** Run a no-op inside the mechanism; ok false carries its first error line. */
-  probe: (mechanism: SandboxMechanism, executable: string) => { ok: boolean; detail: string }
+  probe: (mechanism: Exclude<SandboxMechanism, 'low-integrity'>, executable: string) => { ok: boolean; detail: string }
+  /** Windows: make the low-labelled shell copies and prove they run at low integrity. */
+  prepareWindows: () => { ok: true; shells: LowIntegrityShells } | { ok: false; detail: string }
 }
 
-/**
- * Windows is unavailable on purpose. Confining one process's writes there
- * needs an AppContainer or a restricted token plus ACL edits, all native
- * calls this app has no dependency for; `runas /trustlevel` drops admin
- * rights but confines neither writes nor network, and cannot pipe stdio.
- * Saying "sandboxed" over any of those would be a lie.
- */
-export const WINDOWS_UNAVAILABLE_REASON =
-  'Windows has no built-in way to confine one command’s file writes and network without extra system components, so the sandbox runs on macOS and Linux only.'
+/** Windows, when the low-integrity copies cannot be made or do not run at low integrity. */
+export function windowsUnavailableReason(detail: string): string {
+  return `Commands cannot be confined at low integrity here: ${detail}.`
+}
 
 export const BWRAP_MISSING_REASON =
   'bubblewrap (bwrap) is not installed. Install it with your package manager (for example `sudo apt install bubblewrap`), then reopen this page.'
@@ -50,7 +52,11 @@ function unavailable(reason: string): DetectedSandbox {
 }
 
 export function detectSandboxCapability(deps: SandboxCapabilityDeps): DetectedSandbox {
-  if (deps.platform === 'win32') return unavailable(WINDOWS_UNAVAILABLE_REASON)
+  if (deps.platform === 'win32') {
+    const prepared = deps.prepareWindows()
+    if (!prepared.ok) return unavailable(windowsUnavailableReason(prepared.detail))
+    return { available: true, mechanism: 'low-integrity', reason: null, executable: prepared.shells.cmd, shells: prepared.shells }
+  }
   if (deps.platform === 'darwin') {
     if (!deps.exists(SANDBOX_EXEC_PATH)) {
       return unavailable(`${SANDBOX_EXEC_PATH} is missing, so commands cannot be confined on this Mac.`)
@@ -76,7 +82,10 @@ export function detectSandboxCapability(deps: SandboxCapabilityDeps): DetectedSa
 }
 
 /** Start the mechanism around `true`: proves it works here, not just that it is installed. */
-function defaultProbe(mechanism: SandboxMechanism, executable: string): { ok: boolean; detail: string } {
+function defaultProbe(
+  mechanism: Exclude<SandboxMechanism, 'low-integrity'>,
+  executable: string
+): { ok: boolean; detail: string } {
   const args =
     mechanism === 'seatbelt'
       ? ['-p', '(version 1)(allow default)', '--', '/usr/bin/true']
@@ -96,7 +105,16 @@ export function defaultSandboxCapabilityDeps(): SandboxCapabilityDeps {
     platform: process.platform,
     exists: existsSync,
     pathEnv: process.env.PATH ?? process.env.Path ?? '',
-    probe: defaultProbe
+    probe: defaultProbe,
+    prepareWindows: () => {
+      let userData: string
+      try {
+        userData = app.getPath('userData')
+      } catch (err) {
+        return { ok: false, detail: err instanceof Error ? err.message : String(err) }
+      }
+      return prepareLowIntegrityShells(userData)
+    }
   }
 }
 

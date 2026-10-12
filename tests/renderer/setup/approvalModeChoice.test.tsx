@@ -23,9 +23,9 @@ function Controlled({ initial = 'mutating' as ToolApprovalMode, onChange = vi.fn
 }
 
 describe('approvalModes', () => {
-  it('never calls approvals-off "nothing": what still asks is said', () => {
+  it('names approvals-off as Settings does, and says what still asks', () => {
     const off = approvalModes(true).find((m) => m.mode === 'off')!
-    expect(off.label).toBe('Unattended')
+    expect(off.label).toBe('Nothing')
     expect(off.description).toBe('For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask.')
     expect(approvalModes(false).find((m) => m.mode === 'off')!.description).toBe(
       'For runs nobody is watching. Tools the agent writes and risky commands still ask.'
@@ -41,7 +41,7 @@ describe('ApprovalModeChoice', () => {
     expect(radios.map((r) => r.querySelector('span:last-child span')?.textContent)).toEqual([
       'Edits and commands',
       'Every tool',
-      'Unattended'
+      'Nothing'
     ])
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false'])
     expect(radios.map((r) => r.tabIndex)).toEqual([0, -1, -1])
@@ -68,7 +68,7 @@ describe('ApprovalModeChoice', () => {
   it('the chosen row is filled and the others fill only on hover — never both classes', () => {
     render(<Controlled initial="all" />)
     const on = screen.getByRole('radio', { name: /Every tool/ })
-    const off = screen.getByRole('radio', { name: /Unattended/ })
+    const off = screen.getByRole('radio', { name: /^Nothing/ })
     // SELECTED, the one fill for the chosen one.
     expect(on.classList.contains('bg-surface-2')).toBe(true)
     expect(on.classList.contains('hover:bg-surface')).toBe(false)

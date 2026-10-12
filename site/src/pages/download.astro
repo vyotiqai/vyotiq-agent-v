@@ -7,9 +7,17 @@ import { LATEST_RELEASE, RELEASES, REPO } from '@/data/site'
 const release = await latestRelease()
 const files = installers(release)
 
-type Row = { id: Platform; label: string; note: string }
+/** `armOnly`: listed only when the release has it — releases before 1.2 had no arm64 builds. */
+type Row = { id: Platform; label: string; note: string; armOnly?: boolean }
 const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] = [
-  { os: 'windows', name: 'Windows', rows: [{ id: 'windows', label: 'Installer', note: 'x64 · for you only, or for everyone on the PC' }] },
+  {
+    os: 'windows',
+    name: 'Windows',
+    rows: [
+      { id: 'windows', label: 'Installer', note: 'x64 · for you only, or for everyone on the PC' },
+      { id: 'windows-arm', label: 'Installer for Arm', note: 'Windows on Arm PCs · arm64', armOnly: true }
+    ]
+  },
   {
     os: 'mac',
     name: 'macOS',
@@ -23,8 +31,11 @@ const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] =
     name: 'Linux',
     rows: [
       { id: 'appimage', label: 'AppImage', note: 'x64 · updates from inside the app' },
+      { id: 'appimage-arm', label: 'AppImage for Arm', note: 'arm64 · updates from inside the app', armOnly: true },
       { id: 'deb', label: '.deb', note: 'Debian, Ubuntu · update by installing a newer .deb' },
-      { id: 'rpm', label: '.rpm', note: 'Fedora, RHEL · update by installing a newer .rpm' }
+      { id: 'deb-arm', label: '.deb for Arm', note: 'arm64', armOnly: true },
+      { id: 'rpm', label: '.rpm', note: 'Fedora, RHEL · update by installing a newer .rpm' },
+      { id: 'rpm-arm', label: '.rpm for Arm', note: 'aarch64', armOnly: true }
     ]
   }
 ]
@@ -46,7 +57,7 @@ const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] =
       <div class="os" data-os={g.os}>
         <h2 class="h3">{g.name}</h2>
         <ul>
-          {g.rows.map((r) => {
+          {g.rows.filter((r) => !r.armOnly || files[r.id]).map((r) => {
             const f = files[r.id]
             return (
               <li>
@@ -114,7 +125,17 @@ const groups: { os: 'windows' | 'mac' | 'linux'; name: string; rows: Row[] }[] =
   const link = document.querySelector<HTMLAnchorElement>('[data-detect-link]')
   const note = document.querySelector<HTMLElement>('[data-detect-note]')
   const ua = navigator.userAgent
-  const pick = /Windows/.test(ua) ? ['windows', 'for Windows'] : /Mac OS X|Macintosh/.test(ua) ? ['mac-arm', 'for Mac with Apple silicon. On an Intel Mac, pick Intel below.'] : /Linux/.test(ua) && !/Android/.test(ua) ? ['appimage', 'AppImage for Linux'] : null
+  // Browsers on Windows on Arm report x64, so Windows always offers x64 first.
+  const linuxArm = /aarch64|arm64/i.test(ua) && Boolean(document.querySelector('[data-platform="appimage-arm"]'))
+  const pick = /Windows/.test(ua)
+    ? ['windows', 'for Windows. On a Windows on Arm PC, pick the Arm installer below.']
+    : /Mac OS X|Macintosh/.test(ua)
+      ? ['mac-arm', 'for Mac with Apple silicon. On an Intel Mac, pick Intel below.']
+      : /Linux/.test(ua) && !/Android/.test(ua)
+        ? linuxArm
+          ? ['appimage-arm', 'AppImage for Linux on Arm']
+          : ['appimage', 'AppImage for Linux']
+        : null
   const target = pick && document.querySelector<HTMLAnchorElement>(`[data-platform="${pick[0]}"]`)
   if (box && link && note && pick && target) {
     link.href = target.href

@@ -62,6 +62,7 @@ import {
   scrubProviderErrorText,
   shouldRetryOmitCacheKey,
   shouldRetryOmitIncludeUsage,
+  shouldRetryOmitMaxTokens,
   shouldRetryOpenRouterCompatBody,
   shouldRetrySanitizeToolSchema,
   stripRejectedBodyField
@@ -1583,6 +1584,17 @@ export function createOpenAiCompatibleProvider(
           continue
         }
 
+        // The moderate limit we send (requestLimits.ts) is ours, not the
+        // user's: a host that won't take it gets one retry with its own default.
+        if (
+          maxOutputTokens !== undefined &&
+          maxOutputTokens === req.maxOutputTokens &&
+          shouldRetryOmitMaxTokens(res.status, text)
+        ) {
+          maxOutputTokens = undefined
+          continue
+        }
+
         // Some OpenAI-compat hosts reject stream_options.include_usage — retry without.
         if (
           !bodyOverrides?.omitIncludeUsage &&
@@ -1916,7 +1928,7 @@ export const openrouterProvider = createOpenAiCompatibleProvider('openrouter', {
   ...OPENROUTER_OPTS,
   extraHeaders: {
     'HTTP-Referer': 'https://vyotiq.com',
-    'X-Title': 'Vyotiq'
+    'X-Title': 'Agent V'
   }
 })
 export const xaiProvider = createOpenAiCompatibleProvider('xai', XAI_OPTS)

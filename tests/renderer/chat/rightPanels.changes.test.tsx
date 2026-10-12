@@ -7,6 +7,7 @@ import { ChangesPanel } from '@renderer/features/chat/components/ChangesPanel'
 import type { UiItem } from '@shared/transcript'
 import { requestCommitBox, takeCommitRequest } from '@renderer/features/chat/commitRequest'
 import { requestOpenCommit } from '@renderer/features/chat/commitOpenRequests'
+import { resetGitStatusLimitForTests } from '@renderer/lib/git/gitStatusLimit'
 
 beforeEach(() => {
   Object.defineProperty(window, 'vyotiq', {
@@ -451,7 +452,20 @@ describe('ChangesPanel', () => {
     })
   })
 
+  it('drafts nothing in the background unless the setting is on', async () => {
+    renderGit()
+    await screen.findByText('a.ts')
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    // Each draft is a billed call: without the setting, Commit… is what asks.
+    expect(window.vyotiq.gitGenerateCommitMessage).not.toHaveBeenCalled()
+    await compose(/^Commit…$/)
+    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('drafts the commit message while Changes is on screen, and checks it with main on Commit…', async () => {
+    ;(window.vyotiq as unknown as Record<string, unknown>).getSettings = vi
+      .fn()
+      .mockResolvedValue({ ok: true, data: { commitMessageAutoDraft: true } })
     renderGit()
     await screen.findByText('a.ts')
     const line = await screen.findByRole('button', { name: 'feat: improve generated commit messages' }, { timeout: 3000 })
@@ -609,7 +623,7 @@ describe('ChangesPanel', () => {
     })
   })
 
-  it('offers only a plain commit before a repository remote exists', async () => {
+  it('opens the commit box straight from Commit before a repository remote exists', async () => {
     ;(window.vyotiq.gitStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       data: {
@@ -642,10 +656,12 @@ describe('ChangesPanel', () => {
     })
     renderGit()
     await screen.findByText('a.ts')
-    fireEvent.click(screen.getByRole('button', { name: /^Commit$/ }))
-    expect(await screen.findByRole('menuitem', { name: /^Commit…$/ })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: /Push/ })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: /Create PR/ })).toBeNull()
+    // A menu whose one item repeated the button was a wasted click.
+    const commit = screen.getByRole('button', { name: /^Commit$/ })
+    expect(commit.getAttribute('aria-haspopup')).toBeNull()
+    fireEvent.click(commit)
+    expect(await screen.findByRole('textbox', { name: /Commit message/i })).toBeTruthy()
+    expect(screen.queryByRole('menuitem')).toBeNull()
   })
 
   it('selects the requested file from preferredSelectedPath and loads its diff', async () => {
@@ -1014,15 +1030,73 @@ describe('ChangesPanel', () => {
     expect(screen.getByText('This task finished without changing a file.')).toBeTruthy()
   })
 
-  it('holds Commit and Keep/Undo while the run is live, with Stop at hand', async () => {
-    const onStopRun = vi.fn()
+  it('lists every changed file on Show all, past the first 200', async () => {
+    const file = (i: number) => ({
+      path: `src/f${String(i).padStart(3, '0')}.ts`,
+      status: 'modified',
+      added: 1,
+      removed: 0,
+      addedStaged: 0,
+      removedStaged: 0,
+      addedUnstaged: 1,
+      removedUnstaged: 0,
+      binary: false,
+      staged: false,
+      unstaged: true
+    })
+    const status = (count: number, total: number) => ({
+      ok: true,
+      data: {
+        kind: 'ok',
+        status: {
+          branch: 'main',
+          files: Array.from({ length: count }, (_, i) => file(i)),
+          truncated: count < total,
+          fileCount: total,
+          added: total,
+          removed: 0,
+          hasRemote: false,
+          hasCommits: true
+        }
+      }
+    })
+    const gitStatus = window.vyotiq.gitStatus as ReturnType<typeof vi.fn>
+    gitStatus.mockImplementation(async (_ws: string, opts?: { limit?: number }) =>
+      opts?.limit ? status(218, 218) : status(200, 218)
+    )
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" preferredScopeToken={1} />)
+    const banner = await waitFor(() => {
+      const el = document.querySelector('[data-changes-truncated]')
+      expect(el).toBeTruthy()
+      return el as HTMLElement
+    })
+    expect(banner.textContent).toContain('Showing first 200 of 218 changed files')
+    fireEvent.click(within(banner).getByRole('button', { name: 'Show all' }))
+    await waitFor(() => expect(gitStatus).toHaveBeenLastCalledWith('/ws', { limit: 5000 }))
+    await waitFor(() => expect(document.querySelector('[data-changes-truncated]')).toBeNull())
+    resetGitStatusLimitForTests()
+  })
+
+  it('takes the emphasis off Commit when this task changed nothing', async () => {
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} runId="run-1" running={false} />)
+    await screen.findByText('Nothing changed')
+    const commit = await waitFor(() => {
+      const buttons = Array.from(document.querySelectorAll('[data-commit-aside]'))
+      expect(buttons.length).toBeGreaterThan(0)
+      return buttons[0] as HTMLElement
+    })
+    // The workspace's own changes are still one click away, just not the lead.
+    expect(commit.className).not.toContain('bg-accent ')
+    expect(commit.getAttribute('title')).toMatch(/^This task changed nothing\. Commit takes the workspace's \d+ uncommitted file/)
+  })
+
+  it('holds Commit and Keep/Undo while the run is live, with no Stop in the panel', async () => {
     render(
       <ChangesPanel
         items={agentEdit('src/a.ts')}
         workspacePath="/ws"
         gitRevision={1}
         running
-        onStopRun={onStopRun}
         canResolve
         resolvablePaths={new Set(['src/a.ts'])}
         resolveBlockedReason="Stop the run to Keep/Discard agent writes."
@@ -1034,8 +1108,7 @@ describe('ChangesPanel', () => {
     const footer = document.querySelector('[data-changes-footer]') as HTMLElement
     expect(footer.textContent).toContain('Commit and Keep/Undo unlock when the run stops.')
     expect(within(footer).queryByRole('button', { name: /^Commit$/ })).toBeNull()
-    fireEvent.click(within(footer).getByRole('button', { name: 'Stop run' }))
-    expect(onStopRun).toHaveBeenCalled()
+    expect(within(footer).queryByRole('button', { name: 'Stop run' })).toBeNull()
     expect((within(row('src/a.ts')).getByRole('button', { name: 'Keep a.ts' }) as HTMLButtonElement).disabled).toBe(true)
   })
 

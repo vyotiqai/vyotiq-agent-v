@@ -73,7 +73,7 @@ function htmlPage(title: string, body: string): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${safeTitle} · Vyotiq</title>
+  <title>${safeTitle} · Agent V</title>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -201,7 +201,7 @@ export async function beginMcpOAuthCallback(
         res.end(
           htmlPage(
             'Authorisation failed',
-            'This response did not match the sign-in Vyotiq started. Try Sign in again.'
+            'This response did not match the sign-in Agent V started. Try Sign in again.'
           )
         )
         logger.warn('Rejected MCP OAuth callback with a bad state parameter', {
@@ -212,7 +212,7 @@ export async function beginMcpOAuthCallback(
         return
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-      res.end(htmlPage('Connected', 'You can close this window and return to Vyotiq.'))
+      res.end(htmlPage('Connected', 'You can close this window and return to Agent V.'))
       clearTimeout(timer)
       pendingByServerId.delete(serverId)
       try {
@@ -333,7 +333,7 @@ export function createMcpOAuthProvider(
     },
     get clientMetadata(): OAuthClientMetadata {
       return {
-        client_name: 'Vyotiq',
+        client_name: 'Agent V',
         redirect_uris: [redirectUrl],
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],

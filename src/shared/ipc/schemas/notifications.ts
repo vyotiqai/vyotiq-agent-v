@@ -7,7 +7,7 @@ export const NOTIFICATION_INBOX_CAP = 50
 export const NotificationSourceSchema = z.enum(['agent', 'system'])
 export type NotificationSource = z.infer<typeof NotificationSourceSchema>
 
-export const NotificationKindSchema = z.enum(['run_done', 'run_error', 'needs_you', 'crash', 'update_ready'])
+export const NotificationKindSchema = z.enum(['run_done', 'run_error', 'needs_you', 'crash', 'update_ready', 'budget'])
 export type NotificationKind = z.infer<typeof NotificationKindSchema>
 
 export const NotificationActionSchema = z.discriminatedUnion('type', [
@@ -30,9 +30,18 @@ export const NotificationActionSchema = z.discriminatedUnion('type', [
     )
   }),
   /** Open the navigator's update panel — the one update surface. */
-  z.object({ type: z.literal('open_update') })
+  z.object({ type: z.literal('open_update') }),
+  /** Open the Usage page (a budget notice). */
+  z.object({ type: z.literal('open_usage') })
 ])
 export type NotificationAction = z.infer<typeof NotificationActionSchema>
+
+/** What the tray menu asks the window to do once it is shown. */
+export const TrayCommandSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('open_run'), workspacePath: z.string().min(1), runId: z.string().min(1) }),
+  z.object({ type: z.literal('new_task') })
+])
+export type TrayCommand = z.infer<typeof TrayCommandSchema>
 
 export const NotificationItemSchema = z.object({
   id: z.string().min(1),
@@ -89,8 +98,20 @@ export function runErrorDedupeKey(runId: string): string {
 
 export const CRASH_DEDUPE_KEY = 'crash'
 
+/** Send one test message to the phone: `url` before it is saved, else the saved one. */
+export const NotificationsRemoteTestRequestSchema = z.object({
+  mode: z.enum(['ntfy', 'webhook']),
+  url: z.string().trim().min(1).max(2000).optional()
+})
+export type NotificationsRemoteTestRequest = z.infer<typeof NotificationsRemoteTestRequestSchema>
+
 /**
  * One "update ready" item at most: a newer download replaces it, and it goes at
  * the next launch — a restart ends that download's ready state either way.
  */
 export const UPDATE_READY_DEDUPE_KEY = 'update_ready'
+
+/** One budget notice per period: `budget:day:2026-10-08`, `budget:month:2026-10`. */
+export function budgetDedupeKey(period: 'day' | 'month', key: string): string {
+  return `budget:${period}:${key}`
+}

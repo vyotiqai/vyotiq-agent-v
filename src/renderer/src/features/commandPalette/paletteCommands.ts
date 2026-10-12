@@ -1,4 +1,5 @@
 import type { UpdaterStatePayload } from '@shared/ipc'
+import { openInEditor } from '@renderer/lib/openInEditor'
 import type { ThemeId } from '@shared/theme'
 import type { AppearanceSettings } from '@shared/appearance'
 import { SKIN_CATALOG, type SkinId } from '@shared/skins'
@@ -23,7 +24,32 @@ import type { PaletteCommand } from './CommandPalette'
  */
 
 /** Opening the palette from the palette is not a command. */
-const EXCLUDED = new Set<string>(['search', 'commandPalette'])
+const EXCLUDED = new Set<string>(['search', 'commandPalette', 'navBack', 'navForward'])
+
+/**
+ * Shortcuts whose handler lives in the task view (its composer, record,
+ * panels and inspector). Home, Usage and Settings mount none of them, so the
+ * palette offered "Stop the run" on Home and it did nothing.
+ */
+const TASK_VIEW_ONLY = new Set<string>([
+  'focusComposer',
+  'stop',
+  'find',
+  'refresh',
+  'dictation',
+  'cycleMode',
+  'panelTerminal',
+  'panelChanges',
+  'panelBrowser',
+  'panelFiles',
+  'panelPlan',
+  'panelPr',
+  'closeChat',
+  'splitPane',
+  'findInFiles',
+  'inspector',
+  'inspectorExpand'
+])
 
 const ICON: Record<string, IconName> = {
   sidebar: 'sidebar',
@@ -84,6 +110,7 @@ export function paletteCommands({
   canAddWorkspace = false,
   appearance = null,
   hasTask = false,
+  inTaskView = true,
   canImportTask = false
 }: {
   workspaces: readonly string[]
@@ -95,12 +122,17 @@ export function paletteCommands({
   appearance?: { theme: ThemeId; skinId: SkinId } | null
   /** A task view is showing, so the task commands have something to act on. */
   hasTask?: boolean
+  /** The task view is showing (a task, or a new one being written); false on Home, Usage and Settings. */
+  inTaskView?: boolean
   /** A workspace is active to import a task bundle into. */
   canImportTask?: boolean
 }): PaletteCommand[] {
   const base: PaletteCommand[] = shortcutCatalog()
     // One tab per Alt chord would repeat the panel commands; the chords are listed in Settings.
     .filter((entry) => !EXCLUDED.has(entry.id) && !/^(workspace[1-9]|inspectorTab[1-6]|prevTask|nextTask)$/.test(entry.id))
+    .filter((entry) => inTaskView || !TASK_VIEW_ONLY.has(entry.id))
+    // Nothing to stop without a task in front of you.
+    .filter((entry) => hasTask || entry.id !== 'stop')
     .map((entry) => ({
       id: entry.id,
       title: entry.title,
@@ -124,6 +156,7 @@ export function paletteCommands({
   })
 
   const extras: PaletteCommand[] = [
+    ...(activePath ? [{ id: 'openWorkspaceInEditor', title: 'Open workspace in editor', icon: 'code' as const }] : []),
     { id: 'goUsage', title: 'Usage', icon: 'chart' },
     { id: 'openInbox', title: 'Inbox', icon: 'inbox' },
     { id: 'scheduledTasks', title: 'Scheduled tasks', icon: 'repeat' },
@@ -191,6 +224,8 @@ export function paletteSettingsCommands(needle: string): PaletteCommand[] {
 
 export type PaletteHandlers = {
   workspaces: readonly string[]
+  /** The workspace in front, for Open workspace in editor. */
+  activeWorkspacePath?: string | null
   onOpenSettings: () => void
   onOpenHome: () => void
   onOpenUsage: () => void
@@ -226,6 +261,10 @@ export function runPaletteCommand(id: string, h: PaletteHandlers): void {
   }
   if (id === 'scheduledTasks') {
     requestScheduledTasks()
+    return
+  }
+  if (id === 'openWorkspaceInEditor') {
+    if (h.activeWorkspacePath) void openInEditor({ workspacePath: h.activeWorkspacePath })
     return
   }
   if (id === 'newChat') return h.onNewTask()

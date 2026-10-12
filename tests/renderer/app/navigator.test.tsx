@@ -234,6 +234,38 @@ describe('Navigator', () => {
     expect(actions.onTogglePin).toHaveBeenCalledWith(WS, 'loop')
   })
 
+  it('opens a task beside, marks it unread and back, and shows its folder', () => {
+    const actions = { onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), onOpenBeside: vi.fn(), onRevealFolder: vi.fn() }
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: { [WS]: { runs: [run('ok'), run('other')] } },
+          selected: { workspacePath: WS, runId: 'other' },
+          rowActions: actions
+        })}
+      />
+    )
+    fireEvent.contextMenu(row('Task ok'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open beside' }))
+    expect(actions.onOpenBeside).toHaveBeenCalledWith(WS, 'ok')
+
+    fireEvent.contextMenu(row('Task ok'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mark as unread' }))
+    fireEvent.contextMenu(row('Task ok'))
+    expect(screen.getByRole('menuitem', { name: 'Mark as read' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mark as read' }))
+    fireEvent.contextMenu(row('Task ok'))
+    expect(screen.getByRole('menuitem', { name: 'Mark as unread' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+
+    // The open task is already in front: no Open beside for it.
+    fireEvent.contextMenu(row('Task other'))
+    expect(screen.queryByRole('menuitem', { name: 'Open beside' })).toBeNull()
+    // "Open folder in editor" sits beside it; this is the file manager's.
+    fireEvent.click(screen.getAllByRole('menuitem', { name: /folder/ }).find((el) => !/editor/i.test(el.textContent ?? ''))!)
+    expect(actions.onRevealFolder).toHaveBeenCalledWith(WS)
+  })
+
   it('offers Resume on a task you stopped that has edits to review, and counts one check as one', () => {
     // A task you stopped carries on through Retry's path, as the record's Resume does.
     const actions = { onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), onRetry: vi.fn() }
@@ -463,6 +495,32 @@ describe('Navigator', () => {
     expect(within(beta).queryByRole('button', { name: /^Task a1/ })).toBeNull()
     // The heading names the workspace, so the row's meta doesn't.
     expect(row('Task b1').textContent).not.toContain('beta')
+  })
+
+  it('leaves the empty home folder out of the list until it holds a task', () => {
+    const HOME = 'C:\\work\\home'
+    const { rerender } = render(
+      <Navigator
+        {...props({
+          openPaths: [WS, OTHER, HOME],
+          homeWorkspacePath: HOME,
+          runsByWorkspacePath: { [WS]: { runs: [run('a1')] }, [OTHER]: { runs: [run('b1')] }, [HOME]: { runs: [] } }
+        })}
+      />
+    )
+    const names = (): (string | null)[] =>
+      Array.from(document.querySelectorAll('[data-nav-workspace]')).map((el) => el.getAttribute('data-nav-workspace'))
+    expect(names()).toEqual(['alpha', 'beta'])
+    rerender(
+      <Navigator
+        {...props({
+          openPaths: [WS, OTHER, HOME],
+          homeWorkspacePath: HOME,
+          runsByWorkspacePath: { [WS]: { runs: [run('a1')] }, [OTHER]: { runs: [run('b1')] }, [HOME]: { runs: [run('h1')] } }
+        })}
+      />
+    )
+    expect(names()).toHaveLength(3)
   })
 
   it('shows one workspace without a workspace heading', () => {
@@ -1060,6 +1118,8 @@ describe('Navigator row lines', () => {
     const list = document.querySelector('[data-nav-instances] ul')!
     const titles = Array.from(list.querySelectorAll('button')).map((b) => b.getAttribute('title'))
     expect(titles).toEqual(['Write the tests', 'Read the docs'])
+    // Names that differ need no id after them.
+    expect(list.querySelectorAll('[data-instance-id]')).toHaveLength(0)
     expect(within(list as HTMLElement).getByText('Running pnpm test')).toBeTruthy()
     // Each says its state in words too, not in its glyph alone.
     expect(within(list as HTMLElement).getAllByRole('img').map((g) => g.getAttribute('aria-label'))).toEqual(['Running', 'Done'])
@@ -1103,6 +1163,115 @@ describe('Navigator row lines', () => {
       />
     )
     expect(document.querySelector('[data-nav-instances]')).toBeNull()
+  })
+
+  it('appends the short id when instances share a title, and leaves unique ones alone', () => {
+    const dupA = '58bcbfed-0000-4000-8000-000000000000'
+    const dupB = 'd44d9323-0000-4000-8000-000000000000'
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [run('parent', { status: 'running' })],
+              instanceRuns: [
+                run(dupA, { parentRunId: 'parent', status: 'running', goal: 'Facts verified in this run' }),
+                run(dupB, { parentRunId: 'parent', status: 'running', goal: 'Facts verified in this run' }),
+                run('c-done', { parentRunId: 'parent', goal: 'Read the docs' })
+              ]
+            }
+          },
+          activeRuns: [live('parent'), live(dupA), live(dupB)]
+        })}
+      />
+    )
+    const list = document.querySelector('[data-nav-instances] ul') as HTMLElement
+    // The two same-named rows carry their short id; the unique one does not.
+    expect(Array.from(list.querySelectorAll('[data-instance-id]')).map((chip) => chip.textContent)).toEqual([
+      '58bcbfed',
+      'd44d9323'
+    ])
+    // The tooltip still names the whole title.
+    expect(within(list).getAllByTitle('Facts verified in this run')).toHaveLength(2)
+    expect(within(list).getByTitle('Read the docs').querySelector('[data-instance-id]')).toBeNull()
+  })
+
+  it('names the awaited child in a running task’s second line', () => {
+    const child = '58bcbfed-0000-4000-8000-000000000000'
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [run('parent', { status: 'running' })],
+              instanceRuns: [run(child, { parentRunId: 'parent', goal: 'Map src/main' })]
+            }
+          },
+          activeRuns: [live('parent', { activity: 'Awaiting instance 58bcbfed' })]
+        })}
+      />
+    )
+    const line = row('Task parent').querySelector('[data-nav-activity]') as HTMLElement
+    expect(line.textContent).toBe('Waiting on Map src/main')
+    // Nothing is lost: the raw line the run reported stays in the tooltip.
+    expect(line.getAttribute('title')).toBe('Awaiting instance 58bcbfed')
+  })
+
+  it('says how many it waits on while several run, and names each by the step it serves', () => {
+    const a = '58bcbfed-0000-4000-8000-000000000000'
+    const b = '6a0c1d2e-0000-4000-8000-000000000000'
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [run('parent', { status: 'running' })],
+              instanceRuns: [
+                run(a, {
+                  parentRunId: 'parent',
+                  inlineInstance: true,
+                  status: 'running',
+                  goal: 'Outcome: A verified integrity verdict on the removal guards',
+                  stepTitle: 'Guard integrity: **removal** guards'
+                }),
+                run(b, {
+                  parentRunId: 'parent',
+                  inlineInstance: true,
+                  status: 'running',
+                  goal: 'Outcome: Files in your scope (all modified)',
+                  stepTitle: 'Appearance + settings trace'
+                })
+              ]
+            }
+          },
+          activeRuns: [live('parent', { activity: 'Awaiting instance 58bcbfed' }), live(a), live(b)]
+        })}
+      />
+    )
+    // Naming the one it happens to await first hid the other.
+    expect(row('Task parent').querySelector('[data-nav-activity]')?.textContent).toBe('Waiting on 2 instances')
+    // The parent's record names them by their steps; so does the navigator, as words.
+    const list = document.querySelector('[data-nav-instances] ul') as HTMLElement
+    const titles = Array.from(list.querySelectorAll('button')).map((el) => el.getAttribute('title'))
+    expect(titles).toEqual(['Guard integrity: removal guards', 'Appearance + settings trace'])
+  })
+
+  it('leaves the second line alone when the awaited id names no child of the task', () => {
+    const child = '58bcbfed-0000-4000-8000-000000000000'
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [run('parent', { status: 'running' })],
+              instanceRuns: [run(child, { parentRunId: 'parent', goal: 'Map src/main' })]
+            }
+          },
+          activeRuns: [live('parent', { activity: 'Awaiting instance deadbeef' })]
+        })}
+      />
+    )
+    expect(row('Task parent').querySelector('[data-nav-activity]')?.textContent).toBe('Awaiting instance deadbeef')
   })
 
   it('says how a review task’s checks stand, and marks the unmet ones', () => {

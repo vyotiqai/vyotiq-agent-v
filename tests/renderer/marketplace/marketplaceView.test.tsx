@@ -858,7 +858,7 @@ describe('Add MCP server', () => {
     expect((within(dialog).getByRole('textbox', { name: 'Server arguments' }) as HTMLInputElement).value).toBe(
       'mcp-server-fetch'
     )
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add and connect' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /^(Add and connect|Run it)$/ }))
     await waitFor(() =>
       expect(bridge.marketplaceApplyDetectedMcp).toHaveBeenCalledWith({
         server: expect.objectContaining({ id: 'mcp-fetch', command: 'uvx', args: ['mcp-server-fetch'], enabled: true }),

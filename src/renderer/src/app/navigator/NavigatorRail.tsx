@@ -55,6 +55,41 @@ export function railInitials(title: string): string {
     .join('')
 }
 
+/** The meaningful words of a title, as railInitials reads them. */
+function railWords(title: string): string[] {
+  const words = title.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w))
+  return words
+    .filter((w, i) => i === 0 || !FILLER.has(w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')))
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean)
+}
+
+/**
+ * Two letters for each task on the rail, unlike each other's. Initials come
+ * first ("Tidy the tests" → TT); when two tasks share them ("Tidy the tests",
+ * "Tune timeouts"), each takes the first two letters of its first word (Ti,
+ * Tu), and then a letter that differs further in, so no two read the same.
+ */
+export function railLabels(titles: readonly string[]): string[] {
+  const labels = titles.map(railInitials)
+  const counts = new Map<string, number>()
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1)
+  const taken = new Set(labels.filter((label) => counts.get(label) === 1))
+  return labels.map((label, i) => {
+    if (counts.get(label) === 1 || !label) return label
+    const words = railWords(titles[i]!)
+    const first = words[0] ?? ''
+    const candidates: string[] = []
+    // The first word's own second letter, then each later letter of the title.
+    for (const ch of [...first.slice(1), ...words.slice(1).join('')]) {
+      candidates.push(`${first.charAt(0).toLocaleUpperCase()}${ch.toLocaleLowerCase()}`)
+    }
+    const pick = candidates.find((c) => !taken.has(c)) ?? label
+    taken.add(pick)
+    return pick
+  })
+}
+
 /**
  * The navigator below the desktop breakpoint, where the full list is a
  * drawer: New task on top, then one glyph per task still in play, in the
@@ -96,6 +131,10 @@ export function NavigatorRail({
   const openRow = place === 'task' ? railOpenRow(sections, selected) : null
   // The rail's Inbox answers in place too: Needs you first, with Allow once and Deny.
   const { asks, respond } = useWaitingAsks(activeRuns, openPaths, onRespondApproval)
+  // Labels across every task the rail shows, so no two read the same.
+  const shown = [...groups.flatMap((section) => section.rows), ...(openRow ? [openRow] : [])]
+  const labels = railLabels(shown.map((row) => row.title))
+  const labelOf = (row: NavRow): string => labels[shown.indexOf(row)] ?? railInitials(row.title)
   const isCurrent = (row: NavRow): boolean =>
     place === 'task' && selected?.runId === row.runId && workspacePathsEqual(selected.workspacePath, row.workspacePath)
   return (
@@ -117,7 +156,13 @@ export function NavigatorRail({
             data-rail-section={section.key}
           >
             {section.rows.map((row) => (
-              <RailTask key={`${row.workspacePath}\u0000${row.runId}`} row={row} current={isCurrent(row)} onSelect={onSelect} />
+              <RailTask
+                key={`${row.workspacePath}\u0000${row.runId}`}
+                row={row}
+                label={labelOf(row)}
+                current={isCurrent(row)}
+                onSelect={onSelect}
+              />
             ))}
           </ul>
         ))}
@@ -127,7 +172,7 @@ export function NavigatorRail({
             className={cn('flex flex-col items-center gap-1', groups.length > 0 ? cn('mt-2 border-t pt-2', BORDER_DIVIDER) : null)}
             data-rail-section="open"
           >
-            <RailTask row={openRow} current onSelect={onSelect} />
+            <RailTask row={openRow} label={labelOf(openRow)} current onSelect={onSelect} />
           </ul>
         ) : null}
       </div>
@@ -158,15 +203,18 @@ export function NavigatorRail({
  */
 function RailTask({
   row,
+  label,
   current,
   onSelect
 }: {
   row: NavRow
+  /** Its initials, or letters that tell it from a task with the same ones. */
+  label: string
   current: boolean
   onSelect: (workspacePath: string, runId: string) => void
 }) {
   const doing = row.activity ?? row.stateLabel
-  const initials = railInitials(row.title)
+  const initials = label
   return (
     <li>
       <Tooltip content={`${row.title}\n${doing}`} side="right" describeChild={false}>

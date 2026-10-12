@@ -4,6 +4,7 @@ import type { MarketplaceOverrideKind } from '@shared/domain/marketplaceEnableme
 import { classifyMcpInput, tokenizeCommand } from '@shared/utils/mcpClassify'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Button, Checkbox, Input, Segmented, StatusGlyph, Textarea, type TaskState } from '@renderer/lib/ui'
+import { Icon } from '@renderer/lib/icons'
 import { FIELD_GRID } from './McpServerConfig'
 import { mcpLaunchLine } from './extensionItems'
 import type { MarketplaceController } from './useMarketplaceController'
@@ -92,6 +93,33 @@ function useImportList() {
 }
 
 type ImportList = ReturnType<typeof useImportList>
+
+/**
+ * What adding does, said before the click that does it — in this dialog, not
+ * a native message box that ignores the skin and can open behind the window.
+ * The first time, it also carries the "unsigned source" warning, and that
+ * click records the acknowledgement.
+ */
+function RunNotice({ acked, remote, line }: { acked: boolean; remote: boolean; line: string | null }) {
+  return (
+    <div className="space-y-1.5 rounded-md border border-border px-3 py-2 text-xs" data-mcp-run-notice>
+      {acked ? null : (
+        <p className="flex items-start gap-1.5 text-warning">
+          <Icon name="warning" size={12} className="mt-0.5 shrink-0" />
+          <span>
+            MCP servers and packages are unsigned. Add only from sources you trust; this is asked once.
+          </span>
+        </p>
+      )}
+      {line ? (
+        <>
+          <p className="text-muted">{remote ? 'Agent V will connect to:' : 'Agent V will run this on your machine, as you:'}</p>
+          <code className="block whitespace-pre-wrap break-all rounded-sm bg-sunken px-2 py-1 font-mono text-fg">{line}</code>
+        </>
+      ) : null}
+    </div>
+  )
+}
 
 export function AddMcpDialog({
   controller,
@@ -215,7 +243,10 @@ export function AddMcpDialog({
     try {
       if (many) {
         const servers = many.filter((s) => pasted.selected.has(s.id))
-        const res = await controller.importExternalMcp({ mode: 'merge', selectedIds: [...pasted.selected], servers })
+        const res = await controller.importExternalMcp(
+          { mode: 'merge', selectedIds: [...pasted.selected], servers },
+          { confirmedInApp: true }
+        )
         if (!res.ok) {
           setError(res.error)
           return
@@ -238,7 +269,9 @@ export function AddMcpDialog({
                 : undefined,
               overwrite
             }
-      const res = await controller.applyDetectedMcp(payload)
+      // The warning and the command were on screen in this dialog; that click
+      // is the acknowledgement, with no native box after it.
+      const res = await controller.applyDetectedMcp(payload, { confirmedInApp: true })
       if (!res.ok) {
         setError(res.error)
         return
@@ -293,7 +326,10 @@ export function AddMcpDialog({
     setError(null)
     setSubmitting(true)
     try {
-      const res = await controller.importExternalMcp({ mode: 'merge', selectedIds: [...scanned.selected], servers })
+      const res = await controller.importExternalMcp(
+        { mode: 'merge', selectedIds: [...scanned.selected], servers },
+        { confirmedInApp: true }
+      )
       if (!res.ok) {
         setError(res.error)
         return
@@ -433,6 +469,21 @@ export function AddMcpDialog({
               label="Available in this workspace only"
             />
           )}
+          {canAdd && !many ? (
+            <RunNotice
+              acked={controller.remoteInstallAcked}
+              remote={remote && !preferInstall}
+              line={
+                preferInstall && packageInstall
+                  ? null
+                  : remote
+                    ? (server?.url ?? '').trim()
+                    : [(server?.command ?? '').trim(), argsLine.trim()].filter(Boolean).join(' ')
+              }
+            />
+          ) : many && !controller.remoteInstallAcked ? (
+            <RunNotice acked={false} remote={false} line={null} />
+          ) : null}
           {error ? <ErrorLine>{error}</ErrorLine> : null}
         </div>
       ) : view === 'registry' ? (
@@ -472,6 +523,9 @@ export function AddMcpDialog({
           ) : scanned.preview ? (
             <ServerChecklist list={scanned} disabled={locked} />
           ) : null}
+          {scanned.selected.size > 0 && !controller.remoteInstallAcked ? (
+            <RunNotice acked={false} remote={false} line={null} />
+          ) : null}
           {error ? <ErrorLine>{error}</ErrorLine> : null}
         </div>
       )}
@@ -502,7 +556,7 @@ export function AddMcpDialog({
         </Button>
         {view === 'registry' ? null : view === 'paste' ? (
           <Button size="sm" variant="primary" pending={submitting} disabled={locked || !canAdd} onClick={() => void add()}>
-            {many ? `Import ${pasted.selected.size}` : 'Add and connect'}
+            {many ? `Import ${pasted.selected.size}` : !remote && !preferInstall ? 'Run it' : 'Add and connect'}
           </Button>
         ) : (
           <Button

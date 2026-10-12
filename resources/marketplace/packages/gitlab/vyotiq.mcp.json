@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "gitlab",
+  "name": "GitLab",
+  "version": "1.0.0",
+  "description": "Issues, merge requests and pipelines on GitLab.com, through GitLab’s hosted MCP server. Sign in with GitLab.",
+  "transport": "http",
+  "url": "https://gitlab.com/api/v4/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/"
+}

@@ -29,6 +29,8 @@ import {
   listMcpToolDefinitions,
   mcpToolName,
   resetMcpSessionsForTests,
+  setOpenElicitedLinkForTests,
+  setSamplingModelSource,
   shutdownMcpServers,
   type McpAsker
 } from '@main/agent/mcp'
@@ -117,6 +119,58 @@ describe('MCP elicitation and tool list changes, against a real stdio server', (
         })
     })
     expect(serverSaw((await call('book', waiting.a)).content)).toEqual({ action: 'cancel' })
+  }, 30_000)
+
+  it('shows a server’s link, opens it only on yes, and never an http one', async () => {
+    await connectMcpServer(server)
+    const opened: string[] = []
+    setOpenElicitedLinkForTests(async (url) => {
+      opened.push(url)
+    })
+    try {
+      const yes = asker((req) => [{ questionId: 'open', values: [req.questions[0]!.options![0]!] }])
+      const accepted = await call('signin', yes.a)
+      expect(yes.asked[0]!.title).toBe('Bookings asks you to open a link')
+      expect(yes.asked[0]!.questions[0]!.prompt).toContain('https://example.com/auth?state=1')
+      expect(serverSaw(accepted.content)).toEqual({ action: 'accept' })
+      expect(opened).toEqual(['https://example.com/auth?state=1'])
+
+      const no = asker((req) => [{ questionId: 'open', values: [req.questions[0]!.options![1]!] }])
+      expect(serverSaw((await call('signin', no.a)).content)).toEqual({ action: 'decline' })
+
+      const plain = asker(() => [])
+      expect(serverSaw((await call('signin-plain', plain.a)).content)).toEqual({ action: 'decline' })
+      expect(plain.asked).toHaveLength(0)
+      expect(opened).toHaveLength(1)
+    } finally {
+      setOpenElicitedLinkForTests(null)
+    }
+  }, 30_000)
+
+  it('answers a sampling request with the model only once the person allows it', async () => {
+    await connectMcpServer(server)
+    const asked: Array<{ system?: string; text: string; max: number }> = []
+    setSamplingModelSource(() => ({
+      complete: async (req) => {
+        asked.push({ system: req.system, text: String(req.messages[0]!.content), max: req.maxOutputTokens })
+        return { text: 'Booked for four people.', model: 'test-model', stopReason: 'endTurn' }
+      }
+    }))
+    try {
+      const yes = asker((req) => [{ questionId: 'sample', values: [req.questions[0]!.options![0]!] }])
+      const allowed = serverSaw((await call('summarize', yes.a)).content) as Record<string, unknown>
+      expect(yes.asked[0]!.title).toBe('Bookings asks your model to answer something')
+      expect(yes.asked[0]!.questions[0]!.prompt).toContain('Summarize: the table is booked for four.')
+      expect(allowed).toMatchObject({ role: 'assistant', model: 'test-model', content: { type: 'text', text: 'Booked for four people.' } })
+      expect(asked).toEqual([{ system: 'Answer in five words.', text: 'Summarize: the table is booked for four.', max: 50 }])
+
+      const no = asker((req) => [{ questionId: 'sample', values: [req.questions[0]!.options![1]!] }])
+      const denied = serverSaw((await call('summarize', no.a)).content) as { error?: string }
+      expect(denied.error).toMatch(/Sampling declined/)
+      expect(asked).toHaveLength(1)
+    } finally {
+      setSamplingModelSource(() => null)
+    }
   }, 30_000)
 
   it('follows notifications/tools/list_changed: a tool added at runtime is callable without reconnecting', async () => {

@@ -5,11 +5,15 @@ import { findSlashChipSubmit } from './mentionModel'
 import {
   SLASH_GROUP_ORDER,
   clusterMcpByServer,
-  isComposerModeSlashCommand,
-  partitionSlashGroupByAvailability
+  isComposerModeSlashCommand
 } from './slashCommandPresentation'
 
-/** Fuzzy-filter then flatten in SLASH_GROUP_ORDER so highlight index matches accept. */
+/**
+ * Fuzzy-filter then flatten in SLASH_GROUP_ORDER so highlight index matches
+ * accept. Everything ready comes first, every group's; what still needs
+ * installing, enabling or signing in follows in its own band. Typing `/` used
+ * to list 15 catalog skills, each with Install, above `/compact` and `/goal`.
+ */
 export function buildSlashDisplayList(
   query: string,
   commands: SlashCommandDescriptor[]
@@ -25,20 +29,13 @@ export function buildSlashDisplayList(
     list.push(cmd)
     byGroup.set(cmd.group, list)
   }
-  const out: SlashCommandDescriptor[] = []
-  for (const g of SLASH_GROUP_ORDER) {
-    const items = byGroup.get(g)
-    if (items?.length) {
-      const partitioned = partitionSlashGroupByAvailability(items)
-      out.push(...(g === 'MCP' ? clusterMcpByServer(partitioned) : partitioned))
-    }
-    byGroup.delete(g)
-  }
-  for (const [g, items] of byGroup) {
-    const partitioned = partitionSlashGroupByAvailability(items)
-    out.push(...(g === 'MCP' ? clusterMcpByServer(partitioned) : partitioned))
-  }
-  return out
+  const groups = [...SLASH_GROUP_ORDER, ...[...byGroup.keys()].filter((g) => !(SLASH_GROUP_ORDER as readonly string[]).includes(g))]
+  const band = (ready: boolean): SlashCommandDescriptor[] =>
+    groups.flatMap((g) => {
+      const items = (byGroup.get(g) ?? []).filter((cmd) => (cmd.availability === 'ready') === ready)
+      return g === 'MCP' ? clusterMcpByServer(items) : items
+    })
+  return [...band(true), ...band(false)]
 }
 
 export function useSlashCommands({

@@ -110,7 +110,7 @@ function DeleteAllDataField() {
           ))}
         </ul>
         <p className="m-0 text-xs text-muted">
-          Branches and commits stay in your repositories. VYOTIQ restarts to delete, since it can’t remove files it has
+          Branches and commits stay in your repositories. Agent V restarts to delete, since it can’t remove files it has
           open.
         </p>
         <div className="flex items-center justify-end gap-2">

@@ -43,7 +43,8 @@ describe('setupProvider', () => {
       ready: false,
       state: 'failed',
       label: 'Ollama',
-      detail: 'not connected',
+      // The shipped default nobody chose: a quiet lead, not an error.
+      detail: 'no local model found',
       reason: 'Cannot reach Ollama at http://127.0.0.1:11434.'
     })
   })

@@ -16,6 +16,8 @@ import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
+import { WebSearchGroup } from '../components/WebSearchGroup'
+import { HooksGroup } from '../components/HooksGroup'
 import { ToolCatalog, toolCatalogSummary, useToolCatalog } from '../components/ToolCatalog'
 import {
   formatBrowserDomainAllowlist,
@@ -101,7 +103,15 @@ function useSandboxCapability(): SandboxCapability | null {
 export function sandboxHint(capability: SandboxCapability | null): string {
   if (!capability) return 'Checking whether this machine can sandbox commands…'
   if (!capability.available) return capability.reason ?? 'This machine cannot sandbox commands.'
+  if (capability.mechanism === 'low-integrity') {
+    return 'Agent commands write only to the workspace, temp and package caches. They can still read the disk and use the network.'
+  }
   return 'Agent commands write only to the workspace, temp and package caches.'
+}
+
+/** Low integrity confines writes, not the network: Windows has no Network choice. */
+export function sandboxNetworkChoosable(capability: SandboxCapability | null): boolean {
+  return capability?.mechanism !== 'low-integrity'
 }
 
 /** "Only example.com, *.corp.internal and 2 more." */
@@ -115,10 +125,13 @@ function allowlistHint(hosts: readonly string[]): string {
 
 export function ToolsSection({
   form,
-  onOpenMarketplace
+  onOpenMarketplace,
+  workspacePath = null
 }: {
   form: SettingsFormState
   onOpenMarketplace?: SettingsViewProps['onOpenMarketplace']
+  /** The open workspace, for its hooks file. */
+  workspacePath?: string | null
 }) {
   const settings = form.settings
   const catalog = useToolCatalog()
@@ -129,6 +142,7 @@ export function ToolsSection({
   const sandbox = settings.agentSandbox ?? DEFAULT_AGENT_SANDBOX
   const sandboxOn = sandbox.mode !== 'off'
   const sandboxAvailable = sandboxCapability?.available === true
+  const networkChoosable = sandboxNetworkChoosable(sandboxCapability)
   // Unavailable: "Workspace only" can't be picked, but a sandbox already on
   // (a settings file from another machine) can still be turned off.
   const sandboxModeOptions = AGENT_SANDBOX_MODE_OPTIONS.map((option) =>
@@ -155,6 +169,18 @@ export function ToolsSection({
     if (!allowlistOpen) return
     document.getElementById(allowlistPanelId)?.querySelector('textarea')?.focus()
   }, [allowlistOpen, allowlistPanelId])
+
+  const persistedShellPath = settings.terminalShellPath ?? ''
+  const [shellPathDraft, setShellPathDraft] = useState(persistedShellPath)
+  useEffect(() => {
+    setShellPathDraft(persistedShellPath)
+  }, [persistedShellPath])
+  const commitShellPath = (): void => {
+    const next = shellPathDraft.trim()
+    if (next === persistedShellPath) return
+    void form.runUpdate({ terminalShellPath: next })
+  }
+  useFlushOnUnmount(commitShellPath)
 
   const persistedDiagnostics = settings.diagnosticsCommand ?? ''
   const [diagnosticsDraft, setDiagnosticsDraft] = useState(persistedDiagnostics)
@@ -185,6 +211,33 @@ export function ToolsSection({
             void form.runUpdate({ terminalShell })
           }}
         />
+        <SettingsField
+          id="terminal-shell-path"
+          title="Shell program"
+          hint="For your own terminal tabs only; the agent keeps the Shell above."
+          help="A full path or a program on PATH, such as zsh, fish or nu. Leave blank to use the Shell setting. New terminal's menu still opens PowerShell, cmd, Git Bash or WSL."
+          {...form.defaultMark('terminalShellPath')}
+        >
+          <div className="w-[240px]">
+            <Input
+              size="sm"
+              mono
+              placeholder="Same as Shell"
+              aria-label="Shell program"
+              spellCheck={false}
+              disabled={form.formLocked}
+              value={shellPathDraft}
+              onChange={(e) => setShellPathDraft(e.target.value)}
+              onBlur={commitShellPath}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                }
+              }}
+            />
+          </div>
+        </SettingsField>
         <SettingsField
           id="diagnostics-command"
           title="Diagnostics command"
@@ -229,6 +282,18 @@ export function ToolsSection({
             void form.runUpdate({ terminalScreenReader })
           }}
         />
+        <SwitchField
+          id="terminal-gpu"
+          title="Draw with the GPU"
+          hint="Faster on busy output. Turn it off if the terminal draws wrong."
+          help="Uses WebGL, and falls back to the normal renderer when WebGL is unavailable. Applies to terminal tabs opened from now on."
+          checked={settings.terminalGpuRendering !== false}
+          disabled={form.formLocked}
+          {...form.defaultMark('terminalGpuRendering')}
+          onChange={(terminalGpuRendering) => {
+            void form.runUpdate({ terminalGpuRendering })
+          }}
+        />
       </SettingsGroup>
 
       <SettingsGroup title="Sandbox">
@@ -237,7 +302,7 @@ export function ToolsSection({
           title="Sandbox commands"
           label="Sandbox agent commands"
           hint={sandboxHint(sandboxCapability)}
-          help="Covers the agent's terminal, run_tests and diagnostics — never the terminal panel you type into. Sandboxed commands can read the disk except the app's data and ~/.ssh, and write only the workspace (its git folder included, hooks and config excepted), temp and existing package caches. macOS uses sandbox-exec, Linux bubblewrap. Agent-built tools are refused while it is on."
+          help="Covers the agent's terminal, run_tests and diagnostics — never the terminal panel you type into. Sandboxed commands write only the workspace (its git folder included, hooks and config excepted), temp and existing package caches. macOS uses sandbox-exec and Linux bubblewrap; both also hide the app's data and ~/.ssh. Windows runs commands at low integrity: it labels those folders so they can be written at that level (the first command in a large workspace waits while it does), cannot hide anything from reads or run bash commands, and takes the labels off again when you turn this off. Agent-built tools are refused while it is on."
           value={sandbox.mode}
           options={sandboxModeOptions}
           disabled={form.formLocked || (!sandboxAvailable && !sandboxOn)}
@@ -250,12 +315,16 @@ export function ToolsSection({
           id="agent-sandbox-network"
           title="Network"
           label="Sandboxed command network"
-          hint="Deny cuts sandboxed commands off the internet."
+          hint={
+            networkChoosable
+              ? 'Deny cuts sandboxed commands off the internet.'
+              : 'Not on Windows: the low-integrity sandbox cannot block the network.'
+          }
           help="On macOS localhost stays reachable. On Linux the command gets its own empty network, so the host's localhost is unreachable too."
           nested
           value={sandbox.network}
           options={AGENT_SANDBOX_NETWORK_OPTIONS}
-          disabled={form.formLocked || !sandboxOn || !sandboxAvailable}
+          disabled={form.formLocked || !sandboxOn || !sandboxAvailable || (!networkChoosable && sandbox.network === 'allow')}
           {...form.nestedDefaultMark('agentSandbox', 'network')}
           onChange={(network) => {
             void form.runUpdate({ agentSandbox: { ...sandbox, network } })
@@ -311,12 +380,14 @@ export function ToolsSection({
         </SettingsField>
       </SettingsGroup>
 
+      <WebSearchGroup form={form} />
+
       <SettingsGroup title="MCP">
         <SwitchField
           id="mcp-tool-loading"
           title="Preload every MCP tool"
           hint="Send every connected tool's schema on every step."
-          help="Off (the default) sends only tool names; the agent loads a server's schemas when a run needs them. Four connected servers measured 67k tokens a step when preloaded. To keep one server loaded, pin it in Extensions instead. Takes effect from the next step."
+          help="Off (the default) sends only tool names; the agent loads a server's schemas when a run needs them. Four connected servers measured 67k tokens a step when preloaded. The less-used browser tools and merge_agent_instance wait the same way. To keep one server loaded, pin it in Extensions instead. Takes effect from the next step."
           checked={settings.mcpToolLoading === 'eager'}
           disabled={form.formLocked}
           {...form.defaultMark('mcpToolLoading')}
@@ -340,6 +411,8 @@ export function ToolsSection({
           </Button>
         </SettingsField>
       </SettingsGroup>
+
+      <HooksGroup workspacePath={workspacePath} />
 
       <SettingsGroup title="Catalog" fieldId="tools-catalog" description={toolCatalogSummary(catalog)} plain>
         {catalog ? <ToolCatalog catalog={catalog} /> : null}

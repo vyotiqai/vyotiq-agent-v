@@ -93,7 +93,7 @@ describe('SetupPage', () => {
     })
     const props = renderSetup({ workspace: '/ws' })
 
-    await waitFor(() => expect(step(1).textContent).toContain('Ollama · not connected'))
+    await waitFor(() => expect(step(1).textContent).toContain('Ollama · no local model found'))
     expect(document.querySelector('[data-setup-provider-reason]')?.textContent).toBe(
       'Cannot reach Ollama at http://127.0.0.1:11434 (fetch failed). Start the Ollama app, or save an Ollama API key in Settings → Providers to use Ollama Cloud automatically.'
     )
@@ -151,6 +151,24 @@ describe('SetupPage', () => {
     fireEvent.change(screen.getByLabelText('Anthropic API key'), { target: { value: 'sk-ant-pasted-key-0000' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(onSaveKey).toHaveBeenCalledWith('anthropic', 'sk-ant-pasted-key-0000'))
+  })
+
+  it('connects a local server by URL, and sends cloud accounts to Settings', async () => {
+    const onUseLocal = vi.fn(async () => null)
+    const props = renderSetup({
+      settings: { ...OLLAMA, provider: 'openai' },
+      onUseEnvKey: vi.fn(async () => null),
+      onUseLocal,
+      onSaveKey: vi.fn(async () => null)
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Local server (LM Studio, llama.cpp, vLLM)…' }))
+    fireEvent.change(screen.getByLabelText('Local server URL'), { target: { value: 'http://localhost:8080/v1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() =>
+      expect(onUseLocal).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: 'http://localhost:8080/v1', models: [] }))
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud account (Bedrock, Vertex, Azure)…' }))
+    expect(props.onChangeProvider).toHaveBeenCalled()
   })
 
   it('a saved key is the encrypted one on this device', async () => {

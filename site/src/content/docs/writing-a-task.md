@@ -81,6 +81,7 @@ The model menu beside Agent / Ask picks the model and, for models that reason, t
 - "Start task" starts the run. The shortcut is `Ctrl+Enter` (`⌘↵` on macOS).
 - "Save as draft" puts the brief, its checks and its attachments aside, and empties the page. When you continue a draft, the button reads "Update draft".
 - "Schedule…" runs this brief later, or again and again, as a new task each time. See [Scheduled tasks](/docs/scheduled-tasks).
+- **"One model"** is a menu that can run the brief on a second model too: pick "Also on {model}", from your favorites, recent models and each provider's suggestions. "Start task" then starts two tasks with the same brief, each in a new worktree of its own and on its own model, so you can open them side by side and compare what each did. It needs a git repository on a branch with a commit, as a worktree does. See [Workspaces](/docs/workspaces#worktree-tasks).
 
 Beside "Start task", one line says how tools ask before they run, for example "Asks before edits and commands · MCP tools ask first". "Change" opens Settings, "Agent", which also has "New tasks start in a worktree".
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { homedir } from 'os'
 import path from 'path'
 import type {
+  PermissionRule,
   TerminalShell,
   ToolApprovalDecision,
   ToolApprovalGrant,
@@ -16,6 +17,7 @@ import { scrubString } from '../../shared/utils/scrub'
 import {
   commandAllowKey,
   commandAllowPrefix,
+  commandAllowProgram,
   commandFromAllowKey,
   commandMatchesAllow,
   terminalCommandOf
@@ -32,17 +34,17 @@ import { notifyBadgeChange } from '../app/badges'
 import { needsYouDedupeKey } from '../../shared/ipc'
 import { TOOL_APPROVAL_TIMEOUT_MS } from '../../shared/agentTimeouts'
 import { isCheckCommand } from './feedback/checkCommands'
+import { buildApprovalChangePreview } from './approvalChangePreview'
 import { dangerousCommand, type CommandContext, type DangerousCommand } from './tools/dangerousCommand'
 import { resolveTerminalShell } from './tools/terminal'
 import type { ActiveSkillAllows, PermissionPolicy, PermissionVerdict } from './permissions'
 import type { SkillToolGrant } from './skills/allowedTools'
 
-/** Browse/fetch egress — gated, but not workspace-mutating.
- * Legacy `web_fetch` / `web_search` kept for transcript approval replay only
- * (removed from TOOL_REGISTRY); live network browse is `browser_*`.
+/** Browse/fetch egress — gated, but not workspace-mutating: the agent's
+ * browser (`browser_*`) and the `web_fetch` / `web_search` tools.
  */
 function isNetworkBrowseTool(name: string): boolean {
-  return name.startsWith('browser_') && ASK_SAFE_BUILTIN.has(name)
+  return (name.startsWith('browser_') || name.startsWith('web_')) && ASK_SAFE_BUILTIN.has(name)
 }
 
 export type ApprovalSender = (request: ToolApprovalRequest) => void
@@ -115,6 +117,31 @@ export function resolveToolApproval(response: ToolApprovalResponse): boolean {
   const entry = pending.get(response.requestId)
   if (!entry) return false
   if (entry.runId !== response.runId) return false
+  // A note rides only on Deny, an edit only on Allow once of a command the
+  // card let you edit (not one the guard stopped).
+  const note = response.decision === 'deny' ? response.note : undefined
+  const editedCommand =
+    response.decision === 'once' && entry.request.name === 'terminal' && !entry.request.danger
+      ? response.editedCommand
+      : undefined
+  // The folder is the one main named in the request, never one the response brings.
+  const allowFolder =
+    response.decision === 'always' && response.allowFolder && !entry.request.danger
+      ? entry.request.alwaysAllowFolder
+      : undefined
+  // Likewise the program is the one main offered, never one the response names.
+  const allowProgram =
+    response.decision === 'always' && response.allowProgram && !entry.request.danger
+      ? entry.request.alwaysAllowProgram
+      : undefined
+  if (note || editedCommand || allowFolder || allowProgram) {
+    responseExtras.set(response.requestId, {
+      ...(note ? { note } : {}),
+      ...(editedCommand ? { editedCommand } : {}),
+      ...(allowFolder ? { allowFolder } : {}),
+      ...(allowProgram ? { allowProgram } : {})
+    })
+  }
   entry.resolve(response.decision)
   dismissLifecycleNotification(needsYouDedupeKey(response.runId))
   return true
@@ -193,8 +220,17 @@ export function isToolGated(
   }
   if (canonical === 'terminal') {
     const command = terminalCommandOf(args)
-    // Polling a session reads the output of a command already let through; it starts nothing.
-    if (!command && typeof args?.session_id === 'string' && args.session_id.trim()) return false
+    // Polling a session reads the output of a command already let through; it
+    // starts nothing, and neither does stopping it. Input is new instructions
+    // to that process (a shell reading stdin runs them), so it asks like a command.
+    if (
+      !command &&
+      typeof args?.session_id === 'string' &&
+      args.session_id.trim() &&
+      !(typeof args.input === 'string' && args.input.length > 0)
+    ) {
+      return false
+    }
     // "Always allow" for the terminal is per command: `terminal:pnpm vitest` lets
     // `pnpm vitest …` through, never a chained or redirected command.
     if (command) {
@@ -272,6 +308,7 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
   }
   return (
     canonical === 'delete' ||
+    canonical === 'move' ||
     canonical === 'terminal' ||
     canonical === 'edit' ||
     canonical === 'str_replace' ||
@@ -342,7 +379,81 @@ export function guardedCommand(
  * standing allow — and is saved on the call's result for the record. A call
  * the gate never held (exempt, approvals off, autonomy) has none.
  */
-export type AuthorizeResult = { allowed: true; grant?: ToolApprovalGrant } | { allowed: false; reason: string }
+export type AuthorizeResult =
+  | {
+      allowed: true
+      grant?: ToolApprovalGrant
+      /** The call's arguments as the person edited them; it runs with these. */
+      arguments?: string
+      /** What the person changed, said to the agent with the result. */
+      editNote?: string
+    }
+  | { allowed: false; reason: string }
+
+/** A deny's note, an edited command and a chosen folder, by request id, until the gate reads them. */
+const responseExtras = new Map<
+  string,
+  { note?: string; editedCommand?: string; allowFolder?: string; allowProgram?: string }
+>()
+
+/** The tools "Always allow edits under a folder" covers: the two that change a file in place. */
+const FOLDER_ALLOW_TOOLS = ['edit', 'str_replace'] as const
+
+/** A path the call names, workspace-relative with forward slashes; null when it is outside or absent. */
+function workspaceRelPath(argsJson: string, workspaceRoot: string | undefined): string | null {
+  const raw = parseArgs(argsJson)?.path
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  let rel = raw.trim()
+  if (path.isAbsolute(rel)) {
+    if (!workspaceRoot) return null
+    rel = path.relative(workspaceRoot, rel)
+  }
+  rel = rel.replace(/\\/g, '/').replace(/^\.\//, '')
+  if (!rel || rel.startsWith('../') || rel === '..' || path.isAbsolute(rel)) return null
+  return rel
+}
+
+/** The top folder an edit sits in (`src` for `src/lib/a.ts`), or null for a file at the root. */
+export function editAllowFolder(toolName: string, argsJson: string, workspaceRoot: string | undefined): string | null {
+  if (!(FOLDER_ALLOW_TOOLS as readonly string[]).includes(toolName)) return null
+  const rel = workspaceRelPath(argsJson, workspaceRoot)
+  const slash = rel?.indexOf('/') ?? -1
+  if (!rel || slash <= 0) return null
+  const folder = rel.slice(0, slash)
+  return folder === '.' || folder === '..' || folder.startsWith('.git') ? null : folder
+}
+
+/** The permission rules that stand for "always allow edits under `folder`". */
+export function folderAllowRules(folder: string): PermissionRule[] {
+  return FOLDER_ALLOW_TOOLS.map((tool) => ({ effect: 'allow' as const, tool, path: `${folder}/**` }))
+}
+
+/**
+ * How long a card waits before the call is denied (Settings › Agent):
+ * minutes, 0 for never. Set by the app; tests and headless keep the default.
+ */
+let approvalTimeoutMinutes: () => number = () => TOOL_APPROVAL_TIMEOUT_MS / 60_000
+
+export function setApprovalTimeoutSource(source: () => number): void {
+  approvalTimeoutMinutes = source
+}
+
+/** The wait in ms, or null for none. */
+export function approvalTimeoutMs(): number | null {
+  let minutes: number
+  try {
+    minutes = approvalTimeoutMinutes()
+  } catch {
+    minutes = TOOL_APPROVAL_TIMEOUT_MS / 60_000
+  }
+  if (!Number.isFinite(minutes) || minutes < 0) return TOOL_APPROVAL_TIMEOUT_MS
+  return minutes === 0 ? null : Math.round(minutes * 60_000)
+}
+
+/** "pnpm test" with JSON quotes and backslashes as a model would read them. */
+function quoteForAgent(text: string): string {
+  return JSON.stringify(text.length > 2000 ? `${text.slice(0, 1999)}…` : text)
+}
 
 /** A remembered allow, bounded: a terminal prefix can be a long command. */
 function grantAllow(key: string): string {
@@ -405,6 +516,8 @@ export type ApprovalGateOptions = {
   autonomousMode?: boolean
   /** Persists an "always allow" choice; omitted in tests and headless runs. */
   persistAlways?: (toolName: string) => void
+  /** Persists "Always allow edits under a folder" as allow rules; omitted in tests and headless runs. */
+  persistRules?: (rules: PermissionRule[]) => void
   /**
    * The task's standing "Allow for this task" grants, read back from its run
    * directory: one gate is built per run, and the grant covers follow-ups too.
@@ -449,7 +562,7 @@ function askThroughRenderer(
     })
     return Promise.reject(
       new Error(
-        'Tool approval required but no app window is listening. Reopen Vyotiq and retry, or turn off tool approval in Settings → Agent.'
+        'Tool approval required but no app window is listening. Reopen Agent V and retry, or turn off tool approval in Settings → Agent.'
       )
     )
   }
@@ -497,10 +610,13 @@ function askThroughRenderer(
     })
     notifyBadgeChange()
     signal.addEventListener('abort', onAbort, { once: true })
-    timeoutId = setTimeout(() => {
-      if (!pending.has(request.requestId)) return
-      settle('timeout')
-    }, TOOL_APPROVAL_TIMEOUT_MS)
+    // No timer when the setting says to wait for an answer.
+    if (request.timeoutMs != null && request.timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        if (!pending.has(request.requestId)) return
+        settle('timeout')
+      }, request.timeoutMs)
+    }
     sender(request)
   })
 }
@@ -516,6 +632,8 @@ function askThroughRenderer(
 export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGate {
   const sessionAllowlist = new Set<string>(options.taskAllowlist ?? [])
   const workspaceAllowlist = [...options.workspaceAllowlist]
+  /** Folders chosen with "Always allow edits under" this run; saved rules cover later runs. */
+  const allowedFolders: string[] = []
   const ask =
     options.ask ??
     ((request) =>
@@ -608,6 +726,10 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         const grant = ruleGrantFor(name, options.mode, sessionAllowlist, call.arguments, gateOpts)
         return grant ? { allowed: true, grant } : { allowed: true }
       }
+      const editFolder = held ? null : editAllowFolder(name, call.arguments, options.commandGuard?.workspaceRoot)
+      if (editFolder && allowedFolders.includes(editFolder)) {
+        return { allowed: true, grant: { by: 'you', scope: 'workspace', allow: grantAllow(`edits under ${editFolder}/`) } }
+      }
 
       if (!held && permission?.effect === 'allow') {
         if (permission.source === 'skill') {
@@ -643,8 +765,13 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
       // A call the guard or an ask rule held is never remembered: no "Always allow".
       const terminalCommand = name === 'terminal' && !held ? terminalCommandOf(parseArgs(call.arguments)) : null
       const alwaysAllowCommand = terminalCommand ? commandAllowPrefix(terminalCommand) : null
+      const alwaysAllowProgram = terminalCommand ? commandAllowProgram(terminalCommand) : null
+      const changePreview = buildApprovalChangePreview(name, call.arguments, options.commandGuard?.workspaceRoot)
       const request: ToolApprovalRequest = {
+        ...(changePreview ? { changePreview } : {}),
         ...(name === 'terminal' ? { alwaysAllowCommand } : {}),
+        ...(alwaysAllowProgram ? { alwaysAllowProgram } : {}),
+        ...(editFolder ? { alwaysAllowFolder: editFolder } : {}),
         ...(held ? { danger: held.reason } : {}),
         requestId: randomUUID(),
         runId: options.runId,
@@ -654,6 +781,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
           ? `${name} — a tool this run wrote`
           : summarizeToolArgs(name, call.arguments),
         argsPreview: scrubString(call.arguments.slice(0, 4000)),
+        timeoutMs: approvalTimeoutMs(),
         mutating: isNetworkBrowseTool(name)
           ? false
           : !isApprovalExemptTool(name, (() => {
@@ -682,6 +810,9 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
       if (typeof decision === 'object' && decision && '__denyReason' in decision) {
         return { allowed: false, reason: decision.__denyReason }
       }
+      const extras = responseExtras.get(request.requestId)
+      responseExtras.delete(request.requestId)
+      const said = extras?.note ? ` They said: ${quoteForAgent(extras.note)}. Do what they asked instead.` : ''
       logger.info('Tool approval decision', {
         scope: 'agent',
         correlationId: options.runId,
@@ -697,7 +828,9 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         if (decision === 'deny') {
           return {
             allowed: false,
-            reason: `The user denied this ${held.what} (${held.reason}). Do not retry it; ask what to do instead or continue without it.`
+            reason: said
+              ? `The user denied this ${held.what} (${held.reason}).${said} Do not retry the denied call.`
+              : `The user denied this ${held.what} (${held.reason}). Do not retry it; ask what to do instead or continue without it.`
           }
         }
         if (decision === 'timeout') {
@@ -718,7 +851,9 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         case 'deny':
           return {
             allowed: false,
-            reason: `The user denied permission to run ${name}. Do not retry it; ask what to do instead or continue without it.`
+            reason: said
+              ? `The user denied permission to run ${name}.${said} Do not retry the denied call.`
+              : `The user denied permission to run ${name}. Do not retry it; ask what to do instead or continue without it.`
           }
         case 'session':
           sessionAllowlist.add(agentBuiltAllowKey ?? name)
@@ -729,18 +864,37 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
             // Per command. One that cannot be scoped is let through this once
             // and remembered for nothing — the card never offers it Always.
             if (!alwaysAllowCommand) return { allowed: true, grant: { by: 'you', scope: 'once' } }
-            const key = commandAllowKey(alwaysAllowCommand)
+            const prefix =
+              extras?.allowProgram && extras.allowProgram === alwaysAllowProgram ? alwaysAllowProgram : alwaysAllowCommand
+            const key = commandAllowKey(prefix)
             workspaceAllowlist.push(key)
             options.persistAlways?.(key)
-            return { allowed: true, grant: { by: 'you', scope: 'workspace', allow: grantAllow(alwaysAllowCommand) } }
+            return { allowed: true, grant: { by: 'you', scope: 'workspace', allow: grantAllow(prefix) } }
+          }
+          if (extras?.allowFolder && extras.allowFolder === editFolder) {
+            // Edits under one folder, not the tool everywhere: rules, like a
+            // permission rule written in Settings, so later runs honour it too.
+            allowedFolders.push(extras.allowFolder)
+            options.persistRules?.(folderAllowRules(extras.allowFolder))
+            return { allowed: true, grant: { by: 'you', scope: 'workspace', allow: grantAllow(`edits under ${extras.allowFolder}/`) } }
           }
           // The key, not the name: rewriting the module withdraws the allow.
           workspaceAllowlist.push(agentBuiltAllowKey ?? name)
           options.persistAlways?.(agentBuiltAllowKey ?? name)
           return { allowed: true, grant: { by: 'you', scope: 'workspace', allow: grantAllow(name) } }
         }
-        case 'once':
+        case 'once': {
+          if (extras?.editedCommand && name === 'terminal' && extras.editedCommand !== terminalCommand) {
+            const args = parseArgs(call.arguments) ?? {}
+            return {
+              allowed: true,
+              grant: { by: 'you', scope: 'once' },
+              arguments: JSON.stringify({ ...args, command: extras.editedCommand }),
+              editNote: `[The user edited this command before allowing it. It ran as: ${quoteForAgent(extras.editedCommand)}]`
+            }
+          }
           return { allowed: true, grant: { by: 'you', scope: 'once' } }
+        }
         default: {
           const _exhaustive: never = decision
           return _exhaustive
@@ -757,6 +911,8 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
 export function resetToolApprovalForTests(): void {
   senders.clear()
   pending.clear()
+  responseExtras.clear()
+  approvalTimeoutMinutes = () => TOOL_APPROVAL_TIMEOUT_MS / 60_000
 }
 
 // A cancel releases this run's parked approvals (runRegistry calls it).

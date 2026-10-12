@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { UiItem } from '@shared/transcript'
+// Imported up front: loading the module inside the first test spent its 30s timeout under full-suite load.
+import {
+  collectSessionChangedFiles,
+  mergeChangedFileAction,
+  mergeCheckpointChangedFiles
+} from '@renderer/features/chat/utils/turnFileDiffs'
 
 function tool(
   id: string,
@@ -22,18 +28,12 @@ function tool(
 }
 
 describe('collectSessionChangedFiles', () => {
-  it('keeps created when a later edit modifies the same path', async () => {
-    const { mergeChangedFileAction } = await import(
-      '@renderer/features/chat/utils/turnFileDiffs'
-    )
+  it('keeps created when a later edit modifies the same path', () => {
     expect(mergeChangedFileAction('created', 'modified')).toBe('created')
     expect(mergeChangedFileAction('created', 'deleted')).toBe('deleted')
   })
 
-  it('marks successful deletes as deleted', async () => {
-    const { collectSessionChangedFiles } = await import(
-      '@renderer/features/chat/utils/turnFileDiffs'
-    )
+  it('marks successful deletes as deleted', () => {
     const files = collectSessionChangedFiles([
       { kind: 'message', id: 'u1', role: 'user', content: 'remove', at: 1 },
       tool('t1', 'delete', { path: 'src/gone.ts' })
@@ -43,10 +43,7 @@ describe('collectSessionChangedFiles', () => {
 })
 
 describe('mergeCheckpointChangedFiles', () => {
-  it('adds checkpoint-only paths to tool-arg changed files', async () => {
-    const { mergeCheckpointChangedFiles } = await import(
-      '@renderer/features/chat/utils/turnFileDiffs'
-    )
+  it('adds checkpoint-only paths to tool-arg changed files', () => {
     const toolFiles = [{ path: 'src/a.ts', added: 2, removed: 1, action: 'modified' as const }]
     const checkpoint = [
       { path: 'src/a.ts', action: 'modified' as const },

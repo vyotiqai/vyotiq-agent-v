@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
-import type { McpServerStatus, ToolApprovalMode, ToolApprovalSettings, ToolCatalogResult } from '@shared/ipc'
+import type { CompareModelOption } from './compareModels'
+import {
+  TASK_DRAFT_CHECK_CHARS_MAX,
+  TASK_DRAFT_CHECKS_MAX,
+  type McpServerStatus,
+  type ToolApprovalMode,
+  type ToolApprovalSettings,
+  type ToolCatalogResult
+} from '@shared/ipc'
 import { relativeTimeAgo } from '@shared/utils/timeFormat'
 import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
-import { Button, IconButton, Menu, Segmented, StatusGlyph, cn, type MenuOption } from '@renderer/lib/ui'
-import { Icon } from '@renderer/lib/icons'
-import { BORDER_DIVIDER, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { Button, IconButton, Keys, Menu, Segmented, cn, type MenuOption } from '@renderer/lib/ui'
+import { Icon, type IconName } from '@renderer/lib/icons'
+import { BORDER_DIVIDER, NUM, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
@@ -12,6 +20,7 @@ import { useGitInit } from '@renderer/features/chat/components/useGitInit'
 import { useGitStatus } from '@renderer/features/chat/components/useGitStatus'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { ruleFileCountLabel, ruleRootFiles } from './ruleSummary'
+import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
 
 /** Where a new task can be moved to: the open workspaces. */
 export type NewTaskTargets = {
@@ -20,9 +29,9 @@ export type NewTaskTargets = {
   onMove: (workspacePath: string, brief: string) => void
 }
 
-/** The schema's bounds on the brief's checks. */
-const MAX_CHECKS = 20
-const CHECK_MAX_CHARS = 500
+/** The schema's bounds on the brief's checks — the same Structure's Done when moves within. */
+const MAX_CHECKS = TASK_DRAFT_CHECKS_MAX
+const CHECK_MAX_CHARS = TASK_DRAFT_CHECK_CHARS_MAX
 
 const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
   off: 'Runs its tools without asking',
@@ -32,8 +41,13 @@ const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
 
 const INDEX_LABEL = { ready: 'Ready', building: 'Building', degraded: 'Degraded', off: 'Off', paused: 'Paused' } as const
 
-function startChord(): string {
+export function startChord(): string {
   return window.vyotiq?.platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter'
+}
+
+/** The same chord as keycaps, for the quiet line under the box. */
+export function startChordKeys(): string[] {
+  return window.vyotiq?.platform === 'darwin' ? ['⌘', '↵'] : ['Ctrl', '↵']
 }
 
 /** Where the facts beside the brief lead: the page where each one is changed. */
@@ -42,7 +56,8 @@ export type NewTaskFactTarget = 'agent' | 'tools' | 'indexing'
 /**
  * Starting a task is filling in a brief, not opening a chat. The brief is one
  * box: what to do, the checks the run is judged against, and how it runs (the
- * composer's own control row). Where it runs is the header; beside it, what
+ * composer's own control row, which ends in the page's one action, Start task.
+ * Where it runs is the header, as icons; under the box, what
  * the agent will see, each fact a way to where you change it. The brief
  * itself is the composer's input, so @ context, attachments and / skills
  * work here as they do on the instruction line.
@@ -61,7 +76,6 @@ export function NewTaskBrief({
   onDrop,
   approval,
   canStart,
-  startBlockedReason,
   onChecksChange,
   onStart,
   onOpenSettings,
@@ -75,7 +89,8 @@ export function NewTaskBrief({
   onWorktreeChange,
   extraRoots = NO_FOLDERS,
   onAddFolder,
-  onExtraRootsChange
+  onExtraRootsChange,
+  compare
 }: {
   workspacePath: string | null
   targets?: NewTaskTargets
@@ -97,7 +112,6 @@ export function NewTaskBrief({
   /** How tools ask before they run — said once, beside Start task. */
   approval?: ToolApprovalSettings | null
   canStart: boolean
-  startBlockedReason: string | null
   /** The checks as they stand, a half-typed one included — whatever starts the task sends them. */
   onChecksChange: (doneWhen: string[]) => void
   onStart: () => void
@@ -122,6 +136,11 @@ export function NewTaskBrief({
   /** Add folder…: the OS picker, checked by main. Absent hides the row. */
   onAddFolder?: () => void
   onExtraRootsChange?: (next: string[]) => void
+  /**
+   * Also run on: a second model for the same brief. Start then makes two
+   * tasks, each in its own worktree, to compare side by side. Absent hides it.
+   */
+  compare?: { options: readonly CompareModelOption[]; value: string | null; onChange: (next: string | null) => void }
 }) {
   const [draftCheck, setDraftCheck] = useState('')
 
@@ -170,9 +189,17 @@ export function NewTaskBrief({
         <h1 className="mr-2 shrink-0 whitespace-nowrap text-sm font-semibold text-fg-strong">New task</h1>
         {workspacePath ? (
           <>
-            {'in '}
-            <WorkspaceSelect workspacePath={workspacePath} targets={targets} brief={brief} />
-            <BranchSelect workspacePath={workspacePath} />
+            {/* The header reads as a line: a new task, in this folder, on this
+                branch. The words stay quieter than the two names they hold. */}
+            <span className="shrink-0 text-tertiary">in</span>
+            <span className="flex min-w-0 items-center gap-1">
+              <Icon name="workspace" size={13} className="shrink-0 text-tertiary" />
+              <WorkspaceSelect workspacePath={workspacePath} targets={targets} brief={brief} />
+            </span>
+            <span className="ml-1 flex min-w-0 items-center gap-1">
+              <Icon name="branch" size={13} className="shrink-0 text-tertiary" />
+              <BranchSelect workspacePath={workspacePath} />
+            </span>
           </>
         ) : null}
         <span className="flex-1" />
@@ -182,11 +209,15 @@ export function NewTaskBrief({
         {headerActions}
       </header>
 
-      {/* The column is what is narrow, not the window: with the inspector open
-          beside it, what the agent will see goes under the brief. */}
+      {/* The workbench: the brief keeps the record's measure on the left, and
+          what the agent will see reads beside it on the right. Under 1100px of
+          column the rail falls under the brief — the field keeps the whole
+          width there, which is what a split pane or an open inspector leaves. */}
       <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid w-full max-w-[1040px] grid-cols-1 gap-10 px-5 pb-12 pt-6 @[720px]:grid-cols-[minmax(0,1fr)_260px] @[720px]:gap-12 @[720px]:px-8">
-          <div className="min-w-0">
+        {/* 1180 = the record's 780 measure + the 40px gutter + the 296px rail,
+            so the brief is exactly as wide as the steps it becomes. */}
+        <div className="mx-auto min-h-full w-full max-w-[1180px] px-5 pb-16 pt-10 @[720px]:px-8 @[900px]:pt-16 @[1100px]:grid @[1100px]:grid-cols-[minmax(0,1fr)_296px] @[1100px]:items-start @[1100px]:gap-x-10 @[1400px]:pt-24">
+          <div className="mx-auto w-full max-w-[780px]">
             {banners}
             <div
               className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
@@ -204,10 +235,18 @@ export function NewTaskBrief({
                   check is one click into it, not two. */}
               <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
                 {checks.length > 0 ? (
+                  <div className="flex items-baseline gap-2 pb-0.5 pt-1">
+                    <span className={SECTION_LABEL}>Done when</span>
+                    <span className={cn(NUM, 'text-tertiary')}>{checks.length}</span>
+                  </div>
+                ) : null}
+                {checks.length > 0 ? (
                   <ul className="m-0 list-none p-0" aria-label="Done when">
                     {checks.map((text, index) => (
+                      // The row number is the check's id in the record (c1, c2…),
+                      // so the brief and the run's ledger read one list.
                       <li key={`${index}:${text}`} className="group flex h-7 items-center gap-2.5">
-                        <StatusGlyph state="queued" size={14} />
+                        <span className={cn(NUM, 'w-4 shrink-0 text-right text-tertiary')}>{index + 1}</span>
                         <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
                           {text}
                         </span>
@@ -225,8 +264,11 @@ export function NewTaskBrief({
                 ) : null}
                 {checks.length < MAX_CHECKS ? (
                   <label className="group/check flex h-7 cursor-text items-center gap-2.5">
-                    {/* The field has no box of its own inside the brief's: its + says where focus is. */}
-                    <Icon name="plus" size={14} className="shrink-0 text-tertiary group-focus-within/check:text-fg" />
+                    {/* The field has no box of its own inside the brief's: its + says where focus is.
+                        It sits in the same gutter as the rows' numbers, so both lists share one edge. */}
+                    <span className="flex w-4 shrink-0 justify-center">
+                      <Icon name="plus" size={14} className="text-tertiary group-focus-within/check:text-fg" />
+                    </span>
                     <input
                       value={draftCheck}
                       maxLength={CHECK_MAX_CHARS}
@@ -239,6 +281,15 @@ export function NewTaskBrief({
                   </label>
                 ) : null}
               </div>
+              {/* The control row is the box's action edge: how it runs, then
+                  the one word that starts it (Composer's own primary). */}
+              <div className={cn('border-t pb-1 pl-4 pr-3 @container', BORDER_DIVIDER)}>{controls}</div>
+            </div>
+            {menus}
+
+            {/* What is not the run itself sits under the box on one quiet
+                row: scope on the left, its manners and the way aside right. */}
+            <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
               {onAddFolder ? (
                 <AddedFolders
                   roots={extraRoots}
@@ -246,36 +297,55 @@ export function NewTaskBrief({
                   onRemove={(root) => onExtraRootsChange?.(extraRoots.filter((r) => r !== root))}
                 />
               ) : null}
-              <div className="pb-1 pl-4 pr-3 @container">{controls}</div>
-            </div>
-            {menus}
-
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Button
-                variant="primary"
-                size="md"
-                title={startBlockedReason ?? `Start task (${startChord()})`}
-                disabled={!canStart}
-                onClick={onStart}
-              >
-                Start task
-              </Button>
-              {draft ? (
-                <Button
-                  variant="ghost"
-                  size="md"
-                  disabled={!draft.canSave || draft.saving}
-                  pending={draft.saving}
-                  title={draft.canSave ? undefined : 'Write a brief or a check first'}
-                  onClick={draft.onSave}
-                >
-                  {draft.continuing ? 'Update draft' : 'Save as draft'}
-                </Button>
-              ) : null}
-              {approval ? <ApprovalNote approval={approval} onOpenSettings={onOpenSettings} /> : null}
+              <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                {/* The keys, so the chord is learnt by looking rather than by
+                    hovering the one button that takes it. */}
+                <span className="hidden items-center gap-1.5 text-xs text-tertiary @[720px]:flex">
+                  <Keys keys={startChordKeys()} />
+                  <span>start</span>
+                </span>
+                {draft ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    disabled={!draft.canSave || draft.saving}
+                    pending={draft.saving}
+                    title={draft.canSave ? undefined : 'Write a brief or a check first'}
+                    onClick={draft.onSave}
+                  >
+                    {draft.continuing ? 'Update draft' : 'Save as draft'}
+                  </Button>
+                ) : null}
+                {workspacePath ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    icon="repeat"
+                    disabled={!brief.trim()}
+                    title={brief.trim() ? 'Run this brief on a schedule, a new task each time' : 'Write a brief first'}
+                    onClick={() =>
+                      void requestRepeatTask({
+                        workspacePath,
+                        title: brief.trim().split('\n')[0]!.slice(0, 120),
+                        instruction: brief.trim(),
+                        ...(checks.length ? { doneWhen: checks } : {}),
+                        worktree
+                      })
+                    }
+                  >
+                    Schedule…
+                  </Button>
+                ) : null}
+                {workspacePath && compare && compare.options.length > 0 ? (
+                  <CompareModels workspacePath={workspacePath} compare={compare} />
+                ) : null}
+                {approval ? <ApprovalNote approval={approval} onOpenSettings={onOpenSettings} /> : null}
+              </div>
             </div>
           </div>
-
+          {/* The rail: what the agent will see, where you change it. Beside
+              the brief on a wide column; under it on a narrow one, where the
+              field needs the whole width. */}
           {workspacePath ? (
             <WhatTheAgentSees
               workspacePath={workspacePath}
@@ -293,8 +363,8 @@ export function NewTaskBrief({
 const NO_FOLDERS: readonly string[] = []
 
 /**
- * The folders outside the workspace the task may also work in, one row each
- * on the checks' left edge, and the way to add one. The workspace stays where
+ * The folders outside the workspace the task may also work in, as quiet chips
+ * on the row under the box, and the way to add one. The workspace stays where
  * the task runs; these are reached by absolute path.
  */
 function AddedFolders({
@@ -307,14 +377,14 @@ function AddedFolders({
   onRemove: (root: string) => void
 }) {
   return (
-    <div className={cn('border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-added-folders>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1" data-added-folders>
       {roots.length > 0 ? (
-        <ul className="m-0 list-none p-0" aria-label="Added folders">
+        <ul className="m-0 flex list-none flex-wrap items-center gap-x-3 gap-y-1 p-0" aria-label="Added folders">
           {roots.map((root) => (
-            <li key={root} className="group flex h-7 items-center gap-2.5">
-              <Icon name="folder" size={14} className="shrink-0 text-muted" />
-              <span className="shrink-0 text-xs text-fg">{extraRootLabel(root)}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary" title={root}>
+            <li key={root} className="group flex min-w-0 items-center gap-1.5 text-xs">
+              <Icon name="folder" size={13} className="shrink-0 text-muted" />
+              <span className="shrink-0 text-fg">{extraRootLabel(root)}</span>
+              <span className="min-w-0 truncate font-mono text-caption text-tertiary" title={root}>
                 {root}
               </span>
               <IconButton
@@ -386,6 +456,38 @@ const WHERE_ITEMS = [
  * Where it works, both answers in view: in this folder, or in a new worktree
  * branched from it — only offered when there is a commit to branch from.
  */
+/**
+ * "One model" / "Also on {model}": the brief again on a second model. Each copy
+ * runs in a worktree of its own, so it is offered only where one can be made —
+ * the same test as Where it works.
+ */
+function CompareModels({
+  workspacePath,
+  compare
+}: {
+  workspacePath: string
+  compare: { options: readonly CompareModelOption[]; value: string | null; onChange: (next: string | null) => void }
+}) {
+  const git = useGitStatus(workspacePath, 0, true, 0)
+  if (git.result?.kind !== 'ok' || !git.status?.branch || !git.status.hasCommits) return null
+  return (
+    <Menu
+      value={compare.value ?? ''}
+      options={[
+        { value: '', label: 'One model' },
+        ...compare.options.map((o) => ({ value: o.value, label: `Also on ${o.label}`, group: o.group }))
+      ]}
+      onChange={(next) => compare.onChange(next || null)}
+      aria-label="Also run on another model"
+      title="Run the same brief on a second model, each in its own worktree, to compare"
+      icon="columns"
+      size="xs"
+      bare
+      quiet={!compare.value}
+    />
+  )
+}
+
 function WhereItWorks({
   workspacePath,
   worktree,
@@ -444,7 +546,6 @@ function BranchSelect({ workspacePath }: { workspacePath: string }) {
   }))
   return (
     <>
-      <span className="pl-1">{'on '}</span>
       <Menu
         value={branch}
         options={options}
@@ -528,12 +629,15 @@ function useToolsSummary(workspacePath: string): {
 
   useEffect(() => {
     let cancelled = false
-    const off = window.vyotiq.onToolsCatalogChanged?.((next) => {
-      if (!cancelled) setCatalog(next)
-    })
-    void window.vyotiq.toolsCatalogGet?.({ workspacePath }).then((res) => {
-      if (!cancelled && res.ok) setCatalog(res.data)
-    })
+    // Read for this workspace: what a run here leaves out depends on it, and a
+    // pushed catalog is the active workspace's.
+    const read = (): void => {
+      void window.vyotiq.toolsCatalogGet?.({ workspacePath }).then((res) => {
+        if (!cancelled && res.ok) setCatalog(res.data)
+      })
+    }
+    const off = window.vyotiq.onToolsCatalogChanged?.(read)
+    read()
     void window.vyotiq.mcpStatus?.({ workspacePath }).then((res) => {
       if (!cancelled && res.ok) setMcp(res.data.servers)
     })
@@ -544,7 +648,9 @@ function useToolsSummary(workspacePath: string): {
   }, [workspacePath])
 
   if (!catalog) return null
-  const builtin = catalog.entries.filter((e) => e.source === 'builtin' && e.active).length
+  // Counted as a run here sends them: no GitHub tools without a remote, no notebook tool without one.
+  const leftOut = new Set(catalog.notApplicable ?? [])
+  const builtin = catalog.entries.filter((e) => e.source === 'builtin' && e.active && !leftOut.has(e.name)).length
   const servers = catalog.servers.filter((s) => s.enabled).length
   const broken = (mcp ?? []).find((s) => s.enabled && !s.connected && !s.connecting && s.error)
   const problem = broken
@@ -606,13 +712,28 @@ function WhatTheAgentSees({
   const ruleFiles = ruleRootFiles(rules)
 
   return (
-    <aside className="min-w-0 pt-1" aria-label="What the agent will see" data-agent-sees>
+    // The rail beside the brief on a wide column, and its own sticky block:
+    // the facts hold still while the brief scrolls. Under 1100px it falls
+    // under the box, where the rows read two to a line.
+    <aside
+      className={cn(
+        // Under the box it keeps the brief's 780 measure and centre, so the
+        // two share a left edge; beside it, the rail's own column.
+        'mx-auto w-full min-w-0 max-w-[780px] border-t pt-4 @[1100px]:sticky @[1100px]:top-6 @[1100px]:mx-0 @[1100px]:max-w-none @[1100px]:border-t-0 @[1100px]:pt-0',
+        BORDER_DIVIDER
+      )}
+      aria-label="What the agent will see"
+      data-agent-sees
+    >
       <h2 className={SECTION_LABEL}>What the agent will see</h2>
       {failed ? (
         <p className="mt-3 text-xs text-muted">This workspace’s context could not be read.</p>
       ) : (
-        <ul className="m-0 mt-1.5 list-none p-0">
+        // Two facts to a line when the ledger is under the box, one when it is
+        // the 296px rail: the rows never wrap mid-value.
+        <ul className="m-0 mt-1 grid list-none grid-cols-1 gap-x-8 p-0 @[560px]:grid-cols-2 @[1100px]:grid-cols-1">
           <Fact
+            icon="branch"
             k="Branch"
             v={
               context ? (
@@ -643,6 +764,7 @@ function WhatTheAgentSees({
             warn={!context?.branch && Boolean(gitInit.error)}
           />
           <Fact
+            icon="rules"
             k="Rules"
             v={
               context
@@ -657,6 +779,7 @@ function WhatTheAgentSees({
             open={onOpenRules ? { label: 'Extensions', run: onOpenRules } : undefined}
           />
           <Fact
+            icon="memory"
             k="Memory"
             v={
               context
@@ -671,12 +794,14 @@ function WhatTheAgentSees({
             open={onOpenSettings ? { label: 'Settings', run: () => onOpenSettings('agent') } : undefined}
           />
           <Fact
+            icon="database"
             k="Index"
             v={context ? INDEX_LABEL[context.codeIndex.state] : null}
             d={context ? indexDetail(context.codeIndex) : null}
             open={onOpenSettings ? { label: 'Settings', run: () => onOpenSettings('indexing') } : undefined}
           />
           <Fact
+            icon="tool"
             k="Tools"
             v={tools ? `${tools.builtin} built-in · ${tools.servers} MCP ${tools.servers === 1 ? 'server' : 'servers'}` : null}
             d={tools?.problem ?? null}
@@ -689,10 +814,14 @@ function WhatTheAgentSees({
   )
 }
 
-/** "12,408 files · updated 4m ago" — this workspace's own index, when it has one. */
+/**
+ * "12,408 source files · updated 4m ago" — this workspace's own index, when it
+ * has one. The index holds production source only (no tests, docs or config),
+ * so a bare "2 files" for a four-file repository read as a miscount.
+ */
 function indexDetail(index: { files?: number; indexedAt?: string }): string | null {
   if (index.files == null) return null
-  const files = `${index.files.toLocaleString('en-US')} ${index.files === 1 ? 'file' : 'files'}`
+  const files = `${index.files.toLocaleString('en-US')} source ${index.files === 1 ? 'file' : 'files'}`
   const ago = index.indexedAt ? relativeTimeAgo(index.indexedAt) : ''
   return ago ? `${files} · updated ${ago}` : files
 }
@@ -702,12 +831,14 @@ function indexDetail(index: { files?: number; indexedAt?: string }): string | nu
  * change it: the whole row is the link, its text still on the column's edge.
  */
 function Fact({
+  icon,
   k,
   v,
   d,
   warn = false,
   open
 }: {
+  icon: IconName
   k: string
   v: ReactNode
   d?: string | null
@@ -716,25 +847,34 @@ function Fact({
   open?: { label: string; run: () => void }
 }) {
   const body = (
-    <>
-      {/* The separators are heard, not seen: a link's name reads "Index: Ready, …". */}
-      <span className="block text-caption text-tertiary">{k}</span>
-      <span className="sr-only">: </span>
-      <span className="flex min-h-5 items-center gap-1.5 text-sm text-fg">
-        {v === null ? (
-          <span className="h-3 w-24 rounded-sm bg-surface" aria-label="Loading" />
-        ) : (
-          <span className="min-w-0 truncate">{v}</span>
-        )}
-        {warn ? <Icon name="warningCircle" size={13} className="shrink-0 text-warning" /> : null}
+    // One glyph, then the key over its value over its detail, all on one left
+    // edge. In a 296px rail the three read as a row instead of a squeezed
+    // table, and the glyph is what tells five lines apart at a glance.
+    <span className="flex min-w-0 items-start gap-2.5">
+      <Icon name={icon} size={14} className={cn('mt-[3px] shrink-0', warn ? 'text-warning' : 'text-tertiary')} />
+      <span className="min-w-0 flex-1">
+        {/* Labels in the app carry no colon; a screen reader still hears the pause. */}
+        <span className="text-caption text-tertiary">
+          {k}
+          <span className="sr-only">:</span>
+        </span>
+        <span className="mt-px flex min-w-0 items-center gap-1.5 text-sm text-fg">
+          {v === null ? (
+            <span className="h-3.5 w-24 rounded-sm bg-surface" aria-label="Loading" />
+          ) : (
+            <span className="min-w-0 truncate">{v}</span>
+          )}
+          {warn ? <Icon name="warningCircle" size={13} className="shrink-0 text-warning" /> : null}
+        </span>
+        {d ? (
+          <span className="mt-px block min-w-0 truncate text-caption">
+            {/* The comma is heard, not seen: a link's name reads "Index: Ready, …". */}
+            <span className="sr-only">, </span>
+            <span className={warn ? 'text-warning' : 'text-muted'}>{d}</span>
+          </span>
+        ) : null}
       </span>
-      {d ? (
-        <>
-          <span className="sr-only">, </span>
-          <span className={cn('block truncate text-xs', warn ? 'text-warning' : 'text-muted')}>{d}</span>
-        </>
-      ) : null}
-    </>
+    </span>
   )
   return (
     <li data-fact={k}>
@@ -743,7 +883,7 @@ function Fact({
           type="button"
           onClick={open.run}
           className={cn(
-            '-mx-2 block w-[calc(100%+16px)] rounded-md px-2 py-1.5 text-left vy-transition focus-visible:vy-focus-ring',
+            '-mx-2 block w-[calc(100%+16px)] rounded-md px-2 py-1 text-left vy-transition focus-visible:vy-focus-ring',
             ROW_HOVER
           )}
         >
@@ -751,7 +891,9 @@ function Fact({
           <span className="sr-only">, change in {open.label}</span>
         </button>
       ) : (
-        <div className="py-1.5">{body}</div>
+        // No inset: a button row's -mx-2/px-2 nets to zero, so the glyph
+        // column lines up with these rows only when they have none either.
+        <div className="py-1">{body}</div>
       )}
     </li>
   )

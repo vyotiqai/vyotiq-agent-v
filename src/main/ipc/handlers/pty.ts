@@ -7,6 +7,8 @@ import {
   PtyRenameRequestSchema,
   PtyWriteRequestSchema,
   PtyResizeRequestSchema,
+  TerminalKeptListRequestSchema,
+  TerminalKeptStopRequestSchema,
   ok,
   fail
 } from '../../../shared/ipc'
@@ -19,6 +21,11 @@ import {
   writePty
 } from '@main/app/ptySessions'
 import { failFrom, isOpenWorkspace, senderOk } from '../ipcShared'
+import {
+  listKeptTerminalSessions,
+  onKeptTerminalSessionsChanged,
+  stopKeptTerminalSession
+} from '@main/agent/tools/terminalSessions'
 
 /** The terminal panel's own shells. Registered once by registerIpc. */
 export function registerPtyIpc(): void {
@@ -87,6 +94,38 @@ export function registerPtyIpc(): void {
       return ok(killPty(req.id, req.workspacePath))
     } catch (err) {
       return failFrom(err, IPC.ptyKill)
+    }
+  })
+
+  // Kept background processes ride the same "sessions changed" push the
+  // Terminal panel already listens to.
+  onKeptTerminalSessionsChanged(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC.ptySessionsChanged, {})
+    }
+  })
+
+  ipcMain.handle(IPC.terminalKeptList, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TerminalKeptListRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(listKeptTerminalSessions(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.terminalKeptList)
+    }
+  })
+
+  ipcMain.handle(IPC.terminalKeptStop, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TerminalKeptStopRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      // Only a process kept for this workspace — never one from another tree.
+      const owned = listKeptTerminalSessions(req.workspacePath).some((s) => s.id === req.id)
+      return ok(owned ? stopKeptTerminalSession(req.id) : false)
+    } catch (err) {
+      return failFrom(err, IPC.terminalKeptStop)
     }
   })
 

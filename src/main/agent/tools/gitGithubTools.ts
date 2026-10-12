@@ -7,6 +7,7 @@ import {
   prCreate,
   prCheckLog,
   prView,
+  prReviewThreads,
   parseActionsJobUrl,
   reviewPullRequest,
   listGithubIssues,
@@ -17,11 +18,83 @@ import { wrapUntrustedContent } from '../untrustedContent'
 import { readTrimmed } from './argAccess'
 import { invalidateAfterWorkspaceMutation, throwIfAborted, toolOk, toolFail } from './index'
 import type { ToolHandler } from './index'
+import type { PrReviewThread, PrView } from '../../../shared/ipc'
 
 /** Conclusions GitHub reports for a check that failed (the PR panel's own set). */
 const FAILED_CHECK_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
 /** Job logs read per call: each is a `gh run view` of up to megabytes. */
 const CHECK_LOGS_READ = 3
+/** One comment's text as handed over; a pasted log can run to megabytes. */
+const DISCUSSION_BODY_MAX = 4_000
+/** The whole discussion as handed over: unresolved threads and reviews come first, so a cut takes the rest. */
+const DISCUSSION_MAX = 40_000
+
+function clip(text: string, max: number): string {
+  const body = text.trim()
+  return body.length > max ? `${body.slice(0, max)}\n[... ${body.length - max} more characters on GitHub]` : body
+}
+
+function threadPlace(thread: PrReviewThread): string {
+  const line = thread.line ?? thread.originalLine
+  const span = thread.startLine && line && thread.startLine !== line ? `${thread.startLine}-${line}` : line ? String(line) : ''
+  return `${thread.path}${span ? `:${span}` : ''}${thread.diffSide === 'LEFT' ? ' (old side)' : ''}${thread.isOutdated ? ' (outdated: the code moved since)' : ''}`
+}
+
+/**
+ * A pull request's discussion, most actionable first: what reviewers asked
+ * (their latest reviews and the inline threads still open), then the
+ * conversation, then the threads already resolved, by place only.
+ */
+function formatPrDiscussion(pr: PrView, threads: { threads: PrReviewThread[]; totalCount: number; truncated: boolean } | null): string {
+  const out: string[] = [
+    `Pull request #${pr.number} ${pr.title} (${pr.state.toLowerCase()}${pr.isDraft ? ', draft' : ''}) ${pr.headRefName} -> ${pr.baseRefName}`,
+    pr.url,
+    '',
+    'Description:',
+    clip(pr.body, DISCUSSION_BODY_MAX) || '(no description)'
+  ]
+  const reviews = pr.latestReviews.filter((r) => r.body.trim() || r.state.toUpperCase() !== 'COMMENTED')
+  if (reviews.length > 0) {
+    out.push('', `Latest review from each reviewer (${reviews.length}):`)
+    for (const r of reviews) {
+      out.push(`--- ${r.author}: ${r.state.toLowerCase().replace(/_/g, ' ')}${r.submittedAt ? ` ${r.submittedAt}` : ''}`)
+      if (r.body.trim()) out.push(clip(r.body, DISCUSSION_BODY_MAX))
+    }
+  }
+  if (pr.reviewRequests.length > 0) out.push('', `Review requested from: ${pr.reviewRequests.join(', ')}`)
+  const open = threads?.threads.filter((t) => !t.isResolved) ?? []
+  const resolved = threads?.threads.filter((t) => t.isResolved) ?? []
+  if (threads === null) {
+    out.push('', 'Inline review threads: GitHub did not return them.')
+  } else if (open.length > 0) {
+    out.push('', `Unresolved review threads (${open.length}):`)
+    for (const t of open) {
+      out.push('', `[${threadPlace(t)}]`)
+      for (const c of t.comments) out.push(`--- ${c.author}${c.createdAt ? ` ${c.createdAt}` : ''}`, clip(c.body, DISCUSSION_BODY_MAX))
+      if (t.commentCount > t.comments.length) out.push(`(${t.commentCount - t.comments.length} later replies are on GitHub)`)
+    }
+  } else {
+    out.push('', 'Unresolved review threads: none.')
+  }
+  const comments = pr.comments ?? []
+  const count = pr.commentCount ?? comments.length
+  if (count > 0) {
+    out.push('', `Conversation (${comments.length === count ? count : `latest ${comments.length} of ${count}`}, oldest first):`)
+    for (const c of comments) {
+      out.push(`--- ${c.author}${c.createdAt ? ` ${c.createdAt}` : ''}${c.minimized ? ' (hidden on GitHub)' : ''}`)
+      if (!c.minimized) out.push(clip(c.body, DISCUSSION_BODY_MAX))
+    }
+  } else {
+    out.push('', 'Conversation: no comments.')
+  }
+  if (resolved.length > 0) {
+    out.push('', `Resolved review threads (${resolved.length}):`)
+    for (const t of resolved) out.push(`- ${threadPlace(t)}${t.resolvedBy ? ` · resolved by ${t.resolvedBy}` : ''}`)
+  }
+  if (threads?.truncated) out.push('', `GitHub has ${threads.totalCount} review threads; the first ${threads.threads.length} are above.`)
+  const text = out.join('\n')
+  return text.length > DISCUSSION_MAX ? `${text.slice(0, DISCUSSION_MAX)}\n[... the rest of the discussion is on GitHub: ${pr.url}]` : text
+}
 
 export const gitGithubHandlers = {
   git_status: async (workspace, _args, signal) => {
@@ -153,15 +226,18 @@ export const gitGithubHandlers = {
       const pr = await prView(workspace, number)
       throwIfAborted(signal)
       if (!pr) return toolOk('github_pr_checks', summary, 'This branch has no pull request on GitHub.')
-      const lines = [`Pull request #${pr.number} ${pr.title} (${pr.state.toLowerCase()}) ${pr.headRefName} -> ${pr.baseRefName}`, pr.url]
-      if (pr.checks.length === 0) {
-        lines.push('No CI checks reported.')
-        return toolOk('github_pr_checks', `#${pr.number}`, lines.join('\n'))
-      }
+      // The title, check names, descriptions and step names are written by
+      // whoever opened the PR or wrote the workflow — a fork's, for a fork PR —
+      // so all of it reaches the model inside the untrusted fence.
+      const report = [`Pull request #${pr.number} ${pr.title} (${pr.state.toLowerCase()}) ${pr.headRefName} -> ${pr.baseRefName}`, pr.url]
+      if (pr.checks.length === 0) report.push('No CI checks reported.')
       for (const check of pr.checks) {
         const verdict = (check.conclusion || check.state || 'unknown').toLowerCase()
-        lines.push(`- ${check.name}: ${verdict}${check.description ? ` (${check.description})` : ''}${check.url ? ` ${check.url}` : ''}`)
+        report.push(`- ${check.name}: ${verdict}${check.description ? ` (${check.description})` : ''}${check.url ? ` ${check.url}` : ''}`)
       }
+      const lines = [
+        wrapUntrustedContent(report.join('\n'), { source: 'github', origin: pr.url || `pull request #${pr.number}`, kind: 'pr_checks' })
+      ]
       const failed = pr.checks.filter((c) => FAILED_CHECK_CONCLUSIONS.has((c.conclusion ?? '').toUpperCase()))
       let read = 0
       for (const check of failed) {
@@ -171,19 +247,56 @@ export const gitGithubHandlers = {
           break
         }
         read += 1
+        throwIfAborted(signal)
         try {
           const log = await prCheckLog(workspace, check.url)
           throwIfAborted(signal)
-          const head = `Failing step of "${check.name}"${log.step ? ` (${log.step})` : ''}${log.truncated ? ', last lines' : ''}:`
-          lines.push('', head, wrapUntrustedContent(log.excerpt || '(the job logged nothing)', { source: 'github', origin: check.url, kind: 'ci_log' }))
+          const text = [
+            `Check: ${check.name}`,
+            ...(log.step ? [`Failing step: ${log.step}`] : []),
+            log.truncated ? 'Last lines of the log:' : 'Log:',
+            log.excerpt || '(the job logged nothing)'
+          ].join('\n')
+          lines.push('', `Log of failed check ${read}:`, wrapUntrustedContent(text, { source: 'github', origin: check.url, kind: 'ci_log' }))
         } catch (err) {
-          lines.push('', `Log of "${check.name}" could not be read: ${err instanceof Error ? err.message : String(err)}`)
+          // Stopped: no more downloads, and no "could not be read" for a Stop.
+          throwIfAborted(signal)
+          lines.push('', `Log of failed check ${read} (${check.url}) could not be read: ${err instanceof Error ? err.message : String(err)}`)
         }
       }
       return toolOk('github_pr_checks', `#${pr.number}`, lines.join('\n'))
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return toolFail('github_pr_checks', summary, msg)
+    }
+  },
+  github_pr_comments: async (workspace, args, signal) => {
+    throwIfAborted(signal)
+    const number = typeof args.number === 'number' ? args.number : undefined
+    const summary = number ? `comments on #${number}` : 'comments'
+    try {
+      const pr = await prView(workspace, number)
+      throwIfAborted(signal)
+      if (!pr) return toolOk('github_pr_comments', summary, 'This branch has no pull request on GitHub.')
+      let threads: Awaited<ReturnType<typeof prReviewThreads>> = null
+      try {
+        threads = await prReviewThreads(workspace, pr.number)
+      } catch {
+        // Said in the text; the rest of the discussion still helps.
+        threads = null
+      }
+      throwIfAborted(signal)
+      // Every word here was written by someone on GitHub — on a public
+      // repository, anyone — so all of it reaches the model inside the fence.
+      return toolOk(
+        'github_pr_comments',
+        `#${pr.number}`,
+        wrapUntrustedContent(formatPrDiscussion(pr, threads), { source: 'github', origin: pr.url || `pull request #${pr.number}`, kind: 'pr_discussion' })
+      )
+    } catch (err) {
+      throwIfAborted(signal)
+      const msg = err instanceof Error ? err.message : String(err)
+      return toolFail('github_pr_comments', summary, msg)
     }
   },
   github_issue: async (workspace, args, signal) => {
@@ -221,10 +334,13 @@ export const gitGithubHandlers = {
         const lines = result.issues.map(
           (issue) => `#${issue.number} ${issue.state} ${issue.title} ${issue.url}`
         )
+        // Anyone can title an issue on a public repository.
         return toolOk(
           'github_issue',
           'list',
-          lines.length > 0 ? lines.join('\n') : 'No open issues.'
+          lines.length > 0
+            ? wrapUntrustedContent(lines.join('\n'), { source: 'github', origin: 'open issues', kind: 'issue_list' })
+            : 'No open issues.'
         )
       }
       const title = typeof args.title === 'string' ? args.title.trim() : ''

@@ -27,6 +27,8 @@ type UtilityRequest = {
   /** Base64 Int16 little-endian PCM at 16 kHz. */
   pcm16k?: string
   sampleRate?: number
+  /** ISO-639-1 hint for a multilingual model; absent for the English-only ones. */
+  language?: string
 }
 
 type UtilityResponse = {
@@ -155,7 +157,7 @@ async function handle(msg: UtilityRequest): Promise<void> {
         if (typeof msg.pcm16k !== 'string' || !msg.pcm16k.trim()) {
           throw new Error('transcribe requires pcm16k')
         }
-        const text = await invokeAsr(session.asr, msg.pcm16k, session.backend)
+        const text = await invokeAsr(session.asr, msg.pcm16k, session.backend, msg.language ? { language: msg.language } : {})
         post({ id, ok: true, text, modelId: session.modelId })
         return
       }

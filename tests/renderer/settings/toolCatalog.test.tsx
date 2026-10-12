@@ -181,7 +181,9 @@ describe('ToolCatalog', () => {
     }))
     render(<Catalog />)
     await waitFor(() => expect(group('Agent-built tools')).toBeTruthy())
-    expect(within(group('Agent-built tools')).getByRole('button').getAttribute('aria-expanded')).toBe('true')
+    expect(within(group('Agent-built tools')).getByRole('button', { name: /Agent-built tools/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(within(group('Agent-built tools')).getByRole('button', { name: 'View the code of count_todos' })).toBeTruthy()
+    expect(within(group('Agent-built tools')).getByRole('button', { name: 'Delete count_todos' })).toBeTruthy()
     // tests/gui-e2e/agent-built-tools.spec.ts pins this sentence.
     expect(
       screen.getByText(/each call asks you, and asks again whenever the code changes/)

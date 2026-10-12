@@ -8,7 +8,8 @@ export type ParsedProxyUrl = { ok: true; url: string } | { ok: false; error: str
 /**
  * A manual proxy: `http://host:port` or `https://host:port`. Credentials in
  * the URL are refused — settings are plain JSON and get exported; a proxy that
- * needs a password is set through HTTPS_PROXY in the environment instead.
+ * needs a password takes its user name and password in their own fields (the
+ * password goes to the key vault).
  */
 export function validateProxyUrl(raw: string): ParsedProxyUrl {
   const input = raw.trim()
@@ -29,7 +30,7 @@ export function validateProxyUrl(raw: string): ParsedProxyUrl {
   if (url.username || url.password) {
     return {
       ok: false,
-      error: 'Leave the password out of the address. For a proxy that needs one, set HTTPS_PROXY before starting the app.'
+      error: 'Leave the user name and password out of the address: they have their own fields below.'
     }
   }
   if (!url.hostname) return { ok: false, error: 'The proxy address needs a host.' }
@@ -40,6 +41,19 @@ export function validateProxyUrl(raw: string): ParsedProxyUrl {
     return { ok: false, error: 'A proxy address is just a host and port, with no path.' }
   }
   return { ok: true, url: `${url.protocol}//${url.host}` }
+}
+
+/** A proxy URL with credentials for Node's own traffic (`http://user:pass@host:port`). */
+export function proxyUrlWithCredentials(url: string, username: string, password: string | null): string {
+  if (!username || !password) return url
+  try {
+    const u = new URL(url)
+    u.username = encodeURIComponent(username)
+    u.password = encodeURIComponent(password)
+    return u.toString().replace(/\/$/, '')
+  } catch {
+    return url
+  }
 }
 
 /** `a.com, *.corp ; 10.0.0.0/8` → `a.com,*.corp,10.0.0.0/8` (NO_PROXY form). */

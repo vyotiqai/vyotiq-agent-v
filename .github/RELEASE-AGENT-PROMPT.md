@@ -71,7 +71,7 @@ That is done when, and only when, all of the following are true:
   Every one of these is derived from a command's output or read from a file. If
   you cannot derive it, STOP (§B).
 - **Never publish a release whose notes you did not author.** The stub body
-  `Vyotiq vX.Y.Z installers and update metadata.` is a failure state, not a
+  `Agent V vX.Y.Z installers and update metadata.` is a failure state, not a
   default (§5).
 - **Never mark a phase green on the strength of CI alone** where this prompt
   asks for a packaged-app launch or a download check. CI has passed on builds
@@ -115,11 +115,11 @@ tag matching `v*` and runs four stages in order:
 ```
 verify              typecheck + unit tests + tag/version match
   └─ create-release creates a DRAFT release in the releases repo, stub body
-       └─ package   3 parallel jobs: windows-x64 | linux-x64 | macOS (arm64+x64)
+       └─ package   4 parallel jobs: windows (x64+arm64) | linux-x64 | linux-arm64 | macOS (arm64+x64)
                     electron-builder --publish always → uploads into that draft
             └─ finalize-release
                     backfills notes only if the body is empty or still the stub
-                    asserts all installers + latest.yml / latest-linux.yml / latest-mac.yml
+                    asserts all installers + latest.yml / latest-linux.yml / latest-linux-arm64.yml / latest-mac.yml
                     flips draft → published
                     mirrors the pointer release onto the source repo
 ```
@@ -445,7 +445,7 @@ git commit -m "chore: bump version to X.Y.Z"
 node -p "require('./package.json').version"
 
 # 3. Annotated tag, then push branch and tag.
-git tag -a vX.Y.Z -m "Vyotiq vX.Y.Z"
+git tag -a vX.Y.Z -m "Agent V vX.Y.Z"
 git push origin main
 git push origin vX.Y.Z
 
@@ -461,8 +461,8 @@ gh run list --workflow=Release --limit 1
 gh run watch <run-id> --repo vyotiqai/vyotiq-agent-v --exit-status
 ```
 
-Expect roughly 20–40 minutes: `Verify → Create release → windows-x64 /
-linux-x64 / macOS → Finalize release`.
+Expect roughly 20–40 minutes: `Verify → Create release → windows /
+linux-x64 / linux-arm64 / macOS → Finalize release`.
 
 Print: `PHASE 5 tag — PASS — vX.Y.Z pushed, run <url> <status>`.
 
@@ -511,12 +511,15 @@ Required — the run is not done until every one is present:
 
 - `isDraft: false`
 - A body that is your authored notes
-- **All three updater manifests**: `latest.yml`, `latest-linux.yml`,
-  `latest-mac.yml`. A missing one **silently kills auto-update on that OS** (this
-  happened on v1.1.0). Blockmaps alongside them.
-- Installers: `Vyotiq-X.Y.Z-setup.exe`, `Vyotiq-X.Y.Z.AppImage`,
-  `vyotiq_X.Y.Z_amd64.deb`, `vyotiq-X.Y.Z.x86_64.rpm`, `Vyotiq-X.Y.Z-arm64.dmg`,
-  `Vyotiq-X.Y.Z-x64.dmg`, `Vyotiq-X.Y.Z-arm64-mac.zip`, `Vyotiq-X.Y.Z-mac.zip`
+- **All four updater manifests**: `latest.yml` (lists both Windows
+  installers), `latest-linux.yml`, `latest-linux-arm64.yml`, `latest-mac.yml`.
+  A missing one **silently kills auto-update on that OS** (this happened on
+  v1.1.0). Blockmaps alongside them.
+- Installers: `Vyotiq-X.Y.Z-x64-setup.exe`, `Vyotiq-X.Y.Z-arm64-setup.exe`,
+  `Vyotiq-X.Y.Z.AppImage`, `Vyotiq-X.Y.Z-arm64.AppImage`,
+  `vyotiq_X.Y.Z_amd64.deb`, `vyotiq_X.Y.Z_arm64.deb`, `vyotiq-X.Y.Z.x86_64.rpm`,
+  `vyotiq-X.Y.Z.aarch64.rpm`, `Vyotiq-X.Y.Z-arm64.dmg`, `Vyotiq-X.Y.Z-x64.dmg`,
+  `Vyotiq-X.Y.Z-arm64-mac.zip`, `Vyotiq-X.Y.Z-mac.zip`
 - The version inside each filename equals `X.Y.Z`.
 - The pointer release `vX.Y.Z` exists on `vyotiqai/vyotiq-agent-v`, marked Latest.
 
@@ -525,9 +528,9 @@ Required — the run is not done until every one is present:
 Do this for at least the platform you are on.
 
 ```powershell
-gh release download vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --pattern "*-setup.exe" --dir .\dist-verify
+gh release download vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --pattern "*-x64-setup.exe" --dir .\dist-verify
 gh release download vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --pattern "latest.yml" --dir .\dist-verify
-certutil -hashfile .\dist-verify\Vyotiq-X.Y.Z-setup.exe SHA512
+certutil -hashfile .\dist-verify\Vyotiq-X.Y.Z-x64-setup.exe SHA512
 ```
 
 `latest.yml` carries the SHA512 **base64-encoded**; decode it and compare. A
@@ -552,8 +555,8 @@ payload by unpacking it instead — an NSIS installer is a readable archive:
 
 ```powershell
 $7z = (Get-ChildItem node_modules\.pnpm -Recurse -Filter 7z.exe | Select-Object -First 1).FullName
-& $7z l .\dist-verify\Vyotiq-X.Y.Z-setup.exe | Select-String 'app-64.7z|\.exe$'
-& $7z e .\dist-verify\Vyotiq-X.Y.Z-setup.exe -o.\dist-verify\unpacked -y $null
+& $7z l .\dist-verify\Vyotiq-X.Y.Z-x64-setup.exe | Select-String 'app-64.7z|\.exe$'
+& $7z e .\dist-verify\Vyotiq-X.Y.Z-x64-setup.exe -o.\dist-verify\unpacked -y $null
 ```
 
 The SHA512 match plus the expected payload entries is the release gate. CI has
@@ -681,7 +684,7 @@ A release is done when every box is ticked with evidence:
 - [ ] `package.json` version = tag = release version
 - [ ] Release **published**, not draft, in `vyotiqai/vyotiq-agent-v-releases`
 - [ ] Authored structured notes on the release — not the stub
-- [ ] 8 installers + `latest.yml` + `latest-linux.yml` + `latest-mac.yml` + blockmaps
+- [ ] 12 installers + `latest.yml` + `latest-linux.yml` + `latest-linux-arm64.yml` + `latest-mac.yml` + blockmaps
 - [ ] Downloaded installer SHA512 matched, installed, launched, version confirmed
 - [ ] Pointer release mirrored on the source repo, marked Latest
 - [ ] vyotiq.com rebuilt and showing X.Y.Z on Download and Changelog
@@ -768,7 +771,7 @@ pnpm pack:linux          # AppImage
 pnpm pack:dir:win:alt    # alternate output dir when the first is locked
 
 # Release
-git tag -a vX.Y.Z -m "Vyotiq vX.Y.Z" && git push origin main && git push origin vX.Y.Z
+git tag -a vX.Y.Z -m "Agent V vX.Y.Z" && git push origin main && git push origin vX.Y.Z
 gh run watch <id> --repo vyotiqai/vyotiq-agent-v --exit-status
 gh release edit vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --notes-file release-notes/vX.Y.Z.md
 gh release view vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --json isDraft,body,assets
@@ -784,7 +787,7 @@ updater manifests unless electron-builder publishes them, and they are built on
 one machine's toolchain.
 
 ```bash
-pnpm pack:win       # → dist-package/Vyotiq-X.Y.Z-setup.exe
+pnpm pack:win       # → dist-package/Vyotiq-X.Y.Z-x64-setup.exe (this machine's arch)
 pnpm pack:linux     # → dist-package/Vyotiq-X.Y.Z.AppImage
 pnpm pack:mac       # → dist-package/Vyotiq-X.Y.Z-{arm64,x64}.dmg   (macOS host only)
 ```

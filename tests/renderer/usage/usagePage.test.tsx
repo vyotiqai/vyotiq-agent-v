@@ -98,6 +98,31 @@ describe('Usage', () => {
     expect(page.textContent).toContain('Tokens1.2M71% from cache')
   })
 
+  it('lists side calls on their own, so a background cost is never hidden in the total', async () => {
+    homeActivity = vi.fn(async () => ({
+      ok: true as const,
+      data: result({
+        totals: {
+          runs: 9,
+          billedInputTokens: 900_000,
+          outputTokens: 340_000,
+          billedCost: 4.21,
+          sideCalls: [{ site: 'commit_message', calls: 2, billedInputTokens: 38_952, outputTokens: 80, estimatedCost: 0.12 }]
+        }
+      })
+    }))
+    renderUsage()
+    const side = await screen.findByRole('region', { name: 'Side calls' })
+    const row = side.querySelector('[data-usage-side-call="commit_message"]') as HTMLElement
+    expect(row.textContent).toBe('Commit messages2 calls39K$0.12 est.')
+  })
+
+  it('shows no side calls section when there were none', async () => {
+    renderUsage()
+    await screen.findByText('Spend per day')
+    expect(screen.queryByRole('region', { name: 'Side calls' })).toBeNull()
+  })
+
   it('draws one chart by day, spend first, with a switch to tokens and tasks', async () => {
     renderUsage()
     const spend = await screen.findByRole('region', { name: 'Spend per day' })

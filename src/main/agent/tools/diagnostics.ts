@@ -6,8 +6,8 @@ import { resolveInsideWorkspace } from '@main/workspace/safePath'
 import { assertInsideWorkspace } from '../../../shared/workspacePath'
 import { scrubPath } from '../../../shared/utils/scrub'
 import { abortError } from '../../../shared/errors'
-import { killProcessTree, sanitizedTerminalEnv } from './terminal'
-import { sandboxHeaderLines, sandboxHintLines, type SandboxLaunch } from '../sandbox/wrap'
+import { agentCommandEnv, killProcessTree } from './terminal'
+import { sandboxHeaderLines, sandboxHintLines, wrappedSpawnOptions, type SandboxLaunch, type WrappedCommand } from '../sandbox/wrap'
 
 const DIAG_TIMEOUT_MS = 120_000
 /**
@@ -185,10 +185,10 @@ export function runSafeCommand(
   }
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null; killed: boolean }> {
   return new Promise((resolve, reject) => {
-    const launch = options.sandbox ? options.sandbox.wrap(bin, args) : { bin, args }
+    const launch: WrappedCommand = options.sandbox ? options.sandbox.wrap(bin, args) : { bin, args }
     const child = spawn(launch.bin, launch.args, {
       cwd: options.cwd,
-      env: options.env,
+      ...wrappedSpawnOptions(launch, options.env),
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -590,7 +590,7 @@ export async function toolDiagnosticsAsync(
   try {
     const { stdout, stderr, exitCode, killed } = await runSafeCommand(bin, argv, {
       cwd: workspace,
-      env: sanitizedTerminalEnv(),
+      env: agentCommandEnv(),
       signal,
       timeoutMs: DIAG_TIMEOUT_MS,
       sandbox

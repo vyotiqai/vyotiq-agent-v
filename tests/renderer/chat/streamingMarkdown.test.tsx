@@ -6,15 +6,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import {
   MarkdownContent,
   balanceIncompleteMarkdown,
-  prepareStreamingMarkdown,
   splitMarkdownBlocks,
-  trailingOpenFenceBody,
   HIGHLIGHT_CACHE_MAX_ENTRIES,
   setHighlightCacheEntry,
   getHighlightCacheEntry,
   clearHighlightCacheForTests,
   highlightCacheSizeForTests
 } from '@renderer/lib/ui/MarkdownContent'
+import { trailingOpenFenceBody } from '@renderer/lib/markdown/fenceUtils'
 
 beforeEach(() => {
   clearHighlightCacheForTests()
@@ -32,41 +31,41 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('prepareStreamingMarkdown', () => {
+describe('balanceIncompleteMarkdown while streaming', () => {
   it('closes an unclosed fence without balancing inline markdown', () => {
-    expect(prepareStreamingMarkdown('```\nx = a**b')).toBe('```\nx = a**b\n```')
+    expect(balanceIncompleteMarkdown('```\nx = a**b')).toBe('```\nx = a**b\n```')
   })
 
   it('balances bold while streaming', () => {
-    expect(prepareStreamingMarkdown('Partial **bold')).toBe('Partial **bold**')
+    expect(balanceIncompleteMarkdown('Partial **bold')).toBe('Partial **bold**')
   })
 })
 
-describe('prepareStreamingMarkdown fence nesting', () => {
+describe('balanceIncompleteMarkdown fence nesting', () => {
   it('does not open a stray tilde fence for a tilde line inside a backtick fence', () => {
-    expect(prepareStreamingMarkdown('```\n~~~\nstill inside')).toBe('```\n~~~\nstill inside\n```')
+    expect(balanceIncompleteMarkdown('```\n~~~\nstill inside')).toBe('```\n~~~\nstill inside\n```')
   })
 
   it('closes a four-backtick fence with a matching four-backtick marker', () => {
-    expect(prepareStreamingMarkdown('````md\n```js\nconst x = 1\n```')).toBe(
+    expect(balanceIncompleteMarkdown('````md\n```js\nconst x = 1\n```')).toBe(
       '````md\n```js\nconst x = 1\n```\n````'
     )
   })
 
   it('leaves a closed indented fence alone', () => {
-    expect(prepareStreamingMarkdown('  ```js\n  const x = 1\n  ```')).toBe(
+    expect(balanceIncompleteMarkdown('  ```js\n  const x = 1\n  ```')).toBe(
       '  ```js\n  const x = 1\n  ```'
     )
   })
 
   it('keeps a nested fence opener while the outer fence is still streaming', () => {
-    expect(prepareStreamingMarkdown('```md\nHere is the patch:\n```ts')).toBe(
+    expect(balanceIncompleteMarkdown('```md\nHere is the patch:\n```ts')).toBe(
       '```md\nHere is the patch:\n```ts\n```'
     )
   })
 
   it('closes a language fence that is only the opener so far', () => {
-    expect(prepareStreamingMarkdown('```js')).toBe('```js\n```')
+    expect(balanceIncompleteMarkdown('```js')).toBe('```js\n```')
   })
 })
 
@@ -372,5 +371,22 @@ describe('highlightCache bounds', () => {
     expect(
       getHighlightCacheEntry(`key-${HIGHLIGHT_CACHE_MAX_ENTRIES + 2}`)
     ).toBe(`<pre>html-${HIGHLIGHT_CACHE_MAX_ENTRIES + 2}</pre>`)
+  })
+})
+
+describe('MarkdownContent, finished', () => {
+  it('keeps a footnote with its note and a loose list as one list', () => {
+    const doc = 'Claim[^1].\n\n- one\n\n- two\n\n  more of two\n\n[^1]: The source.'
+    const { container } = render(<MarkdownContent content={doc} />)
+    expect(container.querySelector('sup a')).not.toBeNull()
+    expect(container.querySelector('section.footnotes')!.textContent).toContain('The source.')
+    expect(container.querySelectorAll('ul')).toHaveLength(1)
+    expect(container.querySelectorAll('ul > li')).toHaveLength(2)
+  })
+
+  it('reads a [[path]] citation as code in prose, never inside a fence', () => {
+    const { container } = render(<MarkdownContent content={'See [[src/a.ts:4]].\n\n```md\n[[src/a.ts:4]]\n```'} />)
+    expect(container.querySelector('p code')!.textContent).toBe('src/a.ts:4')
+    expect(container.querySelector('pre')!.textContent).toContain('[[src/a.ts:4]]')
   })
 })

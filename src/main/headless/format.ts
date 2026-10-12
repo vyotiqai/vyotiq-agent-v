@@ -1,4 +1,5 @@
 import type { AgentEvent } from '../../shared/ipc'
+import { briefOutcome } from '../../shared/utils/agentInstance'
 import type { HeadlessOutputFormat } from './args'
 import type { HeadlessResult } from './outcome'
 
@@ -50,7 +51,7 @@ export function progressLineForEvent(ev: AgentEvent): string | null {
       return '· compacted earlier context'
     case 'agent_instance_update':
       return ev.phase === 'started'
-        ? `· helper started${ev.goal ? `: ${oneLine(ev.goal)}` : ''}`
+        ? `· helper started${ev.goal ? `: ${oneLine(briefOutcome(ev.goal) || ev.goal)}` : ''}`
         : `· helper ${ev.phase}${ev.summary ? `: ${oneLine(ev.summary)}` : ''}`
     default:
       return null

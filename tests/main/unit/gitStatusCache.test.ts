@@ -62,6 +62,18 @@ describe('gitStatusCache', () => {
     expect(readGitStatus).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a longer list apart from the default one, and invalidates both', async () => {
+    await readGitStatusCached('C:/repo')
+    await readGitStatusCached('C:/repo', 5000)
+    await readGitStatusCached('C:/repo', 5000)
+    expect(readGitStatus).toHaveBeenCalledTimes(2)
+    expect(readGitStatus).toHaveBeenLastCalledWith('C:/repo', 5000)
+    invalidateGitStatusCache('C:/repo')
+    await readGitStatusCached('C:/repo', 5000)
+    await readGitStatusCached('C:/repo')
+    expect(readGitStatus).toHaveBeenCalledTimes(4)
+  })
+
   it('invalidates so the next read shells out again', async () => {
     await readGitStatusCached('C:/repo')
     invalidateGitStatusCache('C:/repo')

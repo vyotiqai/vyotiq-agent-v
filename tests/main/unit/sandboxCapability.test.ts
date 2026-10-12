@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   BWRAP_MISSING_REASON,
   detectSandboxCapability,
-  WINDOWS_UNAVAILABLE_REASON,
+  windowsUnavailableReason,
   type SandboxCapabilityDeps
 } from '@main/agent/sandbox/capability'
 
@@ -12,18 +12,31 @@ function deps(overrides: Partial<SandboxCapabilityDeps>): SandboxCapabilityDeps 
     exists: () => false,
     pathEnv: '/usr/local/bin:/usr/bin',
     probe: () => ({ ok: true, detail: '' }),
+    prepareWindows: () => ({ ok: false, detail: 'not under test' }),
     ...overrides
   }
 }
 
 describe('detectSandboxCapability', () => {
-  it('is unavailable on Windows with the reason, without probing anything', () => {
+  it('runs at low integrity on Windows once the low copies start there, without the POSIX probes', () => {
     const probe = vi.fn()
-    const exists = vi.fn(() => true)
-    const res = detectSandboxCapability(deps({ platform: 'win32', probe, exists }))
-    expect(res).toEqual({ available: false, mechanism: null, reason: WINDOWS_UNAVAILABLE_REASON, executable: null })
+    const shells = { cmd: 'C:\\ud\\sandbox\\cmd-low.exe', powershell: 'C:\\ud\\sandbox\\powershell-low.exe' }
+    const res = detectSandboxCapability(deps({ platform: 'win32', probe, prepareWindows: () => ({ ok: true, shells }) }))
+    expect(res).toEqual({ available: true, mechanism: 'low-integrity', reason: null, executable: shells.cmd, shells })
     expect(probe).not.toHaveBeenCalled()
-    expect(exists).not.toHaveBeenCalled()
+  })
+
+  it('says why on Windows when the low copies cannot be made', () => {
+    const res = detectSandboxCapability(
+      deps({ platform: 'win32', prepareWindows: () => ({ ok: false, detail: 'icacls could not label cmd-low.exe' }) })
+    )
+    expect(res).toEqual({
+      available: false,
+      mechanism: null,
+      reason: windowsUnavailableReason('icacls could not label cmd-low.exe'),
+      executable: null
+    })
+    expect(res.reason).toBe('Commands cannot be confined at low integrity here: icacls could not label cmd-low.exe.')
   })
 
   it('uses sandbox-exec on macOS when it exists and starts', () => {

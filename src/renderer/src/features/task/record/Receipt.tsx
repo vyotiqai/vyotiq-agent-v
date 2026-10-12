@@ -18,7 +18,17 @@ import {
 } from '@renderer/features/chat/utils/messageFooterStats'
 import { RecordRow } from './RecordLayout'
 
-export type ReceiptPart = { key: string; text: string; title: string }
+/** `detail`: telemetry (tokens, speed, cache) the line keeps for its hover, not its text. */
+export type ReceiptPart = { key: string; text: string; title: string; detail?: true }
+
+/**
+ * A run's cost as the record says it: "~" marks an estimate from published
+ * prices, but an estimate of nothing is nothing — a free model's "~$0" on
+ * every row was a squiggle carrying no news.
+ */
+export function costLabel(cost: { cost: number; estimated: boolean }): string {
+  return cost.estimated && cost.cost !== 0 ? `~${formatUsdCost(cost.cost)}` : formatUsdCost(cost.cost)
+}
 
 /**
  * The run's receipt as parts: wall time, tokens, output speed, cache share and
@@ -43,16 +53,16 @@ export function receiptParts(
   }
   if (!usage || usage.steps <= 0) return parts
   const tokens = freshCaptionTokens(usage)
-  if (tokens > 0) parts.push({ key: 'tokens', text: tokensCaption(tokens), title: 'Fresh input + output tokens' })
+  if (tokens > 0) parts.push({ key: 'tokens', text: tokensCaption(tokens), title: 'Fresh input + output tokens', detail: true })
   const speed = outputTokensPerSecond(usage)
-  if (speed != null) parts.push({ key: 'speed', text: formatTokPerSec(speed), title: 'Output speed' })
+  if (speed != null) parts.push({ key: 'speed', text: formatTokPerSec(speed), title: 'Output speed', detail: true })
   const cache = cacheCaptionPct(usage)
-  if (cache != null) parts.push({ key: 'cache', text: cacheHitCaption(cache), title: 'Prompt cache hits' })
+  if (cache != null) parts.push({ key: 'cache', text: cacheHitCaption(cache), title: 'Prompt cache hits', detail: true })
   const cost = turnCost(usage)
   if (cost) {
     parts.push({
       key: 'cost',
-      text: cost.estimated ? `~${formatUsdCost(cost.cost)}` : formatUsdCost(cost.cost),
+      text: costLabel(cost),
       title: cost.estimated ? 'Estimated from published prices' : 'Billed by the provider'
     })
   }
@@ -69,7 +79,8 @@ export function ReceiptLine({
   outcome,
   outcomeDetail,
   actions,
-  summary
+  summary,
+  onRerun
 }: {
   usage: StepUsageTotals | null
   startedAt: number | null
@@ -87,13 +98,20 @@ export function ReceiptLine({
   actions?: ReactNode
   /** The run's result as text: a settled run offers to copy it. */
   summary?: string
+  /** The latest finished run: run its instruction again. */
+  onRerun?: () => void
 }) {
   const now = useSharedNow(live && startedAt != null)
   const end = live ? now : endedAt
   const duration = startedAt != null && end != null ? end - startedAt : null
-  const parts = receiptParts(usage, duration, live ? [] : checks)
+  const all = receiptParts(usage, duration, live ? [] : checks)
+  // Time, checks and cost answer "how did it go"; tokens, speed and cache are
+  // for whoever tunes the harness: the line's hover, and its screen-reader text.
+  const parts = all.filter((p) => !p.detail)
+  const details = all.filter((p) => p.detail)
   const copyable = !live && Boolean(summary?.trim())
-  if (parts.length === 0 && !feedback && !outcome && !actions && !copyable) return null
+  const rerun = live ? undefined : onRerun
+  if (parts.length === 0 && details.length === 0 && !feedback && !outcome && !actions && !copyable && !rerun) return null
   const rate = (rating: RunFeedbackRating): void => {
     if (!feedback) return
     feedback.onRate(feedback.value === rating ? null : rating)
@@ -102,7 +120,7 @@ export function ReceiptLine({
     <RecordRow className="border-t border-border">
       <div
         className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-tertiary tnum"
-        title={live ? 'So far' : 'Receipt'}
+        title={details.length > 0 ? details.map((p) => p.text).join(' · ') : live ? 'So far' : 'Receipt'}
         data-receipt
       >
         {outcome ? (
@@ -125,14 +143,20 @@ export function ReceiptLine({
             {p.text}
           </span>
         ))}
+        {details.length > 0 ? (
+          <span className="sr-only" data-receipt-details>
+            {details.map((p) => `${p.title}: ${p.text}`).join('; ')}
+          </span>
+        ) : null}
         <span className="flex-1" />
         {actions ? (
           <span className="flex items-center gap-1 font-sans" data-receipt-actions>
             {actions}
           </span>
         ) : null}
-        {!live && (feedback || copyable) ? (
+        {!live && (feedback || copyable || rerun) ? (
           <span className="flex items-center gap-0.5">
+            {rerun ? <IconButton icon="retry" label="Run this again" size="sm" tone="muted" onClick={rerun} /> : null}
             {feedback ? (
               <>
                 <IconButton

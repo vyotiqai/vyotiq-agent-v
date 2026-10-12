@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitStatus, GitStatusResult } from '@shared/ipc'
+import { useGitStatusLimit } from '@renderer/lib/git/gitStatusLimit'
 
 export type GitStatusState = {
   status: GitStatus | null
@@ -39,6 +40,7 @@ export function useGitStatus(
   const [loading, setLoading] = useState(false)
   const [manualRevision, setManualRevision] = useState(0)
   const requestRef = useRef(0)
+  const limit = useGitStatusLimit(workspacePath)
 
   useEffect(() => {
     if (!workspacePath || !enabled) {
@@ -57,8 +59,7 @@ export function useGitStatus(
     const start = (): void => {
       if (cancelled || request !== requestRef.current) return
       setLoading(true)
-      void window.vyotiq
-        .gitStatus(workspacePath)
+      void (limit ? window.vyotiq.gitStatus(workspacePath, { limit }) : window.vyotiq.gitStatus(workspacePath))
         .then((ipcResult) => {
           if (cancelled || request !== requestRef.current) return
           if (!ipcResult.ok) {
@@ -107,7 +108,7 @@ export function useGitStatus(
       }
       if (timer != null) clearTimeout(timer)
     }
-  }, [workspacePath, revision, manualRevision, enabled, deferStartupMs])
+  }, [workspacePath, revision, manualRevision, enabled, deferStartupMs, limit])
 
   const refresh = useCallback(() => setManualRevision((value) => value + 1), [])
 

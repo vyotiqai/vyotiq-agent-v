@@ -135,7 +135,10 @@ win:
   # packs when CSC_LINK is unset) or Windows auto-update always fails. Re-add
   # `publisherName: <cert subject CN>` together with win.forceCodeSigning: true
   # once the signing cert is always present in the release environment.
-  # Win x64 only — drop other onnxruntime natives (~150 MB). macOS/Linux keep theirs.
+  # Each Windows package keeps only its own arch's natives: `${arch}` is the
+  # arch being packed (x64 or arm64) and `!(…)` matches every other one, so
+  # the x64 app drops the arm64 onnxruntime and node-pty builds and the arm64
+  # app drops the x64 ones (~150 MB of onnxruntime alone).
   files:
     # App exclusions repeat here — see the `files:` comment above.
     - from: .
@@ -167,25 +170,47 @@ win:
         - '!{.git,.github,.cursor,.vyotiq}/**'
         - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
         - '!**/onnxruntime-node/bin/napi-v6/linux/**'
-        - '!**/onnxruntime-node/bin/napi-v6/win32/arm64/**'
-        # node-pty: keep win32-x64 prebuilds only (platform-wrong).
+        - '!**/onnxruntime-node/bin/napi-v6/win32/!(${arch})/**'
+        # node-pty: keep this arch's win32 prebuild only.
         - '!**/node_modules/node-pty/prebuilds/{darwin,linux}*/**'
-        - '!**/node_modules/node-pty/prebuilds/win32-arm64/**'
+        - '!**/node_modules/node-pty/prebuilds/win32-!(${arch})/**'
   executableName: Vyotiq
+  # Run by the uninstaller from resources/uninstall (see nsis.include).
+  extraResources:
+    - from: build/uninstall
+      to: uninstall
+    # The `vyotiq` command. Settings puts resources/cli on the user PATH; the
+    # uninstaller takes it off (path-entry.ps1).
+    - from: build/cli
+      to: cli
 nsis:
-  artifactName: ${productName}-${version}-setup.${ext}
+  # One installer per arch, not one carrying both: release.yml packs x64 and
+  # arm64 in one run, and latest.yml then lists both installers. The updater
+  # takes the one whose name holds its own arch (electron-updater findFile),
+  # so the name must carry `${arch}`.
+  buildUniversalInstaller: false
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
-  # Offer cleanup at uninstall: the assisted uninstaller shows a checkbox to
-  # remove the per-user app data dir (%APPDATA%\Vyotiq) instead of leaving
-  # stale profiles/configs behind forever.
+  # Vyotiq is the company, Agent V the product. productName stays "Vyotiq":
+  # it names %APPDATA%\Vyotiq, the .exe and the update feed's files, and
+  # changing it would orphan every install's data. What a person reads in the
+  # Start menu, on the desktop, in toasts and in Installed apps is the product.
+  # An upgrade renames the old "Vyotiq" shortcuts: the installer reads the
+  # previous ShortcutName from its registry key (setLinkVars in common.nsh).
+  shortcutName: Agent V
+  uninstallDisplayName: Agent V
+  # Uninstalling deletes the per-user app data dir (%APPDATA%\Vyotiq) instead
+  # of leaving stale profiles/configs behind forever. There is no checkbox: the
+  # template deletes it unless the uninstaller runs for an update.
   deleteAppDataOnUninstall: true
   runAfterFinish: true
+  # customUnInstall puts back the Windows sandbox's integrity labels
+  # (build/uninstall/restore-sandbox-labels.ps1, shipped by win.extraResources).
+  include: build/installer.nsh
 mac:
   icon: resources/icon.icns
   target:
@@ -251,6 +276,10 @@ linux:
   # fail. fpm accepts any string, so this still produces a buildable .deb.
   maintainer: "Vyotiq <support@vyotiq.com>"
   category: Development
+  # The launcher's label; the binary and install path keep productName.
+  desktop:
+    entry:
+      Name: Agent V
   # x-scheme-handler entry so deb/rpm installs resolve vyotiq:// links via xdg.
   mimeTypes:
     - x-scheme-handler/vyotiq
@@ -288,6 +317,8 @@ linux:
         - '!{.git,.github,.cursor,.vyotiq}/**'
         - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
         - '!**/onnxruntime-node/bin/napi-v6/win32/**'
+        # This arch's linux onnxruntime only (x64 or arm64).
+        - '!**/onnxruntime-node/bin/napi-v6/linux/!(${arch})/**'
         # node-pty: keep linux prebuilds only (platform-wrong).
         - '!**/node_modules/node-pty/prebuilds/{win32,darwin}*/**'
 appImage:

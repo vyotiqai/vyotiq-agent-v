@@ -2,18 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { logger } from '@shared/logger'
 
 const mocks = vi.hoisted(() => ({
-  readGitDiff: vi.fn(),
+  readCommitChanges: vi.fn(),
   readGitLog: vi.fn(),
-  readGitStatus: vi.fn(),
   streamChat: vi.fn(),
   getSettings: vi.fn(),
   getSecret: vi.fn()
 }))
 
 vi.mock('@main/git/git', () => ({
-  readGitDiff: mocks.readGitDiff,
-  readGitLog: mocks.readGitLog,
-  readGitStatus: mocks.readGitStatus
+  readCommitChanges: mocks.readCommitChanges,
+  readGitLog: mocks.readGitLog
 }))
 
 vi.mock('@main/settings/settings', () => ({
@@ -41,43 +39,26 @@ import { generateCommitMessage } from '@main/git/commitMessage'
 
 describe('generateCommitMessage', () => {
   beforeEach(() => {
-    mocks.readGitDiff.mockReset()
+    mocks.readCommitChanges.mockReset()
     mocks.readGitLog.mockReset()
-    mocks.readGitStatus.mockReset()
     mocks.streamChat.mockReset()
     mocks.getSettings.mockReset()
     mocks.getSecret.mockReset()
-    mocks.readGitDiff.mockResolvedValue({
-      ok: true,
-      content: 'diff --git a/src/tools/shell.ts b/src/tools/shell.ts\n+export function runShell() {}'
-    })
-    mocks.readGitStatus.mockResolvedValue({
-      kind: 'ok',
-      status: {
-        branch: 'main',
-        files: [
-          {
-            path: 'src/tools/shell.ts',
-            status: 'added',
-            added: 1,
-            removed: 0,
-            addedStaged: 0,
-            removedStaged: 0,
-            addedUnstaged: 1,
-            removedUnstaged: 0,
-            binary: false,
-            staged: false,
-            unstaged: true
-          }
-        ],
-        truncated: false,
-        fileCount: 1,
-        added: 1,
-        removed: 0,
-        hasRemote: false,
-        hasCommits: true
-      }
-    })
+    mocks.readCommitChanges.mockImplementation(async (_cwd: string, mode: string) => ({
+      files: [
+        {
+          path: 'src/tools/shell.ts',
+          kind: 'added',
+          added: 1,
+          removed: 0,
+          binary: false,
+          untracked: true,
+          diff: 'new file src/tools/shell.ts' + String.fromCharCode(10) + '+export function runShell() {}'
+        }
+      ],
+      partial: false,
+      key: `generation-test-${mode}-${Math.random()}`
+    }))
     mocks.readGitLog.mockResolvedValue([{ subject: 'feat(cli): add command runner' }])
     mocks.getSettings.mockReturnValue({
       provider: 'ollama',
@@ -100,7 +81,7 @@ describe('generateCommitMessage', () => {
       message: 'feat(cli): add shell execution helper',
       source: 'agent'
     })
-    expect(mocks.readGitDiff).toHaveBeenCalledTimes(1)
+    expect(mocks.readCommitChanges).toHaveBeenCalledTimes(1)
   })
 
   it('writes the subject with the utility model when one is set, and with the task model when its provider has no key', async () => {
@@ -147,12 +128,12 @@ describe('generateCommitMessage', () => {
   })
 
   it('falls back with the diff reason when the diff cannot be read', async () => {
-    mocks.readGitDiff.mockResolvedValue({ ok: false, error: 'git failed' })
+    mocks.readCommitChanges.mockResolvedValue(null)
 
     await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
       message: null,
       source: 'fallback',
-      reason: 'No diff content found for the selected changes'
+      reason: 'No changes to describe'
     })
   })
 
@@ -200,7 +181,7 @@ describe('generateCommitMessage', () => {
         source: 'fallback',
         reason: 'Generation timed out'
       })
-      await vi.advanceTimersByTimeAsync(12_000)
+      await vi.advanceTimersByTimeAsync(30_000)
       await expectation
     } finally {
       vi.useRealTimers()

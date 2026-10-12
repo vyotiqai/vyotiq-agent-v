@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { existsSync, readFileSync, realpathSync, rmSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { logger } from '../../shared/logger'
+import { ROOT_INSTRUCTION_FILES } from '../../shared/rules'
 import { resolveInsideWorkspace } from '../workspace/safePath'
 import { HARNESS_SECTION_TAGS, isWellFormedHarness } from './harnessSections'
 import { wrapUntrustedContent } from './untrustedContent'
@@ -46,6 +47,40 @@ Data viz: a \`\`\`chart fence whose body is one JSON spec renders as a chart —
 Views: a \`\`\`view fence renders one JSON spec as UI — {"id","title","blocks":[…]}; blocks stats{items:[{label,value}]}, rows{items:[{title,meta?,value?,state?,diff?:{add,del},path?}]}, table{columns:[{id,label}],rows:[{cells}]}, chart{spec}, checks{items:[{label,state}]}, note{text}, actions{actions:[{label,say}]}; any item may take "say" or "do" (all listed in show_view). Only data observed this run; reuse the id to update it; a clicked "say" is the user's next message. While working, show_view draws or updates one in place; a live{source} block (sources listed there) is filled by the app and stays current — prefer it to typing those figures, and to answer questions about them.
 </output_format>
 `
+
+/**
+ * The harness names shell commands for this machine only: every platform used
+ * to carry the Windows ones (Stop-Process, Get-CimInstance) in its stable
+ * prefix. The platform is fixed for the process, so the prefix stays
+ * byte-stable for the cache.
+ */
+const PLATFORM_COMMANDS: Record<'win32' | 'posix', Record<string, string>> = {
+  win32: {
+    kill_by_name: 'Stop-Process -Name electron.exe, taskkill /IM electron.exe, Get-Process electron | Stop-Process',
+    list_processes: 'Get-CimInstance Win32_Process'
+  },
+  posix: {
+    kill_by_name: 'pkill electron, killall Electron',
+    list_processes: 'ps -eo pid,ppid,command'
+  }
+}
+
+/**
+ * The instruction files the rules loader actually reads, so the harness can't
+ * name one nothing reads (it once listed `AGENT-V.md`) or miss one it does.
+ */
+const INSTRUCTION_FILES_TEXT = [...ROOT_INSTRUCTION_FILES, '.cursor/rules/*.mdc', '.vyotiq/rules/']
+  .map((name, i, all) => (i === all.length - 1 ? `and ${name}` : name))
+  .join(', ')
+
+/** Fill `{{kill_by_name}}`-style slots with this platform's commands. */
+export function fillPlatformCommands(text: string, platform: NodeJS.Platform = process.platform): string {
+  const commands: Record<string, string> = {
+    ...PLATFORM_COMMANDS[platform === 'win32' ? 'win32' : 'posix'],
+    instruction_files: INSTRUCTION_FILES_TEXT
+  }
+  return text.replace(/\{\{(\w+)\}\}/g, (slot, key: string) => commands[key] ?? slot)
+}
 
 /** Cap workspace appendix so a hostile repo cannot flood the system prompt. */
 export const WORKSPACE_HARNESS_APPENDIX_CAP = 24_000
@@ -101,9 +136,28 @@ function loadBundledOrFallback(): string {
   }
 }
 
+/** `name` in Agent V's own package.json: the one checkout whose harness file is meant for this prompt. */
+export const AGENT_V_PACKAGE_NAME = 'vyotiq'
+
+/**
+ * The appendix is for working on Agent V itself. Any other repository with a
+ * `resources/harness/default.md` (a fork, a lookalike) used to have it
+ * appended to every prompt; now only a checkout whose package.json names this
+ * package does.
+ */
+function isAgentVCheckout(workspaceRoot: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspaceRoot, 'package.json'), 'utf8')) as { name?: unknown }
+    return pkg.name === AGENT_V_PACKAGE_NAME
+  } catch {
+    return false
+  }
+}
+
 function readWorkspaceAppendix(workspaceRoot: string, bundledSpine: string): string | null {
   let wsPath: string | undefined
   try {
+    if (!isAgentVCheckout(workspaceRoot)) return null
     wsPath = workspaceHarnessPath(workspaceRoot)
     // When the workspace *is* the Agent V repo, bundled and workspace paths are
     // the same file — appending would duplicate the entire spine.
@@ -148,10 +202,12 @@ function readWorkspaceAppendix(workspaceRoot: string, bundledSpine: string): str
  * 24k cap limits blast radius. Loaded once per invoke.
  */
 export function loadHarness(workspaceRoot?: string): string {
-  const spine = loadBundledOrFallback()
+  const bundled = loadBundledOrFallback()
+  const spine = fillPlatformCommands(bundled)
   if (!workspaceRoot) return spine
 
-  const appendix = readWorkspaceAppendix(workspaceRoot, spine)
+  // Compared as written, slots and all: a worktree of this repo holds the same file.
+  const appendix = readWorkspaceAppendix(workspaceRoot, bundled)
   if (!appendix) return spine
 
   return [

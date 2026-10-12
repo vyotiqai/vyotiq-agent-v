@@ -12,6 +12,7 @@ import {
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { SettingsField, SettingsGroup, SettingsItem, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
+import { SegmentedField } from '../components/SegmentedField'
 import { requestWhatsNew } from '@renderer/features/whats-new/useWhatsNew'
 import { SettingsFileGroup } from '../components/SettingsFileGroup'
 
@@ -241,6 +242,25 @@ export function AboutSection({
           {...form.defaultMark('autoCheckUpdates')}
           onChange={(autoCheckUpdates) => {
             void form.runUpdate({ autoCheckUpdates })
+          }}
+        />
+        <SegmentedField
+          id="about-update-channel"
+          title="Channel"
+          hint={
+            (form.settings.updateChannel ?? 'stable') === 'beta'
+              ? 'Pre-releases too: newer features, rougher edges. Going back to Stable waits for the next stable release.'
+              : 'Stable releases only.'
+          }
+          value={form.settings.updateChannel ?? 'stable'}
+          options={[
+            { value: 'stable', label: 'Stable' },
+            { value: 'beta', label: 'Beta' }
+          ]}
+          disabled={form.formLocked}
+          {...form.defaultMark('updateChannel')}
+          onChange={(updateChannel) => {
+            void form.runUpdate({ updateChannel })
           }}
         />
         <SettingsItem

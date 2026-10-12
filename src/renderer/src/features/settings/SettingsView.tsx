@@ -191,7 +191,7 @@ export function SettingsView(props: SettingsViewProps) {
       case 'agent':
         return <AgentSection form={form} secrets={secrets} onOpenMarketplace={onOpenMarketplace} />
       case 'tools':
-        return <ToolsSection form={form} onOpenMarketplace={onOpenMarketplace} />
+        return <ToolsSection form={form} onOpenMarketplace={onOpenMarketplace} workspacePath={activeWorkspacePath} />
       case 'indexing':
         return <IndexingSection form={form} openWorkspaces={openWorkspaces} />
       case 'voice':
@@ -230,6 +230,28 @@ export function SettingsView(props: SettingsViewProps) {
     search
   }
 
+  // The pane row names the section only once its own heading has scrolled
+  // away: at the top of a section, the heading right below says it already.
+  // The name stays in the row for assistive tech either way.
+  const [headingInView, setHeadingInView] = useState(true)
+  useEffect(() => {
+    const root = scroll.scrollerRef.current
+    const heading = root?.querySelector(`#settings-section-${section}`)
+    if (!root || !heading || typeof IntersectionObserver === 'undefined') {
+      setHeadingInView(false)
+      return undefined
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1]
+        if (entry) setHeadingInView(entry.isIntersecting)
+      },
+      { root, threshold: 0 }
+    )
+    observer.observe(heading)
+    return () => observer.disconnect()
+  }, [section, scroll.scrollerRef])
+
   return (
     <div className="flex h-full min-h-0 flex-col" data-settings-shell>
       {slot ? createPortal(<SettingsIndex {...indexProps} />, slot) : <SettingsIndexStrip {...indexProps} />}
@@ -237,7 +259,12 @@ export function SettingsView(props: SettingsViewProps) {
         className="flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2"
         data-settings-header
       >
-        <h1 className="m-0 shrink-0 text-sm font-semibold text-fg-strong">{SECTION_LABELS[section]}</h1>
+        <h1
+          className={headingInView ? 'sr-only' : 'm-0 shrink-0 text-sm font-semibold text-fg-strong'}
+          data-settings-title-hidden={headingInView || undefined}
+        >
+          {SECTION_LABELS[section]}
+        </h1>
         <p className="m-0 min-w-0 truncate text-xs text-tertiary">{sectionDescription(section)}</p>
         <span className="flex-1" />
         {changes.count(section) > 0 ? (

@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { UiItem } from '@shared/transcript'
 import { mockServiceInstruction } from '@shared/utils/unreachableService'
+import { formatAgentInstanceLabel } from '@shared/utils/agentInstance'
 import type { TaskState } from '@renderer/lib/ui'
-import { MarkdownContent, headingSections } from '@renderer/lib/ui/MarkdownContent'
+import { headingSections } from '@renderer/lib/markdown/headingSections'
+import { ReplyMarkdown } from '@renderer/features/task/record/reply/ReplyMarkdown'
 import { buildRecordModel, type RecordRun, type WorkItem } from '@renderer/features/task/recordModel'
-import { foldsToOpen, briefOpenKey, runOpenKey } from '@renderer/features/task/recordFind'
+import { foldsToOpen, briefOpenKey, cardOpenKey, runOpenKey } from '@renderer/features/task/recordFind'
 import { REPEAT_FOLD_AT, foldRepeats } from '@renderer/features/task/record/repeats'
 import { WorkList } from '@renderer/features/task/record/WorkItems'
 import { Brief } from '@renderer/features/task/record/Brief'
@@ -16,6 +18,7 @@ import { PlanLine } from '@renderer/features/task/record/RecordLayout'
 import { coverCheckInstruction, followUpOrigin, prCheckInstruction } from '@renderer/features/task/followUps'
 import { TaskPane, type TaskPaneProps } from '@renderer/features/task/TaskPane'
 import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
+import { openWork } from './helpers/openWork'
 
 /**
  * The second round of record polish (2026-10-01): a call repeated unchanged
@@ -65,6 +68,21 @@ function thought(id: string, text: string): WorkItem {
     text,
     streaming: false
   }
+}
+
+const CHILD_RUN_ID = '30349fc7-0e9a-4a93-9c3b-9f1e2d3c4b5a'
+
+/** An instance call's row: one child, dealt with through the same arguments. */
+function instanceCall(name: string, s: number, content: string, args = JSON.stringify({ run_id: CHILD_RUN_ID })): WorkItem {
+  seq += 1
+  const t: ToolItem = {
+    kind: 'tool',
+    id: `inst-${seq}`,
+    at: at(s),
+    endedAt: at(s + 2),
+    tool: { id: `inst-${seq}`, name, summary: '', status: 'done', content, argsPreview: args }
+  }
+  return { kind: 'instance', id: t.id, tool: t }
 }
 
 function renderWork(work: WorkItem[]): HTMLElement {
@@ -132,6 +150,68 @@ describe('a call repeated unchanged', () => {
   })
 })
 
+describe('a child polled unchanged', () => {
+  const pull = (s: number, messages: number): WorkItem =>
+    instanceCall(
+      'pull_agent_instance',
+      s,
+      `${formatAgentInstanceLabel(CHILD_RUN_ID)}\nstatus: running\nshowing ${messages} of ${messages} messages`
+    )
+
+  it(`folds a run of identical pulls to one line naming the child, keeping the last row`, () => {
+    const pulls = [pull(10, 20), pull(20, 40), pull(30, 60), pull(40, 80)]
+    const rows = foldRepeats(pulls)
+    expect(rows).toHaveLength(2)
+    const fold = rows[0]
+    expect(fold?.kind).toBe('repeats')
+    if (fold?.kind !== 'repeats') return
+    // Each pull returned different output; unchanged arguments are what fold.
+    const toolId = (item: (typeof pulls)[number]): string => (item as unknown as { tool: { id: string } }).tool.id
+    expect(fold.calls.map((c) => c.id)).toEqual([toolId(pulls[0]!), toolId(pulls[1]!), toolId(pulls[2]!)])
+    expect(fold.child).toBe('30349fc7')
+    expect(rows[1]).toBe(pulls[3])
+    const container = renderWork(pulls)
+    const line = container.querySelector('[data-record-repeats]')!
+    expect(line.getAttribute('data-record-repeats')).toBe('3')
+    expect(line.textContent).toContain('3 earlier calls')
+    // The line says whose child it stands for, since the rows that did are folded under it.
+    expect(line.textContent).toContain('on instance 30349fc7')
+    // Only the last poll keeps its row until the line opens.
+    expect(container.querySelectorAll('[data-record-tool="pull_agent_instance"]')).toHaveLength(1)
+    fireEvent.click(line.querySelector('button[aria-expanded="false"]')!)
+    expect(container.querySelectorAll('[data-record-tool="pull_agent_instance"]')).toHaveLength(4)
+  })
+
+  it('never folds repeated spawns: they are the instances block, not a poll', () => {
+    const spawns = [1, 2, 3].map((i) => instanceCall('spawn_agent_instance', i * 10, formatAgentInstanceLabel(CHILD_RUN_ID)))
+    expect(foldRepeats(spawns).every((r) => r.kind !== 'repeats')).toBe(true)
+    const container = renderWork(spawns)
+    expect(container.querySelectorAll('[data-record-repeats]')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-record-instances]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-record-instance]')).toHaveLength(3)
+  })
+})
+
+describe('a paragraph echoed back to back', () => {
+  const said = 'Verifying the remaining build workstreams before merging the finished accessibility branches.'
+
+  it('is one row: three settled thoughts of the same words collapse to the last', () => {
+    const work = [thought('m1', said), thought('m2', said), thought('m3', said)]
+    const rows = foldRepeats(work)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toBe(work[2])
+    const container = renderWork(work)
+    expect(container.querySelectorAll('[data-record-thought]')).toHaveLength(1)
+  })
+
+  it('stays two rows when other work comes between the echoes', () => {
+    const work: WorkItem[] = [thought('m1', said), card(poll('x', 5)), thought('m2', said)]
+    expect(foldRepeats(work).filter((r) => r.kind === 'thought')).toHaveLength(2)
+    const container = renderWork(work)
+    expect(container.querySelectorAll('[data-record-thought]')).toHaveLength(2)
+  })
+})
+
 /** One run of a model with a step titled in markdown and an earlier run. */
 function runs(): RecordRun[] {
   const items: UiItem[] = [
@@ -171,6 +251,16 @@ describe('Find in record', () => {
   it('opens a brief whose words hold the match', () => {
     const model = runs()
     expect(foldsToOpen(model, 'parseArgs').has(briefOpenKey(1))).toBe(true)
+  })
+
+  it('finds what a command printed, and opens its card', () => {
+    const run = runs()[1]!
+    const out = poll('FAIL tests/auth.test.ts > rejects an expired token', 5, 'pnpm vitest run')
+    const model: RecordRun[] = [{ ...run, steps: [], setup: [], after: [card(out)] }]
+    const open = foldsToOpen(model, 'expired token')
+    expect(open.has(cardOpenKey(out.id))).toBe(true)
+    // An answer that is not in any output opens no card.
+    expect([...foldsToOpen(model, 'nothing like this')]).toEqual([])
   })
 
   it('opens the line a repeated call folded to when an earlier one matches', () => {
@@ -254,20 +344,20 @@ describe('a Result of several parts', () => {
   })
 
   it('offers a copy on each heading, and none on a one-part answer or while it streams', () => {
-    const { container, rerender } = render(<MarkdownContent content={answer} sectionCopy />)
+    const { container, rerender } = render(<ReplyMarkdown text={answer} sectionCopy />)
     expect(container.querySelectorAll('[data-section-copy]')).toHaveLength(3)
     expect(screen.getAllByRole('button', { name: 'Copy this section' })).toHaveLength(3)
-    rerender(<MarkdownContent content={answer} sectionCopy streaming />)
+    rerender(<ReplyMarkdown text={answer} sectionCopy streaming />)
     expect(container.querySelectorAll('[data-section-copy]')).toHaveLength(0)
-    rerender(<MarkdownContent content={'## Only\nOne part.'} sectionCopy />)
+    rerender(<ReplyMarkdown text={'## Only\nOne part.'} sectionCopy />)
     expect(container.querySelectorAll('[data-section-copy]')).toHaveLength(0)
-    rerender(<MarkdownContent content={answer} />)
+    rerender(<ReplyMarkdown text={answer} />)
     expect(container.querySelectorAll('[data-section-copy]')).toHaveLength(0)
   })
 
   it('says its tone, so its inline code sits a step down from it', () => {
-    const { container } = render(<MarkdownContent content="Run `pnpm test`." tone="strong" />)
-    expect(container.querySelector('.markdown-body')!.getAttribute('data-tone')).toBe('strong')
+    const { container } = render(<ReplyMarkdown text="Run `pnpm test`." tone="strong" />)
+    expect(container.querySelector('[data-reply]')!.getAttribute('data-tone')).toBe('strong')
   })
 })
 
@@ -302,7 +392,9 @@ describe('reasoning, from the task menu', () => {
       messageCount: 4,
       composer: null
     }
-    return render(<TaskPane {...props} />).container
+    const { container } = render(<TaskPane {...props} />)
+    openWork(container)
+    return container
   }
 
   const openMenu = () => fireEvent.click(screen.getByRole('button', { name: /^More — / }))

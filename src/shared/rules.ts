@@ -17,7 +17,15 @@
  * conventions in AGENTS.md expects the agent to follow them without being told
  * in every prompt, so they belong in the system prompt rather than the history.
  */
-export const ROOT_INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', '.cursorrules'] as const
+export const ROOT_INSTRUCTION_FILES = [
+  'AGENTS.md',
+  'CLAUDE.md',
+  // Claude Code's personal, uncommitted additions to CLAUDE.md.
+  'CLAUDE.local.md',
+  'GEMINI.md',
+  '.github/copilot-instructions.md',
+  '.cursorrules'
+] as const
 
 const ROOT_INSTRUCTION_NAMES = new Set<string>(
   ROOT_INSTRUCTION_FILES.map((name) => name.toLowerCase())
@@ -29,14 +37,39 @@ export function isRootInstructionFileName(name: string): boolean {
 }
 
 /**
- * True when `rel` names a root instruction file *at the workspace root*.
- * Only root-level copies are read into the prompt, so `packages/app/AGENTS.md`
- * is an ordinary file here.
+ * True when `rel` names a root instruction file *at the workspace root*
+ * (`.github/copilot-instructions.md` included). Only root-level copies are
+ * read into the prompt, so `packages/app/AGENTS.md` is an ordinary file here.
  */
 export function isRootInstructionFilePath(rel: string): boolean {
   const norm = rel.replace(/\\/g, '/').replace(/^\.\//, '')
-  if (norm.includes('/')) return false
   return isRootInstructionFileName(norm)
+}
+
+/**
+ * The `@path` imports in an instruction file (Claude Code's CLAUDE.md
+ * syntax): `@docs/style.md`, `@./notes.md`, `@README.md`. A token must name
+ * a path (a `/`) or a file with an extension, so `@alice` is not one; code
+ * spans and fenced blocks are skipped. Paths are as written, relative to the
+ * importing file.
+ */
+export function instructionImports(text: string): string[] {
+  const out: string[] = []
+  let fenced = false
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced
+      continue
+    }
+    if (fenced) continue
+    const prose = line.replace(/`[^`]*`/g, ' ')
+    for (const m of prose.matchAll(/(?:^|[\s(])@((?:\.{1,2}\/)?[\w.-]+(?:\/[\w.-]+)*)/g)) {
+      const ref = m[1]!.replace(/[.,;:]+$/, '')
+      if (!ref.includes('/') && !/\.[A-Za-z0-9]+$/.test(ref)) continue
+      if (!out.includes(ref)) out.push(ref)
+    }
+  }
+  return out
 }
 
 export type FrontmatterSplit = {

@@ -10,7 +10,7 @@ import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import type { RecordStep, RecordTail } from '../recordModel'
 import { RecordOpenContext, stepOpenKey } from '../recordFind'
 import { RecordRow } from './RecordLayout'
-import { NowLine, WorkList, counted, plainLine, workCounts, workIsLive } from './WorkItems'
+import { NowLine, StepChildrenContext, WorkList, counted, plainLine, workCounts, workIsLive } from './WorkItems'
 
 /**
  * The plan's steps; only the step the live work is going into is open, the
@@ -139,6 +139,8 @@ function StepRow({
   const durationMs =
     step.startedAt == null ? null : step.endedAt != null ? step.endedAt - step.startedAt : live ? now - step.startedAt : null
   const instances = instancesOf(step)
+  // The children this row names: inside the step, their rows need not say it again.
+  const childIds = new Set(instances.map((i) => i.runId))
   const { onOpenAgentInstance } = useRunSession()
   const summary = stepSummaryText(step)
   const tail = step.work[step.work.length - 1]
@@ -244,7 +246,11 @@ function StepRow({
         </div>
         {expanded && canOpen ? (
           <div className="space-y-2 pb-3 pl-[36px] pr-2">
-            {step.work.length > 0 ? <WorkList items={step.work} /> : null}
+            {step.work.length > 0 ? (
+              <StepChildrenContext.Provider value={childIds}>
+                <WorkList items={step.work} />
+              </StepChildrenContext.Provider>
+            ) : null}
             {showActivity ? <NowLine text={activity!} /> : null}
             {needs}
           </div>

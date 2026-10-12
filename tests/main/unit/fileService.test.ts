@@ -295,6 +295,39 @@ describe('workspace file service', () => {
     expect(existsSync(join(root, 'renamed.ts'))).toBe(false)
   })
 
+  it('moves an entry, folder and all, to the trash when a trash is given', async () => {
+    const trashed: string[] = []
+    const result = await deleteWorkspaceFile(
+      { workspacePath: root, path: 'src', recursive: false },
+      async (abs) => {
+        trashed.push(abs)
+      }
+    )
+    expect(result).toMatchObject({ path: 'src', kind: 'directory', trashed: true })
+    expect(trashed).toEqual([join(root, 'src')])
+    // The fake trash moved nothing, so the folder is still on disk.
+    expect(existsSync(join(root, 'src'))).toBe(true)
+  })
+
+  it('reports a failed trash instead of deleting for good', async () => {
+    await expect(
+      deleteWorkspaceFile({ workspacePath: root, path: 'src', recursive: true }, async () => {
+        throw new Error('no recycle bin')
+      })
+    ).rejects.toMatchObject({ code: 'TRASH_FAILED' })
+    expect(existsSync(join(root, 'src'))).toBe(true)
+  })
+
+  it('deletes for good when asked to, even with a trash', async () => {
+    const trash = vi.fn(async () => {})
+    await deleteWorkspaceFile(
+      { workspacePath: root, path: 'src', recursive: true, permanent: true },
+      trash
+    )
+    expect(trash).not.toHaveBeenCalled()
+    expect(existsSync(join(root, 'src'))).toBe(false)
+  })
+
   it('does not delete a non-empty directory without recursive confirmation', async () => {
     await expect(
       deleteWorkspaceFile({

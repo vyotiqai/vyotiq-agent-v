@@ -453,47 +453,38 @@ describe('Composer', () => {
     })
   })
 
-  it('keeps the line editable while a run is in progress, with Queue and Stop', () => {
+  it('keeps the line editable while a run is in progress, with Stop beside one Queue action', () => {
     const onStop = vi.fn()
-    const { rerender } = render(
-      <Composer
-        provider="ollama"
-        model="qwen2.5"
-        running
-        hasWorkspace
-        secrets={testSecrets}
-        chatSettings={chatSettings}
-        onChatSettingsChange={vi.fn()}
-        onProviderModel={vi.fn()}
-        onSend={vi.fn()}
-        onStop={onStop}
-      />
-    )
+    const composerProps = {
+      provider: 'ollama' as const,
+      model: 'qwen2.5',
+      hasWorkspace: true,
+      secrets: testSecrets,
+      chatSettings,
+      onChatSettingsChange: vi.fn(),
+      onProviderModel: vi.fn(),
+      onSend: vi.fn(),
+      onStop
+    }
+    const { rerender } = render(<Composer {...composerProps} running />)
 
     const ta = screen.getByRole('combobox', { name: 'Instruction' })
     expect(ta.getAttribute('contenteditable')).toBe('true')
     expect(screen.queryByRole('button', { name: /^Send$/i })).toBeNull()
-    // Stop moved into the line's control row, right before the action.
+    // The row ends in one action while a run is live: Queue, off until there is text.
+    expect(screen.getByRole('button', { name: /^Queue$/i })).toHaveProperty('disabled', true)
+    // Stop is a real button in the row, not Escape-only: wired onStop, live run.
     const stop = screen.getByRole('button', { name: /^Stop$/i })
+    // It stands directly before the action, so the row still ends in the one
+    // thing that sends.
     expect(stop.nextElementSibling?.textContent).toContain('Queue')
     fireEvent.click(stop)
     expect(onStop).toHaveBeenCalledTimes(1)
 
-    // Not live, nothing to stop.
-    rerender(
-      <Composer
-        provider="ollama"
-        model="qwen2.5"
-        running={false}
-        hasWorkspace
-        secrets={testSecrets}
-        chatSettings={chatSettings}
-        onChatSettingsChange={vi.fn()}
-        onProviderModel={vi.fn()}
-        onSend={vi.fn()}
-        onStop={onStop}
-      />
-    )
+    // Not live: the one action reads Send, and there is nothing left to stop.
+    rerender(<Composer {...composerProps} running={false} />)
+    expect(screen.getByRole('button', { name: /^Send$/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Queue$/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Stop$/i })).toBeNull()
   })
 

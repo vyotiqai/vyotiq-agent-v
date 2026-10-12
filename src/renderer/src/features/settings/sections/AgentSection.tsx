@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent } from 'react'
 import {
   DEFAULT_MAX_PARALLEL_INSTANCES,
+  DEFAULT_SPEND_BUDGET,
   MAX_PARALLEL_INSTANCES_LIMIT,
   TASK_SPEND_LIMIT_MAX_USD,
   type ToolApprovalSettings
@@ -20,6 +21,8 @@ import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { ModelRefField } from '../components/ModelRefField'
+import { CustomPricesField } from '../components/CustomPricesField'
+import { MemoryNotesList } from '../components/MemoryNotesList'
 import { SwitchField } from '../components/SwitchField'
 import { workspaceBadge } from '../components/WorkspaceBadge'
 import {
@@ -203,11 +206,20 @@ export function MemoryField({ workspacePath }: { workspacePath: string | null })
       hint={hint}
       help="Kept in .vyotiq/memory in the workspace. Tasks read index.md and state.md every step and open notes when they need them."
       below={
-        error ? (
-          <p className="m-0 text-xs text-danger" role="alert">
-            {error}
-          </p>
-        ) : null
+        <>
+          {error ? (
+            <p className="m-0 text-xs text-danger" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {workspacePath && !empty ? (
+            <MemoryNotesList
+              workspacePath={workspacePath}
+              revision={notes + files.length}
+              onChanged={reload}
+            />
+          ) : null}
+        </>
       }
     >
       <Button size="sm" variant="danger" disabled={!context || empty || clearing} onClick={() => void clear()}>
@@ -344,10 +356,28 @@ export function AgentSection({
           onChange={(mcpProtection) => patchApproval({ mcpProtection })}
           {...form.agentDefaultMark('toolApproval', 'mcpProtection')}
         />
+        <NumberField
+          id="approval-timeout"
+          field="approvalTimeout"
+          form={form}
+          title="Deny unanswered after"
+          label="Deny an unanswered approval after, in minutes"
+          hint="An approval nobody answers is denied after this long. 0 waits for you, however long that takes."
+          help="Applies to approvals asked from now on. With 0, a run nobody is watching stays parked on its card until someone answers or stops it."
+          unit="min"
+          min={0}
+          max={1440}
+          value={form.settings.approvalTimeoutMinutes ?? 15}
+          disabled={form.formLocked}
+          onCommit={(approvalTimeoutMinutes) => {
+            void form.runUpdate({ approvalTimeoutMinutes })
+          }}
+          {...form.defaultMark('approvalTimeoutMinutes')}
+        />
         <SwitchField
           id="agent-autonomous-mode"
-          title="Unattended mode"
-          hint="Approve gated tools automatically, except high-risk ones. For runs nobody is watching."
+          title="Approve low-risk tools on their own"
+          hint="Browser actions, memory notes and web reads stop asking. Edits, commands, git, MCP tools and tools the agent wrote still ask."
           help="Applies to every workspace."
           checked={form.settings.autonomousMode}
           disabled={form.formLocked}
@@ -358,12 +388,11 @@ export function AgentSection({
         />
         <SelectField
           id="agent-autonomous-questions"
-          title="Questions while unattended"
-          help="Skip moves on without an answer. Wait holds the run until you answer — however long that takes."
-          nested
+          title="When the agent asks a question"
+          help="Skip moves on without an answer, and MCP servers' questions are declined. Wait holds the run until you answer — however long that takes. A question about spending more always waits."
           value={form.settings.autonomousSkipQuestions}
           options={AUTONOMOUS_QUESTIONS_OPTIONS}
-          disabled={form.formLocked || !form.settings.autonomousMode}
+          disabled={form.formLocked}
           onChange={(autonomousSkipQuestions) => {
             void form.runUpdate({ autonomousSkipQuestions })
           }}
@@ -447,6 +476,21 @@ export function AgentSection({
             void form.runUpdate({ utilityModel })
           }}
         />
+        <SwitchField
+          id="commit-message-auto-draft"
+          title="Draft commit messages ahead"
+          hint="Writes one while Changes shows uncommitted work. Off: written when you open Commit…"
+          help="Each new set of changes is a model call on the utility model. Its spend shows in Usage, on the task whose Changes asked."
+          checked={form.settings.commitMessageAutoDraft ?? false}
+          disabled={form.formLocked}
+          onChange={(commitMessageAutoDraft) => {
+            void form.runUpdate({ commitMessageAutoDraft })
+          }}
+          {...form.defaultMark('commitMessageAutoDraft')}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="Cost">
         <NumberField
           id="task-spend-limit"
           field="taskSpendLimit"
@@ -454,7 +498,7 @@ export function AgentSection({
           title="Spend limit per task"
           label="Spend limit per task, in US dollars"
           hint="A task stops and asks before spending more, its instances included. 0 is off."
-          help="Counts what the provider billed, or an estimate from published prices. Custom endpoints and unpriced models add nothing."
+          help="Counts what the provider billed, or an estimate from a price below, the built-in table or the models.dev catalog. A model none of them prices adds nothing."
           unit="USD"
           min={0}
           max={TASK_SPEND_LIMIT_MAX_USD}
@@ -464,6 +508,64 @@ export function AgentSection({
             void form.runUpdate({ taskSpendLimitUsd })
           }}
           {...form.defaultMark('taskSpendLimitUsd')}
+        />
+        <NumberField
+          id="daily-budget"
+          field="dailyBudget"
+          form={form}
+          title="Daily budget"
+          label="Daily budget across tasks, in US dollars"
+          hint="A heads-up at 80% of it, then a notice when the day's spend across every task reaches it. 0 is off."
+          help="Counts the same spend as Usage, side calls included. It never stops a task; the per-task limit does that."
+          unit="USD"
+          min={0}
+          max={TASK_SPEND_LIMIT_MAX_USD}
+          value={form.settings.spendBudget?.dailyUsd ?? 0}
+          disabled={form.formLocked}
+          onCommit={(dailyUsd) => {
+            void form.runUpdate({ spendBudget: { ...(form.settings.spendBudget ?? DEFAULT_SPEND_BUDGET), dailyUsd } })
+          }}
+          {...form.defaultMark('spendBudget')}
+        />
+        <NumberField
+          id="monthly-budget"
+          field="monthlyBudget"
+          form={form}
+          title="Monthly budget"
+          label="Monthly budget across tasks, in US dollars"
+          hint="The same two notices for the calendar month. 0 is off."
+          unit="USD"
+          min={0}
+          max={TASK_SPEND_LIMIT_MAX_USD * 10}
+          value={form.settings.spendBudget?.monthlyUsd ?? 0}
+          disabled={form.formLocked}
+          onCommit={(monthlyUsd) => {
+            void form.runUpdate({ spendBudget: { ...(form.settings.spendBudget ?? DEFAULT_SPEND_BUDGET), monthlyUsd } })
+          }}
+        />
+        <SwitchField
+          id="hold-at-budget"
+          title="Hold new work at the budget"
+          hint="Once a budget is spent, new tasks, follow-ups, schedules and loops wait until the next day or month. Running tasks finish."
+          checked={form.settings.spendBudget?.holdAtBudget ?? false}
+          disabled={
+            form.formLocked ||
+            ((form.settings.spendBudget?.dailyUsd ?? 0) <= 0 && (form.settings.spendBudget?.monthlyUsd ?? 0) <= 0)
+          }
+          onChange={(holdAtBudget) => {
+            void form.runUpdate({ spendBudget: { ...(form.settings.spendBudget ?? DEFAULT_SPEND_BUDGET), holdAtBudget } })
+          }}
+        />
+        <CustomPricesField form={form} />
+        <SwitchField
+          id="long-prompt-cache"
+          title="Keep the prompt cache for an hour"
+          hint="Anthropic only. Waiting more than 5 minutes on an approval or question otherwise re-sends the whole prompt at full price. Each cache write costs more (2× input instead of 1.25×)."
+          checked={form.settings.longPromptCache ?? false}
+          disabled={form.formLocked}
+          onChange={(longPromptCache) => {
+            void form.runUpdate({ longPromptCache })
+          }}
         />
       </SettingsGroup>
 

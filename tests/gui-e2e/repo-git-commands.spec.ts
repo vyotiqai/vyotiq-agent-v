@@ -95,7 +95,7 @@ test('Changes skips the programs a repository names, and runs them once allowed'
 
   const notice = panel.locator('[data-repo-commands]')
   await expect(notice).toBeVisible({ timeout: 15_000 })
-  await expect(notice).toContainText("This repository's git settings run programs. Vyotiq's git skips them.")
+  await expect(notice).toContainText("This repository's git settings run programs. Agent V's git skips them.")
   await expect(notice).toContainText('core.fsmonitor')
   await expect(notice).toContainText('filter.x.clean')
   // The change still shows: status worked without them. Changes opens on

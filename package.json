@@ -26,6 +26,8 @@
     "redesign:voice": "vite --config src/redesign/voice/vite.config.ts",
     "redesign:rail": "vite --config src/redesign/rail/vite.config.ts",
     "redesign:agents": "vite --config src/redesign/agents/vite.config.ts",
+    "redesign:threads": "vite --config src/redesign/threads/vite.config.ts",
+    "redesign:glass": "vite --config src/redesign/glass/vite.config.ts",
     "typecheck:tests": "tsc -p tsconfig.tests-node.json --noEmit && tsc -p tsconfig.tests-web.json --noEmit && tsc -p tsconfig.tests-e2e.json --noEmit",
     "typecheck:tests:e2e": "tsc -p tsconfig.tests-e2e.json --noEmit",
     "test": "pnpm sync:harness && pnpm sync:docx-md && node scripts/test-exit-wrapper.cjs",
@@ -34,7 +36,8 @@
     "test:e2e": "vitest run tests/main/e2e",
     "test:gui-e2e": "playwright test -c tests/gui-e2e/playwright.config.ts",
     "test:watch": "vitest",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
+    "smoke:boot": "node scripts/boot-smoke.mjs",
     "usage:report": "node scripts/usage-report.mjs",
     "eval:coding": "node scripts/eval-coding.mjs",
     "start": "electron-vite preview --skipBuild",
@@ -114,7 +117,9 @@
     "@vitest/coverage-v8": "^5.0.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "^6.0.0",
+    "axe-core": "^4.13.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "codemirror": "^6.0.2",
     "electron": "44.4.5",
@@ -147,6 +152,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.1",
+    "vitest-axe": "^0.1.0"
   }
 }

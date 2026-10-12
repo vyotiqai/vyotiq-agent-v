@@ -11,6 +11,9 @@ const repoRoot = process.cwd()
 const mainEntry = join(repoRoot, 'out/main/index.js')
 const videoDir = join(repoRoot, 'test-results', 'gui-e2e', 'videos')
 
+/** Approvals off: what every spec's seed starts from unless it names a mode. */
+export const E2E_TOOL_APPROVAL = { mode: 'off', allowlist: [], mcpProtection: true, rules: [] }
+
 export type LaunchedApp = {
   app: ElectronApplication
   window: Page
@@ -58,6 +61,9 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   // opens on the first-run Set up page. setup.spec.ts drives that page and
   // seeds the choice as not made.
   if (seeded.toolApprovalOnboardingDone === undefined) seeded.toolApprovalOnboardingDone = true
+  // The specs were written when approvals defaulted to off, and their mock
+  // replies edit and run freely. Specs about approvals set a mode themselves.
+  if (seeded.toolApproval === undefined) seeded.toolApproval = E2E_TOOL_APPROVAL
   writeFileSync(settingsPath, JSON.stringify(seeded), 'utf8')
   mkdirSync(videoDir, { recursive: true })
 

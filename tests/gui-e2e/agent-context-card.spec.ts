@@ -105,7 +105,8 @@ test('empty new chat shows the agent context card', async () => {
   // The header names the new task and where it will run.
   const header = window.locator('[data-task-header]')
   await expect(header).toContainText('New task')
-  await expect(header).toContainText(/in vyotiq-agent-context-ws/i)
+  // "in" sits in its own flex cell, so the joined text has no space: \s* not " ".
+  await expect(header).toContainText(/in\s*vyotiq-agent-context-ws/i)
   // The brief's aside says what the agent will see.
   const card = window.getByRole('complementary', { name: 'What the agent will see' })
   await expect(card).toBeVisible({ timeout: 15_000 })
@@ -116,7 +117,8 @@ test('empty new chat shows the agent context card', async () => {
   // Every reading is labelled, and the workspace name is NOT repeated here —
   // the header above already carries it.
   for (const label of ['Branch', 'Rules', 'Memory', 'Index', 'Tools']) {
-    await expect(card.getByText(label, { exact: true })).toBeVisible()
+    // Each reading's key is the label above its value: "Rules:", "Index:".
+    await expect(card.getByText(new RegExp('^' + label + ':'))).toBeVisible()
   }
   await expect(card).not.toContainText(/vyotiq-agent-context-ws/i)
 })

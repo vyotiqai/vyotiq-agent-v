@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { UiItem } from '@shared/transcript'
 import type { DoneWhenCheck } from '@shared/doneWhenChecks'
 import { buildRecordModel } from '@renderer/features/task/recordModel'
@@ -63,13 +63,38 @@ describe('done-when checks in the record', () => {
     expect(byRun.get(2)!.map((c) => c.id)).toEqual(['c2'])
   })
 
-  it('shows open checks under the brief while the run is live', () => {
+  it('shows the checks under the brief while the run is live, as one line that opens onto them', () => {
     const model = buildRecordModel(items.slice(0, 2), { running: true })
     render(<TaskRecord model={model} options={{ running: true }} checks={checks} messageCount={1} />)
-    expect(screen.getByRole('region', { name: 'Done when' })).toBeTruthy()
-    expect(screen.getByText('checked at the end')).toBeTruthy()
+    const region = screen.getByRole('region', { name: 'Done when' })
+    // Folded: how they stand, not three rows above the work.
+    expect(region.textContent).toContain('1 of 2 met so far')
+    expect(screen.queryByText('pnpm vitest run — 6 passed')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Done when/ }))
     expect(screen.getByText('pnpm vitest run — 6 passed')).toBeTruthy()
     expect(document.querySelector('[data-checked]')).toBeNull()
+  })
+
+  it('says "checked at the end" once, on the folded line, not once per open check', () => {
+    const model = buildRecordModel(items.slice(0, 2), { running: true })
+    render(
+      <TaskRecord
+        model={model}
+        options={{ running: true }}
+        checks={[
+          check({ id: 'c1', text: 'The updater suite passes' }),
+          check({ id: 'c2', text: 'No retry added around the swap' })
+        ]}
+        messageCount={1}
+      />
+    )
+    // One hint for the whole list, on the line that holds it.
+    expect(screen.getByRole('region', { name: 'Done when' }).textContent).toContain('2 checks · checked at the end')
+    fireEvent.click(screen.getByRole('button', { name: /Done when/ }))
+    expect(document.querySelector('[data-check="c1"]')?.textContent).not.toContain('checked at the end')
+    // Opened, nothing about the open rows is dropped: both keep glyph and verdict word.
+    expect(document.querySelectorAll('[data-check-verdict="open"]')).toHaveLength(2)
+    expect(screen.getAllByText(/Not checked yet:/)).toHaveLength(2)
   })
 
   it('moves them under the result once the run ends, and counts them in the receipt', () => {

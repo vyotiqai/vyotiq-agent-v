@@ -28,16 +28,36 @@ function runOutcome(run: HookRunLogEntry): string {
   return run.code === null ? 'failed to start' : `exit ${run.code}`
 }
 
-function CommandList({ commands }: { commands: string[] }): JSX.Element | null {
-  if (commands.length === 0) return null
+function CommandList({ commands, skipped = [] }: { commands: string[]; skipped?: string[] }): JSX.Element | null {
+  if (commands.length === 0 && skipped.length === 0) return null
   return (
-    <ul className="m-0 list-none space-y-0.5 p-0">
-      {commands.map((command, i) => (
-        <li key={`${i}-${command}`} className="truncate font-mono text-caption text-muted" title={command}>
-          {command}
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-1">
+      {commands.length > 0 ? (
+        <ul className="m-0 list-none space-y-0.5 p-0">
+          {commands.map((command, i) => (
+            <li key={`${i}-${command}`} className="truncate font-mono text-caption text-muted" title={command}>
+              {command}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {skipped.length > 0 ? (
+        // A file from Claude Code can name events or hook types this app does
+        // not run; they used to vanish into the log.
+        <div data-hooks-skipped>
+          <p className="m-0 text-caption text-warning">
+            Not run here ({skipped.length}):
+          </p>
+          <ul className="m-0 list-none space-y-0.5 p-0">
+            {skipped.map((entry, i) => (
+              <li key={`${i}-${entry}`} className="truncate font-mono text-caption text-tertiary" title={entry}>
+                {entry}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -88,7 +108,7 @@ export function HooksGroup({ workspacePath }: { workspacePath: string | null }):
         title="Your hooks"
         hint={overview ? fileHint(overview.user) : 'Reading…'}
         help="Commands of yours around the agent's work, in Claude Code's hooks.json shape. Yours always run, in every workspace."
-        below={overview ? <CommandList commands={overview.user.commands} /> : null}
+        below={overview ? <CommandList commands={overview.user.commands} skipped={overview.user.skipped} /> : null}
       >
         <Button size="sm" variant="secondary" onClick={() => void open('user')}>
           {overview?.user.exists ? 'Open file' : 'Create file'}
@@ -100,7 +120,7 @@ export function HooksGroup({ workspacePath }: { workspacePath: string | null }):
           title={`${formatWorkspaceName(workspacePath)}'s hooks`}
           hint={ws && ws.exists && !ws.error && decision ? DECISION_WORDS[decision] : ws ? fileHint(ws) : 'Reading…'}
           help="From .vyotiq/hooks.json in the workspace. They came with the folder, so they run only once you allow that exact file; any change to it asks again."
-          below={ws ? <CommandList commands={ws.commands} /> : null}
+          below={ws ? <CommandList commands={ws.commands} skipped={ws.skipped} /> : null}
         >
           <div className="flex items-center gap-1.5">
             {ws && ws.exists && !ws.error && ws.commands.length > 0 ? (

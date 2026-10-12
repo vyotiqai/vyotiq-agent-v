@@ -184,6 +184,18 @@ export function contextWindowFromOllamaShow(
   row: Record<string, unknown>,
   opts?: { ignoreNumCtx?: boolean }
 ): number | undefined {
+  // A Modelfile `num_ctx` is the window the server actually runs the model
+  // with (the OpenAI-compatible endpoint cannot change it); the architecture
+  // maximum below is only what the model could take. Sizing prompts by the
+  // maximum had them cut from the front, silently.
+  if (!opts?.ignoreNumCtx) {
+    const params = row.parameters
+    if (typeof params === 'string') {
+      const m = /(?:^|\n)\s*num_ctx\s+(\d+)/i.exec(params)
+      const numCtx = m ? positiveIntTokens(Number(m[1])) : undefined
+      if (numCtx != null) return numCtx
+    }
+  }
   const modelInfo = row.model_info
   if (modelInfo && typeof modelInfo === 'object') {
     const info = modelInfo as Record<string, unknown>
@@ -201,14 +213,6 @@ export function contextWindowFromOllamaShow(
 
   const fromRow = extractContextWindowFromCatalogRow(row)
   if (fromRow != null) return fromRow
-
-  if (!opts?.ignoreNumCtx) {
-    const params = row.parameters
-    if (typeof params === 'string') {
-      const m = /(?:^|\n)\s*num_ctx\s+(\d+)/i.exec(params)
-      if (m) return positiveIntTokens(Number(m[1]))
-    }
-  }
   return undefined
 }
 

@@ -51,6 +51,8 @@ function makeChrome(status: GitStatus, patch: Partial<GitChrome> = {}): GitChrom
     pull: vi.fn(async () => ({ kind: 'pulled' as const, detail: 'Pulled' })),
     push: vi.fn(async () => true),
     createBranch: vi.fn(async () => true),
+    restoreStash: vi.fn(async () => false as const),
+    dropStash: vi.fn(async () => true),
     ...patch
   }
 }
@@ -101,14 +103,14 @@ describe('GitSyncControls', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /^Push/ }))
     expect(chrome.push).toHaveBeenCalledTimes(1)
     openMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: /^Pull/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Pull(?! with)/ }))
     expect(chrome.pull).toHaveBeenCalledWith(undefined)
   })
 
   it('disables every remote action with no remote', () => {
     render(<GitSyncControls chrome={makeChrome(makeStatus({ hasRemote: false }))} />)
     openMenu()
-    for (const name of [/^Fetch/, /^Pull/, /^Publish branch/]) {
+    for (const name of [/^Fetch/, /^Pull(?! with)/, /^Publish branch/]) {
       expect(screen.getByRole('menuitem', { name }).getAttribute('aria-disabled')).toBe('true')
     }
     expect(screen.getByRole('menuitem', { name: /^New branch/ }).getAttribute('aria-disabled')).toBeNull()
@@ -117,7 +119,7 @@ describe('GitSyncControls', () => {
   it('holds Pull and New branch while a run is live in the checkout', () => {
     render(<GitSyncControls chrome={makeChrome(makeStatus({ upstream: 'origin/main', ahead: 0, behind: 1 }))} running />)
     openMenu()
-    expect(screen.getByRole('menuitem', { name: /^Pull/ }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('menuitem', { name: /^Pull(?! with)/ }).getAttribute('aria-disabled')).toBe('true')
     expect(screen.getByRole('menuitem', { name: /^New branch/ }).getAttribute('aria-disabled')).toBe('true')
     expect(screen.getByRole('menuitem', { name: /^Fetch/ }).getAttribute('aria-disabled')).toBeNull()
     expect(screen.getByRole('menuitem', { name: /^Push/ }).getAttribute('aria-disabled')).toBeNull()
@@ -131,7 +133,7 @@ describe('GitSyncControls', () => {
     )
     render(<GitSyncControls chrome={makeChrome(makeStatus({ upstream: 'origin/main', ahead: 1, behind: 1 }), { pull })} />)
     openMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: /^Pull/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Pull(?! with)/ }))
     const dialog = await screen.findByRole('dialog', { name: 'Branch has diverged' })
     expect(dialog.textContent).toContain('main and origin/main have diverged')
     fireEvent.click(screen.getByRole('button', { name: 'Rebase' }))

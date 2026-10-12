@@ -832,16 +832,15 @@ describe('status message parser', () => {
     expect(data.answers).toEqual(['line one\nline two'])
   })
 
-  it('chips Skipped for autonomous ask_question skip', () => {
-    const data = parseStatusMessageData(
-      tool({
-        name: 'ask_question',
-        status: 'done',
-        content: 'Question skipped (autonomous mode). Continue with a reasonable default.'
-      })
-    )
-    expect(data.chip).toBe('Skipped')
-    expect(data.message).toMatch(/autonomous mode/i)
+  it('chips Skipped for a skipped ask_question, in the current and the pre-v7 wording', () => {
+    for (const content of [
+      'Question skipped (questions are set to skip). Continue with a reasonable default.',
+      'Question skipped (autonomous mode). Continue with a reasonable default.'
+    ]) {
+      const data = parseStatusMessageData(tool({ name: 'ask_question', status: 'done', content }))
+      expect(data.chip).toBe('Skipped')
+      expect(data.message).toBe(content)
+    }
   })
 
   it('chips Invalid arguments for empty questions[] and required-field errors', () => {

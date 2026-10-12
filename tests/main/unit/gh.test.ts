@@ -588,8 +588,14 @@ describe('gh helpers', () => {
     mockGhInstalled()
     execFileAsync
       .mockResolvedValueOnce({ stdout: 'gh version 2.0', stderr: '' })
-      .mockResolvedValueOnce({ stdout: 'merged\n', stderr: '' })
-    await expect(prMerge('/ws', 'squash', 12)).resolves.toEqual({ detail: 'merged' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: { repository: { pullRequest: { state: 'MERGED', autoMergeRequest: null, isMergeQueueEnabled: false, isInMergeQueue: false, mergeQueueEntry: null } } }
+        }),
+        stderr: ''
+      })
+    await expect(prMerge('/ws', 'squash', 12)).resolves.toEqual({ detail: 'Squashed and merged' })
     const mergeArgs = execFileAsync.mock.calls.find((c) => (c[1] as string[])[1] === 'merge')
     expect(mergeArgs?.[1]).toEqual(expect.arrayContaining(['merge', '12']))
   })

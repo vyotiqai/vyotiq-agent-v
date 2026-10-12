@@ -255,6 +255,25 @@ describe('runGoalFromUserText', () => {
     expect(goal).not.toContain('Downloads')
   })
 
+  it('keeps an apostrophe inside a word, and drops the quotes around a path', () => {
+    expect(runGoalFromUserText("What's uncommitted? Don't commit")).toBe("What's uncommitted? Don't commit")
+    expect(runGoalFromUserText('Open "C:\\Users\\admin\\a.txt" and check')).toBe('Open and check')
+  })
+
+  it('ends a single-quoted path at its closing quote', () => {
+    expect(runGoalFromUserText("Open 'C:\\Users\\admin\\a.txt' and check")).toBe('Open and check')
+    expect(
+      runGoalFromUserText("Review 'C:\\Users\\admin\\Downloads\\FORGET Loop Engineering.txt' please")
+    ).toBe('Review please')
+    expect(runGoalFromUserText("Open 'C:\\Users\\O'Brien\\a.txt' and check")).toBe('Open and check')
+  })
+
+  it('scrubs an unquoted Windows path with spaces whole', () => {
+    expect(runGoalFromUserText('Review C:\\Users\\admin\\Downloads\\FORGET Loop Engineering.txt')).toBe(
+      'Review'
+    )
+  })
+
   it('becomes chat when the message is only an absolute path', () => {
     expect(
       runGoalFromUserText('"C:\\Users\\admin\\Downloads\\FORGET Loop Engineering.txt"')
@@ -269,6 +288,15 @@ describe('findAbsolutePathsInText', () => {
       '"C:\\Users\\admin\\Downloads\\FORGET Loop Engineering.txt"'
     )
     expect(paths.some((p) => p.includes('Downloads'))).toBe(true)
+  })
+
+  it('stops a single-quoted Windows path at the closing quote', () => {
+    expect(findAbsolutePathsInText("Open 'C:\\Users\\admin\\a.txt' and check")).toEqual([
+      'C:\\Users\\admin\\a.txt'
+    ])
+    expect(findAbsolutePathsInText("Open 'C:\\Users\\O'Brien\\My Docs\\a.txt'.")).toEqual([
+      "C:\\Users\\O'Brien\\My Docs\\a.txt"
+    ])
   })
 
   it('builds outside-workspace guidance', () => {

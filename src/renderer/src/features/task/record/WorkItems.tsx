@@ -1,13 +1,16 @@
 import { createContext, memo, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { UiItem } from '@shared/transcript'
 import type { ToolApprovalGrant } from '@shared/ipc'
-import { isRetryableTurnFailure } from '@shared/errors'
+import { isRetryableTurnFailure, turnFailureNextSteps } from '@shared/errors'
+import { requestOpenSettings } from '@renderer/app/openSettings'
+import { requestOpenModelPicker } from '@renderer/features/chat/components/composer/modelPickerEvent'
 import { inferFileWriteAction, parseArgsRecord, summarizeToolArgs } from '@shared/toolSummary'
 import { parseTerminalOutput } from '@shared/utils/terminalFormat'
 import { formatElapsed } from '@shared/utils/timeFormat'
 import { stripModelNotes } from '@shared/utils/modelNotes'
 import { mockServiceInstruction } from '@shared/utils/unreachableService'
 import {
+  briefOutcome,
   formatAgentInstanceShortId,
   parseAgentInstanceRunId,
   parseAgentInstanceRunIdFromArgs,
@@ -16,7 +19,19 @@ import {
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { Button, DiffStat, IconButton, STATE_LABEL, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import {
+  ActionMenu,
+  Button,
+  DiffStat,
+  IconButton,
+  STATE_LABEL,
+  StatusGlyph,
+  cn,
+  pushToast,
+  type ActionMenuItem,
+  type TaskState
+} from '@renderer/lib/ui'
+import { requestRunInTerminal } from '@renderer/features/chat/terminalRequests'
 import { BORDER_DIVIDER, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { ToolRowOutput } from '@renderer/features/chat/components/ToolRow'
@@ -32,7 +47,7 @@ import { toolImagesOf } from '@renderer/features/chat/toolUi/parsers/browser'
 import { ToolImageStrip } from '@renderer/features/chat/toolUi/ToolImageStrip'
 import { normalizeRelPath } from '@renderer/features/chat/utils/turnFileDiffs'
 import { editStatOf } from '../editStat'
-import { RecordOpenContext, repeatOpenKey, thoughtOpenKey } from '../recordFind'
+import { RecordOpenContext, WORK_PAGE, cardOpenKey, earlierOpenKey, repeatOpenKey, thoughtOpenKey } from '../recordFind'
 import type { WorkItem } from '../recordModel'
 import { RecordProse } from './RecordProse'
 import { foldRepeats, type RepeatRun } from './repeats'
@@ -213,9 +228,28 @@ export function WorkList({
     seen.set(id, count + 1)
     return count === 0 ? id : `${id}#${count}`
   }
-  const rows: readonly (WorkItem | RepeatRun)[] = foldRepeated ? foldRepeats(items) : items
+  // A long list opens on its latest rows; each "Show more" adds a page above.
+  const [shown, setShown] = useState(WORK_PAGE)
+  const forced = useContext(RecordOpenContext).has(earlierOpenKey(items[0]?.id ?? ''))
+  const hidden = forced ? 0 : Math.max(0, items.length - shown)
+  const visible = hidden > 0 ? items.slice(hidden) : items
+  const listed = visible.filter((w) => !waitOnListedChild(w, items))
+  const rows: readonly (WorkItem | RepeatRun)[] = foldRepeated ? foldRepeats(listed) : listed
   return (
     <div className="space-y-2">
+      {hidden > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShown((n) => n + WORK_PAGE)}
+          className="group flex min-h-6 w-full items-center gap-2 rounded-sm text-left text-xs focus-visible:vy-focus-ring"
+          data-record-earlier={hidden}
+        >
+          <span className="shrink-0 font-medium text-fg">{hidden.toLocaleString()} earlier</span>
+          <span className="min-w-0 truncate text-muted">Show {Math.min(WORK_PAGE, hidden)} more</span>
+          <span className="flex-1" />
+          <Chevron open={false} />
+        </button>
+      ) : null}
       {groupWork(rows).map((w) =>
         w.kind === 'instances' ? (
           <InstancesBlock key={keyOf(`instances:${rowKeyOf(w.spawns[0]!)}`)} spawns={w.spawns} />
@@ -226,6 +260,25 @@ export function WorkList({
         )
       )}
     </div>
+  )
+}
+
+/**
+ * A wait still going on a child whose own row is in the same list: that row
+ * already shows it running, with its time, so a second spinner and time for
+ * the wait says nothing. Settled, the wait is where the child's report is.
+ */
+function waitOnListedChild(w: WorkItem, items: readonly WorkItem[]): boolean {
+  if (w.kind !== 'instance' || w.tool.tool.name !== 'await_agent_instance' || w.tool.tool.status !== 'running') return false
+  const runId = parseAgentInstanceRunIdFromArgs(w.tool.tool.argsPreview)
+  return (
+    runId != null &&
+    items.some(
+      (o) =>
+        o.kind === 'instance' &&
+        o.tool.tool.name === 'spawn_agent_instance' &&
+        parseAgentInstanceRunId(o.tool.tool.content ?? undefined) === runId
+    )
   )
 }
 
@@ -255,7 +308,7 @@ function RepeatsLine({ run }: { run: RepeatRun }) {
     <div data-record-repeats={n}>
       <WorkLine
         verb={`${n} earlier ${run.command ? (n === 1 ? 'run' : 'runs') : n === 1 ? 'call' : 'calls'}`}
-        detail={run.command ? 'of the same command' : 'with the same arguments'}
+        detail={run.command ? 'of the same command' : run.child ? `on instance ${run.child}` : 'with the same arguments'}
         open={open}
         onToggle={() => setOpen(!open)}
         trailing={
@@ -277,9 +330,6 @@ function RepeatsLine({ run }: { run: RepeatRun }) {
 function rowKeyOf(item: ToolItem): string {
   return item.key ?? item.id
 }
-
-/** From this many rows, a settled run's work outside any step folds to one line. */
-export const FOLD_LOOSE_AT = 4
 
 export function counted(n: number, one: string): string {
   return `${n} ${n === 1 ? one : `${one}s`}`
@@ -338,64 +388,6 @@ export function workSummary(items: readonly WorkItem[]): string {
 }
 
 /**
- * Work outside any step. Once the run has settled with an answer, a longer
- * list folds to one line saying what it amounts to — the way a finished step
- * does — so the result is a few rows under the brief, not under all of it.
- * While the run is live, or when it ended without an answer (stopped, failed),
- * every row shows: the work is then all there is to read. An error stays in
- * view under the line: it may be the one that offers Retry.
- */
-export function LooseWork({ items, fold, openKey }: { items: readonly WorkItem[]; fold: boolean; openKey: string }) {
-  const [userOpen, setOpen] = useState(false)
-  // Find in record opens a fold that holds a match.
-  const forced = useContext(RecordOpenContext).has(openKey)
-  if (!fold || items.length < FOLD_LOOSE_AT) return <WorkList items={items} />
-  const open = userOpen || forced
-  const errors = items.filter((w) => w.kind === 'error')
-  const tools = items.flatMap((w) =>
-    w.kind === 'explore' ? w.tools : w.kind === 'card' || w.kind === 'instance' || w.kind === 'tool' || w.kind === 'plan' ? [w.tool] : []
-  )
-  const summary = workSummary(items) || counted(items.length, 'item')
-  const spanned = tools.length > 0 ? spanMs(tools) : null
-  return (
-    <div data-loose-work>
-      <div className="-mx-2">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className={cn(
-            'group flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm vy-transition focus-visible:vy-focus-ring',
-            ROW_HOVER
-          )}
-        >
-          <span className="min-w-0 flex-1 truncate text-secondary">{summary}</span>
-          {errors.length > 0 ? <span className="shrink-0 text-xs text-danger">{counted(errors.length, 'error')}</span> : null}
-          <span className="min-w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
-            {spanned != null && spanned >= 1000 ? formatElapsed(spanned) : ''}
-          </span>
-          {/* Sized and pulled in like the History row's, so this time shares the work rows' right edge. */}
-          <Icon
-            name={open ? 'chevron' : 'chevronRight'}
-            size={11}
-            className={cn('-ml-0.5 shrink-0 text-tertiary', !open && 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
-          />
-        </button>
-      </div>
-      {open ? (
-        <div className="pb-1 pt-2">
-          <WorkList items={items} />
-        </div>
-      ) : errors.length > 0 ? (
-        <div className="pt-2">
-          <WorkList items={errors} />
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/**
  * Same work, same transcript items: the model is rebuilt on every streamed
  * token, but the items under an unchanged row keep their identity, so the row
  * need not render again. Only the row that is streaming does.
@@ -425,6 +417,8 @@ export function sameWork(a: WorkItem, b: WorkItem): boolean {
     case 'compaction':
     case 'notice':
       return a.item === (b as typeof a).item
+    case 'said':
+      return a.item === (b as typeof a).item && a.text === (b as typeof a).text
     default: {
       const _exhaustive: never = a
       return _exhaustive
@@ -441,32 +435,60 @@ export const WorkItemView = memo(WorkItemViewImpl, (prev, next) => sameWork(prev
  */
 function ErrorItem({ id, message, code }: { id: string; message: string; code?: string | undefined }) {
   const { retryableErrorId, onRetry, mockTarget, onFollowUp, onDismissRunError } = useContext(RecordActionsContext)
+  const { runId, workspacePath } = useRunSession()
   const latest = id === retryableErrorId
   const canRetry = Boolean(onRetry) && latest && isRetryableTurnFailure({ errorCode: code })
   const mock = latest && mockTarget && onFollowUp ? mockTarget : null
+  // What fixes it when typing can't: another model, or the provider's settings.
+  const next = latest ? turnFailureNextSteps(code) : { switchModel: false, providerSettings: false }
+  const copyDetails = (): void => {
+    // The raw code lives here, not on the row: it is for a bug report, not for reading.
+    const details = [message, code ? `code: ${code}` : '', runId ? `run: ${runId}` : '', workspacePath ? `workspace: ${workspacePath}` : '']
+      .filter(Boolean)
+      .join('\n')
+    void navigator.clipboard?.writeText(details).then(
+      () => pushToast('Copied the error details.'),
+      () => pushToast('Couldn’t copy the error details.', 'error')
+    )
+  }
   return (
     // Wraps when the pane is narrow: the actions then keep the right edge.
-    <div role="alert" className="flex flex-wrap items-start gap-x-2 gap-y-1 text-xs text-danger">
+    <div role="alert" className="flex flex-wrap items-start gap-x-2 gap-y-1 text-xs text-danger" title={code || undefined}>
       <Icon name="xCircle" size={14} className="mt-px shrink-0" />
       <p className="min-w-0 grow basis-48 [overflow-wrap:anywhere]">{message}</p>
-      {code ? <code className="shrink-0 font-mono text-caption text-tertiary">{code}</code> : null}
-      {canRetry || mock || onDismissRunError ? (
-        <div className="-my-1 ml-auto flex shrink-0 items-center gap-1">
-          {canRetry ? (
-            <Button size="xs" onClick={onRetry}>
-              Retry
-            </Button>
-          ) : null}
-          {mock ? (
-            <Button size="xs" variant="ghost" onClick={() => onFollowUp!(mockServiceInstruction(mock))}>
-              Ask it to mock {mock}
-            </Button>
-          ) : null}
-          {onDismissRunError ? (
-            <IconButton icon="close" label="Dismiss error" size="xs" tone="muted" onClick={() => onDismissRunError(id)} />
-          ) : null}
-        </div>
-      ) : null}
+      <div className="-my-1 ml-auto flex shrink-0 flex-wrap items-center gap-1">
+        {canRetry ? (
+          <Button size="xs" onClick={onRetry}>
+            Retry
+          </Button>
+        ) : null}
+        {next.switchModel ? (
+          <Button
+            size="xs"
+            variant={canRetry ? 'ghost' : 'secondary'}
+            icon="model"
+            onClick={(event) => {
+              if (!requestOpenModelPicker(event.currentTarget)) requestOpenSettings('providers')
+            }}
+          >
+            Switch model
+          </Button>
+        ) : null}
+        {next.providerSettings ? (
+          <Button size="xs" variant="ghost" icon="gear" onClick={() => requestOpenSettings('providers')}>
+            Provider settings
+          </Button>
+        ) : null}
+        {mock ? (
+          <Button size="xs" variant="ghost" onClick={() => onFollowUp!(mockServiceInstruction(mock))}>
+            Ask it to mock {mock}
+          </Button>
+        ) : null}
+        <IconButton icon="copy" label="Copy error details" size="xs" tone="muted" onClick={copyDetails} />
+        {onDismissRunError ? (
+          <IconButton icon="close" label="Dismiss error" size="xs" tone="muted" onClick={() => onDismissRunError(id)} />
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -493,9 +515,28 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
         </WithApproval>
       )
     case 'plan':
-      return <PlanItem title={item.title} running={item.tool.tool.status === 'running'} />
+      return (
+        <PlanItem
+          title={item.title}
+          running={item.tool.tool.status === 'running'}
+          ended={planEnded(item.tool.tool)}
+          failure={
+            item.tool.tool.status === 'fail' && !planEnded(item.tool.tool)
+              ? ((item.tool.tool.content ?? '').trim().split('\n').find((l) => l.trim()) ?? '')
+              : null
+          }
+        />
+      )
     case 'note':
-      return <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+      return item.item.cutOff ? (
+        <div>
+          <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+          {/* Quiet: the run recovered on its own; this only explains the fragment. */}
+          <p className="mt-0.5 text-caption text-tertiary">Cut off at the output limit</p>
+        </div>
+      ) : (
+        <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+      )
     case 'thought':
       return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought id={item.id} text={item.text} />
     case 'error':
@@ -513,7 +554,37 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
       )
     case 'notice':
       return <NoticeItem text={item.item.text} />
+    case 'said':
+      return <SaidItem text={item.text} attachments={item.item.attachments} images={item.item.images} />
   }
+}
+
+/**
+ * What you said into the run while it worked (Send now), where it landed in
+ * the work: your words, a step up from the agent's notes around them.
+ */
+function SaidItem({
+  text,
+  attachments = [],
+  images = []
+}: {
+  text: string
+  attachments?: readonly { name: string }[]
+  images?: readonly string[]
+}) {
+  const extra = [...attachments.map((a) => a.name), ...(images.length > 0 ? [counted(images.length, 'image')] : [])]
+  return (
+    <div className="flex min-w-0 items-start gap-2 text-sm leading-[22px]" data-record-said>
+      <Icon name="chat" size={14} className="mt-1 shrink-0 text-tertiary" />
+      <p className="m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
+        <span className="text-tertiary">You said </span>
+        <span className="text-fg-strong">
+          <TickedText text={text} code="rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em]" />
+        </span>
+        {extra.length > 0 ? <span className="text-tertiary"> · {extra.join(', ')}</span> : null}
+      </p>
+    </div>
+  )
 }
 
 /**
@@ -570,7 +641,11 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
   // One lookup names what it looked at ("Read vitest.config.ts 105-121"); a
   // count ("1 file") would make you open it to find out.
   const only = tools.length === 1 ? group.nestedTools[0]?.subtitle : ''
-  const detail = only && only !== '…' && only !== tools[0]!.tool.name ? only : group.summary
+  // Nor says its own name twice: `git_status` summarised "git status" reads
+  // "Git status  git status" — the verb is all there is to say.
+  const name = tools[0]!.tool.name
+  const ownName = tools.length === 1 && Boolean(only) && only !== name && !targetOf(name, only)
+  const detail = ownName ? '' : only && only !== '…' && only !== name ? only : group.summary
   return (
     <div>
       <WorkLine
@@ -732,7 +807,8 @@ function WithApproval({ id, grant, children }: { id: string; grant: ToolApproval
 
 function TerminalCard({ item }: { item: ToolItem }) {
   const { onLoadToolContent, mcpServerNames } = useContext(RecordActionsContext)
-  const { onOpenAgentTerminal } = useRunSession()
+  const { onOpenAgentTerminal, onOpenPanel, workspacePath } = useRunSession()
+  const [menuOpen, setMenuOpen] = useState(false)
   const args = parseArgsRecord(item.tool.argsPreview)
   const command =
     (typeof args?.command === 'string' && args.command) || (typeof args?.cmd === 'string' && args.cmd) || item.tool.summary
@@ -750,17 +826,20 @@ function TerminalCard({ item }: { item: ToolItem }) {
   // failed run broke on opens too, so the failure is in sight where it happened.
   const brokeHere = useContext(BrokeAtContext) === item.id && failed && hasOutput
   const autoOpen = (running && hasOutput) || brokeHere
-  const [open, setOpen] = useState(autoOpen)
+  const [userOpen, setOpen] = useState(autoOpen)
   useEffect(() => {
     if (autoOpen) setOpen(true)
   }, [autoOpen])
+  // Find in record opens a card whose output holds a match.
+  const forced = useContext(RecordOpenContext).has(cardOpenKey(item.id))
+  const open = userOpen || forced
   return (
     <div className="overflow-hidden rounded-lg border border-border" data-record-command>
       <div className="flex items-center bg-bg">
         <button
           type="button"
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen(!open)}
           className={cn(
             'group flex h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs focus-visible:vy-focus-ring',
             running && onOpenAgentTerminal ? 'pl-3 pr-1' : 'px-3'
@@ -796,8 +875,39 @@ function TerminalCard({ item }: { item: ToolItem }) {
         {running && onOpenAgentTerminal ? (
           // Only while it runs: the mirror lives as long as the app does, and a
           // finished command's output is already in the card.
-          <IconButton icon="expand" label="Open in Terminal" size="xs" tone="muted" onClick={onOpenAgentTerminal} className="mr-2" />
+          <IconButton icon="expand" label="Open in Terminal" size="xs" tone="muted" onClick={onOpenAgentTerminal} className="mr-1" />
         ) : null}
+        <ActionMenu
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          placement="down"
+          align="end"
+          aria-label="Command actions"
+          items={commandMenuItems({
+            command,
+            output: parsed ? [parsed.stdout, parsed.stderr].filter((s) => s.trim()).join('\n') : (item.tool.content ?? ''),
+            canRun: Boolean(workspacePath) && !running && !awaiting,
+            onRun: () => {
+              if (!workspacePath) return
+              requestRunInTerminal(workspacePath, command)
+              onOpenPanel?.('terminal')
+            }
+          })}
+          trigger={(t) => (
+            <IconButton
+              ref={t.ref}
+              icon="more"
+              label="Command actions"
+              size="xs"
+              tone="muted"
+              className="mr-2"
+              aria-expanded={t['aria-expanded']}
+              aria-controls={t['aria-controls']}
+              aria-haspopup={t['aria-haspopup']}
+              onClick={t.onClick}
+            />
+          )}
+        />
       </div>
       {open ? (
         <div className="border-t border-border bg-sunken px-1 pt-1">
@@ -814,6 +924,29 @@ function TerminalCard({ item }: { item: ToolItem }) {
       ) : null}
     </div>
   )
+}
+
+function copyText(text: string, what: string): void {
+  const ok = window.vyotiq?.writeClipboard?.(text) ?? false
+  pushToast(ok ? `${what} copied` : `Could not copy the ${what.toLowerCase()}`, ok ? undefined : 'error')
+}
+
+/** Copy the command, copy what it printed, or run it again in your own shell. */
+export function commandMenuItems(opts: {
+  command: string
+  output: string
+  canRun: boolean
+  onRun: () => void
+}): ActionMenuItem[] {
+  return [
+    { id: 'copy-command', label: 'Copy command', icon: 'copy', onSelect: () => copyText(opts.command, 'Command') },
+    ...(opts.output.trim()
+      ? [{ id: 'copy-output', label: 'Copy output', icon: 'copy' as const, onSelect: () => copyText(opts.output, 'Output') }]
+      : []),
+    ...(opts.canRun
+      ? [{ id: 'run-again', label: 'Run in my terminal', icon: 'terminal' as const, onSelect: opts.onRun }]
+      : [])
+  ]
 }
 
 function EditCard({ item }: { item: ToolItem }) {
@@ -899,7 +1032,8 @@ function EditCard({ item }: { item: ToolItem }) {
  */
 export function targetOf(name: string, summary: string | null | undefined): string {
   const said = summary?.trim() ?? ''
-  if (!said || said === name) return ''
+  // "git status" for `git_status` is the tool's own name in words: "Git status  git status".
+  if (!said || said === name || said.toLowerCase() === name.replace(/_/g, ' ').toLowerCase()) return ''
   if (!said.startsWith(`${name} `)) return said
   return said
     .slice(name.length)
@@ -929,7 +1063,10 @@ function ToolLine({ item }: { item: ToolItem }) {
   // A stopped or refused call's summary is only why; what it was doing is in its args.
   const summary = stopped || refused ? summarizeToolArgs(tool.name, tool.argsPreview) : tool.summary
   const target = targetOf(tool.name, summary)
-  const status = tool.name === 'ask_question' || tool.name === 'switch_mode' ? parseStatusMessageData(tool) : null
+  // A question or a mode switch ends when you answer it, so its span is how
+  // long the reader took, not work: settled, it says no time.
+  const waitedOnYou = tool.name === 'ask_question' || tool.name === 'switch_mode'
+  const status = waitedOnYou ? parseStatusMessageData(tool) : null
   // An answered question says what you answered, under it; "Answered" alone
   // would make you open it to find out.
   const answers = !stopped && !refused && tool.name === 'ask_question' ? (status?.answers ?? []) : []
@@ -964,7 +1101,7 @@ function ToolLine({ item }: { item: ToolItem }) {
               <AwaitingApproval />
             ) : running ? (
               <AgentVSpinner size={11} />
-            ) : (
+            ) : waitedOnYou ? null : (
               <Duration ms={toolDurationMs(item)} />
             )}
           </>
@@ -1122,25 +1259,38 @@ type SpawnFacts = {
   failed: boolean
   phase: AgentInstanceUiState['phase'] | null
   verb: string
+  /** The verb without the short id, for a row whose step already shows it. */
+  bareVerb: string
   state: TaskState
   startedAt: string | undefined
   /** How long the child ran, once it has settled. */
   ranMs: number | null
-  /** Its step and activity while it runs. */
+  /** What it is doing while it runs. */
   doing: string
   /** Why it failed, when it did. */
   reason: string
   /** The user-defined helper type it runs as; empty for a general helper. */
   agentType: string
+  /**
+   * What to call it: its helper type, else the start of what it was asked.
+   * The short id meant nothing to anyone and three of them read alike; it
+   * stays in the tooltip and the instance's own pane.
+   */
+  name: string
 }
 
-/**
- * The deliverable a child's brief names, its label dropped: "Outcome: X" or
- * "## Outcome" over X gives X. Empty when the text names none.
- */
-export function outcomeLine(text: string | undefined): string {
-  const m = /(?:^|\n)[ \t]*(?:#+[ \t]*)?Outcome\b:?[ \t]*\n*[ \t]*([^\n]+)/i.exec(text ?? '')
-  return m?.[1]?.trim() ?? ''
+/** The deliverable a child's brief names (shared with the navigator's instance titles). */
+export const outcomeLine = briefOutcome
+
+/** Longest name a row gives a child before cutting it. */
+const CHILD_NAME_MAX = 40
+
+/** A child's name in a row: its helper type, else what it was asked, cut; the short id last. */
+export function childName(agentType: string, goal: string, shortId: string): string {
+  if (agentType.trim()) return agentType.trim()
+  const words = goal.replace(/\s+/g, ' ').trim()
+  if (words) return words.length > CHILD_NAME_MAX ? `${words.slice(0, CHILD_NAME_MAX - 1).trimEnd()}…` : words
+  return shortId || 'instance'
 }
 
 /**
@@ -1157,27 +1307,31 @@ function spawnFacts(item: ToolItem, agentInstances: Record<string, AgentInstance
   // and often opens with boilerplate ("Vyotiq is an Electron coding agent…").
   // The args preview is cut, often before `outcome`, so the child's own brief
   // ("Outcome: …" first) is the next place to find it.
+  // Spawned for a step: that step's title first, as the navigator names it.
   const goal =
+    (instance?.stepTitle?.trim() ? plainLine(instance.stepTitle) : '') ||
     (typeof args?.outcome === 'string' && args.outcome.trim()) ||
     outcomeLine(instance?.goal) ||
     outcomeLine(typeof args?.goal === 'string' ? args.goal : undefined) ||
     (typeof args?.goal === 'string' ? args.goal : (instance?.goal ?? ''))
   const failed = tool.status === 'fail'
   const phase = tool.status === 'running' ? null : (instance?.phase ?? null)
-  const verb =
+  const bareVerb =
     tool.status === 'running'
       ? 'Spawning instance'
       : failed
         ? 'Spawn failed'
         : phase === 'started'
-          ? `Running instance ${shortId}`
+          ? 'Running instance'
           : phase === 'done'
-            ? `Instance finished ${shortId}`
+            ? 'Instance finished'
             : phase === 'error'
-              ? `Instance failed ${shortId}`
+              ? 'Instance failed'
               : phase === 'cancelled'
-                ? `Instance cancelled ${shortId}`
-                : `Spawned instance ${shortId}`
+                ? 'Instance cancelled'
+                : 'Spawned instance'
+  // The detail line names what it was asked; the verb no longer carries the id.
+  const verb = bareVerb
   const state: TaskState =
     tool.status === 'running' || phase === 'started'
       ? 'running'
@@ -1188,19 +1342,20 @@ function spawnFacts(item: ToolItem, agentInstances: Record<string, AgentInstance
           : 'done'
   const ranMs =
     instance?.startedAt && instance.endedAt ? Date.parse(instance.endedAt) - Date.parse(instance.startedAt) : null
-  const doing =
-    phase === 'started'
-      ? [instance?.step ? `Step ${instance.step}` : '', instance?.activity ?? ''].filter(Boolean).join(' · ')
-      : ''
+  // What it is doing now. Not its loop's step count: "Step 32" beside a
+  // seven-step plan read as a step of that plan.
+  const doing = phase === 'started' ? (instance?.activity ?? '').trim() : ''
   const reason = failed ? firstLine(tool.content) : phase === 'error' ? firstLine(instance?.summary) : ''
   const agentType = instance?.agentType || (typeof args?.agent_type === 'string' ? args.agent_type.trim() : '')
   return {
     runId,
     shortId,
+    name: childName(agentType, goal, shortId),
     goal,
     failed,
     phase,
     verb,
+    bareVerb,
     state,
     startedAt: instance?.startedAt ?? item.endedAt,
     ranMs: ranMs != null && Number.isFinite(ranMs) && ranMs >= 0 ? ranMs : null,
@@ -1210,15 +1365,45 @@ function spawnFacts(item: ToolItem, agentInstances: Record<string, AgentInstance
   }
 }
 
+/**
+ * The children a step's own row names (its title and id chips, its time): a
+ * child's row inside that step says only how it stands and what it is doing.
+ */
+export const StepChildrenContext = createContext<ReadonlySet<string> | null>(null)
+
 function SpawnRow({ item }: { item: ToolItem }) {
   const { agentInstances } = useRunSession()
+  const stepChildren = useContext(StepChildrenContext)
   const tool = item.tool
-  const { runId, shortId, goal, failed, phase, verb, startedAt, ranMs, doing, reason, agentType } = spawnFacts(
-    item,
-    agentInstances
-  )
+  const { runId, shortId, name, goal, failed, phase, verb, bareVerb, startedAt, ranMs, doing, reason, agentType } =
+    spawnFacts(item, agentInstances)
+  if (runId && stepChildren?.has(runId)) {
+    // The step's row is this child's title and time; one of several says which it is.
+    const alone = stepChildren.size === 1
+    const running = tool.status === 'running' || phase === 'started'
+    return (
+      <div
+        data-record-instance={shortId || undefined}
+        data-instance-phase={phase ?? undefined}
+        title={goal || undefined}
+      >
+        <WorkLine
+          verb={alone ? bareVerb : `${bareVerb} · ${name}`}
+          tone={failed || phase === 'error' ? 'danger' : undefined}
+          detail={doing || (agentType ? <span className="text-tertiary">{agentType}</span> : undefined)}
+          trailing={
+            <>
+              {alone ? null : <OpenInstance runId={runId} shortId={shortId} />}
+              {running ? <AgentVSpinner size={11} /> : null}
+            </>
+          }
+        />
+        {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
+      </div>
+    )
+  }
   return (
-    <div data-record-instance={shortId || undefined} data-instance-phase={phase ?? undefined}>
+    <div data-record-instance={shortId || undefined} data-instance-phase={phase ?? undefined} title={shortId || undefined}>
       <WorkLine
         verb={verb}
         tone={failed || phase === 'error' ? 'danger' : undefined}
@@ -1252,9 +1437,7 @@ function SpawnRow({ item }: { item: ToolItem }) {
         }
       />
       {doing ? (
-        <p className="m-0 mt-0.5 truncate text-caption text-tertiary" aria-live="polite">
-          {doing}
-        </p>
+        <p className="m-0 mt-0.5 truncate text-caption text-tertiary">{doing}</p>
       ) : null}
       {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
     </div>
@@ -1284,22 +1467,25 @@ function InstancesBlock({ spawns }: { spawns: readonly ToolItem[] }) {
       <ul className="m-0 list-none p-0">
         {kids.map(({ item, facts }) => {
           const running = facts.state === 'running'
-          const detail = facts.reason || facts.doing || facts.goal
+          // The name already says what it was asked when it is that; not twice.
+          const detail = facts.reason || facts.doing || (facts.name === facts.goal ? '' : facts.goal)
           const body = (
             <>
               <StatusGlyph state={facts.state} size={14} />
               <span className="shrink-0 font-mono text-caption text-fg">
-                {facts.shortId ? (
+                {facts.runId ? (
                   <>
                     {/* The row is the way in; its name says so. */}
-                    {onOpenAgentInstance && facts.runId ? <span className="sr-only">Open instance</span> : null}{' '}
-                    {facts.shortId}
+                    {onOpenAgentInstance ? <span className="sr-only">Open instance</span> : null}{' '}
+                    <span className="inline-block max-w-[24ch] truncate align-bottom font-sans" title={facts.shortId}>
+                      {facts.name}
+                    </span>
                   </>
                 ) : (
                   facts.verb
                 )}
               </span>
-              {facts.agentType ? (
+              {facts.agentType && facts.name !== facts.agentType ? (
                 <span className="max-w-[12ch] shrink-0 truncate text-caption text-tertiary" data-agent-type>
                   {facts.agentType}
                 </span>
@@ -1385,6 +1571,11 @@ function InstanceCallRow({ item }: { item: ToolItem }) {
   const stopped = !timedOut && (phase === 'error' || phase === 'cancelled')
   const content = displayInstanceContent(tool.content)
   const report = tool.name === 'await_agent_instance' || tool.name === 'pull_agent_instance' ? instanceReport(tool.content) : ''
+  const name = childName(
+    instance?.agentType ?? '',
+    (instance?.stepTitle?.trim() ? plainLine(instance.stepTitle) : '') || outcomeLine(instance?.goal) || '',
+    shortId
+  )
   // The spawn row above already says the child finished; a returned await is
   // where its report is.
   const verb = finished
@@ -1412,9 +1603,9 @@ function InstanceCallRow({ item }: { item: ToolItem }) {
   // A pull is a look at the child's transcript: the line says how it stood, not its first message.
   const detail = canOpen ? (tool.name === 'pull_agent_instance' && pullFacts(tool.content)) || reportTitle(report) : undefined
   return (
-    <div data-record-tool={tool.name}>
+    <div data-record-tool={tool.name} title={shortId || undefined}>
       <WorkLine
-        verb={runId ? `${verb} ${shortId}` : verb}
+        verb={runId ? `${verb}${verb.endsWith(' from') ? ' ' : ' · '}${name}` : verb}
         tone={broke ? 'danger' : undefined}
         detail={detail}
         open={open}
@@ -1448,8 +1639,49 @@ function InstanceCallRow({ item }: { item: ToolItem }) {
   )
 }
 
-function PlanItem({ title, running }: { title: string | null; running: boolean }) {
+/**
+ * How a plan call ended without being written or refused for a fault: stopped
+ * with the run ("Interrupted") or denied at approval. Null when it ran.
+ */
+function planEnded(tool: ToolItem['tool']): string | null {
+  if (tool.status === 'running') return null
+  if (isInterruptedToolContent(tool.content)) return (tool.content ?? '').trim()
+  return tool.status === 'fail' ? approvalRefusalOf(tool.content) : null
+}
+
+function PlanItem({
+  title,
+  running,
+  ended,
+  failure
+}: {
+  title: string | null
+  running: boolean
+  ended: string | null
+  failure: string | null
+}) {
   const { onOpenPanel } = useRunSession()
+  // Stopped or denied, not broken: its own verb, how it ended said once and
+  // quietly, and no plan to open.
+  if (ended != null) {
+    return (
+      <WorkLine
+        verb="Writing the plan"
+        detail={title ?? undefined}
+        trailing={<span className="shrink-0 text-caption text-tertiary">{ended}</span>}
+      />
+    )
+  }
+  // Refused (malformed args, a rule it broke): no plan was written, so there is none to open.
+  if (failure != null) {
+    return (
+      <div data-record-plan="failed">
+        {/* The verb says it failed; a trailing "failed" would only repeat it. */}
+        <WorkLine verb="Plan not written" tone="danger" detail={title ?? undefined} />
+        {failure ? <p className="mt-0.5 truncate text-xs text-muted">{failure}</p> : null}
+      </div>
+    )
+  }
   return (
     <WorkLine
       verb={running ? 'Writing the plan' : 'Wrote the plan'}
@@ -1593,6 +1825,7 @@ export function workIsLive(w: WorkItem): boolean {
     case 'error':
     case 'compaction':
     case 'notice':
+    case 'said':
       return false
     default: {
       const _exhaustive: never = w
@@ -1607,13 +1840,17 @@ export function NowLine({ text, since }: { text: string; since?: string }) {
   return (
     // The fill bleeds into the gutter so the spinner sits on the edge every
     // other work row (and the settled thought it becomes) starts on.
-    <div className="-mx-2 flex h-7 items-center gap-2 rounded-md bg-surface px-2 text-xs" aria-live="polite">
+    // The live region is the text line only: the per-second elapsed tick is
+    // aria-hidden so it does not re-announce the row every second.
+    <div className="-mx-2 flex h-7 items-center gap-2 rounded-md bg-surface px-2 text-xs">
       <AgentVSpinner size={14} className="shrink-0 text-fg" />
       <span className="font-semibold text-fg-strong">Now</span>
-      <span className="min-w-0 flex-1 truncate vy-text-live" title={since}>
+      <span className="min-w-0 flex-1 truncate vy-text-live" title={since} aria-live="polite" aria-atomic="false">
         {line}
       </span>
-      <ElapsedSince since={since} />
+      <span aria-hidden="true">
+        <ElapsedSince since={since} />
+      </span>
     </div>
   )
 }

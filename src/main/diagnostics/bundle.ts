@@ -119,7 +119,7 @@ export function buildDiagnosticsEntries(input: DiagnosticsInput): ZipEntry[] {
   const { ctx } = input
   const logNames = input.logs.map((log) => `logs/${log.name.replace(/[\\/]/g, '_')}`)
   const readme = [
-    'Vyotiq diagnostics',
+    'Agent V diagnostics',
     `Made ${input.now.toISOString()}`,
     '',
     'system.json    app, Electron, Node and OS versions, CPU and memory',

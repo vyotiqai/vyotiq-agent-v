@@ -2,9 +2,9 @@ import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { collectHomeActivity } from '@main/agent/activityStats'
+import { collectHomeActivity, collectUsageTaskDays, NO_TASK_USAGE_GOAL } from '@main/agent/activityStats'
 import { resetJsonDocCacheForTests } from '@main/agent/jsonDocCache'
-import { workspaceSessionsRoot } from '@main/storage/paths'
+import { workspaceSessionsRoot, workspaceUsageDir } from '@main/storage/paths'
 
 vi.mock('electron', () => ({
   app: {
@@ -84,6 +84,7 @@ function ledgerFile(
 
 afterEach(() => {
   rmSync(sessionsRoot(), { recursive: true, force: true })
+  rmSync(join(workspaceUsageDir(WS), 'usage.json'), { force: true })
   resetJsonDocCacheForTests()
 })
 
@@ -203,6 +204,55 @@ describe('collectHomeActivity', () => {
       pricedRuns: 1
     })
     expect(res.outcomes).toEqual({ done: 1, error: 0, cancelled: 0, running: 0 })
+  })
+
+  it('counts spend with no task in every total but never as a task, and lists side calls', async () => {
+    makeRun('run-a', {
+      'receipt.json': receipt({ runId: 'run-a', writtenAt: '2026-09-09T10:00:00.000Z' }),
+      'usage.json': JSON.stringify({
+        version: 1,
+        lastTotals: { steps: 1, billedInputTokens: 100, outputTokens: 10, billedCost: 0, estimatedCost: 0, cachedInputTokens: 0, reasoningTokens: 0 },
+        days: {
+          '2026-09-09': {
+            inputTokens: 150,
+            outputTokens: 12,
+            estimatedCost: 0.02,
+            aux: { commit_message: { calls: 1, inputTokens: 50, outputTokens: 2, estimatedCost: 0.005 } }
+          }
+        }
+      })
+    })
+    mkdirSync(workspaceUsageDir(WS), { recursive: true })
+    writeFileSync(
+      join(workspaceUsageDir(WS), 'usage.json'),
+      JSON.stringify({
+        version: 1,
+        lastTotals: { steps: 0, billedInputTokens: 0, outputTokens: 0, billedCost: 0, estimatedCost: 0, cachedInputTokens: 0, reasoningTokens: 0 },
+        days: {
+          '2026-09-09': {
+            inputTokens: 19000,
+            outputTokens: 40,
+            estimatedCost: 0.06,
+            aux: { commit_message: { calls: 2, inputTokens: 19000, outputTokens: 40, estimatedCost: 0.06 } }
+          }
+        }
+      })
+    )
+
+    const res = await collectHomeActivity([WS], NOW, 7, { breakdown: true })
+    // One task: the workspace's own spend is not one.
+    expect(res.totals.runs).toBe(1)
+    expect(res.totals.billedInputTokens).toBe(19150)
+    expect(res.totals.estimatedCost).toBeCloseTo(0.08)
+    expect(res.tasks?.map((t) => t.runId)).toEqual(['run-a'])
+    expect(res.workspaces?.[0]).toMatchObject({ runs: 1, billedInputTokens: 19150 })
+    expect(res.totals.sideCalls).toEqual([
+      { site: 'commit_message', calls: 3, billedInputTokens: 19050, outputTokens: 42, estimatedCost: expect.closeTo(0.065) }
+    ])
+
+    // The CSV still sums to the page: the no-task spend is its own row.
+    const rows = await collectUsageTaskDays([WS], NOW, 7)
+    expect(rows.find((r) => r.runId === '')).toMatchObject({ goal: NO_TASK_USAGE_GOAL, inputTokens: 19000 })
   })
 
   it('keeps a live (receiptless) run in the window through its per-step ledger', async () => {

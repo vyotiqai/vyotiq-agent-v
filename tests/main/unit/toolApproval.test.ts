@@ -29,6 +29,7 @@ describe('isToolGated', () => {
 
   it('reads GitHub without asking, and asks before posting to it', () => {
     expect(isToolGated('github_pr_checks', 'mutating', none, [], '{}')).toBe(false)
+    expect(isToolGated('github_pr_comments', 'mutating', none, [], '{}')).toBe(false)
     expect(isToolGated('github_issue', 'mutating', none, [], '{"action":"list"}')).toBe(false)
     expect(isToolGated('github_issue', 'mutating', none, [], '{"action":"view","number":12}')).toBe(false)
     expect(isToolGated('github_issue', 'mutating', none, [], '{"action":"create","title":"x"}')).toBe(true)
@@ -36,6 +37,7 @@ describe('isToolGated', () => {
     expect(isAutonomousHighRiskTool('github_issue', '{"action":"view","number":12}')).toBe(false)
     expect(isAutonomousHighRiskTool('github_issue', '{"action":"create","title":"x"}')).toBe(true)
     expect(isAutonomousHighRiskTool('github_pr_checks', '{}')).toBe(false)
+    expect(isAutonomousHighRiskTool('github_pr_comments', '{}')).toBe(false)
   })
 
   it('asks before a screen snip, even under autonomy', () => {

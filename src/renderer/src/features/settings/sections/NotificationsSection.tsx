@@ -1,9 +1,11 @@
-import { DEFAULT_NOTIFICATION_SETTINGS, type NotificationSettings } from '@shared/ipc'
+import { DEFAULT_NOTIFICATION_SETTINGS, DEFAULT_QUIET_HOURS, type NotificationSettings } from '@shared/ipc'
+import { Input } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { DESKTOP_NOTIFICATION_OPTIONS } from '../constants'
 import { SelectField } from '../components/SelectField'
-import { SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
+import { RemoteNotificationsGroup } from '../components/RemoteNotificationsGroup'
 
 /** Whose notifications a desktop alert is. */
 function desktopName(): string {
@@ -19,6 +21,8 @@ export function NotificationsSection({ form }: { form: SettingsFormState }) {
   const patch = (partial: Partial<NotificationSettings>): void => {
     void form.runUpdate({ notifications: { ...notifications, ...partial } })
   }
+  const quiet = notifications.quietHours ?? DEFAULT_QUIET_HOURS
+  const desktopLocked = eventsLocked || notifications.desktop === 'off'
 
   return (
     <SettingsStack>
@@ -42,6 +46,56 @@ export function NotificationsSection({ form }: { form: SettingsFormState }) {
           onChange={(desktop) => patch({ desktop })}
           {...form.nestedDefaultMark('notifications', 'desktop')}
         />
+        <SwitchField
+          id="notifications-sound"
+          title="Sound"
+          hint="Desktop alerts play the system sound."
+          checked={notifications.sound ?? false}
+          disabled={desktopLocked}
+          onChange={(sound) => patch({ sound })}
+          {...form.nestedDefaultMark('notifications', 'sound')}
+        />
+        <SwitchField
+          id="notifications-quiet-hours"
+          title="Quiet hours"
+          hint="No desktop alerts in these hours. The inbox still fills."
+          checked={quiet.enabled}
+          disabled={desktopLocked}
+          onChange={(enabled) => patch({ quietHours: { ...quiet, enabled } })}
+          {...form.nestedDefaultMark('notifications', 'quietHours')}
+        />
+        {quiet.enabled ? (
+          <SettingsField id="notifications-quiet-hours-range" title="From and to" nested hint="Local time; a range can run past midnight.">
+            <div className="flex items-center gap-1.5">
+              {/* Width from the wrapper: Input is w-full and cn() has no merge. */}
+              <div className="w-28">
+                <Input
+                  type="time"
+                  size="sm"
+                  aria-label="Quiet from"
+                  value={quiet.start}
+                  disabled={desktopLocked}
+                  onChange={(e) => {
+                    if (/^\d{2}:\d{2}$/.test(e.target.value)) patch({ quietHours: { ...quiet, start: e.target.value } })
+                  }}
+                />
+              </div>
+              <span className="text-xs text-tertiary">to</span>
+              <div className="w-28">
+                <Input
+                  type="time"
+                  size="sm"
+                  aria-label="Quiet until"
+                  value={quiet.end}
+                  disabled={desktopLocked}
+                  onChange={(e) => {
+                    if (/^\d{2}:\d{2}$/.test(e.target.value)) patch({ quietHours: { ...quiet, end: e.target.value } })
+                  }}
+                />
+              </div>
+            </div>
+          </SettingsField>
+        ) : null}
       </SettingsGroup>
 
       <SettingsGroup title="Events">
@@ -72,13 +126,15 @@ export function NotificationsSection({ form }: { form: SettingsFormState }) {
         <SwitchField
           id="notifications-system"
           title="System alerts"
-          hint="When the window recovers from a crash, and when an update is ready to install."
+          hint="When the window recovers from a crash, an update is ready to install, or spend reaches a budget."
           checked={notifications.system}
           disabled={eventsLocked}
           onChange={(system) => patch({ system })}
           {...form.nestedDefaultMark('notifications', 'system')}
         />
       </SettingsGroup>
+
+      <RemoteNotificationsGroup form={form} />
     </SettingsStack>
   )
 }

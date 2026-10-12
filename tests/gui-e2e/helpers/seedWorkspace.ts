@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from '../../../src/shared/ipc/schemas/settings'
 import { workspaceIdFromPath } from '../../../src/shared/utils/workspaceId'
 import { canonicalizeWorkspacePath } from '../../../src/shared/utils/workspacePath'
 import { RUN_INTERRUPTED_ERROR } from '../../../src/shared/runInterrupt'
+import { E2E_TOOL_APPROVAL } from './launch'
 
 /**
  * The active workspace path after `addWorkspace`, or a loud failure.
@@ -205,7 +206,7 @@ export function seedRecentWorkspaces(userDataDir: string, workspacePaths: string
   return canonical
 }
 
-/** Seed settings.json (merged over defaults). */
+/** Seed settings.json (merged over defaults, with approvals off as launchApp seeds them). */
 export function seedAppSettings(
   userDataDir: string,
   partial: Record<string, unknown> = {}
@@ -213,7 +214,7 @@ export function seedAppSettings(
   mkdirSync(userDataDir, { recursive: true })
   writeFileSync(
     join(userDataDir, 'settings.json'),
-    JSON.stringify({ ...DEFAULT_SETTINGS, ...partial }, null, 2),
+    JSON.stringify({ ...DEFAULT_SETTINGS, toolApproval: E2E_TOOL_APPROVAL, ...partial }, null, 2),
     'utf8'
   )
 }

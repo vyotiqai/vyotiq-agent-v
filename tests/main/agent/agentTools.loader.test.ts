@@ -179,3 +179,44 @@ describe('agentToolsFingerprint / loadAgentToolsSnapshot', () => {
     expect(readFileCalls.count).toBeGreaterThan(readsAfterFirst)
   })
 })
+
+describe('reading and deleting an agent-built tool', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-agent-tools-delete-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reads a tool’s code by name, and moves its file to the trash', async () => {
+    const { readAgentToolSource, deleteAgentTool } = await import('@main/agent/agentTools/loader')
+    const path = toolFile(dir, 'count', { name: 'count', description: 'Counts', inputSchema: { type: 'object' } })
+    const found = await readAgentToolSource(dir, 'count')
+    expect(found?.path).toBe(path)
+    expect(found?.source).toContain('export async function handler')
+    expect(await readAgentToolSource(dir, 'missing')).toBeNull()
+
+    const trashed: string[] = []
+    const done = await deleteAgentTool(dir, 'count', async (p) => {
+      trashed.push(p)
+      rmSync(p)
+    })
+    expect(done).toEqual({ trashed: true })
+    expect(trashed).toEqual([path])
+    expect(await loadAgentToolsSnapshot(dir)).toEqual([])
+  })
+
+  it('deletes outright when the trash fails', async () => {
+    const { deleteAgentTool } = await import('@main/agent/agentTools/loader')
+    toolFile(dir, 'gone', { name: 'gone', description: 'Goes', inputSchema: { type: 'object' } })
+    const done = await deleteAgentTool(dir, 'gone', async () => {
+      throw new Error('no trash')
+    })
+    expect(done).toEqual({ trashed: false })
+    expect(await scanAgentTools(dir)).toEqual([])
+    expect(await deleteAgentTool(dir, 'gone')).toBeNull()
+  })
+})

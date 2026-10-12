@@ -8,7 +8,7 @@ import {
   killProcessTreeAndWait,
   normalizeChildExitCode,
   resolveTerminalShell,
-  sanitizedTerminalEnv,
+  agentCommandEnv,
   stripPowerShellPatternNoise,
   TERMINAL_MAX_OUTPUT,
   terminalDocxUnzipPreflight,
@@ -23,7 +23,7 @@ import type { TerminalShell } from '../../../shared/ipc'
 import { lowerProcessPriority } from '../processPriority'
 import { logger } from '../../../shared/logger'
 import { registerRunCancelHooks } from '../runRegistry'
-import type { SandboxLaunch } from '../sandbox/wrap'
+import { wrappedSpawnOptions, type SandboxLaunch, type WrappedCommand } from '../sandbox/wrap'
 
 export type TerminalSessionStatus = 'running' | 'done' | 'timeout' | 'pattern_matched' | 'aborted'
 
@@ -72,9 +72,44 @@ type TerminalSession = {
   onOutput?: (chunk: { text: string; stream: 'stdout' | 'stderr' }) => void
   /** Resolvers waiting for close / pattern / status change (event-driven poll). */
   waiters: Set<() => void>
+  /**
+   * Still running when its turn ended, so it was kept for the task instead of
+   * killed: a dev server, a watcher. Any later turn of the same run may poll,
+   * feed or stop it; the user stops it from the app. See keepLiveTerminalSessionsForInvoke.
+   */
+  kept?: boolean
 }
 
 const sessions = new Map<string, TerminalSession>()
+
+/** A background process kept running past the turn that started it. */
+export type KeptTerminalSession = {
+  id: string
+  runId: string
+  workspacePath: string
+  command: string
+  cwd: string
+  /** ISO time the process started. */
+  startedAt: string
+}
+
+const keptListeners = new Set<() => void>()
+
+/** Called whenever the set of kept sessions changes (one kept, one exits or is stopped). */
+export function onKeptTerminalSessionsChanged(listener: () => void): () => void {
+  keptListeners.add(listener)
+  return () => keptListeners.delete(listener)
+}
+
+function notifyKeptChanged(): void {
+  for (const listener of [...keptListeners]) {
+    try {
+      listener()
+    } catch (err) {
+      logger.warn('Kept terminal listener failed', { scope: 'agent', err })
+    }
+  }
+}
 
 /**
  * Deferred work keyed by session id, run when the session's process exits.
@@ -150,7 +185,9 @@ function assertSessionOwnership(
       `Unknown terminal session_id: ${sessionId}. Background shells do not survive app restart and finished sessions are pruned automatically — run the command again.`
     )
   }
-  if (session.runId !== runId || session.invokeId !== invokeId) {
+  // A kept session outlived its turn on purpose; any later turn of the same
+  // run owns it.
+  if (session.runId !== runId || (session.invokeId !== invokeId && !session.kept)) {
     throw new Error(`Terminal session does not belong to run: ${sessionId}`)
   }
 }
@@ -181,6 +218,7 @@ export function disposeTerminalSession(id: string): void {
   notifySessionWaiters(session)
   sessions.delete(id)
   void runExitFinalizers(id)
+  if (session.kept) notifyKeptChanged()
 }
 
 export function resetTerminalSessionsForTests(): void {
@@ -223,6 +261,109 @@ export function disposeTerminalSessionsForInvoke(runId: string, invokeId: number
     disposed++
   }
   return disposed
+}
+
+/**
+ * End of a turn that finished on its own: background processes still running
+ * (a dev server, a test watcher) are kept for the task instead of killed, so
+ * "start the server and leave it" is true when the agent says it. Finished
+ * sessions are disposed as before. A cancelled turn never gets here — its
+ * cancel hook disposes everything the turn started.
+ * @returns the sessions kept.
+ */
+export function keepLiveTerminalSessionsForInvoke(runId: string, invokeId: number): KeptTerminalSession[] {
+  const kept: KeptTerminalSession[] = []
+  for (const session of [...sessions.values()]) {
+    if (session.runId !== runId) continue
+    if (!session.running) {
+      if (session.invokeId === invokeId || session.kept) disposeTerminalSession(session.id)
+      continue
+    }
+    if (session.invokeId !== invokeId && !session.kept) continue
+    session.kept = true
+    // Nobody reads the live stream after the turn; the buffers keep the output.
+    session.onOutput = undefined
+    kept.push(keptView(session))
+  }
+  if (kept.length > 0) notifyKeptChanged()
+  return kept
+}
+
+function keptView(session: TerminalSession): KeptTerminalSession {
+  return {
+    id: session.id,
+    runId: session.runId,
+    workspacePath: session.workspaceRoot,
+    command: session.command,
+    cwd: session.cwd,
+    startedAt: new Date(session.createdAt).toISOString()
+  }
+}
+
+/** Background processes kept past their turn and still running, optionally for one workspace. */
+export function listKeptTerminalSessions(workspacePath?: string): KeptTerminalSession[] {
+  const out: KeptTerminalSession[] = []
+  for (const session of sessions.values()) {
+    if (!session.kept || !session.running) continue
+    if (workspacePath && !workspacePathsEqual(session.workspaceRoot, workspacePath)) continue
+    out.push(keptView(session))
+  }
+  return out.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+}
+
+/** Stop a kept background process (the user's Stop). False when it is unknown or not kept. */
+export function stopKeptTerminalSession(id: string): boolean {
+  const session = sessions.get(id)
+  if (!session || !session.kept) return false
+  disposeTerminalSession(id)
+  return true
+}
+
+/** Every session a run owns, kept or not — the task was deleted. */
+export function disposeTerminalSessionsForRun(runId: string): number {
+  let disposed = 0
+  for (const session of [...sessions.values()]) {
+    if (session.runId !== runId) continue
+    disposeTerminalSession(session.id)
+    disposed++
+  }
+  return disposed
+}
+
+/**
+ * The agent's `kill: true`: stop one of this run's sessions (its whole process
+ * tree) and return its last output.
+ */
+export function killTerminalSession(opts: { runId: string; invokeId: number; sessionId: string }): string {
+  const session = sessions.get(opts.sessionId)
+  assertSessionOwnership(session, opts.sessionId, opts.runId, opts.invokeId)
+  // `aborted` says it was stopped; the frame must keep exit_code last for its parser.
+  const frame = formatSession({ ...session, status: session.running ? 'aborted' : session.status })
+  disposeTerminalSession(session.id)
+  return frame
+}
+
+/**
+ * The agent's `input`: write text to a running session's stdin (an answer to a
+ * y/N prompt, a line for a REPL). A newline is added when missing, which is
+ * what pressing Enter sends.
+ */
+export function writeTerminalSessionInput(opts: {
+  runId: string
+  invokeId: number
+  sessionId: string
+  input: string
+}): void {
+  const session = sessions.get(opts.sessionId)
+  assertSessionOwnership(session, opts.sessionId, opts.runId, opts.invokeId)
+  if (!session.running) {
+    throw new Error(`Terminal session ${opts.sessionId} has already exited; there is nothing to send input to.`)
+  }
+  const stdin = session.child.stdin
+  if (!stdin || stdin.destroyed || !stdin.writable) {
+    throw new Error(`Terminal session ${opts.sessionId} does not accept input (its stdin is closed).`)
+  }
+  stdin.write(opts.input.endsWith('\n') ? opts.input : `${opts.input}\n`)
 }
 
 export function disposeTerminalSessionsForWorkspace(workspacePath: string): number {
@@ -359,6 +500,12 @@ export type StartBackgroundTerminalOpts = {
   onStillRunning?: (sessionId: string) => void
   /** Run the shell inside this OS sandbox (main/agent/sandbox). Absent = unsandboxed. */
   sandbox?: SandboxLaunch
+  /**
+   * Kills the process when it aborts — the run's hard cancel. Defaults to
+   * `signal`, which may also fire on a soft steer and must then only end the
+   * wait, not the process.
+   */
+  lifetimeSignal?: AbortSignal
 }
 
 export async function startBackgroundTerminal(
@@ -432,10 +579,10 @@ export async function startBackgroundTerminal(
     }
   }
 
-  const launch = opts.sandbox ? opts.sandbox.wrap(spec.bin, spec.args) : spec
+  const launch: WrappedCommand = opts.sandbox ? opts.sandbox.wrap(spec.bin, spec.args) : spec
   const child = spawn(launch.bin, launch.args, {
     cwd,
-    env: sanitizedTerminalEnv(),
+    ...wrappedSpawnOptions(launch, agentCommandEnv()),
     windowsHide: true
   })
   if (child.pid) lowerProcessPriority(child.pid)
@@ -471,8 +618,9 @@ export async function startBackgroundTerminal(
     notifySessionWaiters(session)
     void runExitFinalizers(id)
   }
-  if (opts.signal.aborted) onAbort()
-  else opts.signal.addEventListener('abort', onAbort, { once: true })
+  const lifetime = opts.lifetimeSignal ?? opts.signal
+  if (lifetime.aborted) onAbort()
+  else lifetime.addEventListener('abort', onAbort, { once: true })
 
   child.stdout?.on('data', (buf: Buffer) => {
     const text = decodeConsoleText(buf)
@@ -515,9 +663,17 @@ export async function startBackgroundTerminal(
     if (session.status === 'running' || session.status === 'pattern_matched') {
       session.status = matchesPattern(session) ? 'pattern_matched' : 'done'
     }
-    opts.signal.removeEventListener('abort', onAbort)
+    lifetime.removeEventListener('abort', onAbort)
     notifySessionWaiters(session)
     void runExitFinalizers(id)
+    if (session.kept) {
+      logger.info('Kept background terminal exited', {
+        scope: 'agent',
+        correlationId: session.runId,
+        exitCode: session.exitCode
+      })
+      notifyKeptChanged()
+    }
   })
 
   return await pollTerminalSession({
@@ -527,6 +683,7 @@ export async function startBackgroundTerminal(
     blockUntilMs: opts.blockUntilMs,
     pattern: opts.pattern,
     signal: opts.signal,
+    runSignal: opts.lifetimeSignal,
     killOnTimeout: opts.killOnTimeout,
     onStillRunning: opts.onStillRunning
   })

@@ -730,7 +730,7 @@ export function setPublicFetchForTests(next: PublicFetchImpl | null): void {
 }
 
 /** Read the full response body, capped at WEB_FETCH_MAX_BYTES. */
-async function readBody(res: Response): Promise<Buffer> {
+async function readBody(res: Response, maxBytes = WEB_FETCH_MAX_BYTES): Promise<Buffer> {
   if (!res.body) return Buffer.alloc(0)
   const reader = res.body.getReader()
   const chunks: Buffer[] = []
@@ -744,12 +744,12 @@ async function readBody(res: Response): Promise<Buffer> {
       // Hard cap (restores pre-a067d81 behavior): buffered bytes never exceed
       // WEB_FETCH_MAX_BYTES. Remaining stream bytes are read and discarded so
       // the connection can close cleanly.
-      const room = WEB_FETCH_MAX_BYTES - totalBytes
+      const room = maxBytes - totalBytes
       if (room <= 0) continue
       const buf = Buffer.from(value)
       if (buf.byteLength > room) {
         chunks.push(buf.subarray(0, room))
-        totalBytes = WEB_FETCH_MAX_BYTES
+        totalBytes = maxBytes
       } else {
         chunks.push(buf)
         totalBytes += buf.byteLength
@@ -766,7 +766,9 @@ async function readBody(res: Response): Promise<Buffer> {
 export async function fetchPublicResponse(
   startUrl: URL,
   signal: AbortSignal,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  /** The byte cap for this response, once its headers are in: web_fetch lets a PDF be larger than a page. */
+  bodyCap?: (response: Response) => number
 ): Promise<{ response: Response; finalUrl: URL; body: Buffer }> {
   const circuitKey = circuitKeyHttp(startUrl)
   assertCircuitClosed(circuitKey)
@@ -785,7 +787,7 @@ export async function fetchPublicResponse(
           if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
           continue
         }
-        const body = await readBody(response)
+        const body = await readBody(response, bodyCap?.(response) ?? WEB_FETCH_MAX_BYTES)
         if (retriableStatus) recordCircuitFailure(circuitKey)
         else recordCircuitSuccess(circuitKey)
         return { response, finalUrl, body }

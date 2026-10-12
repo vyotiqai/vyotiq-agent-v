@@ -1,5 +1,7 @@
 import type { SlashCommandDescriptor, SlashCommandResolveResult } from '../../../shared/ipc'
 import { formatGoalInvocation, loopUsageMessage, parseLoopCommand } from '../../../shared/goalRuntime'
+import { initMessage, reviewMessage } from '../../../shared/utils/agentPrompts'
+export { parseReviewScope } from '../../../shared/utils/agentPrompts'
 
 export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
   {
@@ -111,6 +113,24 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     availability: 'ready'
   },
   {
+    id: 'builtin:init',
+    trigger: 'init',
+    label: 'Write AGENTS.md',
+    description: 'Draft AGENTS.md from this repo: build, test and lint commands, layout, conventions. Text after /init says what to stress',
+    kind: 'builtin',
+    group: 'App',
+    availability: 'ready'
+  },
+  {
+    id: 'builtin:review',
+    trigger: 'review',
+    label: 'Review changes',
+    description: 'Review uncommitted changes for bugs, regressions and missing tests. /review branch, or /review task for this task’s changes',
+    kind: 'builtin',
+    group: 'App',
+    availability: 'ready'
+  },
+  {
     id: 'builtin:add-dir',
     trigger: 'add-dir',
     label: 'Add folder',
@@ -121,10 +141,12 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
   }
 ]
 
+/** Built-ins that step aside for a workspace command or skill with the same trigger. */
+export const YIELDING_BUILTINS: ReadonlySet<string> = new Set(['init', 'review'])
+
 export function resolveBuiltin(
   id: string,
-  trailingText: string,
-  helpMessage: string
+  trailingText: string
 ): SlashCommandResolveResult | null {
   switch (id) {
     case 'builtin:clear':
@@ -152,7 +174,9 @@ export function resolveBuiltin(
         ...(trailingText.trim() ? { trailingText: trailingText.trim() } : {})
       }
     case 'builtin:help':
-      return { action: 'send', message: helpMessage }
+      // The slash menu is the list: reopening it costs nothing, where sending
+      // a written list would start a paid run to echo it back.
+      return { action: 'client', clientAction: 'help' }
     case 'builtin:undo':
       return { action: 'client', clientAction: 'undo_writes' }
     case 'builtin:ask':
@@ -171,14 +195,19 @@ export function resolveBuiltin(
       const parsed = parseLoopCommand(trailingText)
       if (parsed.kind === 'stop') return { action: 'client', clientAction: 'loop_stop' }
       if (parsed.kind === 'status') return { action: 'client', clientAction: 'loop_status' }
-      if (parsed.kind === 'usage') return { action: 'send', message: loopUsageMessage() }
-      if (parsed.kind === 'error') return { action: 'send', message: parsed.message }
+      // Usage and parse errors are for the person typing, never the model.
+      if (parsed.kind === 'usage') return { action: 'notice', message: loopUsageMessage() }
+      if (parsed.kind === 'error') return { action: 'notice', message: parsed.message }
       return {
         action: 'client',
         clientAction: 'loop_set',
         trailingText: trailingText.trim()
       }
     }
+    case 'builtin:init':
+      return { action: 'send', message: initMessage(trailingText.trim()), mode: 'agent' }
+    case 'builtin:review':
+      return { action: 'send', message: reviewMessage(trailingText.trim()) }
     case 'builtin:add-dir': {
       // Quotes are how a path with spaces is usually pasted.
       const path = trailingText.trim().replace(/^(["'])(.*)\1$/, '$2').trim()
@@ -187,18 +216,4 @@ export function resolveBuiltin(
     default:
       return null
   }
-}
-
-export function buildHelpMessage(commands: SlashCommandDescriptor[]): string {
-  const lines = [
-    'Available slash commands:',
-    '',
-    ...commands
-      .filter((c) => c.availability === 'ready')
-      .slice(0, 40)
-      .map((c) => `- \`/${c.trigger}\` — ${c.description || c.label}`),
-    '',
-    'Type `/` in the instruction line to search all commands.'
-  ]
-  return lines.join('\n')
 }

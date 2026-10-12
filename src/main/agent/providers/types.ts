@@ -24,6 +24,8 @@ export interface TokenUsage {
   cachedInputTokens?: number
   /** Input tokens written into the prompt cache this step (Anthropic cache_creation). */
   cacheCreationInputTokens?: number
+  /** The share of `cacheCreationInputTokens` written with the 1-hour TTL (billed higher). */
+  cacheCreationLongInputTokens?: number
   /** Reasoning / thinking tokens billed as output (provider-specific). */
   reasoningTokens?: number
   /** Provider-reported account charge in USD (e.g. OpenRouter `usage.cost`). */
@@ -129,6 +131,12 @@ export interface ProviderChatRequest {
   modelInfo?: ModelInfo
   /** API service tier (`flex` / `priority`). UI labels `priority` as Fast (OpenAI Fast mode). */
   serviceTier?: ServiceTier
+  /**
+   * How long the provider should keep the stable prefix (tools + system)
+   * cached. `'1h'` outlives an approval or question wait at a higher write
+   * price (Anthropic: 2x base input instead of 1.25x). Default `'5m'`.
+   */
+  promptCacheTtl?: '5m' | '1h'
 }
 
 export interface LlmProvider {

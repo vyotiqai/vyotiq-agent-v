@@ -7,6 +7,7 @@ import { getWorkspaces } from '../workspace/workspaces'
 import { runExists } from './state'
 import { createRunId } from './loop'
 import { isImportedRun } from './runBundle'
+import { budgetHoldReason } from './spendBudget'
 import { validateExtraRoots } from './extraRoots'
 import {
   isActive,
@@ -72,6 +73,8 @@ function refuse(error: string, code?: string): LaunchRunOutcome {
  * `launchRun` is the variant that waits.
  */
 export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
+  const held = budgetHoldReason()
+  if (held) return refuse(held, 'budget_hold')
   const { workspacePath, wc } = request
   const open = getWorkspaces().openPaths.some((p) => workspacePathsEqual(p, workspacePath))
   if (!open) return refuse('Workspace is not open', 'workspace_not_open')

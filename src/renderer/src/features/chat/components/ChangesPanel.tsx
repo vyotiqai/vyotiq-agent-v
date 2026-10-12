@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { openInEditor } from '@renderer/lib/openInEditor'
 import {
   ActionMenu,
   Button,
@@ -17,6 +18,9 @@ import {
 import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
 import { Icon } from '@renderer/lib/icons'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
+import { useSettingValue } from '@renderer/lib/hooks/useSettingValue'
+import { CommitActionsMenu } from './GitManageDialogs'
+import { expandGitStatus } from '@renderer/lib/git/gitStatusLimit'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { CHAT_RIGHT_PANEL_BODY, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type {
@@ -29,7 +33,9 @@ import type {
   TaskCommitSettled,
   TaskFileStat
 } from '@shared/ipc'
+import { GIT_STATUS_FILE_LIMIT_MAX } from '@shared/ipc'
 import { namedGitBranch } from '@shared/utils/gitBranch'
+import { reviewMessage } from '@shared/utils/agentPrompts'
 import type { UiItem } from '@shared/transcript'
 import type { ChatItemsStore } from '../chatStores'
 import { onCommitOpenRequest, takeCommitOpenRequest } from '../commitOpenRequests'
@@ -46,7 +52,19 @@ import {
   type ChangesListFile,
   type FileDiffSource
 } from '@renderer/features/inspector/ChangesList'
-import type { AskTarget, HunkActions, HunkTarget } from '@renderer/features/inspector/ReviewDiffTable'
+import {
+  ReviewCommentsContext,
+  askLineKey,
+  type AskTarget,
+  type HunkActions,
+  type HunkTarget
+} from '@renderer/features/inspector/ReviewDiffTable'
+import {
+  reviewCommentText,
+  reviewInstruction,
+  reviewLineLabel,
+  type ReviewComment
+} from '@renderer/features/inspector/reviewComments'
 import { ChangesColumn } from '@renderer/features/inspector/ChangesColumn'
 import { lineLabel } from '@renderer/features/inspector/reviewDiff'
 import { reviewSignature, useReviewViewed } from '@renderer/features/inspector/reviewViewed'
@@ -70,6 +88,15 @@ import {
 } from '../utils/turnFileDiffs'
 
 type ChangeScope = 'agent' | 'uncommitted' | 'staged' | 'unstaged' | 'commits'
+
+/** What "Review these changes" asks /review to look at, per view. */
+const REVIEW_SCOPE_ARG: Record<ChangeScope, string> = {
+  agent: 'task',
+  uncommitted: 'uncommitted',
+  staged: 'uncommitted only the staged changes',
+  unstaged: 'uncommitted only the unstaged changes',
+  commits: 'branch'
+}
 
 const SCOPE_LABEL: Record<ChangeScope, string> = {
   agent: 'This task',
@@ -207,7 +234,6 @@ export const ChangesPanel = memo(function ChangesPanel({
   writeCheckpointFiles,
   active = true,
   running = false,
-  onStopRun,
   preferredScope = 'agent',
   preferredScopeToken = 0,
   preferredSelectedPath = null,
@@ -250,7 +276,6 @@ export const ChangesPanel = memo(function ChangesPanel({
   active?: boolean
   /** The run is live: Commit and Keep/Undo wait for it to stop. */
   running?: boolean
-  onStopRun?: () => void
   /** Scope requested by the parent (e.g. transcript Open Changes → agent). */
   preferredScope?: ChangeScope
   /** Bump to re-apply preferredScope even if the scope value is unchanged. */
@@ -341,10 +366,18 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [commitIntent, setCommitIntent] = useState<'commit' | 'push' | 'pr' | 'amend'>('commit')
   /** HEAD's commit, read while the git views are on screen: Amend is offered while it is unpushed. */
   const [lastCommit, setLastCommit] = useState<GitLastCommit | null>(null)
+  /**
+   * The commit Amend was opened on, with the message the box started from. It
+   * is what gets amended: main refuses it once it is no longer HEAD, rather
+   * than the box's message landing on whatever commit is latest by then.
+   */
+  const [amendTarget, setAmendTarget] = useState<{ sha: string; message: string } | null>(null)
   /** The branch picked while there were uncommitted changes: the switch waits on a choice. */
   const [switchAsk, setSwitchAsk] = useState<string | null>(null)
   /** Changes a switch left on the current branch, offered back. */
   const [branchStash, setBranchStash] = useState<GitBranchStash | null>(null)
+  /** That stash was restored with conflicts: its changes are in the files, it waits to be dropped. */
+  const [stashRestoredSha, setStashRestoredSha] = useState<string | null>(null)
   const [stashBusy, setStashBusy] = useState(false)
   const [layout, setLayout] = useState<DiffLayout>('unified')
   /** The review reads side by side by default; the narrow tab reads top to bottom. */
@@ -404,6 +437,12 @@ export const ChangesPanel = memo(function ChangesPanel({
     messageEditedRef.current = false
     setFindOpen(false)
     setFindQuery('')
+    // The last workspace's commit, stash and pending switch are not this one's.
+    setLastCommit(null)
+    setAmendTarget(null)
+    setBranchStash(null)
+    setStashRestoredSha(null)
+    setSwitchAsk(null)
     closeMenus()
   }, [workspacePath, closeMenus])
 
@@ -657,8 +696,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   )
 
   const sendAmend = useCallback(() => {
-    if (!lastCommit) return
-    void chrome.amend(message, lastCommit.sha, commitMode, runId).then(async (ok) => {
+    if (!amendTarget) return
+    void chrome.amend(message, amendTarget.sha, commitMode, runId).then(async (ok) => {
       if (!ok) return
       if (ok.task) onTaskCommitted?.(ok.task, false)
       setMessage('')
@@ -673,7 +712,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       const list = await refreshCommits()
       setSelectedCommit(list[0] ?? null)
     })
-  }, [chrome, message, lastCommit, commitMode, runId, onTaskCommitted, onGitMutated, refreshCommits])
+  }, [chrome, message, amendTarget, commitMode, runId, onTaskCommitted, onGitMutated, refreshCommits])
 
   /** What Commit & Create PR writes the PR from — the PR tab's draft; set where the checks are read. */
   const prTextRef = useRef<{ title: string; body: string } | null>(null)
@@ -743,7 +782,12 @@ export const ChangesPanel = memo(function ChangesPanel({
       setGenerationNotice(null)
       setMessageGenerating(true)
       void window.vyotiq
-        .gitGenerateCommitMessage({ workspacePath, mode: commitMode, ...(force ? { force: true } : {}) })
+        .gitGenerateCommitMessage({
+          workspacePath,
+          mode: commitMode,
+          ...(force ? { force: true } : {}),
+          ...(runId ? { runId } : {})
+        })
         .then((result) => {
           if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
           if (result.ok && result.data.source === 'agent' && result.data.message) {
@@ -766,7 +810,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           setMessageGenerating(false)
         })
     },
-    [commitMode, visibleGitFiles, workspacePath]
+    [commitMode, visibleGitFiles, workspacePath, runId]
   )
 
   const openCompose = useCallback((intent: 'commit' | 'push' | 'pr' | 'amend' = 'commit') => {
@@ -778,6 +822,7 @@ export const ChangesPanel = memo(function ChangesPanel({
     setMessageGenerating(false)
     setGenerationNotice(null)
     setDraftMayBeStale(false)
+    setAmendTarget(intent === 'amend' && lastCommit ? { sha: lastCommit.sha, message: lastCommit.message } : null)
     if (intent === 'amend') {
       // Amend keeps the commit's own message to edit; nothing is drafted for it.
       setMessage(lastCommit?.message ?? '')
@@ -795,7 +840,7 @@ export const ChangesPanel = memo(function ChangesPanel({
     if (!workspacePath) return
     setMessageGenerating(true)
     void window.vyotiq
-      .gitGenerateCommitMessage({ workspacePath, mode: commitMode })
+      .gitGenerateCommitMessage({ workspacePath, mode: commitMode, ...(runId ? { runId } : {}) })
       .then((result) => {
         if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
         if (result.ok && result.data.source === 'agent' && result.data.message) {
@@ -822,7 +867,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         if (sequence !== messageGenerationSeqRef.current) return
         setMessageGenerating(false)
       })
-  }, [commitMode, visibleGitFiles, workspacePath, lastCommit])
+  }, [commitMode, visibleGitFiles, workspacePath, lastCommit, runId])
 
   const { confirm, dialog: confirmDialog } = useConfirm()
 
@@ -855,15 +900,41 @@ export const ChangesPanel = memo(function ChangesPanel({
     if (!workspacePath || !branchStash) return
     setStashBusy(true)
     try {
-      const res = await window.vyotiq.gitStashRestore({ workspacePath, sha: branchStash.sha })
-      chrome.reportNotice(res.ok ? res.data.detail : res.error, !res.ok || res.data.conflicted)
-      if (res.ok && !res.data.conflicted) setBranchStash(null)
-      chrome.refresh()
+      const res = await chrome.restoreStash(branchStash.sha)
+      if (res && !res.conflicted) setBranchStash(null)
+      // With conflicts the changes are in the files now; the stash waits to be dropped.
+      if (res && res.conflicted) setStashRestoredSha(branchStash.sha)
       onGitMutated?.()
     } finally {
       setStashBusy(false)
     }
   }, [workspacePath, branchStash, chrome, onGitMutated])
+
+  const dropStash = useCallback(async () => {
+    if (!workspacePath || !branchStash) return
+    const restored = stashRestoredSha === branchStash.sha
+    // Not restored yet: dropping throws those changes away, so it asks first.
+    if (
+      !restored &&
+      !(await confirm(`The changes you left on ${branchStash.branch} will be deleted from the stash, not restored.`, {
+        title: 'Drop the changes left here',
+        confirmLabel: 'Drop',
+        danger: true
+      }))
+    ) {
+      return
+    }
+    setStashBusy(true)
+    try {
+      if (await chrome.dropStash(branchStash.sha)) {
+        setBranchStash(null)
+        setStashRestoredSha(null)
+      }
+      onGitMutated?.()
+    } finally {
+      setStashBusy(false)
+    }
+  }, [workspacePath, branchStash, stashRestoredSha, chrome, confirm, onGitMutated])
 
   const fileDiffStaged = useCallback(
     (file: GitChangedFile): boolean => {
@@ -980,9 +1051,10 @@ export const ChangesPanel = memo(function ChangesPanel({
   // overwrites, and every untracked file, in the OS trash first.
   const discardScope: 'worktree' | 'all' | null =
     displayScope === 'unstaged' ? 'worktree' : displayScope === 'uncommitted' ? 'all' : null
+  // Not while a task runs here: a discard would rewrite the files it is writing.
   const discardable = useMemo(
-    () => (discardScope ? filteredFiles.filter((f) => f.status !== 'conflicted') : []),
-    [discardScope, filteredFiles]
+    () => (discardScope && !running ? filteredFiles.filter((f) => f.status !== 'conflicted') : []),
+    [discardScope, filteredFiles, running]
   )
   const discard = useCallback(
     async (paths: string[]) => {
@@ -1132,8 +1204,21 @@ export const ChangesPanel = memo(function ChangesPanel({
   const rowActions = (file: ChangesListFile) => {
     const name = file.path.replace(/\\/g, '/').split('/').pop() ?? file.path
     const open =
-      onOpenFile && file.status !== 'D' ? (
-        <IconButton icon="external" label={`Open ${name}`} size="xs" tone="muted" onClick={() => onOpenFile(file.path)} />
+      file.status !== 'D' && (onOpenFile || workspacePath) ? (
+        <>
+          {onOpenFile ? (
+            <IconButton icon="external" label={`Open ${name}`} size="xs" tone="muted" onClick={() => onOpenFile(file.path)} />
+          ) : null}
+          {workspacePath ? (
+            <IconButton
+              icon="code"
+              label={`Open ${name} in editor`}
+              size="xs"
+              tone="muted"
+              onClick={() => void openInEditor({ workspacePath, path: file.path })}
+            />
+          ) : null}
+        </>
       ) : null
     if (displayScope === 'agent') {
       const decidable = canResolve && resolvableOf(file.path) && !resolutionOf(file.path) && !conflictedOf(file.path)
@@ -1192,6 +1277,16 @@ export const ChangesPanel = memo(function ChangesPanel({
         </>
       )
     }
+    return (
+      <>
+        {gitFileActions(file)}
+        {open}
+      </>
+    )
+  }
+
+  /** A git scope's Stage, Unstage and Discard for one file: on its row, and on the review's file header. */
+  const gitFileActions = (file: ChangesListFile) => {
     const entry = browserFiles.find((f) => f.path === file.path)
     return (
       <>
@@ -1225,7 +1320,6 @@ export const ChangesPanel = memo(function ChangesPanel({
             onClick={() => void discard([file.path])}
           />
         ) : null}
-        {open}
       </>
     )
   }
@@ -1288,17 +1382,82 @@ export const ChangesPanel = memo(function ChangesPanel({
       />
     ) : null
 
-  const askAboutLine =
-    onAskAboutLine && displayScope !== 'commits'
-      ? (target: AskTarget, question: string) => {
-          const n = lineLabel(target.line)
-          const where =
-            target.line.kind === 'del' ? `line ${n} as it was before the change (removed)` : `line ${n}`
-          onAskAboutLine(
-            [`In \`${target.path}\`, ${where}:`, '```', target.line.text, '```', '', question].join('\n')
-          )
-        }
-      : undefined
+  const askAboutLine = useMemo(
+    () =>
+      onAskAboutLine && displayScope !== 'commits'
+        ? (target: AskTarget, question: string) => onAskAboutLine(reviewCommentText(target, question))
+        : undefined,
+    [onAskAboutLine, displayScope]
+  )
+
+  // A review in progress: line comments collect here, then go to the agent as
+  // one instruction. Per task; a new task starts empty.
+  const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
+  const [reviewOpen, setReviewOpen] = useState(false)
+  useEffect(() => {
+    setReviewComments([])
+    setReviewOpen(false)
+  }, [workspacePath, runId])
+  const queueComment = useCallback((target: AskTarget, comment: string) => {
+    setReviewComments((prev) => [...prev, { id: `${Date.now()}-${prev.length}`, target, comment }])
+  }, [])
+  const queuedLines = useMemo(
+    () => new Set(reviewComments.map((c) => askLineKey(c.target.path, c.target.side, c.target.line))),
+    [reviewComments]
+  )
+  const reviewCtx = useMemo(
+    () => (askAboutLine ? { onQueue: queueComment, queuedLines } : {}),
+    [askAboutLine, queueComment, queuedLines]
+  )
+  const sendReview = (): void => {
+    if (!onAskAboutLine || reviewComments.length === 0) return
+    onAskAboutLine(reviewInstruction(reviewComments))
+    setReviewComments([])
+    setReviewOpen(false)
+  }
+  const reviewBar =
+    reviewComments.length > 0 ? (
+      <div className="shrink-0 border-b border-border" data-review-comments>
+        <div className="flex h-9 items-center gap-2 pl-3 pr-2 text-xs">
+          <button
+            type="button"
+            aria-expanded={reviewOpen}
+            onClick={() => setReviewOpen((v) => !v)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-fg focus-visible:vy-focus-ring"
+          >
+            <Icon name={reviewOpen ? 'chevron' : 'chevronRight'} size={11} className="shrink-0 text-tertiary" />
+            <span className="truncate">
+              {reviewComments.length} review comment{reviewComments.length === 1 ? '' : 's'}
+            </span>
+          </button>
+          <Button size="xs" variant="ghost" onClick={() => setReviewComments([])}>
+            Discard
+          </Button>
+          <Button size="xs" variant="primary" disabled={running} title={running ? 'Sends when the run stops' : undefined} onClick={sendReview}>
+            Send to the agent
+          </Button>
+        </div>
+        {reviewOpen ? (
+          <ul className="m-0 list-none px-3 pb-2">
+            {reviewComments.map((c) => (
+              <li key={c.id} className="group flex items-start gap-2 py-1 text-xs">
+                <span className="shrink-0 font-mono text-caption text-tertiary">
+                  {c.target.path.split('/').pop()}:{reviewLineLabel(c.target)}
+                </span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap text-secondary">{c.comment}</span>
+                <IconButton
+                  icon="close"
+                  size="xs"
+                  tone="muted"
+                  label="Remove this comment"
+                  onClick={() => setReviewComments((prev) => prev.filter((x) => x.id !== c.id))}
+                />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    ) : null
 
   // One hunk of a waiting file, undone on its own. The write stays waiting on
   // Keep or Undo; the diff and counts are asked for again. The toast's Restore
@@ -1405,10 +1564,11 @@ export const ChangesPanel = memo(function ChangesPanel({
   }))
   const currentBranch = namedGitBranch(status?.branch)
 
-  // Changes a switch left on this branch, and HEAD's commit for Amend: read
-  // while a git view is on screen, again whenever git moves.
+  // Changes a switch left on this branch, read again whenever git moves. In
+  // every scope: they belong to the branch, and the tab opens on "This task",
+  // where a clean tree otherwise gives no hint they are waiting.
   useEffect(() => {
-    if (!active || !gitView || !repoOk || !workspacePath || !window.vyotiq?.gitBranchStash) {
+    if (!active || !repoOk || !workspacePath || !window.vyotiq?.gitBranchStash) {
       setBranchStash(null)
       return undefined
     }
@@ -1419,7 +1579,8 @@ export const ChangesPanel = memo(function ChangesPanel({
     return () => {
       cancelled = true
     }
-  }, [active, gitView, repoOk, workspacePath, currentBranch, gitRevision, status?.fileCount])
+  }, [active, repoOk, workspacePath, currentBranch, gitRevision, status?.fileCount])
+  // HEAD's commit for Amend, while a git view is on screen.
   useEffect(() => {
     if (!active || !gitView || !repoOk || !workspacePath || !window.vyotiq?.gitLastCommit) {
       setLastCommit(null)
@@ -1432,7 +1593,8 @@ export const ChangesPanel = memo(function ChangesPanel({
     return () => {
       cancelled = true
     }
-  }, [active, gitView, repoOk, workspacePath, currentBranch, gitRevision, status?.ahead])
+    // HEAD's sha: a pull, an amend or a commit made anywhere else moves it.
+  }, [active, gitView, repoOk, workspacePath, currentBranch, gitRevision, status?.ahead, status?.head])
   const branchOptions: MenuOption[] = (() => {
     const list: MenuOption[] = branches.map((b) => ({
       value: b.name,
@@ -1442,6 +1604,27 @@ export const ChangesPanel = memo(function ChangesPanel({
     if (currentBranch && !list.some((o) => o.value === currentBranch)) list.unshift({ value: currentBranch, label: currentBranch })
     return list
   })()
+
+  // The whole diff on screen to the agent for a read-only review: /review's
+  // brief, scoped to the view (this task, the working tree, or the branch).
+  const reviewable =
+    displayScope === 'agent'
+      ? sessionAgentFiles.length > 0
+      : displayScope === 'commits'
+        ? commits.length > 0
+        : visibleGitFiles.length > 0
+  const reviewItems: ActionMenuItem[] =
+    onAskAboutLine && reviewable
+      ? [
+          {
+            id: 'review-changes',
+            label: 'Review these changes',
+            icon: 'eye',
+            separatorBefore: true,
+            onSelect: () => onAskAboutLine(reviewMessage(REVIEW_SCOPE_ARG[displayScope]))
+          }
+        ]
+      : []
 
   const moreItems: ActionMenuItem[] = [
     { id: 'wrap', label: 'Word wrap', checked: wordWrap, onSelect: () => setWordWrap((v) => !v) },
@@ -1465,7 +1648,8 @@ export const ChangesPanel = memo(function ChangesPanel({
       ? [
           {
             id: 'discard-all',
-            label: findQuery.trim() ? 'Discard changes to shown files…' : 'Discard all changes…',
+            // The list stops at its cap: "all" would promise more than is sent.
+            label: findQuery.trim() || status?.truncated ? 'Discard changes to shown files…' : 'Discard all changes…',
             icon: 'undo' as const,
             danger: true,
             separatorBefore: displayScope !== 'unstaged',
@@ -1473,6 +1657,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           }
         ]
       : []),
+    ...reviewItems,
     ...(onViewPr ? [{ id: 'pr', label: 'View pull request', icon: 'pullRequest' as const, separatorBefore: true, onSelect: onViewPr }] : [])
   ]
 
@@ -1481,6 +1666,12 @@ export const ChangesPanel = memo(function ChangesPanel({
     displayScope !== 'commits' &&
     (commitMode === 'staged' ? gitFiles.some((f) => f.staged) : gitFiles.length > 0)
   const pendingTask = unresolvedTask.length > 0 && Boolean(onKeepAllWrites || onDiscardAllWrites)
+  // "This task" shows nothing, yet Commit would take every uncommitted file in
+  // the workspace: none of them this task's, so it is not the next step.
+  const commitIsAside = displayScope === 'agent' && sessionAgentFiles.length === 0
+  const commitAsideTitle = commitIsAside
+    ? `This task changed nothing. Commit takes the workspace's ${gitFiles.length} uncommitted file${gitFiles.length === 1 ? '' : 's'}.`
+    : undefined
   // How this task's edits were settled, once nothing waits on review — the
   // record's line, said here too.
   const settled =
@@ -1491,15 +1682,18 @@ export const ChangesPanel = memo(function ChangesPanel({
   // drafted once while Changes is on screen over uncommitted work (a
   // stopped run). Main keeps it by the exact diff, so looking again — here,
   // on Commit…, after a restart — costs nothing until the changes differ.
+  // Each new change set is a billed call, so it waits for the setting;
+  // without it the message is written when Commit… opens.
   const draftFingerprint = canCommit
     ? `${commitMode}|${gitFiles
         .map((f) => `${f.path}:${f.status}:${f.staged ? 1 : 0}${f.unstaged ? 1 : 0}:${f.added}/${f.removed}`)
         .join(',')}`
     : ''
+  const autoDraft = useSettingValue('commitMessageAutoDraft', false)
   const [drafting, setDrafting] = useState<string | null>(null)
   const draftAskedRef = useRef('')
   useEffect(() => {
-    if (!active || running || composing || !workspacePath || !draftFingerprint) return
+    if (!autoDraft || !active || running || composing || !workspacePath || !draftFingerprint) return
     if (draftAskedRef.current === draftFingerprint) return
     const fingerprint = draftFingerprint
     // Let a burst of status updates settle into one change set first.
@@ -1507,7 +1701,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       draftAskedRef.current = fingerprint
       setDrafting(fingerprint)
       void window.vyotiq
-        ?.gitGenerateCommitMessage({ workspacePath, mode: commitMode })
+        ?.gitGenerateCommitMessage({ workspacePath, mode: commitMode, ...(runId ? { runId } : {}) })
         .then((res) => {
           if (res.ok && res.data.source === 'agent' && res.data.message) {
             setDrafted({ fingerprint, message: res.data.message })
@@ -1517,7 +1711,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         .finally(() => setDrafting((current) => (current === fingerprint ? null : current)))
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [active, running, composing, workspacePath, draftFingerprint, commitMode])
+  }, [autoDraft, active, running, composing, workspacePath, draftFingerprint, commitMode, runId])
   const draftedMessage = drafted && drafted.fingerprint === draftFingerprint ? drafted.message : null
   draftedMessageRef.current = draftedMessage
 
@@ -1574,7 +1768,8 @@ export const ChangesPanel = memo(function ChangesPanel({
         : commitIntent === 'amend'
           ? 'Amend'
           : 'Commit'
-  const commitBusy = chrome.busy || Boolean(resolveBusy) || messageGenerating
+  // A run in this checkout locks Commit and Amend, in the footer and the review row alike.
+  const commitBusy = chrome.busy || Boolean(resolveBusy) || messageGenerating || running
   const submitCommit = (): void => {
     if (commitIntent === 'pr') sendCreatePr()
     else if (commitIntent === 'amend') sendAmend()
@@ -1603,11 +1798,17 @@ export const ChangesPanel = memo(function ChangesPanel({
         ]
       : [])
   ]
-  const commitFileCount = commitMode === 'staged' ? gitFiles.filter((f) => f.staged).length : gitFiles.length
+  // With no remote and nothing to amend the menu held one item, "Commit…",
+  // the same as the button: then the button opens the commit box itself.
+  const commitHasMenu = commitMenuItems.length > 1
+  // What the commit takes: the status list stops at its cap, its total does
+  // not. Commit stages that whole total; a staged count past the cap is a floor.
+  const commitFileCount = commitMode === 'staged' ? gitFiles.filter((f) => f.staged).length : (status?.fileCount ?? gitFiles.length)
+  const commitCountIsFloor = commitMode === 'staged' && Boolean(status?.truncated)
   // Where the words came from: the agent's draft, untouched, or why they may be wrong.
   const commitNote =
-    commitIntent === 'amend' && lastCommit
-      ? `Amends ${lastCommit.sha.slice(0, 7)} · not pushed yet`
+    commitIntent === 'amend' && amendTarget
+      ? `Amends ${amendTarget.sha.slice(0, 7)} · not pushed yet`
       : generationNotice
     ? `No drafted message: ${generationNotice} — a plain one is in its place`
     : draftMayBeStale
@@ -1626,6 +1827,9 @@ export const ChangesPanel = memo(function ChangesPanel({
       canSubmit={Boolean(message.trim()) && !commitBusy}
       branch={currentBranch}
       files={commitFileCount}
+      filesAtLeast={commitCountIsFloor}
+      // "This task" lists the task's files, but Commit takes every uncommitted one.
+      everyUncommitted={displayScope === 'agent' && commitMode === 'all'}
       note={commitNote}
     />
   )
@@ -1718,10 +1922,24 @@ export const ChangesPanel = memo(function ChangesPanel({
       ...(displayScope === 'unstaged' && status && visibleGitFiles.length > 0
         ? [{ id: 'stage-all', label: 'Stage all', icon: 'plus' as const, separatorBefore: true, onSelect: sendStageAll }]
         : []),
+      ...(discardable.length > 0 && !chrome.busy
+        ? [
+            {
+              id: 'discard-all',
+              label: findQuery.trim() || status?.truncated ? 'Discard changes to shown files…' : 'Discard all changes…',
+              icon: 'undo' as const,
+              danger: true,
+              separatorBefore: displayScope !== 'unstaged',
+              onSelect: () => void discard(discardable.map((f) => f.path))
+            }
+          ]
+        : []),
+      ...reviewItems,
       ...(onViewPr ? [{ id: 'pr', label: 'View pull request', icon: 'pullRequest' as const, separatorBefore: true, onSelect: onViewPr }] : [])
     ]
 
     return (
+      <ReviewCommentsContext.Provider value={reviewCtx}>
       <div
         className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg"
         data-changes-panel
@@ -1782,14 +2000,15 @@ export const ChangesPanel = memo(function ChangesPanel({
                 <Button
                   ref={t.ref}
                   size="xs"
-                  variant="primary"
-                  trailingIcon="chevron"
+                  variant={commitIsAside ? 'secondary' : 'primary'}
+                  trailingIcon={commitHasMenu ? 'chevron' : undefined}
                   disabled={running || chrome.busy || Boolean(resolveBusy)}
-                  title={running ? 'Commit unlocks when the run stops' : undefined}
-                  aria-expanded={t['aria-expanded']}
-                  aria-controls={t['aria-controls']}
-                  aria-haspopup={t['aria-haspopup']}
-                  onClick={t.onClick}
+                  title={running ? 'Commit unlocks when the run stops' : commitAsideTitle}
+                  data-commit-aside={commitIsAside || undefined}
+                  aria-expanded={commitHasMenu ? t['aria-expanded'] : undefined}
+                  aria-controls={commitHasMenu ? t['aria-controls'] : undefined}
+                  aria-haspopup={commitHasMenu ? t['aria-haspopup'] : undefined}
+                  onClick={commitHasMenu ? t.onClick : () => openCompose('commit')}
                 >
                   Commit
                 </Button>
@@ -1814,15 +2033,12 @@ export const ChangesPanel = memo(function ChangesPanel({
           <div className="flex h-9 shrink-0 items-center border-b border-border pl-4 pr-2">{settledLine}</div>
         ) : null}
 
+        {reviewBar}
+
         {running && (pendingTask || canCommit) ? (
           <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs text-muted">
             <StatusGlyph state="paused" size={13} />
             <span className="min-w-0 flex-1">Commit and Keep/Undo unlock when the run stops.</span>
-            {onStopRun ? (
-              <Button size="xs" variant="ghost" onClick={onStopRun}>
-                Stop run
-              </Button>
-            ) : null}
           </div>
         ) : null}
 
@@ -1909,6 +2125,9 @@ export const ChangesPanel = memo(function ChangesPanel({
                     />
                     <span className="shrink-0 font-mono text-caption text-tertiary">{selectedCommit.shortSha}</span>
                     <span className="min-w-0 flex-1 truncate text-fg">{selectedCommit.subject}</span>
+                    {workspacePath ? (
+                      <CommitActionsMenu workspacePath={workspacePath} commit={selectedCommit} chrome={chrome} running={running} />
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="flex h-9 shrink-0 items-center gap-2 px-3 text-xs" data-review-progress>
@@ -1992,6 +2211,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                       onClick={() => void onDiscardWriteFile(selected.path)}
                     />
                   ) : null}
+                  {displayScope !== 'agent' ? gitFileActions(selected) : null}
                   <Checkbox
                     checked={isViewed(selected)}
                     label="Viewed"
@@ -2012,7 +2232,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                     numbers="both"
                     added={selected.status === 'A' || selected.status === '?'}
                     onAsk={askAboutLine}
-                    hunkActions={hunkActionsFor(selected)}
+                    hunkActions={displayScope === 'agent' ? hunkActionsFor(selected) : gitHunkActionsFor(selected.path)}
                   />
                 </div>
               </>
@@ -2028,10 +2248,12 @@ export const ChangesPanel = memo(function ChangesPanel({
         </div>
         {confirmDialog}
       </div>
+      </ReviewCommentsContext.Provider>
     )
   }
 
   return (
+    <ReviewCommentsContext.Provider value={reviewCtx}>
     <div
       className={CHAT_RIGHT_PANEL_BODY}
       data-changes-panel
@@ -2063,6 +2285,9 @@ export const ChangesPanel = memo(function ChangesPanel({
               if (name !== currentBranch) void checkoutBranch(name)
             }}
             aria-label="Switch branch"
+            // A switch swaps the files a run is writing, and waits for any git action in flight.
+            disabled={running || Boolean(chrome.syncing) || chrome.busy}
+            title={running ? 'Switch branches when the run stops' : undefined}
             placement="down"
             searchable={branchOptions.length > 8}
             searchPlaceholder="Find a branch"
@@ -2074,7 +2299,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             className="min-w-0 shrink"
           />
         ) : null}
-        {gitView && repoOk ? <GitSyncControls chrome={chrome} running={running} /> : null}
+        {gitView && repoOk ? <GitSyncControls chrome={chrome} running={running} workspacePath={workspacePath} /> : null}
         {showCounts ? (
           <>
             <span className="shrink-0 text-xs text-muted">
@@ -2161,32 +2386,74 @@ export const ChangesPanel = memo(function ChangesPanel({
       {repoCommandsNotice}
       {checksBlock}
 
-      {branchStash && gitView ? (
+      {branchStash ? (
         <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2 text-xs" data-branch-stash>
           <Icon name="archive" size={13} className="shrink-0 text-tertiary" />
-          <span className="min-w-0 flex-1 truncate text-secondary">
-            Changes you left on <span className="font-mono">{branchStash.branch}</span>
-            <span className="text-tertiary">
-              {' '}
-              · {branchStash.files} {branchStash.files === 1 ? 'file' : 'files'}
-            </span>
-          </span>
-          <Button
-            size="xs"
-            pending={stashBusy}
-            disabled={stashBusy || running || chrome.busy}
-            title={running ? 'Restore when the run stops' : 'Put these changes back in the working tree'}
-            onClick={() => void restoreStash()}
-          >
-            Restore
-          </Button>
+          {stashRestoredSha === branchStash.sha ? (
+            <>
+              <span className="min-w-0 flex-1 truncate text-secondary">
+                Restored with conflicts
+                <span className="text-tertiary"> · resolve them, then drop the stash</span>
+              </span>
+              <Button
+                size="xs"
+                pending={stashBusy}
+                disabled={stashBusy || chrome.busy}
+                title="Delete the stash: its changes are in the files now"
+                onClick={() => void dropStash()}
+              >
+                Drop stash
+              </Button>
+            </>
+          ) : (
+            <>
+              <span className="min-w-0 flex-1 truncate text-secondary">
+                Changes you left on <span className="font-mono">{branchStash.branch}</span>
+                <span className="text-tertiary">
+                  {' '}
+                  · {branchStash.files} {branchStash.files === 1 ? 'file' : 'files'}
+                </span>
+              </span>
+              <Button
+                size="xs"
+                pending={stashBusy}
+                disabled={stashBusy || running || chrome.busy}
+                title={running ? 'Restore when the run stops' : 'Put these changes back in the working tree'}
+                onClick={() => void restoreStash()}
+              >
+                Restore
+              </Button>
+              <IconButton
+                icon="trash"
+                label="Drop these changes…"
+                size="xs"
+                tone="muted"
+                disabled={stashBusy || chrome.busy}
+                onClick={() => void dropStash()}
+              />
+            </>
+          )}
         </div>
       ) : null}
 
+      {reviewBar}
+
       {status?.truncated && displayScope !== 'agent' && displayScope !== 'commits' ? (
-        <p className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted">
-          Showing first {status.files.length} of {status.fileCount} changed files
-        </p>
+        <div
+          className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted"
+          data-changes-truncated
+        >
+          <span className="min-w-0 flex-1 truncate">
+            Showing first {status.files.length} of {status.fileCount} changed files
+          </span>
+          {workspacePath && status.files.length < Math.min(status.fileCount, GIT_STATUS_FILE_LIMIT_MAX) ? (
+            <Button size="xs" variant="ghost" onClick={() => expandGitStatus(workspacePath)}>
+              {status.fileCount > GIT_STATUS_FILE_LIMIT_MAX
+                ? `Show ${GIT_STATUS_FILE_LIMIT_MAX.toLocaleString()}`
+                : 'Show all'}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {displayScope === 'commits' && selectedCommit ? (
@@ -2203,6 +2470,9 @@ export const ChangesPanel = memo(function ChangesPanel({
           />
           <span className="shrink-0 font-mono text-caption text-tertiary">{selectedCommit.shortSha}</span>
           <span className="min-w-0 flex-1 truncate text-fg">{selectedCommit.subject}</span>
+          {workspacePath ? (
+            <CommitActionsMenu workspacePath={workspacePath} commit={selectedCommit} chrome={chrome} running={running} />
+          ) : null}
         </div>
       ) : null}
 
@@ -2292,11 +2562,6 @@ export const ChangesPanel = memo(function ChangesPanel({
             <div className="flex items-center gap-2 text-xs text-muted">
               <StatusGlyph state="paused" size={13} />
               <span className="min-w-0 flex-1">Commit and Keep/Undo unlock when the run stops.</span>
-              {onStopRun ? (
-                <Button size="xs" variant="ghost" onClick={onStopRun}>
-                  Stop run
-                </Button>
-              ) : null}
             </div>
           ) : composing ? (
             <div className="space-y-2.5">
@@ -2305,7 +2570,8 @@ export const ChangesPanel = memo(function ChangesPanel({
                 <Button size="sm" variant="ghost" onClick={cancelCompose}>
                   Cancel
                 </Button>
-                {workspacePath ? (
+                {/* Amend keeps the commit's own message: a new one would describe only the changes added to it. */}
+                {workspacePath && commitIntent !== 'amend' ? (
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2380,13 +2646,15 @@ export const ChangesPanel = memo(function ChangesPanel({
                     <Button
                       ref={t.ref}
                       size="sm"
-                      variant="primary"
-                      trailingIcon="chevron"
+                      variant={commitIsAside ? 'secondary' : 'primary'}
+                      trailingIcon={commitHasMenu ? 'chevron' : undefined}
                       disabled={chrome.busy || Boolean(resolveBusy)}
-                      aria-expanded={t['aria-expanded']}
-                      aria-controls={t['aria-controls']}
-                      aria-haspopup={t['aria-haspopup']}
-                      onClick={t.onClick}
+                      title={commitAsideTitle}
+                      data-commit-aside={commitIsAside || undefined}
+                      aria-expanded={commitHasMenu ? t['aria-expanded'] : undefined}
+                      aria-controls={commitHasMenu ? t['aria-controls'] : undefined}
+                      aria-haspopup={commitHasMenu ? t['aria-haspopup'] : undefined}
+                      onClick={commitHasMenu ? t.onClick : () => openCompose('commit')}
                     >
                       Commit
                     </Button>
@@ -2426,5 +2694,6 @@ export const ChangesPanel = memo(function ChangesPanel({
         </p>
       </Dialog>
     </div>
+    </ReviewCommentsContext.Provider>
   )
 })

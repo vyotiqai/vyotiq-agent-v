@@ -30,6 +30,7 @@ import {
   PersistedEventSchema,
   RunLoopSchema,
   RunStatusSchema,
+  STEP_TITLE_MAX,
   contentToText,
   runDoneDedupeKey,
   runErrorDedupeKey,
@@ -59,6 +60,7 @@ import {
 } from '../../shared/utils/runTelemetry'
 import { toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import { finalizeInterruptedTodos } from './tools/todo'
+import { instanceStepTitle } from './planStepTitle'
 import { readGoal } from './runGoal'
 import { readLenientReceiptCost } from './runStats'
 import { readJsonDocCached } from './jsonDocCache'
@@ -80,6 +82,7 @@ import {
 } from './context/foldWatermark'
 import { writeRunReceiptBestEffort } from './runReceipt'
 import { RUN_LIST_CAP } from '@shared/domain/runs'
+import { moveRunToDeleted } from './deletedRuns'
 
 export { flushEventAppends, takeEventAppendFailureNotice, onRunStorageLost, clearRunStorageLostHandler } from './eventAppendQueue'
 export { flushMessageAppends, takeMessageAppendFailureNotice } from './messageAppendQueue'
@@ -317,6 +320,9 @@ export type CreateRunOptions = {
   worktreeBranch?: string
   /** The helper type an inline instance runs as, and its tool allowlist. */
   agentType?: { name: string; tools?: string[] }
+  /** The parent's plan step an inline instance serves: its id, and its title then. */
+  stepId?: string
+  stepTitle?: string
   /** Folders outside the workspace the task may also work in (already validated). */
   extraRoots?: string[]
   /** Started by a repeating schedule. */
@@ -362,6 +368,8 @@ export function createRun(
     ...(options.worktreePath ? { worktreePath: options.worktreePath } : {}),
     ...(options.worktreeBranch ? { worktreeBranch: options.worktreeBranch } : {}),
     ...(options.agentType ? { agentType: options.agentType } : {}),
+    ...(options.stepId?.trim() ? { stepId: options.stepId.trim().slice(0, 80) } : {}),
+    ...(options.stepTitle?.trim() ? { stepTitle: options.stepTitle.trim().slice(0, STEP_TITLE_MAX) } : {}),
     ...(options.extraRoots?.length ? { extraRoots: options.extraRoots } : {}),
     ...(options.scheduled ? { scheduled: options.scheduled } : {})
   }
@@ -1261,6 +1269,9 @@ async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promis
         ...(status.extraRoots?.length ? { extraRoots: status.extraRoots } : {}),
         ...(status.scheduled ? { scheduled: status.scheduled } : {})
       }
+      // An instance is named by the step it serves, as the parent's plan titles it now.
+      const stepTitle = await instanceStepTitle(root, entry.name, status)
+      if (stepTitle) summary.stepTitle = stepTitle
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)
       if (workspaceRoot && !status.inlineInstance) {
@@ -1529,6 +1540,8 @@ export async function interruptOrphanRuns(
         // Skip runs still live in memory (re-adding an open workspace must not
         // treat an in-flight agent as a crash orphan).
         if (isActive(name)) continue
+        // A headless run belongs to its own process: alive, it is not an orphan.
+        if (ownedByLiveProcess(parsed.data)) continue
         if (!isRunStaleByAge(parsed.data.updatedAt, maxAgeMs)) continue
         await interruptRunningRunOnDisk(workspacePath, name, dir, parsed.data)
         workspaceCount += 1
@@ -1547,6 +1560,32 @@ export async function interruptOrphanRuns(
 }
 
 const DEFAULT_STALE_RUN_AGE_MS = 120_000
+
+/**
+ * A headless run's owner is trusted only this long after its last write: a
+ * process id can be reused once its process is gone, and a live run writes
+ * its status every step.
+ */
+const OWNER_PID_TRUST_MS = 24 * 60 * 60 * 1000
+
+/** Whether a process with this id exists (EPERM: it exists, it is just not ours). */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM'
+  }
+}
+
+/** A `running` record another live process (a headless run) is writing. */
+export function ownedByLiveProcess(status: RunStatus, now = Date.now(), alive = processAlive): boolean {
+  const pid = status.ownerPid
+  if (!pid || pid === process.pid) return false
+  const written = Date.parse(status.updatedAt)
+  if (!Number.isFinite(written) || now - written > OWNER_PID_TRUST_MS) return false
+  return alive(pid)
+}
 
 function isRunStaleByAge(updatedAt: string, maxAgeMs: number): boolean {
   if (maxAgeMs <= 0) return true
@@ -1706,6 +1745,7 @@ export async function reconcileStaleRuns(
       }
       if (parsed.data.status !== 'running') continue
       if (isActive(entry.name)) continue
+      if (ownedByLiveProcess(parsed.data)) continue
       if (!isRunStaleByAge(parsed.data.updatedAt, maxAgeMs)) continue
       await interruptRunningRunOnDisk(workspacePath, entry.name, dir, parsed.data)
       count += 1
@@ -1728,9 +1768,15 @@ function dismissRunLifecycleInbox(runId: string): void {
   dismissLifecycleNotification(runErrorDedupeKey(id))
 }
 
+/**
+ * Delete a task. By default it goes to Recently deleted (deletedRuns.ts) for
+ * 30 days, its helper instances with it; `permanent` removes it from disk.
+ * Worktree branches go either way.
+ */
 export async function deleteRun(
   workspacePath: string,
-  runId: string
+  runId: string,
+  opts: { permanent?: boolean } = {}
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (isActive(runId)) {
     return { ok: false, error: 'Cancel run first' }
@@ -1740,6 +1786,8 @@ export async function deleteRun(
     return { ok: false, error: 'Run not found' }
   }
   const status = loadStatus(dir)
+  /** Instance folders that go to Recently deleted with the task. */
+  const keptChildren: Array<{ runId: string; dir: string }> = []
 
   if (!status?.inlineInstance) {
     const { instances } = await collectRunsFromRoot(workspaceSessionsRoot(workspacePath))
@@ -1757,7 +1805,8 @@ export async function deleteRun(
       }
       if (existsSync(childDir)) {
         await drainRunWritersBeforeDelete(childDir)
-        rmSync(childDir, { recursive: true, force: true })
+        if (opts.permanent) rmSync(childDir, { recursive: true, force: true })
+        else keptChildren.push({ runId: child.runId, dir: childDir })
       }
       // The stitched-transcript memo pins multi-MB strings per run dir — drop
       // it with the directory or the LRU keeps deleted runs resident.
@@ -1779,7 +1828,20 @@ export async function deleteRun(
   if (isActive(runId)) {
     return { ok: false, error: 'Cancel run first' }
   }
-  rmSync(dir, { recursive: true, force: true })
+  if (opts.permanent) {
+    rmSync(dir, { recursive: true, force: true })
+  } else {
+    try {
+      await moveRunToDeleted(workspacePath, runId, dir, {
+        ...(status?.goal ? { goal: status.goal } : {}),
+        instanceDirs: keptChildren
+      })
+    } catch (err) {
+      // Never half a delete: what could not be kept is not removed either.
+      logger.warn('Could not move the task to Recently deleted', { scope: 'agent', runId, err })
+      return { ok: false, error: 'Could not move the task to Recently deleted. Nothing was deleted.' }
+    }
+  }
   invalidateMessagesCache(dir)
   dismissRunLifecycleInbox(runId)
   invalidateListRunsCache(workspacePath)

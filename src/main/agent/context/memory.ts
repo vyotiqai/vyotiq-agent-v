@@ -273,6 +273,81 @@ export function listMemoryNotes(
   }
 }
 
+/** One note as Settings lists it. */
+export type MemoryNoteDetail = {
+  /** `notes/<name>.md`, or `state.md`. */
+  path: string
+  bytes: number
+  mtimeMs: number
+  /** Its first heading or line, for a reader scanning the list. */
+  title: string
+  /** index.md links to it. */
+  indexed: boolean
+}
+
+function firstLine(text: string): string {
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/^#+\s*/, '').trim()
+    if (line) return line.length > 120 ? `${line.slice(0, 119)}…` : line
+  }
+  return ''
+}
+
+/** Every note, and state.md when there is one, newest first. */
+export async function memoryNoteDetails(workspacePath: string): Promise<MemoryNoteDetail[]> {
+  const root = memoryRoot(workspacePath)
+  if (!existsSync(root)) return []
+  const indexed = new Set(indexLinkedNotes(workspacePath))
+  const out: MemoryNoteDetail[] = []
+  const read = async (rel: string, isIndexed: boolean): Promise<void> => {
+    try {
+      const abs = assertUnderMemory(workspacePath, rel)
+      const st = await lstat(abs)
+      if (!st.isFile()) return
+      const text = await readFile(abs, 'utf8')
+      out.push({ path: rel, bytes: st.size, mtimeMs: st.mtimeMs, title: firstLine(text), indexed: isIndexed })
+    } catch {
+      // An unreadable note is left out of the list, not the whole list.
+    }
+  }
+  if (existsSync(join(root, 'state.md'))) await read('state.md', true)
+  let names: string[] = []
+  try {
+    names = (await readdir(join(root, 'notes'), { withFileTypes: true, encoding: 'utf8' }))
+      .filter((e) => e.isFile() && e.name.endsWith('.md'))
+      .map((e) => e.name)
+  } catch {
+    names = []
+  }
+  for (const name of names) await read(`notes/${name}`, indexed.has(name))
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+/**
+ * Delete one note (or state.md) and the index line that points at it, so
+ * index.md never links to a note that is gone. index.md itself is not
+ * deletable this way: Clear memory is.
+ */
+export async function deleteMemoryNote(workspacePath: string, relPath: string): Promise<boolean> {
+  const cleaned = relPath.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (hasTraversalSegment(cleaned)) throw new Error('Invalid memory path')
+  const note = /^notes\/([a-zA-Z0-9._-]+\.md)$/.exec(cleaned)
+  if (!note && cleaned !== 'state.md') throw new Error('Only a note (notes/<name>.md) or state.md can be deleted')
+  const abs = assertUnderMemory(workspacePath, cleaned)
+  const removed = await unlinkRegularFile(abs)
+  if (removed && note) {
+    const indexAbs = assertUnderMemory(workspacePath, 'index.md')
+    if (existsSync(indexAbs)) {
+      const text = readFileSync(indexAbs, 'utf8')
+      const name = note[1]!.replace(/[.]/g, '\\.')
+      const pattern = new RegExp(`\\]\\(\\s*notes/${name}\\s*\\)`)
+      const kept = text.split('\n').filter((line) => !pattern.test(line))
+      if (kept.length !== text.split('\n').length) atomicWriteFile(indexAbs, kept.join('\n'))
+    }
+  }
+  return removed
+}
+
 export function readMemoryFile(
   workspacePath: string,
   relPath: string

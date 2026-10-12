@@ -78,4 +78,44 @@ describe('useAppearance', () => {
     act(() => handler?.(true))
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
   })
+
+  it('applies accessibility attributes and numeric scale to the document root', () => {
+    const { result } = renderHook(() =>
+      useAppearance({
+        ...DEFAULT_SETTINGS,
+        theme: 'light',
+        fontScale: 1.52,
+        skinId: 'native',
+        reduceMotion: 'on',
+        contrast: 'more',
+        alwaysShowFocusRing: true,
+        announceVerbosity: 'brief'
+      })
+    )
+    const root = document.documentElement
+    expect(root.getAttribute('data-font-scale')).toBe('1.52')
+    expect(root.style.getPropertyValue('--vy-font-scale')).toBe('1.52')
+    expect(root.getAttribute('data-reduce-motion')).toBe('on')
+    expect(root.getAttribute('data-contrast')).toBe('more')
+    expect(root.getAttribute('data-focus-ring')).toBe('always')
+    expect(root.getAttribute('data-announce')).toBe('brief')
+    expect(result.current.reduceMotion).toBe('on')
+    expect(result.current.announceVerbosity).toBe('brief')
+  })
+
+  it('clears the inline scale for presets and defaults the focus ring', () => {
+    renderHook(() =>
+      useAppearance({
+        ...DEFAULT_SETTINGS,
+        theme: 'light',
+        fontScale: 'large',
+        skinId: 'native'
+      })
+    )
+    const root = document.documentElement
+    expect(root.getAttribute('data-font-scale')).toBe('large')
+    expect(root.style.getPropertyValue('--vy-font-scale')).toBe('')
+    expect(root.getAttribute('data-focus-ring')).toBe('auto')
+    expect(root.getAttribute('data-announce')).toBe('full')
+  })
 })

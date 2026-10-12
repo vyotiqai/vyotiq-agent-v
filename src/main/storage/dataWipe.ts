@@ -13,6 +13,7 @@ import { getHomeWorkspacePath, getWorkspaces } from '../workspace/workspaces'
 import { userDataRoot, workspacesRoot } from './paths'
 import { measureDir } from './retention'
 import { requestDataWipe } from './wipeUserData'
+import { markQuitConfirmed } from '../app/quitGuard'
 
 /**
  * Settings → Storage → Delete all my data. The preview measures what goes; the
@@ -97,6 +98,7 @@ export async function runDataWipe(confirmToken: string, nowMs = Date.now()): Pro
   })
   // After the reply reaches the renderer.
   setTimeout(() => {
+    markQuitConfirmed()
     app.relaunch()
     app.quit()
   }, 100)

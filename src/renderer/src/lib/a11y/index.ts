@@ -1,5 +1,6 @@
 export { FOCUSABLE_SELECTOR, getFocusableElements, typingElsewhere } from './focusable'
 export { useFocusTrap } from './useFocusTrap'
 export { useRovingTabIndex, type RovingOrientation } from './useRovingTabIndex'
+export { TYPEAHEAD_RESET_MS, isTypeaheadKey, useTypeahead } from './useTypeahead'
 export { announceLive, useLiveAnnouncer } from './useLiveAnnouncer'
 export { Dialog } from './Dialog'

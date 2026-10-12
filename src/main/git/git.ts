@@ -1,8 +1,9 @@
-import { execFile as execFileCb } from 'child_process'
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
-import { copyFile, mkdtemp, readFile, rm, stat } from 'fs/promises'
+import { execFile as execFileCb, spawn } from 'child_process'
+import { createHash, type Hash } from 'crypto'
+import { existsSync, readFileSync, realpathSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
+import { copyFile, lstat, mkdtemp, open, readFile, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, dirname, join, resolve } from 'path'
+import { basename, dirname, join, relative, resolve } from 'path'
 import { promisify } from 'util'
 import type {
   GitBlameLine,
@@ -14,6 +15,7 @@ import type {
   GitStatus,
   GitStatusResult
 } from '../../shared/ipc'
+import { GIT_STATUS_FILE_LIMIT_DEFAULT, GIT_STATUS_FILE_LIMIT_MAX } from '../../shared/ipc'
 import { diffFingerprint, hunkIdentity, parseUnifiedHunks, sameHunk, type HunkIdentity } from '../../shared/utils/hunkPatch'
 import { mapLimit } from '../../shared/utils/mapLimit'
 import { isSafeWorkspaceRelPath } from '../../shared/utils/workspacePath'
@@ -30,7 +32,7 @@ const PUSH_TIMEOUT_MS = 120_000
 const MAX_BUFFER = 4 * 1024 * 1024
 const GIT_PROBE_TTL_MS = 60_000
 /** Per-file list ceiling in `readGitStatus`; totals (`fileCount`, +/-) stay complete. */
-export const GIT_STATUS_FILE_LIMIT = 200
+export const GIT_STATUS_FILE_LIMIT = GIT_STATUS_FILE_LIMIT_DEFAULT
 
 let gitBinaryCache: { ok: boolean; bin: string | null; checkedAt: number } | null = null
 
@@ -287,6 +289,15 @@ async function gitQuiet(args: string[], cwd: string, timeout: number): Promise<s
 }
 
 /**
+ * A path the person picked, as a pathspec that names only that path: without
+ * `:(literal)` git reads `[`, `*` and `?` as wildcards, so `app/[id].tsx`
+ * also matched `app/i.tsx` and a discard threw that file's edits away too.
+ */
+function literalPathspec(path: string): string {
+  return `:(literal)${path}`
+}
+
+/**
  * `-uall` so real project files under new dirs stay visible (e.g. `sub/new.txt`).
  * `--no-renames`: porcelain -z rename/copy records are two NUL fields
  * (`R new\0old\0`); without this, the old path is parsed as `XY + path`
@@ -489,7 +500,12 @@ function emptyFile(path: string, status: GitChangedFile['status']): GitChangedFi
   }
 }
 
-export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
+export async function readGitStatus(
+  cwd: string,
+  /** Files to list; the default 200 unless "Show all" asked for more. */
+  limit: number = GIT_STATUS_FILE_LIMIT
+): Promise<GitStatusResult> {
+  const fileLimit = Math.max(1, Math.min(GIT_STATUS_FILE_LIMIT_MAX, Math.floor(limit)))
   if (!(await gitAvailable())) {
     return { kind: 'unavailable', detail: 'Git is not installed or not on PATH' }
   }
@@ -504,15 +520,17 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   // reported a freshly initialized repository as having no branch at all.
   // symbolic-ref answers before the first commit and stays null when detached.
   const unstagedArgs = ['diff', '--numstat', '--no-renames', '-z']
-  const [branch, hasCommits, porcelain, remote, unstagedMap] = await Promise.all([
+  const [branch, headRaw, porcelain, remote, unstagedMap] = await Promise.all([
     currentGitBranch(cwd),
-    hasGitCommits(cwd),
+    gitQuiet(['rev-parse', '--verify', 'HEAD'], cwd, READ_TIMEOUT_MS),
     gitStatusPorcelain(cwd),
     gitQuiet(['remote'], cwd, READ_TIMEOUT_MS),
     numstatMap(cwd, unstagedArgs)
   ])
 
   const hasRemote = Boolean(remote?.trim())
+  const head = headRaw?.trim() || undefined
+  const hasCommits = head !== undefined
 
   // Round two — both of these need an answer from round one: the staged diff
   // needs to know whether HEAD exists, and ahead/behind needs a remote plus
@@ -595,7 +613,7 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   // The schema ships a bounded file list with complete totals (truncated +
   // fileCount tell the UI); huge trees stay cheap over IPC and the Changes
   // panel announces the cut instead of pretending the list is everything.
-  const files = all.slice(0, GIT_STATUS_FILE_LIMIT)
+  const files = all.slice(0, fileLimit)
 
   // Measure untracked files only once we know which ones ship. Every count is
   // a file read, so doing this inside the parse loop meant a workspace
@@ -639,6 +657,7 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
     removed,
     hasRemote,
     hasCommits,
+    ...(head ? { head } : {}),
     ...(aheadBehind ?? {}),
     ...(upstream ? { upstream } : {}),
     ...(repoCommands ? { repoCommands } : {})
@@ -738,7 +757,7 @@ export async function readGitDiff(
     const args = ['show', '--no-color', '--no-ext-diff', '--pretty=format:', '--patch']
     if (opts.ignoreWhitespace) args.push('-w')
     args.push('--end-of-options', sha)
-    if (path) args.push('--', path)
+    if (path) args.push('--', literalPathspec(path))
     try {
       const stdout = await gitDiffStdout(args, cwd, READ_TIMEOUT_MS)
       const text = stdout.trimEnd()
@@ -776,7 +795,7 @@ export async function readGitDiff(
     args.push('--cached')
   }
   if (path) {
-    args.push('--', path)
+    args.push('--', literalPathspec(path))
   }
 
   try {
@@ -802,6 +821,208 @@ export async function readGitDiff(
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: message }
   }
+}
+
+/** One file a commit would take, for writing its message. */
+export type CommitChangeFile = {
+  /** As git names it: from the repository's top for tracked files, from the workspace for new ones. */
+  path: string
+  kind: 'added' | 'modified' | 'deleted'
+  added: number
+  removed: number
+  binary: boolean
+  /** Not tracked yet: Commit adds it. */
+  untracked: boolean
+  /** Its diff as git prints it (a new file's text as added lines); null when there is none to show. */
+  diff: string | null
+}
+
+export type CommitChanges = {
+  files: CommitChangeFile[]
+  /** Some diff text was past what is read; the file list is still whole. */
+  partial: boolean
+  /** Fingerprint of everything read: the same changes give the same key. */
+  key: string
+}
+
+/** More than any prompt takes: what is read past this is counted, not kept. */
+const COMMIT_PATCH_READ_MAX = 4_000_000
+/** A new file's text kept for its diff; the rest of it is only counted. */
+const UNTRACKED_TEXT_KEPT = 48 * 1024
+/** A new file is counted up to here; past it, its line count is a lower bound. */
+const UNTRACKED_COUNT_MAX = 2 * 1024 * 1024
+const COMMIT_READ_TIMEOUT_MS = 20_000
+
+/**
+ * Git's stdout, kept up to `maxChars`: a diff of thousands of files is read
+ * without the 4 MB buffer limit failing it, and what is past the cap is
+ * hashed into `digest` (so the key still changes with it) but not kept.
+ */
+async function readGitCapped(
+  args: string[],
+  cwd: string,
+  maxChars: number,
+  digest: Hash
+): Promise<{ text: string; cut: boolean } | null> {
+  const command = await guardedGitCommand(args, cwd)
+  if (!command) return null
+  return new Promise((resolvePromise) => {
+    const child = spawn(command.bin, command.args, { cwd, env: command.env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    const chunks: string[] = []
+    let kept = 0
+    let cut = false
+    const timer = setTimeout(() => child.kill(), COMMIT_READ_TIMEOUT_MS)
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      digest.update(chunk)
+      if (kept >= maxChars) {
+        cut = true
+        return
+      }
+      const room = maxChars - kept
+      if (chunk.length > room) cut = true
+      const part = chunk.length > room ? chunk.slice(0, room) : chunk
+      chunks.push(part)
+      kept += part.length
+    })
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolvePromise(null)
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolvePromise(code === 0 ? { text: chunks.join(''), cut } : null)
+    })
+  })
+}
+
+/** Each file's own part of a `git diff`, by its path (renames are off, so a and b agree). */
+function splitPatchByPath(patch: string): Map<string, string> {
+  const out = new Map<string, string>()
+  const starts: number[] = []
+  const header = /^diff --git /gm
+  for (let m = header.exec(patch); m; m = header.exec(patch)) starts.push(m.index)
+  for (let i = 0; i < starts.length; i += 1) {
+    const chunk = patch.slice(starts[i], starts[i + 1] ?? patch.length).trimEnd()
+    const eol = chunk.indexOf('\n')
+    const firstLine = eol === -1 ? chunk : chunk.slice(0, eol)
+    const plain = /^diff --git a\/(.+) b\/\1$/.exec(firstLine)
+    const quoted = /^diff --git "a\/(.+)" "b\/\1"$/.exec(firstLine)
+    const path = plain?.[1] ?? (quoted ? unquoteGitPath(quoted[1]!) : null)
+    if (path) out.set(path, chunk)
+  }
+  return out
+}
+
+/** A path git printed in quotes (C-style escapes, octal bytes for UTF-8). */
+function unquoteGitPath(raw: string): string {
+  const bytes: number[] = []
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i]!
+    if (ch !== '\\') {
+      bytes.push(...Buffer.from(ch, 'utf8'))
+      continue
+    }
+    const next = raw[i + 1] ?? ''
+    if (/[0-7]/.test(next)) {
+      bytes.push(parseInt(raw.slice(i + 1, i + 4), 8))
+      i += 3
+      continue
+    }
+    const simple: Record<string, number> = { n: 10, t: 9, r: 13, '"': 34, '\\': 92, a: 7, b: 8, f: 12, v: 11 }
+    bytes.push(simple[next] ?? next.charCodeAt(0))
+    i += 1
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+
+/** A new file as a diff would show it, from the disk: no git spawn per file. */
+async function readUntrackedForCommit(
+  cwd: string,
+  relPath: string
+): Promise<(Pick<CommitChangeFile, 'added' | 'binary' | 'diff'> & { stamp: string }) | null> {
+  let abs: string
+  try {
+    abs = resolveInsideWorkspace(cwd, relPath)
+    const info = await lstat(abs)
+    if (!info.isFile()) return null
+    const stamp = `${relPath}\0${info.size}\0${info.mtimeMs}\0`
+    const handle = await open(abs, 'r')
+    try {
+      const want = Math.min(info.size, UNTRACKED_COUNT_MAX)
+      const buffer = Buffer.alloc(want)
+      const { bytesRead } = await handle.read(buffer, 0, want, 0)
+      const bytes = buffer.subarray(0, bytesRead)
+      if (bytes.subarray(0, 8000).includes(0)) return { added: 0, binary: true, diff: null, stamp }
+      let lines = 0
+      for (const byte of bytes) if (byte === 10) lines += 1
+      if (bytesRead > 0 && bytes[bytesRead - 1] !== 10) lines += 1
+      const text = bytes.subarray(0, UNTRACKED_TEXT_KEPT).toString('utf8')
+      const shown = text.split(/\r?\n/)
+      if (shown.at(-1) === '') shown.pop()
+      return {
+        added: lines,
+        binary: false,
+        diff: `new file ${relPath}\n${shown.map((line) => `+${line}`).join('\n')}`,
+        stamp
+      }
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * What a commit would take, for writing its message: every file with its line
+ * counts, and each one's diff. `all` is what Commit stages (tracked changes
+ * against HEAD plus new files, without the noise folders Changes hides);
+ * `staged` is the index. Nothing is capped by file count, unlike the status
+ * list, and new files are read from disk rather than one git call each.
+ */
+export async function readCommitChanges(cwd: string, mode: 'all' | 'staged'): Promise<CommitChanges | null> {
+  if (!isGitRepo(cwd)) return null
+  const digest = createHash('sha256').update(mode).update('\0')
+  const hasCommits = await hasGitCommits(cwd)
+  const base = mode === 'staged' || !hasCommits ? ['--cached'] : ['HEAD']
+  const [numstat, nameStatus, patch, others] = await Promise.all([
+    numstatMap(cwd, ['diff', '--numstat', '-z', '--no-renames', ...base]),
+    gitQuiet(['diff', '--name-status', '-z', '--no-renames', ...base], cwd, READ_TIMEOUT_MS),
+    readGitCapped(['diff', '--no-color', '--no-ext-diff', '--no-renames', '-U2', ...base], cwd, COMMIT_PATCH_READ_MAX, digest),
+    mode === 'all' ? gitQuiet(['ls-files', '--others', '--exclude-standard', '-z'], cwd, READ_TIMEOUT_MS) : Promise.resolve('')
+  ])
+  if (nameStatus === null || patch === null) return null
+  const diffs = splitPatchByPath(patch.text)
+  const files: CommitChangeFile[] = []
+  const names = splitNul(nameStatus)
+  for (let i = 0; i + 1 < names.length; i += 2) {
+    const code = names[i]!.charAt(0)
+    const path = names[i + 1]!
+    if (isNoisePath(path)) continue
+    const counts = numstat.get(path)
+    files.push({
+      path,
+      kind: code === 'A' ? 'added' : code === 'D' ? 'deleted' : 'modified',
+      added: counts?.added ?? 0,
+      removed: counts?.removed ?? 0,
+      binary: counts?.binary ?? false,
+      untracked: false,
+      diff: diffs.get(path) ?? null
+    })
+  }
+  const tracked = new Set(files.map((f) => f.path))
+  const untracked = splitNul(others ?? '').filter((p) => !isNoisePath(p) && !tracked.has(p))
+  const read = await mapLimit(untracked, 8, (p) => readUntrackedForCommit(cwd, p))
+  untracked.forEach((path, i) => {
+    const got = read[i]
+    if (!got) return
+    // In list order, whatever order the reads finished in: the key is stable.
+    digest.update(got.stamp)
+    files.push({ path, kind: 'added', added: got.added, removed: 0, binary: got.binary, untracked: true, diff: got.diff })
+  })
+  for (const f of files) digest.update(`${f.path}\0${f.kind}\0${f.added}\0${f.removed}\0`)
+  return { files, partial: patch.cut, key: digest.digest('hex') }
 }
 
 export type BranchDiff = {
@@ -1088,7 +1309,7 @@ async function stageNonNoisePaths(cwd: string, paths: string[]): Promise<void> {
   for (let i = 0; i < paths.length; i += STAGE_PATH_BATCH) {
     const chunk = paths.slice(i, i + STAGE_PATH_BATCH)
     // `-A` with pathspecs stages adds, mods, and deletions for those paths only.
-    await git(['add', '-A', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    await git(['add', '-A', '--', ...chunk.map(literalPathspec)], cwd, WRITE_TIMEOUT_MS)
   }
 }
 
@@ -1377,7 +1598,7 @@ export async function unstagePaths(
   }
   for (let i = 0; i < clean.length; i += STAGE_PATH_BATCH) {
     const chunk = clean.slice(i, i + STAGE_PATH_BATCH)
-    await git(['restore', '--staged', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    await git(['restore', '--staged', '--', ...chunk.map(literalPathspec)], cwd, WRITE_TIMEOUT_MS)
   }
   return {
     unstaged: true,
@@ -1391,7 +1612,7 @@ export async function unstagePaths(
  * which `git apply` needs to match the file.
  */
 export function singleHunkPatch(diffText: string, target: HunkIdentity): string | null {
-  const lines = diffText.split('\n')
+  const lines = diffText.replace(/\n+$/, '').split('\n')
   const first = lines.findIndex((line) => line.startsWith('@@ '))
   if (first <= 0) return null
   const header = lines.slice(0, first)
@@ -1401,12 +1622,13 @@ export function singleHunkPatch(diffText: string, target: HunkIdentity): string 
     if (line.startsWith('@@ ')) blocks.push([line])
     else blocks[blocks.length - 1]!.push(line)
   }
-  for (const block of blocks) {
-    // Ended with a newline, so a CRLF file's last line splits off its CR as every other line does.
-    const [hunk] = parseUnifiedHunks(`${block.join('\n')}\n`)
-    if (hunk && sameHunk(hunkIdentity(hunk), target)) return `${[...header, ...block].join('\n')}\n`
-  }
-  return null
+  // Matched as the tab parsed it — `readGitDiff` trims the end, which takes a
+  // last hunk's blank context line (and a CRLF file's last CR) with it — but
+  // the patch keeps every line as git wrote it, which `git apply` needs.
+  const shown = parseUnifiedHunks(diffText.trimEnd())
+  if (shown.length !== blocks.length) return null
+  const index = shown.findIndex((hunk) => sameHunk(hunkIdentity(hunk), target))
+  return index < 0 ? null : `${[...header, ...blocks[index]!].join('\n')}\n`
 }
 
 /**
@@ -1444,12 +1666,12 @@ export async function stageHunk(
       '--dst-prefix=b/',
       ...(unstage ? ['--cached'] : []),
       '--',
-      path
+      literalPathspec(path)
     ],
     cwd,
     READ_TIMEOUT_MS
   )
-  const patch = singleHunkPatch(raw.replace(/\n+$/, ''), target)
+  const patch = singleHunkPatch(raw, target)
   if (!patch) throw new Error('That hunk is no longer in the diff')
   const dir = await mkdtemp(join(tmpdir(), 'vyotiq-hunk-'))
   const file = join(dir, 'hunk.patch')
@@ -1532,6 +1754,32 @@ async function trashCopyOf(abs: string, trash: TrashFile): Promise<void> {
 }
 
 /**
+ * Where a discard moves `rel` to the trash: the entry itself, never what a
+ * link leads to. A path git lists through a junction or symlinked folder
+ * (`docs-link/a.md`) names a file elsewhere — tracked, maybe — so it is
+ * refused; a link that is itself the untracked entry goes as the link.
+ */
+function unlinkedEntryPath(cwd: string, rel: string): string {
+  const parentRel = dirname(rel)
+  const realParent = resolveInsideWorkspace(cwd, parentRel === '.' ? '.' : parentRel)
+  const realRoot = realpathSync(resolve(cwd))
+  const fold = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p)
+  if (fold(relative(realRoot, realParent)) !== fold(relative(resolve(cwd), resolve(cwd, parentRel)))) {
+    throw new Error('it is reached through a link, so it was left alone')
+  }
+  return join(realParent, basename(rel))
+}
+
+async function pathEntryExists(abs: string): Promise<boolean> {
+  try {
+    await lstat(abs)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Throw away the person's own changes to `paths` (relative to `cwd`).
  *
  * - `worktree`: what is not staged goes; the file is back to its staged copy.
@@ -1555,15 +1803,22 @@ export async function discardPaths(
 
   // Porcelain names paths from the repository root; strip this workspace's
   // own prefix so they compare with the workspace-relative ones asked for.
-  const [prefixRaw, statusRaw] = await Promise.all([
+  const [prefixRaw, statusRaw, hasCommits] = await Promise.all([
     git(['rev-parse', '--show-prefix'], cwd, READ_TIMEOUT_MS),
-    git(['status', '--porcelain=v1', '-z', '-uall', '--no-renames', '--', ...clean], cwd, READ_TIMEOUT_MS)
+    git(
+      ['status', '--porcelain=v1', '-z', '-uall', '--no-renames', '--', ...clean.map(literalPathspec)],
+      cwd,
+      READ_TIMEOUT_MS
+    ),
+    hasGitCommits(cwd)
   ])
   const prefix = prefixRaw.trim()
-  const codes = new Map<string, string>()
+  // One path can have two records: `git rm --cached` leaves `D ` and `??`.
+  const codes = new Map<string, string[]>()
   for (const entry of splitNul(statusRaw)) {
     const rel = entry.slice(3)
-    codes.set(prefix && rel.startsWith(prefix) ? rel.slice(prefix.length) : rel, entry.slice(0, 2))
+    const key = prefix && rel.startsWith(prefix) ? rel.slice(prefix.length) : rel
+    codes.set(key, [...(codes.get(key) ?? []), entry.slice(0, 2)])
   }
 
   const toRestoreWorktree: string[] = []
@@ -1572,15 +1827,30 @@ export async function discardPaths(
   const toTrash: string[] = []
   const skipped: string[] = []
   for (const path of clean) {
-    const xy = codes.get(path)
-    if (!xy) continue
+    const records = codes.get(path)
+    if (!records) continue
+    const untracked = records.includes('??')
+    // The tracked record decides `all`; in `worktree` an untracked copy beside it is what goes.
+    const xy = records.find((code) => code !== '??')
+    if (!xy || (scope === 'worktree' && untracked)) {
+      toTrash.push(path)
+      continue
+    }
     const [x, y] = [xy[0]!, xy[1]!]
-    if (xy === '??') toTrash.push(path)
-    else if (x === 'U' || y === 'U' || xy === 'AA' || xy === 'DD') skipped.push(path)
+    if (x === 'U' || y === 'U' || xy === 'AA' || xy === 'DD') skipped.push(path)
     else if (scope === 'worktree') {
       if (y !== ' ') toRestoreWorktree.push(path)
     } else if (x === 'A') toUnstageThenTrash.push(path)
     else toRestoreHead.push(path)
+  }
+
+  /** git's own words on a failure, without the command line. */
+  const run = async (args: string[]): Promise<void> => {
+    try {
+      await git(args, cwd, WRITE_TIMEOUT_MS)
+    } catch (err) {
+      throw new Error(`git could not discard: ${gitFailureText(err)}`)
+    }
   }
 
   const failures: string[] = []
@@ -1613,22 +1883,39 @@ export async function discardPaths(
   const discarded: string[] = []
   for (let i = 0; i < restoreWorktree.length; i += STAGE_PATH_BATCH) {
     const chunk = restoreWorktree.slice(i, i + STAGE_PATH_BATCH)
-    await git(['restore', '--worktree', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    await run(['restore', '--worktree', '--', ...chunk.map(literalPathspec)])
     discarded.push(...chunk)
   }
   for (let i = 0; i < restoreHead.length; i += STAGE_PATH_BATCH) {
     const chunk = restoreHead.slice(i, i + STAGE_PATH_BATCH)
-    await git(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    await run(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...chunk.map(literalPathspec)])
     discarded.push(...chunk)
   }
   for (let i = 0; i < toUnstageThenTrash.length; i += STAGE_PATH_BATCH) {
     const chunk = toUnstageThenTrash.slice(i, i + STAGE_PATH_BATCH)
-    await git(['restore', '--staged', '--', ...chunk], cwd, WRITE_TIMEOUT_MS)
+    // Before the first commit there is no HEAD to restore the index from.
+    await run(
+      hasCommits
+        ? ['restore', '--staged', '--', ...chunk.map(literalPathspec)]
+        : ['rm', '--cached', '-f', '-q', '--', ...chunk.map(literalPathspec)]
+    )
     toTrash.push(...chunk)
   }
   for (const path of toTrash) {
+    let abs: string
     try {
-      await trash(resolveInsideWorkspace(cwd, path))
+      abs = unlinkedEntryPath(cwd, path)
+    } catch (err) {
+      failures.push(`${path}: ${err instanceof Error ? err.message : String(err)}`)
+      continue
+    }
+    // Added then deleted (`AD`): unstaging was the whole discard.
+    if (!(await pathEntryExists(abs))) {
+      discarded.push(path)
+      continue
+    }
+    try {
+      await trash(abs)
       backedUp += 1
       discarded.push(path)
     } catch (err) {
@@ -1715,6 +2002,16 @@ export async function checkoutBranch(
       throw new Error('Resolve the merge conflicts before switching branches')
     }
     if (dirty.trim()) {
+      // A stash keeps the changes but not the merge, cherry-pick or revert they belong to.
+      for (const [ref, what] of [
+        ['MERGE_HEAD', 'merge'],
+        ['CHERRY_PICK_HEAD', 'cherry-pick'],
+        ['REVERT_HEAD', 'revert']
+      ] as const) {
+        if ((await gitQuiet(['rev-parse', '--verify', '--quiet', ref], cwd, READ_TIMEOUT_MS)) != null) {
+          throw new Error(`A ${what} is in progress: commit it or abort it before leaving its changes on ${from}`)
+        }
+      }
       const before = await stashTop(cwd)
       try {
         await git(['stash', 'push', '--include-untracked', '-m', `${BRANCH_STASH_PREFIX}${from}`], cwd, WRITE_TIMEOUT_MS)
@@ -1722,13 +2019,23 @@ export async function checkoutBranch(
         throw new Error(`Could not stash the changes: ${gitFailureText(err)}`)
       }
       const after = await stashTop(cwd)
-      if (!after || after === before) throw new Error('git did not stash the changes; nothing was switched')
+      if (!after || after === before) {
+        throw new Error('git stashed nothing (changes inside a submodule stay with the submodule), so nothing was switched')
+      }
       try {
         await git(['checkout', match.name], cwd, WRITE_TIMEOUT_MS)
       } catch (err) {
+        // A failing post-checkout hook fails the command after the switch.
+        if ((await currentGitBranch(cwd)) === match.name) {
+          return {
+            detail: `Checked out ${match.name}. Your changes stay on ${from}. The post-checkout hook failed: ${gitFailureText(err)}`,
+            stashed: true
+          }
+        }
         // Put them back where they were, on the branch that never changed.
-        await gitQuiet(['stash', 'pop', '--index'], cwd, WRITE_TIMEOUT_MS)
-        throw new Error(gitFailureText(err) || `Could not check out ${match.name}`)
+        const popped = (await gitQuiet(['stash', 'pop', '--index'], cwd, WRITE_TIMEOUT_MS)) != null
+        const kept = popped ? '' : ` Your changes are kept in the stash as "${BRANCH_STASH_PREFIX}${from}".`
+        throw new Error(`${gitFailureText(err) || `Could not check out ${match.name}`}${kept}`)
       }
       return { detail: `Checked out ${match.name}. Your changes stay on ${from}`, stashed: true }
     }
@@ -1737,6 +2044,9 @@ export async function checkoutBranch(
   try {
     await git(['checkout', match.name], cwd, WRITE_TIMEOUT_MS)
   } catch (err) {
+    if ((await currentGitBranch(cwd)) === match.name) {
+      return { detail: `Checked out ${match.name}. The post-checkout hook failed: ${gitFailureText(err)}` }
+    }
     throw new Error(gitFailureText(err) || `Could not check out ${match.name}`)
   }
   return { detail: `Checked out ${match.name}` }
@@ -1771,9 +2081,36 @@ export async function readBranchStash(cwd: string): Promise<GitBranchStash | nul
   if (!entry || !COMMIT_SHA_RE.test(entry.sha)) return null
   // Tracked files changed, plus the untracked ones the stash keeps in its third parent.
   const tracked = await gitQuiet(['diff', '--name-only', '-z', `${entry.sha}^1`, entry.sha], cwd, READ_TIMEOUT_MS)
-  const untracked = await gitQuiet(['ls-tree', '-r', '--name-only', '-z', `${entry.sha}^3`], cwd, READ_TIMEOUT_MS)
-  const files = new Set([...splitNul(tracked ?? ''), ...splitNul(untracked ?? '')])
+  const files = new Set([...splitNul(tracked ?? ''), ...(await stashUntrackedFiles(cwd, entry.sha))])
   return { sha: entry.sha, branch, files: files.size, createdAt: entry.createdAt }
+}
+
+/** The untracked files a stash keeps in its third parent, from the repository root. */
+async function stashUntrackedFiles(cwd: string, sha: string): Promise<string[]> {
+  // --full-tree: from a workspace in a subfolder, ls-tree would list only that folder.
+  const out = await gitQuiet(['ls-tree', '-r', '--full-tree', '--name-only', '-z', `${sha}^3`], cwd, READ_TIMEOUT_MS)
+  return splitNul(out ?? '')
+}
+
+/**
+ * Drop a stash a switch left on the current branch — after a restore with
+ * conflicts, once its changes are back in the files, or to throw them away.
+ */
+export async function dropBranchStash(cwd: string, sha: string): Promise<{ detail: string }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  if (!COMMIT_SHA_RE.test(sha)) throw new Error('Invalid stash')
+  const branch = await currentGitBranch(cwd)
+  const entry = (await listStashes(cwd)).find((e) => e.sha === sha)
+  if (!entry) return { detail: 'Those changes are no longer in the stash' }
+  if (!branch || stashLeftOn(entry.subject) !== branch) {
+    throw new Error(`Those changes were left on ${stashLeftOn(entry.subject) ?? 'another branch'}; switch to it to drop them`)
+  }
+  try {
+    await git(['stash', 'drop', entry.ref], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    throw new Error(`Could not drop the stash: ${gitFailureText(err)}`)
+  }
+  return { detail: `Dropped the changes left on ${branch}` }
 }
 
 /**
@@ -1791,6 +2128,17 @@ export async function restoreBranchStash(cwd: string, sha: string): Promise<GitS
     throw new Error(`Those changes were left on ${stashLeftOn(entry.subject) ?? 'another branch'}; switch to it to restore them`)
   }
   if ((await conflictedPaths(cwd)).length > 0) throw new Error('Resolve the merge conflicts first')
+  // git restores tracked changes first and only then finds a new file in the
+  // way, leaving the restore half done; check those before anything moves.
+  const top = (await git(['rev-parse', '--show-toplevel'], cwd, READ_TIMEOUT_MS)).trim()
+  const inTheWay: string[] = []
+  for (const file of await stashUntrackedFiles(cwd, sha)) {
+    if (await pathEntryExists(join(top, file))) inTheWay.push(file)
+  }
+  if (inTheWay.length > 0) {
+    const named = inTheWay.slice(0, 3).join(', ') + (inTheWay.length > 3 ? ` and ${inTheWay.length - 3} more` : '')
+    throw new Error(`New files in those changes exist here now (${named}). Move them aside, then restore.`)
+  }
   const apply = async (args: string[]): Promise<unknown> => {
     try {
       await git(args, cwd, WRITE_TIMEOUT_MS)
@@ -1799,17 +2147,22 @@ export async function restoreBranchStash(cwd: string, sha: string): Promise<GitS
       return err
     }
   }
+  const treeState = (): Promise<string | null> =>
+    gitQuiet(['status', '--porcelain=v1', '-z', '-uall', '--no-renames'], cwd, READ_TIMEOUT_MS)
   // --index puts staged changes back staged. When the index cannot take them
-  // as they were, git applies nothing and says so; then they come back unstaged.
+  // as they were, git applies nothing; then they come back unstaged. Told
+  // apart by the tree not moving, not by git's message, which is translated.
+  const before = await treeState()
   let failed = await apply(['stash', 'apply', '--index', sha])
-  if (failed && /conflicts in index/i.test(gitFailureText(failed)) && (await conflictedPaths(cwd)).length === 0) {
+  if (failed && (await conflictedPaths(cwd)).length === 0 && before !== null && (await treeState()) === before) {
     failed = await apply(['stash', 'apply', sha])
   }
   if (failed) {
     const conflicts = await conflictedPaths(cwd)
     if (conflicts.length > 0) {
+      // What to do next stays on the stash row, which outlasts this notice.
       return {
-        detail: `Restored with conflicts in ${plural(conflicts.length, 'file', 'files')}; the stash is kept until you resolve them`,
+        detail: `${plural(conflicts.length, 'file', 'files')} came back with conflicts; the stash is kept`,
         conflicted: true
       }
     }
@@ -2097,4 +2450,168 @@ export async function createGitBranch(
     branch: name,
     detail: options.checkout === false ? `Created ${name}` : `Created and switched to ${name}`
   }
+}
+
+// ── Branch, stash and commit operations offered in the app ─────────────────
+
+function assertBranchName(raw: string): string {
+  const problem = branchNameProblem(raw)
+  if (problem) throw new Error(problem)
+  return raw.trim()
+}
+
+/**
+ * Delete a local branch. Not the current one; and, without `force`, only one
+ * whose commits are merged — git refuses otherwise and the answer says so,
+ * so the caller can ask before forcing.
+ */
+export async function deleteLocalBranch(
+  cwd: string,
+  branch: string,
+  opts: { force?: boolean } = {}
+): Promise<{ detail: string; unmerged?: boolean }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const name = assertBranchName(branch)
+  const listed = await listLocalBranches(cwd)
+  const match = listed.find((entry) => entry.name === name)
+  if (!match) throw new Error(`Unknown branch: ${name}`)
+  if (match.current) throw new Error('Switch to another branch before deleting this one')
+  try {
+    await git(['branch', opts.force ? '-D' : '-d', '--', name], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    const text = gitFailureText(err)
+    if (!opts.force && /not fully merged/i.test(text)) {
+      return { detail: `${name} has commits that are not merged anywhere`, unmerged: true }
+    }
+    throw new Error(`Could not delete ${name}: ${text}`)
+  }
+  return { detail: `Deleted ${name}` }
+}
+
+/** Rename a local branch (the current one included). */
+export async function renameLocalBranch(cwd: string, from: string, to: string): Promise<{ detail: string }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const oldName = assertBranchName(from)
+  const newName = assertBranchName(to)
+  if (oldName === newName) return { detail: `Already named ${newName}` }
+  const listed = await listLocalBranches(cwd)
+  if (!listed.some((entry) => entry.name === oldName)) throw new Error(`Unknown branch: ${oldName}`)
+  if (listed.some((entry) => entry.name === newName)) throw new Error(`A branch named ${newName} exists already`)
+  try {
+    await git(['branch', '-m', '--', oldName, newName], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    throw new Error(`Could not rename ${oldName}: ${gitFailureText(err)}`)
+  }
+  return { detail: `Renamed ${oldName} to ${newName}` }
+}
+
+/** Every stash, newest first, with the branch it was made on and what it holds. */
+export async function listAllStashes(
+  cwd: string
+): Promise<Array<{ sha: string; ref: string; message: string; branch: string | null; createdAt: string | null; files: number }>> {
+  if (!isGitRepo(cwd)) return []
+  const out: Array<{ sha: string; ref: string; message: string; branch: string | null; createdAt: string | null; files: number }> = []
+  for (const entry of await listStashes(cwd)) {
+    if (!COMMIT_SHA_RE.test(entry.sha)) continue
+    // "On main: message" or "WIP on main: abc123 subject"
+    const on = /^(?:WIP on|On) ([^:]+):\s*(.*)$/.exec(entry.subject)
+    const tracked = await gitQuiet(['diff', '--name-only', '-z', `${entry.sha}^1`, entry.sha], cwd, READ_TIMEOUT_MS)
+    const files = new Set([...splitNul(tracked ?? ''), ...(await stashUntrackedFiles(cwd, entry.sha))])
+    out.push({
+      sha: entry.sha,
+      ref: entry.ref,
+      message: on ? on[2]!.trim() : entry.subject,
+      branch: on ? on[1]!.trim() : null,
+      createdAt: entry.createdAt,
+      files: files.size
+    })
+  }
+  return out
+}
+
+/**
+ * Apply any stash to the working tree; `drop` removes it after a clean apply.
+ * Conflicts leave markers and keep the stash.
+ */
+export async function applyAnyStash(
+  cwd: string,
+  sha: string,
+  opts: { drop?: boolean } = {}
+): Promise<GitStashRestoreResult> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  if (!COMMIT_SHA_RE.test(sha)) throw new Error('Invalid stash')
+  if (!(await listStashes(cwd)).some((e) => e.sha === sha)) throw new Error('That stash is gone')
+  if ((await conflictedPaths(cwd)).length > 0) throw new Error('Resolve the merge conflicts first')
+  try {
+    await git(['stash', 'apply', '--index', sha], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    const conflicts = await conflictedPaths(cwd)
+    if (conflicts.length > 0) {
+      return { detail: `${plural(conflicts.length, 'file', 'files')} came back with conflicts; the stash is kept`, conflicted: true }
+    }
+    // The index could not take them as staged: apply them unstaged.
+    try {
+      await git(['stash', 'apply', sha], cwd, WRITE_TIMEOUT_MS)
+    } catch (again) {
+      throw new Error(`Could not apply the stash: ${gitFailureText(again)}`)
+    }
+  }
+  if (opts.drop) {
+    const now = (await listStashes(cwd)).find((e) => e.sha === sha)
+    if (now) await gitQuiet(['stash', 'drop', now.ref], cwd, WRITE_TIMEOUT_MS)
+  }
+  return { detail: opts.drop ? 'Applied the stash and dropped it' : 'Applied the stash; it is kept', conflicted: false }
+}
+
+/** Drop any stash, by its commit. */
+export async function dropAnyStash(cwd: string, sha: string): Promise<{ detail: string }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  if (!COMMIT_SHA_RE.test(sha)) throw new Error('Invalid stash')
+  const entry = (await listStashes(cwd)).find((e) => e.sha === sha)
+  if (!entry) return { detail: 'That stash is gone already' }
+  try {
+    await git(['stash', 'drop', entry.ref], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    throw new Error(`Could not drop the stash: ${gitFailureText(err)}`)
+  }
+  return { detail: 'Dropped the stash' }
+}
+
+/**
+ * Revert a commit, cherry-pick one, or merge a branch into the current one.
+ * A conflict is an answer, not a failure: the files carry markers and
+ * Changes shows them to resolve; `conflicted` says so.
+ */
+export async function integrateCommit(
+  cwd: string,
+  op: 'revert' | 'cherry-pick' | 'merge',
+  target: string
+): Promise<{ detail: string; conflicted: boolean }> {
+  if (!isGitRepo(cwd)) throw new Error('Not a git repository')
+  const ref = target.trim()
+  if (op === 'merge') assertBranchName(ref)
+  else if (!/^[0-9a-f]{7,64}$/i.test(ref)) throw new Error('Invalid commit')
+  if ((await conflictedPaths(cwd)).length > 0) throw new Error('Resolve the merge conflicts first')
+  const dirty = await gitQuiet(['status', '--porcelain=v1', '-uno'], cwd, READ_TIMEOUT_MS)
+  if (dirty?.trim()) throw new Error('Commit or stash your changes first')
+  const args =
+    op === 'revert'
+      ? ['revert', '--no-edit', ref]
+      : op === 'cherry-pick'
+        ? ['cherry-pick', ref]
+        : ['merge', '--no-edit', '--', ref]
+  try {
+    await git(args, cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    const conflicts = await conflictedPaths(cwd)
+    if (conflicts.length > 0) {
+      return {
+        detail: `${plural(conflicts.length, 'file has', 'files have')} conflicts to resolve, then commit to finish the ${op}`,
+        conflicted: true
+      }
+    }
+    throw new Error(`Could not ${op}: ${gitFailureText(err)}`)
+  }
+  const what = op === 'revert' ? `Reverted ${ref.slice(0, 7)}` : op === 'cherry-pick' ? `Cherry-picked ${ref.slice(0, 7)}` : `Merged ${ref}`
+  return { detail: what, conflicted: false }
 }

@@ -55,6 +55,16 @@ test('a live run reads at a glance, and can be found again from anywhere in it',
   await brief.fill('Run the suite and report')
   await brief.press('Control+Enter')
 
+  // Watch for the Now line from the moment the run starts: it exists only
+  // while the thought streams — a shorter window than the waits below — so
+  // an assertion begun after the polls can miss it entirely. One assertion
+  // of the settled pair: the row (the record's scroll container is itself a
+  // polite live region now, so aim at the row holding the live span, not the
+  // bare attribute) must read NOW_THOUGHT under its “Now” word — checking
+  // visibility first, then the text, lands after the stream has settled.
+  const nowRow = page.locator('[data-record-scroll] div:has(> span[aria-live="polite"])')
+  const nowVisible = expect(nowRow.filter({ hasText: 'NOW_THOUGHT' })).toContainText('Now', { timeout: 30_000 })
+
   // Five identical polls: the first four are one line above the last.
   const step2 = page.locator('[data-step="2"]')
   const repeats = step2.locator('[data-record-repeats]')
@@ -67,16 +77,15 @@ test('a live run reads at a glance, and can be found again from anywhere in it',
   const tasks = page.getByRole('navigation', { name: 'Tasks' }).first()
   await expect(tasks).toContainText('Running', { timeout: 3_000 })
 
-  // The thought streaming now is the Now line.
-  const now = page.locator('[aria-live="polite"]').filter({ hasText: 'NOW_THOUGHT' })
-  await expect(now).toBeVisible({ timeout: 20_000 })
-  await expect(now).toContainText('Now')
+  // The thought streaming now was the Now line, said in the row with its word.
+  await nowVisible
   await page.screenshot({ path: test.info().outputPath('live-now-dark.png') })
 
-  // The run waits on you; it is still live.
+  // The run waits on you; it is still live. The composer's row carries Stop
+  // beside its action, Queue; Escape stops the run just the same.
   const card = page.locator('[data-needs-you]')
   await expect(card).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
+  await expect(page.locator('[data-composer-line]').getByRole('button', { name: /^queue$/i })).toBeVisible()
 
   // Shorter still, and only now: "Jump to now" is the way back from a live
   // run going on more than NEAR_BOTTOM_PX (80px) below the view, so the record
@@ -134,14 +143,14 @@ test('the Result copies by section, its marks set as type, and reasoning hides f
   const result = page.locator('section[aria-label="Result"]')
   await expect(result).toBeVisible({ timeout: 30_000 })
   await expect(result.locator('[data-section-copy]')).toHaveCount(3)
-  await expect(result.locator('.markdown-body')).toHaveAttribute('data-tone', 'strong')
+  await expect(result.locator('[data-reply]')).toHaveAttribute('data-tone', 'strong')
   await expect(result).not.toContainText('**')
   await expect(result).not.toContainText('[[')
   // The citation opens its file, as a chip a step down from the answer's ink.
   const cite = result.getByRole('button', { name: 'src/main/agent/loop.ts:12' })
   await expect(cite).toBeVisible()
   const ink = await cite.evaluate((el) => {
-    const prose = getComputedStyle(el.closest('.markdown-body')!).color
+    const prose = getComputedStyle(el.closest('[data-reply]')!).color
     return { chip: getComputedStyle(el).color, prose }
   })
   expect(ink.chip).not.toBe(ink.prose)
@@ -153,6 +162,8 @@ test('the Result copies by section, its marks set as type, and reasoning hides f
   await page.screenshot({ path: test.info().outputPath('result-dark.png') })
 
   // Reasoning: the settled step that polled holds its thoughts until hidden.
+  // The answered run's work is behind one line; open it first.
+  await page.locator('[data-work-fold="done"] > div > button').click()
   const step2 = page.locator('[data-step="2"]')
   await step2.locator('button[aria-expanded="false"]').first().click()
   await expect(step2.locator('[data-record-thought]').first()).toBeVisible()
@@ -168,7 +179,7 @@ test('the Result copies by section, its marks set as type, and reasoning hides f
   // across the whole column, a time on two lines, thoughts in italics, and
   // markdown marks reaching the page.
   const read = await record(page).evaluate((root) => {
-    const prose = [...root.querySelectorAll<HTMLElement>('.record-prose > p, .record-prose > ul')]
+    const prose = [...root.querySelectorAll<HTMLElement>('[data-reply] [data-block] > p, [data-reply] [data-block] > ul')]
     const times = [...root.querySelectorAll<HTMLElement>('.tnum')].filter((el) => el.textContent?.trim())
     const thoughts = [...root.querySelectorAll<HTMLElement>('[data-record-thought] button > span:not(.sr-only)')]
     return {

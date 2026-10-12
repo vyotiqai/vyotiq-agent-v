@@ -4,6 +4,7 @@ import type {
   MarketplaceIndex,
   MarketplaceInstalledItem,
   MarketplaceInstallRequest,
+  MarketplacePackageUpdate,
   McpApplyDetectedRequest,
   McpApplyDetectedResult,
   McpDetectResult,
@@ -86,6 +87,9 @@ export function useMarketplaceController({
   const [installed, setInstalled] = useState<MarketplaceIndex>({ schemaVersion: 1, items: [] })
   const [localSkills, setLocalSkills] = useState<LocalSkillItem[]>([])
   const [projectRules, setProjectRules] = useState<ProjectRuleItem[]>([])
+  /** Newer versions found by Check for updates, by installed id. */
+  const [updates, setUpdates] = useState<ReadonlyMap<string, MarketplacePackageUpdate>>(new Map())
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [toolCatalog, setToolCatalog] = useState<ToolCatalogResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [busyTargetId, setBusyTargetId] = useState<string | null>(null)
@@ -302,9 +306,9 @@ export function useMarketplaceController({
     return () => window.clearTimeout(timer)
   }, [anyConnecting, mcpStatus, loadMcpStatus])
 
-  const ensureRemoteAck = useCallback(async (): Promise<boolean> => {
+  const ensureRemoteAck = useCallback(async (confirmedInApp = false): Promise<boolean> => {
     if (settings.marketplace?.remoteInstallAcked) return true
-    const res = await window.vyotiq.marketplaceAckRemoteInstall(true)
+    const res = await window.vyotiq.marketplaceAckRemoteInstall(true, confirmedInApp ? { confirmedInApp: true } : undefined)
     if (!res.ok) {
       pushToast(res.error, 'error')
       return false
@@ -539,6 +543,7 @@ export function useMarketplaceController({
           userRules: (settings.userRules ?? []).map((r) => (r.id === id ? { ...r, enabled: on } : r))
         })
       }
+      if (item.projectRule) return setWorkspaceOverride('rules', item.projectRule.path, on ? null : false)
       if (item.scope) return applyWhere(item, on ? 'all' : 'off')
       if (item.plugin && item.server) {
         return setWorkspaceOverride('mcp', item.server.id, on ? null : false)
@@ -564,10 +569,13 @@ export function useMarketplaceController({
   )
 
   const applyDetectedMcp = useCallback(
-    async (payload: McpApplyDetectedRequest): Promise<Outcome<McpApplyDetectedResult>> => {
+    async (
+      payload: McpApplyDetectedRequest,
+      opts?: { confirmedInApp?: boolean }
+    ): Promise<Outcome<McpApplyDetectedResult>> => {
       beginBusy('marketplace-apply')
       try {
-        if (!(await ensureRemoteAck())) {
+        if (!(await ensureRemoteAck(opts?.confirmedInApp))) {
           return { ok: false, error: 'The install acknowledgement was not recorded.' }
         }
         const res = await window.vyotiq.marketplaceApplyDetectedMcp(payload)
@@ -600,10 +608,13 @@ export function useMarketplaceController({
   )
 
   const importExternalMcp = useCallback(
-    async (payload: McpImportExternalRequest): Promise<Outcome<McpImportExternalResult>> => {
+    async (
+      payload: McpImportExternalRequest,
+      opts?: { confirmedInApp?: boolean }
+    ): Promise<Outcome<McpImportExternalResult>> => {
       beginBusy('marketplace-import')
       try {
-        if (!(await ensureRemoteAck())) {
+        if (!(await ensureRemoteAck(opts?.confirmedInApp))) {
           return { ok: false, error: 'The install acknowledgement was not recorded.' }
         }
         const res = await window.vyotiq.marketplaceImportExternalMcp(payload)
@@ -621,6 +632,45 @@ export function useMarketplaceController({
       }
     },
     [ensureRemoteAck, afterMutation, beginBusy, endBusy]
+  )
+
+  const checkUpdates = useCallback(async (): Promise<void> => {
+    setCheckingUpdates(true)
+    try {
+      const res = await window.vyotiq.marketplaceCheckUpdates()
+      if (!res.ok) {
+        pushToast(res.error, 'error')
+        return
+      }
+      const { updates: found, checked, failed } = res.data
+      setUpdates(new Map(found.map((u) => [u.id, u])))
+      const failedNote = failed.length > 0 ? ` Could not check ${failed.join(', ')}.` : ''
+      pushToast(
+        checked === 0
+          ? 'Nothing to check: only packages added from npm, git or a registry can be.'
+          : found.length === 0
+            ? `All ${checked} up to date.${failedNote}`
+            : `${found.length === 1 ? 'An update' : `${found.length} updates`}: ${found.map((u) => `${u.name} ${u.latest}`).join(', ')}.${failedNote}`,
+        failed.length > 0 && found.length === 0 ? 'error' : 'info'
+      )
+    } finally {
+      setCheckingUpdates(false)
+    }
+  }, [])
+
+  /** Install the newer version from the same source; enablement carries over. */
+  const updatePackage = useCallback(
+    async (update: MarketplacePackageUpdate): Promise<boolean> => {
+      const item = await runInstall({ source: update.source, target: update.target }, { busyTargetId: update.id })
+      if (!item) return false
+      setUpdates((prev) => {
+        const next = new Map(prev)
+        next.delete(update.id)
+        return next
+      })
+      return true
+    },
+    [runInstall]
   )
 
   return {
@@ -651,6 +701,10 @@ export function useMarketplaceController({
     ensureRemoteAck,
     runInstall,
     installFromCatalog,
+    updates,
+    checkingUpdates,
+    checkUpdates,
+    updatePackage,
     setEnabled,
     setServerEnabled,
     updateServer,
@@ -662,7 +716,9 @@ export function useMarketplaceController({
     detectMcp,
     applyDetectedMcp,
     scanExternalMcp,
-    importExternalMcp
+    importExternalMcp,
+    /** The one-time "unsigned sources" acknowledgement is on record. */
+    remoteInstallAcked: Boolean(settings.marketplace?.remoteInstallAcked)
   }
 }
 

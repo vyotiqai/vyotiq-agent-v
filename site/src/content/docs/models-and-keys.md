@@ -46,13 +46,25 @@ If your system has no secure storage, keys cannot be saved at all: the field rea
 
 With no endpoints added, "Custom endpoints" reads "Any OpenAI-compatible server: vLLM, llama.cpp, LM Studio, a hosted gateway".
 
-- Click "Add endpoint", pick "OpenAI-compatible" or "Azure OpenAI", give it a name ("Name, such as Home GPU") and a base URL, then click "Add".
+- Click "Add endpoint", pick "OpenAI-compatible" or "Azure OpenAI", give it a name ("Name, such as Home GPU") and a base URL, then click "Add". For a common host, "Start from…" fills in both: Together AI, Fireworks, Cerebras, DeepInfra and Moonshot (Kimi), or LM Studio, vLLM and llama.cpp on this machine. Paste the host's key on the endpoint's row once it is added.
 - You can save up to 20 endpoints. Each one appears as its own provider. "Remove" deletes one, but not while it is the provider for new tasks.
 - The base URL should contain `/v1`, or a vendor's mount such as `/v1/openai`. If it has no `/v1`, Agent V adds it.
 - The built-in "Custom OpenAI-compatible" row starts at `http://127.0.0.1:8080/v1`. An added endpoint needs its own URL.
 - "Public hosts need a key; loopback and a private LAN can go without."
 
-Agent V has no price table for custom endpoints. Their tasks show tokens, and a cost only when the server reports one. See [Usage and cost](/docs/usage-and-cost).
+When you switch to an endpoint, Agent V asks it which models it serves and picks one of them, so a task never starts on a model left over from another provider. The model picker marks a model the server doesn't list as "Not reported by this server".
+
+## Model limits
+
+Agent V sizes every prompt to the model's context window, and asks for no more output than the model allows. Hosted providers report both. A local or custom server often doesn't, and a guessed window that is too large means the server cuts the prompt from the front without saying so.
+
+- **What Agent V reads by itself:** llama.cpp's `/props`, LM Studio's model list, and, for Ollama, the context the running model was loaded with (`OLLAMA_CONTEXT_LENGTH`, or the model's `num_ctx`), which is often far below the model's maximum.
+- **Setting them yourself:** the rows for Ollama, Custom OpenAI-compatible and each added endpoint list "Model limits". Each model shows its context, and where that came from: "from the server", "reported", "guessed" or "set by you". "Set" takes a context window and, optionally, a max output, as a number of tokens such as `32768` or `32k`. "Reset" goes back to what the server says.
+- **Reachability:** a local provider's row says "Local · 3 models" when the server answers, or "Not reachable" with "Check again" when it doesn't.
+
+On Groq, xAI, Mistral, DeepSeek and OpenRouter, a request asks for up to 16k output tokens, or 32k on the step after a reply was cut off. Left to themselves some of these hosts stop early (DeepSeek's default is 4k), and OpenRouter holds credit against the model's full maximum. If a host refuses the limit, the request is sent once more without one. A max output you set yourself is sent as it is.
+
+A custom endpoint's model has a cost when the server reports one, when its id matches a model in the models.dev catalog, or when you give it a price in Settings, "Agent", "Cost", "Prices". Otherwise its tasks show tokens only. See [Usage and cost](/docs/usage-and-cost).
 
 ### Azure OpenAI
 
@@ -82,9 +94,9 @@ Open the "Google Vertex AI" row and set the "Google Cloud project" and the "Vert
 - "Key file": paste a service-account key (the whole JSON file).
 - "gcloud login": use the login `gcloud auth application-default login` wrote on this computer. "Check this computer" shows what it found. Then click "Use this login". Nothing is copied; the file is read when a task starts.
 
-Gemini models go through `streamGenerateContent`, Claude models through `streamRawPredict`. Models from other publishers on Vertex are not supported yet. Vertex has no endpoint that lists the models a project can use, so the list comes from the models.dev registry, after Agent V checks your sign-in works.
+Gemini models go through `streamGenerateContent`, Claude models through `streamRawPredict`, and the open and partner models Vertex serves as a service (Llama, DeepSeek, Qwen, gpt-oss and others) through Vertex's OpenAI-compatible Chat Completions endpoint, named `publisher/model`, for example `meta/llama-3.3-70b-instruct-maas`. Mistral and AI21 models use routes of their own that Agent V does not speak yet. Vertex has no endpoint that lists the models a project can use, so the list comes from the models.dev registry, after Agent V checks your sign-in works.
 
-Agent V has no price table for Bedrock, Vertex AI or Azure, so their tasks show tokens but no cost, and the per-task spend limit can't count them.
+Bedrock, Vertex AI and Azure models are priced from the models.dev catalog when their id matches one there, or from a price you set in Settings, "Agent", "Cost", "Prices"; otherwise their tasks show tokens but no cost, and the spend limits can't count them.
 
 ## Claude through OpenRouter
 
@@ -97,7 +109,7 @@ Settings, "Agent" has two more model choices. Both start as "Same as the task".
 | Setting | What it runs |
 | --- | --- |
 | "Helper model" | [Instances](/docs/instances). "Same as the task" runs each instance on the model its task was started with. |
-| "Utility model" | Compaction summaries and commit messages. A cheaper model is enough for these. Compaction still decides what to keep by the task's model. If this provider has no key, the task's model is used. |
+| "Utility model" | Compaction summaries, commit messages and Structure. A cheaper model is enough for these. Compaction still decides what to keep by the task's model. If this provider has no key, the task's model is used. |
 
 Pick a provider, then one of its models. Choosing a provider alone saves nothing.
 
@@ -121,7 +133,7 @@ Settings, "General", "Network" sets the proxy for everything the app sends: prov
 | "Manual" | Uses the "Proxy address" for everything except the hosts in "Skip the proxy for". This computer is always skipped. |
 | "None" | Connects directly. |
 
-The line under the choice shows the proxy in use and where it came from. A proxy that needs a password can't be typed in; set `HTTPS_PROXY=http://user:password@host:port` before starting the app instead. A SOCKS system proxy reaches the agent's browser and updates, but not provider calls. With a PAC file, provider calls follow the proxy it picks for `https://api.openai.com`.
+The line under the choice shows the proxy in use and where it came from. A manual proxy that asks you to sign in takes a "User name" and a "Password" under the address; the password goes to the key vault, never settings.json. The app's own traffic and the agent's browser sign in with them. Commands the agent runs get the proxy address without the password, so a command cannot read it out of its environment; to give them one, set `HTTPS_PROXY=http://user:password@host:port` before starting the app. A SOCKS system proxy reaches the agent's browser and updates, but not provider calls. With a PAC file, provider calls follow the proxy it picks for `https://api.openai.com`.
 
 ## If the provider does not connect
 

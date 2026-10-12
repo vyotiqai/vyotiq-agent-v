@@ -34,6 +34,8 @@ vi.mock('@main/settings/settings', () => ({
     model: 'qwen2.5',
     ollamaBaseUrl: 'http://127.0.0.1:11434',
     theme: 'system',
+    // These suites drive edits with no approver; the app's default asks first.
+    toolApproval: { mode: 'off', allowlist: [], mcpProtection: true, rules: [] },
     telemetryEnabled: false
   }),
   readLegacyWorkspacePath: () => null

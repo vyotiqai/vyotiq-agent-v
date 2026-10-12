@@ -11,7 +11,7 @@ import { canGit } from '../../helpers/canGit'
  * and a DELETE removes the branch from it, as GitHub's would.
  */
 const { gh } = vi.hoisted(() => ({
-  gh: { pr: {} as Record<string, unknown>, bare: '', calls: [] as string[], refGone: false }
+  gh: { pr: {} as Record<string, unknown>, bare: '', calls: [] as string[], refGone: false, defaultBranch: 'main' }
 }))
 
 vi.mock('@main/git/ghBinary', () => ({
@@ -37,6 +37,7 @@ vi.mock('child_process', async (importOriginal) => {
         gh.calls.push(args.join(' '))
         const notFound = Object.assign(new Error('Command failed: gh api'), { stderr: 'gh: Not Found (HTTP 404)', code: 1 })
         if (args[0] === 'pr' && args[1] === 'view') return { stdout: JSON.stringify(gh.pr), stderr: '' }
+        if (args[0] === 'repo' && args[1] === 'view') return { stdout: JSON.stringify({ defaultBranchRef: { name: gh.defaultBranch } }), stderr: '' }
         if (args[0] === 'api' && args[1] === '-X' && args[2] === 'DELETE') {
           const branch = args[3]!.replace('repos/{owner}/{repo}/git/refs/heads/', '').split('/').map(decodeURIComponent).join('/')
           actual.execFileSync('git', ['branch', '-D', branch], { cwd: gh.bare, stdio: 'ignore' })
@@ -125,6 +126,7 @@ describe.skipIf(!canGit)('prCleanupMerged', () => {
   beforeEach(() => {
     gh.calls = []
     gh.refGone = false
+    gh.defaultBranch = 'main'
   })
 
   it('switches to the base, pulls the merge, and deletes the branch here and on GitHub', async () => {
@@ -203,6 +205,53 @@ describe.skipIf(!canGit)('prCleanupMerged', () => {
     const { repo } = setup()
     gh.pr = { ...gh.pr, state: 'OPEN' }
     await expect(prCleanupMerged(repo, 12)).rejects.toThrow(/#12 is not merged/)
+    // A refusal is the user's to sort, logged as such, not as a fault in the app.
+    await expect(prCleanupMerged(repo, 12)).rejects.toMatchObject({ code: 'IPC_CLIENT' })
     expect(git(repo, 'branch', '--show-current').trim()).toBe('feat/login')
+  })
+
+  it('never tidies away the base branch or the default branch', async () => {
+    const { repo } = setup()
+    gh.pr = { ...gh.pr, headRefName: 'main', baseRefName: 'main' }
+    await expect(prCleanupMerged(repo, 12)).rejects.toThrow('main is also the base branch, so it stays.')
+    gh.pr = { ...gh.pr, headRefName: 'feat/login', baseRefName: 'release' }
+    gh.defaultBranch = 'feat/login'
+    await expect(prCleanupMerged(repo, 12)).rejects.toThrow("feat/login is the repository's default branch, so it stays.")
+    expect(git(repo, 'branch', '--show-current').trim()).toBe('feat/login')
+    expect(gh.calls.some((c) => c.includes('DELETE'))).toBe(false)
+  })
+
+  it('keeps the local branch checked out in another worktree and still deletes it on GitHub', async () => {
+    const { repo, bare } = setup()
+    git(repo, 'switch', 'main')
+    const wt = join(repo, '..', 'wt')
+    git(repo, 'worktree', 'add', wt, 'feat/login')
+    const result = await prCleanupMerged(repo, 12)
+    expect(result).toMatchObject({ deletedLocal: false, deletedRemote: true })
+    expect(result.detail).toContain('Kept the local feat/login: it is checked out in another worktree')
+    expect(git(bare, 'branch', '--format=%(refname:short)').trim()).toBe('main')
+  })
+
+  it('keeps the GitHub branch when GitHub did not say which commit was merged', async () => {
+    const { repo, bare } = setup()
+    gh.pr = { ...gh.pr, headRefOid: undefined }
+    const result = await prCleanupMerged(repo, 12)
+    expect(result.deletedRemote).toBe(false)
+    expect(result.detail).toContain('Kept feat/login on GitHub: GitHub did not say which commit was merged')
+    expect(git(bare, 'branch', '--format=%(refname:short)').split('\n').map((b) => b.trim()).filter(Boolean).sort()).toEqual(['feat/login', 'main'])
+  })
+
+  it("leaves another remote's same-named branch tracked", async () => {
+    const { repo } = setup()
+    // A fork remote whose feat/login is somewhere else.
+    const fork = join(repo, '..', 'fork.git')
+    git(join(repo, '..'), 'init', '--bare', '--initial-branch=main', 'fork.git')
+    git(repo, 'remote', 'add', 'fork', fork)
+    git(repo, 'push', '-q', 'fork', 'main:feat/login')
+    git(repo, 'fetch', '-q', 'fork')
+    const result = await prCleanupMerged(repo, 12)
+    expect(result.deletedRemote).toBe(true)
+    expect(branches(repo)).toContain('fork/feat/login')
+    expect(branches(repo)).not.toContain('origin/feat/login')
   })
 })

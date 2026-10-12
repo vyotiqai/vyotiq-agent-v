@@ -4,6 +4,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import {
+  CreateMessageRequestSchema,
   ElicitRequestSchema,
   ErrorCode,
   ListRootsRequestSchema,
@@ -26,8 +27,9 @@ import { neutralizeUntrustedBody, wrapUntrustedContent } from '../untrustedConte
 import { mcpToolSummary } from '../../../shared/toolSummary'
 import type { ToolResult } from '../tools'
 import type { AgentQuestionAnswer, AgentQuestionRequest, ToolImageRef } from '../../../shared/ipc'
-import { AGENT_QUESTION_MAX_TITLE_CHARS } from '../../../shared/utils/agentQuestionForm'
+import { AGENT_QUESTION_MAX_PROMPT_CHARS, AGENT_QUESTION_MAX_TITLE_CHARS } from '../../../shared/utils/agentQuestionForm'
 import { elicitationContent, elicitationForm } from './elicitation'
+import { answerSampling, type SamplingModel } from './sampling'
 import { PausableCallTimer } from './callTimer'
 import { storeToolImage } from '../toolImageStore'
 import { sanitizedTerminalEnv } from '../tools/terminal'
@@ -756,8 +758,10 @@ export type McpAsker = {
   /** The run's own cancel: a question outlives a stream interrupt. */
   signal: AbortSignal
   ask: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionAnswer[]>
-  /** Unattended with questions skipped: decline rather than wait (read when a question comes). */
+  /** Questions set to Skip: decline rather than wait (read when a question comes). */
   skipQuestions?: () => boolean
+  /** The task's workspace: whose model answers a server's sampling request. */
+  workspacePath?: string | null
 }
 
 /** In-flight callers per session key, newest last. */
@@ -772,12 +776,12 @@ async function answerElicitation(client: Client, params: ElicitRequest['params']
     return { action: 'decline' }
   }
   if (!owner) return decline('the server is not connected yet')
-  if (params.mode === 'url') return decline('link requests are not supported')
   const askers = sessionAskers.get(owner.key) ?? []
   if (askers.length === 0) return decline('no task is calling this server')
   if (new Set(askers.map((a) => a.runId)).size > 1) return decline('several tasks are calling this server')
   const asker = askers[askers.length - 1]!
-  if (asker.skipQuestions?.()) return decline('unattended, questions are skipped')
+  if (asker.skipQuestions?.()) return decline('questions are set to skip')
+  if (params.mode === 'url') return answerUrlElicitation(owner.serverName, asker, params, decline)
   const built = elicitationForm(owner.serverName, params.message, params.requestedSchema)
   if (!built.ok) return decline(`the form can't be shown: it ${built.reason}`)
   const { title, questions } = built.form
@@ -804,6 +808,108 @@ async function answerElicitation(client: Client, params: ElicitRequest['params']
     return decline('the answers were still not valid after three tries')
   } catch {
     // Stopped, or the card was closed: the person didn't answer.
+    return { action: 'cancel' }
+  } finally {
+    asker.onWaiting(false)
+  }
+}
+
+/** The model that answers sampling requests for a workspace; installed by main at startup. */
+let samplingModelFor: (workspacePath: string | null) => SamplingModel | null = () => null
+
+export function setSamplingModelSource(source: (workspacePath: string | null) => SamplingModel | null): void {
+  samplingModelFor = source
+}
+
+/**
+ * A server asks the task's model for an answer (sampling/createMessage). Put
+ * to the person on the question card first, like a form; declined with an
+ * error when they say no, nobody is calling, or no model is set up.
+ */
+async function answerSamplingRequest(
+  client: Client,
+  params: Parameters<typeof answerSampling>[2]
+): Promise<Awaited<ReturnType<typeof answerSampling>>> {
+  const owner = clientSessions.get(client)
+  const decline = (reason: string): never => {
+    logger.info('MCP sampling declined', { scope: 'mcp', serverId: owner?.serverId, reason })
+    throw new McpError(ErrorCode.InvalidRequest, `Sampling declined: ${reason}`)
+  }
+  if (!owner) return decline('the server is not connected yet')
+  const askers = sessionAskers.get(owner.key) ?? []
+  if (askers.length === 0) return decline('no task is calling this server')
+  if (new Set(askers.map((a) => a.runId)).size > 1) return decline('several tasks are calling this server')
+  const asker = askers[askers.length - 1]!
+  if (asker.skipQuestions?.()) return decline('questions are set to skip')
+  let model: SamplingModel | null = null
+  try {
+    model = samplingModelFor(asker.workspacePath ?? null)
+  } catch {
+    model = null
+  }
+  return answerSampling(owner.serverName, asker, params, model, decline)
+}
+
+const OPEN_LINK = 'Open it in my browser'
+const DONT_OPEN = "Don't open it"
+
+/** Opens a link a server asked for; replaced in tests. */
+let openElicitedLink = async (url: string): Promise<void> => {
+  const { shell } = await import('electron')
+  await shell.openExternal(url)
+}
+
+/** @internal */
+export function setOpenElicitedLinkForTests(open: ((url: string) => Promise<void>) | null): void {
+  openElicitedLink =
+    open ??
+    (async (url: string) => {
+      const { shell } = await import('electron')
+      await shell.openExternal(url)
+    })
+}
+
+/**
+ * A server asks the person to open a page (a sign-in, a payment, a consent).
+ * The link is shown in full on the task's question card and opened only when
+ * the person says so, and only over https; nothing from the page comes back
+ * through here — the server learns the outcome on its own side.
+ */
+async function answerUrlElicitation(
+  serverName: string,
+  asker: McpAsker & { onWaiting: (waiting: boolean) => void },
+  params: { message: string; url: string },
+  decline: (reason: string) => ElicitResult
+): Promise<ElicitResult> {
+  let url: URL
+  try {
+    url = new URL(params.url)
+  } catch {
+    return decline('the link is not a valid address')
+  }
+  if (url.protocol !== 'https:') return decline('only https links are opened')
+  const title = `${serverName} asks you to open a link`
+  const message = params.message.trim()
+  const room = AGENT_QUESTION_MAX_PROMPT_CHARS - url.href.length - 4
+  const prompt = `${room > 0 && message ? `${message.length > room ? `${message.slice(0, room - 1)}…` : message}
+
+` : ''}${url.href}`
+  asker.onWaiting(true)
+  try {
+    const answers = await asker.ask(
+      {
+        requestId: randomUUID(),
+        runId: asker.runId,
+        toolCallId: asker.toolCallId,
+        title: title.length <= AGENT_QUESTION_MAX_TITLE_CHARS ? title : `${title.slice(0, AGENT_QUESTION_MAX_TITLE_CHARS - 1)}…`,
+        questions: [{ id: 'open', prompt: prompt.slice(0, AGENT_QUESTION_MAX_PROMPT_CHARS), type: 'single', options: [OPEN_LINK, DONT_OPEN] }]
+      },
+      asker.signal
+    )
+    if (answers.find((a) => a.questionId === 'open')?.values[0] !== OPEN_LINK) return { action: 'decline' }
+    await openElicitedLink(url.href)
+    return { action: 'accept' }
+  } catch {
     return { action: 'cancel' }
   } finally {
     asker.onWaiting(false)
@@ -1248,12 +1354,15 @@ function createMcpClient(workspacePath?: string | null): Client {
   const client = new Client({ name: 'vyotiq', version: '1.0.0' }, {
     capabilities: {
       roots: { listChanged: false },
-      // Forms only: a link request would send the person to a page on the
-      // server's say-so, outside anything the app can show or check.
-      elicitation: { form: {} }
+      // Forms, and links: a link is shown in full and opened only on the
+      // person's say-so, over https (answerUrlElicitation).
+      elicitation: { form: {}, url: {} },
+      // Asked of the person each time, then answered by the workspace's model (answerSamplingRequest).
+      sampling: {}
     }
   })
   client.setRequestHandler(ElicitRequestSchema, (request) => answerElicitation(client, request.params))
+  client.setRequestHandler(CreateMessageRequestSchema, (request) => answerSamplingRequest(client, request.params))
   client.setRequestHandler(ListRootsRequestSchema, () => {
     const workspace = resolveStdioWorkspacePath(workspacePath)
     if (!workspace) return { roots: [] }

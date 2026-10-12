@@ -11,7 +11,8 @@ A workspace is a folder on your computer. Every task runs in one, and the agent'
 
 - **During setup:** step 2, "Open a workspace", has "Choose a folder…". You can also drop a folder onto it.
 - **Later:** open the workspace menu at the top of the navigator and pick "Add workspace…". Settings, "General", has "Add workspace" too.
-- **From a `vyotiq://` link:** a link to a task opens its folder too. A task's "Copy link", in its menu in the navigator, makes one. For a folder you have never opened, Agent V first asks "Open a folder from a link" and shows the path.
+- **From the command line or Explorer:** start Agent V with a folder, `Vyotiq.exe C:\code\api`, or `.` for the folder you are in, and it opens that folder as a workspace, starting the app if it isn't running. On Windows the installer adds "Open in Agent V" to a folder's right-click menu in Explorer. On macOS, drop a folder on the Dock icon. On Windows, Settings › General › Command line can also put a `vyotiq` command on your PATH, so `vyotiq .` works from any terminal; Remove takes it off again, and so does uninstalling.
+- **From a `vyotiq://` link:** a link to a task opens its folder too. A task's "Copy link", in its menu in the navigator, makes one. Other tools can link to `vyotiq://open?ws=<folder>` to open a folder, or to `vyotiq://new?ws=<folder>&brief=<text>` to open New task there with the brief filled in; it is never sent until you start it. For a folder you have never opened, Agent V first asks "Open a folder from a link" and shows the path.
 
 With more than one workspace open, the same menu narrows the navigator to one of them or shows "All workspaces". While it shows one workspace, it also has "Close {workspace}".
 
@@ -57,11 +58,32 @@ When the run is over, a strip under the record says "Works in its own worktree, 
 
 ## Finding and tidying tasks
 
-The navigator groups tasks by what they need from you: "Needs you", "Running", "Ready for review", "Pinned", "Drafts", then "Earlier" by day. A task's menu (right-click it) has "Pin", "Archive", "Rename" and "Delete", among others. The view menu (the filter icon) hides groups, shows "Unread only", and lists archived tasks with "Show archived".
+The navigator groups tasks by what they need from you: "Needs you", "Running", "Ready for review", "Pinned", "Drafts", then "Earlier" by day. A task's menu (right-click it) has "Pin", "Archive", "Rename" and "Delete", among others, and also "Open beside" (the task in a second pane next to the one you are in), "Mark as unread" / "Mark as read", "Repeat…" (see [Scheduled tasks](/docs/scheduled-tasks)) and "Show folder in Explorer" ("Reveal folder in Finder" on macOS, "Show folder" on Linux), which opens the task's folder (its worktree, for a worktree task) in your file manager. The view menu (the filter icon) hides groups, shows "Unread only", and lists archived tasks with "Show archived".
 
 The magnifier at the top of the navigator searches your tasks. From two characters, titles match as you type. A moment later the navigator also lists tasks with a match inside them, from you, the agent or a tool, with the matching line under the task. Search covers the workspaces the navigator shows and includes archived tasks. Matches in tasks the list hasn't loaded yet appear under "Older tasks". A very long task is searched from its newest 16 MB, and a search that stops early says "so far".
 
-To tidy several tasks at once, `Ctrl`-click them (`⌘`-click on macOS; `Shift`-click selects a range). A bar at the top says how many are selected and offers "Archive" and "Delete…"; a running task in the selection is left out. The view menu's "Archive all done" archives every task under "Earlier" in the workspaces the navigator shows, including ones the view menu hides. Pinned tasks and tasks waiting for review stay. Archiving shows "Undo"; deleting asks first. The archive keeps up to 500 tasks, and archiving past that brings the oldest back into view.
+To tidy several tasks at once, `Ctrl`-click them (`⌘`-click on macOS; `Shift`-click selects a range). A bar at the top says how many are selected and offers "Archive" and "Delete…"; a running task in the selection is left out. The view menu's "Archive all done" archives every task under "Earlier" in the workspaces the navigator shows, including ones the view menu hides. Pinned tasks and tasks waiting for review stay. Archiving shows "Undo"; deleting asks first, then shows "Undo" too.
+
+A deleted task is not gone at once: it waits 30 days in "Recently deleted…", in the view menu. There each one has "Restore", which puts it back where it was, and "Delete now"; "Empty Recently deleted" deletes them all for good. After 30 days a deleted task is removed when the app starts.
+
+`Alt+←` and `Alt+→` (or the mouse's back and forward buttons) move back and forward through the tasks and pages you opened, as in a browser. The archive keeps up to 500 tasks, and archiving past that brings the oldest back into view.
+
+## Opening files in your editor
+
+Agent V opens a file, or a whole folder, in the editor you already use:
+
+| From | What opens |
+| --- | --- |
+| The Files tab: a tab's or a file's menu, "Open in editor" | That file or folder |
+| The Changes tab: the editor button on a file's row | That file |
+| A file named in an answer: `Ctrl`-click it (`⌘`-click on macOS) | That file, at the line the answer names |
+| A task's menu in the navigator: "Open folder in editor" | The task's folder (its worktree, for a worktree task) |
+| `Ctrl+K`: "Open workspace in editor" | The workspace in front |
+| An instance's pane: "Open in editor", beside its worktree's branch | The instance's worktree |
+
+Settings, "General", "Editor", "Open files in" picks the editor: VS Code, Cursor, Windsurf, Zed, Sublime Text, WebStorm, IntelliJ IDEA, PyCharm, or "The default app for the file". "Auto", the default, takes the first of them it finds, in the order Cursor, VS Code, Windsurf, Zed, Sublime Text, then the JetBrains IDEs, and says which one in brackets. An editor whose launcher isn't installed reads "(not found)".
+
+Agent V finds an editor by its command-line launcher on your PATH: `code`, `cursor`, `windsurf`, `zed`, `subl`, `webstorm`, `idea` or `pycharm`. Most editors install it from their command palette (VS Code: "Shell Command: Install 'code' command in PATH"). With "Auto" and none found, the file opens in the system's default app; with a named editor that isn't on the PATH, Agent V says so instead.
 
 ## Per-workspace settings
 

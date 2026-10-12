@@ -1,13 +1,16 @@
-import type { FontScale } from '@shared/appearance'
+import type { FontScalePreset } from '@shared/appearance'
 import type {
   AgentSandboxMode,
   AgentSandboxNetwork,
+  AnnounceVerbosity,
   AutonomousSkipQuestions,
+  Contrast,
   DesktopNotificationMode,
   DictationEnterAction,
   DictationEngine,
   NavigationMode,
   ProviderId,
+  ReduceMotion,
   ResponseVerbosity,
   SecretProvider,
   SearchEngineId,
@@ -24,10 +27,27 @@ export const THEME_OPTIONS: SettingsOption<ThemeId>[] = [
   { value: 'dark', label: 'Dark' }
 ]
 
-export const FONT_SCALE_OPTIONS: SettingsOption<FontScale>[] = [
+export const FONT_SCALE_OPTIONS: SettingsOption<FontScalePreset>[] = [
   { value: 'small', label: 'Small' },
   { value: 'default', label: 'Default' },
   { value: 'large', label: 'Large' }
+]
+
+export const REDUCE_MOTION_OPTIONS: SettingsOption<ReduceMotion>[] = [
+  { value: 'system', label: 'System' },
+  { value: 'on', label: 'On' },
+  { value: 'off', label: 'Off' }
+]
+
+export const CONTRAST_OPTIONS: SettingsOption<Contrast>[] = [
+  { value: 'system', label: 'System' },
+  { value: 'more', label: 'More' }
+]
+
+export const ANNOUNCE_VERBOSITY_OPTIONS: SettingsOption<AnnounceVerbosity>[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'brief', label: 'Brief' },
+  { value: 'full', label: 'Full' }
 ]
 
 /**
@@ -234,6 +254,9 @@ export const SETTINGS_ERROR_IDS: Record<Exclude<SettingsErrorField, null>, strin
   keepTurns: 'keep-turns-error',
   parallelInstances: 'parallel-instances-error',
   taskSpendLimit: 'task-spend-limit-error',
+  dailyBudget: 'daily-budget-error',
+  approvalTimeout: 'approval-timeout-error',
+  monthlyBudget: 'monthly-budget-error',
   autoCompactThreshold: 'auto-compact-threshold-error',
   checkpointKeep: 'checkpoint-keep-error',
   checkpointAge: 'checkpoint-age-error',

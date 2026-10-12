@@ -406,9 +406,18 @@ export function useSettingsForm({
       thinkingEnabled: settings.thinkingEnabled,
       thinkingEffort: settings.thinkingEffort
     }
+    // A model the endpoint serves, not a hard-coded default it may not have
+    // (`gpt-oss-120b` on an LM Studio server listing two other models).
+    let served: string[] = []
+    try {
+      const listed = await window.vyotiq?.listModels?.({ provider })
+      if (listed?.ok) served = listed.data.models.filter((m) => !m.isPlaceholder).map((m) => m.id)
+    } catch {
+      served = []
+    }
     const ok = await runUpdate({
       provider,
-      model: defaultModelFor(provider),
+      model: pickServedModel(served, defaultModelFor(provider)),
       thinkingEnabled: prefs.thinkingEnabled,
       thinkingEffort: prefs.thinkingEffort
     })
@@ -932,4 +941,14 @@ export type SettingMark = { changed: boolean; onReset: () => void; resetTo: Sett
 /** Settings are plain JSON, so two values are the same setting when they serialize the same. */
 function sameSetting(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+}
+
+/**
+ * The model new tasks use after switching provider: the default when the
+ * endpoint lists it, else the first model it lists, else the default (a host
+ * with no model list).
+ */
+export function pickServedModel(served: readonly string[], fallback: string): string {
+  if (served.length === 0 || served.includes(fallback)) return fallback
+  return served[0]!
 }

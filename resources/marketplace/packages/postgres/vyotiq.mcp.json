@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "postgres",
+  "name": "Postgres",
+  "version": "1.0.0",
+  "description": "Read a Postgres database: schemas, queries, explain plans and index advice. Starts in restricted (read-only) mode.",
+  "transport": "stdio",
+  "command": "uvx",
+  "args": [
+    "postgres-mcp",
+    "--access-mode=restricted"
+  ],
+  "env": {
+    "PYTHONIOENCODING": "utf-8"
+  },
+  "auth": "token",
+  "requires": [
+    "uv"
+  ],
+  "inputs": [
+    {
+      "name": "DATABASE_URI",
+      "target": "env",
+      "label": "Connection string",
+      "placeholder": "postgresql://user:password@localhost:5432/db",
+      "isSecret": true,
+      "isRequired": true
+    }
+  ],
+  "docsUrl": "https://github.com/crystaldba/postgres-mcp"
+}

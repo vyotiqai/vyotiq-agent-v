@@ -232,4 +232,13 @@ describe('output formats', () => {
     expect(progressLineForEvent(ev({ type: 'text_delta', text: 'x' }))).toBeNull()
     expect(progressLineForEvent(ev({ type: 'error', message: 'No API key' }))).toBe('✗ No API key')
   })
+
+  it('names a helper by the outcome its brief asks for', () => {
+    const started = (goal: string) =>
+      progressLineForEvent(ev({ type: 'agent_instance_update', parentRunId: RUN, instanceRunId: 'kid', phase: 'started', goal }))
+    expect(started('Outcome: A map of the IPC boundary\n\nBackground: Vyotiq is an Electron app')).toBe(
+      '· helper started: A map of the IPC boundary'
+    )
+    expect(started('Fix the flaky test')).toBe('· helper started: Fix the flaky test')
+  })
 })

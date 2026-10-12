@@ -1,0 +1,380 @@
+/*
+  The renderer's own stylesheet — tokens, skins, @theme, @utility helpers —
+  imported whole, so every class here resolves exactly as it does in the app.
+  Tailwind's source detection starts at this Vite root, which does not reach
+  the renderer, so the primitives need an explicit @source.
+*/
+@import '../../../renderer/src/styles.css';
+
+@source '../../../renderer/src/lib';
+@source '../../../renderer/src/features/chat/components/composer/ProviderLogo.tsx';
+@source '.';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* ─── Glass: a skin layer over native-dark ────────────────────────────────────
+
+  Sits on the same element as data-skin/data-theme, so the app's named tints
+  (`--vy-accent-soft` and friends, derived on [data-theme]) re-derive from
+  these values. Every literal lives in this block; components only read the
+  semantic tokens, as in the app.
+
+  Measured from the reference (1200×900, luminance 0–255):
+  - Pill fill is near-black, nearly opaque: 5–16 at the left, ~24 at the
+    right, one soft glow under the middle that rises to ~50 at the bottom.
+  - The left cap picks up the bright backdrop behind it (~65): the only place
+    the blur shows through.
+  - The rim is lit from above: ~130 on top, ~62 along the bottom. The × circle
+    matches (104 / 75), its inside brightening downward like the pill's.
+  - Icons are pure white; the placeholder ~200.
+  - The backdrop is soft-focus dots (~11px pitch) over hard light: a bright
+    left band (~125), a bright top-right corner (~110), mid-field ~30–40.
+*/
+[data-skin][data-theme].gx {
+  --vy-chrome: #0b0b0b;
+  --vy-bg: rgb(255 255 255 / 0.04);
+  --vy-card: rgb(255 255 255 / 0.05);
+  --vy-surface: rgb(255 255 255 / 0.08);
+  --vy-surface-2: rgb(255 255 255 / 0.13);
+  --vy-sunken: rgb(0 0 0 / 0.32);
+  --vy-border: rgb(255 255 255 / 0.1);
+  --vy-border-strong: rgb(255 255 255 / 0.22);
+  /* On a near-black fill the greys sit higher than native-dark's; each step still reads as a step. */
+  --vy-fg-strong: #ffffff;
+  --vy-fg: #ededed;
+  --vy-secondary: #d2d2d2;
+  --vy-muted: #b3b3b3;
+  --vy-tertiary: #969696;
+  /* One accent, and it is light: the reference has no hue to give. */
+  --vy-accent: #f4f4f4;
+  --vy-accent-hover: #ffffff;
+  --vy-accent-fg: #0a0a0a;
+  --vy-focus: #f4f4f4;
+  --vy-soft-mix: 12%;
+  --vy-shadow-menu: 0 24px 56px -12px rgb(0 0 0 / 0.85);
+
+  /*
+    Radii follow the control height, so every control is a capsule: 14px is
+    half a 28px control (buttons, segments, menu rows), 10px half a 20px one
+    (xs icon buttons, keycaps). Containers get the larger two.
+  */
+  --vy-radius-sm: 10px;
+  --vy-radius-md: 14px;
+  --vy-radius-lg: 20px;
+  --vy-radius-xl: 22px;
+
+  /* The material: near-black, clearer at the ends, one glow under the middle. */
+  --gx-fill-end: rgb(14 14 14 / 0.7);
+  --gx-fill: rgb(8 8 8 / 0.93);
+  --gx-fill-right: rgb(16 16 16 / 0.86);
+  --gx-glow: rgb(255 255 255 / 0.13);
+  --gx-pop: rgb(13 13 13 / 0.95);
+  --gx-pop-glow: rgb(255 255 255 / 0.05);
+  --gx-solid: #111111;
+  --gx-rim-top: rgb(255 255 255 / 0.44);
+  --gx-rim-side: rgb(255 255 255 / 0.12);
+  --gx-rim-bottom: rgb(255 255 255 / 0.2);
+  --gx-rim-focus: rgb(255 255 255 / 0.62);
+  --gx-shadow-near: rgb(0 0 0 / 0.55);
+  --gx-shadow-far: rgb(0 0 0 / 0.8);
+  --gx-blur: 28px;
+
+  /*
+    The backdrop's light: hard-edged bright regions over a dark field. It is
+    drawn twice — once as a soft haze, once through a dot mask — which is how
+    the reference's out-of-focus fluted glass reads.
+  */
+  --gx-stage: #0c0c0c;
+  --gx-light:
+    linear-gradient(90deg, rgb(205 205 205) 0%, rgb(150 150 150) 5%, rgb(70 70 70) 14%, transparent 24%),
+    radial-gradient(26% 34% at 100% 0%, rgb(215 215 215), transparent 78%),
+    radial-gradient(9% 55% at 41% 0%, rgb(125 125 125), transparent 85%),
+    radial-gradient(14% 18% at 63% 96%, rgb(120 120 120), transparent 80%),
+    radial-gradient(55% 26% at 36% 90%, rgb(150 150 150), transparent 85%),
+    radial-gradient(40% 40% at 70% 35%, rgb(70 70 70), transparent 85%),
+    linear-gradient(rgb(40 40 40), rgb(34 34 34));
+  --gx-haze: 0.5;
+  /* Two lens grids a pixel apart beat against each other: the reference's moiré. */
+  --gx-pitch-a: 10px 11px;
+  --gx-pitch-b: 11px 12px;
+  --gx-scrim: rgb(0 0 0 / 0.62);
+
+  /*
+    Liquid: mostly clear. A light tint keeps words readable over the bent
+    backdrop; the rim is a specular highlight, brightest nearest the light.
+  */
+  /*
+    The tint is laid twice — once across, once down — each clear over the
+    rim's bezel. The middle, where the words sit, gets both; the rim, where
+    the lens bends the backdrop, gets one or none.
+  */
+  --gx-lq-tint: rgb(10 10 10 / 0.36);
+  --gx-lq-bezel: 16px;
+  --gx-lq-sheen: rgb(255 255 255 / 0.06);
+  --gx-lq-pop: rgb(14 14 14 / 0.66);
+  --gx-lq-spec: rgb(255 255 255 / 0.9);
+  --gx-lq-rim: rgb(255 255 255 / 0.24);
+  --gx-lq-rim-far: rgb(255 255 255 / 0.1);
+  --gx-lq-inner-top: rgb(255 255 255 / 0.2);
+  --gx-lq-inner-bottom: rgb(255 255 255 / 0.07);
+  --gx-lq-inner-glow: rgb(255 255 255 / 0.05);
+  --gx-lq-shadow: rgb(0 0 0 / 0.55);
+  /* A spring with one overshoot, for surfaces that arrive and give under a press. */
+  --gx-spring: linear(0, 0.36 8%, 0.82 18%, 1.05 28%, 1.09 34%, 1.06 42%, 1.01 54%, 0.995 66%, 1);
+}
+
+/* The greys a contrast request lifts — tokens, so they stay beside the block above. */
+@media (prefers-contrast: more) {
+  [data-skin][data-theme].gx {
+    --vy-muted: #c8c8c8;
+    --vy-tertiary: #b0b0b0;
+    --vy-border: rgb(255 255 255 / 0.2);
+  }
+}
+
+/*
+  The material lives in the components layer, under Tailwind's utilities:
+  unlayered rules outrank every layer, so `.gx-pop { position: relative }`
+  would beat the `absolute` it is drawn with.
+*/
+@layer components {
+  /* The backdrop. Its two layers sit under everything the frame holds. */
+  .gx-stage {
+    isolation: isolate;
+    background-color: var(--gx-stage);
+  }
+
+  .gx-stage::before,
+  .gx-stage::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    z-index: -1;
+    background: var(--gx-light);
+    pointer-events: none;
+  }
+
+  /* The haze between the dots. */
+  .gx-stage::before {
+    opacity: var(--gx-haze);
+    filter: blur(10px);
+  }
+
+  /* The dots: the light seen through a grid of soft lenses. */
+  .gx-stage::after {
+    -webkit-mask:
+      radial-gradient(closest-side, #000, transparent) 0 0 / var(--gx-pitch-a),
+      radial-gradient(closest-side, rgb(0 0 0 / 0.45), transparent) 0 0 / var(--gx-pitch-b);
+    mask:
+      radial-gradient(closest-side, #000, transparent) 0 0 / var(--gx-pitch-a),
+      radial-gradient(closest-side, rgb(0 0 0 / 0.45), transparent) 0 0 / var(--gx-pitch-b);
+    filter: blur(1.4px);
+  }
+
+  /*
+    Where the composer sits the backdrop dims, so words placed straight on it
+    (the queue, Structure's row, the rail) read without a box of their own.
+  */
+  .gx-scrim-bottom {
+    background: radial-gradient(70% 55% at 50% 100%, var(--gx-scrim), transparent 85%);
+  }
+
+  .gx-scrim-top {
+    background: radial-gradient(80% 70% at 50% 25%, var(--gx-scrim), transparent 85%);
+  }
+
+  /*
+    Glass surfaces. The rim is lit from above and the fill glows from below,
+    as both the reference's pill and its circle are.
+  */
+  .gx-glass,
+  .gx-pop {
+    position: relative;
+    isolation: isolate;
+    backdrop-filter: blur(var(--gx-blur)) saturate(1.1);
+    -webkit-backdrop-filter: blur(var(--gx-blur)) saturate(1.1);
+    box-shadow:
+      0 4px 10px -4px var(--gx-shadow-near),
+      0 22px 48px -14px var(--gx-shadow-far);
+  }
+
+  .gx-glass {
+    background:
+      radial-gradient(44% 110% at 54% 108%, var(--gx-glow), transparent 72%),
+      linear-gradient(90deg, var(--gx-fill-end), var(--gx-fill) 9%, var(--gx-fill) 86%, var(--gx-fill-right));
+  }
+
+  /* Popovers: the same material, denser, so rows read over the busy backdrop. */
+  .gx-pop {
+    background:
+      radial-gradient(60% 50% at 50% 104%, var(--gx-pop-glow), transparent 75%),
+      var(--gx-pop);
+    border-radius: var(--vy-radius-xl);
+  }
+
+  /* The rim: a 1px gradient border drawn inside the radius. */
+  .gx-glass::before,
+  .gx-pop::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      to bottom,
+      var(--gx-rim-top),
+      var(--gx-rim-side) 38%,
+      var(--gx-rim-side) 70%,
+      var(--gx-rim-bottom)
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* The app's focus-within:border-border-strong, as the rim. */
+  .gx-glass[data-gx-field]:focus-within::before {
+    background: linear-gradient(
+      to bottom,
+      var(--gx-rim-focus),
+      var(--gx-rim-side) 38%,
+      var(--gx-rim-side) 70%,
+      var(--gx-rim-bottom)
+    );
+  }
+
+  /*
+    Liquid. The lens itself (the bent backdrop) is set per element by
+    glass/liquid.ts; the blur here only covers the frame before it attaches.
+  */
+  .gx-liquid .gx-glass,
+  .gx-liquid .gx-pop {
+    backdrop-filter: blur(3px) saturate(1.25);
+    -webkit-backdrop-filter: blur(3px) saturate(1.25);
+    box-shadow:
+      inset 0 1px 1px var(--gx-lq-inner-top),
+      inset 0 -1px 1px var(--gx-lq-inner-bottom),
+      inset 0 0 14px var(--gx-lq-inner-glow),
+      0 12px 32px -12px var(--gx-lq-shadow);
+  }
+
+  .gx-liquid .gx-glass {
+    background:
+      linear-gradient(to bottom, var(--gx-lq-sheen), transparent 55%),
+      linear-gradient(
+        90deg,
+        transparent,
+        var(--gx-lq-tint) var(--gx-lq-bezel),
+        var(--gx-lq-tint) calc(100% - var(--gx-lq-bezel)),
+        transparent
+      ),
+      linear-gradient(
+        transparent,
+        var(--gx-lq-tint) var(--gx-lq-bezel),
+        var(--gx-lq-tint) calc(100% - var(--gx-lq-bezel)),
+        transparent
+      );
+  }
+
+  .gx-liquid .gx-pop {
+    background: var(--gx-lq-pop);
+  }
+
+  .gx-liquid .gx-glass::before,
+  .gx-liquid .gx-pop::before {
+    background: radial-gradient(
+      90% 150% at var(--gx-lx, 26%) var(--gx-ly, -35%),
+      var(--gx-lq-spec),
+      var(--gx-lq-rim) 42%,
+      var(--gx-lq-rim-far) 80%
+    );
+  }
+
+  .gx-liquid .gx-glass[data-gx-field]:focus-within::before {
+    background: radial-gradient(
+      90% 150% at var(--gx-lx, 26%) var(--gx-ly, -35%),
+      var(--gx-lq-spec),
+      var(--gx-rim-focus) 42%,
+      var(--gx-lq-rim) 80%
+    );
+  }
+
+  /*
+    No blur to give, or the reader asked for less transparency (Windows'
+    Transparency effects off reports this): the same shapes, solid, for
+    either material. After the liquid rules and one class stronger, so it
+    wins over both. `.gx-preview` is the mockup viewer's "show the glass
+    anyway", so the material can be judged on a machine that has it off.
+  */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gx .gx-glass,
+    .gx .gx-pop {
+      background: var(--gx-solid);
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .gx:not(.gx-preview) .gx-glass,
+    .gx:not(.gx-preview) .gx-pop {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background: var(--gx-solid);
+    }
+  }
+
+  /* More contrast asked for: a firmer rim all round. */
+  @media (prefers-contrast: more) {
+    .gx-glass::before,
+    .gx-pop::before {
+      background: var(--gx-rim-focus);
+    }
+  }
+}
+
+/*
+  Liquid motion. Unlayered on purpose: a popover's `animate-menu-in` is a
+  utility, and only an unlayered rule outranks it. Scoped to .gx-liquid and
+  to readers who have not asked for less motion.
+*/
+@media (prefers-reduced-motion: no-preference) {
+  .gx-liquid .gx-pop {
+    animation: gx-liquid-in 460ms var(--gx-spring) backwards;
+  }
+
+  /* The way out arrives from the pill's end, as if it split off. */
+  .gx-liquid [data-gx-emerge] {
+    animation: gx-emerge 560ms var(--gx-spring) backwards;
+  }
+
+  /* A glass control gives under a press and springs back. */
+  .gx-liquid button.gx-glass {
+    transition: transform 380ms var(--gx-spring);
+  }
+
+  .gx-liquid button.gx-glass:active {
+    transform: scale(0.9);
+  }
+}
+
+@keyframes gx-liquid-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92, 0.86);
+  }
+}
+
+@keyframes gx-emerge {
+  from {
+    opacity: 0;
+    transform: translateX(-28px) scale(0.45, 0.6);
+  }
+}

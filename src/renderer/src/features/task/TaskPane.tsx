@@ -9,13 +9,14 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import type { RunFeedbackRating, RunGoal, RunLoop, RunSummary, ToolApprovalDecision } from '@shared/ipc'
+import type { RunFeedbackRating, RunGoal, RunLoop, RunSummary, ToolApprovalDecision, ToolApprovalExtras } from '@shared/ipc'
 import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { unreachableServiceInTurn } from '@shared/utils/unreachableService'
 import { isRetryableTurnFailure } from '@shared/errors'
 import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
 import { Icon } from '@renderer/lib/icons'
+import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
 import { AgentVSpinner } from '@renderer/lib/brand'
 import { ActionMenu, Button, IconButton, ImageLightbox, cn, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
 import {
@@ -25,6 +26,7 @@ import {
   matchShortcut,
   shortcutLabel
 } from '@renderer/lib/shortcuts'
+import { COMPOSER_GUTTER, RECORD_MAX } from '@renderer/lib/utils/layout'
 import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
@@ -65,6 +67,8 @@ export type TaskPaneRunActions = {
   onDelete?: () => void
   /** A copy of the task's conversation as a new task, to take another way. */
   onFork?: () => void
+  /** The same, up to a point: the first `forkIndex` messages (all of them when undefined). */
+  onForkAt?: (forkIndex: number | undefined) => void
   /** Pin or unpin: a pinned task keeps its own navigator group. Read when the menu draws. */
   onTogglePin?: () => void
   isPinned?: () => boolean
@@ -106,7 +110,11 @@ export type TaskPaneProps = {
   actions: TaskPaneRunActions
   turnUsage?: readonly StepUsageTotals[]
   runFeedback?: { value: RunFeedbackRating | null; onRate: (rating: RunFeedbackRating | null) => void }
-  onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
+  onApprovalDecision?: (
+    requestId: string,
+    decision: ToolApprovalDecision,
+    extras?: ToolApprovalExtras
+  ) => void | Promise<void>
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   approvalAutoFocus?: boolean
   instanceGates?: readonly InlineInstanceGate[]
@@ -115,7 +123,11 @@ export type TaskPaneProps = {
   editComposer?: ReactNode
   onBeginEdit?: (messageIndex: number) => void
   onRevert?: (messageIndex: number, runN?: number) => void
+  /** "Run this again": the latest instruction, rerun as it was. */
+  onRerun?: (messageIndex: number, runN?: number, said?: number) => void
   messageCount: number
+  /** Each user turn's message index, for a brief whose item id does not carry one. */
+  userMessageIndexes?: readonly number[]
   onOpenChanges?: (path?: string) => void
   onLoadToolContent?: (toolCallId: string) => Promise<string | null>
   mcpServerNames?: ReadonlyMap<string, string>
@@ -216,7 +228,7 @@ function useInstanceFacts(): Readonly<Record<string, InstanceFacts>> | undefined
   const { agentInstances } = useRunSession()
   const key = agentInstances
     ? Object.values(agentInstances)
-        .map((i) => `${i.instanceRunId}:${i.phase}:${i.startedAt ?? ''}:${i.endedAt ?? ''}`)
+        .map((i) => `${i.instanceRunId}:${i.phase}:${i.startedAt ?? ''}:${i.endedAt ?? ''}:${i.stepId ?? ''}`)
         .join('|')
     : ''
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` is the facts' identity
@@ -370,6 +382,17 @@ export function TaskPane(props: TaskPaneProps) {
     // Main forks only a stopped task ("Cancel run first").
     ...(props.actions.onFork && runId && !liveNow
       ? [{ id: 'fork', label: 'Fork', icon: 'fork' as const, onSelect: props.actions.onFork }]
+      : []),
+    // The same Repeat… the navigator row offers: this brief, on a schedule.
+    ...(runId && workspacePath
+      ? [
+          {
+            id: 'repeat',
+            label: 'Repeat…',
+            icon: 'repeat' as const,
+            onSelect: () => void requestRepeatTask({ workspacePath, runId, title })
+          }
+        ]
       : []),
     ...(props.actions.onCopyLink && runId
       ? [{ id: 'link', label: 'Copy link', icon: 'link' as const, onSelect: props.actions.onCopyLink }]
@@ -729,6 +752,7 @@ export function TaskPane(props: TaskPaneProps) {
             contentRef={scroll.contentRef}
             onScroll={scroll.onScroll}
             onActivate={props.onActivate}
+            busy={live || loading ? true : undefined}
           >
             {props.transcriptHasEarlier && !empty ? (
               <div className="flex justify-center pb-1" data-load-earlier>
@@ -772,7 +796,18 @@ export function TaskPane(props: TaskPaneProps) {
                 editComposer={props.editComposer}
                 onBeginEdit={props.onBeginEdit}
                 onRevert={props.onRevert}
+                onRerun={props.onRerun}
+                onForkFrom={
+                  props.actions.onForkAt && runId && !liveNow
+                    ? (messageIndex) => {
+                        // Through this instruction's whole turn: up to the next instruction.
+                        const next = props.userMessageIndexes?.find((i) => i > messageIndex)
+                        props.actions.onForkAt!(next)
+                      }
+                    : undefined
+                }
                 messageCount={props.messageCount}
+                userMessageIndexes={props.userMessageIndexes}
                 onImageClick={setLightbox}
               />
             )}
@@ -794,19 +829,27 @@ export function TaskPane(props: TaskPaneProps) {
             ) : null}
           </RecordBody>
           {live && scroll.away && !loading ? (
-            <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-              <Button
-                size="xs"
-                variant="secondary"
-                icon="arrowDown"
-                // The record's own End key (useRecordScroll), not a rebindable chord.
-                kbd={['End']}
-                onClick={jumpBottom}
-                className="pointer-events-auto shadow-menu"
-                data-jump-to-now
-              >
-                Jump to now
-              </Button>
+            // Docked to the column's trailing edge, where the durations end, not over
+            // its middle. It reserves the record's 8px scroll gutter as the composer
+            // does and mirrors the column (RECORD_MAX, px-4), so its right edge is
+            // the record's right edge on any pane width. Above the record's own
+            // raised controls (a step's instance chips sit at z-[1]), or one
+            // scrolling past would cover the button.
+            <div className={cn('pointer-events-none absolute inset-x-0 bottom-3 z-10', COMPOSER_GUTTER)}>
+              <div className={cn('mx-auto flex w-full justify-end px-4', RECORD_MAX)}>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  icon="arrowDown"
+                  // The record's own End key (useRecordScroll), not a rebindable chord.
+                  kbd={['End']}
+                  onClick={jumpBottom}
+                  className="pointer-events-auto shadow-menu"
+                  data-jump-to-now
+                >
+                  Jump to now
+                </Button>
+              </div>
             </div>
           ) : null}
         </div>

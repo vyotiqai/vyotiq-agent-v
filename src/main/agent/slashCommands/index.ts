@@ -13,7 +13,7 @@ import {
   findWorkspaceSettingsOverride,
   getWorkspaces
 } from '../../workspace/workspaces'
-import { BUILTIN_COMMANDS, buildHelpMessage, resolveBuiltin } from './builtins'
+import { BUILTIN_COMMANDS, YIELDING_BUILTINS, resolveBuiltin } from './builtins'
 import { listSkillCommands, resolveSkillCommand } from './skills'
 import { listWorkspaceCommands, resolveWorkspaceCommand } from './workspaceCommands'
 import { listRuleCommands, resolveRuleCommand } from './ruleCommands'
@@ -138,7 +138,10 @@ export async function listSlashMenu(workspacePath?: string | null): Promise<Slas
       listRuleCommands(workspacePath ?? null)
     ])
     const mcp = listMcpCommands(overrides, workspacePath ?? null)
-    const commands = mergeByTrigger([BUILTIN_COMMANDS, workspace, skills, rules, mcp])
+    // A person's own /init or /review (a command file or a skill) keeps working.
+    const own = new Set([...workspace, ...skills].map((cmd) => triggerKey(cmd.trigger)))
+    const builtins = BUILTIN_COMMANDS.filter((cmd) => !(YIELDING_BUILTINS.has(cmd.trigger) && own.has(triggerKey(cmd.trigger))))
+    const commands = mergeByTrigger([builtins, workspace, skills, rules, mcp])
     const mcpServers = listSlashMcpServers(commands, overrides)
     setSlashListCacheEntry(key, { commands, mcpServers, expiresAt: Date.now() + LIST_TTL_MS })
     return { commands, mcpServers }
@@ -163,11 +166,7 @@ export async function resolveSlashCommand(
   const workspacePath = args.workspacePath ?? null
   const overrides = marketplaceOverridesFor(workspacePath)
 
-  const builtin = resolveBuiltin(
-    id,
-    trailingText,
-    buildHelpMessage(await listSlashCommands(workspacePath))
-  )
+  const builtin = resolveBuiltin(id, trailingText)
   if (builtin) return builtin
 
   if (id.startsWith('skill:')) {
@@ -190,7 +189,7 @@ export async function resolveSlashCommand(
     if (result) return result
   }
 
-  return { action: 'send', message: `Unknown slash command: ${id}` }
+  return { action: 'notice', message: `Unknown slash command: ${id}` }
 }
 
 /** Find a command by typed trigger among the listed set. */

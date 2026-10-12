@@ -56,8 +56,8 @@ or in Claude Code's form. Claude Code names are mapped:
 | `Edit` | `edit` and `str_replace` |
 | `Write` | `edit` |
 | `LS` | `list_dir` |
-| `WebFetch` | `browser_navigate` and `browser_snapshot` |
-| `WebSearch` | `browser_search` |
+| `WebFetch` | `web_fetch`, `browser_navigate` and `browser_snapshot` |
+| `WebSearch` | `web_search` and `browser_search` |
 | `TodoWrite` | `todo_write` |
 
 MCP tools are named as `mcp__<server>__<tool>`. To grant a whole server, use

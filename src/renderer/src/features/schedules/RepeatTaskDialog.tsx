@@ -37,6 +37,11 @@ export function RepeatTaskDialog() {
         setWorktree(false)
         setError(null)
         setSaving(false)
+        // A brief from New task has no record to read: it runs on the default model.
+        if (next.runId === undefined) {
+          setWorktree(next.worktree === true)
+          return
+        }
         const read = window.vyotiq?.scheduleSource
         if (!read) return
         void read(next.workspacePath, next.runId).then((res) => {
@@ -63,19 +68,29 @@ export function RepeatTaskDialog() {
     if (!task || !result.ok || saving) return
     setSaving(true)
     setError(null)
-    const res = await window.vyotiq.createSchedule({
-      workspacePath: task.workspacePath,
-      fromRunId: task.runId,
-      schedule: result.spec,
-      // Until the task's record is read, main reads the same defaults itself.
-      ...(source
+    const res = await window.vyotiq.createSchedule(
+      task.runId === undefined
         ? {
-            provider: model?.provider ?? null,
-            model: model?.model ?? null,
-            ...(source.canWorktree ? { worktree } : {})
+            workspacePath: task.workspacePath,
+            instruction: task.instruction,
+            ...(task.doneWhen?.length ? { doneWhen: task.doneWhen } : {}),
+            ...(worktree ? { worktree: true } : {}),
+            schedule: result.spec
           }
-        : {})
-    })
+        : {
+            workspacePath: task.workspacePath,
+            fromRunId: task.runId,
+            schedule: result.spec,
+            // Until the task's record is read, main reads the same defaults itself.
+            ...(source
+              ? {
+                  provider: model?.provider ?? null,
+                  model: model?.model ?? null,
+                  ...(source.canWorktree ? { worktree } : {})
+                }
+              : {})
+          }
+    )
     setSaving(false)
     if (!res.ok) {
       setError(res.error)
@@ -93,7 +108,7 @@ export function RepeatTaskDialog() {
     <Dialog
       open={task != null}
       onClose={close}
-      title="Repeat task"
+      title={task?.runId === undefined ? 'Schedule task' : 'Repeat task'}
       icon="repeat"
       size="md"
       footer={
@@ -103,7 +118,7 @@ export function RepeatTaskDialog() {
             Cancel
           </Button>
           <Button size="sm" variant="primary" disabled={!result.ok || saving} onClick={() => void save()}>
-            {saving ? 'Saving…' : 'Repeat'}
+            {saving ? 'Saving…' : task?.runId === undefined ? 'Schedule' : 'Repeat'}
           </Button>
         </>
       }

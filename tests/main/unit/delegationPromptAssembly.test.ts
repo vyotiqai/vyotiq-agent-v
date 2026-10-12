@@ -60,10 +60,12 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
       .filter(Boolean)
       .join('\n')
 
-    // Harness spine: delegation is the default for anything but a trivial action.
-    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\) for any task that is not a single trivial action/)
-    expect(prompt).toMatch(/a single read-only lookup, or a single one-line edit/)
-    expect(prompt).toMatch(/never spawn for that/)
+    // Harness spine: delegation is a judgment call — independent or large work only.
+    expect(prompt).toMatch(/Delegating to child agent instances \(root runs\) is a judgment call/)
+    expect(prompt).toMatch(/independent pieces worth running in parallel/)
+    expect(prompt).toMatch(/a read-only lookup, a small or tightly coupled edit/)
+    expect(prompt).toMatch(/never spawn just to look thorough/)
+    expect(prompt).not.toMatch(/not a single trivial action/)
     expect(prompt).toMatch(/one verifiable deliverable per child instance/)
     expect(prompt).toMatch(/verified evidence/)
     expect(prompt).toMatch(/child sees nothing of this conversation/)
@@ -73,9 +75,8 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
 
     // Mode section (root, not inline): conditional delegation trigger + anti-overuse balance.
     expect(prompt).toMatch(/whether to use them is a judgment call/)
-    expect(prompt).toMatch(/Delegate for any task that is not a single trivial action/)
-    expect(prompt).toMatch(/never spawn for that/)
-    expect(prompt).toMatch(/decompose the plan into a structured set/)
+    expect(prompt).toMatch(/one piece is large enough that a child with a narrow brief would finish it faster/)
+    expect(prompt).toMatch(/decompose the delegated work into a structured set/)
     expect(prompt).toMatch(/batch independent tool calls within a step first/i)
 
     // Catalog: the five instance tools with operational lifecycle text.
@@ -103,7 +104,7 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
       .join('\n')
 
     // Children still get the generic workstream-brief principle from the spine…
-    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\)/)
+    expect(prompt).toMatch(/Delegating to child agent instances \(root runs\)/)
     // …but no parent-only delegation trigger or instance lifecycle.
     expect(prompt).not.toMatch(/Fan every task out with a complete structured brief/)
     expect(prompt).not.toMatch(/spawn_agent_instance/)

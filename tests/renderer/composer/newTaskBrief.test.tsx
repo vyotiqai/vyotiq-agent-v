@@ -119,6 +119,8 @@ describe('New task brief', () => {
     const box = page.querySelector<HTMLElement>('[data-brief]')!
     const row = box.querySelector<HTMLElement>('[data-composer-controls]')!
     expect(row).toBeTruthy()
+    // Start task ends that row: the box closes with its own action.
+    expect(within(row).getByRole('button', { name: 'Start task' })).toBeTruthy()
     // Agent leads the modes.
     const modes = within(row).getByRole('radiogroup', { name: 'Mode' })
     expect(within(modes).getAllByRole('radio')[0]!.textContent).toBe('Agent')
@@ -142,9 +144,28 @@ describe('New task brief', () => {
     expect(sees.textContent).toContain('2 notes')
     expect(sees.textContent).toContain('release-runbook, packaged-launch')
     expect(sees.textContent).toContain('Ready')
-    expect(sees.textContent).toContain('12,408 files · updated 4m ago')
+    expect(sees.textContent).toContain('12,408 source files · updated 4m ago')
     await waitFor(() => expect(sees.textContent).toContain('2 built-in · 1 MCP server'))
     await waitFor(() => expect(sees.textContent).toContain('GitHub needs sign-in'))
+  })
+
+  it('keeps every fact on one left edge, under the brief, with no colon after the key', async () => {
+    renderBrief()
+    const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(sees.textContent).toContain('2 changed · 1 ahead'))
+    // Under the box the facts share the brief's 780 measure and centre.
+    expect(sees.className).toContain('max-w-[780px]')
+    expect(sees.className).toContain('mx-auto')
+    expect(sees.className).toContain('@[1100px]:max-w-none')
+    for (const row of Array.from(sees.querySelectorAll<HTMLElement>('[data-fact]'))) {
+      const inner = row.firstElementChild as HTMLElement
+      // A button row nets -mx-2 + px-2 to zero; a plain row must add no inset.
+      if (inner.tagName === 'BUTTON') expect(inner.className).toContain('-mx-2')
+      else expect(inner.className).not.toContain('px-2')
+      const key = row.querySelector('.text-caption.text-tertiary')!
+      expect(key.querySelector('.sr-only')?.textContent).toBe(':')
+    }
+    expect(sees.querySelector('[data-fact="Branch"]')).toBeTruthy()
   })
 
   it('names the prompt-loaded memory files when there are no notes, not None', async () => {
@@ -353,6 +374,30 @@ describe('New task brief', () => {
     expect(briefStateFor('/ws/app').worktree).toBe(false)
   })
 
+  it('also runs on a second model: Start asks for both', async () => {
+    window.vyotiq.listModels = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        models: [
+          { id: 'qwen2.5', inputModalities: ['text'], outputModalities: ['text'], supportsTools: true, supportsVision: false },
+          { id: 'llama3.3', inputModalities: ['text'], outputModalities: ['text'], supportsTools: true, supportsVision: false }
+        ],
+        warning: null
+      }
+    })) as unknown as typeof window.vyotiq.listModels
+    const { props } = renderBrief()
+    const compare = await screen.findByRole('button', { name: /Also run on another model/ })
+    expect(compare.textContent).toContain('One model')
+    fireEvent.click(compare)
+    fireEvent.click(await screen.findByRole('option', { name: 'Also on llama3.3' }))
+    typeBrief('Speed up the importer')
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ compareWith: { provider: 'ollama', model: 'llama3.3' } })
+    // Started: the next brief is one model again.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Also run on another model/ }).textContent).toContain('One model'))
+  })
+
   it('offers no worktree when there is no commit to branch from', async () => {
     window.vyotiq.gitStatus = vi.fn(async () => ({
       ok: true as const,
@@ -379,6 +424,19 @@ describe('New task brief', () => {
     renderBrief({ agentMode: 'ask' })
     const page = document.querySelector('[data-new-task]') as HTMLElement
     expect(page.textContent).toContain('the agent reads and answers, and changes nothing')
+  })
+
+  it('counts the tools a run here sends, not the ones it leaves out', async () => {
+    const get = window.vyotiq.toolsCatalogGet as unknown as (req: { workspacePath: string }) => Promise<unknown>
+    const base = (await get({ workspacePath: '/ws/app' })) as { ok: true; data: Record<string, unknown> }
+    // No git remote here: a run drops the GitHub tools, so New task does too.
+    window.vyotiq.toolsCatalogGet = vi.fn(async () => ({
+      ok: true as const,
+      data: { ...base.data, notApplicable: ['edit'] }
+    })) as unknown as typeof window.vyotiq.toolsCatalogGet
+    renderBrief()
+    const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(sees.textContent).toContain('1 built-in · 1 MCP server'))
   })
 
   it('makes each fact you can change a way to where you change it', async () => {
@@ -445,5 +503,75 @@ describe('New task brief', () => {
     await waitFor(() => expect(window.vyotiq.pickExtraRoot).toHaveBeenCalled())
     expect(screen.queryByRole('list', { name: 'Added folders' })).toBeNull()
     expect(briefStateFor('/ws/app').extraRoots).toBeUndefined()
+  })
+})
+
+describe('New task brief: Structure’s Done when', () => {
+  const STRUCTURED = 'Add CSV export.\n\n## Done when\n- Export downloads a .csv\n- Columns match the table'
+
+  async function structure(): Promise<HTMLElement> {
+    window.vyotiq.promptStructure = vi.fn(async () => ({
+      ok: true as const,
+      data: { kind: 'brief' as const, taskType: 'feature' as const, brief: STRUCTURED }
+    })) as unknown as typeof window.vyotiq.promptStructure
+    typeBrief('add csv export to the usage page')
+    const button = document.querySelector<HTMLButtonElement>('[data-composer-structure]')!
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+    return waitFor(() => {
+      const strip = document.querySelector<HTMLElement>('[data-structure-done]')
+      expect(strip).not.toBeNull()
+      return strip!
+    })
+  }
+
+  const brief = (): string => screen.getByRole('combobox', { name: 'Brief' }).textContent ?? ''
+
+  it('moves the bullets into the checks on one click, out of the brief', async () => {
+    const { props } = renderBrief()
+    const strip = await structure()
+    // Nothing moves until asked.
+    expect(briefStateFor('/ws/app').checks).toEqual([])
+    const move = within(strip).getByRole('button', { name: 'Move 2 to checks' })
+    fireEvent.click(move)
+    await waitFor(() => expect(briefStateFor('/ws/app').checks).toEqual(['Export downloads a .csv', 'Columns match the table']))
+    expect(brief()).toContain('Add CSV export.')
+    expect(brief()).not.toContain('Done when')
+    const list = within(screen.getByRole('list', { name: 'Done when' }))
+    expect(list.getByText('Export downloads a .csv')).toBeTruthy()
+    expect(strip.textContent).toContain('2 checks added')
+    expect(within(strip).queryByRole('button', { name: /to checks/ })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toMatchObject({
+      doneWhen: ['Export downloads a .csv', 'Columns match the table']
+    })
+  })
+
+  it('Undo puts the words back and takes out only the checks it added', async () => {
+    setBriefState('/ws/app', { draftId: null, checks: ['Lint passes'] })
+    renderBrief()
+    const strip = await structure()
+    fireEvent.click(within(strip).getByRole('button', { name: 'Move 2 to checks' }))
+    await waitFor(() => expect(briefStateFor('/ws/app').checks).toHaveLength(3))
+    const check = screen.getByRole('textbox', { name: 'New check' })
+    fireEvent.change(check, { target: { value: 'Typed after' } })
+    fireEvent.keyDown(check, { key: 'Enter' })
+
+    fireEvent.click(within(strip).getByRole('button', { name: /Undo/ }))
+    await waitFor(() => expect(brief()).toBe('add csv export to the usage page'))
+    expect(briefStateFor('/ws/app').checks).toEqual(['Lint passes', 'Typed after'])
+    expect(document.querySelector('[data-structure-done]')).toBeNull()
+  })
+
+  it('Ctrl+Z right after the move undoes the brief and its checks together', async () => {
+    renderBrief()
+    const strip = await structure()
+    fireEvent.click(within(strip).getByRole('button', { name: 'Move 2 to checks' }))
+    await waitFor(() => expect(briefStateFor('/ws/app').checks).toHaveLength(2))
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Brief' }), { key: 'z', ctrlKey: true })
+    await waitFor(() => expect(brief()).toBe('add csv export to the usage page'))
+    expect(briefStateFor('/ws/app').checks).toEqual([])
   })
 })

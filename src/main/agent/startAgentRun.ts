@@ -29,7 +29,9 @@ import {
   registerParentInstanceEmitter,
   registerRunIpcSender,
   handleInlineInstanceFinished,
-  noteInstanceChildEvent
+  noteInstanceChildEvent,
+  formatInstancesResumeNote,
+  resumeInterruptedInstances
 } from './agentInstances'
 import { clearRunActivity, noteRunActivity } from './runActivity'
 import { notifyBadgeChange } from '../app/badges'
@@ -72,6 +74,41 @@ export function clearGoalRelaunchState(runId: string): void {
   if (timer) {
     clearTimeout(timer)
     relaunchTimers.delete(runId)
+  }
+}
+
+/**
+ * A task an app exit interrupted gets its interrupted instances back before
+ * its own run continues, and is told which came back (agentInstances.ts).
+ * Never fails the resume: an instance that cannot come back is named in the
+ * note instead.
+ */
+function wasInterruptedTask(
+  agentInput: StartAgentRunInput['agentInput'],
+  workspacePath: string,
+  runId: string
+): boolean {
+  if (!agentInput.resume) return false
+  const status = loadStatus(resolveRunDir(workspacePath, runId))
+  return Boolean(status && !status.inlineInstance && status.resumable === true && status.interruptedAt)
+}
+
+async function withInterruptedInstancesResumed(
+  agentInput: StartAgentRunInput['agentInput'],
+  workspacePath: string,
+  runId: string,
+  wc: WebContents
+): Promise<StartAgentRunInput['agentInput']> {
+  try {
+    const note = formatInstancesResumeNote(await resumeInterruptedInstances(workspacePath, runId, wc))
+    if (!note) return agentInput
+    return {
+      ...agentInput,
+      newMessages: [...(agentInput.newMessages ?? []), { role: 'user', content: note, synthetic: true }]
+    }
+  } catch (err) {
+    logger.warn('resuming interrupted instances failed', { scope: 'agentInstances', correlationId: runId, err })
+    return agentInput
   }
 }
 
@@ -154,7 +191,8 @@ function firstUserMessageText(agentInput: StartAgentRunAgentInput): string {
  * own callers ignore it.
  */
 export function startAgentRunInBackground(input: StartAgentRunInput): Promise<void> {
-  const { runId, workspacePath, invokeId, wc, controller, agentInput } = input
+  const { runId, workspacePath, invokeId, wc, controller } = input
+  let agentInput = input.agentInput
   const releaseIpcSender = registerRunIpcSender(runId, wc)
 
   return (async () => {
@@ -220,6 +258,10 @@ export function startAgentRunInBackground(input: StartAgentRunInput): Promise<vo
         // they may have chosen this runtime to avoid.
         const resolved = await resolveAvailableRuntime(agentInput.runtime ?? 'local')
         if (!resolved.ok) throw new Error(resolved.error)
+        // Checked first so an ordinary start or resume takes no extra async hop.
+        if (wasInterruptedTask(agentInput, workspacePath, runId)) {
+          agentInput = await withInterruptedInstancesResumed(agentInput, workspacePath, runId, wc)
+        }
         runHandle = resolved.runtime.start(agentInput)
         eventStream = runHandle.events()
       }

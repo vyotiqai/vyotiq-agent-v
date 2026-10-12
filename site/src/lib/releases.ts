@@ -107,19 +107,37 @@ export function parseNotes(body: string): { lede: string; sections: NoteSection[
   return { lede: lede.join(' '), sections }
 }
 
-export type Platform = 'windows' | 'mac-arm' | 'mac-intel' | 'appimage' | 'deb' | 'rpm'
+export type Platform =
+  | 'windows'
+  | 'windows-arm'
+  | 'mac-arm'
+  | 'mac-intel'
+  | 'appimage'
+  | 'appimage-arm'
+  | 'deb'
+  | 'deb-arm'
+  | 'rpm'
+  | 'rpm-arm'
+
+/** arm64 in a file name; rpm spells it aarch64. */
+const ARM = /arm64|aarch64/i
 
 /** Picks each platform's installer out of a release's assets by the builder's file names. */
 export function installers(release: Release | null): Partial<Record<Platform, Asset>> {
   if (!release) return {}
   const find = (test: (n: string) => boolean) => release.assets.find((a) => test(a.name))
   return {
-    windows: find((n) => /setup\.exe$/i.test(n)),
+    // Before 1.2 the Windows installer had no arch in its name; it was x64.
+    windows: find((n) => /setup\.exe$/i.test(n) && !ARM.test(n)),
+    'windows-arm': find((n) => /setup\.exe$/i.test(n) && ARM.test(n)),
     'mac-arm': find((n) => /arm64\.dmg$/i.test(n)),
     'mac-intel': find((n) => /(x64|intel)\.dmg$/i.test(n)),
-    appimage: find((n) => /\.AppImage$/.test(n)),
-    deb: find((n) => /\.deb$/.test(n)),
-    rpm: find((n) => /\.rpm$/.test(n))
+    appimage: find((n) => /\.AppImage$/.test(n) && !ARM.test(n)),
+    'appimage-arm': find((n) => /\.AppImage$/.test(n) && ARM.test(n)),
+    deb: find((n) => /\.deb$/.test(n) && !ARM.test(n)),
+    'deb-arm': find((n) => /\.deb$/.test(n) && ARM.test(n)),
+    rpm: find((n) => /\.rpm$/.test(n) && !ARM.test(n)),
+    'rpm-arm': find((n) => /\.rpm$/.test(n) && ARM.test(n))
   }
 }
 

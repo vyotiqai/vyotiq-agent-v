@@ -134,10 +134,30 @@ export function skillInvocationEditDraft(parsed: ParsedSkillInvocation): string 
 }
 
 /** Cursor-compatible `{{input}}` replacement in workspace command templates. */
+/** Split command arguments on spaces, keeping "quoted words" together. */
+function commandArgs(input: string): string[] {
+  const out: string[] = []
+  for (const m of input.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) out.push(m[1] ?? m[2] ?? m[3] ?? '')
+  return out
+}
+
+/**
+ * Fill a command file's body with what was typed after it. Placeholders, as
+ * the tools these files come from write them:
+ * - `{{input}}` (Agent V, Cursor) and `$ARGUMENTS` (Claude Code): the whole text;
+ * - `$1`…`$9` (Claude Code): one argument each, "quoted words" kept together;
+ * - `${input}` / `${input:name}` (Copilot prompt files): the whole text.
+ * With none of them, the text goes after the body.
+ */
 export function formatWorkspaceCommand(template: string, userText?: string): string {
   const input = (userText ?? '').trim()
-  if (template.includes('{{input}}')) {
-    return template.split('{{input}}').join(input)
+  const whole = /\{\{input\}\}|\$ARGUMENTS\b|\$\{input(?::[^}]*)?\}/g
+  const positional = /\$([1-9])(?!\d)/g
+  const hasWhole = whole.test(template)
+  const hasPositional = positional.test(template)
+  if (hasWhole || hasPositional) {
+    const args = commandArgs(input)
+    return template.replace(whole, () => input).replace(positional, (_, n: string) => args[Number(n) - 1] ?? '')
   }
   if (!input) return template.trim()
   return `${template.trim()}\n\n${input}`
@@ -209,8 +229,13 @@ export function userMessageDisplayText(text: string): string {
   return text
 }
 
+// Two shapes. A path opened by a single quote ends at its closing quote (an
+// apostrophe between letters, as in O'Brien, stays part of the path); without
+// that, `'C:\a.txt' and check` would match through to the end of the line.
+// Anything else keeps spaces and apostrophes in its segments, so an unquoted
+// `C:\My Docs\a b.txt` is still found whole.
 const WINDOWS_ABS_PATH =
-  /(?:^|[\s"'`])([A-Za-z]:\\(?:[^<>:"/|?*\r\n]+\\)*[^<>:"/|?*\r\n]+)(?=$|[\s"'`])/g
+  /(?:^|[\s"`])'([A-Za-z]:\\(?:(?:[^<>:"/|?*'\r\n]|(?<=[\p{L}\p{N}])'(?=[\p{L}\p{N}]))+\\)*(?:[^<>:"/|?*'\r\n]|(?<=[\p{L}\p{N}])'(?=[\p{L}\p{N}]))+)'(?![\p{L}\p{N}])|(?:^|[\s"'`])([A-Za-z]:\\(?:[^<>:"/|?*\r\n]+\\)*[^<>:"/|?*\r\n]+)(?=$|[\s"'`])/gu
 const UNIX_ABS_PATH =
   /(?:^|[\s"'`])(\/(?:Users|home|tmp|var|opt|mnt|Volumes)\/[^\s"'`]+)(?=$|[\s"'`])/g
 
@@ -221,7 +246,7 @@ export function findAbsolutePathsInText(text: string): string[] {
     re.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = re.exec(text)) !== null) {
-      const p = (m[1] ?? '').replace(/[\\/]+$/, '').trim()
+      const p = (m[1] ?? m[2] ?? '').replace(/[\\/]+$/, '').trim()
       if (p) found.add(p)
     }
   }
@@ -236,7 +261,9 @@ export function scrubPathsFromGoalText(text: string): string {
     out = out.split(p).join(' ')
   }
   out = out
-    .replace(/["'`]+/g, ' ')
+    // The quotes a path was wrapped in go with it; an apostrophe inside a word
+    // ("What's", "don't") is the word's own and stays.
+    .replace(/["`]+|(?<![\p{L}\p{N}])'+|'+(?![\p{L}\p{N}])/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   return out || 'chat'

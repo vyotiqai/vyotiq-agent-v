@@ -668,6 +668,91 @@
       ]
     },
     {
+      "id": "brave-search",
+      "name": "Brave Search",
+      "version": "1.0.0",
+      "description": "Web, news, image and local search from the Brave Search API. Needs an API key.",
+      "kind": "mcp",
+      "bundledPath": "brave-search",
+      "source": "bundled",
+      "publisher": "Brave",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 47,
+      "iconPath": "icons/brave-search.svg",
+      "installable": true,
+      "auth": "token",
+      "requires": [
+        "node"
+      ]
+    },
+    {
+      "id": "postgres",
+      "name": "Postgres",
+      "version": "1.0.0",
+      "description": "Read a Postgres database: schemas, queries, explain plans and index advice. Starts in restricted (read-only) mode.",
+      "kind": "mcp",
+      "bundledPath": "postgres",
+      "source": "bundled",
+      "publisher": "Crystal DBA",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 48,
+      "iconPath": "icons/postgres.svg",
+      "installable": true,
+      "auth": "token",
+      "requires": [
+        "uv"
+      ]
+    },
+    {
+      "id": "docker",
+      "name": "Docker MCP Toolkit",
+      "version": "1.0.0",
+      "description": "The servers you enabled in Docker Desktop’s MCP Toolkit, through its gateway. Needs Docker Desktop with the MCP Toolkit on.",
+      "kind": "mcp",
+      "bundledPath": "docker",
+      "source": "bundled",
+      "publisher": "Docker",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 49,
+      "iconPath": "icons/docker.svg",
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "docker"
+      ]
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "version": "1.0.0",
+      "description": "Issues, merge requests and pipelines on GitLab.com, through GitLab’s hosted MCP server. Sign in with GitLab.",
+      "kind": "mcp",
+      "bundledPath": "gitlab",
+      "source": "bundled",
+      "publisher": "GitLab",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 50,
+      "iconPath": "icons/gitlab.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
       "id": "incident-triage",
       "name": "Incident triage",
       "version": "1.0.0",

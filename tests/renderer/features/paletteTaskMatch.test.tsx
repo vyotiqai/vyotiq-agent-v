@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { ActiveRun, RunSummary } from '@shared/ipc'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import type { ActiveRun, RunSearchResult, RunSummary } from '@shared/ipc'
 import { CommandPalette } from '@renderer/features/commandPalette/CommandPalette'
 import { buildNavigatorSections } from '@renderer/app/navigator/navigatorModel'
 
@@ -27,7 +27,7 @@ const RUNS: Record<string, RunSummary[]> = {
 }
 const ACTIVE: ActiveRun[] = [{ runId: 'live', workspacePath: WS, invokeId: 1, pendingFollowUps: [], activity: 'Running pnpm vitest api' }]
 
-function palette() {
+function palette(searchRuns?: (query: string) => Promise<RunSearchResult | null>) {
   const tasks = buildNavigatorSections({
     runsByWorkspacePath: Object.fromEntries(Object.entries(RUNS).map(([path, runs]) => [path, { runs }])),
     openPaths: [WS, OTHER],
@@ -41,6 +41,7 @@ function palette() {
       open
       tasks={tasks}
       commands={[]}
+      searchRuns={searchRuns}
       newTaskIn={null}
       onClose={vi.fn()}
       onOpenTask={vi.fn()}
@@ -82,5 +83,35 @@ describe('Ctrl K task search', () => {
     expect(taskTitles()).toHaveLength(1)
     fireEvent.change(input, { target: { value: 'zebra' } })
     expect(taskTitles()).toHaveLength(0)
+  })
+})
+
+describe('Ctrl K searches what was said', () => {
+  it('lists tasks that mention the query under "Mentioned in", after a pause', async () => {
+    const searchRuns = vi.fn(async () => ({
+      truncated: false,
+      scannedRuns: 4,
+      hits: [
+        // A title hit is already in Tasks; only the transcript hit is new.
+        { workspacePath: OTHER, runId: 'exp', title: 'Add a billing export', updatedAt: now, status: 'done', where: 'title' as const, snippet: 'Add a billing export', matchStart: 0, matchLength: 3 },
+        { workspacePath: OTHER, runId: 'inv', title: 'Fix the invoice totals', updatedAt: now, status: 'done', where: 'agent' as const, snippet: 'the tax was subtracted twice', matchStart: 12, matchLength: 10 }
+      ]
+    }))
+    const input = palette(searchRuns)
+    fireEvent.change(input, { target: { value: 'subtracted' } })
+    const group = await screen.findByRole('group', { name: 'Mentioned in' }, { timeout: 2000 })
+    expect(searchRuns).toHaveBeenCalledWith('subtracted')
+    expect(within(group).getAllByRole('option')).toHaveLength(1)
+    expect(group.textContent).toContain('Fix the invoice totals')
+    expect(group.querySelector('[data-palette-snippet]')?.textContent).toBe('Agent: the tax was subtracted twice')
+    expect(group.querySelector('mark')?.textContent).toBe('subtracted')
+  })
+
+  it('does not search transcripts in commands-only mode', async () => {
+    const searchRuns = vi.fn(async () => null)
+    const input = palette(searchRuns)
+    fireEvent.change(input, { target: { value: '>settings' } })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(searchRuns).not.toHaveBeenCalled()
   })
 })

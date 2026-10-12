@@ -88,7 +88,7 @@ export function RegistryTrustDialog({
   const setAck = async (next: boolean): Promise<void> => {
     setAcking(true)
     try {
-      const res = await window.vyotiq.marketplaceAckRemoteInstall(next)
+      const res = await window.vyotiq.marketplaceAckRemoteInstall(next, { confirmedInApp: true })
       if (!res.ok) {
         setFeedback({ kind: 'error', text: res.error })
         return

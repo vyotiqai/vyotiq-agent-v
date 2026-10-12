@@ -2,6 +2,12 @@ import { isSafeWorkspaceRelPath } from './workspacePath'
 
 const FILE_EXT_RE = /^[A-Za-z0-9]{1,10}$/
 
+/**
+ * Root files a bare name in prose may mean, lower-cased (the lookup is): a
+ * mixed-case entry here never matched, so `README.md` in an answer stayed
+ * text while `package.json` beside it opened. A bare `test.js` is left as
+ * text on purpose — "Node.js" and "Vue.js" read the same.
+ */
 const ROOT_LINKABLE_BASENAMES = new Set([
   'package.json',
   'tsconfig.json',
@@ -13,10 +19,16 @@ const ROOT_LINKABLE_BASENAMES = new Set([
   'eslint.config.js',
   'eslint.config.mjs',
   'prettier.config.js',
-  'README.md',
-  'AGENTS.md',
-  'LICENSE',
-  'LICENSE.md'
+  'readme.md',
+  'agents.md',
+  'claude.md',
+  'changelog.md',
+  'contributing.md',
+  'license.md',
+  'cargo.toml',
+  'pyproject.toml',
+  'requirements.txt',
+  'go.mod'
 ])
 
 function isLikelyRootConfigFile(path: string): boolean {

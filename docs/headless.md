@@ -21,7 +21,11 @@ VYOTIQ_APP=/Applications/Vyotiq.app/Contents/MacOS/Vyotiq bin/vyotiq -p "…"
 
 `package.json` has no `bin`: the package is never published, and a packaged
 app is invoked by its own executable. `bin/vyotiq` (sh) and `bin/vyotiq.cmd`
-are for a checkout. Everything before `--headless` belongs to the launcher
+are for a checkout. An installed app on Windows ships its own pair in
+`resources/cli` (from `build/cli`): an option first runs `--headless`, a folder
+or nothing opens the window. Settings › General › Command line puts that
+folder on the user PATH with `path-entry.ps1`, and the uninstaller runs the
+same script to take it off. Everything before `--headless` belongs to the launcher
 (the dev app path, Electron/Chromium switches); everything after it is parsed
 below, and an unknown option is a usage error.
 
@@ -164,8 +168,9 @@ removed by the next headless run.
 Caveats:
 
 - Starting the app *while* a headless run is going, with that run's
-  workspace open in it, marks the run interrupted: the app's boot sweep sees
-  a `running` record it does not own.
+  workspace open in it, leaves the run alone: its record names the headless
+  process (`ownerPid`), and the app's sweep skips a `running` record whose
+  process is alive. The app shows it as running until it finishes.
 - Each headless run starts its own MCP servers, as the loop does in the app
   (on its first step); their own stderr output shares the run's stderr.
 - Hardware acceleration is off in a headless process; nothing is drawn.

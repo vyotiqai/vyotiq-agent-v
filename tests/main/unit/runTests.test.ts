@@ -16,7 +16,7 @@ vi.mock('@main/agent/tools/diagnostics', () => ({
   runSafeCommand: vi.fn(async () => ({ stdout: 'PASS', stderr: '', exitCode: 0, killed: false }))
 }))
 vi.mock('@main/agent/tools/terminal', () => ({
-  sanitizedTerminalEnv: () => ({ ...process.env })
+  agentCommandEnv: () => ({ PATH: process.env.PATH ?? '', AGENT_COMMAND_ENV: '1' })
 }))
 vi.mock('@shared/errors', () => ({
   abortError: () => new Error('aborted')
@@ -43,6 +43,9 @@ describe('toolRunTestsAsync', () => {
       const result = await toolRunTestsAsync(ws, {}, ac.signal)
       expect(result.command).toMatch(/pnpm (run )?test/)
       expect(result.ok).toBe(true)
+      // An agent command: pnpm must not reinstall before running it.
+      const opts = (runSafeCommand as Mock).mock.calls.at(-1)?.[2] as { env?: Record<string, string> } | undefined
+      expect(opts?.env?.AGENT_COMMAND_ENV).toBe('1')
     } finally {
       rmSync(ws, { recursive: true, force: true })
     }

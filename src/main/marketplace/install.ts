@@ -159,7 +159,7 @@ export function detectPackageAt(root: string): DetectedPackage {
     }
   }
   throw new Error(
-    'Not a Vyotiq package (need vyotiq.mcp.json, vyotiq.plugin.json, or SKILL.md)'
+    'Not an Agent V package (need vyotiq.mcp.json, vyotiq.plugin.json, or SKILL.md)'
   )
 }
 
@@ -271,7 +271,7 @@ function findPackageRoot(extractedDir: string): string {
       return candidate
     }
   }
-  throw new Error('Extracted archive does not contain a Vyotiq package')
+  throw new Error('Extracted archive does not contain an Agent V package')
 }
 
 async function downloadToFile(url: string, destPath: string): Promise<void> {
@@ -489,7 +489,8 @@ function repairBundledMcpManifestsFromResources(): void {
 async function registerInstalled(
   detected: DetectedPackage,
   installSource: MarketplaceInstallSource,
-  packageRelPath: string
+  packageRelPath: string,
+  origin?: MarketplaceInstalledItem['origin']
 ): Promise<MarketplaceInstalledItem> {
   const prior = getInstalledItem(detected.id)
   const item: MarketplaceInstalledItem = {
@@ -502,7 +503,8 @@ async function registerInstalled(
     enabled: prior?.enabled ?? true,
     installSource,
     installedAt: new Date().toISOString(),
-    packagePath: packageRelPath
+    packagePath: packageRelPath,
+    ...(origin ? { origin } : {})
   }
   upsertInstalledItem(item)
   // Plugins count: their nested MCP servers need settings entries as well.
@@ -703,10 +705,55 @@ export async function installDefaultBundledPackages(): Promise<string[]> {
   return installed
 }
 
+/** The version in an npm tarball's package.json (`package/` once extracted). */
+function npmPackedVersion(extractDir: string): string | undefined {
+  for (const path of [join(extractDir, 'package', 'package.json'), join(extractDir, 'package.json')]) {
+    try {
+      const version = (JSON.parse(readFileSync(path, 'utf8')) as { version?: unknown }).version
+      if (typeof version === 'string' && version.trim()) return version.trim()
+    } catch {
+      // not here
+    }
+  }
+  return undefined
+}
+
+/** The npm registry's latest version of a package name. */
+export async function npmLatestVersion(name: string): Promise<string | null> {
+  const encoded = name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name)
+  const res = await fetch(`https://registry.npmjs.org/${encoded}/latest`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(15_000)
+  })
+  if (!res.ok) throw new Error(`npm answered ${res.status}`)
+  const version = ((await res.json()) as { version?: unknown }).version
+  return typeof version === 'string' ? version : null
+}
+
+/** The commit a git remote's HEAD points at, without cloning. */
+export async function gitRemoteHead(url: string): Promise<string | null> {
+  const cloneUrl = assertSafeGitCloneUrl(url)
+  const { stdout } = await execFileAsync('git', ['-c', 'protocol.file.allow=never', 'ls-remote', cloneUrl, 'HEAD'], {
+    timeout: 30_000
+  })
+  const sha = stdout.trim().split(/\s+/)[0]
+  return sha && /^[0-9a-f]{40,64}$/.test(sha) ? sha : null
+}
+
+/** The catalog's version of a registry package, after one refresh. */
+export async function registryCatalogVersions(): Promise<(id: string) => Promise<string | null>> {
+  await refreshRemoteCatalog()
+  const entries = await browseCatalog()
+  const byId = new Map(entries.filter((e) => e.source !== 'bundled').map((e) => [e.id, e.version]))
+  return async (id) => byId.get(id) ?? null
+}
+
 async function materializeToTemp(req: MarketplaceInstallRequest): Promise<{
   root: string
   cleanup: () => void
   source: MarketplaceInstallSource
+  /** What was fetched, for Check for updates: the commit, or the npm or catalog version. */
+  ref?: string
 }> {
   const source = req.source
   const target = req.target.trim()
@@ -796,7 +843,13 @@ async function materializeToTemp(req: MarketplaceInstallRequest): Promise<{
       cleanup()
       throw err
     }
-    return { root: findPackageRoot(cloneDir), cleanup, source }
+    let ref: string | undefined
+    try {
+      ref = (await execFileAsync('git', ['-C', cloneDir, 'rev-parse', 'HEAD'], { timeout: 15_000 })).stdout.trim() || undefined
+    } catch {
+      ref = undefined
+    }
+    return { root: findPackageRoot(cloneDir), cleanup, source, ref }
   }
 
   if (source === 'npm') {
@@ -818,7 +871,7 @@ async function materializeToTemp(req: MarketplaceInstallRequest): Promise<{
     const tgzPath = join(packDir, basename(tgzName))
     const extractDir = join(tmp, 'extract')
     await extractArchive(tgzPath, extractDir)
-    return { root: findPackageRoot(extractDir), cleanup, source }
+    return { root: findPackageRoot(extractDir), cleanup, source, ref: npmPackedVersion(extractDir) }
   }
 
   if (source === 'registry') {
@@ -872,7 +925,7 @@ async function materializeToTemp(req: MarketplaceInstallRequest): Promise<{
       renameSync(archivePath, tgzPath)
       await extractArchive(tgzPath, extractDir)
     }
-    return { root: findPackageRoot(extractDir), cleanup, source }
+    return { root: findPackageRoot(extractDir), cleanup, source, ref: entry.version }
   }
 
   cleanup()
@@ -891,7 +944,7 @@ export async function installMarketplacePackage(
       'Acknowledge marketplace install risk in Extensions → Registry and trust before installing from registry, git, npm, zip, path, or remote MCP URLs.'
     )
   }
-  const { root, cleanup, source } = await materializeToTemp(req)
+  const { root, cleanup, source, ref } = await materializeToTemp(req)
   try {
     let detected: DetectedPackage
     try {
@@ -946,7 +999,11 @@ export async function installMarketplacePackage(
     const dependencies = source === 'bundled' ? await installBundledDependencies(detected.id) : []
     const dest = copyPackageIntoStore(detected.root, detected.id, detected.version)
     const rel = join(detected.id, detected.version).replace(/\\/g, '/')
-    const item = await registerInstalled(detected, source, rel)
+    const origin =
+      source === 'npm' || source === 'git' || source === 'registry'
+        ? { target: req.target.trim(), ...(ref ? { ref } : {}) }
+        : undefined
+    const item = await registerInstalled(detected, source, rel, origin)
     let authTokenStored: boolean | undefined
     if (req.source === 'remote' && req.bearerToken?.trim()) {
       try {

@@ -170,6 +170,24 @@ function ExtensionRow({
             <span className="shrink-0 text-caption text-tertiary">
               {extensionKindLabel(item.kind)} · {item.by}
             </span>
+            {item.alsoIn?.length ? (
+              <span
+                className="min-w-0 truncate text-caption text-tertiary"
+                title={`The same skill is also in ${item.alsoIn.join(' and ')}. The agent uses this copy.`}
+                data-also-in
+              >
+                · also in {item.alsoIn.join(', ')}
+              </span>
+            ) : null}
+            {item.builtIn ? (
+              <span
+                className="shrink-0 text-caption text-tertiary"
+                title={`The agent already has this built in: ${item.builtIn}`}
+                data-built-in
+              >
+                · built in already
+              </span>
+            ) : null}
           </span>
           <span className="block truncate text-xs text-muted" title={item.line || undefined}>
             {item.line}

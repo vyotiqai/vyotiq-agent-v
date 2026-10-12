@@ -3,7 +3,7 @@
  * tool code at scan time — the module header comment is the only input.
  */
 import { createHash } from 'crypto'
-import { readdir, readFile, stat } from 'fs/promises'
+import { readdir, readFile, rm, stat } from 'fs/promises'
 import type { Dirent } from 'fs'
 import { join } from 'path'
 import type { AgentToolDef } from './types'
@@ -145,6 +145,39 @@ export async function agentBuiltToolAllowKey(dir: string, name: string): Promise
   const defs = await loadAgentToolsSnapshot(dir)
   const def = defs.find((d) => d.name === name)
   return def ? `${def.name}@${def.contentHash.slice(0, 16)}` : null
+}
+
+/** The module behind an agent-built tool, by name: its path and code, for the person to read. */
+export async function readAgentToolSource(dir: string, name: string): Promise<{ name: string; path: string; source: string } | null> {
+  const def = (await loadAgentToolsSnapshot(dir)).find((d) => d.name === name)
+  if (!def) return null
+  return { name: def.name, path: def.modulePath, source: await readFile(def.modulePath, 'utf8') }
+}
+
+/**
+ * Remove an agent-built tool: its module goes to the trash when `trash` is
+ * given and works, else it is deleted. The next scan no longer lists it, and
+ * an "always allow" keyed on its code has nothing left to match.
+ */
+export async function deleteAgentTool(
+  dir: string,
+  name: string,
+  trash?: (path: string) => Promise<void>
+): Promise<{ trashed: boolean } | null> {
+  const def = (await loadAgentToolsSnapshot(dir)).find((d) => d.name === name)
+  if (!def) return null
+  let trashed = false
+  if (trash) {
+    try {
+      await trash(def.modulePath)
+      trashed = true
+    } catch {
+      trashed = false
+    }
+  }
+  if (!trashed) await rm(def.modulePath, { force: true })
+  cachedSnapshot = null
+  return { trashed }
 }
 
 const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES)

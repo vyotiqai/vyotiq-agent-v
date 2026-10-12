@@ -10,6 +10,7 @@ import { TaskRecord } from '@renderer/features/task/TaskRecord'
 import { RecordActionsContext } from '@renderer/features/task/record/WorkItems'
 import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
 import { bumpTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
+import { openWork } from './helpers/openWork'
 
 /**
  * What the record says once a run has ended: where a failed one broke, how
@@ -52,13 +53,15 @@ function edit(path: string, s: number): UiItem {
 }
 
 function show(items: UiItem[], options: BuildOptions, extra: Partial<Parameters<typeof TaskRecord>[0]> = {}) {
-  return render(
+  const view = render(
     <RunSessionProvider value={{ workspacePath: '/ws', runId: 'r1' }}>
       <RecordActionsContext.Provider value={{ onOpenChanges: vi.fn() }}>
         <TaskRecord model={buildRecordModel(items, options)} options={options} messageCount={items.length} {...extra} />
       </RecordActionsContext.Provider>
     </RunSessionProvider>
   )
+  openWork(view.container)
+  return view
 }
 
 const commandButton = (container: HTMLElement, command: string): HTMLElement =>
@@ -140,7 +143,7 @@ describe('edits in the work, once settled', () => {
     window.vyotiq = { taskOutcome: vi.fn().mockResolvedValue({ ok: true, data: outcome }) } as unknown as typeof window.vyotiq
     const items = [user('Fix it', 0), edit('src/a.ts', 2), edit('src/b.ts', 4), said('Fixed.', 6)]
     const { container } = show(items, { running: false })
-    // Two edits are under the fold's size, so their cards show as they are.
+    // The work line is open, so the edit cards in it show their marks.
     await waitFor(() => expect(container.querySelectorAll('[data-edit-mark]')).toHaveLength(2))
     const marks = [...container.querySelectorAll('[data-record-edit]')].map((card) => [
       card.querySelector('[data-edit-mark]')?.textContent,

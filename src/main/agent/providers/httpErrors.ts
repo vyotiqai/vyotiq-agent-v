@@ -85,6 +85,21 @@ export function shouldRetryOmitIncludeUsage(status: number, body: string): boole
   return INCLUDE_USAGE_REJECT_RE.test(message)
 }
 
+const MAX_TOKENS_REJECT_RE =
+  /max[_-]?(completion[_-]?)?tokens|max[_ ]output|output tokens|completion tokens|more credits|can only afford/i
+
+/**
+ * An explicit output limit the host won't take: too large for the model
+ * ("valid range of max_tokens is [1, 8192]"), unknown, or more than the account
+ * can reserve (402). Retry once without it so the host's own default applies.
+ */
+export function shouldRetryOmitMaxTokens(status: number, body: string): boolean {
+  if (status === 402) return true
+  if (status !== 400 && status !== 422) return false
+  const message = parseProviderErrorMessage(body) ?? body
+  return MAX_TOKENS_REJECT_RE.test(message)
+}
+
 const PROMPT_CACHE_KEY_REJECT_RE =
   /prompt[_-]?cache[_-]?key|unknown.*(field|parameter|property).*cache|extra.*(field|input|property).*cache/i
 

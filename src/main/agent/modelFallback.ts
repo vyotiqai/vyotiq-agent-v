@@ -316,7 +316,7 @@ export function createModelFallback(opts: {
         apiKey,
         baseUrl,
         modelInfo,
-        price: resolveModelPrice(runProviderId, slot.ref.model),
+        price: resolveModelPrice(runProviderId, slot.ref.model, baseUrl ? { baseUrl } : {}),
         thinkingAllowed: catalogThinkingAllowed(slot.ref.model, modelInfo.supportsThinking)
       }
     }

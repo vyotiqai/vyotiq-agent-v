@@ -150,11 +150,11 @@ describe('ask_question tool', () => {
     expect(result.content).toBe('User answered:\n- Only one?: A')
   })
 
-  it('skips in autonomous mode only when autonomousSkipQuestions is skip', async () => {
+  it('skips when autonomousSkipQuestions is skip, whatever the low-risk switch says', async () => {
     getSettings.mockReturnValue({
       ...DEFAULT_SETTINGS,
       autoModeSwitch: true,
-      autonomousMode: true,
+      autonomousMode: false,
       autonomousSkipQuestions: 'skip'
     })
     const askQuestion = vi.fn()
@@ -170,7 +170,7 @@ describe('ask_question tool', () => {
       }
     )
     expect(result.ok).toBe(true)
-    expect(result.content).toMatch(/skipped \(autonomous mode\)/i)
+    expect(result.content).toMatch(/skipped \(questions are set to skip\)/i)
     expect(askQuestion).not.toHaveBeenCalled()
   })
 

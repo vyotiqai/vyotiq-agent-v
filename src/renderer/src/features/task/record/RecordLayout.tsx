@@ -145,7 +145,8 @@ export function RecordBody({
   scrollRef,
   contentRef,
   onScroll,
-  onActivate
+  onActivate,
+  busy
 }: {
   children: ReactNode
   className?: string
@@ -155,6 +156,8 @@ export function RecordBody({
   onScroll?: () => void
   /** Pointer or focus inside the record focuses its pane. */
   onActivate?: () => void
+  /** Whether a run is streaming or the record is loading; surfaced as aria-busy. */
+  busy?: boolean | undefined
 }) {
   return (
     <div
@@ -165,6 +168,10 @@ export function RecordBody({
       className="@container/record scroll-thin min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
       data-record-scroll
       data-transcript-scroll
+      aria-live="polite"
+      aria-relevant="additions text"
+      aria-atomic="false"
+      aria-busy={busy}
     >
       <div ref={contentRef} className={cn('mx-auto w-full px-4 pb-10 pt-3', RECORD_MAX, className)}>
         {children}

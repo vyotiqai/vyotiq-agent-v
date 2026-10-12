@@ -42,4 +42,35 @@ describe('useFocusTrap', () => {
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(last)
   })
+
+  it('pulls focus back inside on focusin outside the container', () => {
+    render(<TrapFixture active />)
+    const first = screen.getByRole('button', { name: 'First' })
+    const outside = screen.getByRole('button', { name: 'Outside' })
+    expect(document.activeElement).toBe(first)
+    outside.focus()
+    fireEvent.focusIn(outside)
+    expect(document.activeElement).toBe(first)
+  })
+
+  it('skips restore-focus when the previous target is detached', () => {
+    const { rerender } = render(<TrapFixture active={false} />)
+    const outside = screen.getByRole('button', { name: 'Outside' })
+    outside.focus()
+    rerender(<TrapFixture active />)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'First' }))
+    outside.remove()
+    expect(() => rerender(<TrapFixture active={false} />)).not.toThrow()
+    expect(document.activeElement).not.toBe(outside)
+  })
+
+  it('skips restore-focus when the previous target is aria-hidden', () => {
+    const { rerender } = render(<TrapFixture active={false} />)
+    const outside = screen.getByRole('button', { name: 'Outside' })
+    outside.focus()
+    rerender(<TrapFixture active />)
+    outside.setAttribute('aria-hidden', 'true')
+    expect(() => rerender(<TrapFixture active={false} />)).not.toThrow()
+    expect(document.activeElement).not.toBe(outside)
+  })
 })

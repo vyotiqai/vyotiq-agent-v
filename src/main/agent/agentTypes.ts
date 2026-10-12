@@ -97,6 +97,7 @@ const HELPER_EXCLUDED_TOOLS = new Set([
   'pull_agent_instance',
   'merge_agent_instance',
   'cancel_agent_instance',
+  'message_agent_instance',
   'create_goal',
   'update_goal'
 ])
@@ -116,8 +117,8 @@ const CLAUDE_CODE_TOOL_MAP: Record<string, readonly string[]> = {
   ls: ['list_dir'],
   notebookread: ['read'],
   notebookedit: ['edit_notebook'],
-  webfetch: ['browser_navigate', 'browser_snapshot'],
-  websearch: ['browser_search'],
+  webfetch: ['web_fetch', 'browser_navigate', 'browser_snapshot'],
+  websearch: ['web_search', 'browser_search'],
   todowrite: ['todo_write']
 }
 

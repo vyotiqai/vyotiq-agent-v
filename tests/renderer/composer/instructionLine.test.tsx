@@ -49,6 +49,7 @@ function renderLine(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
     onChatSettingsChange: vi.fn(),
     onProviderModel: vi.fn(),
     onSend: vi.fn(),
+    onStop: vi.fn(),
     variant: 'line' as const,
     ...overrides
   }
@@ -88,7 +89,8 @@ describe('instruction line', () => {
     expect(controls.getByRole('button', { name: 'Set up dictation' })).toBeTruthy()
     // Nothing to send yet: Send is there, and says so by being off.
     expect(controls.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true)
-    // Stop lives in the composer's own row, beside Send, and only while a run is live.
+    // Stop is offered whenever a run is live; idle, there is nothing to stop —
+    // onStop is wired, so this is the run guard holding, not a missing prop.
     expect(screen.queryByRole('button', { name: /^Stop$/ })).toBeNull()
     // The decorative prompt glyph is gone.
     expect(shell.textContent).not.toContain('›')
@@ -133,31 +135,42 @@ describe('instruction line', () => {
     expect(vi.mocked(props.onSend).mock.calls[0]![3]).toBeUndefined()
   })
 
-  it('reads Queue while a run is live, with Send now beside it once there is text', async () => {
+  it('is one action while a run is live: Queue empty, Send now with text', async () => {
     const { props } = renderLine({ running: true, onSend: vi.fn(async () => true) })
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Queue' })).toHaveProperty('disabled', true)
-    // Send now only once there is something to send.
+    const row = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-controls]')!
+    // Nothing to send yet: the one action reads Queue and is off.
+    const queue = within(row).getByRole('button', { name: 'Queue' })
+    expect(queue).toHaveProperty('disabled', true)
+    // One action in the row, not a cluster: it stands in for Queue now.
     expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull()
     const line = screen.getByRole('combobox', { name: 'Instruction' })
     line.textContent = 'Use the other API'
     fireEvent.input(line)
-    fireEvent.click(await screen.findByRole('button', { name: 'Send now' }))
+    // The same button, one reading of the same moment: into the run now.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Queue' })).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Send now' }))
     await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
     expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ steer: true })
   })
 
   it('puts Stop in the control row before the action while a run is live', () => {
     const onStop = vi.fn()
-    const { props, rerender } = renderLine({ running: true, onStop })
+    const { props, rerender } = renderLine({ running: true, onStop, onSend: vi.fn(async () => true) })
     const row = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-controls]')!
     const stop = within(row).getByRole('button', { name: 'Stop' })
-    // Same right edge as the action: Stop sits directly before it.
+    // Stop is the second button of two: it stands directly before the action,
+    // so the row still ends in the one thing that sends.
     expect(stop.nextElementSibling?.textContent).toContain('Queue')
+    // Still one action, not a cluster: Stop carries no aria-label of its own.
+    const actions = within(row)
+      .getAllByRole('button')
+      .filter((b) => ['Send', 'Queue', 'Send now'].includes(b.getAttribute('aria-label') ?? ''))
+    expect(actions).toHaveLength(1)
     fireEvent.click(stop)
     expect(onStop).toHaveBeenCalledTimes(1)
 
-    // Idle again, and nothing is left to stop.
+    // Idle again, and there is nothing left to stop.
     rerender(<Composer {...props} running={false} />)
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
   })
@@ -179,6 +192,8 @@ describe('instruction line', () => {
         variant="brief"
       />
     )
+    // A run is live and onStop is wired, so the variant guard is what keeps
+    // Stop out of the brief — not a prop the composer was never given.
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
   })
 

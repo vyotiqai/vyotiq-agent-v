@@ -336,6 +336,20 @@ describe('PrPanel', () => {
     expect(screen.getByRole('button', { name: /Create a draft PR/i })).toBeTruthy()
   })
 
+  it('asks before a draft PR that may create a GitHub repository', async () => {
+    ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: 'Command failed: gh pr view\nno git remotes found'
+    })
+    render(<PrPanel workspacePath="/ws" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Create a draft PR/i }))
+    const dialog = await screen.findByRole('dialog', { name: /Connect or create a GitHub repository/i })
+    expect(dialog.textContent).toMatch(/create a new private repository/i)
+    fireEvent.click(within(dialog).getByRole('button', { name: /Cancel/i }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(window.vyotiq.prCreate).not.toHaveBeenCalled()
+  })
+
   it('titles empty state when the repository has no initial commit', async () => {
     ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,

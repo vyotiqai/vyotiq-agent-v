@@ -16,6 +16,8 @@ import {
   cn
 } from '@renderer/lib/ui'
 import type { NavRow } from '@renderer/app/navigator/navigatorModel'
+import { WHERE_WORDS, highlightMatch } from '@renderer/app/navigator/searchSnippet'
+import type { RunSearchHit, RunSearchResult } from '@shared/ipc'
 
 export type PaletteCommand = {
   id: string
@@ -33,6 +35,7 @@ export type PaletteFile = { workspacePath: string; path: string }
 
 type Item =
   | { kind: 'task'; key: string; row: NavRow }
+  | { kind: 'mention'; key: string; row: NavRow; hit: RunSearchHit }
   | { kind: 'file'; key: string; file: PaletteFile }
   | { kind: 'command'; key: string; command: PaletteCommand }
   | { kind: 'newTask'; key: string; text: string; where: string }
@@ -40,6 +43,10 @@ type Item =
 const TASK_LIMIT = 6
 const FILE_LIMIT = 6
 const COMMAND_LIMIT = 8
+/** Tasks found by what was said in them, not their title. */
+const MENTION_LIMIT = 5
+/** The pause before reading transcripts: they are on disk, titles are in memory. */
+const MENTION_DELAY_MS = 220
 /** Before anything is typed: a few of the open task's changed files, under the commands. */
 const CHANGED_FILE_LIMIT = 3
 
@@ -61,6 +68,7 @@ export function CommandPalette({
   commands,
   settingsCommands,
   searchFiles,
+  searchRuns,
   changedFiles,
   newTaskIn,
   onOpenTask,
@@ -75,6 +83,8 @@ export function CommandPalette({
   commands: readonly PaletteCommand[]
   /** Settings rows matching the query, as commands; listed after the others. */
   settingsCommands?: (needle: string) => PaletteCommand[]
+  /** Search inside tasks (what was said), as the navigator's search does; absent without a workspace. */
+  searchRuns?: (query: string) => Promise<RunSearchResult | null>
   /** Paths in the active workspace matching a query; absent without a workspace. */
   searchFiles?: (query: string, limit: number) => Promise<PaletteFile[]>
   /** The files the open task changed, offered before anything is typed; absent without an open task. */
@@ -90,6 +100,7 @@ export function CommandPalette({
   const [index, setIndex] = useState(0)
   const [files, setFiles] = useState<PaletteFile[]>([])
   const [changed, setChanged] = useState<PaletteFile[]>([])
+  const [mentions, setMentions] = useState<{ query: string; hits: RunSearchHit[] } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -136,6 +147,30 @@ export function CommandPalette({
     }
   }, [open, commandsOnly, needle, searchFiles])
 
+  // Tasks that mention the query, after a pause: the same transcript search as
+  // the navigator's, so the search people reach for first finds as much.
+  useEffect(() => {
+    if (!open || commandsOnly || needle.length < 2 || !searchRuns) {
+      setMentions(null)
+      return
+    }
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      searchRuns(needle).then(
+        (result) => {
+          if (!cancelled) setMentions({ query: needle, hits: result?.hits ?? [] })
+        },
+        () => {
+          if (!cancelled) setMentions(null)
+        }
+      )
+    }, MENTION_DELAY_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [open, commandsOnly, needle, searchRuns])
+
   // The open task's changed files, read once each time the palette opens.
   useEffect(() => {
     if (!open || !changedFiles) {
@@ -170,6 +205,20 @@ export function CommandPalette({
       : [...byTitle, ...byLine]
           .slice(0, TASK_LIMIT)
           .map((row) => ({ kind: 'task' as const, key: `task:${row.workspacePath}:${row.runId}`, row }))
+    // Found by what was said: not already listed by title, and still in the navigator.
+    const listed = new Set(taskItems.map((item) => (item.kind === 'task' ? item.row.runId : '')))
+    const rowsByRun = new Map(tasks.map((row) => [row.runId, row]))
+    const mentionItems: Item[] = []
+    if (!commandsOnly && mentions?.query === needle) {
+      for (const hit of mentions.hits) {
+        if (hit.where === 'title' || listed.has(hit.runId)) continue
+        const row = rowsByRun.get(hit.runId)
+        if (!row) continue
+        listed.add(hit.runId)
+        mentionItems.push({ kind: 'mention', key: `mention:${row.workspacePath}:${row.runId}`, row, hit })
+        if (mentionItems.length >= MENTION_LIMIT) break
+      }
+    }
     const fileItems: Item[] = commandsOnly
       ? []
       : (needle ? files : changed).map((file) => ({ kind: 'file' as const, key: `file:${file.path}`, file }))
@@ -181,11 +230,11 @@ export function CommandPalette({
       !commandsOnly && needle && newTaskIn
         ? [{ kind: 'newTask', key: 'new-task', text: needle, where: newTaskIn.name }]
         : []
-    return { taskItems, fileItems, commandItems, newTask }
-  }, [needle, commandsOnly, tasks, files, changed, commands, settingsCommands, newTaskIn])
+    return { taskItems, mentionItems, fileItems, commandItems, newTask }
+  }, [needle, commandsOnly, tasks, mentions, files, changed, commands, settingsCommands, newTaskIn])
 
   const flat = useMemo(
-    () => [...groups.taskItems, ...groups.commandItems, ...groups.fileItems, ...groups.newTask],
+    () => [...groups.taskItems, ...groups.mentionItems, ...groups.commandItems, ...groups.fileItems, ...groups.newTask],
     [groups]
   )
   const positionOf = useMemo(() => new Map(flat.map((item, i) => [item.key, i])), [flat])
@@ -204,7 +253,7 @@ export function CommandPalette({
   const activate = (item: Item | undefined, opts: { beside?: boolean } = {}): void => {
     if (!item) return
     onClose()
-    if (item.kind === 'task') onOpenTask(item.row, opts.beside === true)
+    if (item.kind === 'task' || item.kind === 'mention') onOpenTask(item.row, opts.beside === true)
     else if (item.kind === 'file') onOpenFile(item.file)
     else if (item.kind === 'command') onRunCommand(item.command.id)
     else onNewTask(item.text)
@@ -294,6 +343,12 @@ export function CommandPalette({
               {groups.taskItems.map(render)}
             </div>
           ) : null}
+          {groups.mentionItems.length > 0 ? (
+            <div role="group" aria-label="Mentioned in">
+              <div className={MENU_LABEL}>Mentioned in</div>
+              {groups.mentionItems.map(render)}
+            </div>
+          ) : null}
           {groups.commandItems.length > 0 ? (
             <div role="group" aria-label="Commands">
               <div className={MENU_LABEL}>Commands</div>
@@ -378,6 +433,28 @@ function PaletteRow({
             ) : (
               [row.workspaceName, taskDetail(row)].filter(Boolean).join(' · ')
             )
+          }
+          hint={active ? '↵ open' : undefined}
+        />
+      </div>
+    )
+  }
+  if (item.kind === 'mention') {
+    const { row, hit } = item
+    return (
+      <div {...common}>
+        <MenuItemBody
+          lead={
+            <span title={row.stateLabel} className="inline-flex shrink-0">
+              <StatusGlyph state={row.state} size={14} />
+            </span>
+          }
+          label={row.title}
+          detail={
+            <span data-palette-snippet>
+              <span className="text-tertiary">{WHERE_WORDS[hit.where]}: </span>
+              {highlightMatch(hit.snippet, hit.matchStart, hit.matchLength, needle)}
+            </span>
           }
           hint={active ? '↵ open' : undefined}
         />

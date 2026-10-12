@@ -26,6 +26,18 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'general'
   },
   {
+    id: 'notifications-remote',
+    title: 'Send to your phone',
+    keywords: ['phone', 'ntfy', 'webhook', 'slack', 'discord', 'teams', 'push', 'away', 'mobile', 'remote'],
+    section: 'notifications'
+  },
+  {
+    id: 'preferred-editor',
+    title: 'Open files in',
+    keywords: ['editor', 'vscode', 'vs code', 'cursor', 'zed', 'jetbrains', 'webstorm', 'sublime', 'open in editor', 'ide'],
+    section: 'general'
+  },
+  {
     id: 'max-chat-panes',
     title: 'Tasks side by side',
     keywords: ['split', 'panes', 'sessions', 'columns', 'layout', 'side by side'],
@@ -47,6 +59,18 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'proxy-url',
     title: 'Proxy address',
     keywords: ['proxy', 'host', 'port', 'manual proxy'],
+    section: 'general'
+  },
+  {
+    id: 'proxy-username',
+    title: 'User name',
+    keywords: ['proxy user', 'proxy login', 'proxy authentication', 'proxy sign in'],
+    section: 'general'
+  },
+  {
+    id: 'proxy-password',
+    title: 'Password',
+    keywords: ['proxy password', 'proxy authentication', 'proxy credentials'],
     section: 'general'
   },
   {
@@ -84,7 +108,31 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   {
     id: 'appearance-font-scale',
     title: 'Text size',
-    keywords: ['appearance', 'font', 'text', 'size', 'scale', 'zoom'],
+    keywords: ['appearance', 'font', 'text', 'size', 'scale', 'zoom', 'percent', '200', 'accessibility', 'a11y'],
+    section: 'appearance'
+  },
+  {
+    id: 'appearance-reduce-motion',
+    title: 'Reduce motion',
+    keywords: ['appearance', 'motion', 'reduce motion', 'animation', 'vestibular', 'accessibility', 'a11y', 'screen reader'],
+    section: 'appearance'
+  },
+  {
+    id: 'appearance-contrast',
+    title: 'Contrast',
+    keywords: ['appearance', 'contrast', 'high contrast', 'more contrast', 'accessibility', 'a11y'],
+    section: 'appearance'
+  },
+  {
+    id: 'appearance-focus-ring',
+    title: 'Always show focus ring',
+    keywords: ['appearance', 'focus', 'focus ring', 'focus indicator', 'sticky', 'keyboard', 'accessibility', 'a11y'],
+    section: 'appearance'
+  },
+  {
+    id: 'appearance-announce',
+    title: 'Screen reader announcements',
+    keywords: ['appearance', 'announce', 'announcements', 'screen reader', 'verbosity', 'brief', 'live region', 'accessibility', 'a11y', 'assistive'],
     section: 'appearance'
   },
   {
@@ -225,14 +273,14 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'agent-autonomous-mode',
-    title: 'Unattended mode',
-    keywords: ['autonomous', 'unattended', 'auto-approve', 'yolo', 'background', 'permissions', 'autonomous mode'],
+    title: 'Approve low-risk tools on their own',
+    keywords: ['autonomous', 'unattended', 'auto-approve', 'yolo', 'background', 'permissions', 'autonomous mode', 'low-risk'],
     section: 'agent'
   },
   {
     id: 'agent-autonomous-questions',
-    title: 'Questions while unattended',
-    keywords: ['autonomous', 'questions', 'ask', 'skip', 'wait'],
+    title: 'When the agent asks a question',
+    keywords: ['autonomous', 'unattended', 'questions', 'ask', 'skip', 'wait'],
     section: 'agent'
   },
   {
@@ -263,6 +311,84 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'task-spend-limit',
     title: 'Spend limit per task',
     keywords: ['spend', 'cost', 'budget', 'money', 'dollars', 'usd', 'limit', 'price', 'bill'],
+    section: 'agent'
+  },
+  {
+    id: 'web-search-engine',
+    title: 'web_search asks',
+    keywords: ['web search', 'search', 'brave', 'tavily', 'searxng', 'duckduckgo', 'api key', 'internet', 'web_fetch'],
+    section: 'tools'
+  },
+  {
+    id: 'approval-timeout',
+    title: 'Deny unanswered after',
+    keywords: ['approval', 'timeout', 'deny', 'minutes', 'wait', 'unanswered', 'auto-deny', '15'],
+    section: 'agent'
+  },
+  {
+    id: 'close-to-tray',
+    title: 'Keep running in the tray',
+    keywords: ['tray', 'close', 'background', 'minimize', 'quit', 'exit', 'keep running', 'system tray'],
+    section: 'general'
+  },
+  {
+    id: 'command-line',
+    title: 'vyotiq command',
+    keywords: ['command line', 'cli', 'terminal', 'path', 'shell', 'vyotiq', 'open folder', 'headless', 'cmd', 'powershell'],
+    section: 'general'
+  },
+  {
+    id: 'confirm-quit-running',
+    title: 'Ask before quitting with tasks running',
+    keywords: ['quit', 'close', 'exit', 'confirm', 'running', 'stop', 'tasks'],
+    section: 'general'
+  },
+  {
+    id: 'notifications-sound',
+    title: 'Sound',
+    keywords: ['sound', 'chime', 'audio', 'notification', 'alert', 'beep'],
+    section: 'notifications'
+  },
+  {
+    id: 'notifications-quiet-hours',
+    title: 'Quiet hours',
+    keywords: ['quiet', 'do not disturb', 'dnd', 'night', 'silence', 'mute', 'hours', 'notification'],
+    section: 'notifications'
+  },
+  {
+    id: 'daily-budget',
+    title: 'Daily budget',
+    keywords: ['spend', 'cost', 'budget', 'daily', 'day', 'money', 'dollars', 'usd', 'alert', 'warn'],
+    section: 'agent'
+  },
+  {
+    id: 'monthly-budget',
+    title: 'Monthly budget',
+    keywords: ['spend', 'cost', 'budget', 'monthly', 'month', 'money', 'dollars', 'usd', 'alert', 'warn'],
+    section: 'agent'
+  },
+  {
+    id: 'hold-at-budget',
+    title: 'Hold new work at the budget',
+    keywords: ['spend', 'budget', 'hold', 'stop', 'pause', 'block', 'limit', 'cap', 'schedule', 'loop'],
+    section: 'agent'
+  },
+  {
+    id: 'custom-prices',
+    title: 'Prices',
+    keywords: ['price', 'pricing', 'cost', 'rate', 'per token', 'custom endpoint', 'bedrock', 'vertex', 'azure', 'estimate'],
+    section: 'agent'
+  },
+  {
+    id: 'long-prompt-cache',
+    title: 'Keep the prompt cache for an hour',
+    keywords: ['cache', 'prompt cache', 'anthropic', 'claude', 'ttl', '1 hour', 'approval', 'wait', 'cost'],
+    section: 'agent'
+  },
+  {
+    id: 'commit-message-auto-draft',
+    title: 'Draft commit messages ahead',
+    keywords: ['commit', 'message', 'draft', 'background', 'git', 'changes', 'cost'],
     section: 'agent'
   },
   {
@@ -346,6 +472,24 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'tools'
   },
   {
+    id: 'hooks-user',
+    title: 'Your hooks',
+    keywords: ['hooks', 'hooks.json', 'pretooluse', 'posttooluse', 'hook trust', 'allow hooks', 'hook log'],
+    section: 'tools'
+  },
+  {
+    id: 'hooks-runs',
+    title: 'Recent runs',
+    keywords: ['hook log', 'hook runs', 'hooks ran', 'hook output'],
+    section: 'tools'
+  },
+  {
+    id: 'terminal-shell-path',
+    title: 'Shell program',
+    keywords: ['shell path', 'zsh', 'fish', 'nushell', 'custom shell', 'terminal', 'program'],
+    section: 'tools'
+  },
+  {
     id: 'diagnostics-command',
     title: 'Diagnostics command',
     keywords: ['typecheck', 'lint', 'diagnostics', 'tsc', 'eslint', 'check'],
@@ -355,6 +499,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'terminal-screen-reader',
     title: 'Screen reader mode',
     keywords: ['screen reader', 'accessibility', 'a11y', 'terminal', 'assistive'],
+    section: 'tools'
+  },
+  {
+    id: 'terminal-gpu',
+    title: 'Draw with the GPU',
+    keywords: ['webgl', 'gpu', 'renderer', 'terminal', 'performance', 'slow', 'hardware acceleration'],
     section: 'tools'
   },
   {
@@ -614,6 +764,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'about'
   },
   {
+    id: 'about-update-channel',
+    title: 'Channel',
+    keywords: ['beta', 'pre-release', 'prerelease', 'update channel', 'early'],
+    section: 'about'
+  },
+  {
     id: 'about-updater',
     title: 'Updates',
     keywords: ['updates', 'updater', 'upgrade', 'release', 'version', 'check now', 'download', 'restart', 'install'],
@@ -682,6 +838,8 @@ const FIELD_SCROLL_FALLBACK: Record<string, string> = {
   'tool-approval-allowlist': 'tool-approval',
   // Shown only for a manual proxy; otherwise the mode row is where to start.
   'proxy-url': 'proxy-mode',
+  'proxy-username': 'proxy-mode',
+  'proxy-password': 'proxy-mode',
   'proxy-bypass': 'proxy-mode'
 }
 

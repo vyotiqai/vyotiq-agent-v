@@ -7,7 +7,7 @@ import type {
   SecretProvider
 } from '@shared/ipc'
 import { DEFAULT_DICTATION_SETTINGS } from '@shared/ipc'
-import { DICTATION_LOCAL_CATALOG } from '@shared/dictation'
+import { DICTATION_LOCAL_CATALOG, dictationModelIsMultilingual } from '@shared/dictation'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { ActionMenu, Badge, Button, IconButton, Keys, Segmented, cn, type ActionMenuItem } from '@renderer/lib/ui'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
@@ -283,6 +283,8 @@ export function VoiceSection({
   }, [refreshStatus, refreshDevices])
 
   const local = dictation.engine === 'local'
+  // Only the multilingual local model takes a language; the others are English-only.
+  const englishOnly = local && !dictationModelIsMultilingual(dictation.localModelId)
   const installedCount = runtime?.installed.length ?? 0
   const modelBusy = runtime?.phase === 'downloading' || runtime?.phase === 'loading'
   const locked = form.formLocked || busy
@@ -419,12 +421,16 @@ export function VoiceSection({
         <SelectField
           id="dictation-language"
           title="Language"
-          hint={local ? 'Dictation on this PC understands English only.' : 'A hint for the transcription; detection works for most speech.'}
-          value={local ? 'en' : dictation.language}
-          options={local ? [{ value: 'en', label: 'English' }] : DICTATION_LANGUAGE_OPTIONS}
+          hint={
+            englishOnly
+              ? 'This model understands English only. Whisper Small (multilingual) takes other languages.'
+              : 'A hint for the transcription; detection works for most speech.'
+          }
+          value={englishOnly ? 'en' : dictation.language}
+          options={englishOnly ? [{ value: 'en', label: 'English' }] : DICTATION_LANGUAGE_OPTIONS}
           width={200}
-          disabled={locked || local}
-          {...(local ? {} : form.nestedDefaultMark('dictation', 'language'))}
+          disabled={locked || englishOnly}
+          {...(englishOnly ? {} : form.nestedDefaultMark('dictation', 'language'))}
           onChange={(language) => patch({ language })}
         />
         <SelectField

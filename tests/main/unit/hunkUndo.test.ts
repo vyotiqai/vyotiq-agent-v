@@ -152,6 +152,27 @@ describe('undoHunk', () => {
     ).toThrow(/did not write/)
   })
 
+  it('undoes a last hunk whose context ends on blank lines', async () => {
+    writeFileSync(join(workspace, 'b.txt'), 'one\ntwo\nthree\n\n\n', 'utf8')
+    await turn(async () => {
+      await run('str_replace', { path: 'b.txt', old_string: 'three\n', new_string: 'THREE\n' })
+    })
+    const diff = taskFileDiff(runDir, workspace, 'b.txt').diff!
+    expect(parseUnifiedHunks(diff)[0]!.lines.at(-1)).toEqual({ kind: ' ', text: '' })
+
+    undoHunk(runDir, workspace, RUN, shown('b.txt', 0))
+    expect(read('b.txt')).toBe('one\ntwo\nthree\n\n\n')
+  })
+
+  it('undoes a last hunk with blank context in a CRLF file', async () => {
+    writeFileSync(join(workspace, 'c.txt'), 'one\r\ntwo\r\nthree\r\n\r\n', 'utf8')
+    await turn(async () => {
+      await run('str_replace', { path: 'c.txt', old_string: 'three', new_string: 'THREE' })
+    })
+    undoHunk(runDir, workspace, RUN, shown('c.txt', 0))
+    expect(read('c.txt')).toBe('one\r\ntwo\r\nthree\r\n\r\n')
+  })
+
   it('keeps a CRLF file CRLF', async () => {
     const crlf = BEFORE.replace(/\n/g, '\r\n')
     writeFileSync(join(workspace, 'a.txt'), crlf, 'utf8')

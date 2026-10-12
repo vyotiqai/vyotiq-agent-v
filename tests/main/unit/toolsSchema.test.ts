@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { AGENT_TOOLS, AWAIT_AGENT_INSTANCE_MAX_MS, BUILTIN_TOOL_NAMES, validateToolArgs } from '@main/agent/schemas/tools'
+import {
+  AGENT_TOOLS,
+  AWAIT_AGENT_INSTANCE_MAX_MS,
+  BUILTIN_TOOL_NAMES,
+  formatMalformedToolArgsError,
+  formatUnknownToolError,
+  validateToolArgs
+} from '@main/agent/schemas/tools'
 import { BUILTIN_HANDLERS } from '@main/agent/tools'
 import {
   DEFAULT_NAV_TIMEOUT_MS,
@@ -12,6 +19,7 @@ import {
   SETTLE_FALLBACK_MS
 } from '@main/app/browserUrl'
 import { estimateTextTokens } from '@main/agent/context/estimate'
+import { isOptionalBuiltinName } from '@main/agent/context/toolsBudget'
 import { BUDGET_SHARES } from '@shared/domain/contextBudget'
 
 const SECTION_HEADERS = [
@@ -38,14 +46,17 @@ describe('toolsSchema', () => {
   it('covers every executable built-in with a short description', () => {
     const names = AGENT_TOOLS.map((t) => t.name).sort()
     expect(names).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    // 61 + build_tool + check_done_when + screen_snip + github_pr_checks + show_view.
-    expect(names.length).toBe(66)
+    // 61 + build_tool + check_done_when + screen_snip + github_pr_checks + github_pr_comments
+    // + web_fetch + web_search + browser_console + memory_delete + move + message_agent_instance
+    // + show_view.
+    expect(names.length).toBe(73)
     expect(names).toEqual(
       expect.arrayContaining([
         'github_pr_create',
         'github_pr_review',
         'github_issue',
         'github_pr_checks',
+        'github_pr_comments',
         'edit_notebook',
         'lsp',
         'create_goal',
@@ -66,7 +77,7 @@ describe('toolsSchema', () => {
   it('wires a real handler for every built-in tool (no missing/stub handlers)', () => {
     const handlerNames = Object.keys(BUILTIN_HANDLERS).sort()
     expect(handlerNames).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(handlerNames).toHaveLength(66)
+    expect(handlerNames).toHaveLength(73)
     for (const name of BUILTIN_TOOL_NAMES) {
       const handler = BUILTIN_HANDLERS[name as keyof typeof BUILTIN_HANDLERS]
       expect(typeof handler, `${name} handler must be a function`).toBe('function')
@@ -186,11 +197,10 @@ describe('toolsSchema', () => {
     const toolsBudget = Math.floor(defaultWindow * BUDGET_SHARES.tools)
     const estimate = estimateTextTokens(JSON.stringify(AGENT_TOOLS))
     expect(estimate).toBeLessThan(toolsBudget)
-    // Leave headroom for MCP tools under typical budgets. 0.5 -> 0.52: show_view
-    // (the view vocabulary a model can only learn from its description) measures
-    // 11856 of 23040. Loading the optional browser tools on demand, not yet in
-    // this tree, takes the default send back under half.
-    expect(estimate).toBeLessThan(toolsBudget * 0.52)
+    // What a step sends by default: the optional built-ins wait until a task loads them.
+    // Leave headroom for MCP tools under typical budgets.
+    const sent = AGENT_TOOLS.filter((t) => !isOptionalBuiltinName(t.name))
+    expect(estimateTextTokens(JSON.stringify(sent))).toBeLessThan(toolsBudget * 0.5)
   })
 })
 
@@ -294,12 +304,16 @@ describe('harness tool catalog', () => {
     // tool it described. `screen_snip` still reads the screen and carries its own
     // grounding and approval rules in the tool description, so the spine no
     // longer spends 47 tokens on a tool the model cannot reach. Measures 2140.
-    // 2150 -> 2350: the ```view line joined output_format: the fence's shape (a
-    // view drawn in the answer, not a tool, so the spine is the one place a
-    // model learns it), show_view for views drawn while working, and live blocks
-    // the app fills itself. The full vocabulary stays in show_view's
-    // description. Measures 2347.
-    expect(estimateTextTokens(harness)).toBeLessThan(2350)
+    // 2150 -> 2275: the ```view capability line joined output_format (~120
+    // tokens). A model only draws a view it knows the shape of, and the
+    // fence is rendered, not a tool, so the spine is the one place it can
+    // learn it; most optional fields stay out and the renderer accepts them
+    // (diff joined: a change list reads by its +/− columns).
+    // 2275 -> 2300: one sentence pointing at show_view (views drawn and updated
+    // while the run works) and live{source} blocks. The vocabulary itself lives
+    // in show_view's description; the spine only says to prefer a live block to
+    // typed figures, which a fence in the answer can use too. Measures 2278.
+    expect(estimateTextTokens(harness)).toBeLessThan(2300)
   })
 
   it.skipIf(!existsSync(join(process.cwd(), 'docs', 'harness-handbook.md')))(
@@ -674,7 +688,7 @@ describe('harness tool catalog', () => {
     const spawn = AGENT_TOOLS.find((t) => t.name === 'spawn_agent_instance')
     expect(spawn).toBeDefined()
     expect(spawn!.description).toMatch(/independent workstream/i)
-    expect(spawn!.description).toMatch(/fan out for any task that is not a single trivial action/i)
+    expect(spawn!.description).toMatch(/fan out when the work splits into independent pieces/i)
     expect(spawn!.description).toMatch(/no child is overloaded/i)
     expect(spawn!.description).toMatch(/spawns are never denied/)
     expect(spawn!.description).toMatch(/child never sees this conversation/i)
@@ -710,5 +724,20 @@ describe('harness tool catalog', () => {
     const merge = AGENT_TOOLS.find((t) => t.name === 'merge_agent_instance')
     expect(merge!.description).toMatch(/one branch at a time/i)
     expect(merge!.description).toMatch(/one branch at a time/i)
+  })
+})
+
+describe('tool error hints', () => {
+  it('names every memory tool, generated from the registry', () => {
+    const msg = formatUnknownToolError('memory_search')
+    for (const name of ['memory_list', 'memory_read', 'memory_write', 'memory_delete']) expect(msg).toContain(name)
+  })
+
+  it('tells a write cut off by the output limit to split it, not resend it', () => {
+    expect(formatMalformedToolArgsError('edit', { cutOff: true })).toMatch(/output token limit/i)
+    expect(formatMalformedToolArgsError('edit', { cutOff: true })).not.toMatch(/Resend the full arguments/)
+    expect(formatMalformedToolArgsError('edit')).toMatch(/Resend the full arguments/)
+    // Not a content write: resending is still the fix.
+    expect(formatMalformedToolArgsError('read', { cutOff: true })).toMatch(/Resend the full arguments/)
   })
 })

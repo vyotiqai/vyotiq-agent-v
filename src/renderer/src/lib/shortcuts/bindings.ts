@@ -5,6 +5,8 @@ export type ShortcutId =
   | 'nextNeedsYou'
   | 'prevTask'
   | 'nextTask'
+  | 'navBack'
+  | 'navForward'
   | 'newChat'
   | 'goHome'
   | 'settings'
@@ -66,6 +68,8 @@ export const SHORTCUT_BINDINGS: Record<ShortcutId, ShortcutBinding> = {
   nextNeedsYou: { id: 'nextNeedsYou', key: 'j', mod: true },
   prevTask: { id: 'prevTask', key: 'arrowup', mod: false, alt: true },
   nextTask: { id: 'nextTask', key: 'arrowdown', mod: false, alt: true },
+  navBack: { id: 'navBack', key: 'arrowleft', mod: false, alt: true },
+  navForward: { id: 'navForward', key: 'arrowright', mod: false, alt: true },
   newChat: { id: 'newChat', key: 'n', mod: true },
   // Shift required: ⌘H alone hides the app on macOS.
   goHome: { id: 'goHome', key: 'h', mod: true, shift: 'require' },

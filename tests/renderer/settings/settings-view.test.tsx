@@ -65,7 +65,7 @@ beforeEach(() => {
     getAppInfo: vi.fn(async () => ({
       ok: true as const,
       data: {
-        name: 'Vyotiq',
+        name: 'Agent V',
         version: '1.0.0',
         homepage: 'https://vyotiq.com',
         electron: '43.2.0',
@@ -1228,11 +1228,12 @@ describe('settings', () => {
     expect(document.querySelector('[data-settings-field="agent-offline-wait"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="memory-files"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="codeindex-enabled"]')).toBeNull()
-    // Questions only apply to autonomous runs, so they wait on that switch.
+    // Questions are their own setting, not nested under the low-risk switch.
+    expect(screen.getByRole('switch', { name: 'Approve low-risk tools on their own' })).toBeTruthy()
     expect(
-      (screen.getByRole('button', { name: 'Questions while unattended' }) as HTMLButtonElement)
+      (screen.getByRole('button', { name: 'When the agent asks a question' }) as HTMLButtonElement)
         .disabled
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it('Manage rules opens Marketplace on the Rules tab', () => {
@@ -1447,7 +1448,7 @@ describe('settings', () => {
     expect(document.querySelector('[data-settings-field="show-thinking"]')).toBeNull()
     const row = document.querySelector(`[data-settings-item="index:${workspacePath}"]`) as HTMLElement
     expect(row).toBeTruthy()
-    await waitFor(() => expect(row.textContent).toMatch(/12 files · updated/))
+    await waitFor(() => expect(row.textContent).toMatch(/12 source files · updated/))
     expect(within(row).getByText('Ready')).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: 'Reindex proj' }))
     await waitFor(() => expect(window.vyotiq.codeIndexReindex).toHaveBeenCalledWith({ workspacePath }))
@@ -1803,12 +1804,12 @@ describe('settings', () => {
       const group = screen.getByRole('radiogroup', { name: 'Model' })
       // Installed models can be picked; one not on disk offers Install instead.
       expect((within(group).getByRole('radio', { name: /^Whisper Tiny/ }) as HTMLButtonElement).disabled).toBe(false)
-      expect((within(group).getByRole('radio', { name: /^Whisper Small/ }) as HTMLButtonElement).disabled).toBe(false)
+      expect((within(group).getByRole('radio', { name: /^Whisper Small(?! \(multilingual)/ }) as HTMLButtonElement).disabled).toBe(false)
       expect((within(group).getByRole('radio', { name: /^Moonshine Base/ }) as HTMLButtonElement).disabled).toBe(true)
       expect(within(group).getByRole('button', { name: 'Install Moonshine Base' })).toBeTruthy()
       return group
     })
-    expect(within(models).getByRole('radio', { name: /^Whisper Small/ }).getAttribute('aria-checked')).toBe('true')
+    expect(within(models).getByRole('radio', { name: /^Whisper Small(?! \(multilingual)/ }).getAttribute('aria-checked')).toBe('true')
     expect(document.querySelector('[data-dictation-model="whisper-small.en"]')?.textContent).toMatch(/Best for this PC/)
     fireEvent.click(within(models).getByRole('radio', { name: /^Whisper Tiny/ }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
@@ -1975,6 +1976,8 @@ describe('settings', () => {
   })
 
   it('search index and rendered rows match in both directions, section by section', () => {
+    // Command line is a Windows row.
+    Object.assign(window.vyotiq, { platform: 'win32' })
     render(
       <SettingsView
         settings={{
@@ -1982,7 +1985,7 @@ describe('settings', () => {
           // The allowlist row only exists once a tool has been allowed.
           toolApproval: { ...baseSettings.toolApproval, allowlist: ['read_file'] },
           // The proxy address rows only exist for a manual proxy.
-          network: { proxyMode: 'manual', proxyUrl: '', proxyBypass: '' }
+          network: { proxyMode: 'manual', proxyUrl: '', proxyBypass: '', proxyUsername: '' }
         }}
         secrets={emptySecrets}
         onClose={vi.fn()}

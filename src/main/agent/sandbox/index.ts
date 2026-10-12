@@ -12,6 +12,8 @@ import type { AgentSandboxSettings } from '../../../shared/ipc'
 import { getSandboxCapability, type DetectedSandbox } from './capability'
 import { resolveSandboxPolicy, type SandboxFs } from './policy'
 import { describeSandbox, wrapSandboxedCommand, type SandboxLaunch } from './wrap'
+import { lowIntegrityArgv, lowIntegrityTempDir, resolveWindowsSandboxPolicy, windowsLabelPlan } from './windows'
+import { applyWindowsLabels, restoreWindowsLabels, writeSandboxScript } from './windowsSetup'
 
 export type { SandboxLaunch } from './wrap'
 export { sandboxDenialHint } from './wrap'
@@ -56,7 +58,13 @@ export type PrepareAgentSandboxDeps = {
   homeDir?: string
   tmpDir?: string
   userDataDir?: string | null
+  /** %LOCALAPPDATA% (Windows caches). */
+  localAppData?: string | null
 }
+
+/** Windows: low integrity cannot block the network, so Deny is refused, not ignored. */
+export const WINDOWS_NETWORK_DENY_REASON =
+  'Network: Deny is not available on Windows: the low-integrity sandbox confines file writes, not the network. Set Network to Allow in Settings → Tools → Sandbox.'
 
 /**
  * Agent-built tools run in an Electron utility process: Electron starts it,
@@ -91,10 +99,46 @@ export function prepareAgentSandbox(
   if (!settings || settings.mode === 'off') return { state: 'off' }
   const capability = deps.capability ?? getSandboxCapability()
   const platform = deps.platform ?? process.platform
-  if (!capability.available || !capability.mechanism || (platform !== 'darwin' && platform !== 'linux')) {
+  if (!capability.available || !capability.mechanism) {
     return { state: 'unavailable', message: sandboxUnavailableMessage(capability.reason) }
   }
+  if (platform === 'win32' && capability.mechanism === 'low-integrity' && capability.shells) {
+    if (settings.network === 'deny') {
+      return { state: 'unavailable', message: sandboxUnavailableMessage(WINDOWS_NETWORK_DENY_REASON) }
+    }
+    const homeDir = deps.homeDir ?? homedir()
+    const userDataDir = deps.userDataDir !== undefined ? deps.userDataDir : electronUserData()
+    if (!userDataDir) {
+      return { state: 'unavailable', message: sandboxUnavailableMessage('The app data folder is unknown.') }
+    }
+    const policy = resolveWindowsSandboxPolicy({
+      workspaceRoots: [input.workspace, ...(input.extraRoots ?? [])],
+      cwd: input.cwd ?? input.workspace,
+      homeDir,
+      localAppData: deps.localAppData !== undefined ? deps.localAppData : (process.env.LOCALAPPDATA ?? null),
+      userDataDir,
+      network: settings.network,
+      fs: deps.fs ?? nodeFs
+    })
+    const shells = capability.shells
+    const tempDir = lowIntegrityTempDir(homeDir)
+    return {
+      state: 'on',
+      launch: {
+        label: describeSandbox('low-integrity', settings.network),
+        network: settings.network,
+        wrap: (bin, args) =>
+          lowIntegrityArgv(shells, tempDir, bin, args, {
+            writeScript: (extension, text) => writeSandboxScript(homeDir, extension, text)
+          }),
+        ready: () => applyWindowsLabels(userDataDir, homeDir, windowsLabelPlan(policy))
+      }
+    }
+  }
   const mechanism = capability.mechanism
+  if (mechanism === 'low-integrity' || (platform !== 'darwin' && platform !== 'linux')) {
+    return { state: 'unavailable', message: sandboxUnavailableMessage(capability.reason) }
+  }
   const policy = resolveSandboxPolicy({
     platform,
     workspaceRoots: [input.workspace, ...(input.extraRoots ?? [])],
@@ -114,4 +158,34 @@ export function prepareAgentSandbox(
       wrap: (bin, args) => wrapSandboxedCommand(mechanism, policy, bin, args, executable)
     }
   }
+}
+
+/**
+ * prepareAgentSandbox, then whatever the sandbox must finish before its first
+ * command (Windows labels the folders commands may write). A failure there
+ * refuses the command rather than running it unconfined.
+ */
+export async function prepareAgentSandboxReady(
+  input: Parameters<typeof prepareAgentSandbox>[0],
+  deps: PrepareAgentSandboxDeps = {}
+): Promise<AgentSandbox> {
+  const sandbox = prepareAgentSandbox(input, deps)
+  if (sandbox.state !== 'on' || !sandbox.launch.ready) return sandbox
+  try {
+    await sandbox.launch.ready()
+    return sandbox
+  } catch (err) {
+    return { state: 'unavailable', message: sandboxUnavailableMessage(err instanceof Error ? err.message : String(err)) }
+  }
+}
+
+/**
+ * Turning the sandbox off on Windows puts back the labels it set, so the
+ * workspace and caches are as they were. Elsewhere there is nothing to undo.
+ */
+/** `under`: only what the sandbox labelled at or inside that folder (a workspace being removed). */
+export function undoAgentSandboxSetup(under?: string): Promise<void> {
+  if (process.platform !== 'win32') return Promise.resolve()
+  const userDataDir = electronUserData()
+  return userDataDir ? restoreWindowsLabels(userDataDir, undefined, under) : Promise.resolve()
 }

@@ -16,9 +16,12 @@ const PARALLEL_SAFE_BUILTIN = new Set([
   'git_status',
   'git_diff',
   'github_pr_checks',
+  'github_pr_comments',
   'mcp_list_tools',
   'pull_agent_instance',
   'lsp',
+  // A read of logs the browser already holds: no navigation, no egress.
+  'browser_console',
   // Draws a view in the record from its own arguments; touches nothing.
   'show_view'
 ])
@@ -28,7 +31,8 @@ const PARALLEL_MUTATION_BUILTIN = new Set([
   'edit',
   'str_replace',
   'edit_notebook',
-  'memory_write'
+  'memory_write',
+  'memory_delete'
 ])
 
 /**
@@ -56,7 +60,9 @@ const SERIAL_APPROVAL_EXEMPT_BUILTIN = new Set([
   'check_done_when',
   'await_agent_instance',
   'spawn_agent_instance',
-  'cancel_agent_instance'
+  'cancel_agent_instance',
+  // Queues words for a child this run started; it runs nothing itself.
+  'message_agent_instance'
 ])
 
 /** Agent-mode-only builtins (inline instance delegation). */
@@ -65,7 +71,8 @@ export const AGENT_ONLY_BUILTIN = new Set([
   'await_agent_instance',
   'pull_agent_instance',
   'merge_agent_instance',
-  'cancel_agent_instance'
+  'cancel_agent_instance',
+  'message_agent_instance'
 ])
 
 /** Root-chat-only builtins omitted from inline instance catalogs. */

@@ -26,6 +26,7 @@ import {
   type WorkspaceEditorSelection
 } from '@shared/ipc'
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
+import { openInEditor } from '@renderer/lib/openInEditor'
 import { FileTypeIcon } from '@renderer/lib/fileIcons/FileTypeIcon'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
@@ -43,7 +44,7 @@ import {
   type ActionMenuItem
 } from '@renderer/lib/ui'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
-import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
 import type { AgentFileFocus } from './ChatStreamLeaves'
@@ -207,6 +208,29 @@ const TREE_ROW_ACTIVE_FILE = 'bg-surface-2 text-fg-strong'
 /** The keyboard's place when it is not the open file. */
 const TREE_ROW_FOCUSED = 'bg-surface text-fg'
 const FILTER_REVEAL_MAX_DIRS = 120
+/** A file name with no folder: what an answer's `index.ts` chip asks for. */
+export function isBareFileName(path: string): boolean {
+  return !/[\\/]/.test(path) && /\.[a-z0-9]+$/i.test(path)
+}
+
+/** Every workspace file with this exact name, from the cached walk the palette searches. */
+async function workspacePathsNamed(workspacePath: string, name: string): Promise<string[]> {
+  if (!window.vyotiq?.workspaceSuggestPaths) return []
+  try {
+    const res = await window.vyotiq.workspaceSuggestPaths({ workspacePath, query: name, maxResults: 100 })
+    if (!res.ok) return []
+    const want = name.toLowerCase()
+    return res.data.paths
+      .map((p) => p.replace(/\\/g, '/'))
+      .filter((p) => (p.split('/').pop() ?? '').toLowerCase() === want)
+  } catch {
+    return []
+  }
+}
+
+/** How many of a name's places the choice lists before it says how many more. */
+const NAME_CHOICES_SHOWN = 8
+
 const FILES_PANEL_ALERT =
   'flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs'
 /** Diff, Blame and Language server: a 32px row pinned over the view, split off by a divider. */
@@ -586,6 +610,8 @@ export const FilesPanel = memo(function FilesPanel({
   /** Info and success from editor actions — never shown in the danger alert. */
   const [notice, setNotice] = useState<{ message: string; success?: boolean } | null>(null)
   const [failedOpenPath, setFailedOpenPath] = useState<string | null>(null)
+  /** A bare file name asked for that the workspace has in several places. */
+  const [nameChoices, setNameChoices] = useState<{ request: WorkspaceFileOpenRequest; paths: string[] } | null>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [recoveryLoaded, setRecoveryLoaded] = useState(false)
   const [contextMenu, setContextMenu] = useState<FilesContextState | null>(null)
@@ -2083,6 +2109,15 @@ export const FilesPanel = memo(function FilesPanel({
     return { files, dirs }
   }, [agentMarks])
   const narrowToChanged = changedOnly && taskChanged.files.size > 0
+  // Folders holding anything this task added, changed or deleted: a closed one
+  // carries a dot, or its "M" was only found by opening every folder.
+  const changedDirs = useMemo(() => {
+    const dirs = new Set<string>()
+    for (const [path, mark] of agentMarks ?? []) {
+      if (mark.change) for (const parent of parentChain(path)) dirs.add(parent)
+    }
+    return dirs
+  }, [agentMarks])
 
   // Narrowed, the folders on the way to a changed file open on their own: read any not read yet.
   useEffect(() => {
@@ -2667,15 +2702,13 @@ export const FilesPanel = memo(function FilesPanel({
     const operation = captureWorkspaceOperation()
     const currentSelectedPath = selectedPathRef.current
     if (!operation || !currentSelectedPath || !window.vyotiq?.workspaceFileDelete) return
+    // The entry goes to the OS trash, the same rule as git Discard, so one
+    // question covers a folder and everything in it.
     if (
-      !(await requestConfirm(
-        `Permanently delete ${currentSelectedPath}? This cannot be undone.`,
-        {
-          title: 'Permanently delete',
-          confirmLabel: 'Delete permanently',
-          danger: true
-        }
-      ))
+      !(await requestConfirm(`Move ${currentSelectedPath} to the trash?`, {
+        title: 'Delete',
+        confirmLabel: 'Move to trash'
+      }))
     ) {
       return
     }
@@ -2690,7 +2723,7 @@ export const FilesPanel = memo(function FilesPanel({
       result = await window.vyotiq.workspaceFileDelete({
         workspacePath: operation.path,
         path: currentSelectedPath,
-        recursive: false
+        recursive: true
       })
     } catch (err) {
       if (isCurrentWorkspaceOperation(operation)) {
@@ -2700,13 +2733,15 @@ export const FilesPanel = memo(function FilesPanel({
       return
     }
     if (!isCurrentWorkspaceOperation(operation)) return
-    if (!result.ok && result.code === 'DIRECTORY_NOT_EMPTY') {
+    // No trash here (a network drive, a full bin): removing it for good is
+    // the person's call, never a silent fallback.
+    if (!result.ok && result.code === 'TRASH_FAILED') {
       if (
         await requestConfirm(
-          `${currentSelectedPath} is not empty. Delete it and everything inside?`,
+          `${result.error} Delete ${currentSelectedPath} permanently instead? This cannot be undone.`,
           {
-            title: 'Delete directory contents',
-            confirmLabel: 'Delete everything',
+            title: 'Delete permanently',
+            confirmLabel: 'Delete permanently',
             danger: true
           }
         )
@@ -2715,7 +2750,8 @@ export const FilesPanel = memo(function FilesPanel({
           result = await window.vyotiq.workspaceFileDelete({
             workspacePath: operation.path,
             path: currentSelectedPath,
-            recursive: true
+            recursive: true,
+            permanent: true
           })
         } catch (err) {
           if (isCurrentWorkspaceOperation(operation)) {
@@ -2933,6 +2969,28 @@ export const FilesPanel = memo(function FilesPanel({
     void openFileRef.current(rel)
   }, [followAgent, active, workspacePath, agentFocus])
 
+  /** Opens a requested file at `path`: at its line, or as its diff, when the request says so. */
+  const openRequestedAt = useCallback(
+    async (request: WorkspaceFileOpenRequest, path: string): Promise<void> => {
+      await openFile(path)
+      const tab = sessionRef.current?.tabs.find((item) => item.path === path)
+      if (tab?.kind === 'text' && request.line != null) {
+        const cursor = cursorAtLine(tab.content, request.line, request.column ?? 1)
+        mutateTab(tab.id, (current) => ({
+          ...current,
+          cursor,
+          selections: [{ from: cursor, to: cursor }]
+        }))
+        setScrollToLine(request.line)
+      }
+      if (request.mode === 'diff') {
+        skipEditorModeResetRef.current = true
+        await showDiffForPath(path)
+      }
+    },
+    [mutateTab, openFile, showDiffForPath]
+  )
+
   useEffect(() => {
     if (!openPath) {
       openPathRef.current = null
@@ -2953,33 +3011,20 @@ export const FilesPanel = memo(function FilesPanel({
     }
     void (async () => {
       try {
-        await openFile(openPath.path)
-        const tab = sessionRef.current?.tabs.find((item) => item.path === openPath.path)
-        if (tab?.kind === 'text' && openPath.line != null) {
-          const cursor = cursorAtLine(tab.content, openPath.line, openPath.column ?? 1)
-          mutateTab(tab.id, (current) => ({
-            ...current,
-            cursor,
-            selections: [{ from: cursor, to: cursor }]
-          }))
-          setScrollToLine(openPath.line)
+        setNameChoices(null)
+        // A bare name ("index.ts", as an answer cites it) is wherever the
+        // workspace has it: the one file, or a choice among several.
+        const named = isBareFileName(openPath.path) ? await workspacePathsNamed(workspacePath, openPath.path) : []
+        if (named.length > 1 && !named.includes(openPath.path)) {
+          setNameChoices({ request: openPath, paths: named })
+          return
         }
-        if (openPath.mode === 'diff') {
-          skipEditorModeResetRef.current = true
-          await showDiffForPath(openPath.path)
-        }
+        await openRequestedAt(openPath, named.length === 1 ? named[0]! : openPath.path)
       } finally {
         onOpenPathHandled?.(openPath)
       }
     })()
-  }, [
-    mutateTab,
-    onOpenPathHandled,
-    openFile,
-    openPath,
-    showDiffForPath,
-    workspacePath
-  ])
+  }, [onOpenPathHandled, openPath, openRequestedAt, workspacePath])
 
   const showBlameView = useCallback(async (): Promise<void> => {
     if (!workspacePath || !activeTab || activeTab.kind !== 'text' || !window.vyotiq?.gitBlame) {
@@ -3169,6 +3214,15 @@ export const FilesPanel = memo(function FilesPanel({
           onSelect: () => copyPath(absoluteWorkspacePath(workspacePath ?? '', tab.path))
         },
         {
+          id: 'open-tab-editor',
+          label: 'Open in editor',
+          icon: 'code',
+          disabled: !workspacePath,
+          onSelect: () => {
+            if (workspacePath) void openInEditor({ workspacePath, path: tab.path })
+          }
+        },
+        {
           id: 'open-tab-external',
           label: 'Open externally',
           onSelect: () => void openExternally(tab.path)
@@ -3197,6 +3251,15 @@ export const FilesPanel = memo(function FilesPanel({
         icon: isDirectory ? 'folderOpen' : 'fileSearch',
         disabled: !isDirectory && !isFile,
         onSelect: () => void selectTreePathRef.current(path)
+      },
+      {
+        id: 'open-entry-editor',
+        label: 'Open in editor',
+        icon: 'code',
+        disabled: (!isDirectory && !isFile) || !workspacePath,
+        onSelect: () => {
+          if (workspacePath) void openInEditor({ workspacePath, path })
+        }
       },
       { type: 'separator', id: 'entry-open-separator' },
       {
@@ -3238,7 +3301,7 @@ export const FilesPanel = memo(function FilesPanel({
       },
       {
         id: 'delete-entry',
-        label: 'Delete permanently',
+        label: 'Delete',
         icon: 'trash',
         danger: true,
         disabled: isSymlink || busy,
@@ -3577,7 +3640,7 @@ export const FilesPanel = memo(function FilesPanel({
         },
         {
           id: 'delete-selected',
-          label: 'Delete selected permanently',
+          label: 'Delete selected',
           icon: 'trash',
           onSelect: () => void deleteSelected()
         }
@@ -3811,6 +3874,9 @@ export const FilesPanel = memo(function FilesPanel({
     return nestedWorkspaceHint(workspacePath, rootDirectory.entries)
   }, [rootDirectory, workspacePath])
   const narrowSurface = surfaceWidth > 0 && surfaceWidth < 680
+  // Stacked with nothing open, the tree is all there is to use: it takes the
+  // panel, not 272px over an empty preview.
+  const treeFillsPanel = narrowSurface && !activeTab
   const explorerMaxWidth =
     narrowSurface || surfaceWidth <= 0
       ? FILES_EXPLORER_WIDTH_MAX
@@ -3990,7 +4056,8 @@ export const FilesPanel = memo(function FilesPanel({
         >
           <span className="min-w-0 flex-1 truncate">{error}</span>
           <div className="flex shrink-0 items-center gap-1.5">
-            {failedOpenPath && window.vyotiq?.slashCommandsOpenFile ? (
+            {/* A file that is not there opens nowhere else either. */}
+            {failedOpenPath && !/\bnot found\b/i.test(error) && window.vyotiq?.slashCommandsOpenFile ? (
               <Button
                 size="xs"
                 variant="ghost"
@@ -4017,6 +4084,56 @@ export const FilesPanel = memo(function FilesPanel({
           </div>
         </div>
       ) : null}
+      {nameChoices && !error ? (
+        <div
+          role="group"
+          aria-label={`Files named ${nameChoices.request.path}`}
+          className={cn('shrink-0 border-b px-3 pb-1.5 pt-1', BORDER_DIVIDER)}
+          data-files-name-choices
+        >
+          <div className="flex h-7 items-center gap-2 text-xs text-secondary">
+            <span className="min-w-0 flex-1 truncate">
+              <span className="font-mono text-fg">{nameChoices.request.path}</span> is in{' '}
+              {nameChoices.paths.length} places
+            </span>
+            <Button size="xs" variant="ghost" onClick={() => setNameChoices(null)}>
+              Dismiss
+            </Button>
+          </div>
+          <ul className="m-0 list-none p-0">
+            {nameChoices.paths.slice(0, NAME_CHOICES_SHOWN).map((path) => {
+              const slash = path.lastIndexOf('/')
+              return (
+                <li key={path}>
+                  <button
+                    type="button"
+                    className={cn(
+                      'flex h-6 w-full min-w-0 items-center gap-1.5 rounded-sm px-1 text-left font-mono text-caption focus-visible:vy-focus-ring',
+                      ROW_HOVER
+                    )}
+                    onClick={() => {
+                      const request = nameChoices.request
+                      setNameChoices(null)
+                      void openRequestedAt(request, path)
+                    }}
+                  >
+                    <FileTypeIcon path={path} kind="file" size={13} className="shrink-0" />
+                    <span className="min-w-0 truncate">
+                      <span className="text-tertiary">{path.slice(0, slash + 1)}</span>
+                      <span className="text-fg">{path.slice(slash + 1)}</span>
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          {nameChoices.paths.length > NAME_CHOICES_SHOWN ? (
+            <p className="m-0 px-1 pt-0.5 text-caption text-tertiary">
+              {nameChoices.paths.length - NAME_CHOICES_SHOWN} more — filter the tree to find them
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {notice && !error ? (
         <div role="status" aria-live="polite" className={cn(FILES_PANEL_ALERT, 'text-secondary')}>
           <Icon
@@ -4035,7 +4152,11 @@ export const FilesPanel = memo(function FilesPanel({
           style={explorerWidthStyle}
           className={cn(
             'flex min-h-0 min-w-0 flex-col border-border',
-            narrowSurface ? 'w-full max-w-none shrink-0 border-b' : 'w-[var(--files-explorer-width)] max-w-[45%] border-r'
+            treeFillsPanel
+              ? 'w-full max-w-none flex-1'
+              : narrowSurface
+                ? 'w-full max-w-none shrink-0 border-b'
+                : 'w-[var(--files-explorer-width)] max-w-[45%] border-r'
           )}
         >
           <div
@@ -4160,7 +4281,7 @@ export const FilesPanel = memo(function FilesPanel({
             ref={treeScrollRef}
             className={cn(
               'files-panel-scroll overflow-auto py-1',
-              narrowSurface ? 'h-[272px] shrink-0' : 'min-h-0 flex-1'
+              narrowSurface && !treeFillsPanel ? 'h-[272px] shrink-0' : 'min-h-0 flex-1'
             )}
             role="region"
             aria-label="Workspace file surface"
@@ -4363,6 +4484,15 @@ export const FilesPanel = memo(function FilesPanel({
                       {entry.kind === 'symlink' ? (
                         <span className="text-caption text-warning">link</span>
                       ) : null}
+                      {isDir && !open && changedDirs.has(entry.path) ? (
+                        <span
+                          className="shrink-0 font-mono text-caption font-semibold text-muted"
+                          title="Holds files this task changed"
+                          data-folder-changed
+                        >
+                          •
+                        </span>
+                      ) : null}
                       {(() => {
                         const mark = isDir ? undefined : agentMarks?.get(entry.path)
                         if (!mark) return null
@@ -4424,7 +4554,7 @@ export const FilesPanel = memo(function FilesPanel({
           className={narrowSurface ? 'hidden' : undefined}
           hairline
         />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className={treeFillsPanel ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col'} data-files-editor>
           {tabs.length > 0 ? (
             <div
               role="tablist"

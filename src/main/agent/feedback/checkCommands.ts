@@ -76,10 +76,43 @@ const CHAIN_RE = /\|\||&&|[|;&`]|\$\(|>|</
  */
 const SELF_QUERY_RE = /(?:^|\s)(?:--version|-h|--help)\s*$/
 
-export function isCheckCommand(command: string | null | undefined): boolean {
-  if (!command) return false
+/** The command itself, or null when it is chained, piped or asks a runner about itself. */
+function soleCommand(command: string | null | undefined): string | null {
+  if (!command) return null
   let cmd = command.trim().replace(HARMLESS_REDIRECT_RE, '').replace(TRAILING_EXIT_RE, '')
   cmd = cmd.replace(LEADING_CD_RE, '').replace(LEADING_ENV_RE, '').replace(LEADING_CALL_OP_RE, '').trim()
-  if (!cmd || CHAIN_RE.test(cmd) || SELF_QUERY_RE.test(cmd)) return false
-  return CHECK_COMMAND_RES.some((re) => re.test(cmd))
+  if (!cmd || CHAIN_RE.test(cmd) || SELF_QUERY_RE.test(cmd)) return null
+  return cmd
+}
+
+/**
+ * A recognised test, typecheck or lint runner. Autonomy answers `run_tests`
+ * calls by this alone (toolApproval.ts), so it stays narrow: a script the
+ * run wrote itself is never auto-approved as a "test".
+ */
+export function isCheckCommand(command: string | null | undefined): boolean {
+  const cmd = soleCommand(command)
+  return cmd != null && CHECK_COMMAND_RES.some((re) => re.test(cmd))
+}
+
+/** An interpreter, with its flags, running one script file. */
+const SCRIPT_RUN_RE =
+  /^(?:node|nodejs|tsx|ts-node|bun(?:\s+run)?|deno\s+run|python3?(?:\.\d+)?|py|ruby|php)(?:\.exe)?\s+(?:--?[\w-]+(?:=\S+)?\s+)*(?:\.[\\/])?((?:[\w.@-]+[\\/])*([\w.@-]+\.(?:[cm]?[jt]sx?|py|rb|php)))(?:\s|$)/i
+/** `test.js`, `tests.py`, `math.test.ts`, `api_spec.rb`, `test_math.py`, `math_test.py`. */
+const TEST_FILE_RE = /^(?:tests?\.\w+|[\w.@-]+[._-](?:test|spec)s?\.\w+|test_[\w.-]+\.py)$/i
+
+/**
+ * What the receipt and the verification gate count as a check: a runner, or
+ * a test file run by its interpreter (`node test.js`, `python test_math.py`).
+ * Usage flagged "edits with no passing check after" on a run whose agent ran
+ * `node test.js` and saw it pass; a project without a test runner tests this
+ * way. Only the file's own name counts — `node scripts/test-data-gen.js` is
+ * not a test.
+ */
+export function countsAsCheck(command: string | null | undefined): boolean {
+  const cmd = soleCommand(command)
+  if (cmd == null) return false
+  if (CHECK_COMMAND_RES.some((re) => re.test(cmd))) return true
+  const file = SCRIPT_RUN_RE.exec(cmd)?.[2]
+  return file != null && TEST_FILE_RE.test(file)
 }

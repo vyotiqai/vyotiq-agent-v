@@ -199,4 +199,31 @@ describe('PanelResizeHandle', () => {
     fireEvent.doubleClick(screen.getByRole('separator', { name: /Resize sidebar/i }))
     expect(onChange).not.toHaveBeenCalled()
   })
+
+  it('exposes valueText and controlsId as aria-valuetext and aria-controls', () => {
+    render(
+      <PanelResizeHandle
+        label="Resize sidebar"
+        value={220}
+        min={180}
+        max={420}
+        edge="end"
+        valueText="220 pixels wide"
+        controlsId="sidebar-pane"
+        onChange={vi.fn()}
+      />
+    )
+    const handle = screen.getByRole('separator', { name: /Resize sidebar/i })
+    expect(handle.getAttribute('aria-valuetext')).toBe('220 pixels wide')
+    expect(handle.getAttribute('aria-controls')).toBe('sidebar-pane')
+  })
+
+  it('omits aria-valuetext and aria-controls when not provided', () => {
+    render(
+      <PanelResizeHandle label="Resize sidebar" value={220} min={180} max={420} edge="end" onChange={vi.fn()} />
+    )
+    const handle = screen.getByRole('separator', { name: /Resize sidebar/i })
+    expect(handle.getAttribute('aria-valuetext')).toBeNull()
+    expect(handle.getAttribute('aria-controls')).toBeNull()
+  })
 })

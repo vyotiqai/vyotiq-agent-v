@@ -9,7 +9,7 @@
  *    and Whisper Tiny still drafts the live ones.
  */
 
-export const DICTATION_LOCAL_MODEL_IDS = ['whisper-tiny.en', 'whisper-small.en', 'moonshine-base'] as const
+export const DICTATION_LOCAL_MODEL_IDS = ['whisper-tiny.en', 'whisper-small.en', 'moonshine-base', 'whisper-small'] as const
 export type DictationLocalModelId = (typeof DICTATION_LOCAL_MODEL_IDS)[number]
 
 export type DictationLocalBackend = 'whisper' | 'moonshine'
@@ -25,6 +25,8 @@ export type DictationLocalCatalogEntry = {
   roleLabel: string
   approxDownloadLabel: string
   ramHint: string
+  /** Speaks more than English: takes the dictation language setting (empty detects). */
+  multilingual?: boolean
 }
 
 export const DICTATION_LOCAL_CATALOG: readonly DictationLocalCatalogEntry[] = [
@@ -60,8 +62,25 @@ export const DICTATION_LOCAL_CATALOG: readonly DictationLocalCatalogEntry[] = [
     roleLabel: 'Fastest',
     approxDownloadLabel: '~123 MB',
     ramHint: 'Words land moments after each pause · a little less accurate than Whisper Small'
+  },
+  {
+    id: 'whisper-small',
+    backend: 'whisper',
+    hubRepo: 'onnx-community/whisper-small',
+    label: 'Whisper Small (multilingual)',
+    language: 'Many languages',
+    role: 'quality',
+    roleLabel: 'Any language',
+    approxDownloadLabel: '~250 MB',
+    ramHint: 'About 100 languages · set Language to yours, or leave it empty to detect',
+    multilingual: true
   }
 ]
+
+/** True for a model that takes a language hint rather than English only. */
+export function dictationModelIsMultilingual(id: string): boolean {
+  return DICTATION_LOCAL_CATALOG.some((m) => m.id === id && m.multilingual === true)
+}
 
 export function dictationCatalogEntry(
   id: DictationLocalModelId

@@ -35,6 +35,13 @@ const ToolCatalogEntrySchema = z.object({
 export type ToolCatalogEntry = z.infer<typeof ToolCatalogEntrySchema>
 
 /** Omitted/null workspacePath = active workspace scope; a string scopes to that workspace. */
+/** One agent-built tool, by name: see its code, or delete it. */
+export const AgentToolNameRequestSchema = z.object({
+  name: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/, 'Invalid tool name')
+})
+export const AgentToolSourceSchema = z.object({ name: z.string(), path: z.string(), source: z.string() })
+export type AgentToolSource = z.infer<typeof AgentToolSourceSchema>
+
 export const ToolCatalogRequestSchema = z.object({
   workspacePath: z.string().nullish()
 })
@@ -59,6 +66,11 @@ export const ToolCatalogResultSchema = z.object({
   ),
   codeIndexEnabled: z.boolean(),
   autoModeSwitch: z.boolean(),
+  /**
+   * Built-ins a run in this workspace leaves off the wire because they can't
+   * work here (no MCP server, no git remote, no notebook). Absent without a workspace.
+   */
+  notApplicable: z.array(z.string()).optional(),
   /** Stable hash of entries + config; identical when nothing changed. */
   fingerprint: z.string()
 })

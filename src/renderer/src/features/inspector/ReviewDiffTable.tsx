@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { IconButton, cn } from '@renderer/lib/ui'
 import type { CodeToken } from '@renderer/lib/markdown/markdownHighlight'
@@ -16,8 +16,27 @@ import {
   type UnifiedRow
 } from './reviewDiff'
 
-/** A line someone asked about: which file, which line, and on which side of the change. */
-export type AskTarget = { path: string; line: ReviewLine; side: 'old' | 'new' }
+/**
+ * A line someone asked about: which file, which line, and on which side of the
+ * change. `lines` is a range picked with Shift+click: every line from the
+ * first to `line`, in the diff's order, on that side.
+ */
+export type AskTarget = { path: string; line: ReviewLine; side: 'old' | 'new'; lines?: ReviewLine[] }
+
+/**
+ * A review in progress, provided by the Changes panel: comments collect here
+ * and go to the agent as one instruction. Every diff table under it offers
+ * "Add to review" without the panel passing it through each list.
+ */
+export const ReviewCommentsContext = createContext<{
+  onQueue?: (target: AskTarget, comment: string) => void
+  queuedLines?: ReadonlySet<string>
+}>({})
+
+/** The key a queued comment marks its line by. */
+export function askLineKey(path: string, side: 'old' | 'new', line: ReviewLine): string {
+  return `${path}\u0000${side}\u0000${side === 'old' ? line.oldN : line.newN}`
+}
 
 /**
  * One hunk of the diff on screen, named so main can find it again: where it
@@ -93,6 +112,8 @@ export function ReviewDiffTable({
   findQuery = '',
   added: addedFile = false,
   onAsk,
+  onQueue: onQueueProp,
+  queuedLines: queuedLinesProp,
   hunkActions
 }: {
   path: string
@@ -105,9 +126,19 @@ export function ReviewDiffTable({
   /** The file is new; git's `@@ -0,0` header says so too when this is left out. */
   added?: boolean
   onAsk?: (target: AskTarget, question: string) => void
+  /**
+   * Add the comment to a review sent later as one instruction, instead of
+   * sending it now (Ctrl/Cmd+Enter, or Add to review; Enter still sends).
+   */
+  onQueue?: (target: AskTarget, comment: string) => void
+  /** Lines with a comment waiting in the review (`askLineKey`), marked in the gutter. */
+  queuedLines?: ReadonlySet<string>
   /** Per-hunk Undo and Viewed on each hunk header; a new file is one hunk and gets none. */
   hunkActions?: HunkActions
 }) {
+  const review = useContext(ReviewCommentsContext)
+  const onQueue = onQueueProp ?? review.onQueue
+  const queuedLines = queuedLinesProp ?? review.queuedLines
   const parsed = useMemo(() => parseReviewDiff(diff), [diff])
   // Past the cap, the changed lines it dropped: parsed again without one, and
   // only when there is a cut to count.
@@ -135,7 +166,10 @@ export function ReviewDiffTable({
   const numbers = added ? 'new' : numbersAsked
   // Each hunk named from the whole diff, not the capped parse: a hunk the cap
   // cut short is still named by all of its lines. Keys follow the same order.
-  const withHunkActions = Boolean(hunkActions) && !added
+  // A diff main cut short cannot be staged part by part: git's own copy of it
+  // would not match, and main refuses it. No Stage/Unstage rather than one that always fails.
+  const indexCapped = hunkActions?.kind !== undefined && hunkActions.kind !== 'undo' && diff.trimEnd().endsWith('[diff truncated]')
+  const withHunkActions = Boolean(hunkActions) && !added && !indexCapped
   const hunkTargets = useMemo(() => {
     if (!withHunkActions) return null
     const diffHash = diffFingerprint(diff)
@@ -164,17 +198,42 @@ export function ReviewDiffTable({
       ? 'overflow-hidden text-ellipsis whitespace-pre'
       : 'whitespace-pre'
 
+  /**
+   * Shift+click on a second line of the same side, with a question open:
+   * the question covers every line between, and moves under the last.
+   */
+  const rangeTo = (line: ReviewLine, side: 'old' | 'new'): ReviewLine[] | null => {
+    if (!asking || asking.target.side !== side) return null
+    const from = asking.target.lines?.[0] ?? asking.target.line
+    const lo = Math.min(from.i, line.i)
+    const hi = Math.max(from.i, line.i)
+    const onSide = (l: ReviewLine): boolean => (side === 'old' ? l.oldN != null : l.newN != null)
+    const lines = parsed.hunks.flatMap((h) => h.lines).filter((l) => l.i >= lo && l.i <= hi && onSide(l))
+    return lines.length > 1 ? lines : null
+  }
+
   const number = (line: ReviewLine, side: 'old' | 'new', rowKey: string, className: string) => {
     const n = side === 'old' ? line.oldN : line.newN
+    const queued = n != null && queuedLines?.has(askLineKey(path, side, line))
     return (
       <td className={cn('select-none text-right align-top text-tertiary tnum', className)}>
         {onAsk && n != null ? (
           <button
             type="button"
-            className="w-full text-right tnum hover:text-fg focus-visible:vy-focus-ring"
-            aria-label={`Ask about line ${n}${side === 'old' ? ' before the change' : ''}`}
-            onClick={() => {
+            className={cn(
+              'w-full text-right tnum hover:text-fg focus-visible:vy-focus-ring',
+              queued ? 'font-semibold text-accent' : ''
+            )}
+            aria-label={`Ask about line ${n}${side === 'old' ? ' before the change' : ''}${queued ? ' (has a review comment)' : ''}`}
+            title={onQueue ? 'Comment on this line · Shift+click another line for a range' : undefined}
+            onClick={(event) => {
               setSent(null)
+              const range = event.shiftKey ? rangeTo(line, side) : null
+              if (range) {
+                const last = range[range.length - 1]!
+                setAsking({ rowKey, target: { path, line: last, side, lines: range } })
+                return
+              }
               setAsking({ rowKey, target: { path, line, side } })
             }}
           >
@@ -337,6 +396,7 @@ export function ReviewDiffTable({
                     <td colSpan={cols} className="p-0">
                       <AskLine
                         n={lineLabel(asking.target.line)}
+                        from={asking.target.lines ? lineLabel(asking.target.lines[0]!) : undefined}
                         before={asking.target.side === 'old' && asking.target.line.kind !== 'ctx'}
                         onClose={() => setAsking(null)}
                         onSend={(question) => {
@@ -344,6 +404,14 @@ export function ReviewDiffTable({
                           setSent(row.key)
                           setAsking(null)
                         }}
+                        onQueue={
+                          onQueue
+                            ? (comment) => {
+                                onQueue(asking.target, comment)
+                                setAsking(null)
+                              }
+                            : undefined
+                        }
                       />
                     </td>
                   </tr>
@@ -380,49 +448,84 @@ export function ReviewDiffTable({
 
 function AskLine({
   n,
+  from,
   before,
   onSend,
+  onQueue,
   onClose
 }: {
   n: number
+  /** The range's first line, when the question covers several. */
+  from?: number
   before: boolean
   onSend: (question: string) => void
+  /** Add to the review instead of sending (Ctrl/Cmd+Enter, or the button). */
+  onQueue?: (comment: string) => void
   onClose: () => void
 }) {
   const [value, setValue] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   // A line was just picked to ask about; the question goes here.
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key === 'Enter' && value.trim()) {
+  const text = value.trim()
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && text) {
       event.preventDefault()
-      onSend(value.trim())
+      // Enter sends now, as it always has; Ctrl/Cmd+Enter adds it to the review.
+      if (onQueue && (event.ctrlKey || event.metaKey)) onQueue(text)
+      else onSend(text)
     } else if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
       onClose()
     }
   }
+  const label = from != null ? `L${from}–${n}` : `L${n}`
   return (
-    <div className="my-2 flex h-9 items-center gap-2.5 border-y border-border bg-bg px-4 font-sans text-sm">
-      <span className="font-mono text-caption text-tertiary">L{n}</span>
-      <span className="font-mono text-accent" aria-hidden>
+    <div className="my-2 flex items-start gap-2.5 border-y border-border bg-bg px-4 py-2 font-sans text-sm" data-ask-line>
+      <span className="pt-0.5 font-mono text-caption text-tertiary">{label}</span>
+      <span className="pt-0.5 font-mono text-accent" aria-hidden>
         ›
       </span>
-      <input
+      <textarea
         ref={inputRef}
         value={value}
+        rows={Math.min(6, Math.max(1, value.split('\n').length))}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={onKeyDown}
         onBlur={() => {
-          if (!value.trim()) onClose()
+          if (!text) onClose()
         }}
-        className="min-w-0 flex-1 rounded-sm bg-transparent text-sm text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
-        placeholder="Ask about or change this line — goes to the agent as a follow-up"
-        aria-label={`Ask the agent about line ${n}${before ? ' before the change' : ''}`}
+        className="min-w-0 flex-1 resize-none rounded-sm bg-transparent text-sm leading-5 text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
+        placeholder={
+          onQueue
+            ? 'Ask or change this — Enter sends it now, Ctrl+Enter adds it to a review, Shift+Enter for a new line'
+            : 'Ask about or change this line — goes to the agent as a follow-up'
+        }
+        aria-label={`Ask the agent about ${from != null ? `lines ${from} to ${n}` : `line ${n}`}${before ? ' before the change' : ''}`}
       />
+      {onQueue && text ? (
+        <span className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className="rounded-sm px-1.5 py-0.5 text-xs text-muted hover:text-fg focus-visible:vy-focus-ring"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onQueue(text)}
+          >
+            Add to review
+          </button>
+          <button
+            type="button"
+            className="rounded-sm px-1.5 py-0.5 text-xs text-accent hover:text-fg focus-visible:vy-focus-ring"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onSend(text)}
+          >
+            Send now
+          </button>
+        </span>
+      ) : null}
     </div>
   )
 }

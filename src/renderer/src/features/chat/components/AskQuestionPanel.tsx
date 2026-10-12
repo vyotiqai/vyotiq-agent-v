@@ -7,7 +7,8 @@ import {
   useState,
   type FormEvent
 } from 'react'
-import { Button, StatusGlyph, Tooltip, cn, MarkdownContent } from '@renderer/lib/ui'
+import { Button, StatusGlyph, Tooltip, cn } from '@renderer/lib/ui'
+import { RecordProse } from '@renderer/features/task/record/RecordProse'
 import { typingElsewhere } from '@renderer/lib/a11y'
 import {
   QUESTION_GATE_BODY,
@@ -68,12 +69,14 @@ function formatSettledAnswers(
   return parts.join(' · ')
 }
 
-/** Single-question forms with fixed choices submit on selection — no extra click. */
+/**
+ * Single-question forms with fixed choices submit on selection — no extra
+ * click. A typed "Something else…" answer is sent with Enter or Submit.
+ */
 function isQuickSubmitForm(question: UiAgentQuestion): boolean {
   if (question.questions.length !== 1) return false
   const item = question.questions[0]!
-  if (item.type === 'boolean') return true
-  return item.type === 'single' && item.allowCustom !== true
+  return item.type === 'boolean' || item.type === 'single'
 }
 
 /** True when focus sits in a text field outside `root` — the user is typing there. */
@@ -229,8 +232,12 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
     setFields((prev) => ({ ...prev, [id]: { values, customText } }))
     if (quickSubmit) {
       const item = question.questions[0]!
-      if (item.id === id && values.length === 1 && values[0]!.trim()) {
-        submitAnswers([{ questionId: id, values: [values[0]!.trim()] }], 'answered')
+      // Picking a listed option sends it; typing in "Something else…" never
+      // sends a half-typed word.
+      const picked = values.length === 1 ? values[0]!.trim() : ''
+      const listed = item.type === 'boolean' || (item.options ?? []).includes(picked)
+      if (item.id === id && picked && listed && picked !== customText.trim()) {
+        submitAnswers([{ questionId: id, values: [picked] }], 'answered')
       }
     }
   }
@@ -281,7 +288,9 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
       : undefined
   // Quick-submit: picking an option sends immediately — hide the inert Submit control.
   // After a failed send, show Submit so the user can retry explicitly.
-  const showSubmit = !settled && (!quickSubmit || phase !== 'idle' || Boolean(localError))
+  // A typed answer on a quick form needs it too.
+  const typedOther = quickSubmit && Boolean(fields[question.questions[0]?.id ?? '']?.customText.trim())
+  const showSubmit = !settled && (!quickSubmit || typedOther || phase !== 'idle' || Boolean(localError))
 
   return (
     <form
@@ -337,10 +346,10 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
               return (
                 <div key={item.id} className="flex flex-col gap-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    {/* MarkdownContent owns size and colour; the quiet
+                    {/* The reply owns size and colour; the quiet
                         "Unanswered" beside it is what marks an open one. */}
                     <div id={promptId} className="font-medium">
-                      <MarkdownContent content={item.prompt} />
+                      <RecordProse text={item.prompt} />
                     </div>
                     {multi ? (
                       <span className="text-caption text-tertiary">

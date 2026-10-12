@@ -72,6 +72,7 @@ function mount(files: GitChangedFile[] = [file('src/a.ts', 'modified', true, tru
     gitCheckout: vi.fn().mockResolvedValue({ ok: true, data: { detail: 'Checked out feature. Your changes stay on main', stashed: true } }),
     gitBranchStash: vi.fn().mockResolvedValue({ ok: true, data: null }),
     gitStashRestore: vi.fn().mockResolvedValue({ ok: true, data: { detail: 'Restored the changes left on main', conflicted: false } }),
+    gitStashDrop: vi.fn().mockResolvedValue({ ok: true, data: { detail: 'Dropped the changes left on main' } }),
     gitStageHunk: vi.fn().mockResolvedValue({ ok: true, data: { detail: 'Staged the hunk at line 10 of src/a.ts' } }),
     gitLastCommit: vi.fn().mockResolvedValue({ ok: true, data: { sha: HEAD, message: 'feat: first try\n\nbody', pushed: false, amendable: true } }),
     gitAmend: vi.fn().mockResolvedValue({ ok: true, data: { committed: true, pushed: false, detail: 'Amended aaaaaaa' } }),
@@ -148,6 +149,18 @@ describe('ChangesPanel: switching with uncommitted changes', () => {
     expect(await screen.findByText('Restored the changes left on main')).toBeTruthy()
     await waitFor(() => expect(document.querySelector('[data-branch-stash]')).toBeNull())
   })
+
+  it('shows them on "This task" too, where the tab opens: a clean tree there gives no other hint', async () => {
+    api.gitBranchStash!.mockResolvedValue({ ok: true, data: { sha: STASH, branch: 'main', files: 2, createdAt: null } })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} />)
+    const rowEl = await waitFor(() => {
+      const el = document.querySelector('[data-branch-stash]')
+      if (!el) throw new Error('no stash row yet')
+      return el as HTMLElement
+    })
+    expect(rowEl.textContent).toMatch(/Changes you left on main · 2 files/)
+    expect(within(rowEl).getByRole('button', { name: 'Restore' })).toBeTruthy()
+  })
 })
 
 describe('ChangesPanel: background fetch', () => {
@@ -191,6 +204,45 @@ describe('ChangesPanel: background fetch', () => {
     await new Promise((r) => setTimeout(r, 200))
     expect(api.gitStatus!.mock.calls.length).toBe(reads)
   })
+
+  it('a skip because another worktree of the repository just fetched reads the counts again', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    api.gitFetch!.mockResolvedValue({ ok: true, data: { detail: 'Fetched a moment ago', skipped: true, refsMoved: true } })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    const reads = api.gitStatus!.mock.calls.length
+    await waitFor(() => expect(api.gitFetch).toHaveBeenCalled(), { timeout: 5000 })
+    await waitFor(() => expect(api.gitStatus!.mock.calls.length).toBeGreaterThan(reads))
+  })
+})
+
+describe('ChangesPanel: the full-width review', () => {
+  it('Unstaged: stages a hunk, and the file header discards the file, as the side panel does', async () => {
+    api.gitDiscardPaths = vi.fn().mockResolvedValue({ ok: true, data: { detail: 'Discarded changes to src/a.ts' } })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="unstaged" variant="review" reviewTitle="Review" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Stage the hunk at line 10' }))
+    const hunk = hunkIdentity(parseUnifiedHunks(TWO_HUNKS)[1]!)
+    await waitFor(() =>
+      expect(api.gitStageHunk).toHaveBeenCalledWith({ workspacePath: '/ws', path: 'src/a.ts', hunk, diffHash: diffFingerprint(TWO_HUNKS) })
+    )
+    const header = document.querySelector('[data-review-file]') as HTMLElement
+    expect(within(header).getByRole('button', { name: 'Stage src/a.ts' })).toBeTruthy()
+    fireEvent.click(within(header).getByRole('button', { name: 'Discard changes to src/a.ts' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }))
+    await waitFor(() => expect(api.gitDiscardPaths).toHaveBeenCalledWith({ workspacePath: '/ws', paths: ['src/a.ts'], scope: 'worktree' }))
+  })
+
+  it('Staged: each hunk has Unstage', async () => {
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="staged" variant="review" reviewTitle="Review" />)
+    expect(await screen.findByRole('button', { name: 'Unstage the hunk at line 1' })).toBeTruthy()
+  })
+
+  it('offers Discard all changes in its menu', async () => {
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" variant="review" reviewTitle="Review" />)
+    await screen.findByRole('button', { name: 'Discard changes to src/a.ts' })
+    fireEvent.click(screen.getByRole('button', { name: 'Scope, wrap, whitespace, undo all' }))
+    expect(await screen.findByRole('menuitem', { name: 'Discard all changes…' })).toBeTruthy()
+  })
 })
 
 describe('ChangesPanel: staging one hunk', () => {
@@ -220,6 +272,53 @@ describe('ChangesPanel: staging one hunk', () => {
     await screen.findByText('a.ts')
     await screen.findByText('new')
     expect(screen.queryByRole('button', { name: /^(Stage|Unstage) the hunk/ })).toBeNull()
+  })
+})
+
+describe('ChangesPanel: the commit box', () => {
+  async function openCommit(): Promise<HTMLTextAreaElement> {
+    fireEvent.click(screen.getAllByRole('button', { name: 'Commit' }).at(-1)!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Commit…' }))
+    return (await screen.findByRole('textbox', { name: /commit message/i })) as HTMLTextAreaElement
+  }
+  const facts = (): string => (document.querySelector('[data-commit-facts]') as HTMLElement).textContent ?? ''
+
+  it('counts every file the commit takes, not the ones the list stops at', async () => {
+    mount(undefined, { truncated: true, fileCount: 215 })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    await openCommit()
+    expect(facts()).toMatch(/Commit to main · 215 files/)
+  })
+
+  it('a staged count past the list cap reads as a floor', async () => {
+    mount(undefined, { truncated: true, fileCount: 215 })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="staged" />)
+    await screen.findByText('a.ts')
+    await openCommit()
+    expect(facts()).toMatch(/Commit to main · 1\+ files/)
+  })
+
+  it('on "This task" it says the commit takes every uncommitted file', async () => {
+    mount(undefined, { fileCount: 215 })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} />)
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Commit' }).length).toBeGreaterThan(0))
+    await openCommit()
+    expect(facts()).toMatch(/Commit to main · all 215 uncommitted files/)
+  })
+
+  it('fills in the drafted subject and body, and says it was drafted', async () => {
+    api.gitGenerateCommitMessage!.mockResolvedValue({
+      ok: true,
+      data: { message: 'feat(git): read every changed file\n\n- list all files\n- skip lockfiles', source: 'agent' }
+    })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    const field = await openCommit()
+    await waitFor(() => expect(field.value).toBe('feat(git): read every changed file\n\n- list all files\n- skip lockfiles'))
+    expect(facts()).toMatch(/Drafted from the diff · edit freely/)
+    // Shown with git's own line breaks: a 72-column body is not wrapped again.
+    expect(field.getAttribute('wrap')).toBe('off')
   })
 })
 
@@ -254,5 +353,128 @@ describe('ChangesPanel: amending the last commit', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Commit' }).at(-1)!)
     await screen.findByRole('menuitem', { name: 'Commit…' })
     expect(screen.queryByRole('menuitem', { name: /Amend/ })).toBeNull()
+  })
+})
+
+describe('ChangesPanel: after the audit', () => {
+  const stashRow = (): Promise<HTMLElement> =>
+    waitFor(() => {
+      const el = document.querySelector('[data-branch-stash]')
+      if (!el) throw new Error('no stash row yet')
+      return el as HTMLElement
+    })
+
+  const statusWith = (extra: Record<string, unknown>) => ({
+    ok: true,
+    data: {
+      kind: 'ok',
+      status: {
+        branch: 'main',
+        files: [file('src/a.ts', 'modified', true, true)],
+        truncated: false,
+        fileCount: 1,
+        added: 2,
+        removed: 2,
+        hasRemote: true,
+        hasCommits: true,
+        upstream: 'origin/main',
+        ahead: 1,
+        behind: 0,
+        ...extra
+      }
+    }
+  })
+
+  it('a restore with conflicts keeps the row, now to drop the stash once they are resolved', async () => {
+    api.gitBranchStash!.mockResolvedValue({ ok: true, data: { sha: STASH, branch: 'main', files: 1, createdAt: null } })
+    api.gitStashRestore!.mockResolvedValue({
+      ok: true,
+      data: { detail: '1 file came back with conflicts; the stash is kept', conflicted: true }
+    })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    fireEvent.click(within(await stashRow()).getByRole('button', { name: 'Restore' }))
+    await waitFor(() => expect((document.querySelector('[data-branch-stash]') as HTMLElement).textContent).toMatch(/Restored with conflicts/))
+    // The notice says what happened; only the row says what to do next.
+    expect(await screen.findByText('1 file came back with conflicts; the stash is kept')).toBeTruthy()
+    expect(document.body.textContent?.match(/resolve them, then drop/g)).toHaveLength(1)
+    expect(within(await stashRow()).queryByRole('button', { name: 'Restore' })).toBeNull()
+    // Its changes are in the files now: dropping it asks nothing.
+    fireEvent.click(within(await stashRow()).getByRole('button', { name: 'Drop stash' }))
+    await waitFor(() => expect(api.gitStashDrop).toHaveBeenCalledWith({ workspacePath: '/ws', sha: STASH }))
+    await waitFor(() => expect(document.querySelector('[data-branch-stash]')).toBeNull())
+  })
+
+  it('dropping changes that were never restored asks first', async () => {
+    api.gitBranchStash!.mockResolvedValue({ ok: true, data: { sha: STASH, branch: 'main', files: 2, createdAt: null } })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    fireEvent.click(within(await stashRow()).getByRole('button', { name: 'Drop these changes…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toMatch(/will be deleted from the stash, not restored/)
+    expect(api.gitStashDrop).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Drop' }))
+    await waitFor(() => expect(api.gitStashDrop).toHaveBeenCalledWith({ workspacePath: '/ws', sha: STASH }))
+  })
+
+  it('Amend amends the commit it was opened on, even when another is the latest by the time it is sent', async () => {
+    const view = render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    await waitFor(() => expect(api.gitLastCommit).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Commit' }).at(-1)!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Amend last commit…/ }))
+    await screen.findByText(/Amends aaaaaaa · not pushed yet/)
+    // A commit lands from a terminal while the box is open; the panel reads it.
+    api.gitLastCommit!.mockResolvedValue({ ok: true, data: { sha: 'c'.repeat(40), message: 'from the terminal', pushed: false, amendable: true } })
+    view.rerender(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={2} preferredScope="uncommitted" />)
+    await waitFor(() => expect(api.gitLastCommit).toHaveBeenCalledTimes(2))
+    // Still the commit whose message is in the box; main refuses it, as it is no longer HEAD.
+    expect(screen.getByText(/Amends aaaaaaa · not pushed yet/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Amend' }))
+    await waitFor(() => expect(api.gitAmend).toHaveBeenCalledWith(expect.objectContaining({ sha: HEAD })))
+  })
+
+  it('Amend offers no Rewrite: a drafted message would describe only what is being added', async () => {
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    await waitFor(() => expect(api.gitLastCommit).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: 'Commit' }).at(-1)!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Amend last commit…/ }))
+    await screen.findByText(/Amends aaaaaaa/)
+    expect(screen.queryByRole('button', { name: 'Rewrite' })).toBeNull()
+  })
+
+  it('reads the last commit again when HEAD moves under the same ahead count', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    api.gitStatus!.mockResolvedValue(statusWith({ head: HEAD }))
+    // A background fetch that ran reads the status again; by then a pull with rebase moved HEAD.
+    api.gitFetch!.mockResolvedValue({ ok: true, data: { detail: 'Fetched', ahead: 1, behind: 0 } })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    await waitFor(() => expect(api.gitLastCommit).toHaveBeenCalledTimes(1))
+    api.gitStatus!.mockResolvedValue(statusWith({ head: 'd'.repeat(40) }))
+    await waitFor(() => expect(api.gitLastCommit).toHaveBeenCalledTimes(2), { timeout: 5000 })
+  })
+
+  it('while a task runs here: no Discard, and the branch menu waits', async () => {
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" running />)
+    await screen.findByText('a.ts')
+    expect(screen.queryByRole('button', { name: 'Discard changes to src/a.ts' })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Switch branch' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('coming back to the window asks for a background fetch', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    await waitFor(() => expect(api.gitFetch).toHaveBeenCalledTimes(1), { timeout: 5000 })
+    window.dispatchEvent(new Event('focus'))
+    await waitFor(() => expect(api.gitFetch).toHaveBeenCalledTimes(2))
+  })
+
+  it('a diff main cut short offers no hunk Stage', async () => {
+    api.gitDiff!.mockResolvedValue({ ok: true, data: { content: `${TWO_HUNKS}\n[diff truncated]` } })
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="unstaged" />)
+    await screen.findByText('a.ts')
+    await screen.findByText('new')
+    expect(screen.queryByRole('button', { name: /^Stage the hunk/ })).toBeNull()
   })
 })

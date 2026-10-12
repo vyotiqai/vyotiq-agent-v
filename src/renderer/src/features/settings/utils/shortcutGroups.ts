@@ -20,7 +20,7 @@ export type ShortcutGroup = {
 const GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> = [
   {
     title: 'Go',
-    ids: ['search', 'newChat', 'goHome', 'nextNeedsYou', 'prevTask', 'nextTask', 'workspaces', 'sidebar', 'settings', 'commandPalette', 'shortcutsHelp', 'shortcuts-help-key']
+    ids: ['search', 'newChat', 'goHome', 'nextNeedsYou', 'prevTask', 'nextTask', 'navBack', 'navForward', 'workspaces', 'sidebar', 'settings', 'commandPalette', 'shortcutsHelp', 'shortcuts-help-key']
   },
   {
     title: 'Task',
@@ -28,6 +28,7 @@ const GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> = [
       'focusComposer',
       'stop',
       'steer',
+      'structure',
       'approval-allow',
       'approval-deny',
       'cycleMode',

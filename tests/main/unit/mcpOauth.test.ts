@@ -56,7 +56,7 @@ describe('createMcpOAuthProvider', () => {
   it('builds the expected client metadata', () => {
     const provider = createMcpOAuthProvider('srv-2', 'https://cb.example/oauth/callback')
     expect(provider.clientMetadata).toMatchObject({
-      client_name: 'Vyotiq',
+      client_name: 'Agent V',
       redirect_uris: ['https://cb.example/oauth/callback'],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],

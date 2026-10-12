@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import { useDocumentTheme } from './useDocumentTheme'
 import { CodeBlockCopyButton } from './CodeBlockCopyButton'
+import { renderMermaid } from '@renderer/lib/markdown/mermaidRepair'
 
 type MermaidApi = (typeof import('mermaid'))['default']
 
@@ -146,7 +147,9 @@ export const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: str
     const id = `vy-mermaid-${renderSeq++}`
     // Read at render time: the tokens are whatever the theme and skin are now.
     void loadMermaid(readMermaidThemeVariables(theme === 'dark'))
-      .then((mermaid) => mermaid.render(id, code))
+      // A model's slip (two edges on a line, a bracket in a label) gets one
+      // more try put right.
+      .then((mermaid) => renderMermaid(mermaid, id, code))
       .then((result) => {
         if (!cancelled) setSvg(result.svg)
       })

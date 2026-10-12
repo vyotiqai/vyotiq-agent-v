@@ -97,6 +97,9 @@ export const IPC = {
   loadRunEvents: 'runs:events',
   loadToolResult: 'runs:tool-result',
   runsDelete: 'runs:delete',
+  runsDeletedList: 'runs:deleted-list',
+  runsDeletedRestore: 'runs:deleted-restore',
+  runsDeletedPurge: 'runs:deleted-purge',
   runsExport: 'runs:export',
   runsRename: 'runs:rename',
   runsFork: 'runs:fork',
@@ -116,6 +119,7 @@ export const IPC = {
   homeActivity: 'runs:activity',
   // Usage page → Export CSV (save dialog in main), and task bundles as JSON.
   usageExportCsv: 'usage:export-csv',
+  usageBudget: 'usage:budget',
   runsExportJson: 'runs:export-json',
   runsImport: 'runs:import',
   runsSetGoalStatus: 'runs:setGoalStatus',
@@ -151,6 +155,8 @@ export const IPC = {
   browserElementPicked: 'browser:elementPicked',
   gitStatus: 'git:status',
   gitGenerateCommitMessage: 'git:generate-commit-message',
+  promptStructure: 'prompt:structure',
+  promptStructureCancel: 'prompt:structure-cancel',
   gitCommit: 'git:commit',
   gitStageAll: 'git:stage-all',
   gitStagePaths: 'git:stage-paths',
@@ -163,6 +169,8 @@ export const IPC = {
   gitBranchStash: 'git:branch-stash',
   /** Puts those changes back: only from an explicit button. */
   gitStashRestore: 'git:stash-restore',
+  /** Drop that stash: after a restore with conflicts, or to throw the changes away. */
+  gitStashDrop: 'git:stash-drop',
   /** Stage (or unstage) one hunk of a file's diff. */
   gitStageHunk: 'git:stage-hunk',
   /** HEAD's commit as Amend needs it. */
@@ -174,6 +182,13 @@ export const IPC = {
   gitPull: 'git:pull',
   gitPush: 'git:push',
   gitCreateBranch: 'git:create-branch',
+  gitBranchDelete: 'git:branch-delete',
+  gitDiscardUndo: 'git:discard-undo',
+  gitBranchRename: 'git:branch-rename',
+  gitStashList: 'git:stash-list',
+  gitStashApply: 'git:stash-apply',
+  gitStashDropAny: 'git:stash-drop-any',
+  gitIntegrate: 'git:integrate',
   gitLog: 'git:log',
   gitCommitFiles: 'git:commit-files',
   gitBlame: 'git:blame',
@@ -197,6 +212,9 @@ export const IPC = {
   crashRecoveryConsume: 'crash:recovery-consume',
   telemetryStatus: 'telemetry:status',
   appInfo: 'app:info',
+  /** Settings › General › Command line: `vyotiq` on the user PATH (Windows, installed app). */
+  cliPathStatus: 'app:cli-path-status',
+  cliPathSet: 'app:cli-path-set',
   /** Whether agent commands can be OS-sandboxed here (Settings → Tools → Sandbox). */
   sandboxCapability: 'sandbox:capability',
   updaterState: 'updater:state',
@@ -226,6 +244,17 @@ export const IPC = {
   /** Locate an MCP launch binary on disk when it is not on PATH. */
   mcpPickBinary: 'mcp:pickBinary',
   toolsCatalogGet: 'tools-catalog:get',
+  agentToolSource: 'agent-tools:source',
+  hooksOverview: 'hooks:overview',
+  setupDetect: 'setup:detect',
+  composerFetchUrl: 'composer:fetch-url',
+  setupUseEnvKey: 'setup:use-env-key',
+  mcpRegistrySearch: 'marketplace:mcp-registry-search',
+  marketplaceCheckUpdates: 'marketplace:check-updates',
+  hooksDecide: 'hooks:decide',
+  hooksForget: 'hooks:forget',
+  hooksOpenFile: 'hooks:open-file',
+  agentToolDelete: 'agent-tools:delete',
   toolsCatalogChanged: 'tools-catalog:changed',
   marketplaceListInstalled: 'marketplace:listInstalled',
   marketplaceBrowse: 'marketplace:browse',
@@ -264,6 +293,8 @@ export const IPC = {
   workspaceFileMove: 'workspace:file-move',
   workspaceFileDelete: 'workspace:file-delete',
   workspaceFileReveal: 'workspace:file-reveal',
+  editorOpen: 'editor:open',
+  editorList: 'editor:list',
   workspaceFormatterStatus: 'workspace:formatter-status',
   workspaceFormatFile: 'workspace:format-file',
   workspaceLspStatus: 'workspace:lsp-status',
@@ -278,6 +309,9 @@ export const IPC = {
   agentContextChanged: 'workspace:agent-context-changed',
   /** Delete the workspace's memory notes, index.md and state.md (Settings → Agent). */
   workspaceClearMemory: 'workspace:clearMemory',
+  workspaceMemoryNotes: 'workspace:memoryNotes',
+  workspaceMemoryNoteRead: 'workspace:memoryNoteRead',
+  workspaceMemoryNoteDelete: 'workspace:memoryNoteDelete',
   workspaceDiagnostics: 'workspace:diagnostics',
   gitDiff: 'git:diff',
   /** The branch against its base (merge base with the default branch), uncommitted work included. */
@@ -305,6 +339,8 @@ export const IPC = {
   prCleanupMerged: 'pr:cleanup-merged',
   /** Posts on the PR's conversation under the signed-in account: only from a Send button. */
   prComment: 'pr:comment',
+  prCommentsAll: 'pr:comments-all',
+  prLeaveMergeQueue: 'pr:leave-merge-queue',
   /** Replaces the PR's description, refused when GitHub's copy changed meanwhile. */
   prEditBody: 'pr:edit-body',
   /** Requests or withdraws reviews. */
@@ -325,9 +361,12 @@ export const IPC = {
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   ptyKill: 'pty:kill',
+  ptyRename: 'pty:rename',
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
   ptySessionsChanged: 'pty:sessions-changed',
+  terminalKeptList: 'terminal:kept-list',
+  terminalKeptStop: 'terminal:kept-stop',
   themeChanged: 'theme:changed',
   getSystemTheme: 'theme:get-system',
   appearancePickCustomCss: 'appearance:pickCustomCss',
@@ -344,8 +383,14 @@ export const IPC = {
   notificationsList: 'notifications:list',
   notificationsMarkRead: 'notifications:markRead',
   notificationsDismiss: 'notifications:dismiss',
+  notificationsRemoteTest: 'notifications:remote-test',
   notificationsChanged: 'notifications:changed',
   notificationsActivate: 'notifications:activate',
+  toolSecretSet: 'tool-secrets:set',
+  toolSecretClear: 'tool-secrets:clear',
+  toolSecretStatus: 'tool-secrets:status',
+  /** Tray menu → window: open a task, start a new one. */
+  trayCommand: 'tray:command',
   /** Storage retention (audit H4/H5): report + confirm-gated cleanup + ack. */
   storageReport: 'storage:report',
   storageCleanupPreview: 'storage:cleanup-preview',

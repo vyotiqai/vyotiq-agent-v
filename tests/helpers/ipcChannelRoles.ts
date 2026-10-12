@@ -31,6 +31,7 @@ export const PUSH_CHANNEL_NAMES = [
   'skillsChanged',
   'notificationsChanged',
   'notificationsActivate',
+  'trayCommand',
   'appearanceCustomCssChanged',
   'updaterState',
   'accessibilitySupportChanged',

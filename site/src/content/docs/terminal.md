@@ -1,6 +1,6 @@
 ---
 title: Terminal
-description: The Terminal tab — your own shells beside the agent's commands, find, copy, clear, rename, other shells, and handing output to the agent.
+description: The Terminal tab — your own shells beside the agent's commands, processes the agent left running, find, copy, clear, rename, other shells, and handing output to the agent.
 group: Reference
 order: 7
 ---
@@ -23,6 +23,14 @@ The ⋯ at the end of the row has:
 | "Clear" | Clears the screen; the shell keeps running |
 | "Rename…" | Names the tab. The agent's session keeps its name |
 | "Ask the agent about this output" | Hands the selected text, or the end of the output, to the agent as an instruction you can edit before sending |
+
+## Processes the agent left running
+
+A command the agent starts in the background, such as a dev server or a watcher, keeps running after its turn ends, so a server it started for you is still up when you look. The task owns it:
+
+- **Where it shows:** "Still running" lists each one with its command, at the top of the Terminal tab and under the task's result in the record. "Stop" ends it.
+- **The agent can stop it too,** and can type into it: the `terminal` tool takes `session_id` with `kill: true` to stop a process, or with `input` to answer a prompt it is waiting on (a line and Enter). Typing into a process asks first in the default approval mode; reading its output doesn't.
+- **When it ends by itself:** stopping the task (Stop or `Esc`) ends the processes it started, and so does deleting the task or quitting the app. A helper [instance](/docs/instances) never leaves one running: its processes end with its turn.
 
 ## Which shell
 

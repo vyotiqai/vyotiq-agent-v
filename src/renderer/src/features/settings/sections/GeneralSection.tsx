@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import type { SecretProvider } from '@shared/ipc'
+import { useEffect, useState } from 'react'
+import type { PreferredEditor, SecretProvider } from '@shared/ipc'
+import { editorName } from '@renderer/lib/openInEditor'
 import { Button } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
@@ -31,6 +32,24 @@ export function GeneralSection({
 }) {
   const settings = form.settings
   const [pickingWorkspace, setPickingWorkspace] = useState(false)
+  // Editors whose command is on PATH, so the menu says which ones will work.
+  const [installedEditors, setInstalledEditors] = useState<string[] | null>(null)
+  useEffect(() => {
+    void window.vyotiq?.editorList?.().then((res) => setInstalledEditors(res?.ok ? res.data : []))
+  }, [])
+  const editorOptions = EDITOR_CHOICES.map((id) => ({
+    value: id,
+    label:
+      id === 'auto'
+        ? installedEditors?.[0]
+          ? `Auto (${editorName(installedEditors[0])})`
+          : 'Auto'
+        : id === 'system'
+          ? 'The default app for the file'
+          : installedEditors && !installedEditors.includes(id)
+            ? `${editorName(id)} (not found)`
+            : editorName(id)
+  }))
 
   const addWorkspace = (): void => {
     if (!onPickWorkspace) return
@@ -71,6 +90,22 @@ export function GeneralSection({
             void form.runUpdate({ maxChatPanes: Number(value) })
           }}
           {...form.defaultMark('maxChatPanes')}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="Editor">
+        <SelectField
+          id="preferred-editor"
+          title="Open files in"
+          hint="Where Open in editor goes: from the Files and Changes tabs, a task’s menu, and Ctrl+click on a file in an answer."
+          value={settings.preferredEditor ?? 'auto'}
+          options={editorOptions}
+          width={220}
+          disabled={form.formLocked}
+          onChange={(preferredEditor) => {
+            void form.runUpdate({ preferredEditor })
+          }}
+          {...form.defaultMark('preferredEditor')}
         />
       </SettingsGroup>
 
@@ -140,3 +175,16 @@ export function GeneralSection({
     </SettingsStack>
   )
 }
+
+const EDITOR_CHOICES: readonly PreferredEditor[] = [
+  'auto',
+  'vscode',
+  'cursor',
+  'windsurf',
+  'zed',
+  'sublime',
+  'webstorm',
+  'idea',
+  'pycharm',
+  'system'
+]

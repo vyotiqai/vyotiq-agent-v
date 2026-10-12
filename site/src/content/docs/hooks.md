@@ -1,11 +1,11 @@
 ---
 title: Hooks
-description: Run your own commands when a task starts, when you send an instruction, before and after the agent's tool calls, when it is about to finish, and when a task needs you.
+description: Run your own commands when a task starts, when you send an instruction, before and after the agent's tool calls, before older work is summarized, when it is about to finish, when a task needs you, and when a turn ends.
 group: Extend
 order: 4
 ---
 
-Hooks are commands you set up to run around the agent's work: a check before it runs a shell command, a linter after it edits a file, a test run before it says it is done. The file follows Claude Code's format for the six events below, so a Claude Code `settings.json` can be used as it is: its other keys are ignored, and so are events Agent V doesn't run and hooks that are not commands (such as a `prompt` hook). The rest of the file still runs, and what was skipped is logged once. Matchers name Agent V's tools, such as `terminal` and `edit`, not Claude Code's `Bash` or `Edit`.
+Hooks are commands you set up to run around the agent's work: a check before it runs a shell command, a linter after it edits a file, a test run before it says it is done. The file follows Claude Code's format for the nine events below, so a Claude Code `settings.json` can be used as it is: its other keys are ignored, and so are events Agent V doesn't run and hooks that are not commands (such as a `prompt` hook). The rest of the file still runs, and what was skipped is logged once. Matchers name Agent V's tools, such as `terminal` and `edit`, not Claude Code's `Bash` or `Edit`.
 
 ## Where hooks come from
 
@@ -16,7 +16,17 @@ Hooks are commands you set up to run around the agent's work: a check before it 
 
 Both files run, yours first, one hook at a time.
 
-A workspace's hooks came with the folder, so the first time a task starts there, Agent V asks: "This workspace's .vyotiq/hooks.json runs commands around the agent's work", listing up to eight of its commands, with "Run them" and "Don't run them". Your answer is kept for that exact file. If the file changes, you are asked again. [Instances](/docs/instances) never ask; they run a workspace's hooks only once you have allowed them. Answers are stored in `hook-trust.json` in the app data folder; there is no setting for them in the app.
+A workspace's hooks came with the folder, so the first time a task starts there, Agent V asks: "This workspace's .vyotiq/hooks.json runs commands around the agent's work", listing up to eight of its commands, with "Run them" and "Don't run them". Your answer is kept for that exact file. If the file changes, you are asked again. [Instances](/docs/instances) never ask; they run a workspace's hooks only once you have allowed them. Answers are stored in `hook-trust.json` in the app data folder.
+
+## Hooks in Settings
+
+Settings, "Tools", "Hooks" shows:
+
+- **Your hooks**: `hooks.json` in the app data folder, and each command it runs. "Open file" opens it in your editor; "Create file" writes an empty one first.
+- **The open workspace's hooks**: `.vyotiq/hooks.json`, its commands, and where it stands: allowed, denied, not decided, or changed since you decided. "Allow" and "Deny" decide for the file as it is now.
+- **Not run here (N)**: under either file, the entries Agent V skipped, such as an event it doesn't run or a `prompt` hook, so a Claude Code file shows what it leaves out.
+- **Remembered decisions**: every workspace you answered for. Forget one and its next task asks again.
+- **Recent runs**: each hook that ran since the app started, newest first, with its event, command, how it ended (ok, blocked, an exit code, timed out) and how long it took. Hover a failed one for the start of its error output.
 
 ## The file
 
@@ -35,7 +45,7 @@ A workspace's hooks came with the folder, so the first time a task starts there,
 }
 ```
 
-`matcher` is a regular expression over the whole tool name, case-sensitive. Leave it out, or use `*`, to match every tool. For `SessionStart` it matches the source, `startup` or `resume`. Stop, Notification and UserPromptSubmit hooks ignore it. `timeout` is in seconds; the default is 60, and anything over 600 runs with 600.
+`matcher` is a regular expression over the whole tool name, case-sensitive. Leave it out, or use `*`, to match every tool. For `SessionStart` it matches the source, `startup` or `resume`; for `PreCompact` the trigger, `auto` or `manual`; for `SessionEnd` the reason, `done`, `cancelled` or `error`. Stop, SubagentStop, Notification and UserPromptSubmit hooks ignore it. `timeout` is in seconds; the default is 60, and anything over 600 runs with 600.
 
 ## What each event does
 
@@ -46,7 +56,10 @@ A workspace's hooks came with the folder, so the first time a task starts there,
 | `PreToolUse` | Before a tool runs, after any approval | The call is blocked and later hooks are skipped. The agent is told it was blocked, with what the hook printed to stderr. |
 | `PostToolUse` | After a tool ran | stderr is added to the result the agent reads |
 | `Stop` | When the agent is about to finish | The agent keeps going, with stderr as the reason. At most three times per turn. Stop hooks do not run in instances or when a follow-up is waiting. |
+| `SubagentStop` | When an [instance](/docs/instances) the agent started is about to finish, in place of `Stop` | The instance keeps going, with stderr as the reason. At most three times per turn. |
+| `PreCompact` | Before older work is folded into a summary: `auto` when the context fills, `manual` for Compact or `/compact` | Ignored. The summary goes ahead. |
 | `Notification` | When a task asks for approval or asks you a question | Ignored |
+| `SessionEnd` | When a turn ends, however it ended. It doesn't wait for the hook. | Ignored |
 
 Exit code 0 means go ahead. Any other exit code is logged and changes nothing. [Instances](/docs/instances) run neither `SessionStart` nor `UserPromptSubmit`.
 
@@ -71,7 +84,9 @@ Each hook gets one JSON object on stdin:
 | `hook_event_name` | Yes | The event's name |
 | `tool_name`, `tool_input` | Tool events | |
 | `tool_response` | `PostToolUse` | `ok` and `content` |
-| `stop_hook_active` | `Stop` | `true` when a Stop hook already kept this turn going |
+| `stop_hook_active` | `Stop`, `SubagentStop` | `true` when a Stop hook already kept this turn going |
+| `trigger` | `PreCompact` | `auto` or `manual` |
+| `reason` | `SessionEnd` | `done`, `cancelled` or `error` |
 | `message` | `Notification` | What the task needs |
 | `prompt` | `UserPromptSubmit` | The instruction as you typed it |
 | `source` | `SessionStart` | `startup` or `resume` |

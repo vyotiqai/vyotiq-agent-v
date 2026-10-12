@@ -32,6 +32,10 @@ export type PanelResizeHandleProps = {
   defaultValue?: number
   className?: string
   disabled?: boolean
+  /** Human-readable current size, heard as the separator's value text. */
+  valueText?: string
+  /** Id of the pane this handle resizes, exposed as aria-controls. */
+  controlsId?: string
   /**
    * The handle sits on the hairline between two flush panes and takes no room
    * in the row. The pane after it draws the rule as a border, which stays one
@@ -62,6 +66,8 @@ export function PanelResizeHandle({
   defaultValue,
   className,
   disabled = false,
+  valueText,
+  controlsId,
   hairline = false
 }: PanelResizeHandleProps) {
   const [dragging, setDragging] = useState(false)
@@ -190,6 +196,8 @@ export function PanelResizeHandle({
       aria-valuenow={value}
       aria-valuemin={min}
       aria-valuemax={max}
+      aria-valuetext={valueText}
+      aria-controls={controlsId}
       aria-disabled={disabled || undefined}
       tabIndex={disabled ? -1 : 0}
       data-panel-resize-handle

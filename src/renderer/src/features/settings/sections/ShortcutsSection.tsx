@@ -90,8 +90,9 @@ export function ShortcutsSection({ form }: { form?: SettingsFormState }) {
               const rowError = error?.id === id ? error.message : null
               return (
                 <div key={entry.id} data-settings-field={`shortcut-${entry.id}`} className="border-b border-border">
-                  <div className="flex h-9 items-center gap-3 text-sm text-fg">
-                    <span className={cn('min-w-0 flex-1 truncate', changed ? 'text-fg-strong' : undefined)}>{entry.title}</span>
+                  {/* A long title wraps to a second line instead of losing its end. */}
+                  <div className="flex min-h-9 items-center gap-3 py-1.5 text-sm text-fg">
+                    <span className={cn('min-w-0 flex-1 leading-snug', changed ? 'text-fg-strong' : undefined)}>{entry.title}</span>
                     {listening ? (
                       <span className="shrink-0 text-xs text-accent" role="status">
                         Press keys…

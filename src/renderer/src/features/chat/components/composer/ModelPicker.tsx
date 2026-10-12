@@ -1,4 +1,5 @@
-import { useCallback, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { OPEN_MODEL_PICKER_EVENT, type OpenModelPickerDetail } from './modelPickerEvent'
 import { createPortal } from 'react-dom'
 import {
   catalogProviderId,
@@ -83,7 +84,13 @@ export type ModelPickerProps = {
   placement?: 'up' | 'down'
 }
 
-type Row = { provider: ProviderIdAny; opt: ModelPickerOption; manual?: boolean }
+type Row = {
+  provider: ProviderIdAny
+  opt: ModelPickerOption
+  manual?: boolean
+  /** The model in use, which this server's list does not have. */
+  unlisted?: boolean
+}
 
 /** What a model can do, in words — for a hover title, never a row of glyphs. */
 function capabilityWords(meta?: ModelInfo): string[] {
@@ -158,6 +165,20 @@ export function ModelPicker(props: ModelPickerProps) {
     },
     [provider, onBrowseProvider]
   )
+  // A provider error's "Switch model" opens this picker — the one in its pane.
+  useEffect(() => {
+    const onRequest = (event: Event): void => {
+      const detail = (event as CustomEvent<OpenModelPickerDetail>).detail
+      const trigger = triggerRef.current
+      if (!trigger || event.defaultPrevented || locked) return
+      if (detail?.pane && !detail.pane.contains(trigger)) return
+      event.preventDefault()
+      trigger.scrollIntoView?.({ block: 'nearest' })
+      onOpenChange(true)
+    }
+    window.addEventListener(OPEN_MODEL_PICKER_EVENT, onRequest)
+    return () => window.removeEventListener(OPEN_MODEL_PICKER_EVENT, onRequest)
+  }, [locked, onOpenChange])
   const { position, close } = useDropdownMenu({
     open,
     onOpenChange,
@@ -246,8 +267,15 @@ export function ModelPicker(props: ModelPickerProps) {
     const seedIds = new Set((seedsByProvider[tab] ?? []).map((o) => o.value))
     base.filter((o) => seedIds.has(o.value)).forEach(take)
     base.forEach(take)
-    return ordered.map((opt) => ({ provider: tab, opt }))
-  }, [query, providers, optionsByProvider, tab, favoriteModels, recentModels, seedsByProvider])
+    const out: Row[] = ordered.map((opt) => ({ provider: tab, opt }))
+    // The model in use, when the server lists others but not it: said, last,
+    // so a stale default is not mistaken for one it serves.
+    const current = model ? modelSelectionKey(provider, model) : ''
+    if (current && tab === provider && base.length > 0 && !seen.has(current)) {
+      out.push({ provider: tab, opt: { value: current, label: model }, unlisted: true })
+    }
+    return out
+  }, [query, providers, optionsByProvider, tab, favoriteModels, recentModels, seedsByProvider, model, provider])
 
   const browsedWarning = query.trim() ? null : (props.warningsByProvider[tab] ?? null)
 
@@ -602,6 +630,11 @@ function ModelRow({
         {row.manual ? row.opt.label : modelId}
         {capabilityWords(meta).length > 0 ? <span className="sr-only">{`, ${capabilityWords(meta).join(', ')}`}</span> : null}
       </span>
+      {row.unlisted ? (
+        <span className="shrink-0 text-caption text-warning" data-model-unlisted>
+          Not reported by this server
+        </span>
+      ) : null}
       {selected ? <Icon name="check" size={12} className="shrink-0 text-fg-strong" /> : null}
       {row.manual ? null : (
         <button

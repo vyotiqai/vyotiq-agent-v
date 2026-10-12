@@ -15,7 +15,8 @@ const execFile = promisify(execFileCb)
 
 const DEVICE_CODE_URL = 'https://github.com/login/device/code'
 const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token'
-const DEFAULT_SCOPE = 'repo read:org gist'
+// What gh needs to accept the token (repo, read:org) and nothing more.
+const DEFAULT_SCOPE = 'repo read:org'
 const GH_DEVICE_LOGIN_URL = 'https://github.com/login/device'
 /**
  * Vyotiq's official GitHub OAuth app (owned by github.com/vyotiqai).

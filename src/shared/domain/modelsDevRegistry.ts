@@ -1,4 +1,5 @@
 import type { ProviderId } from '../ipc/schemas/providers'
+import type { ModelPrice } from '../pricing/modelPrices'
 import { coreModelId } from './modelContextWindows'
 
 /**
@@ -39,6 +40,8 @@ type ModelsDevModel = {
   tool_call?: boolean
   modalities?: { input?: string[]; output?: string[] }
   limit?: { context?: number; output?: number }
+  /** USD per 1M tokens, as the serving provider charges them. */
+  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number; reasoning?: number }
 }
 
 /** One model as a registry provider lists it — what a model picker needs. */
@@ -67,6 +70,10 @@ type RegistryProvider = {
   core: Map<string, number>
   /** Every listed model, in registry order (ids keep their case). */
   listings: ModelsDevListing[]
+  /** Full model id (lowercased) → its price at this provider. */
+  prices: Map<string, ModelPrice>
+  /** Core id → price; null when the provider lists two prices under it. */
+  corePrices: Map<string, ModelPrice | null>
 }
 
 type RegistryIndex = {
@@ -76,6 +83,8 @@ type RegistryIndex = {
   byHost: Map<string, string[]>
   /** Core model id (lowercased) → per-provider distinct context values. */
   byCore: Map<string, Map<string, Set<number>>>
+  /** Core model id → every distinct price any provider lists for it (by its key). */
+  byCorePrice: Map<string, Map<string, ModelPrice>>
 }
 
 /** models.dev registry ids for this app's fixed providers. */
@@ -107,16 +116,58 @@ function hostOf(rawUrl: string | undefined): string | undefined {
   }
 }
 
+function rate(n: unknown): number | undefined {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+/** The registry's cost block as a ModelPrice; null without both input and output rates. */
+function priceOf(cost: ModelsDevModel['cost']): ModelPrice | null {
+  const input = rate(cost?.input)
+  const output = rate(cost?.output)
+  if (input === undefined || output === undefined) return null
+  const cachedInput = rate(cost?.cache_read)
+  const cacheWrite = rate(cost?.cache_write)
+  return {
+    input,
+    output,
+    ...(cachedInput !== undefined ? { cachedInput } : {}),
+    ...(cacheWrite !== undefined ? { cacheWrite } : {})
+  }
+}
+
+function priceKey(p: ModelPrice): string {
+  return `${p.input}/${p.output}/${p.cachedInput ?? ''}/${p.cacheWrite ?? ''}`
+}
+
 function buildIndex(json: Record<string, ModelsDevProvider>): RegistryIndex {
   const providersById = new Map<string, RegistryProvider>()
   const byHost = new Map<string, string[]>()
   const byCore = new Map<string, Map<string, Set<number>>>()
+  const byCorePrice = new Map<string, Map<string, ModelPrice>>()
   for (const [pid, provider] of Object.entries(json)) {
     const models = new Map<string, number>()
     const core = new Map<string, number>()
     const listings: ModelsDevListing[] = []
+    const prices = new Map<string, ModelPrice>()
+    const corePrices = new Map<string, ModelPrice | null>()
     for (const raw of Object.values(provider.models ?? {})) {
       if (!raw?.id) continue
+      const price = priceOf(raw.cost)
+      if (price) {
+        const fullId = raw.id.trim().toLowerCase()
+        prices.set(fullId, price)
+        const coreId = coreModelId(fullId)
+        const seen = corePrices.get(coreId)
+        // Two prices under one core id inside a provider: no core answer.
+        if (seen === undefined) corePrices.set(coreId, price)
+        else if (seen && priceKey(seen) !== priceKey(price)) corePrices.set(coreId, null)
+        let distinct = byCorePrice.get(coreId)
+        if (!distinct) {
+          distinct = new Map()
+          byCorePrice.set(coreId, distinct)
+        }
+        distinct.set(priceKey(price), price)
+      }
       const out = raw.limit?.output
       listings.push({
         id: raw.id.trim(),
@@ -150,7 +201,7 @@ function buildIndex(json: Record<string, ModelsDevProvider>): RegistryIndex {
       values.add(ctx)
     }
     if (models.size === 0 && listings.length === 0) continue
-    providersById.set(pid, { id: pid, models, core, listings })
+    providersById.set(pid, { id: pid, models, core, listings, prices, corePrices })
     const host = hostOf(provider.api)
     if (host) {
       const ids = byHost.get(host)
@@ -161,7 +212,7 @@ function buildIndex(json: Record<string, ModelsDevProvider>): RegistryIndex {
       }
     }
   }
-  return { fetchedAt: Date.now(), providersById, byHost, byCore }
+  return { fetchedAt: Date.now(), providersById, byHost, byCore, byCorePrice }
 }
 
 async function fetchRegistry(signal?: AbortSignal): Promise<RegistryIndex> {
@@ -238,6 +289,61 @@ function lookupContextWindow(
     if (values.size === 1) return values.values().next().value
   }
   return undefined
+}
+
+function candidateProviders(registry: RegistryIndex, opts?: { providerId?: ProviderId; apiHost?: string }): string[] {
+  const candidates: string[] = []
+  if (opts?.apiHost) {
+    for (const pid of registry.byHost.get(opts.apiHost.toLowerCase()) ?? []) candidates.push(pid)
+  }
+  const mapped = opts?.providerId ? REGISTRY_ID_BY_PROVIDER[opts.providerId] : undefined
+  if (mapped && !candidates.includes(mapped)) candidates.push(mapped)
+  return candidates
+}
+
+function lookupPrice(
+  registry: RegistryIndex,
+  modelId: string,
+  opts?: { providerId?: ProviderId; apiHost?: string }
+): ModelPrice | null {
+  const full = modelId.trim().toLowerCase()
+  if (!full) return null
+  const core = coreModelId(full)
+  // Serving-specific first: the provider behind this endpoint's host, then
+  // the registry's entry for the app's fixed provider.
+  for (const pid of candidateProviders(registry, opts)) {
+    const provider = registry.providersById.get(pid)
+    if (!provider) continue
+    const price = provider.prices.get(full) ?? provider.corePrices.get(core)
+    if (price) return price
+  }
+  // No serving match: only a price every listing agrees on, as for windows.
+  const distinct = registry.byCorePrice.get(core)
+  if (distinct && distinct.size === 1) return distinct.values().next().value ?? null
+  return null
+}
+
+/**
+ * A model's price from the registry as loaded now — never a fetch, so it can
+ * sit behind a synchronous price lookup. Null when the registry has not
+ * loaded, the model is unlisted, or its prices disagree.
+ */
+export function lookupModelsDevPrice(
+  modelId: string,
+  opts?: { providerId?: ProviderId; apiHost?: string }
+): ModelPrice | null {
+  if (!index) return null
+  return lookupPrice(index, modelId, opts)
+}
+
+/** Whether the registry is loaded (a price lookup can answer). */
+export function modelsDevRegistryLoaded(): boolean {
+  return index !== null
+}
+
+/** The load under way, if one is: something to wait on without starting a fetch. */
+export function modelsDevRegistryPending(): Promise<unknown> | null {
+  return inflight
 }
 
 /**

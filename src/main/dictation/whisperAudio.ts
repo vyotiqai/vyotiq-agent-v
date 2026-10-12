@@ -99,9 +99,11 @@ export function transcriptText(raw: { text?: string } | Array<{ text?: string }>
  * No words is an answer (`''`), not a failure: a take sends pauses and breaths
  * too, and the caller decides what an empty piece means.
  */
-export async function invokeWhisperAsr(asr: WhisperAsrFn, pcm: unknown): Promise<string> {
+export async function invokeWhisperAsr(asr: WhisperAsrFn, pcm: unknown, opts: { language?: string } = {}): Promise<string> {
   const audio = pcmPayloadToFloat32(pcm)
-  const raw = await asr(audio, { ...WHISPER_ASR_OPTIONS, ...whisperDecodeLimits(audio.length / 16000) })
+  // A language hint only for a multilingual model: an English-only one refuses `language`.
+  const hint = opts.language ? { language: opts.language, task: 'transcribe' } : {}
+  const raw = await asr(audio, { ...WHISPER_ASR_OPTIONS, ...whisperDecodeLimits(audio.length / 16000), ...hint })
   return transcriptText(raw)
 }
 
@@ -134,8 +136,13 @@ export async function invokeMoonshineAsr(asr: WhisperAsrFn, pcm: unknown): Promi
   return parts.join(' ')
 }
 
-export function invokeAsr(asr: WhisperAsrFn, pcm: unknown, backend: 'whisper' | 'moonshine'): Promise<string> {
-  return backend === 'moonshine' ? invokeMoonshineAsr(asr, pcm) : invokeWhisperAsr(asr, pcm)
+export function invokeAsr(
+  asr: WhisperAsrFn,
+  pcm: unknown,
+  backend: 'whisper' | 'moonshine',
+  opts: { language?: string } = {}
+): Promise<string> {
+  return backend === 'moonshine' ? invokeMoonshineAsr(asr, pcm) : invokeWhisperAsr(asr, pcm, opts)
 }
 
 /**

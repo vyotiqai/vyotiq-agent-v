@@ -32,6 +32,8 @@ export type SlashClientHandlers = {
   ) => void | Promise<unknown>
   onOpenFile?: (path: string) => void | Promise<unknown>
   onNotice?: (message: string) => void
+  /** `/help`: reopen the slash menu, which is the list of commands. */
+  onHelp?: () => void
 }
 
 export async function executeSlashResolveResult(
@@ -54,6 +56,10 @@ export async function executeSlashResolveResult(
     case 'open_file':
       await handlers.onOpenFile?.(result.path)
       return 'handled'
+    case 'notice':
+      // 'failed' keeps the draft, so a typo can be fixed in place.
+      handlers.onNotice?.(result.message)
+      return 'failed'
     default: {
       const _exhaustive: never = result
       return _exhaustive
@@ -131,6 +137,9 @@ async function runClientAction(
       const r = await handlers.onLoopStatus?.()
       return r !== false
     }
+    case 'help':
+      handlers.onHelp?.()
+      return true
     case 'add_dir': {
       if (!handlers.onAddDir) return false
       const r = await handlers.onAddDir(opts.trailingText?.trim() || undefined)

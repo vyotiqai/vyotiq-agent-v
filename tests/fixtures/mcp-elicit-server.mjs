@@ -21,6 +21,29 @@ server.registerTool('book', { description: 'Book a table, asking for the details
   return { content: [{ type: 'text', text: JSON.stringify(result) }] }
 })
 
+for (const [name, url] of [
+  ['signin', 'https://example.com/auth?state=1'],
+  ['signin-plain', 'http://example.com/auth']
+]) {
+  server.registerTool(name, { description: 'Ask the person to open a sign-in page' }, async () => {
+    const result = await server.server.elicitInput({ mode: 'url', message: 'Sign in to finish booking', url, elicitationId: `${name}-1` })
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+  })
+}
+
+server.registerTool('summarize', { description: 'Ask the client model for a summary' }, async () => {
+  try {
+    const result = await server.server.createMessage({
+      messages: [{ role: 'user', content: { type: 'text', text: 'Summarize: the table is booked for four.' } }],
+      systemPrompt: 'Answer in five words.',
+      maxTokens: 50
+    })
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+  } catch (err) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: String(err?.message ?? err) }) }] }
+  }
+})
+
 let grown = false
 server.registerTool('grow', { description: 'Add a tool' }, async () => {
   if (!grown) {

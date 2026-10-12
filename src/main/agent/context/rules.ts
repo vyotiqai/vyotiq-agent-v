@@ -1,5 +1,6 @@
-import { join, sep } from 'path'
+import { dirname, join, relative, sep } from 'path'
 import {
+  instructionImports,
   isAlwaysApplyRule,
   isRootInstructionFilePath,
   parseRuleFrontmatter,
@@ -18,6 +19,7 @@ import {
 } from '../workspaceFileScan'
 import { wrapPromptSection } from '../promptSections'
 import { wrapUntrustedContent } from '../untrustedContent'
+import { resolveInsideWorkspace } from '../../workspace/safePath'
 
 // The parser and the inject policy live in @shared/rules so the composer and
 // the rule editor read frontmatter exactly the way the agent does.
@@ -36,6 +38,32 @@ export type RuleFile = { path: string; content: string }
 type CacheEntry = { fingerprint: string; files: RuleFile[]; builtAt: number }
 
 const cache = new Map<string, CacheEntry>()
+
+/**
+ * Rule files switched off in a workspace (Extensions → a rule → its switch),
+ * by workspace-relative path. Installed by main at startup from the
+ * workspace's settings override; unset (tests, headless), nothing is off.
+ */
+let rulesOffSource: (workspacePath: string) => ReadonlySet<string> = () => new Set()
+
+export function setRulesOffSource(source: (workspacePath: string) => ReadonlySet<string>): void {
+  rulesOffSource = source
+}
+
+function slashPath(path: string): string {
+  return path.split(sep).join('/').replace(/\\/g, '/')
+}
+
+function withoutRulesOff(workspacePath: string, files: RuleFile[]): RuleFile[] {
+  let off: ReadonlySet<string>
+  try {
+    off = rulesOffSource(workspacePath)
+  } catch {
+    return files
+  }
+  if (off.size === 0) return files
+  return files.filter((file) => !off.has(slashPath(file.path)))
+}
 
 export function clearRulesCache(workspacePath?: string): void {
   if (!workspacePath) {
@@ -77,6 +105,39 @@ function fingerprintFor(workspacePath: string): Promise<string> {
 
 function readRuleFile(filePath: string): Promise<string | null> {
   return readCappedFile(filePath, { trim: true })
+}
+
+/** How deep `@path` imports follow other imports (Claude Code stops at five hops). */
+const MAX_IMPORT_DEPTH = 3
+
+/**
+ * Add the files a root instruction file imports with `@path`, each as its own
+ * entry right after the file that named it. Only files inside the workspace
+ * (symlinks resolved) are read; a path that escapes it, or is missing, is skipped.
+ */
+async function pushImports(
+  workspacePath: string,
+  fromRel: string,
+  content: string,
+  files: RuleFile[],
+  depth = 1
+): Promise<void> {
+  if (depth > MAX_IMPORT_DEPTH) return
+  for (const ref of instructionImports(content)) {
+    if (files.length >= MAX_RULE_FILES) return
+    let abs: string
+    try {
+      abs = resolveInsideWorkspace(workspacePath, join(dirname(fromRel), ref))
+    } catch {
+      continue
+    }
+    const rel = slashPath(relative(workspacePath, abs))
+    if (files.some((file) => slashPath(file.path) === rel)) continue
+    const raw = await readRuleFile(abs)
+    if (!raw) continue
+    files.push({ path: rel, content: raw })
+    await pushImports(workspacePath, rel, raw, files, depth + 1)
+  }
 }
 
 /**
@@ -124,7 +185,7 @@ export async function readWorkspaceRules(
   const key = `${workspacePath}\0${focusedFile ?? ''}`
   const cached = cache.get(key)
   if (cached && cached.fingerprint === fingerprint && Date.now() - cached.builtAt < CACHE_TTL_MS) {
-    return cached.files
+    return withoutRulesOff(workspacePath, cached.files)
   }
 
   const files: RuleFile[] = []
@@ -133,6 +194,7 @@ export async function readWorkspaceRules(
     if (!raw) continue
     // Root files have no Cursor frontmatter contract — inject as-is.
     files.push({ path: name, content: raw })
+    await pushImports(workspacePath, name, raw, files)
   }
   for (const dir of RULE_DIRS) {
     await collectRuleFiles(workspacePath, dir, files, (raw) =>
@@ -141,7 +203,7 @@ export async function readWorkspaceRules(
   }
 
   cache.set(key, { fingerprint, files, builtAt: Date.now() })
-  return files
+  return withoutRulesOff(workspacePath, files)
 }
 
 export type WorkspaceRuleSources = {

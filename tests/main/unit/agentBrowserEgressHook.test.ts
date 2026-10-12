@@ -43,6 +43,8 @@ vi.mock('electron', () => ({
       setPermissionCheckHandler: vi.fn(),
       webRequest: {
         onHeadersReceived: vi.fn(),
+        onCompleted: vi.fn(),
+        onErrorOccurred: vi.fn(),
         onBeforeRequest: (listener: BeforeRequestListener) => {
           hooks.beforeRequest.push(listener)
         }

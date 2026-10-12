@@ -86,6 +86,12 @@ export type ExtensionItem = {
   scope?: ExtensionScope
   /** What the agent already does without this package, when the package repeats it. */
   builtIn?: string
+  /**
+   * Skills: other copies of the same skill, by where they live. The agent
+   * uses this one (a project copy over yours over a package's), so they're
+   * folded into it, as the prompt folds them.
+   */
+  alsoIn?: string[]
 }
 
 /**
@@ -368,6 +374,8 @@ export function buildExtensionItems(input: ExtensionInputs): ExtensionItem[] {
     })
   }
 
+  foldShadowedSkills(out)
+
   for (const rule of input.userRules) {
     const text = rule.body.trim()
     out.push({
@@ -405,6 +413,52 @@ export function buildExtensionItems(input: ExtensionInputs): ExtensionItem[] {
   }
 
   return out
+}
+
+/** `Design level-up` and `design-level-up` are one skill, as the prompt keys them. */
+function skillKey(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+/** Which copy the agent uses: a project's, then yours, then a package's (skills/index.ts dedupeSkillsByName). */
+function skillRank(item: ExtensionItem): number {
+  if (item.localSkill) return item.localSkill.source === 'project' ? 3 : 2
+  return 1
+}
+
+/** Where a folded-away copy lives, in a few words. */
+function skillPlace(item: ExtensionItem): string {
+  const local = item.localSkill
+  if (!local) return item.by
+  const dir = local.relativePath.replace(/\\/g, '/').split('/').slice(0, -2).join('/')
+  return dir || item.by
+}
+
+/**
+ * One row per skill name. The same skill installed twice — a bundled package
+ * and a copy in ~/.claude/skills — listed twice though the agent sees one;
+ * the copy it uses stays, and says where the others are.
+ */
+function foldShadowedSkills(out: ExtensionItem[]): void {
+  const keep = new Map<string, number>()
+  for (let i = 0; i < out.length; i++) {
+    const item = out[i]!
+    if (item.kind !== 'skill') continue
+    const key = skillKey(item.localSkill?.name ?? item.name)
+    const idKey = skillKey(item.id)
+    const at = keep.get(key) ?? keep.get(idKey)
+    if (at === undefined) {
+      keep.set(key, i)
+      keep.set(idKey, i)
+      continue
+    }
+    const held = out[at]!
+    const [winner, loser] = skillRank(item) > skillRank(held) ? [item, held] : [held, item]
+    winner.alsoIn = [...(winner.alsoIn ?? []), skillPlace(loser), ...(loser.alsoIn ?? [])]
+    out[at] = winner
+    out[i] = null as unknown as ExtensionItem
+  }
+  for (let i = out.length - 1; i >= 0; i--) if (out[i] == null) out.splice(i, 1)
 }
 
 export function extensionMatchesQuery(item: ExtensionItem, query: string): boolean {

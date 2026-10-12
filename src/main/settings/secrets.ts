@@ -259,6 +259,49 @@ export function secretStatus(): SecretsStatus {
   return { encryptionAvailable, keys, loadError: secretsFileLoadError || undefined }
 }
 
+/** Keys for services a tool talks to that are not model providers (web_search's APIs). */
+export const TOOL_SECRET_NAMES = ['brave', 'tavily', 'proxy', 'notify'] as const
+export type ToolSecretName = (typeof TOOL_SECRET_NAMES)[number]
+
+function toolSecretKey(name: ToolSecretName): string {
+  return `tool-secret:${name}`
+}
+
+export function setToolSecret(name: ToolSecretName, key: string): void {
+  const trimmed = key.trim()
+  if (!trimmed) throw new Error('The key cannot be empty')
+  const data = readMutableSecretsFile()
+  data[toolSecretKey(name)] = encryptBlob(trimmed)
+  writeFile(data)
+  logger.info('Tool key saved', { scope: 'secrets', serverId: name })
+}
+
+export function clearToolSecret(name: ToolSecretName): void {
+  const data = readMutableSecretsFile()
+  const key = toolSecretKey(name)
+  if (!(key in data)) return
+  delete data[key]
+  writeFile(data)
+  logger.info('Tool key cleared', { scope: 'secrets', serverId: name })
+}
+
+export function getToolSecret(name: ToolSecretName): string | null {
+  const encrypted = readFile()[toolSecretKey(name)]
+  if (!encrypted) return null
+  return decryptBlobCached(encrypted)
+}
+
+/** Which tool keys are saved (none is decrypted). */
+export function toolSecretStatus(): Record<ToolSecretName, boolean> {
+  const data = readFile()
+  return Object.fromEntries(
+    TOOL_SECRET_NAMES.map((name) => {
+      const blob = data[toolSecretKey(name)]
+      return [name, typeof blob === 'string' && blob.length > 0]
+    })
+  ) as Record<ToolSecretName, boolean>
+}
+
 /** Store a Bearer token for an MCP server id (OS encrypted). */
 export function setMcpAuthToken(serverId: string, token: string): void {
   const id = serverId.trim()

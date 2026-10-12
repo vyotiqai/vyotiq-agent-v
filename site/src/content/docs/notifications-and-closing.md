@@ -1,6 +1,6 @@
 ---
 title: Notifications and closing
-description: Where Agent V tells you things, sound and quiet hours, budget alerts, and what closing the window or quitting does to running tasks.
+description: Where Agent V tells you things, notifications on your phone, sound and quiet hours, budget alerts, and what closing the window or quitting does to running tasks.
 group: Reference
 order: 6
 ---
@@ -19,6 +19,22 @@ Under "Delivery":
 | "Quiet hours" | No desktop alerts between "From and to" (local time; a range can run past midnight). The inbox still fills |
 
 Under "Events", choose which of these notify: "A task needs you", "A task finished", "A task failed", and "System alerts" ("When the window recovers from a crash, an update is ready to install, or spend reaches a budget"). Budgets are set in Settings, "Agent", "Cost"; see [Usage and cost](/docs/usage-and-cost#daily-and-monthly-budgets).
+
+## On your phone
+
+Under "On your phone", Agent V can send the same notifications off this computer, so a task that needs you reaches you away from the desk.
+
+| Setting | What it does |
+| --- | --- |
+| "Send to your phone" | "Off", "ntfy" or "Webhook" |
+| "Address" | Where to send them. It is kept in the key vault, not in `settings.json`, since anyone holding it can post to you |
+| "When" | "When away" (the default) sends only while the window is in the background, minimized or in the tray; "Always" sends every one |
+| "Check it" | "Send a test" sends one message now, and says what the server answered if it refused |
+
+- **ntfy:** install the ntfy app on your phone, subscribe to a topic, and give Agent V the same topic's address, such as `https://ntfy.sh/your-topic`. Pick a topic name nobody would guess: on the public server, anyone who knows it can read it. A self-hosted ntfy server works the same way. A task that needs you or failed arrives at high priority.
+- **Webhook:** Agent V posts one JSON body to the address, with `text` (which Slack reads), `content` (which Discord reads) and `kind`, `title`, `body` and `at` for a script of your own. A Slack or Discord incoming-webhook address works as it is.
+
+The events are the ones chosen under "Events", and quiet hours hold phone notifications back as they do desktop alerts.
 
 ## Closing the window
 

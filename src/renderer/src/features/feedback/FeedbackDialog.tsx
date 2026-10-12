@@ -70,7 +70,7 @@ const MAIL_LINK =
 function buildFeedbackText(input: FeedbackComposeInput): { subject: string; body: string } {
   const label = FEEDBACK_TYPES.find((t) => t.value === input.type)?.label ?? 'Feedback'
   return {
-    subject: `[Vyotiq] ${label}: ${input.title}`,
+    subject: `[Agent V] ${label}: ${input.title}`,
     body: `${input.message}\n\n(Feedback type: ${label})`
   }
 }

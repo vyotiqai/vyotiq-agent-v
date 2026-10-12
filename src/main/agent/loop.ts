@@ -34,7 +34,9 @@ import {
 } from './streamRetry'
 import { isStreamIdleTimeoutError } from './providers/sse'
 import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
-import { estimateStepCost, resolveModelPrice } from '../../shared/pricing/modelPrices'
+import { estimateStepCost } from '../../shared/pricing/modelPrices'
+import { resolveRunModelPrice } from './pricing'
+import { noteSpendForBudget } from './spendBudget'
 import { resolveServiceTier } from '../../shared/domain/modelSelection'
 import { recallRunModelSelection, rememberRunModelSelection } from './runModelSelection'
 import { stripToolShapedAssistantText } from '../../shared/transcript'
@@ -51,7 +53,7 @@ import {
   taskSpendState,
   type TaskSpendState
 } from './taskSpend'
-import { persistAlwaysAllow } from './toolApprovalStore'
+import { persistAllowRules, persistAlwaysAllow } from './toolApprovalStore'
 import { persistTaskAllow, readTaskAllowlist } from './taskApprovalStore'
 import { createLiveEventQueue, pushLiveEvent, shiftLiveEvent } from './liveEventQueue'
 import { getSecret, hasStoredSecretBlob, secretStatus } from '@main/settings/secrets'
@@ -66,6 +68,8 @@ import {
   applyFoldedMessagesWatermark,
   buildStepToolCatalog,
   splitToolCatalogDetail,
+  deferredBuiltinsLine,
+  wireBuiltinTools,
   shouldTriggerAutoCompact,
   type CompactionRecord
 } from './context'
@@ -74,6 +78,7 @@ import { trimToolResults } from './context/toolTrim'
 import { KEEP_LAST_TOOL_RESULTS, TOOL_RESULT_TRIM_SLACK } from './context/types'
 import { promptPrefixFingerprint } from './context/promptPrefix'
 import { autoCompactLlmEvents } from './compactRun'
+import { dropInapplicableTools, mayHaveGitRemote, mayHaveNotebooks } from './toolApplicability'
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
   proactiveCompactThresholdTokens
@@ -106,7 +111,7 @@ import {
   seedKnownPathsFromMessages,
   seedMutationPathsFromMessages
 } from './loopPolicy'
-import { disposeTerminalSessionsForInvoke } from './tools/terminalSessions'
+import { disposeTerminalSessionsForInvoke, keepLiveTerminalSessionsForInvoke } from './tools/terminalSessions'
 import { getProvider } from './providers'
 import { resolveModelInfo } from './modelResolve'
 import {
@@ -224,7 +229,7 @@ import { AGENT_TOOLS } from './types'
 import { canonicalizeAgentToolName } from './schemas/tools'
 import { recoverTextToolCalls } from './textToolCalls'
 import { attachedInstructionSources, NestedInstructions } from './context/nestedInstructions'
-import { loadRunHooks } from './hooks'
+import { loadRunHooks, type RunHooks } from './hooks'
 import { agentBuiltToolDefinitions } from './agentTools/loader'
 import {
   getMcpServerStatus,
@@ -321,6 +326,19 @@ const CONTEXT_OVERFLOW_VERIFY_FAILED =
  * many, surface `empty_response` to the user instead of looping.
  */
 const MAX_CONSECUTIVE_EMPTY_RESPONSES = 3
+
+/**
+ * Cap on back-to-back replies cut off at the output limit. Each continue
+ * re-sends the whole history, and a model that cannot fit its answer under the
+ * limit cuts off the same way again (eight in a row measured: nine requests,
+ * 166k tokens). After the first cut-off the next request asks for more room
+ * (requestMaxOutputTokens boost); after this many the run stops with the
+ * `truncated` notice and Continue.
+ */
+const MAX_CONSECUTIVE_TRUNCATIONS = 3
+
+/** Notice when that cap ends a run. */
+const TRUNCATION_CAP_NOTICE = `The reply was cut off at the output limit ${MAX_CONSECUTIVE_TRUNCATIONS + 1} times in a row, so the run stopped instead of paying for the same step again. Continue to try once more, or pick a model with a larger output limit.`
 
 /**
  * Ceiling on agent steps in one invoke. Each per-step guard (empty responses,
@@ -1165,6 +1183,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   let runStoppedResumable = false
   /** Mirrors the in-try `isInlineInstance` so teardown can read it too. */
   let runIsInlineInstance = false
+  /** The run's hooks, once loaded, for SessionEnd at teardown. */
+  let teardownHooks: RunHooks | null = null
   let messages: ChatMessage[] = []
   let costTotals: StepUsageTotals = emptyStepUsageTotals()
   let compactionCountThisRun = 0
@@ -1315,9 +1335,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
   }
   try {
+    // A synthetic note the app adds (such as which instances came back after a
+    // restart) is not the user's instruction: it must not retitle the run or
+    // count as someone watching. The goal-continue message is read here on purpose.
     const lastUser = [...(input.messages ?? input.newMessages ?? [])]
       .reverse()
-      .find((m) => m.role === 'user')
+      .find((m) => m.role === 'user' && (!m.synthetic || isGoalContinueMessage(contentDisplayText(m.content))))
     // Prefer what the user typed: do not fall back to contentToText (attachment
     // dumps) for the durable goal. Collapse skill/MCP slash injections so
     // sidebar goals aren't the full body blob. Absolute paths are scrubbed from
@@ -1615,12 +1638,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     const provider = getProvider(runProviderId)
     costLogProvider = runProviderId
     costLogModel = settings.model
-    // Published price for cost estimation; null when unpriceable (custom
-    // endpoints, unknown models) — those runs show tokens, never a fake cost.
-    const runModelPrice = resolveModelPrice(runProviderId, settings.model)
-
     let apiKey: string | null = getSecret(runProviderId)
     const baseUrl = resolveProviderChatBaseUrl(runProviderId, settings, apiKey)
+    // Price for cost estimation: one set in Settings, the table, then the
+    // models.dev catalog by this endpoint's host. Null when none has one —
+    // those runs show tokens, never a fake cost.
+    const runModelPrice = await resolveRunModelPrice(runProviderId, settings.model, baseUrl)
     {
       const status = secretStatus()
       const storedBlob = hasStoredSecretBlob(runProviderId)
@@ -1782,6 +1805,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // Soft follow-up interrupt must cancel parked approvals, not only hard cancel.
       signal: streamSignalFor(runId, controller.signal),
       persistAlways: (toolName) => persistAlwaysAllow(workspace, toolName),
+      persistRules: (rules) => persistAllowRules(workspace, rules),
       taskAllowlist: taskRunDir ? readTaskAllowlist(taskRunDir) : [],
       persistTask: taskRunDir ? (toolName) => void persistTaskAllow(taskRunDir, toolName) : undefined,
       commandGuard: runCommandGuard,
@@ -1830,6 +1854,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             }
           }
     )
+    teardownHooks = runHooks
 
     // SessionStart and UserPromptSubmit, before the first model step. What
     // they print reaches the model as this invoke's run notice; a blocked
@@ -1989,6 +2014,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     let toolsSplitDetail: ContextToolsDetail | undefined
     let lastMcpRefreshFp = ''
     let lastMcpCatalogFp = ''
+    /**
+     * Read once for the run (toolApplicability.ts): a tool array that changed
+     * mid-run would void the prompt cache. MCP follows the servers below.
+     */
+    const runGitRemote = mayHaveGitRemote(toolWorkspace)
+    const runNotebooks = mayHaveNotebooks(toolWorkspace)
     /** One forced reconnect attempt per run when enabled servers previously failed. */
     let mcpFailureRetried = false
     /** MCP tool names in the current step's provider catalog (post admission). */
@@ -2111,7 +2142,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         ...runAttachedMcpServerIds
       ]
         .sort()
-        .join(',')}::${[...runPinnedMcpToolNames].sort().join(',')}`
+        .join(',')}::${[...runPinnedMcpToolNames].sort().join(',')}::${[...runStickyToolNames].sort().join(',')}`
       const catalogFp = `${refreshFp}::${agentMode}::${settings.autoModeSwitch ? 1 : 0}::${modelInfo.supportsTools === false ? 0 : 1}::ci${liveCodeIndexEnabled ? 1 : 0}::${admissionFp}`
       if (configUnchanged && catalogFp === lastMcpCatalogFp && lastMcpCatalogFp !== '') {
         // Servers/mode/switch availability/tools support unchanged — reuse prior defs.
@@ -2135,8 +2166,20 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // is small, and a tool written this step has to be callable on the next
       // one for build_tool to be worth having.
       const agentBuiltDefs = await agentBuiltToolDefinitions()
+      // The less-used browser tools and merge_agent_instance wait, like MCP
+      // schemas, until the run asks for one or calls it (executeTool admits it).
+      const builtins = wireBuiltinTools(AGENT_TOOLS, runStickyToolNames, mcpToolLoading)
       const fullToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpCandidateDefs]
-      const wireToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpSelection.active]
+      // Tools that cannot work here (no MCP server, no git remote, no notebook) stay off the wire.
+      const wireToolDefs = [
+        ...dropInapplicableTools(builtins.wire, {
+          mcpServers: runEnabledMcpIds.size > 0,
+          gitRemote: runGitRemote,
+          notebooks: runNotebooks
+        }),
+        ...agentBuiltDefs,
+        ...mcpSelection.active
+      ]
       const allToolDefs =
         modelInfo.supportsTools !== false
           ? filterToolDefsForCodeIndex(
@@ -2152,7 +2195,16 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               liveCodeIndexEnabled
             )
           : []
-      // Builtins are never deferred; only MCP is admitted on demand.
+      // Held-back builtins this mode could use, named once in the prompt.
+      const deferredBuiltinNames =
+        modelInfo.supportsTools !== false
+          ? filterToolDefsForMode(agentMode, builtins.deferred, {
+              autoModeSwitch: settings.autoModeSwitch,
+              inlineInstance: isInlineInstance,
+              pathScopeShared: isScopeSharedInstance,
+              toolAllowlist: agentTypeToolAllowlist
+            }).map((t) => t.name)
+          : []
       const fullCatalog = buildStepToolCatalog(allToolDefs)
       toolDefs = fullCatalog.tools.map((t) => ({
         name: t.name,
@@ -2166,14 +2218,18 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       )
       // Ask and Plan cannot call MCP at all (isMcpAllowedInMode), so naming a
       // load path there would be a dead instruction.
-      mcpServersSection =
+      mcpServersSection = [
         modelInfo.supportsTools !== false && agentMode === 'agent'
           ? buildMcpServersSection({
               candidates: mcpCandidateDefs,
               loadedServerIds: mcpSelection.loadedServerIds,
               deferredServerIds: mcpSelection.deferredServerIds
             })
-          : ''
+          : '',
+        deferredBuiltinsLine(deferredBuiltinNames, agentMode === 'agent')
+      ]
+        .filter(Boolean)
+        .join('\n\n')
       const keptNameSet = new Set(fullCatalog.tools.map((t) => t.name))
       // A successful refresh that carries the tool should clear fail-fast history.
       for (const name of [...mcpNotInCatalogCounts.keys()]) {
@@ -2246,6 +2302,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
      * back-to-back). Reset on any non-empty turn.
      */
     let consecutiveEmptyResponses = 0
+    /** Steps in a row that stopped on the output limit. Reset by any other stop. */
+    let consecutiveTruncations = 0
     /**
      * Consecutive completed steps that only navigated (read-only lookups, no
      * visible answer). Drives the per-step thinking step-down; any substantive
@@ -2307,7 +2365,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         ]
       }
       try {
-        // Unattended mode's "skip questions" does not answer this one: only a
+        // "When the agent asks a question" → Skip does not answer this one: only a
         // person decides to spend more. The hard run signal ends the wait.
         const answers = await askQuestionThroughRenderer(request, controller.signal, invokeId)
         return answers.find((a) => a.questionId === 'spend')?.values[0] === more ? 'more' : 'stop'
@@ -2687,6 +2745,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           runDir,
           settings,
           signal: controller.signal,
+          beforeFold: () => runHooks.preCompact('auto', controller.signal),
           triggerReason: assembled.overflow ? 'overflow' : 'proactive',
           ...(invokeId != null ? { invokeId } : {})
         })
@@ -2815,6 +2874,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             runId,
             runDir,
             settings,
+            beforeFold: () => runHooks.preCompact('auto', controller.signal),
             signal: controller.signal,
             triggerReason: 'overflow',
             ...(invokeId != null ? { invokeId } : {})
@@ -3128,7 +3188,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           signal: streamSignalFor(runId, controller.signal),
           apiKey: target.apiKey,
           baseUrl: target.baseUrl,
-          maxOutputTokens: requestMaxOutputTokens(target.providerId, target.modelInfo),
+          maxOutputTokens: requestMaxOutputTokens(target.providerId, target.modelInfo, {
+            boost: consecutiveTruncations > 0
+          }),
           toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
           parallelToolCalls: toolDefs.length > 0 ? true : undefined,
           promptCacheKey: runId,
@@ -3146,7 +3208,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 display: settings.showThinking ? 'summarized' : 'omitted'
               }
             : { enabled: false },
-          serviceTier: resolveServiceTier(settings, target.providerId, target.model)
+          serviceTier: resolveServiceTier(settings, target.providerId, target.model),
+          promptCacheTtl: settings.longPromptCache ? '1h' : '5m'
         })) {
           if (controller.signal.aborted) break
           // Soft-steer: break so we can flush partial output and inject follow-ups.
@@ -3391,6 +3454,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 // to today. Best-effort; never breaks the run loop. The raw
                 // context window feeds the per-day context-pressure signal.
                 recordUsageDeltas(runDir, costTotals, new Date(), contextWindow)
+                // Daily/monthly budgets across tasks: a notice, never a stop.
+                noteSpendForBudget()
               }
               const usageEv: AgentEvent = {
                 type: 'step_usage',
@@ -3869,7 +3934,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           invokeId,
           reason: 'repetition',
           step,
-          message: 'Output was repeating the same text; continuing automatically…'
+          message: 'Output was repeating the same text; continuing automatically…',
+          continuing: true
         }
         appendEvent(runDir, continueEv)
         yield continueEv
@@ -3908,7 +3974,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           invokeId,
           reason: 'tool_burst',
           step,
-          message: `Output requested more than ${MAX_TOOL_CALLS_PER_STEP} tool calls in one turn; continuing automatically…`
+          message: `Output requested more than ${MAX_TOOL_CALLS_PER_STEP} tool calls in one turn; continuing automatically…`,
+          continuing: true
         }
         appendEvent(runDir, continueEv)
         yield continueEv
@@ -3980,6 +4047,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
 
       const uniqueToolCalls = resolveStepToolCalls(toolCalls, streamedToolCalls, step)
+      consecutiveTruncations = stepStopReason === 'length' ? consecutiveTruncations + 1 : 0
 
       if (uniqueToolCalls.length > 0) {
         goalNoToolFinishes = 0
@@ -4012,6 +4080,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             ? { thinking: thinkingText }
             : {}),
           ...(stepReasoningState ? { reasoningState: stepReasoningState } : {}),
+          ...(stepStopReason === 'length' && scrubbedAssistantText.trim() ? { cutOff: true } : {}),
           at: new Date().toISOString()
         }
         messages.push(assistant)
@@ -4020,7 +4089,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           type: 'assistant_message',
           runId,
           content: scrubbedAssistantText,
-          ...(thinkingText ? { thinking: thinkingText } : {})
+          ...(thinkingText ? { thinking: thinkingText } : {}),
+          ...(assistant.cutOff ? { cutOff: true } : {})
         }
         appendEvent(runDir, assistantMsgEv)
         yield assistantMsgEv
@@ -4029,14 +4099,25 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // Only an unbroken run of empty turns is a stuck model; any other outcome
         // clears the budget so a long run never trips the cap on stale counts.
         if (incomplete !== 'empty_response') consecutiveEmptyResponses = 0
-        if (incomplete === 'truncated' && !controller.signal.aborted) {
+        if (
+          incomplete === 'truncated' &&
+          !controller.signal.aborted &&
+          consecutiveTruncations <= MAX_CONSECUTIVE_TRUNCATIONS
+        ) {
+          logger.info('Auto-continuing after a cut-off reply', {
+            scope: 'agent',
+            correlationId: runId,
+            step,
+            attempt: Math.max(1, consecutiveTruncations)
+          })
           const continueEv: AgentEvent = {
             type: 'incomplete',
             runId,
             invokeId,
             reason: 'truncated',
             step,
-            message: 'Output was truncated; continuing automatically…'
+            message: 'Output was truncated; continuing automatically…',
+            continuing: true
           }
           appendEvent(runDir, continueEv)
           yield continueEv
@@ -4069,7 +4150,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             invokeId,
             reason: 'empty_response',
             step,
-            message: 'Model returned an empty response; retrying…'
+            message: 'Model returned an empty response; retrying…',
+            continuing: true
           }
           appendEvent(runDir, continueEv)
           yield continueEv
@@ -4223,15 +4305,17 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         }
 
         // A Stop hook may say the work isn't done. Its reason goes to the agent
-        // as a turn, like the other nudges, up to three times per invoke.
+        // as a turn, like the other nudges, up to three times per invoke. A
+        // helper instance answers to SubagentStop instead, as in Claude Code.
         if (
           !incomplete &&
-          !isInlineInstance &&
           stopHookContinues < 3 &&
-          runHooks.has('Stop') &&
+          runHooks.has(isInlineInstance ? 'SubagentStop' : 'Stop') &&
           !hasPendingFollowUps(runId)
         ) {
-          const reason = await runHooks.stop(stopHookContinues > 0, controller.signal)
+          const reason = isInlineInstance
+            ? await runHooks.subagentStop(stopHookContinues > 0, controller.signal)
+            : await runHooks.stop(stopHookContinues > 0, controller.signal)
           if (reason) {
             stopHookContinues += 1
             logger.info('Stop hook kept the run going', { scope: 'agent', correlationId: runId, reason: reason.slice(0, 300) })
@@ -4253,7 +4337,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             invokeId,
             reason: incomplete,
             step,
-            message: INCOMPLETE_MESSAGES[incomplete]
+            message:
+              incomplete === 'truncated' && consecutiveTruncations > MAX_CONSECUTIVE_TRUNCATIONS
+                ? TRUNCATION_CAP_NOTICE
+                : INCOMPLETE_MESSAGES[incomplete]
           }
           logger.warn(
             `Turn ended incomplete: ${incomplete} (textLen=${assistantText.length}; thinkLen=${thinkingText.length})`,
@@ -4546,6 +4633,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         runStickyToolNames,
         mcpLastUsedByName,
         currentStep: step,
+        stepCutOff: stepStopReason === 'length',
         invalidateMcpToolCatalogCache,
         mcpNotInCatalogCounts,
         emitLiveEvent: (ev: AgentEvent) => {
@@ -4927,7 +5015,27 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
     }
     try {
-      disposeTerminalSessionsForInvoke(runId, invokeId)
+      void teardownHooks?.sessionEnd(controller.signal.aborted ? 'cancelled' : runExitedNormally ? 'done' : 'error')
+    } catch {
+      // SessionEnd hooks are fire and forget.
+    }
+    try {
+      // A turn that ended on its own keeps the servers and watchers it left
+      // running: the agent says "the dev server is running", and the user
+      // stops it from the Terminal panel (or the next turn does). A cancel,
+      // or a helper instance, takes everything down as before.
+      if (runExitedNormally && !controller.signal.aborted && !runIsInlineInstance) {
+        const kept = keepLiveTerminalSessionsForInvoke(runId, invokeId)
+        if (kept.length > 0) {
+          logger.info('Kept background terminals running past the turn', {
+            scope: 'agent',
+            correlationId: runId,
+            count: kept.length
+          })
+        }
+      } else {
+        disposeTerminalSessionsForInvoke(runId, invokeId)
+      }
     } catch (disposeErr) {
       logger.warn('Agent run finally dispose failed', {
         scope: 'agent',

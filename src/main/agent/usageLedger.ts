@@ -15,6 +15,8 @@ export type UsageLedgerAuxSite =
   | 'compaction_structured'
   | 'compaction_freeform'
   | 'commit_message'
+  | 'mcp_sampling'
+  | 'prompt_structure'
 
 /** One call site's spend within a day bucket. */
 export type UsageLedgerAux = {

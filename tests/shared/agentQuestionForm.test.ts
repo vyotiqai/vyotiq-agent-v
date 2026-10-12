@@ -14,10 +14,11 @@ import {
 } from '@shared/utils/agentQuestionForm'
 
 describe('normalizeAskQuestionArgs', () => {
-  it('normalizes legacy question + options to single', () => {
+  it('normalizes legacy question + options to single, always with Something else', () => {
     const result = normalizeAskQuestionArgs({
       question: 'Pick?',
       options: ['A', 'B'],
+      // Ignored: the person can always type their own answer.
       allowCustom: false
     })
     expect(result.ok).toBe(true)
@@ -28,9 +29,16 @@ describe('normalizeAskQuestionArgs', () => {
         prompt: 'Pick?',
         type: 'single',
         options: ['A', 'B'],
-        allowCustom: false
+        allowCustom: true
       }
     ])
+  })
+
+  it('offers Something else on typed choices the model did not opt into', () => {
+    const result = normalizeAskQuestionArgs({
+      questions: [{ id: 'db', type: 'single', prompt: 'Which database?', options: ['SQLite', 'Postgres'] }]
+    })
+    expect(result.ok && result.form.questions[0]?.allowCustom).toBe(true)
   })
 
   it('normalizes legacy allowMultiple to multi with allowCustom default true', () => {

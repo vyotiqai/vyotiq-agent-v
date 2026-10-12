@@ -22,7 +22,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Which systems does it run on?',
-    a: 'Windows (x64), macOS on Apple silicon and Intel, and Linux (x64) as an AppImage, .deb or .rpm. <a href="/download">Download</a> has the installers.'
+    a: 'Windows (x64 and Arm), macOS on Apple silicon and Intel, and Linux (x64 and Arm) as an AppImage, .deb or .rpm. <a href="/download">Download</a> has the installers.'
   },
   {
     q: 'Why does Windows or macOS warn me when I open it?',

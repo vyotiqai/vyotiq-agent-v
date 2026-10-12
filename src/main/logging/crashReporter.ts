@@ -27,13 +27,13 @@ export function initCrashReporter(): void {
     // Prefer before app.ready. uploadToServer:false still stores Crashpad minidumps.
     // Do not set ignoreSystemCrashHandler — it can suppress useful OS/Crashpad handling.
     crashReporter.start({
-      productName: 'Vyotiq',
+      productName: 'Agent V',
       companyName: 'Vyotiq',
       submitURL: '',
       uploadToServer: false,
       compress: true,
       globalExtra: {
-        _productName: 'Vyotiq',
+        _productName: 'Agent V',
         _version: crashReporterVersionTag(),
         platform: process.platform,
         arch: process.arch

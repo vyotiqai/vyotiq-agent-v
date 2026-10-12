@@ -1,5 +1,5 @@
-import { useId, useMemo, useState, type ReactNode } from 'react'
-import type { HomeActivityResult } from '@shared/ipc'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
+import type { HomeActivityResult, HomeActivitySideCall, UsageBudgetStatus } from '@shared/ipc'
 import { formatUsdCost, windowCostDisplay } from '@shared/utils/costDisplay'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon } from '@renderer/lib/icons'
@@ -70,6 +70,7 @@ export function UsagePage({
   const activity = useHomeActivity(paths, windowDays, refreshVersion, { endDay, breakdown: true })
   const data = activity.data
   const [exporting, setExporting] = useState(false)
+  const budget = useBudgetStatus(data)
 
   const scopeOptions: MenuOption[] = [
     { value: ALL, label: 'All workspaces' },
@@ -156,7 +157,9 @@ export function UsagePage({
               body="The run receipts in these workspaces could not be read. Nothing is lost; try again."
               action={{ label: 'Try again', onClick: activity.refresh }}
             />
-          ) : !data ? (
+          ) : null}
+          {budget && (budget.day || budget.month) ? <BudgetLine status={budget} /> : null}
+          {activity.error ? null : !data ? (
             <p className="py-10 text-center text-xs text-muted">{activity.loading ? 'Reading receipts…' : 'Usage is unavailable.'}</p>
           ) : data.totals.runs === 0 ? (
             <Notice
@@ -169,6 +172,66 @@ export function UsagePage({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Today's and this month's spend against the budgets (Settings › Agent),
+ * across every workspace whatever the scope above: a budget is across tasks.
+ * Read again whenever the page's own numbers are.
+ */
+function useBudgetStatus(refreshKey: unknown): UsageBudgetStatus | null {
+  const [status, setStatus] = useState<UsageBudgetStatus | null>(null)
+  useEffect(() => {
+    let live = true
+    void window.vyotiq
+      ?.usageBudget?.()
+      .then((res) => {
+        if (live && res.ok) setStatus(res.data)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [refreshKey])
+  return status
+}
+
+function BudgetMeter({ label, period }: { label: string; period: NonNullable<UsageBudgetStatus['day']> }) {
+  const share = period.spentUsd / period.limitUsd
+  const over = share >= 1
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="text-muted">{label}</span>
+      <span className="tabular-nums">
+        <span className="text-fg">{formatUsdCost(period.spentUsd)}</span>
+        <span className="text-tertiary"> of {formatUsdCost(period.limitUsd)}</span>
+        {over ? <span className="text-danger"> · over</span> : null}
+      </span>
+      <ProgressBar
+        value={period.spentUsd}
+        max={period.limitUsd}
+        tone={over ? 'danger' : share >= 0.8 ? 'warning' : 'neutral'}
+        className="w-20"
+        label={`${label}: ${Math.round(share * 100)}% of the budget`}
+      />
+    </span>
+  )
+}
+
+function BudgetLine({ status }: { status: UsageBudgetStatus }) {
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-x-8 gap-y-2 text-xs" data-usage-budget>
+      <span className={SECTION_LABEL}>Budget</span>
+      {status.day ? <BudgetMeter label="Today" period={status.day} /> : null}
+      {status.month ? <BudgetMeter label="This month" period={status.month} /> : null}
+      {status.held ? (
+        <span className="inline-flex items-center gap-1.5 text-warning" title={status.held} data-usage-budget-held>
+          <Icon name="warning" size={13} />
+          New work is held
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -256,12 +319,61 @@ function UsageBody({
         <UncheckedChart data={data} span={span} onOpenTask={onOpenTask} />
       </div>
 
+      {totals.sideCalls?.length ? (
+        <div className="mt-10">
+          <SideCallsChart calls={totals.sideCalls} />
+        </div>
+      ) : null}
+
       {data.tasks ? (
         <div className="mt-10">
           <BreakdownChart data={data} onOpenTask={onOpenTask} />
         </div>
       ) : null}
     </>
+  )
+}
+
+const SIDE_CALL_LABEL: Record<HomeActivitySideCall['site'], string> = {
+  compaction: 'Compaction summaries',
+  commit_message: 'Commit messages',
+  mcp_sampling: 'MCP server requests',
+  prompt_structure: 'Structured instructions'
+}
+
+/**
+ * Model calls made beside the tasks' own steps. Already inside Tokens and
+ * Spend above; listed so a background cost is never hidden in the total.
+ */
+function SideCallsChart({ calls }: { calls: readonly HomeActivitySideCall[] }) {
+  return (
+    <Chart title="Side calls" note="inside the totals above">
+      {calls.map((row) => {
+        const tokens = row.billedInputTokens + row.outputTokens
+        const cost = row.billedCost != null || row.estimatedCost != null ? (row.billedCost ?? 0) + (row.estimatedCost ?? 0) : null
+        return (
+          <div
+            key={row.site}
+            data-usage-side-call={row.site}
+            className={cn(BREAKDOWN_COLUMNS, 'border-b py-1.5 text-xs', BORDER_DIVIDER)}
+          >
+            <span className="truncate text-fg">{SIDE_CALL_LABEL[row.site]}</span>
+            <span className="font-mono text-caption text-tertiary tnum">
+              {formatCount(row.calls)} {row.calls === 1 ? 'call' : 'calls'}
+            </span>
+            <span
+              className="text-right font-mono text-caption text-muted tnum"
+              title={tokensTitle({ ...row, tokens })}
+            >
+              {formatCompactCount(tokens)}
+            </span>
+            <span className="text-right font-mono text-caption text-fg tnum">
+              {costText(cost, row.estimatedCost != null)}
+            </span>
+          </div>
+        )
+      })}
+    </Chart>
   )
 }
 

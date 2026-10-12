@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { railInitials } from '@renderer/app/navigator/NavigatorRail'
+import { railInitials, railLabels } from '@renderer/app/navigator/NavigatorRail'
 
 describe('railInitials', () => {
   it('takes the first letters of the first two words that carry meaning', () => {
@@ -22,5 +22,23 @@ describe('railInitials', () => {
     expect(railInitials('élan vital')).toBe('ÉV')
     expect(railInitials('—')).toBe('')
     expect(railInitials('')).toBe('')
+  })
+})
+
+describe('railLabels', () => {
+  it('keeps initials that are already unique', () => {
+    expect(railLabels(['Update the docs', 'Fix a flaky test'])).toEqual(['UD', 'FF'])
+  })
+
+  it('tells apart two tasks with the same initials', () => {
+    const labels = railLabels(['Tidy the tests', 'Tune timeouts', 'Ship it'])
+    expect(labels).toEqual(['Ti', 'Tu', 'SI'])
+    expect(new Set(labels).size).toBe(3)
+  })
+
+  it('goes further in when the first two letters match too', () => {
+    const labels = railLabels(['Test the parser', 'Test the printer'])
+    expect(new Set(labels).size).toBe(2)
+    for (const label of labels) expect(label.length).toBe(2)
   })
 })

@@ -106,7 +106,7 @@ describe('task bundles (Export as JSON / Import task…)', () => {
     expect(bundle).toMatchObject({
       format: 'vyotiq-task',
       version: 1,
-      app: { name: 'Vyotiq', version: '1.2.0' },
+      app: { name: 'Agent V', version: '1.2.0' },
       task: { runId: SOURCE, title: 'Fix the flaky updater test', status: 'done', step: 2 }
     })
     const text = serializeRunBundle(bundle)
@@ -159,8 +159,8 @@ describe('task bundles (Export as JSON / Import task…)', () => {
       throw new Error('accepted')
     }
     expect(reject('{ not json')).toBe('The file is not JSON.')
-    expect(reject(JSON.stringify({ ...good, format: 'something-else' }))).toBe('The file is not a Vyotiq task export.')
-    expect(reject(JSON.stringify({ ...good, version: 2 }))).toMatch(/newer Vyotiq \(format version 2\)/)
+    expect(reject(JSON.stringify({ ...good, format: 'something-else' }))).toBe('The file is not an Agent V task export.')
+    expect(reject(JSON.stringify({ ...good, version: 2 }))).toMatch(/newer Agent V \(format version 2\)/)
     expect(reject(JSON.stringify({ ...good, messages: [{ role: 'robot', content: 'x' }] }))).toMatch(/^The task file is damaged at messages\.0\.role/)
     expect(reject(JSON.stringify({ ...good, events: [{ at: 'x', event: { no: 'type' } }] }))).toMatch(/damaged at events\.0\.event\.type/)
     // An artifact must be a stored image's name: no path out of the run dir.

@@ -152,6 +152,31 @@ export function useComposerEditState(args: {
     [editingUserMessageIndex, onEditAndResend, cancelPromptEdit]
   )
 
+  /** "Run this again": the instruction at `messageIndex` resent as it was — words, attachments and all. */
+  const rerunPrompt = useCallback(
+    async (messageIndex: number): Promise<boolean> => {
+      const msg = messages[messageIndex]
+      if (!msg || msg.role !== 'user' || !onEditAndResend) return false
+      const images = contentImages(msg.content)
+      const files = contentFiles(msg.content)
+      const audio = contentAudios(msg.content)
+      const nativeFiles = contentNativeFiles(msg.content)
+      if (editingUserMessageIndex != null) cancelPromptEdit()
+      const ok = await onEditAndResend(
+        messageIndex,
+        // As stored, not as the composer edits it: a skill or MCP call stays the text it was sent as.
+        contentDisplayText(msg.content),
+        images.length ? images : undefined,
+        files.length ? files : undefined,
+        audio.length || nativeFiles.length
+          ? { ...(audio.length ? { audio } : {}), ...(nativeFiles.length ? { nativeFiles } : {}) }
+          : undefined
+      )
+      return ok !== false
+    },
+    [messages, onEditAndResend, editingUserMessageIndex, cancelPromptEdit]
+  )
+
   const beginPromptRevert = useCallback(
     async (messageIndex: number, runN?: number) => {
       if (!onRevertToUserMessage) return
@@ -185,6 +210,7 @@ export function useComposerEditState(args: {
     cancelPromptEdit,
     beginPromptEdit,
     submitPromptEdit,
+    rerunPrompt,
     beginPromptRevert,
     sendFromDock
   }

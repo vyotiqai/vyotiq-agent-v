@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { UiItem } from '@shared/transcript'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
-import { WorkList } from '@renderer/features/task/record/WorkItems'
+import { WorkList, childName } from '@renderer/features/task/record/WorkItems'
 import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
 import type { WorkItem } from '@renderer/features/task/recordModel'
 
@@ -48,7 +48,7 @@ describe('instance row against the child phase', () => {
     renderRow(instanceItem('fail', `Timed out waiting for Agent V Instance id; ${RUN_ID} after 900000 ms. Child is still running.`), {
       agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'done', summary: 'Audited the swap.' } }
     })
-    expect(screen.getByText(`Instance finished ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Instance finished · ${SHORT_ID}`)).toBeTruthy()
     expect(screen.getByText('Finished, but the await did not return.')).toBeTruthy()
     expect(screen.queryByText(new RegExp(`^Failed ${SHORT_ID}`))).toBeNull()
   })
@@ -57,7 +57,7 @@ describe('instance row against the child phase', () => {
     renderRow(instanceItem('fail', `Agent V Instance id; ${RUN_ID}\nphase: error\n\nThe swap test never passed.`), {
       agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'error', summary: 'The swap test never passed.' } }
     })
-    expect(screen.getByText(`Instance failed ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Instance failed · ${SHORT_ID}`)).toBeTruthy()
     expect(screen.getByText('The swap test never passed.')).toBeTruthy()
     expect(screen.queryByText(/Agent V Instance id;/)).toBeNull()
   })
@@ -74,7 +74,7 @@ describe('instance row against the child phase', () => {
     renderRow(instanceItem('fail', `Agent V Instance id; ${RUN_ID}\nphase: cancelled`), {
       agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'cancelled', summary: 'Stopped after the first file.' } }
     })
-    expect(screen.getByText(`Instance cancelled ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Instance cancelled · ${SHORT_ID}`)).toBeTruthy()
     expect(screen.getByText('Stopped after the first file.')).toBeTruthy()
   })
 
@@ -82,7 +82,7 @@ describe('instance row against the child phase', () => {
     renderRow(instanceItem('fail', `Agent V Instance id; ${RUN_ID}\nphase: started`), {
       agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'started' } }
     })
-    expect(screen.getByText(`Failed ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Failed · ${SHORT_ID}`)).toBeTruthy()
     expect(screen.getByText('phase: started')).toBeTruthy()
   })
 })
@@ -128,13 +128,13 @@ describe('instance row controls', () => {
       agentInstances: { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'started' } },
       onOpenAgentInstance: vi.fn()
     })
-    expect(screen.getByText(`Awaiting instance ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Awaiting instance · ${SHORT_ID}`)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Open instance/ })).toBeNull()
   })
 })
 
 describe('a spawned child, as it runs', () => {
-  it('says it is running, which step it is on and what it is doing', () => {
+  it('says it is running and what it is doing — not its own loop count, which read as a plan step', () => {
     renderRow(spawnItem('done', SPAWNED), {
       agentInstances: {
         [RUN_ID]: {
@@ -146,8 +146,9 @@ describe('a spawned child, as it runs', () => {
         }
       }
     })
-    expect(screen.getByText(`Running instance ${SHORT_ID}`)).toBeTruthy()
-    expect(screen.getByText('Step 7 · Reading src/main/agent/loop.ts')).toBeTruthy()
+    expect(screen.getByText('Running instance')).toBeTruthy()
+    expect(screen.getByText('Reading src/main/agent/loop.ts')).toBeTruthy()
+    expect(screen.queryByText(/Step 7/)).toBeNull()
     // The deliverable, not the background the goal carries.
     expect(screen.getByText('A map')).toBeTruthy()
   })
@@ -165,7 +166,7 @@ describe('a spawned child, as it runs', () => {
         }
       }
     })
-    expect(screen.getByText(`Instance finished ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText('Instance finished')).toBeTruthy()
     expect(screen.getByText('4m 19s')).toBeTruthy()
     expect(screen.queryByText(/Step 21/)).toBeNull()
   })
@@ -206,5 +207,28 @@ describe('a settled thought', () => {
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText(/The user sent a request/)).toBeTruthy()
+  })
+})
+
+describe('what a child is called', () => {
+  it('is its helper type, else what it was asked, cut; the hex id only as a last resort', () => {
+    expect(childName('Reviewer', 'Check the diff', SHORT_ID)).toBe('Reviewer')
+    expect(childName('', 'A list of top-level files', SHORT_ID)).toBe('A list of top-level files')
+    expect(childName('', 'Map every IPC handler in src/main and say which ones lack validation', SHORT_ID)).toBe(
+      'Map every IPC handler in src/main and s…'
+    )
+    expect(childName('', '', SHORT_ID)).toBe(SHORT_ID)
+  })
+
+  it('names the report of an await after the child, not its id', () => {
+    renderRow(instanceItem('done', `Agent V Instance id; ${RUN_ID}
+phase: done
+
+## Found four files`), {
+      agentInstances: {
+        [RUN_ID]: { instanceRunId: RUN_ID, phase: 'done', goal: 'Outcome: A list of top-level files', summary: 'ok' }
+      }
+    })
+    expect(screen.queryByText(new RegExp(SHORT_ID))).toBeNull()
   })
 })

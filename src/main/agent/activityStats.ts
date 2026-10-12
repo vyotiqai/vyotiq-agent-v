@@ -10,8 +10,8 @@ import {
 import type { RunReceipt } from '@shared/ipc'
 import { lastDayKeys, localDayKeyOf } from '../../shared/utils/localDay'
 import { mapLimit } from '../../shared/utils/mapLimit'
-import { readUsageLedgerAsync } from './usageLedger'
-import { workspaceSessionsRoot } from '../storage/paths'
+import { readUsageLedgerAsync, type UsageLedgerAuxSite, type UsageLedgerDay } from './usageLedger'
+import { workspaceSessionsRoot, workspaceUsageDir } from '../storage/paths'
 import { migrateLegacyReceipt } from './receiptMigration'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
 import { readJsonDocCached } from './jsonDocCache'
@@ -116,10 +116,19 @@ export type ActivityOptions = {
   breakdown?: boolean
 }
 
+/** The CSV goal for spend with no task behind it (`runId` is empty on that row). */
+export const NO_TASK_USAGE_GOAL = 'Commit messages and other side calls, no task'
+
+/** How the Usage page groups ledger aux sites. */
+function sideCallSite(site: UsageLedgerAuxSite): 'compaction' | 'commit_message' | 'mcp_sampling' | 'prompt_structure' {
+  return site === 'commit_message' || site === 'mcp_sampling' || site === 'prompt_structure' ? site : 'compaction'
+}
+
 /** One task's usage on one local day — a row of the Usage CSV export. */
 export type UsageTaskDay = {
   date: string
   workspacePath: string
+  /** Empty for the workspace's spend with no task (`NO_TASK_USAGE_GOAL`). */
   runId: string
   /** The task's title as the navigator shows it (its goal), when known. */
   goal?: string
@@ -270,6 +279,24 @@ async function aggregateActivity(
   const uncheckedRuns: Array<{ runId: string; workspacePath: string; goal?: string; files: number; writtenAt: string }> = []
   /** Sessions that ended in error — the newest few become the digest (real goals only). */
   const errorRuns: Array<{ runId: string; workspacePath: string; goal?: string; writtenAt: string }> = []
+  /** Side-call spend in the window, by site (already inside the totals). */
+  const sideCalls = new Map<
+    'compaction' | 'commit_message' | 'mcp_sampling' | 'prompt_structure',
+    { calls: number; billedInputTokens: number; outputTokens: number; billedCost?: number; estimatedCost?: number }
+  >()
+  const addSideCalls = (entry: UsageLedgerDay): void => {
+    for (const [site, aux] of Object.entries(entry.aux ?? {}) as Array<[UsageLedgerAuxSite, NonNullable<UsageLedgerDay['aux']>[UsageLedgerAuxSite]]>) {
+      if (!aux) continue
+      const key = sideCallSite(site)
+      const row = sideCalls.get(key) ?? { calls: 0, billedInputTokens: 0, outputTokens: 0 }
+      row.calls += aux.calls
+      row.billedInputTokens += aux.inputTokens
+      row.outputTokens += aux.outputTokens
+      if (aux.billedCost != null && aux.billedCost >= 0) row.billedCost = (row.billedCost ?? 0) + aux.billedCost
+      if (aux.estimatedCost != null && aux.estimatedCost >= 0) row.estimatedCost = (row.estimatedCost ?? 0) + aux.estimatedCost
+      sideCalls.set(key, row)
+    }
+  }
 
   const sliceFor = (workspacePath: string) => {
     let slice = workspaceSlices.get(workspacePath)
@@ -300,9 +327,10 @@ async function aggregateActivity(
     return day
   }
 
+  /** `runId` null: spend with no task — counted in every total, but never as a task. */
   const addUsage = (
     day: HomeActivityDay,
-    runId: string,
+    runId: string | null,
     usage: {
       inputTokens: number
       outputTokens: number
@@ -327,13 +355,13 @@ async function aggregateActivity(
     },
     task?: { workspacePath: string; goal?: string }
   ): void => {
-    activeRunIds.add(runId)
+    if (runId !== null) activeRunIds.add(runId)
     if (task) {
-      const key = `${day.date}\0${task.workspacePath}\0${runId}`
+      const key = `${day.date}\0${task.workspacePath}\0${runId ?? ''}`
       const row = taskDayMap.get(key) ?? {
         date: day.date,
         workspacePath: task.workspacePath,
-        runId,
+        runId: runId ?? '',
         ...(task.goal ? { goal: task.goal } : {}),
         ...(usage.model ? { model: usage.model } : {}),
         inputTokens: 0,
@@ -348,12 +376,12 @@ async function aggregateActivity(
       taskDayMap.set(key, row)
     }
     // Per-day distinct-run count: one usage attribution per run per day.
-    day.runs += 1
+    if (runId !== null) day.runs += 1
     day.billedInputTokens += usage.inputTokens
     day.outputTokens += usage.outputTokens
     billedInputTokens += usage.inputTokens
     outputTokens += usage.outputTokens
-    if ((usage.billedCost ?? -1) >= 0 || (usage.estimatedCost ?? -1) >= 0) pricedRunIds.add(runId)
+    if (runId !== null && ((usage.billedCost ?? -1) >= 0 || (usage.estimatedCost ?? -1) >= 0)) pricedRunIds.add(runId)
     if (usage.billedCost != null && usage.billedCost >= 0) {
       day.billedCost = (day.billedCost ?? 0) + usage.billedCost
       billedCostTotal += usage.billedCost
@@ -404,7 +432,7 @@ async function aggregateActivity(
       }
     }
     if (slice) {
-      slice.runs.add(runId)
+      if (runId !== null) slice.runs.add(runId)
       slice.billedInputTokens += usage.inputTokens
       slice.outputTokens += usage.outputTokens
       if (usage.cachedInputTokens != null && usage.cachedInputTokens > 0) slice.cachedInputTokens += usage.cachedInputTokens
@@ -554,6 +582,7 @@ async function aggregateActivity(
           }
           const day = bucketFor(date)
           if (!day) continue
+          addSideCalls(entry)
           addUsage(
             day,
             runId,
@@ -671,6 +700,41 @@ async function aggregateActivity(
     }
   }
 
+  // Spend with no task behind it (commit messages drafted outside a task):
+  // the workspace's own ledger, in every total but never counted as a task.
+  const sideLedgers = await mapLimit([...workspacePaths], RUN_DIR_PROBE_CONCURRENCY, async (workspacePath) => ({
+    workspacePath,
+    ledger: await readUsageLedgerAsync(workspaceUsageDir(workspacePath)).catch(() => null)
+  }))
+  for (const { workspacePath, ledger } of sideLedgers) {
+    if (!ledger) continue
+    const slice = workspacePaths.length > 1 || options.breakdown ? sliceFor(workspacePath) : undefined
+    for (const [date, entry] of Object.entries(ledger.days)) {
+      if (previousKeys.has(date)) {
+        previousTokens += entry.inputTokens + entry.outputTokens
+        continue
+      }
+      const day = bucketFor(date)
+      if (!day) continue
+      addSideCalls(entry)
+      addUsage(
+        day,
+        null,
+        {
+          inputTokens: entry.inputTokens,
+          outputTokens: entry.outputTokens,
+          billedCost: entry.billedCost,
+          estimatedCost: entry.estimatedCost,
+          cachedInputTokens: entry.cachedInputTokens,
+          promptInputTokens: entry.promptInputTokens,
+          reasoningTokens: entry.reasoningTokens
+        },
+        slice,
+        { workspacePath, goal: NO_TASK_USAGE_GOAL }
+      )
+    }
+  }
+
   const sortedDays = [...days.values()].sort((a, b) => a.date.localeCompare(b.date))
   const slices = [...workspaceSlices.values()].map((slice) => ({
     path: slice.path,
@@ -697,6 +761,8 @@ async function aggregateActivity(
   }>()
   if (options.breakdown) {
     for (const row of taskDays) {
+      // Spend with no task is in its workspace's total, not a task row.
+      if (!row.runId) continue
       const key = `${row.workspacePath}\0${row.runId}`
       const task = byTask.get(key) ?? {
         runId: row.runId,
@@ -797,7 +863,14 @@ async function aggregateActivity(
       ...(withPeak ? { peakInputTokens: peakInputTokensTotal } : {}),
       ...(withContextWindow ? { contextWindow: peakContextWindow } : {}),
       ...(previousTokens > 0 ? { previousTokens } : {}),
-      ...(previousRunIds.size > 0 ? { previousRuns: previousRunIds.size } : {})
+      ...(previousRunIds.size > 0 ? { previousRuns: previousRunIds.size } : {}),
+      ...(sideCalls.size > 0
+        ? {
+            sideCalls: [...sideCalls.entries()]
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([site, row]) => ({ site, ...row }))
+          }
+        : {})
     },
     generatedAt: now.toISOString()
   })

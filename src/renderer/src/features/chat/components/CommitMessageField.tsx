@@ -24,6 +24,8 @@ export function CommitMessageField({
   canSubmit,
   branch,
   files,
+  filesAtLeast = false,
+  everyUncommitted = false,
   note
 }: {
   value: string
@@ -39,6 +41,10 @@ export function CommitMessageField({
   branch: string | null
   /** How many files the commit takes. */
   files: number
+  /** `files` is a floor: the list it was counted from stops short. */
+  filesAtLeast?: boolean
+  /** The commit takes every uncommitted file, not only the ones listed above it. */
+  everyUncommitted?: boolean
   /** Where the words came from, or why they may be wrong. */
   note?: ReactNode
 }) {
@@ -51,8 +57,11 @@ export function CommitMessageField({
         rows={1}
         maxLength={MESSAGE_MAX}
         spellCheck={false}
+        // Lines as git keeps them: no soft wrap, so a body wrapped at 72 reads
+        // as written and a longer line scrolls rather than looking broken.
+        wrap="off"
         // Grows with its lines up to a few, then scrolls.
-        className="block max-h-40 w-full resize-none rounded-sm bg-transparent font-mono text-xs leading-5 text-fg outline-none [field-sizing:content] placeholder:font-sans placeholder:text-tertiary focus-visible:vy-focus-ring"
+        className="block max-h-40 w-full resize-none overflow-x-auto whitespace-pre rounded-sm bg-transparent font-mono text-xs leading-5 text-fg outline-none [field-sizing:content] placeholder:font-sans placeholder:text-tertiary focus-visible:vy-focus-ring"
         placeholder={generating ? 'The agent is writing a commit message…' : 'Commit message'}
         aria-label="Commit message"
         aria-describedby={factsId}
@@ -83,7 +92,7 @@ export function CommitMessageField({
               Commit to <code className="font-mono text-muted">{branch}</code> ·{' '}
             </>
           ) : null}
-          {files} {files === 1 ? 'file' : 'files'}
+          {everyUncommitted ? (files === 1 ? 'the 1 uncommitted file' : `all ${files} uncommitted files`) : `${files}${filesAtLeast ? '+' : ''} ${files === 1 && !filesAtLeast ? 'file' : 'files'}`}
         </span>
         {note ? (
           <>

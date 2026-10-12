@@ -71,6 +71,8 @@ export const MAX_BROWSER_TABS = 16
 const PARTITION_PREFIX = 'persist:vyotiq-agent-browser'
 const downloadGuardedPartitions = new Set<string>()
 const egressGuardedPartitions = new Set<string>()
+/** Partitions whose finished requests are watched for failures (browser_console). */
+const networkWatchedPartitions = new Set<string>()
 const partitionWorkspacePaths = new Map<string, string>()
 
 function partitionForWorkspace(workspacePath?: string): string {
@@ -150,6 +152,40 @@ type BrowserTab = {
    * own (subresources, redirects, popups) — see net/privateNetwork.ts.
    */
   allowLocalHosts: boolean
+  /** Console messages since the page loaded (newest last, capped). */
+  console?: BrowserConsoleEntry[]
+  /** Requests that failed or answered 4xx/5xx since the page loaded (capped). */
+  failedRequests?: BrowserNetworkEntry[]
+}
+
+/** One console line a page printed. */
+export type BrowserConsoleEntry = {
+  at: number
+  level: 'verbose' | 'info' | 'warning' | 'error'
+  message: string
+  url: string
+  line: number
+}
+
+/** One request that failed outright or answered with an error status. */
+export type BrowserNetworkEntry = {
+  at: number
+  method: string
+  url: string
+  resourceType: string
+  status?: number
+  error?: string
+}
+
+/** Entries kept per tab and kind; a noisy page keeps its newest. */
+const BROWSER_LOG_CAP = 200
+const CONSOLE_LEVELS = ['verbose', 'info', 'warning', 'error'] as const
+
+function pushCapped<T>(list: T[] | undefined, entry: T): T[] {
+  const next = list ?? []
+  next.push(entry)
+  if (next.length > BROWSER_LOG_CAP) next.splice(0, next.length - BROWSER_LOG_CAP)
+  return next
 }
 
 type EmbedBounds = { x: number; y: number; width: number; height: number }
@@ -364,7 +400,7 @@ function ensureOffstageWindow(): BaseWindow | null {
       maximizable: false,
       hasShadow: false,
       opacity: 0,
-      title: 'Vyotiq agent browser (offstage)'
+      title: 'Agent V agent browser (offstage)'
     })
   } catch {
     return null
@@ -509,7 +545,7 @@ export function enterAgentBrowserPip(): boolean {
     height: 340,
     minWidth: PIP_MIN_WIDTH,
     minHeight: PIP_MIN_HEIGHT,
-    title: 'Vyotiq — Agent browser',
+    title: 'Agent V — Agent browser',
     alwaysOnTop: true,
     autoHideMenuBar: true,
     show: false,
@@ -919,6 +955,70 @@ function topLevelUrlOf(tab: BrowserTab): string {
 }
 
 /**
+ * Watch a partition's finished requests for failures. `onCompleted` and
+ * `onErrorOccurred` are their own webRequest slots, so this never displaces
+ * the egress gate's `onBeforeRequest`. Once per partition, like the gate.
+ */
+function watchPartitionNetwork(ses: Electron.Session, partition: string): void {
+  if (networkWatchedPartitions.has(partition)) return
+  networkWatchedPartitions.add(partition)
+  ses.webRequest.onCompleted((details) => {
+    if (details.statusCode < 400) return
+    const tab = tabForWebContentsId(details.webContentsId)
+    if (!tab) return
+    tab.failedRequests = pushCapped(tab.failedRequests, {
+      at: Date.now(),
+      method: details.method,
+      url: details.url,
+      resourceType: details.resourceType,
+      status: details.statusCode
+    })
+  })
+  ses.webRequest.onErrorOccurred((details) => {
+    // A request the egress gate refused is said by egressRefusalNote already.
+    if (details.error === 'net::ERR_BLOCKED_BY_CLIENT') return
+    const tab = tabForWebContentsId(details.webContentsId)
+    if (!tab) return
+    tab.failedRequests = pushCapped(tab.failedRequests, {
+      at: Date.now(),
+      method: details.method,
+      url: details.url,
+      resourceType: details.resourceType,
+      error: details.error
+    })
+  })
+}
+
+/** What browser_console reads: the page's console and its failed requests. */
+export function readBrowserLogs(opts: {
+  workspacePath?: string
+  tabId?: string
+  kind: 'console' | 'network' | 'all'
+  /** Lowest console level shown. */
+  minLevel: 'verbose' | 'info' | 'warning' | 'error'
+  limit: number
+  /** Empty the buffers after reading, so the next read shows only what is new. */
+  clear?: boolean
+}): { url: string; console: BrowserConsoleEntry[]; network: BrowserNetworkEntry[]; consoleTotal: number; networkTotal: number } {
+  const tab = ensureTab(opts.tabId, opts.workspacePath)
+  const floor = CONSOLE_LEVELS.indexOf(opts.minLevel)
+  const consoleAll = (tab.console ?? []).filter((e) => CONSOLE_LEVELS.indexOf(e.level) >= floor)
+  const networkAll = tab.failedRequests ?? []
+  const result = {
+    url: tab.view.webContents.isDestroyed() ? '' : tab.view.webContents.getURL(),
+    console: opts.kind === 'network' ? [] : consoleAll.slice(-opts.limit),
+    network: opts.kind === 'console' ? [] : networkAll.slice(-opts.limit),
+    consoleTotal: consoleAll.length,
+    networkTotal: networkAll.length
+  }
+  if (opts.clear) {
+    if (opts.kind !== 'network') tab.console = []
+    if (opts.kind !== 'console') tab.failedRequests = []
+  }
+  return result
+}
+
+/**
  * Per-request network egress gate for browsed pages, registered once per
  * partition session (same shape as `denyPartitionDownloads`).
  *
@@ -965,6 +1065,7 @@ function createTab(workspacePath?: string, allowLocalHosts = true): BrowserTab {
   const ses = session.fromPartition(partitionForWorkspace(workspacePath))
   denyPartitionDownloads(ses, partitionForWorkspace(workspacePath), workspacePath)
   guardPartitionEgress(ses, partitionForWorkspace(workspacePath))
+  watchPartitionNetwork(ses, partitionForWorkspace(workspacePath))
   void applyProxyToSession(ses)
   const id = nextTabId()
   const view = new WebContentsView({
@@ -1006,7 +1107,20 @@ function createTab(workspacePath?: string, allowLocalHosts = true): BrowserTab {
 
   view.webContents.on('did-navigate', () => {
     tab.lastRefs = new Map()
+    // A new document: its console and network start over, as DevTools does.
+    tab.console = []
+    tab.failedRequests = []
     if (visibleTabId === id) emitCurrent()
+  })
+  view.webContents.on('console-message', (details) => {
+    const level = details.level === 'debug' ? 'verbose' : details.level
+    tab.console = pushCapped(tab.console, {
+      at: Date.now(),
+      level: CONSOLE_LEVELS.includes(level) ? level : 'info',
+      message: details.message.length > 2000 ? `${details.message.slice(0, 1999)}…` : details.message,
+      url: details.sourceId,
+      line: details.lineNumber
+    })
   })
   view.webContents.on('did-navigate-in-page', () => {
     tab.lastRefs = new Map()
@@ -2622,6 +2736,7 @@ export function resetAgentBrowserForTests(): void {
   activeTabIdByWorkspace.clear()
   downloadGuardedPartitions.clear()
   egressGuardedPartitions.clear()
+  networkWatchedPartitions.clear()
   browserAllowlistCache = null
   embedBounds = null
   pipWindow = null

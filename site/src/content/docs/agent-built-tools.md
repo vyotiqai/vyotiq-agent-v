@@ -34,9 +34,12 @@ In the record, this shows as a "Built a tool" row. Each call to the tool later s
 
 Tools are saved in the `agent-tools` folder inside the app's data folder, as `<userData>/agent-tools/<name>.mjs`. They are not in your project, and tasks in every workspace can use them.
 
-Nothing expires. A tool stays in the catalog for every later run until you delete its file by hand.
+Nothing expires. A tool stays in the catalog for every later run until you delete it.
 
-Settings, "Tools", lists them in "Catalog" under "Agent-built tools", once at least one exists: "Written by a run — each call asks you, and asks again whenever the code changes". That list shows each tool's name and description. To read the code, open the `.mjs` file.
+Settings, "Tools", lists them in "Catalog" under "Agent-built tools", once at least one exists: "Written by a run — each call asks you, and asks again whenever the code changes". Each row shows the tool's name and description, with two buttons at its end:
+
+- **View the code** opens the module, with its file path, as text. Agent V reads it; it does not run it. Copy and Delete are at the bottom.
+- **Delete** asks first, then moves the `.mjs` file to the trash (or deletes it, if the trash is unavailable). Runs stop seeing the tool from their next step, and an "Always allow" for it has nothing left to match.
 
 ## Not sandboxed
 
@@ -50,7 +53,7 @@ Agent-built tools are gated more tightly than anything else:
 
 - **Building one asks**, unless "Ask before" is "Nothing" or you allowed `build_tool` for the task or always. The card's "Show the full request" holds the `code` as raw JSON, cut after 4,000 characters, so read a long module in its file before you allow its first call. With "Nothing" the build goes through without asking, but every call to the new tool still asks.
 - **Every call asks, even with approvals off**, until you allow that exact code for the task or always. Setting "Ask before" to "Nothing" covers the tools that ship with the app, not code a run wrote minutes ago.
-- **Unattended mode does not approve them.** Both `build_tool` and every agent-built tool are high-risk, so they still ask.
+- **"Approve low-risk tools on their own" does not approve them.** Both `build_tool` and every agent-built tool are high-risk, so they still ask.
 - **An allow is tied to the file's contents.** "Allow for this task" and "Always allow" for an agent-built tool are saved against a hash of its code, not just its name. If the module changes, even with the same name, the old allow no longer matches and the tool asks again. "Always allow" applies to the workspace you are in, and removing the tool from Settings, "Agent", "Always allowed" makes it ask again.
 
 See [Approvals](/docs/approvals) for the modes and the card.

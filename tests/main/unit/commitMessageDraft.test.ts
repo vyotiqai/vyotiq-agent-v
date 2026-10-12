@@ -6,19 +6,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const userData = join(tmpdir(), `vyotiq-commit-draft-${process.pid}-${Date.now()}`)
 
 const mocks = vi.hoisted(() => ({
-  readGitDiff: vi.fn(),
   readGitLog: vi.fn(),
-  readGitStatus: vi.fn(),
   streamChat: vi.fn()
 }))
+
+/** The changes as main reads them: one file whose diff is `diff`, keyed as main keys it (by mode and content). */
+let diff = ''
 
 vi.mock('electron', () => ({
   app: { getPath: (name: string) => (name === 'userData' ? userData : tmpdir()) }
 }))
 vi.mock('@main/git/git', () => ({
-  readGitDiff: mocks.readGitDiff,
-  readGitLog: mocks.readGitLog,
-  readGitStatus: mocks.readGitStatus
+  readCommitChanges: async (_cwd: string, mode: string) => ({
+    files: [{ path: 'swap.ts', kind: 'modified', added: diff.split('\n+').length - 1, removed: 0, binary: false, untracked: false, diff }],
+    partial: false,
+    key: `${mode}\0${diff}`
+  }),
+  readGitLog: mocks.readGitLog
 }))
 vi.mock('@main/settings/settings', () => ({
   getSettings: () => ({
@@ -45,8 +49,7 @@ let replies: string[] = []
 beforeEach(() => {
   mkdirSync(workspace, { recursive: true })
   replies = ['fix(updater): close the staging watcher before the swap', 'fix(updater): release the staging handle first']
-  mocks.readGitDiff.mockResolvedValue({ ok: true, content: 'diff --git a/swap.ts b/swap.ts\n+await closeStagingWatcher()' })
-  mocks.readGitStatus.mockResolvedValue({ kind: 'ok', status: { branch: 'main', files: [], truncated: false, fileCount: 1, added: 1, removed: 0, hasRemote: false, hasCommits: true } })
+  diff = 'diff --git a/swap.ts b/swap.ts\n+await closeStagingWatcher()'
   mocks.readGitLog.mockResolvedValue([])
   mocks.streamChat.mockReset()
   mocks.streamChat.mockImplementation(async function* () {
@@ -70,7 +73,7 @@ describe('drafted commit message', () => {
 
   it('asks again when the diff changes, when only the staged part is asked for, and on Rewrite', async () => {
     await generateCommitMessage(workspace, 'all')
-    mocks.readGitDiff.mockResolvedValue({ ok: true, content: 'diff --git a/swap.ts b/swap.ts\n+await closeStagingWatcher()\n+log()' })
+    diff = 'diff --git a/swap.ts b/swap.ts\n+await closeStagingWatcher()\n+log()'
     await generateCommitMessage(workspace, 'all')
     expect(mocks.streamChat).toHaveBeenCalledTimes(2)
     await generateCommitMessage(workspace, 'staged')

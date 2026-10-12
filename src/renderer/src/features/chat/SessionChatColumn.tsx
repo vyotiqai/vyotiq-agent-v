@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo, useRef } from 'react'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
@@ -6,15 +6,19 @@ import type {
   AgentInteractionMode,
   AttachedFile,
   ChatMessage,
+  ChatRewindPreviewResult,
   ProviderIdAny,
   RunSummary,
   SecretProvider,
-  ToolApprovalDecision
+  ToolApprovalDecision,
+  ToolApprovalExtras
 } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import type { ChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
 import { PaneHeaderActions, TaskPane, type TaskPaneRunActions } from '@renderer/features/task/TaskPane'
 import type { NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
+import { rerunNeedsConfirm, useRewindDialog } from '@renderer/features/task/RewindDialog'
+import { focusComposerMessage } from '@renderer/lib/shortcuts'
 import { runTitle } from '@renderer/app/navigator/runTitle'
 import { useTaskRecentFiles } from '@renderer/features/inspector/agentFileMarks'
 import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
@@ -81,6 +85,7 @@ export function SessionChatColumn({
   onStop,
   onEditAndResend,
   onRevertToUserMessage,
+  onPreviewRewind,
   messages = [],
   pendingFollowUps = [],
   onRemoveFollowUp,
@@ -175,6 +180,8 @@ export function SessionChatColumn({
     extras?: import('@shared/ipc').ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
   onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
+  /** The files a rewind to before `userMessageIndex` would put back (null = unavailable). */
+  onPreviewRewind?: (userMessageIndex: number) => Promise<ChatRewindPreviewResult | null>
   messages?: ChatMessage[]
   pendingFollowUps?: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[]
   onRemoveFollowUp?: (id: string) => void
@@ -189,7 +196,11 @@ export function SessionChatColumn({
   onLoadToolContent?: (toolCallId: string) => Promise<string | null>
   /** Hide one error row in the record for good. */
   onDismissRunError?: (itemId: string) => void
-  onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
+  onApprovalDecision?: (
+    requestId: string,
+    decision: ToolApprovalDecision,
+    extras?: ToolApprovalExtras
+  ) => void | Promise<void>
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   showThinking?: boolean
   chatSurfaceEpoch?: number
@@ -253,6 +264,7 @@ export function SessionChatColumn({
     cancelPromptEdit,
     beginPromptEdit,
     submitPromptEdit,
+    rerunPrompt,
     beginPromptRevert,
     sendFromDock
   } = useComposerEditState({
@@ -262,6 +274,45 @@ export function SessionChatColumn({
     onEditAndResend,
     onRevertToUserMessage
   })
+
+  // Each user turn's message index, in the order the record counts turns: the
+  // transcript skips the loop's own synthetic turns, and so does this.
+  const userMessageIndexes = useMemo(
+    () => messages.flatMap((m, i) => (m.role === 'user' && !m.synthetic ? [i] : [])),
+    [messages]
+  )
+
+  // "Run this again" goes back to before the instruction, then runs it as it was.
+  const { askRewind: askRerun, dialog: rerunDialog } = useRewindDialog()
+  // One at a time: a second click before the run shows as live would rewind
+  // and start it twice.
+  const rerunning = useRef(false)
+  const rerunLast = useCallback(
+    async (messageIndex: number, runN?: number, said = 0): Promise<void> => {
+      if (rerunning.current) return
+      rerunning.current = true
+      // The pane the button sat in: once the run is live the button is gone.
+      const from = document.activeElement
+      const pane = from instanceof HTMLElement ? from.closest<HTMLElement>('[data-chat-pane]') : null
+      try {
+        // A preview that fails leaves the files unknown, and unknown asks first.
+        const preview = onPreviewRewind ? await onPreviewRewind(messageIndex).catch(() => null) : null
+        const files = preview?.files ?? null
+        if (rerunNeedsConfirm(files, said)) {
+          if (!(await askRerun({ runN: runN ?? null, files, rerun: true, said }))) return
+        }
+        if (!(await rerunPrompt(messageIndex))) return
+        // Focus would fall to the page with it; the instruction line is where you steer what runs now.
+        requestAnimationFrame(() => {
+          const at = document.activeElement
+          if (!at || at === document.body) focusComposerMessage(pane)
+        })
+      } finally {
+        rerunning.current = false
+      }
+    },
+    [onPreviewRewind, askRerun, rerunPrompt]
+  )
 
   // A follow-up the record offers ("Ask it to mock Redis"), sent like any other.
   const sendFollowUp = useCallback(
@@ -430,6 +481,7 @@ export function SessionChatColumn({
 
   return (
     <>
+      {rerunDialog}
       {openInstanceRunId && workspacePath ? (
         <AgentInstancePane
           key={openInstanceRunId}
@@ -488,7 +540,9 @@ export function SessionChatColumn({
             editComposer={editComposer}
             onBeginEdit={onEditAndResend ? beginPromptEdit : undefined}
             onRevert={onRevertToUserMessage ? beginPromptRevert : undefined}
+            onRerun={onEditAndResend ? rerunLast : undefined}
             messageCount={messages.length}
+            userMessageIndexes={userMessageIndexes}
             onOpenChanges={onOpenChanges}
             onLoadToolContent={onLoadToolContent}
             onRetry={onContinue}

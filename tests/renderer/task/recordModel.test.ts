@@ -392,19 +392,31 @@ describe('the record keeps work where and when it happened', () => {
     }
   })
 
-  it('carries the plan across a follow-up sent mid-turn', () => {
+  it('keeps a message said mid-turn in the run, where it landed in the work', () => {
     const steer: UiItem = { ...(user('Also cover the docs', 3) as Extract<UiItem, { kind: 'message' }>), midTurn: true }
     const items = [user('Go', 0), todos([['a', 'x', 'A'], ['b', '~', 'B']], 1), read('b1.ts', 2), steer, read('b2.ts', 4)]
     const { runs } = buildRecordModel(items, { running: true })
-    expect(runs).toHaveLength(2)
-    expect(runs[0]!.continued).toBe(true)
-    expect(runs[0]!.steps.map((s) => s.state)).toEqual(['done', 'paused'])
-    expect(runs[0]!.result).toBeNull()
-    expect(runStateOf(runs[0]!, false, { running: true })).toBe('done')
-    expect(runs[1]!.steps.map((s) => s.state)).toEqual(['done', 'running'])
-    expect(runs[1]!.steps[1]!.work.map(explored)).toEqual([['b2.ts']])
+    // The run carried on with it: one run, one plan, the step still running.
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.steps.map((s) => s.state)).toEqual(['done', 'running'])
+    const work = runs[0]!.steps[1]!.work
+    expect(work.map((w) => w.kind)).toEqual(['explore', 'said', 'explore'])
+    expect(work[1]!.kind === 'said' && work[1]!.text).toBe('Also cover the docs')
+    expect(explored(work[2])).toEqual(['b2.ts'])
+    // Its usage spans both turns.
+    expect([runs[0]!.turn, runs[0]!.turns]).toEqual([0, 2])
     // The step's clock still runs from when it first started.
-    expect(runs[1]!.steps[1]!.startedAt).toBe(T0 + 1_000)
+    expect(runs[0]!.steps[1]!.startedAt).toBe(T0 + 1_000)
+  })
+
+  it('takes a later instruction as a run of its own, on its own turn', () => {
+    const steer: UiItem = { ...(user('Also cover the docs', 3) as Extract<UiItem, { kind: 'message' }>), midTurn: true }
+    const items = [user('Go', 0), read('a.ts', 1), steer, read('b.ts', 4), user('Now the tests', 9), read('c.ts', 10)]
+    const { runs } = buildRecordModel(items, { running: false })
+    expect(runs.map((r) => [r.n, r.turn, r.turns])).toEqual([
+      [1, 0, 2],
+      [2, 2, 1]
+    ])
   })
 
   it('keys a create_plan step as todos.json does, and merges a second plan into the first', () => {

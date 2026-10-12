@@ -98,12 +98,18 @@ export const PrViewSchema = z.object({
   /** Set while auto-merge is on; null when it is off. Absent when gh could not say. */
   autoMerge: PrAutoMergeSchema.nullable().optional(),
   /** GitHub would take an auto-merge request from you now (the repo allows it and the PR still waits on something). */
-  canAutoMerge: z.boolean().optional()
+  canAutoMerge: z.boolean().optional(),
+  /** The base branch merges through a merge queue: Merge adds the PR to it. Absent when GitHub could not say. */
+  mergeQueueRequired: z.boolean().optional(),
+  /** Set while the PR waits in the merge queue; `position` is GitHub's, 1 first. */
+  mergeQueue: z.object({ position: z.number().int().min(1).nullable() }).nullable().optional()
 })
 export type PrView = z.infer<typeof PrViewSchema>
 
 export const PrViewRequestSchema = z.object({
-  workspacePath: z.string().min(1)
+  workspacePath: z.string().min(1),
+  /** A pull request by number; unset, the one for the current branch. */
+  number: z.number().int().positive().optional()
 })
 
 export const PrCreateRequestSchema = z.object({
@@ -410,6 +416,12 @@ export type GithubIssueDetail = z.infer<typeof GithubIssueDetailSchema>
 
 /** GitHub caps an issue or PR comment, and a PR body, at 65,536 characters. */
 const GithubTextSchema = z.string().max(65_536)
+
+/** A pull request named by number in an open workspace: Show all comments, leave the merge queue. */
+export const PrNumberRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive()
+})
 
 export const PrCommentRequestSchema = z.object({
   workspacePath: z.string().min(1),

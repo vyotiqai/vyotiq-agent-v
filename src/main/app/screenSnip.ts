@@ -39,7 +39,7 @@ const MAX_TITLE_CHARS = 120
 const HOST_HTML =
   '<!doctype html><meta charset="utf-8">' +
   `<meta http-equiv="Content-Security-Policy" content="default-src 'none'">` +
-  '<title>Vyotiq screen snip</title>'
+  '<title>Agent V screen snip</title>'
 
 export type ScreenSnipTarget =
   | { kind: 'window'; title: string }
@@ -221,7 +221,7 @@ async function ensureHost(): Promise<{ win: BaseWindow; wc: WebContents }> {
     maximizable: false,
     hasShadow: false,
     opacity: 0,
-    title: 'Vyotiq screen snip'
+    title: 'Agent V screen snip'
   })
   win.setIgnoreMouseEvents(true)
   // Linux has no window opacity; keep the window off every screen there.

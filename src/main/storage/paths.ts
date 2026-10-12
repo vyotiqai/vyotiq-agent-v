@@ -94,6 +94,21 @@ export function workspaceRunFeedbackPath(workspacePath: string): string {
   return join(workspaceMetaDir(workspaceId(canonical)), 'runFeedback.json')
 }
 
+/**
+ * Where model spend with no task behind it is recorded for a workspace (a
+ * commit message drafted from Changes outside a task): its own `usage.json`,
+ * a sibling of `sessions/`, so no session listing ever sees it.
+ */
+/** Copies kept so Discard in Changes can be undone in the app. */
+export function discardUndoRoot(): string {
+  return join(userDataRoot(), 'discard-undo')
+}
+
+export function workspaceUsageDir(workspacePath: string): string {
+  const canonical = canonicalizeWorkspacePath(workspacePath)
+  return workspaceMetaDir(workspaceId(canonical))
+}
+
 export function workspaceAttachmentsDir(workspacePath: string): string {
   const canonical = canonicalizeWorkspacePath(workspacePath)
   return join(workspaceMetaDir(workspaceId(canonical)), 'attachments')

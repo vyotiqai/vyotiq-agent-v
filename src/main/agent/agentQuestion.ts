@@ -207,7 +207,7 @@ export function askQuestionThroughRenderer(
     })
     return Promise.reject(
       new Error(
-        'ask_question requires an app window but none is listening. Reopen Vyotiq and retry.'
+        'ask_question requires an app window but none is listening. Reopen Agent V and retry.'
       )
     )
   }
@@ -215,7 +215,7 @@ export function askQuestionThroughRenderer(
   return new Promise<AgentQuestionAnswer[]>((resolve, reject) => {
     // No answer timeout (run-stopping cap removed — user decision): the
     // question waits indefinitely for the user; abort/cancel still applies,
-    // and Settings → "Questions while unattended" → Skip is the opt-out.
+    // and Settings → "When the agent asks a question" → Skip is the opt-out.
     let heartbeatId: ReturnType<typeof setInterval> | undefined
     let settled = false
     const clearWaiters = (): void => {

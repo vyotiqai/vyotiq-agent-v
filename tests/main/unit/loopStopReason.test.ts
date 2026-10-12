@@ -33,6 +33,8 @@ vi.mock('@main/settings/settings', () => ({
     model: 'qwen2.5',
     ollamaBaseUrl: 'http://127.0.0.1:11434',
     theme: 'system',
+    // These suites drive edits with no approver; the app's default asks first.
+    toolApproval: { mode: 'off', allowlist: [], mcpProtection: true, rules: [] },
     telemetryEnabled: false,
     // Isolate stop-reason behavior from soft finish gates (default contract
     // may include a typecheck criterion; require mode would nudge forever here).
@@ -209,6 +211,29 @@ describe('runAgent stop-reason classification', () => {
     expect(incomplete).toHaveLength(3)
     expect(incomplete.every((e) => e.reason === 'truncated')).toBe(true)
     expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+  })
+
+  it('stops after three cut-off continues instead of looping on the same step', async () => {
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      yield { type: 'text', text: `still going ${call}` }
+      yield { type: 'done', stopReason: 'length' }
+    })
+
+    const events = await collect('stop-truncated-cap', workspace)
+    const incomplete = events.filter((e) => e.type === 'incomplete') as Array<
+      CapturedEvent & { continuing?: boolean }
+    >
+
+    expect(call).toBe(4)
+    expect(incomplete).toHaveLength(4)
+    expect(incomplete.slice(0, 3).every((e) => e.continuing === true)).toBe(true)
+    expect(incomplete[3]?.continuing).toBeUndefined()
+    expect(incomplete[3]?.message).toMatch(/cut off at the output limit 4 times/i)
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+    const persisted = readFileSync(join(resolveRunDir(workspace, 'stop-truncated-cap'), 'messages.jsonl'), 'utf8')
+    expect(persisted).toContain('"cutOff":true')
   })
 
   it('auto-continues after repeated empty responses then finishes', async () => {

@@ -42,6 +42,10 @@ import { parseTerminalOutput } from '../../shared/utils/terminalFormat'
 import { yieldToEventLoop } from './tools/walk'
 import type { VerificationTracker } from './feedback/verification'
 import { getWriteCheckpoint } from './checkpoints'
+import { lspBaselineErrors, lspEditFeedback, lspEditTarget } from './editLspFeedback'
+
+/** Shorter than this, the approval gate answered by itself (a rule, an allow list). */
+const APPROVAL_WAIT_MIN_MS = 500
 export const SOFT_WARN_MUTATION_WITHOUT_DIAGNOSTICS =
   '[Soft warning: this step mutated file(s) without calling diagnostics. Run diagnostics (typecheck/lint) before treating the change as done.]'
 
@@ -221,6 +225,8 @@ export type ToolStepContext = {
   mcpLastUsedByName?: Map<string, number>
   /** Current agent step for last-used stamps. */
   currentStep?: number
+  /** This step's reply stopped on the output limit (cut-off tool arguments). */
+  stepCutOff?: boolean
   invalidateMcpToolCatalogCache?: () => void
   /** Run-scoped MCP not-in-catalog rejection counts (per full tool name). */
   mcpNotInCatalogCounts?: Map<string, number>
@@ -397,10 +403,14 @@ async function unreadExistingEditPathsForStep(
 }
 
 async function runSingleTool(
-  call: ToolCall,
+  requestedCall: ToolCall,
   ctx: ToolStepContext,
   stepFlags?: StepFlags
 ): Promise<ToolOutcome> {
+  // The call as it runs: the model's, or the command as the person edited it on the card.
+  let call = requestedCall
+  /** Said to the agent with the result when the person edited the call. */
+  let editNote: string | undefined
   const events: AgentEvent[] = []
   const summary = summarizeToolArgs(call.name, call.arguments)
   events.push({
@@ -414,6 +424,8 @@ async function runSingleTool(
   // Who let a gated call through, saved on its result so the record can say
   // "Allowed by you · always for this task" after a reload.
   let approvedBy: ToolApprovalGrant | undefined
+  // How long the gate held the call for your answer: "Worked for" leaves it out.
+  let waitedMs: number | undefined
 
   try {
     // Ask before doing anything. The request goes to the renderer directly and
@@ -421,7 +433,11 @@ async function runSingleTool(
     // card still lands in the call's row, which the step's assistant_message
     // (sent before any call ran) already made, and keeps its own request time.
     if (ctx.approval) {
+      const askedAt = Date.now()
       const verdict = await ctx.approval.authorize(call)
+      const waited = Date.now() - askedAt
+      // A rule answers in microseconds; anything this long was a person's answer.
+      if (waited >= APPROVAL_WAIT_MIN_MS) waitedMs = waited
       if (!verdict.allowed) {
         const pathSummary = summarizeToolArgs(call.name, call.arguments) || call.name
         const toolMsg: ChatMessage = {
@@ -438,11 +454,16 @@ async function runSingleTool(
           name: call.name,
           summary: pathSummary,
           ok: false,
-          content: verdict.reason
+          content: verdict.reason,
+          ...(waitedMs ? { waitedMs } : {})
         })
         return { ok: false, events, message: toolMsg }
       }
       approvedBy = verdict.grant
+      if (verdict.arguments) {
+        call = { ...call, arguments: verdict.arguments }
+        editNote = verdict.editNote
+      }
     }
 
     const toolArgs = toolArgsFromCall(call.arguments)
@@ -458,7 +479,8 @@ async function runSingleTool(
           summary: summarizeToolArgs(call.name, call.arguments) || call.name,
           ok: false,
           content: reason,
-          ...(approvedBy ? { approvedBy } : {})
+          ...(approvedBy ? { approvedBy } : {}),
+          ...(waitedMs ? { waitedMs } : {})
         })
         return {
           ok: false,
@@ -488,6 +510,10 @@ async function runSingleTool(
     // the step, and cancelling it would cancel every one of them.
     const deadlineController = new AbortController()
     const toolSignal = composeAbortSignal(ctx.signal, deadlineController.signal)
+    // A language server already running for the file: what it reported before
+    // the edit, so only the errors the edit adds are handed back.
+    const lspTarget = lspEditTarget(ctx.workspace, canonicalizeAgentToolName(call.name), toolArgs)
+    const lspBefore = lspTarget ? lspBaselineErrors(ctx.workspace, lspTarget) : null
 
     const pending = executeTool(call.name, call.arguments, ctx.workspace, toolSignal, {
       runDir: ctx.runDir,
@@ -517,6 +543,7 @@ async function runSingleTool(
       runStickyToolNames: ctx.runStickyToolNames,
       mcpLastUsedByName: ctx.mcpLastUsedByName,
       currentStep: ctx.currentStep,
+      stepCutOff: ctx.stepCutOff,
       invalidateMcpToolCatalogCache: ctx.invalidateMcpToolCatalogCache,
       mcpNotInCatalogCounts: ctx.mcpNotInCatalogCounts,
       mutationPaths: ctx.mutationPaths,
@@ -541,14 +568,25 @@ async function runSingleTool(
       ctx.approval?.activateSkill?.(toolArgs.name)
     }
     let content = result.content
+    if (editNote) content = `${editNote}\n\n${content}`
     if (result.ok && unreadPaths.length > 0) {
       content = `${content}\n\n[Soft warning: edited existing file(s) without a prior read/grep/glob/codebase_search inspect: ${unreadPaths.join(', ')}]`
     }
     if (result.ok && rereadNote) {
       content = `${content}\n\n${rereadNote}`
     }
+    let lspNote: string | null = null
+    if (result.ok && lspTarget) {
+      try {
+        lspNote = await lspEditFeedback(ctx.workspace, lspTarget, lspBefore)
+      } catch {
+        // Feedback is a bonus; a server hiccup never fails the edit.
+      }
+      if (lspNote) content = `${content}\n\n${lspNote}`
+    }
     if (
       result.ok &&
+      !lspNote &&
       stepFlags?.softDiagnosticsNudge &&
       isWorkspaceCodeEdit(call)
     ) {
@@ -628,7 +666,8 @@ async function runSingleTool(
       ok: result.ok,
       content,
       ...(images ? { images } : {}),
-      ...(approvedBy ? { approvedBy } : {})
+      ...(approvedBy ? { approvedBy } : {}),
+      ...(waitedMs ? { waitedMs } : {})
     })
     if (!result.ok && !result.failureLogged) {
       // The args summary (e.g. "2 tasks") is not a failure reason. The real
@@ -672,7 +711,8 @@ async function runSingleTool(
         summary,
         ok: false,
         content,
-        ...(approvedBy ? { approvedBy } : {})
+        ...(approvedBy ? { approvedBy } : {}),
+        ...(waitedMs ? { waitedMs } : {})
       })
       return { ok: false, events, message: toolMsg }
     }

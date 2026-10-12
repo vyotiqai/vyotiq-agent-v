@@ -349,5 +349,45 @@ describe('mapToolGroupProps', () => {
     )
     expect(result.doneLabel).toBe('Edited')
   })
+
+  it('verbs noun-phrase labels so a same-category join reads as verbs', () => {
+    const streaming = mapToolGroupProps([
+      tool('t1', 'grep', 'auth', 'running'),
+      tool('t2', 'git_diff', 'src/a.ts', 'running')
+    ])
+    expect(streaming.runningLabel).toBe('Grepping and diffing')
+
+    const settled = mapToolGroupProps([tool('t1', 'grep', 'auth'), tool('t2', 'git_diff', 'src/a.ts')])
+    expect(settled.doneLabel).toBe('Grepped and diffed')
+    expect(settled.summary).toBe('2 lookups')
+
+    const lookups = mapToolGroupProps([
+      tool('t1', 'grep', 'auth'),
+      tool('t2', 'git_status', 'main'),
+      tool('t3', 'lsp', 'src/a.ts')
+    ])
+    expect(lookups.doneLabel).toBe('Grepped, checked git, and queried')
+  })
+
+  it('falls back to the category verb when a same-category label cannot be verbed', () => {
+    const result = mapToolGroupProps([
+      tool('t1', 'grep', 'auth'),
+      tool('t2', 'mcp__github__get_repo', 'vyotiq/repo')
+    ])
+
+    expect(result.nestedTools[1]?.category).toBe('search')
+    expect(result.runningLabel).toBe('Searching')
+    expect(result.doneLabel).toBe('Searched')
+    expect(result.doneLabel).not.toMatch(/get repo/i)
+  })
+
+  it('keeps previously-correct composite verbs', () => {
+    const mixed = mapToolGroupProps([tool('t1', 'read', 'src/a.ts'), tool('t2', 'grep', 'auth')])
+    expect(mixed.runningLabel).toBe('Reading and searching')
+    expect(mixed.doneLabel).toBe('Read and searched')
+
+    const lookups = mapToolGroupProps([tool('t1', 'search', 'auth'), tool('t2', 'grep', 'auth')])
+    expect(lookups.doneLabel).toBe('Searched and grepped')
+  })
 })
 

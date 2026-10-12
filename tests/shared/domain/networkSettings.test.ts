@@ -28,7 +28,7 @@ describe('validateProxyUrl', () => {
 describe('network and cloud settings', () => {
   it('load with defaults when absent, and fall back rather than fail on a bad value', () => {
     const parsed = SettingsSchema.parse({ ...DEFAULT_SETTINGS, network: undefined, bedrockRegion: 'not a region', vertexLocation: 'mars' })
-    expect(parsed.network).toEqual({ proxyMode: 'system', proxyUrl: '', proxyBypass: '' })
+    expect(parsed.network).toEqual({ proxyMode: 'system', proxyUrl: '', proxyUsername: '', proxyBypass: '' })
     expect(parsed.bedrockRegion).toBe('us-east-1')
     expect(parsed.vertexLocation).toBe('global')
     expect(NetworkSettingsSchema.parse({ proxyMode: 'bogus' }).proxyMode).toBe('system')

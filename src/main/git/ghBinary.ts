@@ -466,7 +466,7 @@ async function extractArchive(archivePath: string, destDir: string): Promise<voi
 async function installFromRelease(): Promise<string> {
   const asset = await fetchLatestGhAsset()
   const installDir = ghInstallDir()
-  if (!installDir) throw new Error('Vyotiq app data path is unavailable')
+  if (!installDir) throw new Error('Agent V app data path is unavailable')
   const archivePath = join(installDir, asset.name)
   const extractDir = join(installDir, 'extract')
   mkdirSync(installDir, { recursive: true })
@@ -477,7 +477,7 @@ async function installFromRelease(): Promise<string> {
     throw new Error('Downloaded GitHub CLI archive did not contain gh')
   }
   const target = bundledGhPath()
-  if (!target) throw new Error('Vyotiq app data path is unavailable')
+  if (!target) throw new Error('Agent V app data path is unavailable')
   renameSync(discovered, target)
   if (process.platform !== 'win32') {
     chmodSync(target, 0o755)
@@ -489,7 +489,7 @@ async function installFromRelease(): Promise<string> {
   }
   cachedGhPath = target
   persistGhPath(target)
-  return 'GitHub CLI downloaded into Vyotiq.'
+  return 'GitHub CLI downloaded into Agent V.'
 }
 
 async function installGithubCliForPlatform(): Promise<string> {
@@ -561,7 +561,7 @@ export async function installGithubCli(): Promise<GithubCliInstallResult> {
 
   if (!executable) {
     throw new Error(
-      `${detail} GitHub CLI finished installing but Vyotiq could not activate it. Click Install GitHub CLI again.`
+      `${detail} GitHub CLI finished installing but Agent V could not activate it. Click Install GitHub CLI again.`
     )
   }
 

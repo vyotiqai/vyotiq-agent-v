@@ -1,6 +1,6 @@
 ---
 title: Approvals
-description: What asks for your OK before it runs, the three approval modes, the approval card, Always allow rules, and unattended runs.
+description: What asks for your OK before it runs, the three approval modes, the approval card, Always allow rules, and runs nobody is watching.
 group: Tasks
 order: 4
 ---
@@ -15,9 +15,9 @@ Setup's step 3, "Decide what needs your OK", offers three choices. Settings name
 | --- | --- | --- |
 | "Edits and commands" | "Edits and commands" | "Recommended. Reading is free; changing things asks first." |
 | "Every tool" | "Every tool" | "Even reads and searches ask." |
-| "Unattended" | "Nothing" | "For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask." |
+| "Nothing" | "Nothing" | "For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask." |
 
-Setup starts on "Edits and commands" unless you already chose "Every tool" in Settings. The mode can differ per workspace; setup says "You can change this per workspace." To give a workspace its own mode, turn on its switch in Settings, "General", "Workspaces". The approval settings you change after that are saved for that workspace only, except Unattended mode.
+Setup starts on "Edits and commands" unless you already chose "Every tool" in Settings. The mode can differ per workspace; setup says "You can change this per workspace." To give a workspace its own mode, turn on its switch in Settings, "General", "Workspaces". The approval settings you change after that are saved for that workspace only, except "Approve low-risk tools on their own".
 
 The "New task" page repeats the current mode in a short note, such as "Asks before edits and commands", with "MCP tools ask first" when that applies. Its "Change" link opens Settings, "Agent".
 
@@ -30,10 +30,11 @@ These run without asking:
 - Reading the workspace's memory
 - Loading a skill
 - `git status` and `git diff`
+- A pull request's checks and failing CI logs, its review comments and conversation, and listing or reading GitHub issues
 - Language-server lookups (a rename still asks)
 - Planning and bookkeeping: writing the plan, updating steps, setting goals, switching between Ask and Agent, marking Done when checks, and starting, waiting on, reading or cancelling [instances](/docs/instances)
 
-Everything else asks: file edits and deletes, applying patches, terminal commands, running tests, typecheck and lint, commits, pull requests, reviews and issues, memory writes, screen snips, merging an instance, building a tool, and all MCP tools, including listing, pinning and releasing them. Browser tools always ask in this mode.
+Everything else asks: file edits and deletes, applying patches, terminal commands, running tests, typecheck and lint, commits, pull requests, reviews, creating issues, memory writes and deletes, screen snips, merging an instance, building a tool, and all MCP tools, including listing, pinning and releasing them. Browser tools, `web_fetch` and `web_search` always ask in this mode: a URL can carry data out. `browser_console`, which only reads the open page's errors and failed requests, does not.
 
 ## The approval card
 
@@ -43,10 +44,16 @@ When a tool needs your OK, a "Needs you" card appears in the record. It shows th
 | --- | --- | --- |
 | "Allow once" | `Alt+A` | Runs this call only |
 | "Allow for this task" | | "Allowed for the rest of this task, follow-ups included" |
+| "Always allow edits under {folder}/" | | For an edit inside a folder: edits under that top folder (`src/`, say) run without asking. Saved as two permission rules, so they show in Settings, "Agent", "Permission rules" |
 | "Always allow {tool or command}" | | Runs it without asking again: in every workspace, or only in this one when it has its own settings |
 | "Deny" | `Alt+D` | Refuses the call |
 
 On macOS the keys are `⌥A` and `⌥D`.
+
+Two more ways to answer:
+
+- **Deny with a note…** opens a field, "What it should do instead — sent with Deny". "Deny and send" refuses the call and hands the agent your note, so it knows why and what to do next rather than guessing.
+- **Edit** (a terminal command) opens the command in a field. Change it and press "Run edited once": the edited command runs this one time, and the agent is told it ran your version. Nothing about it is remembered. A risky command (see below) cannot be edited and run this way.
 
 ### Always allow rules for commands
 
@@ -58,13 +65,13 @@ Your rules are listed in Settings, "Agent", under "Always allowed": "Commands an
 
 ### Nobody answers
 
-An approval that waits too long is denied. The card counts down ("denied automatically in …") and denies it after 15 minutes.
+An approval that waits too long is denied. The card counts down ("denied automatically in …") and denies it after 15 minutes. Settings, "Agent", "Approvals", "Deny unanswered after" changes how long, in minutes; 0 waits for you however long that takes. It applies to approvals asked from then on.
 
 ## What always asks
 
 - **MCP tools.** MCP server tools ask in every mode. With "Nothing" they keep asking while "MCP tools always ask" is on, the default ("Even when approvals are off."). You can turn it off in the same group. An Always allow or Allow for this task you give one still covers it.
 - **Tools the agent wrote.** A tool made with `build_tool` asks before it runs, even with approvals set to "Nothing". An allow for it covers only the code you saw, so it asks again whenever that code changes. See [Agent-built tools](/docs/agent-built-tools).
-- **Risky commands.** A terminal or test command asks whatever the mode, Always allow rules, "Allow for this task" or Unattended mode say when it would:
+- **Risky commands.** A terminal or test command asks whatever the mode, Always allow rules, "Allow for this task" or "Approve low-risk tools on their own" say when it would:
   - delete recursively outside the workspace, the whole workspace, or its `.git` folder, or delete paths it reads from its input
   - force-push, mirror, or delete a branch or tag on a remote
   - run `git reset --hard` or `git clean -f`
@@ -73,23 +80,54 @@ An approval that waits too long is denied. The card counts down ("denied automat
 
   A path it cannot know before the command runs, such as `$BUILD_DIR`, counts as outside the workspace. The card says what the command would do and offers only "Allow once" and "Deny": nothing about it is remembered.
 
-## Unattended mode
+## Keeping files away from the agent
 
-Settings, "Agent", has a separate switch, "Unattended mode": "Approve gated tools automatically, except high-risk ones. For runs nobody is watching." It applies to every workspace.
+A `.vyotiqignore` file at the workspace root lists paths the agent's tools may not touch, in the shape of a `.gitignore`: one pattern a line, `#` for a comment, and a folder covers everything in it. `.aiignore` and `.cursorignore` are read the same way, so a project set up for another agent is covered too.
+
+```
+.env
+secrets/
+*.pem
+```
+
+A matching read, edit, search or listing is refused, and the agent is told it was "the workspace’s ignore file". Matching files are left out of search results. A `!` line can't let a file back in, and a pattern that starts with `/` matches that name in any folder, never fewer places. The agent can't change these files: an edit or delete is refused, and a command that names one asks first. A terminal command that reads an ignored file without naming it, such as `cat *`, isn't caught.
+
+## Approving low-risk tools on their own
+
+Settings, "Agent", "Approvals", has a separate switch, "Approve low-risk tools on their own": "Browser actions, memory notes and web reads stop asking. Edits, commands, git, MCP tools and tools the agent wrote still ask." It applies to every workspace. With "Ask before" set to "Nothing" it adds little, since those tools already run without asking.
 
 High-risk tools still ask with it on:
 
 - File edits and deletes, and applying patches
 - Terminal commands
 - A test run whose command is not one of the usual test, lint or build checks
-- Commits, pull requests, pull request reviews and GitHub issues
+- Commits, pull requests, pull request reviews and creating GitHub issues
 - Merging an instance
 - Building a tool, and any agent-built tool
 - Screen snips
 - MCP tools
 - A language-server rename
 
-With Unattended mode on, "Questions while unattended" decides what happens when the agent asks you something: "Wait for an answer" (the default) or "Skip the question". The spend limit and workspace hooks questions always wait.
+## Questions
+
+"When the agent asks a question", in the same group, decides what happens when the agent asks you something: "Wait for an answer" (the default) or "Skip the question", which tells the agent to go on with a reasonable default and declines MCP servers' questions. It does not depend on the switch above. The spend limit and workspace hooks questions always wait.
+
+Before 2026-10-09 the switch was called "Unattended mode", setup's "Nothing" was called "Unattended", and the questions setting only applied with the switch on.
+
+## The command sandbox
+
+Settings, "Tools", "Sandbox", "Sandbox commands" confines the commands the agent runs (its terminal, test runs, typecheck and lint, never the terminal you type into): with "Workspace only" they can write only the workspace (its git folder too, except hooks and config), temp, and the package caches that already exist. It is off by default, and a command the sandbox cannot run is refused, never run without it.
+
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| How | sandbox-exec | bubblewrap (`bwrap`) | Low integrity |
+| Hides the app's data and `~/.ssh` | Yes | Yes | No: keeps them unwritable only |
+| "Network": "Deny" | Yes, localhost still works | Yes, localhost too is cut | Not available |
+| bash commands | Yes | Yes | No: Git Bash and WSL cannot start at low integrity; use PowerShell or cmd |
+
+On Windows, turning it on labels the workspace, the sandbox's temp folder and the package caches so commands can write them at low integrity. The first command in a large workspace waits while that happens (about half a minute for 200,000 files). Turning the sandbox off takes the labels off again, removing a workspace takes its own off, and uninstalling takes them all off.
+
+Tools the agent wrote cannot run while the sandbox is on. See [Agent-built tools](/docs/agent-built-tools).
 
 ## Home: "Needs you"
 

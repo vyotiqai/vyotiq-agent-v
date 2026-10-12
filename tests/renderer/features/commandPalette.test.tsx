@@ -202,6 +202,20 @@ describe('paletteCommands', () => {
     expect(titles).not.toContain('Send feedback')
   })
 
+  it('offers task-view commands only in the task view, and Stop only with a task', () => {
+    // On Home, "Stop the run" and "Focus the instruction line" were listed and did nothing.
+    const ids = (over: { inTaskView?: boolean; hasTask?: boolean }) =>
+      paletteCommands({ workspaces: [WS], activePath: WS, canSendFeedback: false, ...over }).map((c) => c.id)
+    const home = ids({ inTaskView: false })
+    for (const id of ['stop', 'focusComposer', 'panelChanges', 'inspector', 'closeChat']) expect(home).not.toContain(id)
+    expect(home).toContain('newChat')
+    expect(home).toContain('settings')
+    const newTask = ids({ inTaskView: true, hasTask: false })
+    expect(newTask).toContain('focusComposer')
+    expect(newTask).not.toContain('stop')
+    expect(ids({ inTaskView: true, hasTask: true })).toContain('stop')
+  })
+
   it('marks the current workspace', () => {
     const current = paletteCommands({ workspaces: [OTHER, WS], activePath: WS, canSendFeedback: false }).find(
       (c) => c.title === 'Switch to vyotiq'

@@ -124,6 +124,7 @@ export type WorkspaceFileErrorCode =
   | 'FILE_PERMISSION'
   | 'FILE_IO'
   | 'DIRECTORY_NOT_EMPTY'
+  | 'TRASH_FAILED'
   | 'WORKSPACE_ROOT'
   | 'PATH_UNSAFE'
   | 'SYMLINK_ESCAPE'
@@ -1176,13 +1177,31 @@ export async function moveWorkspaceFile(
   )
 }
 
+/** Moves an absolute path to the OS trash (Electron's `shell.trashItem` in the app). */
+export type TrashPath = (absolutePath: string) => Promise<void>
+
 async function deleteWorkspaceFileUnsafe(
-  request: WorkspaceFileDeleteRequest
+  request: WorkspaceFileDeleteRequest,
+  trash?: TrashPath
 ): Promise<WorkspaceFileDeleteResult> {
   const normalized = normalizeRelativePath(request.path, true)
   assertNotWorkspaceRoot(normalized)
   assertNoSymlinkPath(request.workspacePath, normalized)
   const found = existingPath(request.workspacePath, normalized)
+  if (trash && !request.permanent) {
+    // Recoverable, so a folder goes whole without the not-empty question.
+    // A failure is never turned into a permanent delete here: the caller
+    // asks first.
+    try {
+      await trash(found.display)
+    } catch (err) {
+      throw new WorkspaceFileError(
+        'TRASH_FAILED',
+        `Could not move ${normalized} to the trash: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+    return { path: normalized, kind: kindForStats(found.stats), trashed: true }
+  }
   if (found.stats.isDirectory() && !request.recursive) {
     if (readdirSyncSafe(found.display).length > 0) {
       throw new WorkspaceFileError('DIRECTORY_NOT_EMPTY', `Directory is not empty: ${normalized}`)
@@ -1195,20 +1214,27 @@ async function deleteWorkspaceFileUnsafe(
   } else {
     await filesystemOperation(normalized, () => unlink(found.display))
   }
-  return { path: normalized, kind: kindForStats(found.stats) }
+  return { path: normalized, kind: kindForStats(found.stats), trashed: false }
 }
 
+/**
+ * Deletes a workspace entry. With `trash`, the entry goes to the OS trash
+ * unless the request asks for `permanent`; without it (tests, headless), it
+ * is removed from disk.
+ */
 export async function deleteWorkspaceFile(
-  request: WorkspaceFileDeleteRequest
+  request: WorkspaceFileDeleteRequest,
+  trash?: TrashPath
 ): Promise<WorkspaceFileDeleteResult> {
   const normalized = normalizeRelativePath(request.path, true)
-  if (request.recursive || !normalized) {
+  const wholeTree = request.recursive || (Boolean(trash) && !request.permanent)
+  if (wholeTree || !normalized) {
     return withExclusiveWorkspaceMutation(request.workspacePath, () =>
-      deleteWorkspaceFileUnsafe(request)
+      deleteWorkspaceFileUnsafe(request, trash)
     )
   }
   return withWorkspaceMutation(request.workspacePath, normalized, () =>
-    deleteWorkspaceFileUnsafe(request)
+    deleteWorkspaceFileUnsafe(request, trash)
   )
 }
 

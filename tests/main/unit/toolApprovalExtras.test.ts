@@ -207,3 +207,37 @@ describe('always allow edits under a folder', () => {
     expect(always).toEqual(['edit'])
   })
 })
+
+describe('always allow a whole program', () => {
+  it('offers the program beside its subcommand, and remembers it when chosen', async () => {
+    const seen = listen()
+    const always: string[] = []
+    const g = createApprovalGate({
+      runId: 'run-1',
+      mode: 'mutating',
+      workspaceAllowlist: [],
+      signal: new AbortController().signal,
+      persistAlways: (name) => always.push(name)
+    })
+    const first = g.authorize({ id: 'p1', name: 'terminal', arguments: '{"command":"npm test -- --watch=false"}' })
+    await Promise.resolve()
+    expect(seen[0]!.alwaysAllowCommand).toBe('npm test')
+    expect(seen[0]!.alwaysAllowProgram).toBe('npm')
+    resolveToolApproval({ requestId: seen[0]!.requestId, runId: 'run-1', decision: 'always', allowProgram: true })
+    expect(await first).toEqual({ allowed: true, grant: { by: 'you', scope: 'workspace', allow: 'npm' } })
+    expect(always).toEqual(['terminal:npm'])
+    // Another npm command no longer asks.
+    expect((await g.authorize({ id: 'p2', name: 'terminal', arguments: '{"command":"npm run lint"}' })).allowed).toBe(true)
+    expect(seen).toHaveLength(1)
+  })
+
+  it('never offers it for a shell, git or a deleter', async () => {
+    const seen = listen()
+    const g = gate()
+    for (const [i, command] of ['git status', 'rm build.log', 'npx vitest'].entries()) {
+      void g.authorize({ id: `q${i}`, name: 'terminal', arguments: JSON.stringify({ command }) })
+      await Promise.resolve()
+      expect(seen[i]!.alwaysAllowProgram).toBeUndefined()
+    }
+  })
+})

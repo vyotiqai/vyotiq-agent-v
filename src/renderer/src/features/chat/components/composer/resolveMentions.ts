@@ -4,6 +4,7 @@ import { filePreviewKind } from '../filePreviewKind'
 import { pickedElementContextBlock } from '@shared/browserPick'
 import { MAX_FILES } from './useComposerFiles'
 import { MAX_IMAGES } from './useComposerImages'
+import { latestTerminalText } from '../terminalBuffer'
 import {
   extractMentions,
   isSafeWorkspaceRelPath,
@@ -141,6 +142,122 @@ async function resolveBranchBlock(workspacePath: string): Promise<string> {
     }
   }
   return parts.join('\n')
+}
+
+/** Diffs are cut here: the agent can read the rest with git itself. */
+const DIFF_BLOCK_MAX_CHARS = 40_000
+const TERMINAL_BLOCK_MAX_LINES = 200
+const TERMINAL_BLOCK_MAX_CHARS = 12_000
+const SYMBOL_CONTEXT_LINES = 40
+
+function cutBlock(text: string, max: number, what: string): string {
+  return text.length > max ? `${text.slice(0, max)}\n… (${what} cut at ${max.toLocaleString()} characters)` : text
+}
+
+function fence(body: string, lang = ''): string {
+  const ticks = body.includes('```') ? '````' : '```'
+  return `${ticks}${lang}\n${body}\n${ticks}`
+}
+
+async function resolveChangesBlock(workspacePath: string): Promise<string | { error: string }> {
+  try {
+    const res = await window.vyotiq.gitDiff({ workspacePath, vsHead: true })
+    if (!res.ok) return { error: `Uncommitted changes unavailable: ${res.error}` }
+    const content = res.data.content.trim()
+    if (!content) return '## Referenced uncommitted changes\nNothing is uncommitted.'
+    return ['## Referenced uncommitted changes (working tree against HEAD)', fence(cutBlock(content, DIFF_BLOCK_MAX_CHARS, 'diff'), 'diff')].join('\n')
+  } catch (err) {
+    return { error: `Uncommitted changes unavailable: ${err instanceof Error ? err.message : String(err)}` }
+  }
+}
+
+async function resolveCommitBlock(
+  workspacePath: string,
+  mention: Extract<ComposerMention, { kind: 'commit' }>
+): Promise<string | { error: string }> {
+  try {
+    const res = await window.vyotiq.gitDiff({ workspacePath, sha: mention.sha })
+    if (!res.ok) return { error: `Commit ${mention.sha.slice(0, 7)} unavailable: ${res.error}` }
+    return [
+      `## Referenced commit ${mention.sha.slice(0, 7)}${mention.subject ? `: ${mention.subject}` : ''}`,
+      fence(cutBlock(res.data.content.trim(), DIFF_BLOCK_MAX_CHARS, 'diff'), 'diff')
+    ].join('\n')
+  } catch (err) {
+    return { error: `Commit ${mention.sha.slice(0, 7)} unavailable: ${err instanceof Error ? err.message : String(err)}` }
+  }
+}
+
+function resolveTerminalBlock(): string | { error: string } {
+  const latest = latestTerminalText()
+  if (!latest) return { error: 'No terminal output yet: open a terminal tab first' }
+  let lines = latest.text.split('\n')
+  if (lines.length > TERMINAL_BLOCK_MAX_LINES) lines = lines.slice(-TERMINAL_BLOCK_MAX_LINES)
+  let body = lines.join('\n')
+  if (body.length > TERMINAL_BLOCK_MAX_CHARS) body = body.slice(-TERMINAL_BLOCK_MAX_CHARS)
+  return [`## Referenced terminal output${latest.title ? ` (${latest.title})` : ''}, its last lines`, fence(body, 'text')].join('\n')
+}
+
+async function resolveUrlBlock(url: string): Promise<string | { error: string }> {
+  if (!window.vyotiq?.composerFetchUrl) return { error: `Cannot read ${url}` }
+  const res = await window.vyotiq.composerFetchUrl(url)
+  if (!res.ok) return { error: res.error }
+  return [`## Referenced page`, res.data.content].join('\n')
+}
+
+async function resolveIssueBlock(workspacePath: string, number: number): Promise<string | { error: string }> {
+  const issue = await window.vyotiq.githubIssueView({ workspacePath, number })
+  if (issue.ok) {
+    const d = issue.data
+    const comments = d.comments.map((c) => `### ${c.author}\n${c.body}`).join('\n\n')
+    return [
+      `## Referenced issue #${d.number}: ${d.title}`,
+      `${d.state} · by ${d.author}${d.labels.length ? ` · ${d.labels.join(', ')}` : ''} · ${d.url}`,
+      '',
+      cutBlock(d.body.trim() || '(no description)', 12_000, 'description'),
+      comments ? `\n${cutBlock(comments, 12_000, 'comments')}` : ''
+    ]
+      .join('\n')
+      .trim()
+  }
+  // GitHub keeps pull requests apart from issues for `gh issue view`.
+  const pr = await window.vyotiq.prView(workspacePath, number)
+  if (pr.ok && pr.data) {
+    const p = pr.data
+    const files = p.files.slice(0, 60).map((f) => `- ${f.path} (+${f.additions} −${f.deletions})`)
+    return [
+      `## Referenced pull request #${p.number}: ${p.title}`,
+      `${p.state}${p.isDraft ? ' (draft)' : ''} · ${p.headRefName} → ${p.baseRefName} · +${p.additions} −${p.deletions} · ${p.url}`,
+      '',
+      cutBlock(p.body.trim() || '(no description)', 12_000, 'description'),
+      files.length ? `\nFiles:\n${files.join('\n')}` : ''
+    ]
+      .join('\n')
+      .trim()
+  }
+  return { error: issue.error || `#${number} was not found` }
+}
+
+async function resolveSymbolBlock(workspacePath: string, name: string): Promise<string | { error: string }> {
+  if (!window.vyotiq?.workspaceGrep) return { error: `Cannot look up ${name}` }
+  const escaped = name.replace(/[$]/g, '\\$')
+  const query = `(function|class|interface|type|enum|const|let|var|def|fn|struct|trait|func|module)\\s+${escaped}\\b`
+  const res = await window.vyotiq.workspaceGrep({ workspacePath, query, maxResults: 8 })
+  if (!res.ok) return { error: res.error }
+  const hit = res.data.hits[0]
+  if (!hit) return { error: `No definition of ${name} found` }
+  const file = await window.vyotiq.workspaceReadText({ workspacePath, path: hit.path })
+  if (!file.ok) return { error: file.error }
+  const lines = file.data.text.split('\n')
+  const from = Math.max(0, hit.line - 3)
+  const to = Math.min(lines.length, hit.line - 1 + SYMBOL_CONTEXT_LINES)
+  const others = res.data.hits.slice(1).map((h) => `- ${h.path}:${h.line}`)
+  return [
+    `## Referenced symbol ${name} — ${hit.path}:${hit.line}`,
+    fence(lines.slice(from, to).join('\n')),
+    others.length ? `Also defined at:\n${others.join('\n')}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 async function resolveChatBlock(
@@ -461,6 +578,40 @@ export async function resolveComposerMentions(opts: {
         }
         contextBlocks.push(await resolveChatBlock(opts.workspacePath, mention))
         if (!stillCurrent()) return staleResult()
+        break
+      }
+      case 'changes':
+      case 'commit':
+      case 'issue':
+      case 'symbol': {
+        if (!opts.workspacePath) {
+          problems.push(`Cannot load @${mention.kind} (no workspace)`)
+          break
+        }
+        const block =
+          mention.kind === 'changes'
+            ? await resolveChangesBlock(opts.workspacePath)
+            : mention.kind === 'commit'
+              ? await resolveCommitBlock(opts.workspacePath, mention)
+              : mention.kind === 'issue'
+                ? await resolveIssueBlock(opts.workspacePath, mention.number)
+                : await resolveSymbolBlock(opts.workspacePath, mention.name)
+        if (!stillCurrent()) return staleResult()
+        if (typeof block === 'object') problems.push(block.error)
+        else contextBlocks.push(block)
+        break
+      }
+      case 'terminal': {
+        const block = resolveTerminalBlock()
+        if (typeof block === 'object') problems.push(block.error)
+        else contextBlocks.push(block)
+        break
+      }
+      case 'url': {
+        const block = await resolveUrlBlock(mention.url)
+        if (!stillCurrent()) return staleResult()
+        if (typeof block === 'object') problems.push(block.error)
+        else contextBlocks.push(block)
         break
       }
       case 'slash': {

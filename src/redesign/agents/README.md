@@ -22,7 +22,7 @@ pnpm redesign:agents      # http://localhost:5207
 | `browser` | The page it checked at 800 / 1600px. Pick an element with the mouse or keyboard and it lands in the box as a chip |
 | `instances` | A task split across three instances. Each one hangs under its task in the list and opens in place of the record; Back or Esc returns |
 | `failed` | What broke, in words, where it broke, with Retry and "Ask it to mock Redis" |
-| `new` | Where it runs in the header, the brief with done-when checks inside it, Start task with how it asks, and what the agent will see as a column on the right |
+| `new` | Where it runs in the header, the brief with done-when checks inside it and Start task ending its control row, scope and approvals on one quiet line under the box, and what the agent will see as a ledger under that |
 | `home` | All tasks across workspaces, grouped by status or by workspace, with Allow, Answer, Review and Retry in place. The task list steps aside to a rail of places, so the tasks are shown once |
 | `inbox` | Asks first, then finished work, then everything else, all answered in place |
 | `usage` | Spend, tokens or tasks by day over 7 or 30 days, the model mix, and what failed most |

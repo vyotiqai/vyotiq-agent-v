@@ -17,9 +17,23 @@ export type WorkspaceGitSummaryState = {
   refresh: () => void
 }
 
+/**
+ * A folder with no `.git` is an answer, not a failure: it gets neither a
+ * summary nor an error, so its row reads "Not a repository" instead of a red
+ * "Status unavailable" with a Retry that can never help (the built-in home
+ * workspace, on every fresh install).
+ */
 type PathOutcome =
   | { workspacePath: string; summary: WorkspaceGitSummary }
   | { workspacePath: string; error: string }
+  | { workspacePath: string; notRepo: true }
+
+function without<T>(prev: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in prev)) return prev
+  const next = { ...prev }
+  delete next[key]
+  return next
+}
 
 /** Burst of events (write resolution + a commit) should cost one re-pull. */
 const EVENT_DEBOUNCE_MS = 250
@@ -49,6 +63,7 @@ async function fetchPathOutcome(workspacePath: string): Promise<PathOutcome> {
   try {
     const result = await window.vyotiq.gitStatus(workspacePath)
     if (!result.ok) return { workspacePath, error: result.error }
+    if (result.data.kind === 'not_repo') return { workspacePath, notRepo: true }
     if (result.data.kind !== 'ok') {
       return { workspacePath, error: 'Repository status unavailable' }
     }
@@ -104,7 +119,7 @@ export function useWorkspaceGitSummaries(
       const nextErrors: Record<string, string> = {}
       for (const entry of entries) {
         if ('summary' in entry) nextData[entry.workspacePath] = entry.summary
-        else nextErrors[entry.workspacePath] = entry.error
+        else if ('error' in entry) nextErrors[entry.workspacePath] = entry.error
       }
       setData(nextData)
       setErrors(nextErrors)
@@ -118,24 +133,16 @@ export function useWorkspaceGitSummaries(
 
   const applyOutcome = useCallback((outcome: PathOutcome, generation: number) => {
     if (generation !== generationRef.current) return
+    const { workspacePath } = outcome
     if ('summary' in outcome) {
-      const { workspacePath, summary } = outcome
-      setData((prev) => ({ ...prev, [workspacePath]: summary }))
-      setErrors((prev) => {
-        if (!(workspacePath in prev)) return prev
-        const next = { ...prev }
-        delete next[workspacePath]
-        return next
-      })
+      setData((prev) => ({ ...prev, [workspacePath]: outcome.summary }))
+      setErrors((prev) => without(prev, workspacePath))
+    } else if ('error' in outcome) {
+      setErrors((prev) => ({ ...prev, [workspacePath]: outcome.error }))
+      setData((prev) => without(prev, workspacePath))
     } else {
-      const { workspacePath, error } = outcome
-      setErrors((prev) => ({ ...prev, [workspacePath]: error }))
-      setData((prev) => {
-        if (!(workspacePath in prev)) return prev
-        const next = { ...prev }
-        delete next[workspacePath]
-        return next
-      })
+      setErrors((prev) => without(prev, workspacePath))
+      setData((prev) => without(prev, workspacePath))
     }
     setUpdatedAt(new Date().toISOString())
   }, [])

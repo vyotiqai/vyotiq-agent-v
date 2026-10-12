@@ -30,6 +30,7 @@ vi.mock('electron', () => ({
 import {
   addInstanceWorktree,
   commitDirtyInstanceWorktree,
+  finalizeInstanceWorktree,
   gitShowToFile,
   instanceWorktreeBranch,
   instanceWorktreePath,
@@ -38,6 +39,7 @@ import {
   mergeInstanceBranch,
   pruneStaleInstanceBranches,
   pruneStaleInstanceWorktrees,
+  reattachInstanceWorktree,
   removeInstanceWorktree,
   resetInstanceWorktreeCleanupForTests
 } from '@main/git/instanceWorktree'
@@ -307,6 +309,75 @@ describe.skipIf(!canGit)('instanceWorktree locked remove', () => {
     await removeInstanceWorktree(repo, worktreePath)
     expect(existsSync(worktreePath)).toBe(false)
     worktreePath = ''
+  }, 30_000)
+})
+
+describe.skipIf(!canGit)('reattachInstanceWorktree after an app restart', () => {
+  let repo = ''
+  let worktreePath = ''
+
+  afterEach(async () => {
+    if (repo && worktreePath) await removeInstanceWorktree(repo, worktreePath)
+    worktreePath = ''
+    if (repo && existsSync(repo)) {
+      rmSync(repo, { recursive: true, force: true })
+    }
+    if (existsSync(userData)) {
+      rmSync(userData, { recursive: true, force: true })
+    }
+    resetInstanceWorktreeCleanupForTests()
+  })
+
+  const initRepo = (): void => {
+    repo = mkdtempSync(join(tmpdir(), 'vyotiq-wt-reattach-'))
+    git(repo, 'init', '--initial-branch=main')
+    mkdirSync(join(repo, 'src'), { recursive: true })
+    mkdirSync(join(repo, 'extra'), { recursive: true })
+    writeFileSync(join(repo, 'src', 'app.ts'), 'export const n = 1\n', 'utf8')
+    writeFileSync(join(repo, 'extra', 'skip.ts'), 'export const s = 1\n', 'utf8')
+    git(repo, 'add', '.')
+    git(repo, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'init')
+  }
+
+  it('checks the kept branch out again at the same path, with the work the instance committed', async () => {
+    initRepo()
+    const runId = `run-reattach-${process.pid}`
+    const added = await addInstanceWorktree(repo, runId)
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    writeFileSync(join(added.worktreePath, 'src', 'app.ts'), 'export const n = 2\n', 'utf8')
+    // What the app does to a running instance when it exits: commit, remove the checkout, keep the branch.
+    await finalizeInstanceWorktree(repo, added.worktreePath, { keepBranch: true, branch: added.branch })
+    expect(existsSync(added.worktreePath)).toBe(false)
+
+    const back = await reattachInstanceWorktree(repo, runId, added.branch)
+    expect(back).toEqual({ ok: true, worktreePath: added.worktreePath, branch: added.branch })
+    worktreePath = added.worktreePath
+    expect(readFileSync(join(worktreePath, 'src', 'app.ts'), 'utf8').trim()).toBe('export const n = 2')
+  }, 30_000)
+
+  it('keeps a path_scope instance sparse', async () => {
+    initRepo()
+    const runId = `run-reattach-sparse-${process.pid}`
+    const added = await addInstanceWorktree(repo, runId, ['src'])
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    await finalizeInstanceWorktree(repo, added.worktreePath, { keepBranch: true, branch: added.branch })
+
+    const back = await reattachInstanceWorktree(repo, runId, added.branch, ['src'])
+    expect(back.ok).toBe(true)
+    worktreePath = added.worktreePath
+    expect(existsSync(join(worktreePath, 'src', 'app.ts'))).toBe(true)
+    expect(existsSync(join(worktreePath, 'extra', 'skip.ts'))).toBe(false)
+  }, 30_000)
+
+  it('says so when the branch is gone, and refuses a branch that is not an instance branch', async () => {
+    initRepo()
+    const runId = `run-reattach-gone-${process.pid}`
+    const gone = await reattachInstanceWorktree(repo, runId, instanceWorktreeBranch(runId))
+    expect(gone).toEqual({ ok: false, error: `its branch ${instanceWorktreeBranch(runId)} no longer exists` })
+    const foreign = await reattachInstanceWorktree(repo, runId, 'main')
+    expect(foreign).toEqual({ ok: false, error: 'not an instance branch: main' })
   }, 30_000)
 })
 

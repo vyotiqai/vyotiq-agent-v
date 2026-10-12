@@ -60,14 +60,19 @@ test('send message streams fixture assistant text and can stop', async () => {
 
   await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 15_000 })
 
-  // While the run streams, the task composer's line row offers Stop; once the
-  // run is no longer live the composer drops it.
-  const stop = window.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i })
-  if (await stop.isVisible().catch(() => false)) {
-    await stop.click()
-    await expect(stop).toBeHidden({ timeout: 10_000 })
+  // While the run streams, the task composer's line row carries Stop beside the
+  // action — Queue, or Send now once it has text. Press the button; Escape is
+  // the same stop for the keyboard.
+  const action = window.locator('[data-composer-line]').getByRole('button', { name: /^queue$/i })
+  if (await action.isVisible().catch(() => false)) {
+    const stop = window.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i })
+    if (await stop.isVisible().catch(() => false)) await stop.click()
+    else await window.keyboard.press('Escape')
+    await expect(window.locator('[data-receipt-outcome="stopped"]').last()).toBeVisible({ timeout: 20_000 })
   } else {
-    // The run ended before Stop was pressed: the composer carries no Stop.
-    await expect(stop).toHaveCount(0, { timeout: 10_000 })
+    // The run ended on its own: the row reads Send again.
+    await expect(window.locator('[data-composer-line]').getByRole('button', { name: /^send$/i })).toBeVisible({
+      timeout: 20_000
+    })
   }
 })

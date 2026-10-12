@@ -5,7 +5,9 @@ import { estimateTextTokens } from './estimate'
 /**
  * Core browse + diagnostics tools that are always present and never routed
  * through the optional-builtin pin flow. The remaining browser_* tools plus
- * merge_agent_instance are admitted out-of-band via request_mcp_tools pins.
+ * merge_agent_instance stay off the wire until a run asks for them
+ * (request_mcp_tools with their names) or calls one — see
+ * `wireBuiltinTools`. "Preload every MCP tool" sends them every step again.
  */
 const CORE_OPTIONAL_ALWAYS = new Set([
   'browser_navigate',
@@ -18,7 +20,7 @@ const CORE_OPTIONAL_ALWAYS = new Set([
   'diagnostics'
 ])
 
-/** Builtins the request_mcp_tools pin flow can admit (bookkeeping only — the step catalog already carries them). */
+/** Builtins held back until a run asks for or calls one (~1.6k tokens a step together). */
 export const OPTIONAL_BUILTIN_NAMES = new Set([
   ...AGENT_TOOLS.map((t) => t.name).filter(
     (name) => name.startsWith('browser_') && !CORE_OPTIONAL_ALWAYS.has(name)
@@ -28,6 +30,40 @@ export const OPTIONAL_BUILTIN_NAMES = new Set([
 
 export function isOptionalBuiltinName(name: string): boolean {
   return OPTIONAL_BUILTIN_NAMES.has(name)
+}
+
+/**
+ * The builtins that go on the wire this step: everything but the optional
+ * ones the run has not admitted. `eager` (Preload every MCP tool) sends all.
+ * Admission is append-only within a run, like MCP's, because the tool array
+ * leads the request and any change voids the prompt cache.
+ */
+export function wireBuiltinTools<T extends { name: string }>(
+  tools: readonly T[],
+  admitted: ReadonlySet<string>,
+  loading: 'on-demand' | 'eager'
+): { wire: T[]; deferred: T[] } {
+  if (loading === 'eager') return { wire: [...tools], deferred: [] }
+  const wire: T[] = []
+  const deferred: T[] = []
+  for (const t of tools) {
+    if (isOptionalBuiltinName(t.name) && !admitted.has(t.name)) deferred.push(t)
+    else wire.push(t)
+  }
+  return { wire, deferred }
+}
+
+/**
+ * One static line naming the held-back builtins. Static on purpose: it says
+ * the same whether or not one was loaded, so admitting a tool never rewrites
+ * the system prompt as well as the tool array.
+ */
+export function deferredBuiltinsLine(names: readonly string[], canRequest: boolean): string {
+  if (names.length === 0) return ''
+  const how = canRequest
+    ? 'Load the ones you need with `request_mcp_tools` (`tools: [...]`), or call one directly: it runs, and stays loaded for the rest of the run.'
+    : 'Call one directly: it runs, and stays loaded for the rest of the run.'
+  return `<more_builtin_tools>\nMore built-in tools, held back to keep the window free unless already in your tool list: ${names.join(', ')}. ${how}\n</more_builtin_tools>`
 }
 
 /**

@@ -37,6 +37,7 @@ vi.mock('@main/agent/startAgentRun', () => ({
 
 import {
   cancelChildInstance,
+  messageChildInstance,
   emitAgentInstanceUpdate,
   handleInlineInstanceFinished,
   mergeAgentInstanceBranch,
@@ -70,6 +71,8 @@ import {
   updateStatus
 } from '@main/agent/state'
 import { startAgentRunInBackground } from '@main/agent/startAgentRun'
+import { planStepTitle } from '@main/agent/planStepTitle'
+import { invalidateListRunsCache } from '@main/agent/runListCache'
 import { resolveRunDir } from '@main/storage/paths'
 import { DEFAULT_MAX_PARALLEL_INSTANCES, RUN_RECEIPT_VERSION } from '@shared/ipc'
 import { setSettings } from '@main/settings/settings'
@@ -203,6 +206,38 @@ describe('agentInstances', () => {
     clearRunAbort(result.runId)
   })
 
+  it('starts the child with the brief it was given, not only its background', async () => {
+    // Siblings often share the background word for word; the outcome is what tells them apart.
+    const result = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'Shared background every sibling gets',
+      outcome: 'A map of the IPC boundary',
+      subTasks: ['read the channels'],
+      doneWhen: 'reported',
+      pathScope: ['src/main/']
+    })
+    expect(result.ok ? 'ok' : result.error).toBe('ok')
+    if (!result.ok) return
+    type Update = { type?: string; phase?: string; goal?: string }
+    const startedUpdate = (): Update | undefined => {
+      const file = join(resolveRunDir(workspacePath, parentRunId), 'events.jsonl')
+      if (!existsSync(file)) return undefined
+      return readFileSync(file, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Update & { event?: Update })
+        .map((row) => row.event ?? row)
+        .find((e) => e.type === 'agent_instance_update' && e.phase === 'started')
+    }
+    // Appended on the run's write queue.
+    await vi.waitFor(() => expect(startedUpdate()).toBeDefined())
+    const started = startedUpdate()
+    expect(started?.goal).toMatch(/^Outcome: A map of the IPC boundary\n/)
+    expect(started?.goal).toBe(loadStatus(resolveRunDir(workspacePath, result.runId))?.goal)
+    clearRunAbort(result.runId)
+  })
+
   it('runs a helper on the task’s own model, or on the helper model once one is set', async () => {
     const { rememberRunModelSelection } = await import('@main/agent/runModelSelection')
     rememberRunModelSelection(parentRunId, 'anthropic', 'claude-opus-5-5')
@@ -234,6 +269,54 @@ describe('agentInstances', () => {
         model: 'anthropic/claude-haiku-4.5'
       })
       if (onHelperModel.ok) clearRunAbort(onHelperModel.runId)
+    } finally {
+      setSettings({ helperModel: null })
+    }
+  })
+
+  it('runs one child on the model the parent asked for', async () => {
+    const { rememberRunModelSelection } = await import('@main/agent/runModelSelection')
+    rememberRunModelSelection(parentRunId, 'anthropic', 'claude-opus-5-5')
+    setSettings({ helperModel: { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, utilityModel: null })
+    try {
+      vi.mocked(startAgentRunInBackground).mockClear()
+      const inherit = await spawnAgentInstance({
+        parentRunId,
+        workspacePath,
+        goal: 'g',
+        outcome: 'o',
+        subTasks: ['s'],
+        doneWhen: 'd',
+        readOnly: true,
+        model: 'inherit'
+      })
+      expect(inherit.ok).toBe(true)
+      expect(vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0].agentInput).toMatchObject({
+        provider: 'anthropic',
+        model: 'claude-opus-5-5'
+      })
+      if (inherit.ok) clearRunAbort(inherit.runId)
+
+      // "fast" with no Utility model set: the helper model, and a note saying why.
+      const fast = await spawnAgentInstance({
+        parentRunId,
+        workspacePath,
+        goal: 'g',
+        outcome: 'o',
+        subTasks: ['s'],
+        doneWhen: 'd',
+        readOnly: true,
+        model: 'fast'
+      })
+      expect(fast.ok).toBe(true)
+      if (fast.ok) {
+        expect(fast.modelNote).toMatch(/Utility model/)
+        clearRunAbort(fast.runId)
+      }
+      expect(vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0].agentInput).toMatchObject({
+        provider: 'openrouter',
+        model: 'anthropic/claude-haiku-4.5'
+      })
     } finally {
       setSettings({ helperModel: null })
     }
@@ -1446,6 +1529,36 @@ describe('agentInstances', () => {
     if (again.ok) expect(again.phase).toBe('already-terminal')
   })
 
+  it('messageChildInstance queues words for a live child only', async () => {
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'steerable',
+      outcome: 'steerable outcome',
+      subTasks: ['steerable step'],
+      doneWhen: 'steerable complete',
+      pathScope: ['src']
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+
+    const foreign = messageChildInstance(workspacePath, 'not-the-parent', child.runId, 'look at src/b.ts instead')
+    expect(foreign.ok).toBe(false)
+
+    const sent = messageChildInstance(workspacePath, parentRunId, child.runId, 'look at src/b.ts instead')
+    expect(sent).toEqual({ ok: true, queueLength: 1 })
+    const { peekFollowUps } = await import('@main/agent/runRegistry')
+    const queued = peekFollowUps(child.runId)
+    expect(queued).toHaveLength(1)
+    expect(String(queued[0]!.message.content)).toBe('A message from the task that started you:\nlook at src/b.ts instead')
+
+    await updateStatus(resolveRunDir(workspacePath, child.runId), { status: 'done' }, { sync: true })
+    const late = messageChildInstance(workspacePath, parentRunId, child.runId, 'too late')
+    expect(late.ok).toBe(false)
+    if (!late.ok) expect(late.error).toMatch(/already finished/)
+    clearRunAbort(child.runId)
+  })
+
   it('ignores denial strikes for unknown runs', () => {
     expect(noteInlineInstanceDeniedTool('no-such-run')).toBe(false)
   })
@@ -1783,6 +1896,74 @@ describe('agentInstances worktree', () => {
     expect(started?.event.stepId).toBe('s2')
     expect(typeof started?.event.at).toBe('string')
     clearRunAbort(child.runId)
+  })
+
+  it('names a child by the title its step has in the parent’s list, on its start, its status and the run list', async () => {
+    writeFileSync(
+      join(resolveRunDir(workspacePath, parentRunId), 'todos.json'),
+      JSON.stringify({
+        updatedAt: new Date().toISOString(),
+        todos: [
+          { id: 's1', content: 'Map the loop', status: 'completed' },
+          { id: 's2', content: 'Guard integrity:\n  removal guards', status: 'in_progress' }
+        ]
+      })
+    )
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'read only',
+      outcome: 'A verified integrity verdict',
+      subTasks: ['read'],
+      doneWhen: 'reported',
+      readOnly: true,
+      stepId: 's2'
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    await flushEventAppends()
+    const started = readFileSync(join(resolveRunDir(workspacePath, parentRunId), 'events.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { event: { type: string; instanceRunId?: string; stepTitle?: string } })
+      .find((row) => row.event.type === 'agent_instance_update' && row.event.instanceRunId === child.runId)
+    expect(started?.event.stepTitle).toBe('Guard integrity: removal guards')
+    expect(loadStatus(resolveRunDir(workspacePath, child.runId))?.stepTitle).toBe('Guard integrity: removal guards')
+    const listed = await listRuns(workspacePath)
+    expect(listed.instanceRuns.find((r) => r.runId === child.runId)?.stepTitle).toBe('Guard integrity: removal guards')
+    // No step, or one the list does not have: no title, and the child is named as before.
+    expect(planStepTitle(resolveRunDir(workspacePath, parentRunId), 's9')).toBeUndefined()
+    expect(planStepTitle(resolveRunDir(workspacePath, parentRunId), undefined)).toBeUndefined()
+    clearRunAbort(child.runId)
+  })
+
+  it('lists a child by its step as the plan titles it now, and finds the step of one spawned before status kept it', async () => {
+    const parentDir = resolveRunDir(workspacePath, parentRunId)
+    const writeTodos = (title: string): void =>
+      writeFileSync(
+        join(parentDir, 'todos.json'),
+        JSON.stringify({ updatedAt: new Date().toISOString(), todos: [{ id: 's3', content: title, status: 'in_progress' }] })
+      )
+    writeTodos('Trace the settings')
+    // Spawned before this build: no step on its status, only on the parent's start event.
+    const legacy = 'legacy-child-0000-4000-8000-000000000000'
+    createRun(workspacePath, legacy, 'Outcome: Files in your scope', { parentRunId, inlineInstance: true })
+    appendEvent(parentDir, {
+      type: 'agent_instance_update',
+      runId: parentRunId,
+      parentRunId,
+      instanceRunId: legacy,
+      phase: 'started',
+      stepId: 's3'
+    })
+    await flushEventAppends()
+    const titleOf = async (): Promise<string | undefined> =>
+      (await listRuns(workspacePath)).instanceRuns.find((r) => r.runId === legacy)?.stepTitle
+    expect(await titleOf()).toBe('Trace the settings')
+    // A later list renames the step; the record shows the new title, and so does the list.
+    writeTodos('Trace settings and appearance')
+    invalidateListRunsCache(workspacePath)
+    expect(await titleOf()).toBe('Trace settings and appearance')
   })
 
   it("points a worktree child's brief at its own checkout, not the parent's root", async () => {

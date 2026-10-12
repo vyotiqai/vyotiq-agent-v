@@ -56,6 +56,10 @@ vi.mock('electron', () => ({
   }
 }))
 
+const remote = vi.hoisted(() => ({ deliver: vi.fn(), url: null as string | null }))
+vi.mock('@main/notifications/remote', () => ({ deliverRemoteNotification: remote.deliver }))
+vi.mock('@main/settings/secrets', () => ({ getToolSecret: (name: string) => (name === 'notify' ? remote.url : null) }))
+
 vi.mock('@main/settings/settings', () => ({
   getSettings: () => settingsState.current ?? { ...DEFAULT_SETTINGS }
 }))
@@ -189,6 +193,25 @@ describe('notification service', () => {
     settingsState.current!.notifications.desktop = 'always'
     publishNotification(basePublish({ dedupeKey: 'd' }))
     expect(shown).toHaveLength(1)
+  })
+
+  it('sends to the phone only while away, and only with a saved address', () => {
+    remote.deliver.mockReset()
+    remote.url = 'https://ntfy.sh/agent-v-test'
+    settingsState.current = {
+      ...DEFAULT_SETTINGS,
+      notifications: { ...DEFAULT_SETTINGS.notifications, remote: 'ntfy', remoteWhen: 'away' }
+    }
+    windowState.focused = true
+    publishNotification(basePublish({ dedupeKey: 'a' }))
+    expect(remote.deliver).not.toHaveBeenCalled()
+    windowState.focused = false
+    publishNotification(basePublish({ dedupeKey: 'b' }))
+    expect(remote.deliver).toHaveBeenCalledWith('ntfy', 'https://ntfy.sh/agent-v-test', expect.objectContaining({ kind: 'run_done' }))
+    remote.url = null
+    remote.deliver.mockReset()
+    publishNotification(basePublish({ dedupeKey: 'c' }))
+    expect(remote.deliver).not.toHaveBeenCalled()
   })
 
   it('replaces an existing item in place for the same dedupe key', () => {

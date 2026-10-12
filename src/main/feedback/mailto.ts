@@ -25,7 +25,7 @@ export const DIAGNOSTICS_BUNDLE_LINE =
  * the metadata passed in via the input.
  */
 export function buildFeedbackMailto(input: FeedbackMailtoInput): string {
-  const subject = `[Vyotiq ${input.appVersion}] ${input.type}: ${input.title}`
+  const subject = `[Agent V ${input.appVersion}] ${input.type}: ${input.title}`
   let body = input.message
   if (input.includeDiagnostics) {
     const timestamp = (input.now ?? new Date()).toISOString()

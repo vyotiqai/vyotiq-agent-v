@@ -53,7 +53,7 @@ describe('allowed-tools — reading the field', () => {
     expect(byEntry['Glob']).toEqual(['glob'])
     expect(byEntry['Edit']).toEqual(['edit', 'str_replace'])
     expect(byEntry['Bash(git status:*)']).toEqual(['terminal', 'run_tests'])
-    expect(byEntry['WebSearch']).toEqual(['browser_search'])
+    expect(byEntry['WebSearch']).toEqual(['web_search', 'browser_search'])
     expect(byEntry['mcp__github']).toEqual(['mcp__github__*'])
     expect(ignored).toEqual([])
     expect(allows.find((a) => a.entry === 'Bash(git status:*)')?.command).toEqual({ words: ['git', 'status'], exact: false })

@@ -17,6 +17,7 @@ import type {
 import { parseSlashSubmit } from '@shared/slashCommands'
 import { findSlashChipSubmit, hasComposerContent } from './mentionModel'
 import type { MentionMenuItem } from './mentionModel'
+import type { BriefHistoryCursor } from '@renderer/lib/drafts/briefHistory'
 
 /**
  * The extras payload from a cleared draft, if any: native files, audio, and
@@ -69,6 +70,7 @@ export function useComposerDraft({
   onMentionAccept,
   onMentionBack,
   onEditLastUserMessage,
+  history,
   onCancelEdit,
   getCaretStart,
   onSubmitted,
@@ -122,6 +124,8 @@ export function useComposerDraft({
   onMentionBack?: () => boolean
   /** Dock composer: ArrowUp on empty draft or caret at start. Return true if edit began. */
   onEditLastUserMessage?: () => boolean
+  /** New task: ↑ and ↓ walk the briefs you sent before (lib/drafts/briefHistory). */
+  history?: BriefHistoryCursor
   /** Inline edit: Escape cancels the replacement composer. */
   onCancelEdit?: () => void
   getCaretStart?: () => number
@@ -407,6 +411,22 @@ export function useComposerDraft({
       e.stopPropagation()
       onCancelEdit()
       return
+    }
+    if (
+      history &&
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.nativeEvent.isComposing
+    ) {
+      const next = e.key === 'ArrowUp' ? history.older(text) : history.newer(text)
+      if (next !== null) {
+        e.preventDefault()
+        setText(next)
+        return
+      }
     }
     if (
       e.key === 'ArrowUp' &&

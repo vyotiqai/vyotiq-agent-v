@@ -149,9 +149,9 @@ describe('the parent waiting on a child', () => {
       [{ kind: 'instance', id: 'w1', tool: call('await_agent_instance', 'fail', TIMED_OUT, { run_id: RUN_ID }) }],
       { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'cancelled', summary: 'Instance cancelled.' } }
     )
-    expect(screen.getByText(`Waited for instance ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Waited for instance · ${SHORT_ID}`)).toBeTruthy()
     expect(screen.getByText('Timed out after 15m, still running then')).toBeTruthy()
-    expect(screen.queryByText(`Instance cancelled ${SHORT_ID}`)).toBeNull()
+    expect(screen.queryByText(`Instance cancelled · ${SHORT_ID}`)).toBeNull()
     expect(container.querySelector('.text-danger')).toBeNull()
   })
 
@@ -160,7 +160,7 @@ describe('the parent waiting on a child', () => {
       [{ kind: 'instance', id: 'w1', tool: call('await_agent_instance', 'fail', TIMED_OUT, { run_id: RUN_ID }) }],
       { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'done', summary: 'Done.' } }
     )
-    expect(screen.getByText(`Instance finished ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Instance finished · ${SHORT_ID}`)).toBeTruthy()
     expect(container.textContent).not.toContain('Timed out waiting for')
   })
 
@@ -169,7 +169,7 @@ describe('the parent waiting on a child', () => {
       [{ kind: 'instance', id: 'w1', tool: call('await_agent_instance', 'fail', `Agent V Instance id; ${RUN_ID}\nphase: cancelled`, { run_id: RUN_ID }) }],
       { [RUN_ID]: { instanceRunId: RUN_ID, phase: 'cancelled', summary: 'Instance cancelled.' } }
     )
-    expect(screen.getByText(`Instance cancelled ${SHORT_ID}`)).toBeTruthy()
+    expect(screen.getByText(`Instance cancelled · ${SHORT_ID}`)).toBeTruthy()
     expect(screen.queryByText('Instance cancelled.')).toBeNull()
     expect(container.querySelector('.text-danger')).toBeNull()
   })

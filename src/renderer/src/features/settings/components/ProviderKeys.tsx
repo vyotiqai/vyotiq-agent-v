@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   isCustomProviderId,
   type CustomProvider,
@@ -11,9 +11,12 @@ import {
   providerNeedsKey
 } from '@shared/providers'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Input, Segmented, Textarea, pushToast } from '@renderer/lib/ui'
+import { ActionMenu, Button, Input, Segmented, Textarea, pushToast } from '@renderer/lib/ui'
+import { ENDPOINT_PRESETS } from '@shared/domain/endpointPresets'
 import { MAX_CUSTOM_HEADERS, customHeaderError } from '@shared/domain/network'
 import { BedrockFields, VertexFields } from './CloudProviderFields'
+import { ModelLimitsField } from './ModelLimitsField'
+import { isModelListUnsupportedWarning, isSeedFallbackWarning } from '@renderer/features/chat/components/composer/composerModelUtils'
 import { ProviderLogo } from '@renderer/features/chat/components/composer/ProviderLogo'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { PROVIDER_KEY_URLS } from '../constants'
@@ -178,7 +181,7 @@ function ProviderKeyRow({
         ) : null}
         <span className="flex-1" />
         {inUse ? <span className="shrink-0 text-caption font-medium text-accent">In use</span> : null}
-        <KeyStatus state={state} />
+        {state === 'local' ? <Reachability id={id} url={url} /> : <KeyStatus state={state} />}
         <Button
           size="xs"
           variant="ghost"
@@ -240,6 +243,13 @@ function ProviderKeyRow({
               }}
             />
           ) : null}
+          {id === 'ollama' ? (
+            <p className="m-0 text-xs leading-[18px] text-muted">
+              Ollama runs a model with its own context length (OLLAMA_CONTEXT_LENGTH, or the model’s num_ctx), often
+              far below the model’s maximum, and cuts longer prompts from the front without saying so. Agent V reads it
+              once the model is loaded; set it below when it can’t.
+            </p>
+          ) : null}
           {id === 'opencode' && !saved ? (
             <p className="m-0 text-xs leading-[18px] text-muted">
               OpenCode Go is a $10/month subscription. Subscribe, then paste the API key from its console.{' '}
@@ -275,6 +285,9 @@ function ProviderKeyRow({
             <p id="apikey-error" className="m-0 text-xs text-danger" role="alert">
               {form.displayError}
             </p>
+          ) : null}
+          {id === 'ollama' || id === 'custom' || endpoint ? (
+            <ModelLimitsField providerId={id} baseUrl={url || undefined} form={form} />
           ) : null}
           {endpoint && confirmRemove ? (
             <div className="flex items-center gap-2" role="group" aria-label={`Remove ${endpoint.name}`}>
@@ -501,6 +514,7 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
   const [nameError, setNameError] = useState<string | null>(null)
   const [urlError, setUrlError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [presetsOpen, setPresetsOpen] = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
   const count = form.customProviders.length
 
@@ -559,7 +573,7 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
             void submit()
           }}
         >
-          <div>
+          <div className="flex items-center gap-2">
             <Segmented
               label="Endpoint kind"
               value={kind}
@@ -573,6 +587,42 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
                 setUrlError(null)
               }}
             />
+            {kind === 'openai' ? (
+              <ActionMenu
+                aria-label="Endpoint presets"
+                open={presetsOpen}
+                onOpenChange={setPresetsOpen}
+                placement="down"
+                align="start"
+                items={ENDPOINT_PRESETS.map((preset, i) => ({
+                  id: preset.id,
+                  label: preset.name,
+                  detail: preset.local ? 'on this machine' : undefined,
+                  separatorBefore: i > 0 && preset.local === true && ENDPOINT_PRESETS[i - 1]?.local !== true,
+                  onSelect: () => {
+                    setName(preset.name)
+                    setUrl(preset.baseUrl)
+                    setNameError(null)
+                    setUrlError(null)
+                  }
+                }))}
+                trigger={(t) => (
+                  <Button
+                    ref={t.ref}
+                    size="xs"
+                    variant="ghost"
+                    trailingIcon="chevron"
+                    disabled={adding}
+                    aria-expanded={t['aria-expanded']}
+                    aria-controls={t['aria-controls']}
+                    aria-haspopup={t['aria-haspopup']}
+                    onClick={t.onClick}
+                  >
+                    Start from…
+                  </Button>
+                )}
+              />
+            ) : null}
           </div>
           <div className="flex flex-col gap-1">
             <Input
@@ -640,6 +690,56 @@ function KeyStatus({ state }: { state: KeyState }) {
     case 'unavailable':
       return <span className="shrink-0 text-xs text-tertiary">Can’t save keys</span>
   }
+}
+
+type Reach = { phase: 'checking' } | { phase: 'up'; models: number } | { phase: 'down'; why: string }
+
+/**
+ * Whether a keyless server (Ollama, a local endpoint) answers, from its model
+ * list. A keyed provider is checked when its key is saved; these had no check
+ * at all, so the row read "In use · Local" while setup said "not connected".
+ */
+function Reachability({ id, url }: { id: SecretProvider; url: string }) {
+  const [reach, setReach] = useState<Reach>({ phase: 'checking' })
+  const check = useCallback(async (fresh = false): Promise<void> => {
+    setReach({ phase: 'checking' })
+    // On open the cached list will do; Check again asks the server anew.
+    const res = await window.vyotiq?.listModels?.({ provider: id, ...(fresh ? { forceRefresh: true } : {}) })
+    if (!res?.ok) {
+      setReach({ phase: 'down', why: res?.error ?? 'No answer' })
+      return
+    }
+    const warning = res.data.warning ?? null
+    if (warning && isSeedFallbackWarning(warning) && !isModelListUnsupportedWarning(warning)) {
+      setReach({ phase: 'down', why: warning })
+      return
+    }
+    setReach({ phase: 'up', models: res.data.models.filter((m) => !m.isPlaceholder).length })
+  }, [id])
+  useEffect(() => {
+    void check()
+    // The URL changing is a new server to ask.
+  }, [check, url])
+  if (reach.phase === 'checking') {
+    return <span className="shrink-0 text-xs text-tertiary">Local · checking…</span>
+  }
+  if (reach.phase === 'up') {
+    return (
+      <span className="shrink-0 text-xs text-muted" data-provider-reach="up">
+        Local · {reach.models > 0 ? `${reach.models} model${reach.models === 1 ? '' : 's'}` : 'reachable'}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5" data-provider-reach="down">
+      <span className="text-xs text-warning" title={reach.why}>
+        Not reachable
+      </span>
+      <Button size="xs" variant="ghost" onClick={() => void check(true)}>
+        Check again
+      </Button>
+    </span>
+  )
 }
 
 function ExternalLink({ href, children }: { href: string; children: ReactNode }) {

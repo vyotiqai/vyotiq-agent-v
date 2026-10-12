@@ -8,6 +8,8 @@ export type AgentInstanceUiState = {
   pathScope?: string[]
   /** The plan step (todo id) the parent spawned it for. */
   stepId?: string
+  /** That step's title when it was spawned: the name the parent's record gives it. */
+  stepTitle?: string
   /** The user-defined helper type it was spawned as. */
   agentType?: string
   /** When it started and when it reached a terminal phase (ISO). */
@@ -25,6 +27,15 @@ export function formatAgentInstanceLabel(runId: string): string {
   // the token right after the label); the short id is the ledger-chip prefix so
   // timeout/error text correlates with instance rows in the UI.
   return `Agent V Instance id; ${runId} (short ${formatAgentInstanceShortId(runId)})`
+}
+
+/**
+ * The deliverable a child's brief names, its label dropped: "Outcome: X" or
+ * "## Outcome" over X gives X. Empty when the text names none.
+ */
+export function briefOutcome(text: string | undefined): string {
+  const m = /(?:^|\n)[ \t]*(?:#+[ \t]*)?Outcome\b:?[ \t]*\n*[ \t]*([^\n]+)/i.exec(text ?? '')
+  return m?.[1]?.trim() ?? ''
 }
 
 /** Short prefix for tool headers and compact rows (first UUID segment). */

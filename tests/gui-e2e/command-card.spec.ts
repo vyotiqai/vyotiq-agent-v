@@ -55,7 +55,12 @@ test('a running command counts up, opens Terminal, and a stopped run resumes', a
   await expect(terminalTab).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 })
   await expect(page.locator('#dock-panel-terminal')).toBeVisible()
 
-  await page.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i }).click()
+  // The composer's row carries Stop beside Queue; Escape does the same. The
+  // terminal has focus here and a terminal owns Esc (its Ctrl+C is its own
+  // chord), so take focus off the xterm helper textarea first or Esc never
+  // reaches the app.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+  await page.keyboard.press('Escape')
   const receipt = page.locator('[data-receipt]').last()
   await expect(receipt.locator('[data-receipt-outcome="stopped"]')).toBeVisible({ timeout: 20_000 })
   // Nothing was written, so there is nothing to undo — only the way on.
@@ -64,8 +69,8 @@ test('a running command counts up, opens Terminal, and a stopped run resumes', a
 
   await receipt.getByRole('button', { name: 'Resume' }).click()
   await expect(page.getByText('Continue from where you stopped.')).toBeVisible({ timeout: 20_000 })
-  // Stop is back in the composer: the run is live again.
-  await expect(page.locator('[data-composer-line]').getByRole('button', { name: /^stop$/i })).toBeVisible({
+  // The run is live again: Stop is back in the composer and the action is Queue.
+  await expect(page.locator('[data-composer-line]').getByRole('button', { name: /^queue$/i })).toBeVisible({
     timeout: 20_000
   })
 })

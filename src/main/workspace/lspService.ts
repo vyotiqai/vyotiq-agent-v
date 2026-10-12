@@ -237,7 +237,7 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>
 }
 
-type StoredDiagnostic = {
+export type StoredDiagnostic = {
   line: number
   character: number
   message: string
@@ -495,6 +495,37 @@ class LspClient {
     private readonly server: DetectedLspServer
   ) {}
 
+  /** Started, initialized and not shut down: it can answer without a spawn. */
+  get ready(): boolean {
+    return this.initialized && !this.disposed && !this.failure
+  }
+
+  get label(): string {
+    return this.server.label
+  }
+
+  handlesExtension(extension: string): boolean {
+    return this.server.extensions.includes(extension)
+  }
+
+  /** What the server last published for a file, or null when it never has. */
+  storedDiagnostics(path: string): StoredDiagnostic[] | null {
+    return this.diagnostics.get(canonicalLspUri(lspUri(this.workspacePath, path))) ?? null
+  }
+
+  /**
+   * Send the file's new content and wait (up to `settleMs`) for the server to
+   * publish diagnostics for that version, not the ones it held before.
+   */
+  async refreshDiagnostics(path: string, content: string, settleMs: number): Promise<StoredDiagnostic[]> {
+    const uri = canonicalLspUri(lspUri(this.workspacePath, path))
+    const before = this.opened.get(uri)
+    if (!before || before.content !== content) this.diagnostics.delete(uri)
+    await this.open(path, content)
+    await this.waitForDiagnostics(uri, settleMs)
+    return this.diagnostics.get(uri) ?? []
+  }
+
   get serverInfo(): WorkspaceLspServer {
     return {
       id: this.server.id,
@@ -704,7 +735,7 @@ class LspClient {
     return uri
   }
 
-  private waitForDiagnostics(uri: string): Promise<void> {
+  private waitForDiagnostics(uri: string, waitMs = LSP_DIAGNOSTICS_WAIT_MS): Promise<void> {
     if (this.diagnostics.has(uri)) return Promise.resolve()
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -721,7 +752,7 @@ class LspClient {
           )
         }
         resolve()
-      }, LSP_DIAGNOSTICS_WAIT_MS)
+      }, waitMs)
       const waiters = this.diagnosticWaiters.get(uri) ?? []
       waiters.push({ resolve, timer })
       this.diagnosticWaiters.set(uri, waiters)
@@ -901,6 +932,54 @@ function cleanupIdleClients(): void {
 
 const cleanupTimer = setInterval(cleanupIdleClients, 60_000)
 cleanupTimer.unref?.()
+
+/**
+ * The language server already running for this file's language in this
+ * workspace (the agent's `lsp` tool or the Files panel started it), or null.
+ * Never starts one: the edit feedback below must not spawn per edit.
+ */
+function runningClientFor(workspacePath: string, path: string): LspClient | null {
+  if (!isSafeWorkspaceRelPath(path)) return null
+  const prefix = `${canonicalizeWorkspacePath(workspacePath).toLowerCase()}\0`
+  const extension = extname(path).toLowerCase()
+  for (const [key, client] of clients) {
+    if (key.startsWith(prefix) && client.ready && client.handlesExtension(extension)) return client
+  }
+  return null
+}
+
+/** True when a language server for this file's language is already running here. */
+export function lspRunningFor(workspacePath: string, path: string): boolean {
+  return runningClientFor(workspacePath, path) !== null
+}
+
+/** Errors a running server holds for a file before an edit; null when none is running or it never looked. */
+export function lspErrorsBeforeEdit(workspacePath: string, path: string): StoredDiagnostic[] | null {
+  const client = runningClientFor(workspacePath, path)
+  const stored = client?.storedDiagnostics(path)
+  return stored ? stored.filter((d) => d.severity === 'error') : null
+}
+
+/**
+ * Errors a running server reports for a file after an edit, with its label;
+ * null when no server is running for it (nothing is started) or it failed.
+ */
+export async function lspErrorsAfterEdit(
+  workspacePath: string,
+  path: string,
+  content: string,
+  settleMs = 1500
+): Promise<{ server: string; errors: StoredDiagnostic[] } | null> {
+  const client = runningClientFor(workspacePath, path)
+  if (!client) return null
+  try {
+    const all = await client.refreshDiagnostics(path, content, settleMs)
+    client.lastUsed = Date.now()
+    return { server: client.label, errors: all.filter((d) => d.severity === 'error') }
+  } catch {
+    return null
+  }
+}
 
 export function disposeWorkspaceLsp(workspacePath: string): void {
   const prefix = `${canonicalizeWorkspacePath(workspacePath).toLowerCase()}\0`

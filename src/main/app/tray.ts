@@ -46,9 +46,30 @@ const IDLE_POLL_MS = 500
 /** Frame sentinel for "not animating". */
 const IDLE_FRAME = -1
 
+/** A task the tray menu lists: running, or waiting on an answer. */
+export type TrayTask = { workspacePath: string; runId: string; title: string; waiting: boolean }
+
+/**
+ * What the menu lists and does, passed at boot like the count provider so
+ * this module stays free of agent code.
+ */
+export type TrayMenuSource = {
+  tasks: () => TrayTask[]
+  onOpenTask: (task: TrayTask) => void
+  onNewTask: () => void
+  onStopAll: () => void
+}
+
+/** Tasks the menu names before it says "and N more". */
+const MENU_TASK_CAP = 8
+
 let tray: Tray | null = null
 let manifest: TrayManifest = FALLBACK_MANIFEST
 let provider: (() => number) | null = null
+let menuSource: TrayMenuSource | null = null
+/** What the menu was last built from, so a tick rebuilds it only on a change. */
+let menuSignature: string | null = null
+let balloonShown = false
 let timer: ReturnType<typeof setTimeout> | null = null
 let frame = IDLE_FRAME
 let lastTooltip: string | null = null
@@ -143,7 +164,7 @@ function applyFrame(next: number): void {
 
 function applyTooltip(count: number): void {
   if (!tray || tray.isDestroyed()) return
-  const text = count > 0 ? `Vyotiq — ${count} run${count === 1 ? '' : 's'} active` : 'Vyotiq'
+  const text = count > 0 ? `Agent V — ${count} run${count === 1 ? '' : 's'} active` : 'Agent V'
   if (text === lastTooltip) return
   lastTooltip = text
   try {
@@ -187,6 +208,96 @@ function tick(): void {
     schedule(IDLE_POLL_MS)
   }
   applyTooltip(count)
+  refreshMenu()
+}
+
+function menuTasks(): TrayTask[] {
+  if (!menuSource) return []
+  try {
+    return menuSource.tasks()
+  } catch (err) {
+    logger.warn('Tray task provider failed', { scope: 'main', err })
+    return []
+  }
+}
+
+function buildMenu(tasks: TrayTask[]): Electron.Menu {
+  const template: Electron.MenuItemConstructorOptions[] = [{ label: 'Show Agent V', click: revealMainWindow }]
+  if (menuSource) {
+    const source = menuSource
+    template.push({ type: 'separator' })
+    if (tasks.length > 0) {
+      // Waiting ones first: they are what someone opens the tray for.
+      const ordered = [...tasks].sort((a, b) => Number(b.waiting) - Number(a.waiting))
+      for (const task of ordered.slice(0, MENU_TASK_CAP)) {
+        const title = task.title.length > 60 ? `${task.title.slice(0, 59)}…` : task.title
+        template.push({
+          label: task.waiting ? `Needs you · ${title}` : title,
+          click: () => {
+            revealMainWindow()
+            source.onOpenTask(task)
+          }
+        })
+      }
+      if (ordered.length > MENU_TASK_CAP) {
+        template.push({ label: `and ${ordered.length - MENU_TASK_CAP} more`, enabled: false })
+      }
+      template.push({ type: 'separator' })
+    }
+    template.push({
+      label: 'New task',
+      click: () => {
+        revealMainWindow()
+        source.onNewTask()
+      }
+    })
+    template.push({
+      label: tasks.length > 0 ? `Stop all tasks (${tasks.length})` : 'Stop all tasks',
+      enabled: tasks.length > 0,
+      click: () => source.onStopAll()
+    })
+  }
+  template.push({ type: 'separator' }, { label: 'Quit Agent V', click: () => app.quit() })
+  return Menu.buildFromTemplate(template)
+}
+
+function refreshMenu(): void {
+  if (!tray || tray.isDestroyed()) return
+  const tasks = menuTasks()
+  const signature = JSON.stringify(tasks.map((t) => [t.runId, t.title, t.waiting]))
+  if (signature === menuSignature) return
+  menuSignature = signature
+  try {
+    tray.setContextMenu(buildMenu(tasks))
+  } catch (err) {
+    logger.warn('Applying the tray menu failed', { scope: 'main', err })
+  }
+}
+
+/** Whether there is a tray to keep running in. */
+export function trayAvailable(): boolean {
+  return tray !== null && !tray.isDestroyed()
+}
+
+/**
+ * Hide the window and keep running from the tray. The first time in a
+ * session Windows shows a balloon, so a closed window that did not quit is
+ * never a surprise.
+ */
+export function hideToTray(win: Electron.BrowserWindow): void {
+  if (win.isDestroyed()) return
+  win.hide()
+  if (balloonShown || !tray || tray.isDestroyed() || process.platform !== 'win32') return
+  balloonShown = true
+  try {
+    tray.displayBalloon({
+      title: 'Agent V is still running',
+      content: 'Tasks, loops and scheduled tasks keep going. Quit from this icon.',
+      iconType: 'info'
+    })
+  } catch (err) {
+    logger.warn('Tray balloon failed', { scope: 'main', err })
+  }
 }
 
 function revealMainWindow(): void {
@@ -199,12 +310,13 @@ function revealMainWindow(): void {
   win.focus()
 }
 
-export function createTray(options: { getActiveRunCount: () => number }): void {
+export function createTray(options: { getActiveRunCount: () => number; menu?: TrayMenuSource }): void {
   if (tray) {
     logger.warn('Tray already created', { scope: 'main' })
     return
   }
   provider = options.getActiveRunCount
+  menuSource = options.menu ?? null
   manifest = readManifest()
 
   const idle = loadFrameImage(currentThemeDir(), 'idle')
@@ -226,13 +338,8 @@ export function createTray(options: { getActiveRunCount: () => number }): void {
     return
   }
 
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Show Vyotiq', click: revealMainWindow },
-      { type: 'separator' },
-      { label: 'Quit Vyotiq', click: () => app.quit() }
-    ])
-  )
+  menuSignature = null
+  refreshMenu()
   tray.on('click', revealMainWindow)
   applyTooltip(readActiveRunCount())
 
@@ -264,6 +371,8 @@ export function destroyTray(): void {
   }
   tray = null
   provider = null
+  menuSource = null
+  menuSignature = null
   frame = IDLE_FRAME
   lastTooltip = null
   imageCache.clear()

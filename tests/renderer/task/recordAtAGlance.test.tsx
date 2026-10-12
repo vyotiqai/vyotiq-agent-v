@@ -11,12 +11,14 @@ import { WorkList, groupWork } from '@renderer/features/task/record/WorkItems'
 import { stepSummaryText } from '@renderer/features/task/record/Steps'
 import { TerminalBody, markedOutput } from '@renderer/features/chat/toolUi/bodies/TerminalBody'
 import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
+import { openWork } from './helpers/openWork'
 
 const copyText = vi.hoisted(() => vi.fn(async (_text: string) => true))
 vi.mock('@renderer/lib/markdown/copyText', () => ({ copyText }))
 
 /**
- * What the record says at a glance, without opening anything: what you
+ * What the record says at a glance once its work line is open, without
+ * opening anything else: what you
  * answered, which tests passed or failed, what a folded step amounts to, the
  * children a step started, and the result to copy.
  */
@@ -48,6 +50,7 @@ function todos(items: Array<[string, ' ' | '~' | 'x', string]>, s: number): UiIt
 function show(items: UiItem[], options: BuildOptions = { running: false }) {
   const model = buildRecordModel(items, options)
   const view = render(<TaskRecord model={model} options={options} messageCount={items.length} />)
+  openWork(view.container)
   return { model, ...view }
 }
 
@@ -82,12 +85,57 @@ describe('an answered question', () => {
   it('keeps the chip for a question that was skipped', () => {
     const { container } = show([
       user('Set up the database', 0),
-      tool('ask_question', { question: 'Which database?' }, 'Question skipped (autonomous mode)', 1, 'Which database?'),
+      tool('ask_question', { question: 'Which database?' }, 'Question skipped (questions are set to skip)', 1, 'Which database?'),
       said('Done.', 5)
     ])
     const row = container.querySelector('[data-record-tool="ask_question"]') as HTMLElement
     expect(row.querySelector('[data-record-answer]')).toBeNull()
     expect(row.textContent).toContain('Skipped')
+  })
+})
+
+describe('how long a settled call says', () => {
+  /** A call that opened at `s` and settled 93s later: "1m 33s". */
+  function took(name: string, args: Record<string, unknown>, content: string, s: number, summary = ''): UiItem {
+    return {
+      kind: 'tool',
+      id: id('t'),
+      at: at(s),
+      endedAt: at(s + 93),
+      tool: { id: id('c'), name, summary, status: 'done', content, argsPreview: JSON.stringify(args) }
+    }
+  }
+
+  it('says no time for an answered question: that span was the reader’s wait', () => {
+    const { container } = show([
+      user('Set up the database', 0),
+      took('ask_question', { question: 'Which database?' }, 'User answered: Postgres', 1, 'Which database?'),
+      said('Done.', 100)
+    ])
+    const row = container.querySelector('[data-record-tool="ask_question"]') as HTMLElement
+    expect(row.textContent).toContain('Which database?')
+    expect(row.querySelector('[data-record-answer]')?.textContent).toBe('You answered: Postgres')
+    expect(row.textContent).not.toContain('1m 33s')
+  })
+
+  it('says no time for a mode switch either', () => {
+    const { container } = show([
+      user('Just tell me', 0),
+      took('switch_mode', { mode: 'ask' }, 'Switched to Ask', 1),
+      said('Reading, then.', 100)
+    ])
+    const row = container.querySelector('[data-record-tool="switch_mode"]') as HTMLElement
+    expect(row.textContent).not.toContain('1m 33s')
+  })
+
+  it('keeps the measured time on a settled call that ran', () => {
+    const { container } = show([
+      user('Clean up', 0),
+      took('delete', { path: 'tests/a.test.ts' }, 'Deleted tests/a.test.ts', 1, 'tests/a.test.ts'),
+      said('Done.', 100)
+    ])
+    const row = container.querySelector('[data-record-tool="delete"]') as HTMLElement
+    expect(row.textContent).toContain('1m 33s')
   })
 })
 
@@ -195,7 +243,7 @@ describe('a step that started several instances', () => {
     expect(screen.getByText('The route test never passed.').className).toContain('text-danger')
     expect(screen.getByText('1m')).toBeTruthy()
     // The row opens its child.
-    fireEvent.click(screen.getByRole('button', { name: /Open instance 7a01c2de/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Open instance Orders route/ }))
     expect(onOpenAgentInstance).toHaveBeenCalledWith(RUNS[1])
   })
 
@@ -208,7 +256,7 @@ describe('a step that started several instances', () => {
       </RunSessionProvider>
     )
     expect(container.querySelector('[data-record-instances]')).toBeNull()
-    expect(screen.getByText('Instance finished 7a01c2de')).toBeTruthy()
+    expect(screen.getByText('Instance finished')).toBeTruthy()
   })
 
   it('groups only spawns made together', () => {

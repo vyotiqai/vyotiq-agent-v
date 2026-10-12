@@ -33,14 +33,19 @@ export function PrReviewers({
   useEffect(() => {
     setLogin('')
   }, [number])
+  // Another repository has its own people.
+  useEffect(() => {
+    setSuggestions(null)
+  }, [workspacePath])
 
-  // Suggestions are read once, when the field is first used.
+  // Suggestions are read once, when the field is first used; a failed read is tried again next time.
   const loadSuggestions = (): void => {
     if (suggestions || !workspacePath) return
     setSuggestions([])
-    void window.vyotiq.prReviewerSuggestions({ workspacePath }).then((res) => {
-      if (res.ok) setSuggestions(res.data.logins)
-    })
+    void window.vyotiq
+      .prReviewerSuggestions({ workspacePath })
+      .then((res) => setSuggestions(res.ok ? res.data.logins : null))
+      .catch(() => setSuggestions(null))
   }
 
   const change = async (add: string[], remove: string[], key: string): Promise<void> => {

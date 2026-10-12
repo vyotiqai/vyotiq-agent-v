@@ -8,6 +8,7 @@ import { Button } from '@renderer/lib/ui/Button'
 import { cn } from '@renderer/lib/ui/cn'
 import { CONTROL_HOVER } from '@renderer/lib/utils/layout'
 import type { GitChrome } from './GitChrome'
+import { BranchesDialog, StashesDialog } from './GitManageDialogs'
 
 const RUN_LOCK = 'Unlocks when the run stops'
 
@@ -21,9 +22,19 @@ const RUN_LOCK = 'Unlocks when the run stops'
  * `running`: a task is live in this checkout. Pull and New branch rewrite the
  * working tree under it, so they wait — the same lock Commit has.
  */
-export function GitSyncControls({ chrome, running = false }: { chrome: GitChrome; running?: boolean }) {
+export function GitSyncControls({
+  chrome,
+  running = false,
+  workspacePath = null
+}: {
+  chrome: GitChrome
+  running?: boolean
+  /** With it, the menu also manages branches and stashes. */
+  workspacePath?: string | null
+}) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [naming, setNaming] = useState(false)
+  const [managing, setManaging] = useState<'branches' | 'stashes' | null>(null)
   const [diverged, setDiverged] = useState<{ detail: string; upstream: string } | null>(null)
 
   const status = chrome.result?.kind === 'ok' ? chrome.status : null
@@ -62,6 +73,15 @@ export function GitSyncControls({ chrome, running = false }: { chrome: GitChrome
       disabledReason: running ? RUN_LOCK : (noRemote ?? (upstream ? undefined : 'No upstream yet — publish first')),
       onSelect: () => void pull()
     },
+    {
+      id: 'pull-rebase',
+      label: 'Pull with rebase',
+      icon: 'arrowDown',
+      detail: 'your commits on top',
+      disabled: locked || running || !upstream,
+      disabledReason: running ? RUN_LOCK : (noRemote ?? (upstream ? undefined : 'No upstream yet — publish first')),
+      onSelect: () => void pull('rebase')
+    },
     upstream
       ? {
           id: 'push',
@@ -89,7 +109,25 @@ export function GitSyncControls({ chrome, running = false }: { chrome: GitChrome
       disabled: locked || running || !status.hasCommits,
       disabledReason: running ? RUN_LOCK : status.hasCommits ? undefined : 'No commits yet',
       onSelect: () => setNaming(true)
-    }
+    },
+    ...(workspacePath
+      ? [
+          {
+            id: 'branches',
+            label: 'Branches…',
+            icon: 'branch' as const,
+            detail: 'rename, delete, merge in',
+            disabled: !status.hasCommits,
+            onSelect: () => setManaging('branches')
+          },
+          {
+            id: 'stashes',
+            label: 'Stashes…',
+            icon: 'archive' as const,
+            onSelect: () => setManaging('stashes')
+          }
+        ]
+      : [])
   ]
 
   const summary = [
@@ -159,6 +197,24 @@ export function GitSyncControls({ chrome, running = false }: { chrome: GitChrome
           )}
         />
       )}
+      {workspacePath ? (
+        <>
+          <BranchesDialog
+            open={managing === 'branches'}
+            workspacePath={workspacePath}
+            chrome={chrome}
+            running={running}
+            onClose={() => setManaging(null)}
+          />
+          <StashesDialog
+            open={managing === 'stashes'}
+            workspacePath={workspacePath}
+            chrome={chrome}
+            running={running}
+            onClose={() => setManaging(null)}
+          />
+        </>
+      ) : null}
       <Dialog
         open={diverged !== null}
         onClose={() => setDiverged(null)}

@@ -61,11 +61,50 @@ too). If `bwrap` is missing, or installed but unable to create a sandbox
 with that reason, and a command the agent runs while the setting is on fails
 with a clear error rather than running unsandboxed.
 
-**Windows** has no sandbox. Confining one process's writes and network there
-needs an AppContainer or a restricted token plus ACL changes — native calls
-this app has no dependency for. `runas /trustlevel` drops admin rights but
-confines neither writes nor network, and cannot pipe output back. Rather than
-call any of those a sandbox, the Settings control is disabled with the reason.
+**Windows** runs the command at low integrity (`windows.ts`, `windowsSetup.ts`).
+Windows starts a program at the lower of the user's integrity level and the
+mandatory label on its executable file, and children inherit it; a
+low-integrity process cannot write anything labelled medium, which every file
+is by default. So:
+
+- The capability check copies `cmd.exe` and Windows PowerShell's
+  `powershell.exe` into `<userData>/sandbox/` as `cmd-low.exe` and
+  `powershell-low.exe`, labels the copies low with `icacls`, and proves a
+  command started from the cmd copy runs with the low mandatory SID
+  (`S-1-16-4096`, the same in every language).
+- Before the first command, the writable paths are labelled low with
+  inheritance (`icacls <dir> /setintegritylevel (OI)(CI)low`), which reaches
+  every file already inside — about 7,700 files a second, so a 200,000-file
+  workspace waits half a minute once. Git `hooks` and `config` are then
+  labelled medium again, so they stay read-only. Labels are remembered in
+  `<userData>/sandbox/labels.json` with each path's creation time, so a folder
+  is labelled again only when it is made anew (a recreated task worktree).
+- Temp is `%USERPROFILE%\AppData\LocalLow\Vyotiq\sandbox-temp` (LocalLow is
+  low already); `TEMP` and `TMP` point there.
+- Windows PowerShell and cmd commands run from their low copies with their
+  arguments untouched. Anything else goes through the cmd copy as
+  `cmd /d /s /c "<line>"`, every cmd metacharacter caret-escaped (the
+  cross-spawn shape), so the program gets exactly the command line it would
+  have got. cmd's line cannot hold a newline and stops at 8,191 characters, so
+  a PowerShell 7 (`pwsh`) script is written to a `.ps1` file first.
+- **bash cannot run**: Git Bash's MSYS runtime and WSL's launcher both die at
+  low integrity (MSYS cannot create its shared objects there), and so do Git
+  for Windows' MSYS tools. A bash command fails at once with that reason. Git
+  itself works; a git hook written in sh does not.
+- It **cannot block reads or the network**: hidden paths are only kept
+  unwritable (labelled medium when a writable folder holds them), and
+  Network: Deny is refused with the reason rather than ignored. Settings shows
+  the Network row disabled on Windows.
+- Turning the sandbox off sets every path it labelled low back to medium,
+  which is what an unlabelled file already is. Removing a workspace does the
+  same for the paths at or inside it.
+
+A low-labelled workspace can be written by any low-integrity process on the
+machine, not only the agent's. Few programs run at low integrity today; the
+labels come off when the sandbox is turned off, when the workspace is removed,
+and at uninstall: `build/installer.nsh` runs
+`build/uninstall/restore-sandbox-labels.ps1` over `<userData>/sandbox/labels.json`
+before the app data goes (not when the uninstaller runs for an update).
 
 ## Agent-built tools
 
@@ -93,3 +132,7 @@ setting that says it is confined.
 - `tests/main/unit/sandboxCapability.test.ts` — detection per platform
 - `tests/main/unit/terminalSandbox.test.ts` — the wrapper is applied only when
   a sandbox is passed, and the `sandbox:` line and hint in the result
+- `tests/main/unit/sandboxWindows.test.ts` — quoting and escaping, the Windows
+  rules and label order, labelling once and again for a recreated folder,
+  restoring, Network: Deny refused, and (on Windows) a real run: writes inside
+  the workspace, denied outside it and in `.git\config`, arguments intact

@@ -20,7 +20,7 @@ import { realpathIfExists } from '../../workspace/safePath'
 import { BUILTIN_COMMANDS } from '../slashCommands/builtins'
 
 export type LocalSkillSource = 'project' | 'personal'
-export type LocalSkillOrigin = 'vyotiq' | 'cursor'
+export type LocalSkillOrigin = 'vyotiq' | 'cursor' | 'claude' | 'agents'
 
 export type LocalSkill = {
   id: string
@@ -71,6 +71,28 @@ export function personalSkillsRoot(): string {
   return personalSkillsRootOverride ?? join(homedir(), '.vyotiq', 'skills')
 }
 
+/**
+ * Claude Code's personal skills (`~/.claude/skills`), read as they are. Null
+ * while a test points the personal root elsewhere, so a machine's real skills
+ * never leak into a test.
+ */
+export function personalClaudeSkillsRoot(): string | null {
+  return personalSkillsRootOverride ? null : join(homedir(), '.claude', 'skills')
+}
+
+/** Project skill folders, most specific first: the first name wins. */
+const PROJECT_SKILL_DIRS: { parts: [string, string]; origin: LocalSkillOrigin }[] = [
+  { parts: ['.vyotiq', 'skills'], origin: 'vyotiq' },
+  { parts: ['.claude', 'skills'], origin: 'claude' },
+  { parts: ['.agents', 'skills'], origin: 'agents' },
+  { parts: ['.cursor', 'skills'], origin: 'cursor' }
+]
+
+function personalRoots(): string[] {
+  const claude = personalClaudeSkillsRoot()
+  return claude ? [personalSkillsRoot(), claude] : [personalSkillsRoot()]
+}
+
 export function localSkillId(source: LocalSkillSource, name: string): string {
   return `skill:local:${source}:${name}`
 }
@@ -118,10 +140,11 @@ function dirMtime(path: string): string {
 }
 
 function fingerprintFor(workspacePath: string | null): string {
-  const parts = [`personal:${dirMtime(personalSkillsRoot())}`]
+  const parts = personalRoots().map((root) => `personal:${dirMtime(root)}`)
   if (workspacePath) {
-    parts.push(`vyotiq:${dirMtime(join(workspacePath, '.vyotiq', 'skills'))}`)
-    parts.push(`cursor:${dirMtime(join(workspacePath, '.cursor', 'skills'))}`)
+    for (const { parts: dir, origin } of PROJECT_SKILL_DIRS) {
+      parts.push(`${origin}:${dirMtime(join(workspacePath, ...dir))}`)
+    }
   }
   return parts.join('|')
 }
@@ -226,10 +249,13 @@ export function loadLocalSkills(workspacePath?: string | null): LocalSkill[] {
   const skills: LocalSkill[] = []
   const seen = new Set<string>()
   if (ws) {
-    scanSkillRoot(join(ws, '.vyotiq', 'skills'), 'project', 'vyotiq', '.vyotiq/skills', skills, seen)
-    scanSkillRoot(join(ws, '.cursor', 'skills'), 'project', 'cursor', '.cursor/skills', skills, seen)
+    for (const { parts, origin } of PROJECT_SKILL_DIRS) {
+      scanSkillRoot(join(ws, ...parts), 'project', origin, parts.join('/'), skills, seen)
+    }
   }
   scanSkillRoot(personalSkillsRoot(), 'personal', undefined, '~/.vyotiq/skills', skills, seen)
+  const claudePersonal = personalClaudeSkillsRoot()
+  if (claudePersonal) scanSkillRoot(claudePersonal, 'personal', 'claude', '~/.claude/skills', skills, seen)
 
   cache.set(key, { fingerprint, skills, builtAt: Date.now() })
   return skills
@@ -267,15 +293,11 @@ export function isAllowedLocalSkillPath(
   }
   if (!isSkillMdFilename(real)) return false
 
-  const personal = realpathIfExists(personalSkillsRoot())
-  if (isInsideRoot(real, personal)) return true
+  if (personalRoots().some((root) => isInsideRoot(real, realpathIfExists(root)))) return true
 
   const ws = workspacePath?.trim()
   if (!ws) return false
-  const projectRoots = [
-    join(ws, '.vyotiq', 'skills'),
-    join(ws, '.cursor', 'skills')
-  ]
+  const projectRoots = PROJECT_SKILL_DIRS.map(({ parts }) => join(ws, ...parts))
   return projectRoots.some((root) => isInsideRoot(real, realpathIfExists(root)))
 }
 
@@ -304,7 +326,7 @@ function isValidSkillName(slug: string): boolean {
  * SKILL.md does not change.
  */
 function isPersonalSkillPath(absPath: string): boolean {
-  return isInsideRoot(resolve(absPath), realpathIfExists(personalSkillsRoot()))
+  return personalRoots().some((root) => isInsideRoot(resolve(absPath), realpathIfExists(root)))
 }
 
 function skillSlug(title?: string): string {

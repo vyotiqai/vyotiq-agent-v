@@ -8,6 +8,8 @@ import {
 import {
   startBackgroundTerminal,
   pollTerminalSession,
+  killTerminalSession,
+  writeTerminalSessionInput,
   registerTerminalSessionExitFinalize
 } from './terminalSessions'
 import { parseTerminalOutput } from '../../../shared/utils/terminalFormat'
@@ -23,8 +25,11 @@ import { needsOpaqueWatch, recordTerminalCommandPriors } from './terminalCheckpo
 import { finishWatches, startWatches, type WorkspaceSnapshot } from '../workspaceMutationWatch'
 import { invalidateAfterWorkspaceMutation, terminalResultOk, toolOk, toolFail } from './index'
 import type { ToolHandler } from './index'
-import { prepareAgentSandbox, type SandboxLaunch } from '../sandbox'
+import { prepareAgentSandboxReady, type SandboxLaunch } from '../sandbox'
 import { fenceRemoteTerminalOutput } from './terminalRemoteFence'
+
+/** How long a poll after `input` waits for the process to react, unless block_until_ms says otherwise. */
+const INPUT_ECHO_WAIT_MS = 3000
 
 /** Prefer the real shell command over a session UUID in logs and timeline titles. */
 function terminalResultSummary(command: string, sessionId: string, content: string): string {
@@ -139,7 +144,7 @@ export const terminalHandlers = {
     // A poll reads a shell that is already running; only a new command spawns.
     let sandbox: SandboxLaunch | undefined
     if (command.trim()) {
-      const prepared = prepareAgentSandbox({
+      const prepared = await prepareAgentSandboxReady({
         workspace,
         cwd,
         extraRoots: context.extraRoots,
@@ -171,8 +176,20 @@ export const terminalHandlers = {
       if (!runId || invokeId == null) {
         return toolFail('terminal', 'session', 'Background terminal requires run ownership')
       }
+      if (sessionId && args.kill === true) {
+        const content = killTerminalSession({ runId, invokeId, sessionId })
+        const ran = parseTerminalOutput(content).command || ''
+        return toolOk('terminal', terminalResultSummary(ran, sessionId, content), fenceRemoteTerminalOutput(content, ran))
+      }
+      const input = typeof args.input === 'string' && args.input.length > 0 ? args.input : ''
+      if (sessionId && input) {
+        writeTerminalSessionInput({ runId, invokeId, sessionId, input })
+      }
       const blockUntilMs = sessionId
-        ? resolveSessionPollBlockUntilMs(args)
+        ? // After input, look for the reaction briefly rather than the 30s poll default.
+          input && typeof args.block_until_ms !== 'number'
+          ? INPUT_ECHO_WAIT_MS
+          : resolveSessionPollBlockUntilMs(args)
         : resolveNewCommandBlockUntilMs(args)
       // A foreground new command (no explicit ceiling / no background request)
       // should wait for completion and be hard-killed at the ceiling if it
@@ -215,7 +232,9 @@ export const terminalHandlers = {
                 killOnTimeout: defaultWait,
                 onOutput,
                 onStillRunning: registerExitFinalize,
-                sandbox
+                sandbox,
+                // A steer ends the wait; only a cancel ends the process.
+                lifetimeSignal: context.runSignal
               })
           )
       mirrorAgentCommandEnd(workspace, command, content)

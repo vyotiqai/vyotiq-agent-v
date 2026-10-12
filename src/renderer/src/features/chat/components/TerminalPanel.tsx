@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { Button, cn } from '@renderer/lib/ui'
+import { Button, IconButton, Input, cn, type ActionMenuItem } from '@renderer/lib/ui'
+import { usePrompt } from '@renderer/lib/hooks/usePrompt'
 import { Icon } from '@renderer/lib/icons'
+import { KeptProcesses } from './KeptProcesses'
+import { useKeptTerminals } from '../hooks/useKeptTerminals'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { formatElapsed } from '@shared/utils/timeFormat'
@@ -12,7 +16,7 @@ import { matchShortcut } from '@renderer/lib/shortcuts'
 import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
-import type { PtySessionInfo } from '@shared/ipc'
+import type { PtySessionInfo, PtyShellChoice } from '@shared/ipc'
 import type { UiItem } from '@shared/transcript'
 import { collectTaskCommands } from '@renderer/features/inspector/taskCommands'
 import { TaskCommandList } from '@renderer/features/inspector/TaskCommandList'
@@ -23,6 +27,15 @@ import { getPtyOutputBuffers, ensurePtyOutputBufferListener } from './ptyOutputB
 import { EmptyPanel } from './PanelChrome'
 import { TerminalSessionBar } from './TerminalSessionBar'
 import { onTerminalRunRequest, takeTerminalRunRequest } from '../terminalRequests'
+import {
+  askAboutOutputInstruction,
+  bufferLines,
+  bufferText,
+  findInLines,
+  registerTerminal,
+  terminalFor,
+  type TerminalMatch
+} from './terminalBuffer'
 
 ensurePtyOutputBufferListener()
 
@@ -45,13 +58,55 @@ function readTerminalTheme(): ITheme {
   }
 }
 
+/**
+ * Current UI text scale for the terminal font. Resolves from the
+ * --vy-font-scale token (set by presets and numeric scales alike); falls back
+ * to the data-font-scale attribute map before first paint applies the token.
+ */
+function readFontScaleValue(): number {
+  if (typeof document === 'undefined') return 1
+  const fromToken = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--vy-font-scale')
+  )
+  if (Number.isFinite(fromToken) && fromToken > 0) return fromToken
+  const attr = document.documentElement.getAttribute('data-font-scale')
+  if (attr === 'small') return 0.92
+  if (attr === 'large') return 1.08
+  const numeric = Number.parseFloat(attr ?? '')
+  if (Number.isFinite(numeric) && numeric > 0) return numeric
+  return 1
+}
+
+/** Terminal point size for a UI text scale (12pt at the default scale). */
+function terminalFontSize(scale = readFontScaleValue()): number {
+  return Math.max(6, Math.round(12 * scale))
+}
+
+/**
+ * Draw a terminal with WebGL: far faster than the DOM on busy output. Any
+ * failure leaves the DOM renderer drawing, and a lost GPU context (too many
+ * terminals open, a driver reset) disposes the addon so xterm falls back to it.
+ */
+export function loadWebglRenderer(term: Terminal): { dispose: () => void } | null {
+  if (typeof WebGL2RenderingContext === 'undefined') return null
+  try {
+    const webgl = new WebglAddon()
+    webgl.onContextLoss(() => webgl.dispose())
+    term.loadAddon(webgl)
+    return webgl
+  } catch {
+    return null
+  }
+}
+
 /** One xterm host bound to a PTY session id. */
 function PtySessionView({
   sessionId,
   workspacePath,
   visible,
   focused = true,
-  isReadOnly
+  isReadOnly,
+  onFind
 }: {
   sessionId: string
   workspacePath: string
@@ -66,8 +121,12 @@ function PtySessionView({
    * would send its keystrokes to a session with nothing behind it.
    */
   isReadOnly?: (sessionId: string) => boolean
+  /** Ctrl F in the terminal: open the panel's find row. */
+  onFind?: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const onFindRef = useRef(onFind)
+  onFindRef.current = onFind
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const visibleRef = useRef(visible)
@@ -94,7 +153,7 @@ function PtySessionView({
       disableStdin: isReadOnlyRef.current?.(sessionId) ?? false,
       cursorBlink: !(isReadOnlyRef.current?.(sessionId) ?? false),
       fontFamily: readCssColor('--vy-font-mono', '"JetBrains Mono", ui-monospace, monospace'),
-      fontSize: 12,
+      fontSize: terminalFontSize(),
       theme: readTerminalTheme(),
       screenReaderMode: true
     })
@@ -132,6 +191,12 @@ function PtySessionView({
       ) {
         return false
       }
+      // Find in this terminal's output, as in VS Code; the shell never sees it.
+      if (event.type === 'keydown' && matchShortcut(event, 'find') && onFindRef.current) {
+        event.preventDefault()
+        onFindRef.current()
+        return false
+      }
       if (
         event.type === 'keydown' &&
         (event.ctrlKey || event.metaKey) &&
@@ -160,6 +225,15 @@ function PtySessionView({
     term.open(el)
     termRef.current = term
     fitRef.current = fit
+    // Settings arrive after open: until then the DOM renderer draws, which is
+    // also what stays when WebGL cannot start.
+    let gpu: { dispose: () => void } | null = null
+    let disposed = false
+    void window.vyotiq?.getSettings?.().then((res) => {
+      if (disposed || (res.ok && res.data.terminalGpuRendering === false)) return
+      gpu = loadWebglRenderer(term)
+    })
+    const unregister = registerTerminal(sessionId, term)
 
     // Subscribe before replaying buffer so mid-gap chunks land in the buffer
     // (global listener) and are included in the replay — not dropped.
@@ -201,6 +275,30 @@ function PtySessionView({
       })
     }
 
+    // Skin, theme — and the text scale: a font-size change re-fits so the
+    // grid still fills the pane. `style` is watched because a numeric scale
+    // sets --vy-font-scale inline; presets change data-font-scale instead.
+    // Screen-reader handling above is untouched.
+    const applyTerminalScale = (): void => {
+      const next = terminalFontSize()
+      if (term.options.fontSize !== next) {
+        term.options.fontSize = next
+        scheduleFit()
+      }
+    }
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = readTerminalTheme()
+      term.options.fontFamily = readCssColor(
+        '--vy-font-mono',
+        '"JetBrains Mono", ui-monospace, monospace'
+      )
+      applyTerminalScale()
+    })
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'data-skin', 'data-font-scale', 'style']
+    })
+
     const onData = term.onData((data) => {
       if (isReadOnlyRef.current?.(sessionId)) return
       void window.vyotiq?.ptyWrite?.(sessionId, data, workspacePath)
@@ -215,21 +313,12 @@ function PtySessionView({
       typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => scheduleFit()) : null
     ro?.observe(el)
 
-    const themeObserver = new MutationObserver(() => {
-      term.options.theme = readTerminalTheme()
-      term.options.fontFamily = readCssColor(
-        '--vy-font-mono',
-        '"JetBrains Mono", ui-monospace, monospace'
-      )
-    })
-    themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme', 'data-skin']
-    })
-
     applyFit()
 
     return () => {
+      disposed = true
+      gpu?.dispose()
+      unregister()
       onData.dispose()
       unsubData?.()
       unsubExit?.()
@@ -303,7 +392,8 @@ export function TerminalPanel({
   showAgentRequest = 0,
   items,
   itemsStore,
-  taskKey = null
+  taskKey = null,
+  onAskAgent
 }: {
   className?: string
   workspacePath?: string | null
@@ -320,8 +410,11 @@ export function TerminalPanel({
   itemsStore?: ChatItemsStore
   /** Which task that is: a new one starts back on its list. */
   taskKey?: string | null
+  /** Hand an instruction to the agent (drafted into the task's box when there is one). */
+  onAskAgent?: (instruction: string) => void
 }) {
   const [sessions, setSessions] = useState<PtySessionInfo[]>([])
+  const keptTerminals = useKeptTerminals(workspacePath)
   const liveItems = useChatLiveItems(itemsStore, items ?? NO_ITEMS, visible && Boolean(taskKey))
   const commands = useMemo(() => (taskKey ? collectTaskCommands(liveItems) : []), [liveItems, taskKey])
   /**
@@ -399,7 +492,7 @@ export function TerminalPanel({
     setListReady(true)
   }, [workspacePath])
 
-  const createSession = useCallback(async (focus = true): Promise<string | null> => {
+  const createSession = useCallback(async (focus = true, shell?: PtyShellChoice): Promise<string | null> => {
     if (!workspacePath) {
       setError('Open a workspace to start a terminal.')
       return null
@@ -410,7 +503,7 @@ export function TerminalPanel({
     }
     setError(null)
     suppressAutoCreateRef.current = false
-    const res = await window.vyotiq.ptyCreate({ workspacePath, cols: 80, rows: 24 })
+    const res = await window.vyotiq.ptyCreate({ workspacePath, cols: 80, rows: 24, ...(shell ? { shell } : {}) })
     if (!res.ok) {
       setError(res.error || 'Failed to create terminal session.')
       return null
@@ -562,10 +655,130 @@ export function TerminalPanel({
   const shellName = activeSession && !activeIsAgent ? activeSession.title : null
 
   const onTask = view === 'task'
-  const openShell = (): void => {
+  const openShell = (shell?: PtyShellChoice): void => {
     setChosenView('sessions')
-    void createSession()
+    void createSession(true, shell)
   }
+
+  // Find in the shown tab's output: every match, the current one selected
+  // and scrolled to. Typing or switching tabs searches again.
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findMatches, setFindMatches] = useState<TerminalMatch[]>([])
+  const [findIndex, setFindIndex] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
+  const showMatch = useCallback(
+    (match: TerminalMatch | undefined) => {
+      const term = terminalFor(activeId)
+      if (!term) return
+      if (!match) {
+        term.clearSelection()
+        return
+      }
+      term.select(match.col, match.row, match.length)
+      term.scrollToLine(Math.max(0, match.row - Math.floor(term.rows / 2)))
+    },
+    [activeId]
+  )
+  const runFind = useCallback(
+    (query: string) => {
+      const term = terminalFor(activeId)
+      const matches = term ? findInLines(bufferLines(term), query) : []
+      setFindMatches(matches)
+      // Start from the latest output, where the eye already is.
+      const start = Math.max(0, matches.length - 1)
+      setFindIndex(start)
+      showMatch(matches[start])
+    },
+    [activeId, showMatch]
+  )
+  const stepFind = (delta: number): void => {
+    if (findMatches.length === 0) return
+    const next = (findIndex + delta + findMatches.length) % findMatches.length
+    setFindIndex(next)
+    showMatch(findMatches[next])
+  }
+  const openFind = useCallback(() => {
+    setFindOpen(true)
+    requestAnimationFrame(() => findInputRef.current?.select())
+  }, [])
+  const closeFind = (): void => {
+    setFindOpen(false)
+    terminalFor(activeId)?.clearSelection()
+    terminalFor(activeId)?.focus()
+  }
+  useEffect(() => {
+    if (findOpen && findQuery) runFind(findQuery)
+    // Another tab: its own matches. The query stays.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
+
+  const { prompt, dialog: promptDialog } = usePrompt()
+  const renameActive = async (): Promise<void> => {
+    if (!activeSession || !workspacePath) return
+    const title = await prompt('Rename terminal', activeSession.title, { confirmLabel: 'Rename' })
+    if (!title?.trim()) return
+    const res = await window.vyotiq?.ptyRename?.({ id: activeSession.id, workspacePath, title: title.trim() })
+    if (res && !res.ok) setError(res.error)
+    await refreshList()
+  }
+  const activeText = (): { text: string; selected: boolean } | null => {
+    const term = terminalFor(activeId)
+    if (!term) return null
+    const selection = term.hasSelection() ? term.getSelection().trim() : ''
+    if (selection) return { text: selection, selected: true }
+    const text = bufferText(bufferLines(term))
+    return text ? { text, selected: false } : null
+  }
+  const isWindows = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform)
+  const hasTerm = Boolean(activeSession) && !onTask
+  const menuItems: ActionMenuItem[] = [
+    { id: 'new-powershell', heading: 'New terminal', label: 'PowerShell', icon: 'terminal', disabled: !workspacePath, onSelect: () => openShell('powershell') },
+    ...(isWindows
+      ? [
+          { id: 'new-cmd', label: 'Command Prompt', icon: 'terminal' as const, disabled: !workspacePath, onSelect: () => openShell('cmd') },
+          { id: 'new-bash', label: 'Git Bash', icon: 'terminal' as const, disabled: !workspacePath, onSelect: () => openShell('bash') },
+          { id: 'new-wsl', label: 'WSL', icon: 'terminal' as const, disabled: !workspacePath, onSelect: () => openShell('wsl') }
+        ]
+      : [{ id: 'new-bash', label: 'bash', icon: 'terminal' as const, disabled: !workspacePath, onSelect: () => openShell('bash') }]),
+    { id: 'find', label: 'Find', icon: 'search', keys: ['Ctrl', 'F'], separatorBefore: true, disabled: !hasTerm, onSelect: openFind },
+    {
+      id: 'copy-all',
+      label: 'Copy all output',
+      icon: 'copy',
+      disabled: !hasTerm,
+      onSelect: () => {
+        const term = terminalFor(activeId)
+        if (term) void copyText(bufferText(bufferLines(term)))
+      }
+    },
+    { id: 'clear', label: 'Clear', icon: 'trash', disabled: !hasTerm, onSelect: () => terminalFor(activeId)?.clear() },
+    {
+      id: 'rename',
+      label: 'Rename…',
+      icon: 'edit',
+      disabled: !hasTerm || activeIsAgent,
+      disabledReason: activeIsAgent ? 'The agent’s session keeps its name' : undefined,
+      onSelect: () => void renameActive()
+    },
+    ...(onAskAgent
+      ? [
+          {
+            id: 'ask',
+            label: 'Ask the agent about this output',
+            icon: 'chat' as const,
+            detail: 'the selection, or the end of the output',
+            separatorBefore: true,
+            disabled: !hasTerm,
+            onSelect: () => {
+              const picked = activeText()
+              if (!picked) return
+              onAskAgent(askAboutOutputInstruction(picked.text, { shell: activeIsAgent ? null : activeSession?.title, selected: picked.selected }))
+            }
+          }
+        ]
+      : [])
+  ]
   const sessionBar = (
     <TerminalSessionBar
       sessions={sessions}
@@ -584,8 +797,9 @@ export function TerminalPanel({
         setActiveId(id)
       }}
       onKill={(id) => void killSession(id)}
-      onCreate={openShell}
+      onCreate={() => openShell()}
       onToggleSplit={() => void toggleSplit()}
+      menuItems={menuItems}
     />
   )
 
@@ -603,6 +817,11 @@ export function TerminalPanel({
       </p>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {sessionBar}
+        <KeptProcesses
+          items={keptTerminals.kept}
+          onStop={(id) => void keptTerminals.stop(id)}
+          className="shrink-0 border-b border-border pl-3 pr-1"
+        />
         {onTask ? null : activeIsAgent ? (
           <div className="flex h-8 shrink-0 items-center gap-2 bg-surface pl-3 pr-1 text-xs text-muted" data-terminal-readonly>
             <Icon name="lock" size={12} className="shrink-0" />
@@ -611,6 +830,39 @@ export function TerminalPanel({
             <Button size="xs" variant="secondary" onClick={() => void createSession()}>
               Open a shell here
             </Button>
+          </div>
+        ) : null}
+        {findOpen && !onTask ? (
+          <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border pl-2 pr-1" data-terminal-find role="search">
+            <div className="min-w-0 flex-1">
+              <Input
+                ref={findInputRef}
+                size="sm"
+                placeholder="Find in output"
+                aria-label="Find in terminal output"
+                value={findQuery}
+                onChange={(e) => {
+                  setFindQuery(e.target.value)
+                  runFind(e.target.value)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    stepFind(e.shiftKey ? 1 : -1)
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    closeFind()
+                  }
+                }}
+              />
+            </div>
+            <span className="shrink-0 px-1 text-caption tabular-nums text-tertiary" aria-live="polite">
+              {findQuery ? (findMatches.length ? `${findIndex + 1} of ${findMatches.length}` : 'No results') : ''}
+            </span>
+            <IconButton icon="chevronUp" label="Previous match" size="xs" tone="muted" disabled={findMatches.length === 0} onClick={() => stepFind(-1)} />
+            <IconButton icon="chevron" label="Next match" size="xs" tone="muted" disabled={findMatches.length === 0} onClick={() => stepFind(1)} />
+            <IconButton icon="close" label="Close find" size="xs" tone="muted" onClick={closeFind} />
           </div>
         ) : null}
         {error ? (
@@ -642,6 +894,7 @@ export function TerminalPanel({
                     visible={visible && !onTask}
                     focused={visible && !onTask}
                     isReadOnly={isMirrorSession}
+                    onFind={openFind}
                   />
                 </div>
                 <div className="w-px shrink-0 bg-border" />
@@ -662,6 +915,7 @@ export function TerminalPanel({
                 visible={visible && !onTask}
                 focused={visible && !onTask}
                 isReadOnly={isMirrorSession}
+                onFind={openFind}
               />
             )
           ) : (
@@ -675,7 +929,7 @@ export function TerminalPanel({
               }
               actions={
                 workspacePath ? (
-                  <Button size="sm" onClick={openShell}>
+                  <Button size="sm" onClick={() => openShell()}>
                     Open a shell
                   </Button>
                 ) : null
@@ -703,6 +957,7 @@ export function TerminalPanel({
           </div>
         ) : null}
       </div>
+      {promptDialog}
     </div>
   )
 }

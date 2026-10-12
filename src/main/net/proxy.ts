@@ -3,6 +3,7 @@ import { session, type Session } from 'electron'
 import type { NetworkSettings } from '../../shared/ipc'
 import {
   normalizeProxyBypass,
+  proxyUrlWithCredentials,
   validateProxyUrl,
   type ProxyStatus
 } from '../../shared/domain/network'
@@ -34,8 +35,30 @@ type SetGlobalProxyFromEnv = (env: Record<string, string | undefined>) => () => 
 const setGlobalProxyFromEnv = (http as unknown as { setGlobalProxyFromEnv?: SetGlobalProxyFromEnv })
   .setGlobalProxyFromEnv?.bind(http)
 
-let current: { env: ProxyEnv; status: ProxyStatus } = { env: {}, status: { source: 'none' } }
+/**
+ * `env` is what Node's own traffic uses; `childEnv`, when set, is what child
+ * processes get instead — the manual proxy without its password, so a command
+ * the agent runs cannot read the password out of its environment.
+ */
+let current: { env: ProxyEnv; childEnv?: ProxyEnv; status: ProxyStatus } = { env: {}, status: { source: 'none' } }
 const trackedSessions = new Set<Session>()
+
+export type ProxyCredentials = { username: string; password: string | null }
+
+/** The manual proxy's user name and password; installed by main from settings and the key vault. */
+let credentialsSource: () => ProxyCredentials | null = () => null
+
+export function setProxyCredentialsSource(source: () => ProxyCredentials | null): void {
+  credentialsSource = source
+}
+
+function readCredentials(): ProxyCredentials | null {
+  try {
+    return credentialsSource()
+  } catch {
+    return null
+  }
+}
 
 /** Proxy variables from an environment; the lowercase spelling wins, as in curl and Node. */
 export function envProxyFrom(env: NodeJS.ProcessEnv): ProxyEnv {
@@ -88,16 +111,26 @@ export function resolveNodeProxy(
   net: NetworkSettings,
   env: NodeJS.ProcessEnv,
   systemProxyUrl: string | null,
-  systemNote?: string
-): { env: ProxyEnv; status: ProxyStatus } {
+  systemNote?: string,
+  credentials?: ProxyCredentials | null
+): { env: ProxyEnv; childEnv?: ProxyEnv; status: ProxyStatus } {
   if (net.proxyMode === 'direct') return { env: {}, status: { source: 'none' } }
   if (net.proxyMode === 'manual') {
     const parsed = validateProxyUrl(net.proxyUrl)
     if (parsed.ok) {
       const bypass = [normalizeProxyBypass(net.proxyBypass), LOCAL_BYPASS].filter(Boolean).join(',')
+      const username = (credentials?.username ?? net.proxyUsername ?? '').trim()
+      const authed = proxyUrlWithCredentials(parsed.url, username, credentials?.password ?? null)
+      const plain: ProxyEnv = { HTTP_PROXY: parsed.url, HTTPS_PROXY: parsed.url, NO_PROXY: bypass }
       return {
-        env: { HTTP_PROXY: parsed.url, HTTPS_PROXY: parsed.url, NO_PROXY: bypass },
-        status: { source: 'manual', url: parsed.url, bypass: normalizeProxyBypass(net.proxyBypass) || undefined }
+        env: { HTTP_PROXY: authed, HTTPS_PROXY: authed, NO_PROXY: bypass },
+        ...(authed !== parsed.url ? { childEnv: plain } : {}),
+        status: {
+          source: 'manual',
+          url: parsed.url,
+          bypass: normalizeProxyBypass(net.proxyBypass) || undefined,
+          ...(username && !credentials?.password ? { note: 'A user name is set but no password is saved.' } : {})
+        }
       }
     }
     return { env: {}, status: { source: 'none', note: `The manual proxy isn't usable: ${parsed.error}` } }
@@ -122,7 +155,7 @@ export function resolveNodeProxy(
   return { env: {}, status: { source: 'none', ...(systemNote ? { note: systemNote } : {}) } }
 }
 
-function installNode(next: { env: ProxyEnv; status: ProxyStatus }): void {
+function installNode(next: { env: ProxyEnv; childEnv?: ProxyEnv; status: ProxyStatus }): void {
   if (!setGlobalProxyFromEnv) {
     current = { env: {}, status: { source: 'none', note: 'This runtime has no built-in proxy support.' } }
     return
@@ -139,7 +172,7 @@ function installNode(next: { env: ProxyEnv; status: ProxyStatus }): void {
  */
 export function applyEarlyNodeProxy(net: NetworkSettings): void {
   try {
-    installNode(resolveNodeProxy(net, process.env, null))
+    installNode(resolveNodeProxy(net, process.env, null, undefined, readCredentials()))
   } catch (err) {
     logger.warn('Could not set the proxy at startup', { scope: 'net', err })
   }
@@ -161,6 +194,31 @@ function chromiumConfig(net: NetworkSettings): Electron.ProxyConfig {
 }
 
 let lastChromium: Electron.ProxyConfig = { mode: 'system' }
+/** The manual proxy's host, for answering its sign-in challenge; null when not manual. */
+let lastManualHost: string | null = null
+
+function manualProxyHost(net: NetworkSettings): string | null {
+  const parsed = validateProxyUrl(net.proxyUrl)
+  if (!parsed.ok) return null
+  try {
+    return new URL(parsed.url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Chromium asks for proxy credentials through the app's `login` event (the
+ * agent browser, the updater's session). Answered only for the manual proxy
+ * set here, with the saved user name and password; anything else falls
+ * through to Chromium's own handling.
+ */
+export function proxyLoginAnswer(authInfo: { isProxy: boolean; host: string }): ProxyCredentials | null {
+  if (!authInfo.isProxy || !lastManualHost) return null
+  if (authInfo.host.toLowerCase().replace(/^\[|\]$/g, '') !== lastManualHost.replace(/^\[|\]$/g, '')) return null
+  const creds = readCredentials()
+  return creds?.username && creds.password ? creds : null
+}
 
 /** Give a session the app's proxy — and every later change to it. */
 export async function applyProxyToSession(ses: Session): Promise<void> {
@@ -198,7 +256,8 @@ export async function applyNetworkSettings(net: NetworkSettings): Promise<ProxyS
       logger.warn('Could not read the system proxy', { scope: 'net', err })
     }
   }
-  installNode(resolveNodeProxy(net, process.env, systemUrl, systemNote))
+  lastManualHost = net.proxyMode === 'manual' ? manualProxyHost(net) : null
+  installNode(resolveNodeProxy(net, process.env, systemUrl, systemNote, readCredentials()))
   logger.info('Network proxy applied', {
     scope: 'net',
     reason: `${current.status.source}${current.status.url ? ` ${current.status.url}` : ''}`
@@ -213,7 +272,7 @@ export function proxyStatus(): ProxyStatus {
 /** HTTPS_PROXY/HTTP_PROXY/NO_PROXY (both spellings) for a child process, or none. */
 export function childProxyEnv(): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(current.env)) {
+  for (const [k, v] of Object.entries(current.childEnv ?? current.env)) {
     if (!v) continue
     out[k] = v
     out[k.toLowerCase()] = v

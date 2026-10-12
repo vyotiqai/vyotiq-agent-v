@@ -57,8 +57,34 @@ describe('edit approval preview', () => {
     expect(preview).toMatchObject({ action: 'modify', add: 1, del: 1 })
     expect(preview?.lines[0]?.kind).toBe('@')
     expect(preview?.lines.filter((l) => l.kind !== '@' && l.kind !== ' ')).toEqual([
-      { kind: '-', text: '  return a - b' },
-      { kind: '+', text: '  return a + b' }
+      { kind: '-', text: '  return a - b', oldNo: 2 },
+      { kind: '+', text: '  return a + b', newNo: 2 }
+    ])
+  })
+
+  it('places a str_replace in its file: hunk header, context and line numbers', () => {
+    const file = ['// math', 'export function add(a, b) {', '  return a - b', '}', '', 'export const one = 1', ''].join('\r\n')
+    writeFileSync(join(root, 'math.js'), file, 'utf8')
+    const preview = buildApprovalChangePreview(
+      'str_replace',
+      json({ path: 'math.js', old_string: 'return a - b', new_string: 'return a + b' }),
+      root
+    )
+    expect(preview).toMatchObject({ action: 'modify', add: 1, del: 1 })
+    expect(preview?.lines[0]).toMatchObject({ kind: '@', text: expect.stringMatching(/^@@ -1,6 \+1,6 @@/) })
+    expect(preview?.lines.find((l) => l.kind === '-')).toEqual({ kind: '-', text: '  return a - b', oldNo: 3 })
+    expect(preview?.lines.find((l) => l.kind === '+')).toEqual({ kind: '+', text: '  return a + b', newNo: 3 })
+    expect(preview?.lines.filter((l) => l.kind === ' ').map((l) => l.oldNo)).toEqual([1, 2, 4, 5, 6])
+  })
+
+  it('numbers the rows of a diff the model wrote from its hunk header', () => {
+    const diff = ['@@ -10,3 +10,3 @@', ' a', '-b', '+c', ' d'].join('\n')
+    const preview = buildApprovalChangePreview('edit', json({ path: 'x.ts', diff }), root)
+    expect(preview?.lines.slice(1)).toEqual([
+      { kind: ' ', text: 'a', oldNo: 10, newNo: 10 },
+      { kind: '-', text: 'b', oldNo: 11 },
+      { kind: '+', text: 'c', newNo: 11 },
+      { kind: ' ', text: 'd', oldNo: 12, newNo: 12 }
     ])
   })
 

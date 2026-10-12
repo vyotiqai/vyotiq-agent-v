@@ -103,3 +103,16 @@ describe('parseVyFileHref', () => {
     expect(isLinkableWorkspacePath('src/a.ts')).toBe(true)
   })
 })
+
+describe('bare root files in prose', () => {
+  it('links README.md as it links package.json — the lookup is case-blind', () => {
+    const out = autolinkWorkspacePathsInProse('See package.json and README.md, then AGENTS.md.')
+    expect(out).toContain('(#vy-file:package.json)')
+    expect(out).toContain('(#vy-file:README.md)')
+    expect(out).toContain('(#vy-file:AGENTS.md)')
+  })
+
+  it('leaves a bare name that reads like a product as text', () => {
+    expect(autolinkWorkspacePathsInProse('Built with Node.js and test.js')).not.toContain('#vy-file:')
+  })
+})

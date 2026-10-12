@@ -179,7 +179,7 @@ test('Bedrock takes a region and access keys; Vertex a project and this computer
   // Saving a key refreshes that provider's catalog. Through the local proxy it
   // stays on this machine instead of reaching AWS or Google with fake keys.
   await page.evaluate(
-    (proxyUrl) => window.vyotiq.setSettings({ network: { proxyMode: 'manual', proxyUrl, proxyBypass: '' } }),
+    (proxyUrl) => window.vyotiq.setSettings({ network: { proxyMode: 'manual', proxyUrl, proxyBypass: '', proxyUsername: '' } }),
     `http://127.0.0.1:${proxyPort}`
   )
   await openSection(page, 'Providers')

@@ -17,6 +17,7 @@ import {
   POWERSHELL_EXIT_EPILOGUE,
   resolveTerminalShell,
   sanitizedTerminalEnv,
+  agentCommandEnv,
   terminalSpawnSpec,
   unixShellInvocation,
   unsupportedUnixOnWindowsMessage,
@@ -72,6 +73,21 @@ describe('unixShellInvocation', () => {
       bin: '/bin/sh',
       args: ['-c', 'ls']
     })
+  })
+})
+
+describe('agentCommandEnv', () => {
+  // pnpm 12 reinstalls before `pnpm run`/`exec` when deps look stale; in an
+  // instance worktree that relinked the parent checkout's node_modules.
+  it('tells pnpm not to install before running, in the spelling pnpm 12 reads', () => {
+    const env = agentCommandEnv({ PATH: '/bin', OPENAI_API_KEY: 'sk-planted' })
+    expect(env.pnpm_config_verify_deps_before_run).toBe('false')
+    expect(env.PATH).toBe('/bin')
+    expect(env.OPENAI_API_KEY).toBeUndefined()
+  })
+
+  it('leaves the user’s own terminal env as it was', () => {
+    expect(sanitizedTerminalEnv({ PATH: '/bin' }).pnpm_config_verify_deps_before_run).toBeUndefined()
   })
 })
 

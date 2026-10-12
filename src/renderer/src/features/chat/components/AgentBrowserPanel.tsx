@@ -37,6 +37,7 @@ import {
   BROWSER_VIEWPORT_KEY,
   BROWSER_VIEWPORT_PRESETS,
   browserViewportPreset,
+  browserViewportShortLabel,
   parseBrowserViewportPreset,
   type BrowserViewportPresetId
 } from './browserViewport'
@@ -539,7 +540,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       : []),
     ...BROWSER_VIEWPORT_PRESETS.map((preset, index) => ({
       id: `viewport-${preset.id}`,
-      label: preset.id === 'fit' ? 'Fit the panel' : preset.label,
+      label: preset.id === 'fit' ? 'Fit the panel' : `${preset.device} · ${preset.label}`,
       checked: viewportPreset === preset.id,
       separatorBefore: index === 0,
       onSelect: () => setViewport(preset.id)
@@ -750,7 +751,11 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           onChange={(id) => setViewport(id)}
           items={[
             { id: 'fit' as BrowserViewportPresetId, label: 'Fit', title: 'Fit the panel' },
-            { id: fixedPreset.id, label: String(fixedPreset.width), title: fixedPreset.label }
+            {
+              id: fixedPreset.id,
+              label: browserViewportShortLabel(fixedPreset),
+              title: `${fixedPreset.device}, ${fixedPreset.label} px`
+            }
           ]}
         />
         <ActionMenu

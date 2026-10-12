@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -21,7 +22,9 @@ import type {
   ServiceTier,
   SlashCommandDescriptor
 } from '@shared/ipc'
-import { modelSelectionKey } from '@shared/domain/modelSelection'
+import { modelSelectionKey, parseModelSelectionKey } from '@shared/domain/modelSelection'
+import { compareModelOptions } from '@renderer/features/task/compareModels'
+import { providerLabel } from '@shared/providers'
 import { resolveModelContextWindow } from '@shared/domain/modelContextWindows'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
@@ -39,6 +42,7 @@ import {
   useBriefState,
   useNewTaskWorktreeDefault
 } from '@renderer/lib/drafts/taskDraftStore'
+import { createBriefHistoryCursor, recordBrief } from '@renderer/lib/drafts/briefHistory'
 import { useGitStatus } from '../useGitStatus'
 import { isSessionDragEvent } from '@renderer/lib/chat/chatPaneLayout'
 import { ComposerMentionInput, type ComposerMentionInputHandle } from './ComposerMentionInput'
@@ -60,6 +64,7 @@ import { useComposerModels } from './useComposerModels'
 import { deriveModelReadiness, modelReadinessBlocksSend, modelReadinessSendReason } from './modelReadiness'
 import { ModelReadinessBanner } from './ModelReadinessBanner'
 import { pickAudioFallback, pickVisionFallback } from './composerModelUtils'
+import { matchCommandModel, type CommandModelChoices } from './commandModel'
 import {
   getWorkspaceHotUi,
   resolveHotComposerDraft,
@@ -68,7 +73,7 @@ import {
 } from '@renderer/lib/hooks/workspaceHotUiStore'
 import { clearComposerAttachments, composerAttachmentKey } from '@renderer/lib/hooks/composerAttachmentStore'
 import { SlashCommandMenu } from './SlashCommandMenu'
-import { NewTaskBrief, type NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
+import { NewTaskBrief, startChord, type NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
 import { addTaskFolder } from '@renderer/features/task/taskFolders'
 import { useSlashCommands } from './useSlashCommands'
 import { MentionMenu } from './MentionMenu'
@@ -90,12 +95,22 @@ import {
 import { resolveLinePlaceholder, type LineOutcome } from './composerPlaceholder'
 import { filesFromDataTransfer } from './dataTransferFiles'
 import { focusComposerMessage, isMainComposerTarget } from '@renderer/lib/shortcuts'
+import { structureHolds, useStructure, useStructureState, type StructureHandle } from './useStructure'
+import { StructureStrip } from './StructureStrip'
+
+/** Ctrl/Cmd+Shift+Enter: write the draft up as a brief. */
+function isStructureChord(e: React.KeyboardEvent): boolean {
+  return e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && !e.nativeEvent.isComposing
+}
 
 /**
  * Three surfaces, one anatomy: the field, what is attached to it, then one
- * control row — mode, model · effort, context, attach, mic, the action.
- * `line` is the task's instruction line, flush with the pane's bottom edge
- * (Send, or Queue while a run is live; Stop beside it, also while live).
+ * control row — mode, model · effort, context, attach, mic, then Stop while a
+ * run is live and the one action.
+ * `line` is the task's instruction line, flush with the pane's bottom edge,
+ * ending in Stop and one action: Send now while a live run has text to take,
+ * Queue while one is live and the field is empty, Send otherwise. Esc stops
+ * the run too.
  * `brief` is the New task page, the same field and row in its box.
  * `inline` is Edit and rerun, in a box where the instruction was.
  */
@@ -231,7 +246,7 @@ export function Composer({
   seedNativeFiles?: AttachedNativeFile[]
   /** Escape / cancel while editing a prompt bubble. */
   onCancelEdit?: () => void
-  /** Line only: stop the live run — the Stop that used to sit in the task header. */
+  /** Line only: the Stop button that sits beside the action while a run is live. */
   onStop?: () => void
   onFocus?: () => void
   /** Line only: ArrowUp on empty draft or caret at start edits the last user prompt. */
@@ -376,6 +391,11 @@ export function Composer({
   const briefWorktree = Boolean(briefState.worktree) && (!worktreeDefault || worktreeOffered)
   const briefWorktreeRef = useRef(briefWorktree)
   briefWorktreeRef.current = briefWorktree
+  // Also run on: a second model for this brief, until it starts or the workspace changes.
+  const [compareKey, setCompareKey] = useState<string | null>(null)
+  const compareKeyRef = useRef(compareKey)
+  compareKeyRef.current = compareKey
+  useEffect(() => setCompareKey(null), [briefWorkspace])
   // Folders outside the workspace the new task may also work in.
   const briefExtraRoots = briefExtraRootsOf(briefState)
   const briefExtraRootsRef = useRef(briefExtraRoots)
@@ -465,6 +485,18 @@ export function Composer({
     [mentions, onDraftChange]
   )
 
+  /** Structure, read by the send path (defined before the hook that makes it). */
+  const structureRef = useRef<StructureHandle | null>(null)
+  /**
+   * The words a brief replaced, taken when Send is pressed: the field empties
+   * before the send goes out, and an empty field ends Structure's brief.
+   */
+  const structuredFromAtSubmitRef = useRef<string | undefined>(undefined)
+  /** The draft as of the latest render, for that snapshot. */
+  const latestTextRef = useRef('')
+  /** Your models, for a command file's `model:` (set once the catalog hook has run). */
+  const commandModelChoicesRef = useRef<CommandModelChoices | null>(null)
+
   const sendWithMentions = useCallback(
     async (
       rawText: string,
@@ -473,6 +505,10 @@ export function Composer({
       extras?: ComposerSendExtras
     ): Promise<boolean | void> => {
       try {
+        // A brief Structure wrote keeps the words it replaced, for the record.
+        const structuredFrom = structuredFromAtSubmitRef.current ?? structureRef.current?.structuredFromFor(rawText)
+        structuredFromAtSubmitRef.current = undefined
+        if (structuredFrom) extras = { ...(extras ?? {}), structuredFrom }
         // The brief's checks ride with the first send only.
         if (briefChecksRef.current.length > 0) {
           extras = { ...(extras ?? {}), doneWhen: briefChecksRef.current }
@@ -485,6 +521,9 @@ export function Composer({
         if (variant === 'brief' && briefWorktreeRef.current) {
           extras = { ...(extras ?? {}), worktree: true }
         }
+        // Also run on another model: App starts both, each in a new worktree.
+        const compareWith = variant === 'brief' && compareKeyRef.current ? parseModelSelectionKey(compareKeyRef.current) : null
+        if (compareWith) extras = { ...(extras ?? {}), compareWith }
         if (variant === 'brief' && briefExtraRootsRef.current.length > 0) {
           extras = { ...(extras ?? {}), extraRoots: [...briefExtraRootsRef.current] }
         }
@@ -521,6 +560,8 @@ export function Composer({
         )
         // The task exists: the page starts over empty next time.
         if (sent !== false && variant === 'brief' && boundWorkspace) setBriefState(boundWorkspace, null)
+        if (sent !== false && compareWith) setCompareKey(null)
+        if (sent !== false) structureRef.current?.onSent()
         return sent
       } catch (err) {
         setFileError(err instanceof Error ? err.message : 'Send failed')
@@ -599,6 +640,18 @@ export function Composer({
       const outcome = await executeSlashResolveResult(res.data, {
         ...slashHandlers,
         onAddDir: addBriefFolder,
+        // `/help` hands back an empty field with `/` typed, so the slash
+        // menu (every command, searchable) opens in place. It waits past the
+        // send path's own clear of the draft.
+        onHelp: () => {
+          window.setTimeout(() => {
+            const handle = taRef.current
+            if (!handle) return
+            handle.focus()
+            handle.setSelectionStart(0)
+            handle.insertText('/')
+          }, 0)
+        },
         onCompact: async (focus?: string) => {
           if (slashHandlers?.onCompact) {
             const r = await slashHandlers.onCompact(focus)
@@ -625,6 +678,34 @@ export function Composer({
             if (modeOk === false) return false
           }
         }
+        // A command file's `model:` and `mode:` set the task's, as the picker
+        // and the mode switch would. A follow-up to a running task goes as is.
+        if (res.data.model || res.data.mode) {
+          const choices = commandModelChoicesRef.current
+          const wanted = res.data.model && choices ? matchCommandModel(res.data.model, choices) : null
+          const switchModel =
+            wanted && wanted !== modelSelectionKey(provider, model) ? parseModelSelectionKey(wanted) : null
+          const switchMode = res.data.mode && res.data.mode !== agentMode ? res.data.mode : null
+          if (running) {
+            if (switchModel || switchMode) {
+              const asked = [switchModel?.model, switchMode ? `${switchMode === 'ask' ? 'Ask' : 'Agent'} mode` : null]
+                .filter(Boolean)
+                .join(' in ')
+              slashHandlers?.onNotice?.(`/${command.trigger} asks for ${asked}. A running task keeps its own, so it went as is.`)
+            }
+          } else {
+            if (switchMode) {
+              const modeOk = await Promise.resolve(slashHandlers?.onSetAgentMode?.(switchMode))
+              if (modeOk === false) return false
+            }
+            if (switchModel) onProviderModel(switchModel.provider, switchModel.model)
+          }
+          if (res.data.model && !wanted) {
+            slashHandlers?.onNotice?.(
+              `/${command.trigger} asks for ${res.data.model}, which isn't one of your models, so it ran with ${model}.`
+            )
+          }
+        }
         const ok = await Promise.resolve(
           sendWithMentions(
             res.data.message,
@@ -642,7 +723,7 @@ export function Composer({
       if (outcome === 'failed') return false
       return true
     },
-    [workspacePath, activeRunId, slashHandlers, onCompactContext, sendWithMentions, slash, setFileError, running, agentMode, addBriefFolder]
+    [workspacePath, activeRunId, slashHandlers, onCompactContext, sendWithMentions, slash, setFileError, running, agentMode, addBriefFolder, provider, model, onProviderModel]
   )
 
   const onSlashAccept = useCallback(
@@ -768,6 +849,8 @@ export function Composer({
     browsedProvider,
     secrets
   })
+  // Read when a command file asks for a model; the send path is defined above.
+  commandModelChoicesRef.current = { provider, providers, optionsByProvider, seedsByProvider }
 
   const catalogLoading = catalogFetchLoading || refreshingCatalog
   const readinessIssue = deriveModelReadiness({
@@ -808,6 +891,13 @@ export function Composer({
     pushToast(continuing ? 'Draft updated' : 'Saved as a draft', { detail: draftTitle(res.data), icon: 'check' })
   }
 
+  // Structure's phase lives here, ahead of the draft hook, so Send is held in
+  // the same render the brief is being written in — not one render later.
+  const structureState = useStructureState()
+  const structureHolding = structureHolds(structureState[0])
+
+  // New task only: ↑ and ↓ in an empty brief walk the briefs sent before.
+  const briefHistory = useMemo(() => (variant === 'brief' ? createBriefHistoryCursor() : undefined), [variant])
   const { text, setText, canSend, submit, onKeyDown } = useComposerDraft({
     submitOnModEnter: variant === 'brief',
     draft: resolvedDraft,
@@ -825,7 +915,8 @@ export function Composer({
     disabled,
     // The attachment errors too: sendDisabledReason below offers to resolve
     // them, and a button that promises a fix must actually refuse to send.
-    sendBlocked: extracting || readinessBlocksSend || fileError != null || imageError != null || audioError != null,
+    sendBlocked:
+      extracting || readinessBlocksSend || fileError != null || imageError != null || audioError != null || structureHolding,
     onSend: sendWithMentions,
     slashMenuOpen: slash.open,
     slashActiveCommand: slash.activeCommand,
@@ -846,10 +937,34 @@ export function Composer({
     onMentionAccept,
     onMentionBack: mentions.goBack,
     onEditLastUserMessage: variant === 'line' ? onEditLastUserMessage : undefined,
+    ...(briefHistory ? { history: briefHistory } : {}),
     onCancelEdit: variant === 'inline' ? onCancelEdit : undefined,
     getCaretStart: () => taRef.current?.getSelectionStart() ?? 0,
-    onSubmitted: keepComposerFocus
+    onSubmitted: () => {
+      if (briefHistory) {
+        recordBrief(latestTextRef.current)
+        briefHistory.reset()
+      }
+      structuredFromAtSubmitRef.current = structureRef.current?.structuredFromFor(latestTextRef.current)
+      keepComposerFocus()
+    }
   })
+
+  const structure = useStructure({
+    state: structureState,
+    workspacePath,
+    runId: activeRunId,
+    mode: agentMode,
+    provider,
+    model,
+    text,
+    setText,
+    // New task only: a brief's Done when can become the page's checks.
+    checks: briefWorkspace ? { list: briefState.checks, set: (next) => setBriefChecks(briefWorkspace, next) } : null,
+    enabled: !inputLocked && Boolean(hasWorkspace)
+  })
+  structureRef.current = structure
+  latestTextRef.current = text
 
   const getDictationCaret = useCallback((): number => {
     const handle = taRef.current
@@ -914,7 +1029,7 @@ export function Composer({
   const addedTextRef = useRef(text)
   addedTextRef.current = text
   const addLockedRef = useRef(false)
-  addLockedRef.current = inputLocked || takeOpen
+  addLockedRef.current = inputLocked || takeOpen || structure.holding
   useEffect(() => {
     if (variant === 'inline') return undefined
     const onAdd = (event: Event): void => {
@@ -1093,6 +1208,19 @@ export function Composer({
       ? `Attach files — ${attachHint}`
       : 'Attach files — or type @ for context'
 
+  // Structure: the draft written up as a brief. Says why when it can't.
+  const structureChord = window.vyotiq?.platform === 'darwin' ? '⌘⇧↵' : 'Ctrl+Shift+Enter'
+  const structureReady =
+    !inputLocked && !takeOpen && !structure.holding && structure.eligibility.ok && Boolean(hasWorkspace)
+  const structureLabel =
+    structure.phase.kind === 'asking'
+      ? 'Answer the questions above, or skip them'
+      : structure.holding
+        ? 'Writing the brief…'
+        : !structure.eligibility.ok && text.trim()
+          ? `Structure — ${structure.eligibility.reason}`
+          : `Structure into a brief (${structureChord})`
+
   const sendDisabledReason = !canSend
     ? disabled
       ? hasWorkspace
@@ -1184,14 +1312,37 @@ export function Composer({
         newlineOnEnter={isBrief}
         ariaLabel={isBrief ? 'Brief' : 'Instruction'}
         value={take.field.value ?? text}
-        readOnly={takeOpen}
+        readOnly={takeOpen || structure.holding}
         highlights={take.field.highlights}
         onChange={(next) => {
-          if (takeOpen) return
+          if (takeOpen || structure.holding) return
           setText(next)
           requestAnimationFrame(syncCursor)
         }}
         onKeyDown={(e) => {
+          if (isStructureChord(e)) {
+            e.preventDefault()
+            if (!takeOpen && !slash.open && !mentions.open) structure.start()
+            return
+          }
+          // Writing or asking: the words wait, and so does Send.
+          if (structure.holding) {
+            if (e.key === 'Enter') e.preventDefault()
+            return
+          }
+          // Undo right after a brief replaced the words: the words come back.
+          if (
+            (e.ctrlKey || e.metaKey) &&
+            !e.shiftKey &&
+            !e.altKey &&
+            e.key.toLowerCase() === 'z' &&
+            structure.phase.kind === 'done' &&
+            text === structure.phase.draft
+          ) {
+            e.preventDefault()
+            structure.undo()
+            return
+          }
           if (
             isLine &&
             running &&
@@ -1329,8 +1480,8 @@ export function Composer({
    *
    * Its wrapper is the size container, so a split pane (280px at the least)
    * sheds in steps rather than spilling: keycaps under 480px, the context
-   * share and Send now under 400px, the effort under 320px — and below that
-   * the right group wraps under the left.
+   * share under 400px, the effort under 320px — and below that the right
+   * group wraps under the left.
    */
   const controls = (action: ReactNode, opts: { context: boolean; takeSendLabel: string | null }): ReactNode =>
     takeOpen ? (
@@ -1397,6 +1548,19 @@ export function Composer({
                 running={running}
               />
             ) : null}
+            {hasWorkspace ? (
+              <IconButton
+                icon="sparkles"
+                label={structureLabel}
+                size="md"
+                tone="muted"
+                disabled={!structureReady}
+                data-composer-structure
+                aria-keyshortcuts="Control+Shift+Enter"
+                onMouseDown={keepFocus}
+                onClick={structure.start}
+              />
+            ) : null}
             <AttachMenu
               label={attachLabel}
               disabled={inputLocked || takeOpen || attachFullAll}
@@ -1407,10 +1571,17 @@ export function Composer({
               screenshot={browserScreenshot}
             />
             <MicControl take={take} disabled={inputLocked} />
-            {/* Stop lives in the line's own row now that the task header is gone. */}
+            {/* Line only, and only while a run is live: Stop sits next to the one
+                action so the row still ends in it. Esc does the same thing. */}
             {isLine && running && onStop ? (
               <Tooltip content="Stop the run (Esc)">
-                <Button size="xs" variant="ghost" icon="stop" onMouseDown={keepFocus} onClick={onStop}>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  icon="stop"
+                  onMouseDown={keepFocus}
+                  onClick={onStop}
+                >
                   Stop
                 </Button>
               </Tooltip>
@@ -1424,7 +1595,7 @@ export function Composer({
   // Buttons never take focus from the field on press: the field is where the
   // next instruction is typed, and the keys do the same thing.
   const keepFocus = (e: ReactMouseEvent): void => e.preventDefault()
-  const sendReady = canSend && !takeOpen
+  const sendReady = canSend && !takeOpen && !structure.holding
 
   if (isBrief) {
     return (
@@ -1444,23 +1615,39 @@ export function Composer({
         }
         brief={text}
         banners={
-          errorAlerts || readiness ? (
-            <div className="mb-4 flex flex-col gap-2">
-              {errorAlerts}
-              {readiness}
-            </div>
-          ) : null
+          <>
+            {errorAlerts || readiness ? (
+              <div className="mb-4 flex flex-col gap-2">
+                {errorAlerts}
+                {readiness}
+              </div>
+            ) : null}
+            <StructureStrip structure={structure} placement="brief" />
+          </>
         }
         fileInput={fileInput}
         input={field}
         attachments={attachments}
-        controls={controls(null, { context: false, takeSendLabel: null })}
+        controls={controls(
+          // The page's one primary, at the end of the brief's own row: the box
+          // ends in the action it takes. Ctrl/Cmd+Enter is wired both places.
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!sendReady}
+            title={sendDisabledReason ?? `Start task (${startChord()})`}
+            onMouseDown={keepFocus}
+            onClick={() => submit()}
+          >
+            Start task
+          </Button>,
+          { context: false, takeSendLabel: null }
+        )}
         menus={menus}
         onDragOver={onAttachmentDragOver}
         onDrop={onAttachmentDrop}
         approval={chatSettings.toolApproval ?? null}
         canStart={sendReady}
-        startBlockedReason={takeOpen ? 'Insert or discard the dictation first' : sendDisabledReason}
         onChecksChange={(doneWhen) => {
           briefChecksRef.current = doneWhen
         }}
@@ -1474,6 +1661,24 @@ export function Composer({
           if (briefWorkspace) setBriefWorktree(briefWorkspace, on)
         }}
         extraRoots={briefExtraRoots}
+        compare={
+          model
+            ? {
+                options: compareModelOptions({
+                  provider,
+                  model,
+                  providers,
+                  providerLabel: (id) => providerLabel(id, customProviders),
+                  optionsByProvider,
+                  seedsByProvider,
+                  favoriteModels,
+                  recentModels
+                }),
+                value: compareKey,
+                onChange: setCompareKey
+              }
+            : undefined
+        }
         onAddFolder={() => void addBriefFolder()}
         onExtraRootsChange={(next) => {
           if (briefWorkspace) setBriefExtraRoots(briefWorkspace, next)
@@ -1501,45 +1706,45 @@ export function Composer({
 
   if (isLine) {
     const shift = window.vyotiq?.platform === 'darwin' ? '⇧' : 'Shift'
-    const lineAction = (
-      <>
-        {running && sendReady ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            kbd={[shift, '↵']}
-            aria-label="Send now"
-            aria-keyshortcuts="Shift+Enter"
-            className="@max-[400px]:hidden"
-            title="Send it into the live run now, instead of when this turn ends"
-            onMouseDown={keepFocus}
-            onClick={steer}
-          >
-            Send now
-          </Button>
-        ) : null}
-        <Button
-          type="submit"
-          size="sm"
-          variant="secondary"
-          kbd={['↵']}
-          aria-label={running ? 'Queue' : 'Send'}
-          aria-keyshortcuts="Enter"
-          title={
-            sendReady
-              ? running
-                ? 'Queue it — it starts when this run ends'
-                : 'Send'
-              : takeOpen
-                ? 'Insert or discard the dictation first'
-                : (sendDisabledReason ?? undefined)
-          }
-          disabled={!sendReady}
-          onMouseDown={keepFocus}
-        >
-          {running ? 'Queue' : 'Send'}
-        </Button>
-      </>
+    // One action, three readings of the same moment — never two buttons to
+    // choose between. Live with something written: it goes into the run now.
+    // Live and empty: it waits for this turn to end. Idle: it sends.
+    const steerNow = running && sendReady
+    const lineAction = steerNow ? (
+      <Button
+        size="sm"
+        variant="secondary"
+        kbd={[shift, '↵']}
+        aria-label="Send now"
+        aria-keyshortcuts="Shift+Enter"
+        title="Send it into the live run now, instead of when this turn ends"
+        onMouseDown={keepFocus}
+        onClick={steer}
+      >
+        Send now
+      </Button>
+    ) : (
+      <Button
+        type="submit"
+        size="sm"
+        variant="secondary"
+        kbd={['↵']}
+        aria-label={running ? 'Queue' : 'Send'}
+        aria-keyshortcuts="Enter"
+        title={
+          sendReady
+            ? running
+              ? 'Queue it — it starts when this run ends'
+              : 'Send'
+            : takeOpen
+              ? 'Insert or discard the dictation first'
+              : (sendDisabledReason ?? undefined)
+        }
+        disabled={!sendReady}
+        onMouseDown={keepFocus}
+      >
+        {running ? 'Queue' : 'Send'}
+      </Button>
     )
     return (
       // A box on the record's column, its edges on the brief's and the steps'
@@ -1638,6 +1843,8 @@ export function Composer({
               </ul>
             ) : null}
 
+            <StructureStrip structure={structure} />
+
             <form
               onSubmit={submit}
               className={cn(
@@ -1692,6 +1899,7 @@ export function Composer({
   return (
     <div className={cn('flex w-full flex-col gap-2', className)} data-composer-inline>
       {errorAlerts ? <div className="flex flex-col gap-2">{errorAlerts}</div> : null}
+      <StructureStrip structure={structure} />
 
       <form
         onSubmit={submit}

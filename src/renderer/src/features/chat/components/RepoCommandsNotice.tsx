@@ -28,7 +28,7 @@ export function RepoCommandsNotice({
 
   const allow = async (): Promise<void> => {
     const confirmed = await confirm(
-      "Vyotiq's git will run these whenever it reads this repository. Allow them only if you trust where it came from. A change to them is switched off again.",
+      "Agent V's git will run these whenever it reads this repository. Allow them only if you trust where it came from. A change to them is switched off again.",
       { title: 'Allow for this repository', confirmLabel: 'Allow' }
     )
     if (!confirmed) return
@@ -49,7 +49,7 @@ export function RepoCommandsNotice({
       <div className="flex items-center gap-2">
         <Icon name="warning" size={14} className="shrink-0 text-muted" />
         <span className="min-w-0 flex-1 text-secondary">
-          This repository&apos;s git settings run programs. Vyotiq&apos;s git skips them.
+          This repository&apos;s git settings run programs. Agent V&apos;s git skips them.
         </span>
         {repoCommands.canAllow ? (
           <Button size="xs" disabled={busy} onClick={() => void allow()}>

@@ -6,6 +6,7 @@ import { IPC } from '../../shared/channels'
 import { logger } from '../../shared/logger'
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
+  inQuietHours,
   NOTIFICATION_BODY_MAX,
   NOTIFICATION_TITLE_MAX,
   NotificationItemSchema,
@@ -23,6 +24,8 @@ import { getSettings } from '../settings/settings'
 import { getMainWindow } from '../app/window'
 import { notifyBadgeChange } from '../app/badges'
 import { setNotificationBus } from './bus'
+import { deliverRemoteNotification } from './remote'
+import { getToolSecret } from '../settings/secrets'
 import {
   dismissNotificationItems,
   dismissNotificationItemsByDedupeKey,
@@ -58,6 +61,7 @@ function categoryEnabled(settings: NotificationSettings, kind: NotificationKind)
       return settings.agentNeedsYou
     case 'crash':
     case 'update_ready':
+    case 'budget':
       return settings.system
     default: {
       const _exhaustive: never = kind
@@ -174,7 +178,7 @@ function handleOsActivation(id: string): void {
   if (action) sendToRenderer(IPC.notificationsActivate, action)
 }
 
-function showOsNotification(item: NotificationItem): void {
+function showOsNotification(item: NotificationItem, sound: boolean): void {
   let supported = false
   try {
     supported = typeof Notification.isSupported === 'function' && Notification.isSupported()
@@ -188,7 +192,7 @@ function showOsNotification(item: NotificationItem): void {
   const toast = new Notification({
     title: item.title,
     body: item.body,
-    silent: true,
+    silent: !sound,
     id: item.id,
     groupId: item.source,
     ...(icon ? { icon } : {})
@@ -235,7 +239,7 @@ export function publishNotification(input: NotificationPublishInput): Notificati
     return null
   }
 
-  const title = clipText(parsed.data.title, NOTIFICATION_TITLE_MAX) || 'Vyotiq'
+  const title = clipText(parsed.data.title, NOTIFICATION_TITLE_MAX) || 'Agent V'
   const body = clipText(parsed.data.body, NOTIFICATION_BODY_MAX)
   const item = NotificationItemSchema.parse({
     id: randomUUID(),
@@ -253,11 +257,29 @@ export function publishNotification(input: NotificationPublishInput): Notificati
   const stored = upsertNotificationItem(item)
   pushChanged()
 
+  // Quiet hours hold the toast back; the inbox item above still lands.
   const desktopOk =
     settings.desktop !== 'off' &&
+    !inQuietHours(settings.quietHours, new Date()) &&
     shouldShowDesktop(settings.desktop, mainWindowUnfocused())
-  if (desktopOk) showOsNotification(stored)
+  if (desktopOk) showOsNotification(stored, settings.sound === true)
+  // A phone: while you're away (or always), and quiet hours hold it back too.
+  const remote = settings.remote ?? 'off'
+  if (remote !== 'off' && !inQuietHours(settings.quietHours, new Date())) {
+    const away = settings.remoteWhen !== 'always' ? mainWindowUnfocused() : true
+    const url = away ? remoteNotificationUrl() : null
+    if (url) deliverRemoteNotification(remote, url, stored)
+  }
   return stored
+}
+
+/** The phone's URL from the key vault; null when none is saved or it can't be read. */
+function remoteNotificationUrl(): string | null {
+  try {
+    return getToolSecret('notify')
+  } catch {
+    return null
+  }
 }
 
 export function listNotifications(): NotificationList {

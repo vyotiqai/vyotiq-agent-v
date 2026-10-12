@@ -65,7 +65,7 @@ test('one Result of every markdown construct, captured in both themes', async ()
   await result.screenshot({ path: join(outDir, `${label}-light.png`) })
 
   // Capture only: the numbers are the deliverable, and today's CSS is the before.
-  const measured = await result.locator('.markdown-body').evaluate((root) => {
+  const measured = await result.locator('[data-reply]').evaluate((root) => {
     const box = (el: Element | null): Record<string, string> | null => {
       if (!el) return null
       const cs = getComputedStyle(el)
@@ -114,7 +114,7 @@ test('one Result of every markdown construct, captured in both themes', async ()
       : []
     const chip = root.querySelector<HTMLElement>('[data-code-chip]')
     const chipStyle = chip ? getComputedStyle(chip) : null
-    const prose = root.querySelector<HTMLElement>('.record-prose > p') ?? document.querySelector<HTMLElement>('.record-prose > p')
+    const prose = root.querySelector<HTMLElement>('[data-block] > p')
     // Scannability contracts, measured from layout and not from the CSS text:
     // does the 72ch measure actually bind inside the pane it sits in, and is the
     // hairline on h2 alone.
@@ -133,11 +133,11 @@ test('one Result of every markdown construct, captured in both themes', async ()
       }
     }
     const proseP = prose
-    const proseH2 = root.querySelector<HTMLElement>('.record-prose > h2')
+    const proseH2 = root.querySelector<HTMLElement>('[data-block] > h2')
     // The block containing the prose: maxWidth under this number means the cap binds.
     const containingBlockClientWidth =
       proseP?.parentElement instanceof HTMLElement ? proseP.parentElement.clientWidth : null
-    const markdownBodyClientWidth = root instanceof HTMLElement ? root.clientWidth : null
+    const replyClientWidth = root instanceof HTMLElement ? root.clientWidth : null
     // `ch` resolved on the prose's own font, so maxWidth reads back in characters.
     const chProbe = document.createElement('span')
     chProbe.style.position = 'absolute'
@@ -184,9 +184,9 @@ test('one Result of every markdown construct, captured in both themes', async ()
       }
     })()
     return {
-      markdownBody: box(root),
+      reply: box(root),
       // Prose ink at the root, so a chip's colour can be compared against it.
-      markdownBodyInk: getComputedStyle(root).color,
+      replyInk: getComputedStyle(root).color,
       p: sel('p'),
       ul: sel('ul'),
       li: sel('li'),
@@ -213,7 +213,7 @@ test('one Result of every markdown construct, captured in both themes', async ()
         ? { ...ink(chip), fontSize: chipStyle.fontSize, padding: chipStyle.padding }
         : null,
       inlineCode: ink(root.querySelector(':not(pre) > code')),
-      recordProsePMaxWidth: prose ? getComputedStyle(prose).maxWidth : null,
+      replyPMaxWidth: prose ? getComputedStyle(prose).maxWidth : null,
       // The scannability pass, measured off the live layout: does 72ch bind,
       // and is the hairline on h2 alone. `charsPerLineEstimate` is a proxy at
       // 0.5em average glyph — the raw numbers beside it are the proof.
@@ -228,7 +228,7 @@ test('one Result of every markdown construct, captured in both themes', async ()
         },
         measure: {
           containingBlockClientWidth,
-          markdownBodyClientWidth,
+          replyClientWidth,
           resolvedChPx: resolvedChPx === null ? null : Number(resolvedChPx.toFixed(2)),
           proseClientWidth: proseP instanceof HTMLElement ? proseP.clientWidth : null,
           proseMaxWidth: proseP ? getComputedStyle(proseP).maxWidth : null,
@@ -261,7 +261,7 @@ test('one Result of every markdown construct, captured in both themes', async ()
 
   // Wrap-alignment measurement: does a wrapped list line sit under its item's text
   // (delta 0) or run back under the marker (negative)? Read from layout, not CSS.
-  const wrap = await result.locator('.markdown-body').evaluate((root) => {
+  const wrap = await result.locator('[data-reply]').evaluate((root) => {
     const items = [...root.querySelectorAll('li')]
     const pick = (predicate: (li: HTMLElement) => boolean) =>
       items.find((li) => predicate(li as HTMLElement)) ?? null

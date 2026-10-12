@@ -60,7 +60,7 @@ in-app updater chain never breaks.**
 - [ ] **Release notes are authored, and the release body is the changelog.**
       The flow stays tag-only and there is no `CHANGELOG.md` — do not re-add a
       changelog file or a changelog gate to the pipeline. But the stub body
-      `release.yml` writes (`Vyotiq vX.Y.Z installers and update metadata.`) is
+      `release.yml` writes (`Agent V vX.Y.Z installers and update metadata.`) is
       a failure state, not an acceptable default: every release ships authored
       `## ` / `- ` sections, because that body is what GitHub and the in-app
       update panel both render.
@@ -80,6 +80,10 @@ in-app updater chain never breaks.**
       waits for CI, so a fixture that drifts from a changed type holds the
       release up (22 new errors across 8 files before 1.1.0).
 - [ ] `pnpm lint` — exit 0.
+- [ ] `pnpm build:vite && pnpm smoke:boot` — exit 0. It starts the built app
+      once and quits. A module cycle that throws at load (the tools barrel,
+      2026-10-09) passes typecheck, lint and the unit suite and is caught
+      only by booting.
 - [ ] `pnpm test` — green. Known-allowed failures are listed in
       `RELEASE-RUNBOOK.md` §7; confirm the failure set has not grown, and
       never introduce a new one.
@@ -208,20 +212,21 @@ dependency's file layout:
 3. [ ] `git add package.json && git commit -m "chore: bump version to X.Y.Z"`.
 4. [ ] **Run the pre-tag gate** (§1 suite + §2 launch test if packaging or
        runtime deps changed).
-5. [ ] `git tag -a vX.Y.Z -m "Vyotiq vX.Y.Z"` then
+5. [ ] `git tag -a vX.Y.Z -m "Agent V vX.Y.Z"` then
        `git push origin main` **then** `git push origin vX.Y.Z`
        (verify each push actually landed — check `git status -sb` is not
        ahead; a swallowed push error leaves the tag unpublished).
 6. [ ] Watch: `gh run watch <run-id> --repo vyotiqai/vyotiq-agent-v --exit-status`
        for the Release workflow. Jobs: Verify → Create release →
-       windows-x64 / linux-x64 / macOS → Finalize release.
+       windows (x64 + arm64) / linux-x64 / linux-arm64 / macOS → Finalize release.
 7. [ ] Post-verify the release:
        - `gh release view vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases`
          shows a published (non-draft) release with a body — stub body
          acceptable per §0 (tag-only notes; not structured notes).
-       - Assets include: `latest.yml`, `latest-linux.yml`, `latest-mac.yml`,
-         `Vyotiq-X.Y.Z-setup.exe`, both `-arm64.dmg`/`-x64.dmg`, both
-         `*-mac.zip`, `.AppImage` (+ blockmaps). All three manifests are
+       - Assets include: `latest.yml`, `latest-linux.yml`,
+         `latest-linux-arm64.yml`, `latest-mac.yml`, `Vyotiq-X.Y.Z-x64-setup.exe`
+         and `-arm64-setup.exe`, both `-arm64.dmg`/`-x64.dmg`, both
+         `*-mac.zip`, both `.AppImage`s (+ blockmaps). All four manifests are
          mandatory — a missing one silently kills that OS's auto-update
          (the v1.1.0 incident).
        - Pointer release mirrored on the source repo, marked Latest.

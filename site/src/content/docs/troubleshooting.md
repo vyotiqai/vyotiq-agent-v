@@ -36,11 +36,11 @@ A server's state shows in Extensions: "Connection failed", "Needs sign-in", "Nee
 - **"Installed, not connected — sign in to use its tools."** Use "Sign in" (or "Sign in with GitHub", "Sign in with Google", or "Add token"). If the server can't register the app itself, you're asked for its OAuth client ID and secret.
 - **Network messages** name the host and the likely cause: "Could not find … — check the URL and your DNS", "refused the connection — check the URL and port", "Timed out reaching … — check your network or proxy", "TLS certificate rejected … — a proxy may be intercepting HTTPS". Fix the cause, then "Retry". A short network failure is tried up to three times before a server is reported down. Home lists a failing server under "Needs you" too.
 
-When a server asks you something while one of its tools runs, the question appears in the task the way the agent's own questions do. "Skip — let the agent choose" tells the server you declined. Unattended tasks with questions set to skip decline without asking.
+When a server asks you something while one of its tools runs, the question appears in the task the way the agent's own questions do. "Skip — let the agent choose" tells the server you declined. With "When the agent asks a question" set to "Skip the question", it is declined without asking.
 
 ## Proxy
 
-Settings, "General", "Network" shows which proxy is in use ("Direct connection", or the address and where it came from). An address that can't be used is refused under the field when you leave it, for example "Only http:// and https:// proxies are supported." or "Leave the password out of the address." For a proxy that needs a password, set `HTTPS_PROXY` before starting the app. "The system proxy is a SOCKS proxy; provider calls go direct." means provider calls don't use the system proxy.
+Settings, "General", "Network" shows which proxy is in use ("Direct connection", or the address and where it came from). An address that can't be used is refused under the field when you leave it, for example "Only http:// and https:// proxies are supported." or "Leave the user name and password out of the address: they have their own fields below." "A user name is set but no password is saved." means the manual proxy has a user name and no saved password. "The system proxy is a SOCKS proxy; provider calls go direct." means provider calls don't use the system proxy.
 
 ## Settings
 
@@ -57,7 +57,7 @@ The update chip shows the new version followed by "failed", and its panel says "
 
 - **"Merging would conflict in N files — nothing was merged"**: nothing was merged and the folder it came from is unchanged. Uncommitted files in the worktree may now be committed on its branch.
 - **"Couldn’t delete the worktree folder — something still has a file open in it"**: close the program using a file there (an editor, a terminal) and discard again.
-- **"This repository's git settings run programs. Vyotiq's git skips them."**: the repository's git config names programs (filters, diff or merge drivers, a custom fsmonitor). The app's own git leaves them out until you choose "Allow for this repo".
+- **"This repository's git settings run programs. Agent V's git skips them."**: the repository's git config names programs (filters, diff or merge drivers, a custom fsmonitor). The app's own git leaves them out until you choose "Allow for this repo".
 
 ## Commands and spending
 
@@ -67,9 +67,9 @@ The update chip shows the new version followed by "failed", and its panel says "
 
 ## Start-up and quitting
 
-- **"Vyotiq failed to start. Check the logs for details."**: open the logs folder (next to `settings.json`, in `logs/`) and look at the end of `vyotiq.log`.
+- **"Agent V failed to start. Check the logs for details."**: open the logs folder (next to `settings.json`, in `logs/`) and look at the end of `vyotiq.log`.
 - Starting the app a second time brings the open window forward instead of opening a second copy.
-- **"Vyotiq is still saving run data. Quit anyway?"** appears only when writing a task's record really takes more than a few seconds, usually because the disk is busy. "Wait" keeps trying for up to a minute; "Quit anyway" may lose the last moments of that record.
+- **"Agent V is still saving run data. Quit anyway?"** appears only when writing a task's record really takes more than a few seconds, usually because the disk is busy. "Wait" keeps trying for up to a minute; "Quit anyway" may lose the last moments of that record.
 
 ## Indexing and dictation
 

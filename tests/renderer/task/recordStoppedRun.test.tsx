@@ -8,7 +8,7 @@ import { formatSkillInvocation, SKILL_BODY_STUB } from '@shared/slashCommands'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { buildRecordModel, runStateOf, type BuildOptions } from '@renderer/features/task/recordModel'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
-import { balanceIncompleteMarkdown } from '@renderer/lib/ui/MarkdownContent'
+import { closeEnd } from '@renderer/features/task/record/reply/blocks'
 import { parseStatusMessageData } from '@renderer/features/chat/toolUi/parsers/status'
 import { thoughtLine } from '@renderer/features/task/record/WorkItems'
 import { foldsToOpen, thoughtOpenKey } from '@renderer/features/task/recordFind'
@@ -169,20 +169,21 @@ describe('a skill load', () => {
 
 describe('closing markdown a finished message left open', () => {
   it('does not count a star inside a code span', () => {
-    expect(balanceIncompleteMarkdown(NOTE)).toBe(NOTE)
+    expect(closeEnd(NOTE)).toBe(NOTE)
   })
 
   it('does not count bullets or a spaced star', () => {
     const list = '* one\n* two\n* three'
-    expect(balanceIncompleteMarkdown(list)).toBe(list)
-    expect(balanceIncompleteMarkdown('2 * 3 = 6')).toBe('2 * 3 = 6')
+    expect(closeEnd(list)).toBe(list)
+    expect(closeEnd('2 * 3 = 6')).toBe('2 * 3 = 6')
   })
 
   it('still closes emphasis and code a stream left open', () => {
-    expect(balanceIncompleteMarkdown('Partial *italic')).toBe('Partial *italic*')
-    expect(balanceIncompleteMarkdown('Partial **bold')).toBe('Partial **bold**')
+    expect(closeEnd('Partial *italic')).toBe('Partial *italic*')
+    expect(closeEnd('Partial **bold')).toBe('Partial **bold**')
+    expect(closeEnd('Stopped in a fence\n\n```ts\nconst a')).toBe('Stopped in a fence\n\n```ts\nconst a\n```')
     // The code span closes first, so the star does not land inside it.
-    expect(balanceIncompleteMarkdown('a *b `c')).toBe('a *b `c`*')
+    expect(closeEnd('a *b `c')).toBe('a *b `c`*')
   })
 })
 

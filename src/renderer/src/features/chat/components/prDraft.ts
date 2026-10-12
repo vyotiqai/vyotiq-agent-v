@@ -14,18 +14,44 @@ export type PrDraftSource = {
   closes?: readonly number[]
 }
 
-/** A closing line as GitHub reads it, alone on a line: `Fixes #12`, `Closes #3`, `Resolves #7`. */
-const CLOSING_LINE = /^[ \t]*(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)[ \t]+#(\d{1,9})[ \t]*$/gim
+/**
+ * A closing line, on a line of its own: `Fixes #12`, `- Closes: #3.`,
+ * `Resolves #7`. Only a whole line counts, so prose that mentions an issue
+ * ("this fixes #12 partly") is not taken for a request to close it.
+ */
+const CLOSING_LINE = /^[ \t]*(?:[-*+][ \t]+)?(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?):?[ \t]+#(\d{1,9})[ \t]*[.,;!]?[ \t]*$/gim
+
+/** A fenced block (``` or ~~~, any length) or a `>` quote: someone else's words, not the person's ask. */
+function withoutQuotedText(text: string): string {
+  const kept: string[] = []
+  let fence: string | null = null
+  for (const line of text.split(/\r?\n/)) {
+    const marker = /^[ \t]*(`{3,}|~{3,})/.exec(line)?.[1] ?? null
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null
+      continue
+    }
+    if (marker) {
+      fence = marker
+      continue
+    }
+    if (/^[ \t]*>/.test(line)) continue
+    kept.push(line)
+  }
+  return kept.join('\n')
+}
 
 /**
  * The issues a task was asked to close: every closing line in the messages
- * the person sent it. A task started from an issue carries one in its brief.
+ * the person sent it, outside quoted and fenced text — an issue body or a CI
+ * log carried into a message can hold closing lines of its own. A task
+ * started from an issue carries one in its brief.
  */
 export function closingIssuesFrom(items: readonly UiItem[]): number[] {
   const out: number[] = []
   for (const item of items) {
     if (item.kind !== 'message' || item.role !== 'user') continue
-    for (const match of item.content.matchAll(CLOSING_LINE)) {
+    for (const match of withoutQuotedText(item.content).matchAll(CLOSING_LINE)) {
       const n = Number(match[1])
       if (n > 0 && !out.includes(n)) out.push(n)
     }

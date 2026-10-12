@@ -44,6 +44,7 @@ import { sanitizedTerminalEnv } from '@main/agent/tools/terminal'
 const settings = (over: Partial<NetworkSettings>): NetworkSettings => ({
   proxyMode: 'system',
   proxyUrl: '',
+  proxyUsername: '',
   proxyBypass: '',
   ...over
 })
@@ -171,6 +172,30 @@ describe('proxy traffic', () => {
     applyEarlyNodeProxy(settings({ proxyMode: 'direct' }))
     expect(childProxyEnv()).toEqual({})
     expect(Object.keys(sanitizedTerminalEnv({ PATH: '/bin', HTTPS_PROXY: 'http://parent:1' })).some((k) => /proxy/i.test(k))).toBe(false)
+  })
+})
+
+describe('a proxy that needs a password', () => {
+  it('signs Node traffic in, keeps the password from children and the status, and answers Chromium only for that proxy', async () => {
+    const proxy = await import('@main/net/proxy')
+    const manual = settings({ proxyMode: 'manual', proxyUrl: 'http://proxy.corp:8080', proxyUsername: 'me@corp' })
+    const resolved = proxy.resolveNodeProxy(manual, {}, null, undefined, { username: 'me@corp', password: 'p@ss word' })
+    expect(resolved.env.HTTPS_PROXY).toBe('http://me%40corp:p%40ss%20word@proxy.corp:8080')
+    expect(resolved.childEnv?.HTTPS_PROXY).toBe('http://proxy.corp:8080')
+    expect(resolved.status).toEqual({ source: 'manual', url: 'http://proxy.corp:8080' })
+    expect(proxy.resolveNodeProxy(manual, {}, null, undefined, { username: 'me@corp', password: null }).status.note).toMatch(/no password/)
+
+    proxy.setProxyCredentialsSource(() => ({ username: 'me@corp', password: 'secret' }))
+    try {
+      await proxy.applyNetworkSettings(manual)
+      expect(proxy.childProxyEnv().HTTPS_PROXY).toBe('http://proxy.corp:8080')
+      expect(proxy.proxyLoginAnswer({ isProxy: true, host: 'proxy.corp' })).toEqual({ username: 'me@corp', password: 'secret' })
+      expect(proxy.proxyLoginAnswer({ isProxy: true, host: 'other.host' })).toBeNull()
+      expect(proxy.proxyLoginAnswer({ isProxy: false, host: 'proxy.corp' })).toBeNull()
+    } finally {
+      proxy.setProxyCredentialsSource(() => null)
+      await proxy.applyNetworkSettings(settings({ proxyMode: 'direct' }))
+    }
   })
 })
 

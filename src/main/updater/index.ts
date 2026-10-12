@@ -10,6 +10,7 @@ import { parseReleaseNotes } from '../../shared/utils/releaseNotes'
 import { logger } from '../../shared/logger'
 import { publishLifecycleNotification } from '../notifications/bus'
 import { UPDATE_READY_DEDUPE_KEY, type NotificationPublishInput } from '../../shared/ipc'
+import { markQuitConfirmed } from '../app/quitGuard'
 
 /** Idle delay after app ready before the one-shot startup update check. */
 export const STARTUP_CHECK_DELAY_MS = 10_000
@@ -80,6 +81,13 @@ function broadcast(next: UpdaterStatePayload): void {
       })
     }
   }
+}
+
+/** Which releases a check looks at; installed by main from settings. */
+let channelSource: () => 'stable' | 'beta' = () => 'stable'
+
+export function setUpdateChannelSource(source: () => 'stable' | 'beta'): void {
+  channelSource = source
 }
 
 /** Current updater state (same payload the renderer receives on `updater:state`). */
@@ -220,6 +228,13 @@ export async function checkForAppUpdates(
   }
   checkInFlight = true
   try {
+    // Beta also takes releases marked pre-release. Leaving beta never
+    // downgrades: the next stable newer than what is installed is offered.
+    try {
+      autoUpdater.allowPrerelease = channelSource() === 'beta'
+    } catch {
+      autoUpdater.allowPrerelease = false
+    }
     await autoUpdater.checkForUpdates()
     return lastInfo && (current.status === 'available' || current.status === 'downloaded')
       ? lastInfo
@@ -265,5 +280,7 @@ export function installAppUpdate(): void {
     })
     return
   }
+  // Installing was the choice: the running-tasks question would only repeat it.
+  markQuitConfirmed()
   autoUpdater.quitAndInstall()
 }

@@ -9,6 +9,7 @@ import {
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from '../icons'
 import { prefersReducedMotion } from '../utils/motion'
+import { isTypeaheadKey, useTypeahead } from '../a11y/useTypeahead'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { cn } from './cn'
 import { Keys } from './Kbd'
@@ -78,10 +79,12 @@ export function ActionMenu({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const { search: typeaheadSearch, reset: resetTypeahead } = useTypeahead()
   const selectable = items.flatMap((item, index) => (item.disabled ? [] : [index]))
   // One label edge: once any row is a checkbox, every row keeps the check column.
   const checkColumn = items.some((item) => item.checked != null)
   const firstSelectable = selectable[0] ?? -1
+  const activeItem = activeIndex >= 0 ? items[activeIndex] : undefined
 
   const { position, close } = useDropdownMenu({
     open,
@@ -96,9 +99,10 @@ export function ActionMenu({
   useEffect(() => {
     if (!open) return
     setActiveIndex(firstSelectable)
+    resetTypeahead()
     const t = window.setTimeout(() => listRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
-  }, [open, firstSelectable])
+  }, [open, firstSelectable, resetTypeahead])
 
   useEffect(() => {
     if (!open || activeIndex < 0) return
@@ -110,6 +114,16 @@ export function ActionMenu({
   }, [activeIndex, open])
 
   const onListKeyDown = (e: ReactKeyboardEvent): void => {
+    // Printable characters jump to the matching row first — before arrows,
+    // Home/End and Enter/Space get a say.
+    if (isTypeaheadKey(e)) {
+      e.preventDefault()
+      const labels = selectable.map((i) => items[i]!.label)
+      const at = selectable.indexOf(activeIndex)
+      const pos = typeaheadSearch(e.key, labels, at)
+      if (pos >= 0) setActiveIndex(selectable[pos]!)
+      return
+    }
     if (selectable.length === 0) return
     // Arrows walk the choosable rows only; a disabled one is never landed on.
     const at = selectable.indexOf(activeIndex)
@@ -142,6 +156,7 @@ export function ActionMenu({
         id={menuId}
         role="menu"
         aria-label={ariaLabel}
+        aria-activedescendant={activeItem ? `${menuId}-item-${activeItem.id}` : undefined}
         tabIndex={-1}
         className={cn(
           'app-region-no-drag fixed m-0 list-none p-1',
@@ -175,6 +190,7 @@ export function ActionMenu({
             ) : null}
             <button
               type="button"
+              id={`${menuId}-item-${item.id}`}
               role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
               aria-checked={item.checked != null ? item.checked : undefined}
               aria-disabled={item.disabled || undefined}

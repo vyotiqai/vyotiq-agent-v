@@ -18,12 +18,13 @@ In Settings, "Shortcuts", click "Change" beside a shortcut and press the keys yo
 | Shortcut | What it does |
 | --- | --- |
 | `Ctrl+K` | Search and commands |
-| `Ctrl+Shift+P` | Search and commands (alternate) |
+| `Ctrl+Shift+P` | Search and commands (a second chord for the same thing) |
 | `Ctrl+B` | Show or hide the navigator |
 | `Ctrl+Shift+H` | Home |
 | `Ctrl+,` | Settings |
 | `Ctrl+J` | Next task that needs you |
 | `Alt+↑` / `Alt+↓` | Previous or next task in the list (not while typing) |
+| `Alt+←` / `Alt+→` | Back and forward through the tasks and pages you opened (the mouse's back and forward buttons too) |
 | `Ctrl+1` to `Ctrl+9` | Switch to workspace 1 to 9 |
 | `Ctrl+W` | Close task tab |
 | `Ctrl+\` | Open a second task pane |
@@ -56,7 +57,7 @@ The command palette (`Ctrl+K`) also runs things without a shortcut: "Usage", "In
 
 | Shortcut | What it does |
 | --- | --- |
-| `Ctrl+F` | Find in the record, changes, or pull request |
+| `Ctrl+F` | Find in the record, changes, or pull request; in a terminal tab, find in its output |
 | `Enter` / `Shift+Enter`, or `F3` / `Shift+F3` | Next or previous match while find is open |
 | `End` | Jump to latest |
 | `Home` | Jump to top |

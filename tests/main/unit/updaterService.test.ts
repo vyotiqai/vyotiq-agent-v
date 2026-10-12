@@ -92,6 +92,18 @@ describe('updater service', () => {
     expect(autoUpdater.disableWebInstaller).toBe(true)
   })
 
+  it('looks at pre-releases only on the beta channel', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    const au = autoUpdater as unknown as AutoUpdaterMock & { allowPrerelease?: boolean }
+    updater.setUpdateChannelSource(() => 'beta')
+    await updater.checkForAppUpdates()
+    expect(au.allowPrerelease).toBe(true)
+    updater.setUpdateChannelSource(() => 'stable')
+    await updater.checkForAppUpdates()
+    expect(au.allowPrerelease).toBe(false)
+  })
+
   it('defers the startup check past ready + idle delay', async () => {
     const updater = await loadUpdater()
     updater.initAutoUpdater()

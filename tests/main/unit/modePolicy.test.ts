@@ -80,12 +80,13 @@ describe('modePolicy', () => {
 
   it('root Agent mode section carries the delegation decision policy', () => {
     const section = modeSectionMarkdown('agent')
-    expect(section).toMatch(/every plan step maps to one child agent instance/)
-    expect(section).toMatch(/decompose the plan into a structured set/)
+    expect(section).toMatch(/each delegated step maps to one child agent instance/)
+    expect(section).toMatch(/decompose the delegated work into a structured set/)
     expect(section).toMatch(/one task per instance/)
-    expect(section).toMatch(/any task that is not a single trivial action/)
-    expect(section).toMatch(/a single read-only lookup, or a single one-line edit/)
-    expect(section).toMatch(/never spawn for that/)
+    expect(section).toMatch(/independent pieces worth running in parallel/)
+    expect(section).toMatch(/a read-only lookup, a small or tightly coupled edit/)
+    expect(section).toMatch(/never spawn just to look thorough/)
+    expect(section).not.toMatch(/not a single trivial action/)
     expect(section).not.toMatch(/no matter how small/)
     expect(section).not.toMatch(/spawned zero instances/)
     expect(section).not.toMatch(/every single time/)
@@ -98,7 +99,7 @@ describe('modePolicy', () => {
 
   it('inline instance Agent mode section omits delegation policy (parent-only)', () => {
     const section = modeSectionMarkdown('agent', { inlineInstance: true })
-    expect(section).not.toMatch(/every plan step maps to one child agent instance/)
+    expect(section).not.toMatch(/each delegated step maps to one child agent instance/)
     expect(section).not.toMatch(/child sees nothing of this conversation/)
     expect(section).not.toMatch(/spawn_agent_instance/)
     expect(section).not.toMatch(/merge_agent_instance/)
@@ -399,6 +400,7 @@ describe('modePolicy', () => {
     ] as const
     const agentOnlyByOmission = [
       'delete',
+      'move',
       'browser_click',
       'browser_type',
       'browser_fill',
@@ -411,6 +413,7 @@ describe('modePolicy', () => {
       'mcp_get_prompt',
       'terminal',
       'memory_write',
+      'memory_delete',
       'git_commit',
       'git_apply',
       'github_pr_create',

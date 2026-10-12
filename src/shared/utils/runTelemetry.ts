@@ -211,6 +211,22 @@ export function addInstanceUsage(a: StepUsageTotals, child: InstanceUsage): Step
   }
 }
 
+/**
+ * Two user turns' totals as one, for a run that spans both (a message said
+ * into it while it worked is a turn of its own): the bill, the steps and the
+ * time sum; the window fields are the later turn's, its peak the higher.
+ */
+export function addTurnUsage(a: StepUsageTotals, b: StepUsageTotals): StepUsageTotals {
+  const sum = addInstanceUsage(a, instanceUsageOf(b))
+  if (b.steps <= 0) return sum
+  return {
+    ...sum,
+    inputTokens: b.inputTokens,
+    cachedInputTokens: b.cachedInputTokens,
+    peakInputTokens: Math.max(a.peakInputTokens, b.peakInputTokens)
+  }
+}
+
 export function stepUsageFromEvent(event: AgentEvent): StepUsageTotals | null {
   if (event.type !== 'step_usage') return null
   const inputTokens = event.inputTokens ?? 0

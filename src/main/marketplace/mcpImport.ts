@@ -615,7 +615,7 @@ export async function detectMcpInput(rawInput: unknown): Promise<McpDetectResult
       confidence: 'medium',
       server,
       warnings: [
-        'Suggested stdio launch via npx. For a Vyotiq package published to npm, install it from Registry and trust.'
+        'Suggested stdio launch via npx. For an Agent V package published to npm, install it from Registry and trust.'
       ]
     })
   }

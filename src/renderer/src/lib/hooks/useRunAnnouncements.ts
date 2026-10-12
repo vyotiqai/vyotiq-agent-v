@@ -18,12 +18,27 @@ export function runAnnouncement(item: NotificationItem): { text: string; asserti
 }
 
 /**
+ * Announcement verbosity from the document (Settings → Appearance →
+ * Accessibility → Screen reader announcements): `off` silences run
+ * announcements, `brief` speaks only failures and questions, anything else
+ * speaks everything.
+ */
+function readAnnounceVerbosity(): 'off' | 'brief' | 'full' {
+  if (typeof document === 'undefined') return 'full'
+  const value = document.documentElement.getAttribute('data-announce')
+  if (value === 'off' || value === 'brief') return value
+  return 'full'
+}
+/**
  * Screen readers hear a task finish, fail, or ask for you — read from the
  * same inbox items the bell and the OS notification use, so the Notifications
  * settings decide what is spoken. Unlike the toasts, this speaks for the task
  * in front of you and while the window is in the background: a screen-reader
  * user can't glance at the record to see it stopped. Items that arrive
  * together are spoken as one line, so one doesn't cut the other off.
+ *
+ * The Accessibility verbosity setting (`data-announce`) narrows this: `off`
+ * silences run announcements, `brief` speaks only failures and questions.
  */
 export function useRunAnnouncements(items: readonly NotificationItem[]): void {
   const mountedAt = useRef(Date.now())
@@ -31,16 +46,19 @@ export function useRunAnnouncements(items: readonly NotificationItem[]): void {
   const seen = useRef(new Set<string>())
 
   useEffect(() => {
+    const verbosity = readAnnounceVerbosity()
     const polite: string[] = []
     const assertive: string[] = []
     for (const item of items) {
       const key = `${item.id}@${item.createdAt}`
       if (seen.current.has(key)) continue
       seen.current.add(key)
+      if (verbosity === 'off') continue
       if (item.read) continue
       if (Date.parse(item.createdAt) < mountedAt.current) continue
       const line = runAnnouncement(item)
       if (!line) continue
+      if (verbosity === 'brief' && !line.assertive) continue
       ;(line.assertive ? assertive : polite).push(line.text)
     }
     if (assertive.length) announceLive(assertive.join('. '), 'assertive')

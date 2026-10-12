@@ -25,7 +25,8 @@ import type { McpRuntimeRequirement } from '../../../shared/ipc'
 const REQUIREMENT_BINARIES: Record<McpRuntimeRequirement, { binary: string; installUrl: string }> = {
   node: { binary: 'npx', installUrl: 'https://nodejs.org/en/download' },
   uv: { binary: 'uvx', installUrl: 'https://docs.astral.sh/uv/getting-started/installation/' },
-  git: { binary: 'git', installUrl: 'https://git-scm.com/downloads' }
+  git: { binary: 'git', installUrl: 'https://git-scm.com/downloads' },
+  docker: { binary: 'docker', installUrl: 'https://docs.docker.com/desktop/' }
 }
 
 export function mcpRequirementBinary(requirement: McpRuntimeRequirement): string {
@@ -255,7 +256,7 @@ export function missingMcpBinaryMessage(missing: MissingMcpBinary): string {
   return (
     `${what} was not found on PATH, so this MCP server cannot start. ` +
     (missing.installUrl
-      ? `Install it, or point Vyotiq at an existing copy.`
+      ? `Install it, or point Agent V at an existing copy.`
       : `Install it, or correct the command.`)
   )
 }

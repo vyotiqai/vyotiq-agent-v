@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, watch, type FSWatcher } from 'fs'
+import { existsSync, readdirSync, readFileSync, watch, type FSWatcher } from 'fs'
 import { dirname, join, resolve } from 'path'
 import type { WebContents } from 'electron'
 import type { AgentEvent, AgentInteractionMode, ChatMessage, RunReceipt } from '../../shared/ipc'
 import { contentDisplayText, DEFAULT_MAX_PARALLEL_INSTANCES, RunReceiptSchema } from '../../shared/ipc'
+import { planStepTitle } from './planStepTitle'
 import { getSettings } from '@main/settings/settings'
 import { recallRunModelSelection } from './runModelSelection'
 import { IPC } from '../../shared/channels'
@@ -25,10 +26,11 @@ import {
   isInstanceWorktreeFallbackError,
   isSafeInstanceWorktreePath,
   mergeInstanceBranch,
+  reattachInstanceWorktree,
   type MergeInstanceBranchResult
 } from '../git/instanceWorktree'
 import { appendEvent, createRun, loadMessagesAsync, loadStatus } from './state'
-import { resolveRunDir } from '@main/storage/paths'
+import { resolveRunDir, workspaceSessionsRoot } from '@main/storage/paths'
 import { createRunId } from './loop'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
 import { migrateLegacyReceipt } from './receiptMigration'
@@ -46,8 +48,10 @@ import {
   registerInlineChildRun,
   tryRegisterRunAbort,
   unregisterInlineChildRun,
-  isActive
+  isActive,
+  enqueueFollowUp
 } from './runRegistry'
+import { syncFollowUpsToDisk } from './followUpStore'
 import { startAgentRunInBackground } from './startAgentRun'
 import { excludeChatEventUiSubscription } from '../ipc/streamBatch'
 import { isSafePathScopePrefix } from './tools/writeGuard'
@@ -76,6 +80,8 @@ const parentInstanceEmitters = new Map<string, (event: AgentEvent) => void>()
  */
 type ChildProgress = {
   stepId?: string
+  /** That step's title when the child was spawned. */
+  stepTitle?: string
   step: number
   activity?: string
   usage: StepUsageTotals
@@ -308,6 +314,7 @@ export function notifyChildTerminal(
     ...(opts?.pathScope ? { pathScope: opts.pathScope } : {}),
     ...(opts?.agentType ? { agentType: opts.agentType } : {}),
     ...(progress?.stepId ? { stepId: progress.stepId } : {}),
+    ...(progress?.stepTitle ? { stepTitle: progress.stepTitle } : {}),
     ...(progress && progress.usage.steps > 0 ? { step: progress.step, usage: instanceUsageOf(progress.usage) } : {})
   })
   const waiters = childWaiters.get(childRunId)
@@ -679,6 +686,52 @@ export function noteInlineInstanceDeniedTool(childRunId: string | undefined): bo
   return false
 }
 
+/** The longest message a parent sends a child in one go. */
+export const CHILD_MESSAGE_MAX_CHARS = 4000
+
+/**
+ * Parent-side steer for a running inline child (message_agent_instance): the
+ * message joins the child's follow-up queue and is applied at its next step,
+ * the way a person's follow-up is. A child going the wrong way used to be
+ * cancelled and spawned again from nothing, losing its work.
+ */
+export function messageChildInstance(
+  workspacePath: string,
+  parentRunId: string,
+  childRunId: string,
+  text: string
+): { ok: true; queueLength: number } | { ok: false; error: string } {
+  const message = text.trim()
+  if (!message) return { ok: false, error: 'message is required' }
+  const childDir = resolveRunDir(workspacePath, childRunId)
+  const childStatus = loadStatus(childDir)
+  if (!childStatus?.inlineInstance || childStatus.parentRunId !== parentRunId) {
+    return { ok: false, error: 'run_id is not an inline instance spawned by this parent run' }
+  }
+  if (terminalPhaseFromStatus(childStatus)) {
+    return {
+      ok: false,
+      error: 'The instance already finished; it takes no more messages. Spawn a new one with what it should do next.'
+    }
+  }
+  const queued = enqueueFollowUp(childRunId, {
+    role: 'user',
+    content: `A message from the task that started you:\n${message.slice(0, CHILD_MESSAGE_MAX_CHARS)}`,
+    at: new Date().toISOString()
+  })
+  if (!queued.ok) {
+    return {
+      ok: false,
+      error:
+        queued.error === 'Run is finishing'
+          ? 'The instance is finishing; await it, then spawn a new one if more is needed.'
+          : 'Instance is not running in this app session. An instance interrupted by an app restart comes back when its task resumes.'
+    }
+  }
+  syncFollowUpsToDisk(childDir, childRunId)
+  return { ok: true, queueLength: queued.queueLength }
+}
+
 /** Parent-side cancel for an inline child (cancel_agent_instance tool). */
 export function cancelChildInstance(
   workspacePath: string,
@@ -699,7 +752,7 @@ export function cancelChildInstance(
     return {
       ok: false,
       error:
-        'Instance is not running in this app session (background instances do not survive restart).'
+        'Instance is not running in this app session. An instance interrupted by an app restart comes back when its task resumes.'
     }
   }
   return { ok: true, phase: 'cancelled' }
@@ -720,6 +773,12 @@ export type SpawnAgentInstanceInput = {
   readOnly?: boolean
   /** A user-defined helper type (agentTypes.ts): instructions, tool allowlist, model. */
   agentType?: ResolvedAgentType
+  /**
+   * The model the parent asked for this one child: `fast` (the Utility
+   * model), `inherit`, a family alias, or provider:model. Wins over the type's
+   * and the helper model when its provider can run it.
+   */
+  model?: string
   emitParentEvent?: (event: AgentEvent) => void
 }
 
@@ -948,11 +1007,14 @@ export async function spawnAgentInstance(
   }
 
   const childPrompt = worktreePath ? rewriteWorkspaceRoot(composedGoal, input.workspacePath, worktreePath) : composedGoal
+  const stepTitle = planStepTitle(parentStatusDir, input.stepId)
   try {
     createRun(input.workspacePath, childRunId, childPrompt, {
       mode,
       parentRunId: input.parentRunId,
       inlineInstance: true,
+      ...(input.stepId?.trim() ? { stepId: input.stepId.trim() } : {}),
+      ...(stepTitle ? { stepTitle } : {}),
       ...(pathScope?.length ? { pathScope } : {}),
       ...(worktreePath ? { worktreePath } : {}),
       ...(worktreeBranch ? { worktreeBranch } : {}),
@@ -987,6 +1049,7 @@ export async function spawnAgentInstance(
   const stepId = input.stepId?.trim() || undefined
   childProgress.set(childRunId, {
     ...(stepId ? { stepId } : {}),
+    ...(stepTitle ? { stepTitle } : {}),
     step: 0,
     usage: emptyStepUsageTotals(),
     sentAt: 0
@@ -997,9 +1060,13 @@ export async function spawnAgentInstance(
     parentRunId: input.parentRunId,
     instanceRunId: childRunId,
     phase: 'started',
-    goal: goalText,
+    // The brief the child was given, as its status and its end event carry it:
+    // `goal` alone is the background, and siblings often share it word for
+    // word, so every one read as the same title until it finished.
+    goal: childPrompt,
     at: new Date().toISOString(),
     ...(stepId ? { stepId } : {}),
+    ...(stepTitle ? { stepTitle } : {}),
     ...(pathScope?.length ? { pathScope } : {}),
     ...(agentType ? { agentType: agentType.name } : {})
   }
@@ -1016,13 +1083,24 @@ export async function spawnAgentInstance(
   // started on one model quietly fanned its helpers out to another.
   // A typed child's own model wins when its provider can run it (agentTypes.ts).
   const settings = getSettings()
-  const typedModel = agentType?.model
-    ? resolveAgentTypeModel(agentType.model, {
-        parent: recallRunModelSelection(input.parentRunId),
-        helper: settings.helperModel ?? null,
-        hasCredentials: (provider) => providerHasCredentials(provider, settings)
-      })
-    : null
+  const modelCtx = {
+    parent: recallRunModelSelection(input.parentRunId),
+    helper: settings.helperModel ?? null,
+    hasCredentials: (provider: Parameters<typeof providerHasCredentials>[0]) => providerHasCredentials(provider, settings)
+  }
+  const requestedModel = input.model?.trim()
+  const typedModel = requestedModel
+    ? requestedModel.toLowerCase() === 'fast'
+      ? settings.utilityModel && modelCtx.hasCredentials(settings.utilityModel.provider)
+        ? { choice: settings.utilityModel }
+        : {
+            choice: modelCtx.helper ?? modelCtx.parent,
+            note: 'no usable Utility model is set (Settings › Agent), so the child runs on the helper model.'
+          }
+      : resolveAgentTypeModel(requestedModel, modelCtx)
+    : agentType?.model
+      ? resolveAgentTypeModel(agentType.model, modelCtx)
+      : null
   if (typedModel?.note) {
     logger.warn('agent type model unavailable; helper runs on the default helper model', {
       scope: 'agentInstances',
@@ -1057,6 +1135,148 @@ export async function spawnAgentInstance(
     ...(sharedBecause ? { sharedBecause } : {}),
     ...(typedModel?.note ? { modelNote: typedModel.note } : {})
   }
+}
+
+export type InterruptedInstancesResume = {
+  resumed: { runId: string; label: string }[]
+  failed: { runId: string; label: string; reason: string }[]
+}
+
+/** This task's instances that an app exit interrupted and that can come back. */
+function interruptedInstancesOf(
+  workspacePath: string,
+  parentRunId: string
+): { runId: string; status: NonNullable<ReturnType<typeof loadStatus>> }[] {
+  const root = workspaceSessionsRoot(workspacePath)
+  let names: string[]
+  try {
+    names = readdirSync(root)
+  } catch {
+    return []
+  }
+  const found: { runId: string; status: NonNullable<ReturnType<typeof loadStatus>> }[] = []
+  for (const name of names) {
+    const status = loadStatus(join(root, name))
+    if (
+      status?.inlineInstance === true &&
+      status.parentRunId === parentRunId &&
+      status.status === 'cancelled' &&
+      status.resumable === true &&
+      Boolean(status.interruptedAt)
+    ) {
+      found.push({ runId: name, status })
+    }
+  }
+  return found.sort((a, b) => (a.status.interruptedAt ?? '').localeCompare(b.status.interruptedAt ?? ''))
+}
+
+/**
+ * Bring back the instances an app exit interrupted, when their task resumes.
+ * Each one gets its checkout back from its kept branch (or works in the
+ * workspace again, for a shared or read-only one), is registered under its
+ * task as at spawn, and continues its own run from disk. Called before the
+ * task's own run starts, so its first await_agent_instance finds them running.
+ */
+export async function resumeInterruptedInstances(
+  workspacePath: string,
+  parentRunId: string,
+  wc: WebContents
+): Promise<InterruptedInstancesResume> {
+  const out: InterruptedInstancesResume = { resumed: [], failed: [] }
+  const parentDir = resolveRunDir(workspacePath, parentRunId)
+  for (const { runId: childRunId, status } of interruptedInstancesOf(workspacePath, parentRunId)) {
+    const label = formatAgentInstanceLabel(childRunId)
+    const fail = (reason: string): void => {
+      out.failed.push({ runId: childRunId, label, reason })
+      logger.warn('interrupted instance not resumed', { scope: 'agentInstances', childRunId, reason })
+    }
+    if (isActive(childRunId)) continue
+    const cap = instanceCap()
+    if (runningInstanceCount(parentRunId) >= cap) {
+      fail(`the task already runs ${cap} instances, the most Settings → Agent → Instances at once allows`)
+      continue
+    }
+    if (status.worktreePath) {
+      const branch = status.worktreeBranch?.trim()
+      if (!branch) {
+        fail('its branch was not recorded')
+        continue
+      }
+      const wt = await reattachInstanceWorktree(workspacePath, childRunId, branch, status.pathScope)
+      if (!wt.ok) {
+        fail(wt.error)
+        continue
+      }
+    } else if (!existsSync(workspacePath)) {
+      fail('its workspace no longer exists')
+      continue
+    }
+    const registered = tryRegisterRunAbort(childRunId, workspacePath)
+    if (!registered.ok) {
+      fail(registered.error)
+      continue
+    }
+    excludeChatEventUiSubscription(childRunId)
+    registerChildInstance(parentRunId, childRunId, workspacePath)
+    const stepId = status.stepId?.trim() || undefined
+    childProgress.set(childRunId, {
+      ...(stepId ? { stepId } : {}),
+      ...(status.stepTitle ? { stepTitle: status.stepTitle } : {}),
+      step: status.step ?? 0,
+      usage: emptyStepUsageTotals(),
+      sentAt: 0
+    })
+    const startedUpdate: AgentEvent = {
+      type: 'agent_instance_update',
+      runId: parentRunId,
+      parentRunId,
+      instanceRunId: childRunId,
+      phase: 'started',
+      goal: status.goal ?? '',
+      at: new Date().toISOString(),
+      ...(stepId ? { stepId } : {}),
+      ...(status.stepTitle ? { stepTitle: status.stepTitle } : {}),
+      ...(status.pathScope?.length ? { pathScope: status.pathScope } : {}),
+      ...(status.agentType ? { agentType: status.agentType.name } : {})
+    }
+    appendEvent(parentDir, startedUpdate)
+    sendLiveParentInstanceEvent(parentRunId, startedUpdate)
+    const settings = getSettings()
+    const childModel = settings.helperModel ?? recallRunModelSelection(parentRunId)
+    void startAgentRunInBackground({
+      runId: childRunId,
+      workspacePath,
+      invokeId: registered.invokeId,
+      controller: registered.controller,
+      wc,
+      agentInput: {
+        runId: childRunId,
+        workspacePath,
+        resume: true,
+        mode: status.mode ?? 'agent',
+        ...(childModel ? { provider: childModel.provider, model: childModel.model } : {})
+      }
+    })
+    out.resumed.push({ runId: childRunId, label })
+  }
+  return out
+}
+
+/** What the resumed task is told about its instances, or null when it had none to bring back. */
+export function formatInstancesResumeNote(result: InterruptedInstancesResume): string | null {
+  if (result.resumed.length === 0 && result.failed.length === 0) return null
+  const lines = ['The app restarted while this task ran.']
+  if (result.resumed.length) {
+    lines.push(
+      `These instances were interrupted with it and are running again from where they stopped: ${result.resumed
+        .map((r) => r.label)
+        .join(', ')}. Await them with await_agent_instance as before; do not spawn them again.`
+    )
+  }
+  for (const f of result.failed) {
+    lines.push(`${f.label} could not be resumed: ${f.reason}. pull_agent_instance shows what it did before it stopped.`)
+  }
+  return lines.join('\n')
 }
 
 export async function handleInlineInstanceFinished(

@@ -155,3 +155,25 @@ describe('ChangesPanel: discarding your own changes', () => {
     expect(screen.queryByRole('button', { name: /^Discard changes/ })).toBeNull()
   })
 })
+
+describe('ChangesPanel: Review these changes', () => {
+  it('sends the read-only review brief for the scope on screen', async () => {
+    const onAskAboutLine = vi.fn()
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" onAskAboutLine={onAskAboutLine} />)
+    await screen.findByText('a.ts')
+    fireEvent.click(screen.getByRole('button', { name: 'More changes actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Review these changes' }))
+    expect(onAskAboutLine).toHaveBeenCalledTimes(1)
+    const brief = String(onAskAboutLine.mock.calls[0][0])
+    expect(brief).toMatch(/^Review the uncommitted changes/)
+    expect(brief).toMatch(/do not edit, commit or revert/)
+  })
+
+  it('is not offered without a way to reach the agent', async () => {
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} preferredScope="uncommitted" />)
+    await screen.findByText('a.ts')
+    fireEvent.click(screen.getByRole('button', { name: 'More changes actions' }))
+    await screen.findByRole('menuitem', { name: 'Discard all changes…' })
+    expect(screen.queryByRole('menuitem', { name: 'Review these changes' })).toBeNull()
+  })
+})

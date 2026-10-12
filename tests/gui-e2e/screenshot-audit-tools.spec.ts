@@ -59,10 +59,10 @@ test('streams T1 tool cards: unknown tool not titled placeholder; ask humanized'
 
   await expect(window.getByText('Audit tools fixture done.')).toBeVisible({ timeout: 20_000 })
 
-  // A finished run with an answer folds its loose work to one line; open it.
-  const looseWork = window.locator('[data-loose-work] > div > button').first()
-  await expect(looseWork).toHaveAttribute('aria-expanded', 'false')
-  await looseWork.click()
+  // A finished run with an answer folds its work behind one line; open it.
+  const work = window.locator('[data-work-fold] > div > button').first()
+  await expect(work).toHaveAttribute('aria-expanded', 'false')
+  await work.click()
 
   // Unknown tool row must not present args.path "placeholder" as the title.
   await expect(window.getByText(/Write file check/i).first()).toBeVisible()

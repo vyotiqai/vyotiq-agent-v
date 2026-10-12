@@ -16,10 +16,11 @@ import { findEnabledSkillByName, type LoadedSkill } from './index'
  * the command guard (tools/dangerousCommand.ts) still holds what it holds.
  *
  * Only skills the user put there count. A workspace's own skills
- * (`.vyotiq/skills`, `.cursor/skills`) came with the folder, which can hand a
- * run anything; and a Marketplace package counts only when it shipped with the
- * app (`installSource: 'bundled'`), since others were written by whoever
- * published them. Personal skills (`~/.vyotiq/skills`) are yours.
+ * (`.vyotiq/skills`, `.claude/skills`, `.agents/skills`, `.cursor/skills`) came
+ * with the folder, which can hand a run anything; and a Marketplace package
+ * counts only when it shipped with the app (`installSource: 'bundled'`), since
+ * others were written by whoever published them. Personal skills
+ * (`~/.vyotiq/skills`, `~/.claude/skills`) are yours.
  */
 
 export type SkillToolAllow = {
@@ -52,6 +53,7 @@ const CLAUDE_TOOLS: Record<string, string[]> = {
   notebookread: ['read'],
   grep: ['grep', 'search'],
   webfetch: [
+    'web_fetch',
     'browser_navigate',
     'browser_snapshot',
     'browser_back',
@@ -61,7 +63,7 @@ const CLAUDE_TOOLS: Record<string, string[]> = {
     'browser_wait_for_selector',
     'browser_wait_for_url'
   ],
-  websearch: ['browser_search']
+  websearch: ['web_search', 'browser_search']
 }
 
 const COMMAND_TOOLS = new Set(['terminal', 'run_tests'])

@@ -15,7 +15,7 @@ const OPENAI_TRANSCRIBE_MODEL = 'gpt-transcribe'
 export const OPENROUTER_TRANSCRIBE_URL = 'https://openrouter.ai/api/v1/audio/transcriptions'
 export const OPENROUTER_TRANSCRIBE_MODEL = 'openai/gpt-transcribe'
 export const OPENROUTER_REFERER = 'https://vyotiq.com'
-export const OPENROUTER_TITLE = 'Vyotiq'
+export const OPENROUTER_TITLE = 'Agent V'
 
 export const DICTATION_FIXTURE_TEXT = 'E2E dictation transcript.'
 

@@ -144,3 +144,24 @@ describe('ActionMenu disabled items', () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 })
+
+describe('ActionMenu activedescendant and typeahead', () => {
+  it('points aria-activedescendant at the active row', () => {
+    render(<Fixture onSelect={vi.fn()} />)
+    const menu = openMenu()
+    const project = screen.getByRole('menuitem', { name: 'Project rule' })
+    expect(project.id).not.toBe('')
+    expect(menu.getAttribute('aria-activedescendant')).toBe(project.id)
+  })
+
+  it('jumps to the matching row on a printable key', () => {
+    const onSelect = vi.fn()
+    render(<Fixture onSelect={onSelect} />)
+    const menu = openMenu()
+    fireEvent.keyDown(menu, { key: 'o' })
+    const other = screen.getByRole('menuitem', { name: 'Other rule' })
+    expect(menu.getAttribute('aria-activedescendant')).toBe(other.id)
+    fireEvent.keyDown(menu, { key: 'Enter' })
+    expect(onSelect).toHaveBeenCalledWith('other')
+  })
+})

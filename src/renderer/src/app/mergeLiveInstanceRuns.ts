@@ -1,5 +1,5 @@
 import type { RunSummary } from '@shared/ipc'
-import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
+import { briefOutcome, type AgentInstanceUiState } from '@shared/utils/agentInstance'
 
 function liveInstanceStatus(
   phase: AgentInstanceUiState['phase']
@@ -40,9 +40,15 @@ export function mergeLiveInstanceRuns(
       runId: inst.instanceRunId,
       status,
       updatedAt: prior?.updatedAt ?? new Date().toISOString(),
-      goal: inst.goal ?? prior?.goal,
+      // A child started before its start carried the brief has only its
+      // background live; the listed brief names the outcome that titles it.
+      goal: briefOutcome(prior?.goal) && !briefOutcome(inst.goal) ? prior!.goal : (inst.goal ?? prior?.goal),
       parentRunId: prior?.parentRunId ?? parentRunId,
       inlineInstance: true,
+      // The row's name: as listed (the plan's title for its step now), else as
+      // its start carried it. Its helper label rides along either way.
+      ...((prior?.stepTitle ?? inst.stepTitle) ? { stepTitle: prior?.stepTitle ?? inst.stepTitle } : {}),
+      ...((inst.agentType ?? prior?.agentType) ? { agentType: inst.agentType ?? prior?.agentType } : {}),
       ...(inst.pathScope?.length
         ? { pathScope: inst.pathScope }
         : prior?.pathScope?.length

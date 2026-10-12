@@ -8,6 +8,8 @@ import { seedModelsFor } from '../../shared/providers'
 import { findOllamaCatalogModel } from '../../shared/reasoning'
 import { baseModelInfo } from './providers/normalize'
 import { listProviderModels } from './providers'
+import { modelLimitSettings } from './modelLimitSettings'
+import { applyModelLimitOverride, modelLimitKey } from '../../shared/domain/modelLimits'
 
 /**
  * Resolve model metadata, falling back to seeds and finally to conservative
@@ -56,17 +58,22 @@ export async function resolveModelInfo(
     }
     return enriched
   }
+  // Unlisted (typed by hand): the person's limits still apply.
+  const override = modelLimitSettings()?.[modelLimitKey(runProviderId, modelId)]
   const seed = seedModelsFor(providerId).find((m) => m.id === modelId)
-  if (seed) return withResolvedContextWindow(seed, providerId)
+  if (seed) return applyModelLimitOverride(withResolvedContextWindow(seed, providerId), override)
   const known = knownContextWindow(modelId, providerId)
-  const fromRegistry = known != null ? undefined : await registryCtx()
-  return baseModelInfo(
-    modelId,
-    {
-      contextWindow: known ?? fromRegistry ?? 128_000,
-      supportsTools: providerId !== 'ollama' || /tool|coder|qwen|llama3|mistral/i.test(modelId)
-    },
-    providerId
+  const fromRegistry = known != null || override?.contextWindow ? undefined : await registryCtx()
+  return applyModelLimitOverride(
+    baseModelInfo(
+      modelId,
+      {
+        contextWindow: known ?? fromRegistry ?? 128_000,
+        supportsTools: providerId !== 'ollama' || /tool|coder|qwen|llama3|mistral/i.test(modelId)
+      },
+      providerId
+    ),
+    override
   )
 }
 

@@ -49,14 +49,19 @@ export const BuiltinClientActionSchema = z.enum([
   'loop_set',
   'loop_stop',
   'loop_status',
-  'add_dir'
+  'add_dir',
+  'help'
 ])
 export type BuiltinClientAction = z.infer<typeof BuiltinClientActionSchema>
 
 export const SlashCommandResolveResultSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('send'),
-    message: z.string()
+    message: z.string(),
+    /** A command file's `model:`, as written: the renderer matches it to one of your models. */
+    model: z.string().min(1).optional(),
+    /** A command file's `mode:` (or Copilot's `agent:`), folded to Ask or Agent. */
+    mode: z.enum(['ask', 'agent']).optional()
   }),
   z.object({
     action: z.literal('client'),
@@ -72,6 +77,11 @@ export const SlashCommandResolveResultSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('open_file'),
     path: z.string().min(1)
+  }),
+  /** A message for the person typing (usage, a parse error); nothing is sent. */
+  z.object({
+    action: z.literal('notice'),
+    message: z.string()
   })
 ])
 export type SlashCommandResolveResult = z.infer<typeof SlashCommandResolveResultSchema>
@@ -133,7 +143,8 @@ export const SlashCommandsCreateSkillResultSchema = z.object({
 })
 export type SlashCommandsCreateSkillResult = z.infer<typeof SlashCommandsCreateSkillResultSchema>
 
-export const LocalSkillOriginSchema = z.enum(['vyotiq', 'cursor'])
+/** Whose folder a skill was read from: `.vyotiq`, `.cursor`, `.claude` or `.agents`. */
+export const LocalSkillOriginSchema = z.enum(['vyotiq', 'cursor', 'claude', 'agents'])
 export type LocalSkillOrigin = z.infer<typeof LocalSkillOriginSchema>
 
 export const LocalSkillItemSchema = z.object({

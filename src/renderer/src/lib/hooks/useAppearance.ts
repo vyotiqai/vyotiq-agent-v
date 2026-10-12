@@ -3,6 +3,7 @@ import type { FontScale } from '@shared/appearance'
 import {
   pickAppearanceSettings,
   resolveAppearanceBootCache,
+  resolveFontScaleValue,
   writeAppearanceBootCache,
   type AppearanceSettings
 } from '@shared/appearance'
@@ -24,8 +25,19 @@ function applyToDocument(
 ): void {
   const root = document.documentElement
   root.setAttribute('data-theme', resolvedTheme)
-  root.setAttribute('data-font-scale', appearance.fontScale)
+  root.setAttribute('data-font-scale', String(appearance.fontScale))
+  // Presets resolve through the styles.css mapping; a numeric scale sets the
+  // token inline so any value in the range applies without a selector per step.
+  if (typeof appearance.fontScale === 'number') {
+    root.style.setProperty('--vy-font-scale', String(resolveFontScaleValue(appearance.fontScale)))
+  } else {
+    root.style.removeProperty('--vy-font-scale')
+  }
   root.setAttribute('data-skin', appearance.skinId)
+  root.setAttribute('data-reduce-motion', appearance.reduceMotion)
+  root.setAttribute('data-contrast', appearance.contrast)
+  root.setAttribute('data-focus-ring', appearance.alwaysShowFocusRing ? 'always' : 'auto')
+  root.setAttribute('data-announce', appearance.announceVerbosity)
   writeAppearanceBootCache(resolveAppearanceBootCache(appearance, resolvedTheme === 'dark'))
 }
 
@@ -116,6 +128,10 @@ export function useAppearance(initial: AppearanceSettings) {
           prev.fontScale === next.fontScale &&
           prev.skinId === next.skinId &&
           prev.customCssPath === next.customCssPath &&
+          prev.reduceMotion === next.reduceMotion &&
+          prev.contrast === next.contrast &&
+          prev.alwaysShowFocusRing === next.alwaysShowFocusRing &&
+          prev.announceVerbosity === next.announceVerbosity &&
           prev.resolvedTheme === resolvedTheme
         ) {
           return prev
@@ -138,6 +154,10 @@ export function useAppearance(initial: AppearanceSettings) {
     fontScale: appearance.fontScale as FontScale,
     skinId: appearance.skinId,
     customCssPath: appearance.customCssPath,
+    reduceMotion: appearance.reduceMotion,
+    contrast: appearance.contrast,
+    alwaysShowFocusRing: appearance.alwaysShowFocusRing,
+    announceVerbosity: appearance.announceVerbosity,
     setAppearance,
     toggleTheme,
     hydrate

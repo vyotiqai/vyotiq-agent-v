@@ -26,6 +26,16 @@ export type ComposerMention =
   /** An element picked in the Browser tab; the chip carries all of it. */
   | { kind: 'element'; element: BrowserPickedElement }
   | { kind: 'chat'; runId: string; title: string }
+  /** What is uncommitted in the workspace, against HEAD. */
+  | { kind: 'changes' }
+  /** The end of the newest terminal tab's output. */
+  | { kind: 'terminal' }
+  | { kind: 'commit'; sha: string; subject: string }
+  | { kind: 'url'; url: string }
+  /** A GitHub issue or pull request by number. */
+  | { kind: 'issue'; number: number }
+  /** Where a code symbol is defined, found by name. */
+  | { kind: 'symbol'; name: string }
   | {
       kind: 'slash'
       slashKind: SlashCommandKind
@@ -49,7 +59,7 @@ export type ComposerSegment =
   | { type: 'text'; value: string }
   | { type: 'mention'; mention: ComposerMention }
 
-export type MentionMenuView = 'root' | 'files' | 'chats' | 'docs' | 'rules'
+export type MentionMenuView = 'root' | 'files' | 'chats' | 'docs' | 'rules' | 'commits'
 
 export type MentionMenuItem =
   | {
@@ -65,6 +75,40 @@ export type MentionMenuItem =
       subtitle: string
     }
   | {
+      id: 'changes' | 'terminal'
+      kind: 'changes' | 'terminal'
+      label: string
+      subtitle: string
+    }
+  | {
+      id: string
+      kind: 'url'
+      url: string
+      label: string
+      subtitle: string
+    }
+  | {
+      id: string
+      kind: 'issue'
+      number: number
+      label: string
+      subtitle: string
+    }
+  | {
+      id: string
+      kind: 'symbol'
+      name: string
+      label: string
+      subtitle: string
+    }
+  | {
+      id: string
+      kind: 'commit'
+      sha: string
+      label: string
+      subtitle: string
+    }
+  | {
       id: 'lints-typecheck' | 'lints-lint'
       kind: 'lints'
       diagnosticsKind: DiagnosticsKind
@@ -72,7 +116,7 @@ export type MentionMenuItem =
       subtitle: string
     }
   | {
-      id: 'files' | 'chats' | 'docs' | 'rules'
+      id: 'files' | 'chats' | 'docs' | 'rules' | 'commits'
       kind: 'nav'
       view: Exclude<MentionMenuView, 'root'>
       label: string
@@ -224,6 +268,18 @@ export function mentionLabel(mention: ComposerMention): string {
       return pickedElementLabel(mention.element)
     case 'chat':
       return mention.title.trim() || mention.runId.slice(0, 8)
+    case 'changes':
+      return 'Uncommitted'
+    case 'terminal':
+      return 'Terminal'
+    case 'commit':
+      return mention.sha.slice(0, 7)
+    case 'url':
+      return urlLabel(mention.url)
+    case 'issue':
+      return `#${mention.number}`
+    case 'symbol':
+      return mention.name
     case 'slash':
       return mention.trigger.trim() || mention.slashKind
     default: {
@@ -231,6 +287,49 @@ export function mentionLabel(mention: ComposerMention): string {
       return _exhaustive
     }
   }
+}
+
+/** `https://example.com/docs/a` → `example.com/docs/a`, kept short for a chip. */
+export function urlLabel(url: string): string {
+  try {
+    const u = new URL(url)
+    const rest = `${u.pathname === '/' ? '' : u.pathname}${u.search}`
+    const label = `${u.host}${rest}`
+    return label.length > 40 ? `${label.slice(0, 39)}…` : label
+  } catch {
+    return url.slice(0, 40)
+  }
+}
+
+/** A query that is a web address the composer can fetch. */
+export function mentionQueryUrl(query: string): string | null {
+  const q = query.trim()
+  if (!/^https?:\/\/\S+$/i.test(q)) return null
+  try {
+    const u = new URL(q)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/** `#123` or `123` after `#`: an issue or PR number. */
+export function mentionQueryIssue(query: string): number | null {
+  const m = /^#(\d{1,7})$/.exec(query.trim())
+  if (!m) return null
+  const n = Number(m[1])
+  return n > 0 ? n : null
+}
+
+/**
+ * An identifier worth looking up as a symbol: shaped like code, not a word —
+ * camelCase, PascalCase, snake_case or with a `$` (`useMentions`, `ToolRow`,
+ * `MAX_FILES`). A plain lowercase word stays a search for files and lists.
+ */
+export function mentionQuerySymbol(query: string): string | null {
+  const q = query.trim()
+  if (!/^[A-Za-z_$][\w$]{2,79}$/.test(q)) return null
+  return /[A-Z_$]/.test(q) ? q : null
 }
 
 function encodePayload(mention: ComposerMention): string {
@@ -253,6 +352,18 @@ function encodePayload(mention: ComposerMention): string {
       return `element:${encodeURIComponent(JSON.stringify(mention.element))}`
     case 'chat':
       return `chat:${mention.runId}|${encodeURIComponent(mention.title)}`
+    case 'changes':
+      return 'changes'
+    case 'terminal':
+      return 'terminal'
+    case 'commit':
+      return `commit:${mention.sha}|${encodeURIComponent(mention.subject)}`
+    case 'url':
+      return `url:${encodeURIComponent(mention.url)}`
+    case 'issue':
+      return `issue:${mention.number}`
+    case 'symbol':
+      return `symbol:${mention.name}`
     case 'slash': {
       const trigger = mention.trigger.trim()
       const head = `slash:${mention.slashKind}:${encodeURIComponent(trigger)}`
@@ -323,6 +434,37 @@ export function decodeMentionPayload(payload: string): ComposerMention | null {
   const raw = payload.trim()
   if (!raw) return null
   if (raw === 'browser') return { kind: 'browser' }
+  if (raw === 'changes') return { kind: 'changes' }
+  if (raw === 'terminal') return { kind: 'terminal' }
+  if (raw.startsWith('commit:')) {
+    const rest = raw.slice('commit:'.length)
+    const bar = rest.indexOf('|')
+    const sha = (bar < 0 ? rest : rest.slice(0, bar)).trim()
+    if (!/^[0-9a-f]{7,64}$/i.test(sha)) return null
+    let subject = bar < 0 ? '' : rest.slice(bar + 1)
+    try {
+      subject = decodeURIComponent(subject)
+    } catch {
+      // keep raw
+    }
+    return { kind: 'commit', sha, subject }
+  }
+  if (raw.startsWith('url:')) {
+    try {
+      const url = mentionQueryUrl(decodeURIComponent(raw.slice('url:'.length)))
+      return url ? { kind: 'url', url } : null
+    } catch {
+      return null
+    }
+  }
+  if (raw.startsWith('issue:')) {
+    const n = Number(raw.slice('issue:'.length))
+    return Number.isInteger(n) && n > 0 ? { kind: 'issue', number: n } : null
+  }
+  if (raw.startsWith('symbol:')) {
+    const name = mentionQuerySymbol(raw.slice('symbol:'.length))
+    return name ? { kind: 'symbol', name } : null
+  }
   if (raw.startsWith('element:')) {
     // A draft is only text, and text can be edited: the element is re-checked
     // on every read, not trusted because it once came from main.
@@ -579,6 +721,21 @@ export function buildRootMentionItems(opts: {
     includeCodebase && (!q || 'rules'.includes(q) || 'rule'.includes(q) || 'agents'.includes(q))
   const chatsNavOk =
     !q || 'past'.includes(q) || 'tasks'.includes(q) || 'chats'.includes(q) || 'chat'.includes(q)
+  const changesOk =
+    includeCodebase && (!q || 'uncommitted'.includes(q) || 'changes'.includes(q) || 'diff'.includes(q) || 'working'.includes(q))
+  const terminalOk = !q || 'terminal'.includes(q) || 'output'.includes(q) || 'shell'.includes(q)
+  const commitsNavOk = includeCodebase && (!q || 'commits'.includes(q) || 'commit'.includes(q) || 'history'.includes(q))
+  const url = mentionQueryUrl(opts.query)
+  const issue = includeCodebase ? mentionQueryIssue(opts.query) : null
+  const symbol = includeCodebase && !url && !issue ? mentionQuerySymbol(opts.query) : null
+
+  // What was typed, read as an address or a number, comes first: it is what was meant.
+  if (url) {
+    items.push({ id: `url:${url}`, kind: 'url', url, label: urlLabel(url), subtitle: 'the page, read when you send' })
+  }
+  if (issue) {
+    items.push({ id: `issue:${issue}`, kind: 'issue', number: issue, label: `#${issue}`, subtitle: 'GitHub issue or pull request' })
+  }
 
   // Context → Files → Browse (see buildMentionRootSections).
   if (branchOk) {
@@ -591,6 +748,12 @@ export function buildRootMentionItems(opts: {
       // on the base itself that is the uncommitted changes — true either way.
       subtitle: branch && branch !== 'HEAD' ? `what ${branch} changed, uncommitted included` : 'uncommitted changes'
     })
+  }
+  if (changesOk) {
+    items.push({ id: 'changes', kind: 'changes', label: 'Uncommitted changes', subtitle: 'the working tree against HEAD' })
+  }
+  if (terminalOk) {
+    items.push({ id: 'terminal', kind: 'terminal', label: 'Terminal output', subtitle: 'the end of your newest terminal tab' })
   }
   if (lintsOk) {
     // Run over the whole project when the instruction is sent — there is no live count.
@@ -650,6 +813,10 @@ export function buildRootMentionItems(opts: {
     }
   }
 
+  if (symbol) {
+    items.push({ id: `symbol:${symbol}`, kind: 'symbol', name: symbol, label: symbol, subtitle: 'where it is defined' })
+  }
+
   if (filesNavOk) {
     items.push({ id: 'files', kind: 'nav', view: 'files', label: 'Files and folders' })
   }
@@ -659,11 +826,26 @@ export function buildRootMentionItems(opts: {
   if (rulesNavOk) {
     items.push({ id: 'rules', kind: 'nav', view: 'rules', label: 'Rules' })
   }
+  if (commitsNavOk) {
+    items.push({ id: 'commits', kind: 'nav', view: 'commits', label: 'Commits' })
+  }
   if (chatsNavOk) {
     items.push({ id: 'chats', kind: 'nav', view: 'chats', label: 'Past tasks' })
   }
 
   return items
+}
+
+export function buildCommitMentionItems(
+  commits: ReadonlyArray<{ sha: string; shortSha: string; subject: string; author: string; relativeDate: string }>
+): MentionMenuItem[] {
+  return commits.map((c) => ({
+    id: `commit:${c.sha}`,
+    kind: 'commit' as const,
+    sha: c.sha,
+    label: c.subject || c.shortSha,
+    subtitle: `${c.shortSha} · ${c.author} · ${c.relativeDate}`
+  }))
 }
 
 export function buildFileMentionItems(

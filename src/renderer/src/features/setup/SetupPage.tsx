@@ -1,8 +1,9 @@
-import { useState, type DragEvent, type ReactNode } from 'react'
-import type { ToolApprovalMode } from '@shared/ipc'
+import { useEffect, useState, type DragEvent, type ReactNode } from 'react'
+import type { ProviderId, SetupDetection, SetupLocalServer, ToolApprovalMode } from '@shared/ipc'
+import { providerLabel } from '@shared/providers'
 import { VyotiqMark } from '@renderer/lib/brand'
 import { Icon } from '@renderer/lib/icons'
-import { Button, StatusGlyph, cn } from '@renderer/lib/ui'
+import { ActionMenu, Button, Input, StatusGlyph, cn } from '@renderer/lib/ui'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { ApprovalModeChoice } from './ApprovalModeChoice'
@@ -64,6 +65,194 @@ function SetupStep({
   )
 }
 
+/**
+ * Providers a key can be pasted for right here, OpenCode Go first as in
+ * Settings. Custom endpoints, Bedrock, Vertex and Azure need more than a key,
+ * so "More providers in Settings" stays beside this.
+ */
+const KEY_PROVIDERS: readonly ProviderId[] = ['opencode', 'anthropic', 'openai', 'openrouter', 'gemini', 'deepseek', 'groq', 'xai', 'mistral']
+
+/**
+ * The provider step's own ways in: a key already in the environment, a model
+ * server already running here, or a key pasted for a provider picked here.
+ * Settings keeps every other provider and option.
+ */
+function ConnectHere({
+  onUseEnvKey,
+  onUseLocal,
+  onSaveKey,
+  onCloudAccount
+}: {
+  onUseEnvKey: (provider: ProviderId) => Promise<string | null>
+  onUseLocal: (server: SetupLocalServer) => Promise<string | null>
+  onSaveKey: (provider: ProviderId, key: string) => Promise<string | null>
+  /** Bedrock, Vertex and Azure sign in with more than a key: Settings. */
+  onCloudAccount: () => void
+}) {
+  const [localOpen, setLocalOpen] = useState(false)
+  const [localUrl, setLocalUrl] = useState('http://localhost:1234/v1')
+  const [found, setFound] = useState<SetupDetection | null>(null)
+  const [pick, setPick] = useState<ProviderId>('anthropic')
+  const [pickOpen, setPickOpen] = useState(false)
+  const [key, setKey] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    void window.vyotiq?.setupDetect?.().then((res) => {
+      if (res?.ok) setFound(res.data)
+    })
+  }, [])
+  const act = async (id: string, run: () => Promise<string | null>): Promise<void> => {
+    setBusy(id)
+    setError(null)
+    try {
+      setError(await run())
+    } finally {
+      setBusy(null)
+    }
+  }
+  const offers = (found?.envKeys.length ?? 0) + (found?.local.length ?? 0)
+  return (
+    <div className="mt-3 space-y-3" data-setup-connect>
+      {offers > 0 ? (
+        <div>
+          <div className={cn('mb-1', SECTION_LABEL)}>Found on this computer</div>
+          <ul className="m-0 list-none p-0">
+            {found!.envKeys.map((entry) => (
+              <li key={entry.provider} className="flex h-9 items-center gap-2 text-sm" data-setup-env-key={entry.provider}>
+                <Icon name="key" size={14} className="shrink-0 text-muted" />
+                <span className="text-fg">{providerLabel(entry.provider)}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{entry.envVar}</span>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  pending={busy === entry.provider}
+                  disabled={busy !== null}
+                  onClick={() => void act(entry.provider, () => onUseEnvKey(entry.provider))}
+                >
+                  Use this key
+                </Button>
+              </li>
+            ))}
+            {found!.local.map((server) => (
+              <li key={server.id} className="flex h-9 items-center gap-2 text-sm" data-setup-local={server.id}>
+                <Icon name="cpu" size={14} className="shrink-0 text-muted" />
+                <span className="text-fg">{server.name}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-tertiary">
+                  {server.models.length === 0
+                    ? 'running, no models yet'
+                    : `running · ${server.models.length} model${server.models.length === 1 ? '' : 's'}`}
+                </span>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  pending={busy === server.id}
+                  disabled={busy !== null || server.models.length === 0}
+                  onClick={() => void act(server.id, () => onUseLocal(server))}
+                >
+                  Use it
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <form
+        className="flex items-center gap-2"
+        aria-label="Paste an API key"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const value = key.trim()
+          if (!value) return
+          void act('paste', async () => {
+            const failed = await onSaveKey(pick, value)
+            if (!failed) setKey('')
+            return failed
+          })
+        }}
+      >
+        <ActionMenu
+          aria-label="Provider for the key"
+          open={pickOpen}
+          onOpenChange={setPickOpen}
+          placement="down"
+          align="start"
+          items={KEY_PROVIDERS.map((id) => ({ id, label: providerLabel(id), checked: id === pick, onSelect: () => setPick(id) }))}
+          trigger={(t) => (
+            <Button
+              ref={t.ref}
+              size="sm"
+              variant="secondary"
+              trailingIcon="chevron"
+              aria-expanded={t['aria-expanded']}
+              aria-controls={t['aria-controls']}
+              aria-haspopup={t['aria-haspopup']}
+              onClick={t.onClick}
+            >
+              {providerLabel(pick)}
+            </Button>
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <Input
+            size="sm"
+            mono
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label={`${providerLabel(pick)} API key`}
+            placeholder="Paste an API key"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+        </div>
+        <Button size="sm" variant="primary" type="submit" pending={busy === 'paste'} disabled={busy !== null || !key.trim()}>
+          Save
+        </Button>
+      </form>
+      <div className="flex flex-wrap items-center gap-2" data-setup-other-ways>
+        <Button size="sm" variant="ghost" icon="cpu" aria-expanded={localOpen} onClick={() => setLocalOpen((v) => !v)}>
+          Local server (LM Studio, llama.cpp, vLLM)…
+        </Button>
+        <Button size="sm" variant="ghost" icon="cloud" onClick={onCloudAccount}>
+          Cloud account (Bedrock, Vertex, Azure)…
+        </Button>
+      </div>
+      {localOpen ? (
+        <form
+          className="flex items-center gap-2"
+          aria-label="Connect a local server"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const url = localUrl.trim()
+            if (!url) return
+            void act('local-url', () => onUseLocal({ id: 'lmstudio', name: 'Local server', baseUrl: url, models: [] }))
+          }}
+        >
+          <div className="min-w-0 flex-1">
+            <Input
+              size="sm"
+              mono
+              aria-label="Local server URL"
+              placeholder="http://localhost:1234/v1"
+              value={localUrl}
+              onChange={(e) => setLocalUrl(e.target.value)}
+            />
+          </div>
+          <Button size="sm" variant="primary" type="submit" pending={busy === 'local-url'} disabled={busy !== null || !localUrl.trim()}>
+            Connect
+          </Button>
+        </form>
+      ) : null}
+      {error ? (
+        <p role="alert" className="m-0 text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function hasFiles(e: DragEvent): boolean {
   return Array.from(e.dataTransfer?.types ?? []).includes('Files')
 }
@@ -109,6 +298,9 @@ export function SetupPage({
   onChooseFolder,
   onOpenPath,
   onStart,
+  onUseEnvKey,
+  onUseLocal,
+  onSaveKey,
   next = 'first-task'
 }: {
   settings: SetupProviderSettings
@@ -127,6 +319,12 @@ export function SetupPage({
   onOpenPath: (path: string) => Promise<string | null>
   /** Resolves to why the choice could not be saved, or null once the brief opens. */
   onStart: (workspacePath: string, mode: ToolApprovalMode) => Promise<string | null>
+  /** Use a key found in the environment; resolves to an error, or null. */
+  onUseEnvKey?: (provider: ProviderId) => Promise<string | null>
+  /** Use a model server running on this machine. */
+  onUseLocal?: (server: SetupLocalServer) => Promise<string | null>
+  /** Save a pasted key and switch to its provider. */
+  onSaveKey?: (provider: ProviderId, key: string) => Promise<string | null>
   next?: SetupNext
 }): ReactNode {
   const [mode, setMode] = useState<ToolApprovalMode>(approvalMode)
@@ -172,7 +370,7 @@ export function SetupPage({
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto" data-setup>
       <div className="mx-auto w-full max-w-[640px] px-8 pb-12 pt-12">
-        <VyotiqMark size={26} className="text-fg-strong" decorative />
+        <VyotiqMark size={28} className="text-fg-strong" decorative />
         <h1 className="mt-5 text-display font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong">Set up Agent V</h1>
         <p className="mt-1 text-sm text-muted">{INTRO[next]}</p>
 
@@ -187,22 +385,33 @@ export function SetupPage({
             changeLabel="Change the model provider"
           >
             {provider.state === 'missing_key' ? (
-              <div className="mt-3">
-                <Button variant="primary" size="sm" icon="key" onClick={onChangeProvider}>
-                  Add a key or choose a provider
-                </Button>
-              </div>
+              <>
+                {onUseEnvKey && onUseLocal && onSaveKey ? (
+                  <ConnectHere onUseEnvKey={onUseEnvKey} onUseLocal={onUseLocal} onSaveKey={onSaveKey} onCloudAccount={onChangeProvider} />
+                ) : null}
+                <div className="mt-3">
+                  <Button variant="ghost" size="sm" icon="gear" onClick={onChangeProvider}>
+                    More providers in Settings
+                  </Button>
+                </div>
+              </>
             ) : provider.state === 'failed' ? (
+              // Usually the default Ollama, which nobody chose and is not
+              // running: why stays quiet, and pasting a key comes first —
+              // "Check again" as the primary button sent most people nowhere.
               <>
                 <p className="mt-1 text-xs leading-[18px] text-tertiary" data-setup-provider-reason>
                   {provider.reason}
                 </p>
+                {onUseEnvKey && onUseLocal && onSaveKey ? (
+                  <ConnectHere onUseEnvKey={onUseEnvKey} onUseLocal={onUseLocal} onSaveKey={onSaveKey} onCloudAccount={onChangeProvider} />
+                ) : null}
                 <div className="mt-3 flex items-center gap-2">
-                  <Button variant="primary" size="sm" icon="retry" onClick={recheck}>
-                    Check again
+                  <Button variant="ghost" size="sm" icon="retry" onClick={recheck}>
+                    Check {provider.label} again
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={onChangeProvider}>
-                    Choose a provider
+                  <Button variant="ghost" size="sm" icon="gear" onClick={onChangeProvider}>
+                    More providers in Settings
                   </Button>
                 </div>
               </>

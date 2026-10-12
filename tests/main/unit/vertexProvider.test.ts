@@ -43,6 +43,16 @@ beforeAll(async () => {
         return
       }
       res.writeHead(200, { 'content-type': 'text/event-stream' })
+      if (req.url!.includes('/endpoints/openapi/')) {
+        res.end(
+          sse([
+            { id: 'c1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'Hello from Llama' } }] },
+            { id: 'c1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+            { id: 'c1', object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } }
+          ]) + 'data: [DONE]\n\n'
+        )
+        return
+      }
       if (req.url!.includes('/publishers/anthropic/')) {
         res.end(
           sse([
@@ -167,13 +177,22 @@ describe('Vertex AI', () => {
     expect(seen.map((s) => s.headers.authorization)).toEqual(['Bearer ya29.t1', 'Bearer ya29.t2'])
   })
 
-  it('refuses models from other publishers instead of guessing a route', async () => {
+  it('streams an open model through the OpenAI-compatible endpoint, named publisher/model', async () => {
     const chunks = await collect(streamVertex(req({ model: 'meta/llama-3.3-70b-instruct-maas' }), endpoint()))
-    expect(chunks).toEqual([{ type: 'error', error: expect.stringMatching(/other publishers/) }])
+    expect(seen[0]!.url).toBe('/v1/projects/proj/locations/global/endpoints/openapi/chat/completions')
+    expect(seen[0]!.headers.authorization).toBe('Bearer ya29.t1')
+    expect(JSON.parse(seen[0]!.body).model).toBe('meta/llama-3.3-70b-instruct-maas')
+    expect(chunks.filter((c) => c.type === 'text').map((c) => c.text).join('')).toBe('Hello from Llama')
+    expect(chunks.at(-1)).toMatchObject({ type: 'done' })
+  })
+
+  it('refuses the publishers whose native routes it does not speak, instead of guessing', async () => {
+    const chunks = await collect(streamVertex(req({ model: 'mistralai/mistral-medium-3' }), endpoint()))
+    expect(chunks).toEqual([{ type: 'error', error: expect.stringMatching(/Mistral and AI21/) }])
     expect(seen).toHaveLength(0)
   })
 
-  it('lists Gemini and Claude chat models from the registry after a real sign-in', async () => {
+  it('lists Gemini, Claude and open chat models from the registry after a real sign-in', async () => {
     __setModelsDevRegistryForTests({
       'google-vertex': {
         models: {
@@ -186,7 +205,7 @@ describe('Vertex AI', () => {
     })
     const models = await listVertexModels(SA, undefined, { tokenUrl: `${origin}/token` })
     expect(tokens).toBe(1)
-    expect(models.map((m) => m.id)).toEqual(['claude-sonnet-5-5', 'gemini-2.5-pro'])
+    expect(models.map((m) => m.id)).toEqual(['claude-sonnet-5-5', 'gemini-2.5-pro', 'meta/llama-3.3-70b-instruct-maas'])
     expect(models[0]).toMatchObject({ contextWindow: 1_000_000, supportsVision: true, supportsTools: true })
   })
 })

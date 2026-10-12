@@ -344,6 +344,39 @@ describe('skills and rules on disk', () => {
     ...partial
   })
 
+  it('lists a skill installed twice once — the copy the agent uses, saying where the other is', () => {
+    const items = build({
+      installed: [installed({ id: 'design-level-up', name: 'Design level-up', kind: 'skill' })],
+      localSkills: [
+        skill({
+          id: 'skill:local:personal:design-level-up',
+          name: 'design-level-up',
+          source: 'personal',
+          skillPath: 'C:/u/.claude/skills/design-level-up/SKILL.md',
+          relativePath: '~/.claude/skills/design-level-up/SKILL.md'
+        })
+      ]
+    })
+    const skills = items.filter((i) => i.kind === 'skill')
+    expect(skills).toHaveLength(1)
+    // Yours outranks a package's, as in the prompt.
+    expect(skills[0]!.localSkill?.source).toBe('personal')
+    expect(skills[0]!.alsoIn).toEqual(['Bundled'])
+  })
+
+  it('keeps a project copy over yours, and names yours', () => {
+    const items = build({
+      localSkills: [
+        skill({ id: 'p', name: 'ship-notes', source: 'personal', skillPath: 'C:/u/.claude/skills/ship-notes/SKILL.md', relativePath: '~/.claude/skills/ship-notes/SKILL.md' }),
+        skill({})
+      ]
+    })
+    const skills = items.filter((i) => i.kind === 'skill')
+    expect(skills).toHaveLength(1)
+    expect(skills[0]!.localSkill?.source).toBe('project')
+    expect(skills[0]!.alsoIn).toEqual(['~/.claude/skills'])
+  })
+
   it('credits a project skill to the workspace and a personal one to you', () => {
     const items = build({
       workspaceName: 'agent-v',

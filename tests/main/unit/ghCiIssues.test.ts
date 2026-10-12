@@ -61,7 +61,11 @@ import {
 
 /** Lines of a real `gh run view --job 111444405036 --log-failed` (gh 2.98, 2026-10-04). */
 const REAL_LOG = readFileSync(join(__dirname, '../../fixtures/github/run-view-log-failed.txt'), 'utf8')
+/** The same job read from the jobs API (`gh api …/actions/jobs/111444405036/logs`, gh 2.98, 2026-10-08): its head and failing step. */
+const REAL_API_LOG = readFileSync(join(__dirname, '../../fixtures/github/job-log-api.txt'), 'utf8')
 const JOB_URL = 'https://github.com/vyotiqai/vyotiq-agent-v/actions/runs/37205055756/job/111444405036'
+const JOB = { host: 'github.com', owner: 'vyotiqai', repo: 'vyotiq-agent-v', runId: '37205055756', jobId: '111444405036' }
+const JOB_LOG_ARGS = 'api --allow-escape-sequences repos/vyotiqai/vyotiq-agent-v/actions/jobs/111444405036/logs'
 
 function ghError(stderr: string): Error {
   return Object.assign(new Error(`Command failed: gh\n${stderr}`), { stderr, code: 1 })
@@ -73,8 +77,9 @@ beforeEach(() => {
 
 describe('parseActionsJobUrl', () => {
   it('reads the run and job ids from a check link GitHub reported', () => {
-    expect(parseActionsJobUrl(JOB_URL)).toEqual({ runId: '37205055756', jobId: '111444405036' })
-    expect(parseActionsJobUrl(`${JOB_URL}?pr=64`)).toEqual({ runId: '37205055756', jobId: '111444405036' })
+    expect(parseActionsJobUrl(JOB_URL)).toEqual(JOB)
+    expect(parseActionsJobUrl(`${JOB_URL}?pr=64`)).toEqual(JOB)
+    expect(parseActionsJobUrl('https://ghe.example.com/team/app/actions/runs/1/job/2')).toMatchObject({ host: 'ghe.example.com', owner: 'team', repo: 'app' })
   })
 
   it('refuses links that are not an Actions job', () => {
@@ -105,6 +110,13 @@ describe('extractFailedStepLog', () => {
     expect(result.excerpt).not.toMatch(/UNKNOWN STEP|\d{4}-\d{2}-\d{2}T|\^\[\[|\uFEFF/)
   })
 
+  it('reads the jobs API log (no job and step columns) to the same excerpt', () => {
+    const api = extractFailedStepLog(REAL_API_LOG)
+    expect(api).toEqual(extractFailedStepLog(REAL_LOG))
+    // A tab in a line's own text is not taken for the job and step columns.
+    expect(extractFailedStepLog('2026-10-04T13:16:57.1Z a\tb\tc').excerpt).toBe('a\tb\tc')
+  })
+
   it('reads CRLF output the same way', () => {
     expect(extractFailedStepLog(REAL_LOG.replace(/\r?\n/g, '\r\n'))).toEqual(extractFailedStepLog(REAL_LOG))
   })
@@ -130,16 +142,18 @@ describe('extractFailedStepLog', () => {
 })
 
 describe('prCheckLog', () => {
-  it('reads --log-failed for the job in the link', async () => {
-    ghRoute.mockImplementation((args) => (args.join(' ') === 'run view --job 111444405036 --log-failed' ? REAL_LOG : ghError('unexpected')))
+  it("reads the job's own log from the jobs API, for the repository in the link", async () => {
+    // Not `gh run view --job --log-failed`: that waits for the whole run and reads its latest attempt.
+    ghRoute.mockImplementation((args) => (args.join(' ') === JOB_LOG_ARGS ? REAL_API_LOG : ghError(`unexpected ${args.join(' ')}`)))
     const result = await prCheckLog('/ws', JOB_URL)
     expect(result.step).toBe('node scripts/typecheck-tests-ratchet.mjs')
+    expect(result.foundError).toBe(true)
   })
 
-  it('reads the whole log when the job logged no failed step', async () => {
-    // A passing job answers --log-failed with nothing (seen on job 111444405079).
-    ghRoute.mockImplementation((args) => (args.includes('--log-failed') ? '' : 'j\ts\t2026-10-04T13:16:57.1Z all good'))
-    const result = await prCheckLog('/ws', JOB_URL)
+  it('asks the GitHub Enterprise host a check links to', async () => {
+    ghRoute.mockImplementation(() => '2026-10-04T13:16:57.1Z all good')
+    const result = await prCheckLog('/ws', 'https://ghe.example.com/team/app/actions/runs/1/job/2')
+    expect(ghRoute.mock.calls[0]![0]).toEqual(['api', '--hostname', 'ghe.example.com', '--allow-escape-sequences', 'repos/team/app/actions/jobs/2/logs'])
     expect(result).toMatchObject({ foundError: false, excerpt: 'all good' })
   })
 

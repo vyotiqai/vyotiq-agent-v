@@ -1,10 +1,10 @@
 import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import type { ToolApprovalDecision } from '@shared/ipc'
+import { APPROVAL_NOTE_MAX, type ToolApprovalDecision, type ToolApprovalExtras } from '@shared/ipc'
 import type { UiToolApproval } from '@shared/transcript'
 import { TERMINAL_DEFAULT_TIMEOUT_MS, TOOL_APPROVAL_TIMEOUT_MS } from '@shared/agentTimeouts'
 import { parseArgsRecord, parseMcpToolDisplay } from '@shared/toolSummary'
 import { Icon } from '@renderer/lib/icons'
-import { Button, StatusGlyph, cn, pushToast } from '@renderer/lib/ui'
+import { Button, StatusGlyph, Textarea, cn, pushToast } from '@renderer/lib/ui'
 import { requestOpenSettings } from '@renderer/app/openSettings'
 import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE } from '@renderer/lib/utils/layout'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
@@ -13,14 +13,15 @@ import { typingElsewhere } from '@renderer/lib/a11y'
 import { toolLabel } from '@renderer/features/chat/toolUi'
 import { RecordActionsContext, plainProse } from './WorkItems'
 import { TickedText } from './TickedText'
+import { ApprovalChangePreview } from './ApprovalChangePreview'
 
-const FILE_TOOLS = new Set(['edit', 'str_replace', 'delete', 'edit_notebook', 'memory_write'])
+const FILE_TOOLS = new Set(['edit', 'str_replace', 'delete', 'move', 'edit_notebook', 'memory_write'])
 
 /** "run a command?" — the thing in plain words, never the running verb. */
 export function approvalTitle(approval: UiToolApproval, serverNames?: ReadonlyMap<string, string>): string {
   const name = approval.toolName
   if (name === 'terminal') return 'run a command?'
-  if (FILE_TOOLS.has(name)) return name === 'delete' ? 'delete a file?' : 'change a file?'
+  if (FILE_TOOLS.has(name)) return name === 'delete' ? 'delete a file?' : name === 'move' ? 'move a file?' : 'change a file?'
   if (name.startsWith('browser_')) return 'use the browser?'
   const mcp = parseMcpToolDisplay(name)
   if (mcp) return `use ${serverNames?.get(mcp.serverId) ?? mcp.serverId} · ${mcp.toolName}?`
@@ -31,8 +32,22 @@ export function approvalTitle(approval: UiToolApproval, serverNames?: ReadonlyMa
  * "Always allowed pnpm vitest": a rule now runs it without asking, so say so
  * once, and where that rule lives.
  */
-function sayAlwaysAllowed(approval: UiToolApproval): void {
-  const what = approval.toolName === 'terminal' ? approval.alwaysAllowCommand : approval.toolName
+function sayAlwaysAllowed(approval: UiToolApproval, extras?: ToolApprovalExtras): void {
+  if (extras?.allowFolder && approval.alwaysAllowFolder) {
+    // Saved as permission rules, so that is where to find it again.
+    pushToast(`Always allowed edits under ${approval.alwaysAllowFolder}/`, {
+      detail: 'Settings › Agent › Permission rules',
+      icon: 'shield',
+      action: { label: 'Settings', onClick: () => requestOpenSettings('agent') }
+    })
+    return
+  }
+  const what =
+    approval.toolName === 'terminal'
+      ? extras?.allowProgram && approval.alwaysAllowProgram
+        ? `${approval.alwaysAllowProgram} commands`
+        : approval.alwaysAllowCommand
+      : approval.toolName
   if (!what) return
   pushToast(`Always allowed ${what}`, {
     detail: 'In this workspace · Settings › Agent',
@@ -66,12 +81,21 @@ export const ApprovalCard = memo(function ApprovalCard({
   requestedAt: number | null
   /** What the agent said just before asking, when it said anything. */
   why?: string
-  onDecide?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
+  onDecide?: (requestId: string, decision: ToolApprovalDecision, extras?: ToolApprovalExtras) => void | Promise<void>
   /** Focus Allow once only in the focused pane. */
   captureFocus?: boolean
 }) {
+  // A note with Deny ("use the staging database instead"), and the command
+  // as edited before Allow once. Both are opened on purpose; the plain
+  // buttons and Alt+A / Alt+D stay one press.
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [edited, setEdited] = useState<string | null>(null)
   const [phase, setPhase] = useState<'idle' | 'pending' | 'done'>('idle')
   const [pendingDecision, setPendingDecision] = useState<ToolApprovalDecision | null>(null)
+  /** Which of the two Always buttons was pressed, for its "Sending…". */
+  const [pendingFolder, setPendingFolder] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showArgs, setShowArgs] = useState(false)
   const allowRef = useRef<HTMLButtonElement>(null)
@@ -86,14 +110,15 @@ export const ApprovalCard = memo(function ApprovalCard({
   const { mcpServerNames } = useContext(RecordActionsContext)
 
   const decide = useCallback(
-    (decision: ToolApprovalDecision): void => {
+    (decision: ToolApprovalDecision, extras?: ToolApprovalExtras): void => {
       if (phase !== 'idle' || !onDecide) return
       setPhase('pending')
       setPendingDecision(decision)
+      setPendingFolder(Boolean(extras?.allowFolder || extras?.allowProgram))
       setError(null)
-      void Promise.resolve(onDecide(approval.requestId, decision))
+      void Promise.resolve(extras ? onDecide(approval.requestId, decision, extras) : onDecide(approval.requestId, decision))
         .then(() => {
-          if (decision === 'always') sayAlwaysAllowed(approval)
+          if (decision === 'always') sayAlwaysAllowed(approval, extras)
           if (mounted.current) setPhase('done')
         })
         .catch((err: unknown) => {
@@ -118,7 +143,35 @@ export const ApprovalCard = memo(function ApprovalCard({
     allow.focus({ preventScroll: true })
   }, [approval.requestId, canFocus])
 
-  // Alt A allows once, Alt D denies — Esc is left to stop the run.
+  const args = parseArgsRecord(approval.argsPreview)
+  const isCommand = approval.toolName === 'terminal'
+  // The terminal's "Always allow" is per command, as main scoped it; a command
+  // that chains or redirects cannot be, so it is not offered at all.
+  // A command the guard stopped is asked one run at a time: no standing grants.
+  const guarded = Boolean(approval.danger)
+  const alwaysAllows = guarded ? null : isCommand ? (approval.alwaysAllowCommand ?? null) : approval.toolName
+  // Beside `npm test`, the program alone, so `npm run lint` stops asking too.
+  const alwaysProgram = guarded || !isCommand ? null : (approval.alwaysAllowProgram ?? null)
+  // An edit inside a folder can also be allowed for that folder only.
+  const alwaysFolder = guarded ? null : (approval.alwaysAllowFolder ?? null)
+  const command = isCommand ? (typeof args?.command === 'string' ? args.command : approval.summary) : null
+  const target = !isCommand && typeof args?.path === 'string' ? args.path : approval.summary
+  // Only a command the guard let through can be edited: an edit runs once,
+  // in place of the agent's, and is never remembered.
+  const canEdit = isCommand && !guarded && typeof args?.command === 'string'
+  const editedCommand = edited != null && edited.trim() && edited.trim() !== command?.trim() ? edited.trim() : null
+  const allowOnce = (): void => decide('once', editedCommand ? { editedCommand } : undefined)
+  const deny = (): void => {
+    const said = note.trim()
+    decide('deny', noteOpen && said ? { note: said } : undefined)
+  }
+  // Absent on older requests: the default 15 minutes. Null: no limit.
+  const timeoutMs = approval.timeoutMs === undefined ? TOOL_APPROVAL_TIMEOUT_MS : approval.timeoutMs
+
+  // Alt A allows once, Alt D denies — Esc is left to stop the run. Through a
+  // ref, so the listener is not re-added on every keystroke in the note.
+  const keysRef = useRef({ allowOnce, deny })
+  keysRef.current = { allowOnce, deny }
   useEffect(() => {
     if (!canDecide || !captureFocus) return undefined
     const onKey = (e: KeyboardEvent): void => {
@@ -127,21 +180,12 @@ export const ApprovalCard = memo(function ApprovalCard({
       const key = e.code === 'KeyA' ? 'a' : e.code === 'KeyD' ? 'd' : e.key.toLowerCase()
       if (key !== 'a' && key !== 'd') return
       e.preventDefault()
-      decide(key === 'a' ? 'once' : 'deny')
+      if (key === 'a') keysRef.current.allowOnce()
+      else keysRef.current.deny()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canDecide, captureFocus, decide])
-
-  const args = parseArgsRecord(approval.argsPreview)
-  const isCommand = approval.toolName === 'terminal'
-  // The terminal's "Always allow" is per command, as main scoped it; a command
-  // that chains or redirects cannot be, so it is not offered at all.
-  // A command the guard stopped is asked one run at a time: no standing grants.
-  const guarded = Boolean(approval.danger)
-  const alwaysAllows = guarded ? null : isCommand ? (approval.alwaysAllowCommand ?? null) : approval.toolName
-  const command = isCommand ? (typeof args?.command === 'string' ? args.command : approval.summary) : null
-  const target = !isCommand && typeof args?.path === 'string' ? args.path : approval.summary
+  }, [canDecide, captureFocus])
 
   const facts: string[] = [approval.mutating ? 'Can change files or run code' : 'Reads only']
   if (isCommand) {
@@ -150,8 +194,8 @@ export const ApprovalCard = memo(function ApprovalCard({
     const timeout = typeof args?.timeoutMs === 'number' && args.timeoutMs > 0 ? args.timeoutMs : TERMINAL_DEFAULT_TIMEOUT_MS
     facts.push(`times out after ${minutes(timeout)}`)
   }
-  if (requestedAt != null) {
-    const left = requestedAt + TOOL_APPROVAL_TIMEOUT_MS - now
+  if (requestedAt != null && timeoutMs != null) {
+    const left = requestedAt + timeoutMs - now
     facts.push(left > 0 ? `denied automatically in ${minutes(left)}` : 'denying now')
   }
   const age = requestedAt != null ? Math.max(0, Math.floor((now - requestedAt) / 60_000)) : null
@@ -182,16 +226,31 @@ export const ApprovalCard = memo(function ApprovalCard({
             <TickedText text={plainProse(why)} code="rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em]" />
           </p>
         ) : null}
-        <pre className="scroll-thin overflow-x-auto rounded-md border border-border bg-sunken px-3 py-2 font-mono text-xs leading-[18px] text-fg-strong">
-          {command != null ? (
-            <>
-              <span className="select-none text-tertiary">$ </span>
-              {command}
-            </>
-          ) : (
-            target
-          )}
-        </pre>
+        {editing && canEdit ? (
+          <Textarea
+            size="sm"
+            rows={Math.min(8, Math.max(2, (edited ?? command ?? '').split('\n').length))}
+            className="font-mono"
+            aria-label="Command to run"
+            value={edited ?? command ?? ''}
+            disabled={!canDecide}
+            onChange={(e) => setEdited(e.target.value)}
+            data-approval-edit=""
+          />
+        ) : approval.changePreview && !isCommand ? (
+          <ApprovalChangePreview preview={approval.changePreview} />
+        ) : (
+          <pre className="scroll-thin overflow-x-auto rounded-md border border-border bg-sunken px-3 py-2 font-mono text-xs leading-[18px] text-fg-strong">
+            {command != null ? (
+              <>
+                <span className="select-none text-tertiary">$ </span>
+                {command}
+              </>
+            ) : (
+              target
+            )}
+          </pre>
+        )}
         {approval.danger ? (
           <p className="flex items-start gap-1.5 text-xs text-danger" data-approval-danger="">
             <Icon name="warning" size={13} className="mt-px shrink-0" aria-hidden />
@@ -216,6 +275,25 @@ export const ApprovalCard = memo(function ApprovalCard({
             ) : null}
           </div>
         ) : null}
+        {noteOpen ? (
+          <Textarea
+            size="sm"
+            rows={2}
+            aria-label="What to do instead"
+            placeholder="What it should do instead — sent with Deny"
+            maxLength={APPROVAL_NOTE_MAX}
+            value={note}
+            disabled={!canDecide}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                deny()
+              }
+            }}
+            data-approval-note=""
+          />
+        ) : null}
         {error ? (
           <p role="alert" className="text-xs text-danger">
             {error}
@@ -230,9 +308,9 @@ export const ApprovalCard = memo(function ApprovalCard({
             title={`Allow once (${altChordLabel('a')})`}
             aria-keyshortcuts="Alt+A"
             disabled={!canDecide}
-            onClick={() => decide('once')}
+            onClick={allowOnce}
           >
-            {pendingText('once', 'Allow once')}
+            {pendingText('once', editedCommand ? 'Run edited once' : 'Allow once')}
           </Button>
           {guarded ? null : (
             <Button size="sm" disabled={!canDecide} onClick={() => decide('session')} title="Allowed for the rest of this task, follow-ups included">
@@ -241,6 +319,23 @@ export const ApprovalCard = memo(function ApprovalCard({
           )}
           {/* Always shown: hiding it below a width left no way to choose it in
               a normal window with the inspector open. The row wraps instead. */}
+          {alwaysFolder ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canDecide}
+              title={`Edits files under ${alwaysFolder}/ without asking, in this and later tasks`}
+              onClick={() => decide('always', { allowFolder: true })}
+            >
+              {pendingDecision === 'always' && phase === 'pending' && pendingFolder ? (
+                'Sending…'
+              ) : (
+                <>
+                  Always allow edits under <code className="font-mono text-caption">{alwaysFolder}/</code>
+                </>
+              )}
+            </Button>
+          ) : null}
           {alwaysAllows ? (
             <span className="inline-flex">
               <Button
@@ -254,7 +349,7 @@ export const ApprovalCard = memo(function ApprovalCard({
                 }
                 onClick={() => decide('always')}
               >
-                {pendingDecision === 'always' && phase === 'pending' ? (
+                {pendingDecision === 'always' && phase === 'pending' && !pendingFolder ? (
                   'Sending…'
                 ) : (
                   <>
@@ -264,16 +359,59 @@ export const ApprovalCard = memo(function ApprovalCard({
               </Button>
             </span>
           ) : null}
+          {alwaysProgram ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canDecide}
+              title={`Runs every ${alwaysProgram} command in this workspace without asking — never one that chains or redirects`}
+              onClick={() => decide('always', { allowProgram: true })}
+            >
+              {pendingDecision === 'always' && phase === 'pending' && pendingFolder ? (
+                'Sending…'
+              ) : (
+                <>
+                  Always allow <code className="font-mono text-caption">{alwaysProgram} …</code>
+                </>
+              )}
+            </Button>
+          ) : null}
+          {canEdit && !editing ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="edit"
+              disabled={!canDecide}
+              title="Change the command, then run it once"
+              onClick={() => {
+                setEditing(true)
+                setEdited(command ?? '')
+              }}
+            >
+              Edit
+            </Button>
+          ) : null}
           <span className="flex-1" />
+          {!noteOpen ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canDecide}
+              title="Deny, and tell the agent what to do instead"
+              onClick={() => setNoteOpen(true)}
+            >
+              Deny with a note…
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="danger"
             title={`Deny (${altChordLabel('d')})`}
             aria-keyshortcuts="Alt+D"
             disabled={!canDecide}
-            onClick={() => decide('deny')}
+            onClick={deny}
           >
-            {pendingText('deny', 'Deny')}
+            {pendingText('deny', noteOpen && note.trim() ? 'Deny and send' : 'Deny')}
           </Button>
         </div>
       </div>

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   BUILTIN_COMMANDS,
-  buildHelpMessage,
   resolveBuiltin
 } from '../../../src/main/agent/slashCommands/builtins'
 import { resolveMcpCommand } from '../../../src/main/agent/slashCommands/mcp'
@@ -69,25 +68,25 @@ describe('builtin slash commands', () => {
   })
 
   it('resolves client actions', () => {
-    expect(resolveBuiltin('builtin:clear', '', '')).toEqual({
+    expect(resolveBuiltin('builtin:clear', '')).toEqual({
       action: 'client',
       clientAction: 'clear'
     })
-    expect(resolveBuiltin('builtin:compact', '', '')).toEqual({
+    expect(resolveBuiltin('builtin:compact', '')).toEqual({
       action: 'client',
       clientAction: 'compact'
     })
-    expect(resolveBuiltin('builtin:compact', 'keep auth rewrite', '')).toEqual({
+    expect(resolveBuiltin('builtin:compact', 'keep auth rewrite')).toEqual({
       action: 'client',
       clientAction: 'compact',
       trailingText: 'keep auth rewrite'
     })
-    expect(resolveBuiltin('builtin:create-rule', 'security', '')).toEqual({
+    expect(resolveBuiltin('builtin:create-rule', 'security')).toEqual({
       action: 'client',
       clientAction: 'create_rule',
       trailingText: 'security'
     })
-    expect(resolveBuiltin('builtin:create-skill', 'personal review', '')).toEqual({
+    expect(resolveBuiltin('builtin:create-skill', 'personal review')).toEqual({
       action: 'client',
       clientAction: 'create_skill',
       trailingText: 'personal review'
@@ -99,12 +98,12 @@ describe('builtin slash commands', () => {
       expect.arrayContaining(['goal', 'loop'])
     )
     // 15 before /plan was removed with Plan mode, 14 before the two
-    // /harness-* commands were removed with the self-harness loop; 13 with /add-dir.
-    expect(BUILTIN_COMMANDS).toHaveLength(13)
+    // /harness-* commands were removed with the self-harness loop; 13 with /add-dir; 15 with /init and /review.
+    expect(BUILTIN_COMMANDS).toHaveLength(15)
     expect(BUILTIN_COMMANDS.map((c) => c.trigger)).not.toContain('plan')
     expect(BUILTIN_COMMANDS.map((c) => c.trigger)).not.toContain('harness-review')
     expect(BUILTIN_COMMANDS.map((c) => c.trigger)).not.toContain('harness-apply')
-    const send = resolveBuiltin('builtin:goal', 'fix flaky tests', '')
+    const send = resolveBuiltin('builtin:goal', 'fix flaky tests')
     expect(send?.action).toBe('send')
     if (send?.action === 'send') {
       expect(send.message).toContain('[Goal]')
@@ -115,45 +114,45 @@ describe('builtin slash commands', () => {
       expect(send.message).not.toContain('create_goal')
       expect(send.message).toContain('update_goal')
     }
-    expect(resolveBuiltin('builtin:goal', 'pause', '')).toEqual({
+    expect(resolveBuiltin('builtin:goal', 'pause')).toEqual({
       action: 'client',
       clientAction: 'goal_pause'
     })
-    expect(resolveBuiltin('builtin:goal', 'resume', '')).toEqual({
+    expect(resolveBuiltin('builtin:goal', 'resume')).toEqual({
       action: 'client',
       clientAction: 'goal_resume'
     })
-    expect(resolveBuiltin('builtin:goal', 'complete', '')).toEqual({
+    expect(resolveBuiltin('builtin:goal', 'complete')).toEqual({
       action: 'client',
       clientAction: 'goal_complete'
     })
-    expect(resolveBuiltin('builtin:goal', '', '')).toEqual({
+    expect(resolveBuiltin('builtin:goal', '')).toEqual({
       action: 'client',
       clientAction: 'goal_usage'
     })
-    expect(resolveBuiltin('builtin:loop', '', '')).toEqual({
+    expect(resolveBuiltin('builtin:loop', '')).toEqual({
       action: 'client',
       clientAction: 'loop_status'
     })
-    expect(resolveBuiltin('builtin:loop', 'stop', '')).toEqual({
+    expect(resolveBuiltin('builtin:loop', 'stop')).toEqual({
       action: 'client',
       clientAction: 'loop_stop'
     })
-    expect(resolveBuiltin('builtin:loop', '30s check CI', '')).toEqual({
+    expect(resolveBuiltin('builtin:loop', '30s check CI')).toEqual({
       action: 'client',
       clientAction: 'loop_set',
       trailingText: '30s check CI'
     })
-    const usage = resolveBuiltin('builtin:loop', 'check CI', '')
-    expect(usage?.action).toBe('send')
+    // Usage and parse errors stay with the person typing; nothing reaches the model.
+    expect(resolveBuiltin('builtin:loop', 'check CI')?.action).toBe('notice')
+    expect(resolveBuiltin('builtin:loop', '10s check CI')).toEqual({
+      action: 'notice',
+      message: expect.stringMatching(/30s/)
+    })
   })
 
-  it('resolves help as a send message', () => {
-    const help = buildHelpMessage(BUILTIN_COMMANDS)
-    const result = resolveBuiltin('builtin:help', '', help)
-    expect(result).toEqual({ action: 'send', message: help })
-    expect(help).toContain('/compact')
-    expect(help).toContain('/clear')
+  it('resolves help to reopening the slash menu, not a paid run', () => {
+    expect(resolveBuiltin('builtin:help', '')).toEqual({ action: 'client', clientAction: 'help' })
   })
 })
 

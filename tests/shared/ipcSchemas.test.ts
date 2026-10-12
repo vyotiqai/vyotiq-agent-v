@@ -884,7 +884,7 @@ describe('ipc schemas', () => {
     expect(parsed.autoCompactThresholdRatio).toBe(0.55)
     expect(parsed.settingsVersion).toBe(SETTINGS_FORMAT_VERSION)
     // Pin the migrated format version so an accidental bump must update this test.
-    expect(SETTINGS_FORMAT_VERSION).toBe(6)
+    expect(SETTINGS_FORMAT_VERSION).toBe(7)
     expect(parsed.thinkingEffort).toBe(DEFAULT_THINKING_EFFORT)
     expect(parsed.thinkingEffort).toBe('low')
     expect(parsed.autoModeSwitch).toBe(true)

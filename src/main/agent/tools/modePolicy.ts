@@ -47,6 +47,9 @@ export const ASK_SAFE_BUILTIN = new Set([
   'concept_search',
   'list_dir',
   'browser_search',
+  // A plain GET and a search: read-only, gated like the browser (a URL can carry data out).
+  'web_fetch',
+  'web_search',
   'ask_question',
   // Draws a view in the record; changes nothing.
   'show_view',
@@ -61,6 +64,8 @@ export const ASK_SAFE_BUILTIN = new Set([
   'browser_wait_for_url',
   'browser_wait_for_text',
   'browser_hover',
+  // Reads the page's console and failed requests; touches neither.
+  'browser_console',
   // Reads the screen and changes nothing; the approval gate still asks first.
   'screen_snip',
   // Catalog listers only. `mcp_read_resource` / `mcp_get_prompt` call into a
@@ -74,8 +79,9 @@ export const ASK_SAFE_BUILTIN = new Set([
   'Skill',
   'git_status',
   'git_diff',
-  // Reads a pull request's checks and CI logs from GitHub; changes nothing.
+  // Read a pull request's checks, CI logs and discussion from GitHub; change nothing.
   'github_pr_checks',
+  'github_pr_comments',
   'lsp'
   // `diagnostics` spawns a shell — Agent-only, not Ask.
 ])
@@ -182,8 +188,8 @@ export function modeSectionMarkdown(
           ...(opts?.inlineInstance
             ? []
             : [
-                'Root-only agent-instance tools may be available, and whether to use them is a judgment call. Delegate for any task that is not a single trivial action — the parent handles only a direct answer to a question, a single read-only lookup, or a single one-line edit; never spawn for that. Never fan out steps that depend on each other. When the run does delegate, plan first with `create_plan` (Goal, Steps, Done when) and decompose the plan into a structured set of small, atomic, independent tasks — one verifiable deliverable per child instance, one task per instance so no child is overloaded. Give the plan its steps as `todos` with ids — every plan step maps to one child agent instance — and spawn each child with that step’s id as `step_id` (and `read_only: true` when it only reads). Briefs carry outcome, sub-tasks, done-when and affected paths, since the child sees nothing of this conversation. Spawn them all in one step and await them together in one step, and follow the catalog schemas for the spawn, await, and merge lifecycle. Briefs demand verified evidence; a child reports anything unverified as unknown, and the parent verifies each child’s summary before reporting success.',
-                'Batch independent tool calls within a step first; work that genuinely decomposes goes to child instances as small briefs rather than being executed step-by-step in the parent, while a single small task stays in the parent.'
+                'Root-only agent-instance tools may be available, and whether to use them is a judgment call. Delegate when the work splits into two or more independent pieces worth running in parallel, or when one piece is large enough that a child with a narrow brief would finish it faster. Keep the rest in the parent — a direct answer, a read-only lookup, a small or tightly coupled edit — and never spawn just to look thorough. Never fan out steps that depend on each other. When the run does delegate, plan first with `create_plan` (Goal, Steps, Done when) and decompose the delegated work into a structured set of small, atomic, independent tasks — one verifiable deliverable per child instance, one task per instance so no child is overloaded. Give the plan its steps as `todos` with ids — each delegated step maps to one child agent instance — and spawn each child with that step’s id as `step_id` (and `read_only: true` when it only reads). Briefs carry outcome, sub-tasks, done-when and affected paths, since the child sees nothing of this conversation. Spawn them all in one step and await them together in one step, and follow the catalog schemas for the spawn, await, and merge lifecycle. Briefs demand verified evidence; a child reports anything unverified as unknown, and the parent verifies each child’s summary before reporting success.',
+                'Batch independent tool calls within a step first; work that genuinely decomposes goes to child instances as small briefs rather than being executed step-by-step in the parent, while small or tightly coupled work stays in the parent.'
               ])
         ].join('\n')
       )

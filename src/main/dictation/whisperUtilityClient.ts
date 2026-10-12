@@ -46,7 +46,7 @@ type UtilityChild = {
 export type DictationWhisperBackend = {
   ensure: (modelDir: string, modelId: string, signal?: AbortSignal) => Promise<void>
   /** `modelId` picks one of the loaded models; without it, the last one ensured. */
-  transcribe: (pcm16k: string, sampleRate: number, signal?: AbortSignal, modelId?: string) => Promise<string>
+  transcribe: (pcm16k: string, sampleRate: number, signal?: AbortSignal, modelId?: string, language?: string) => Promise<string>
   dispose: () => Promise<void>
 }
 
@@ -141,9 +141,9 @@ export class DictationUtilityClient implements DictationWhisperBackend {
   }
 
   /** `''` when the audio had no words — a pause is an answer, not a failure. */
-  async transcribe(pcm16k: string, sampleRate: number, signal?: AbortSignal, modelId?: string): Promise<string> {
+  async transcribe(pcm16k: string, sampleRate: number, signal?: AbortSignal, modelId?: string, language?: string): Promise<string> {
     const res = await this.request(
-      { op: 'transcribe', pcm16k, sampleRate, ...(modelId ? { modelId } : {}) },
+      { op: 'transcribe', pcm16k, sampleRate, ...(modelId ? { modelId } : {}), ...(language ? { language } : {}) },
       this.timeoutMs,
       signal
     )

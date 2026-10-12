@@ -29,7 +29,18 @@ test.describe('Stop, Resume and the Inbox', () => {
       // No notice for a task that needs you: the Inbox must still have it.
       await window.vyotiq.setSettings({
         toolApprovalOnboardingDone: true,
-        notifications: { enabled: true, desktop: 'off', agentRunFinished: true, agentRunFailed: true, agentNeedsYou: false, system: true }
+        notifications: {
+          enabled: true,
+          desktop: 'off',
+          agentRunFinished: true,
+          agentRunFailed: true,
+          agentNeedsYou: false,
+          system: true,
+          sound: true,
+          quietHours: { enabled: false, start: '22:00', end: '07:00' },
+          remote: 'off',
+          remoteWhen: 'away'
+        }
       })
       localStorage.removeItem('vyotiq.chatPaneLayout')
     })
@@ -63,9 +74,10 @@ test.describe('Stop, Resume and the Inbox', () => {
     await page.keyboard.press('Escape')
     await expect(inbox).toBeHidden()
 
-    // Stop from the header: it says so, naming the task, with Resume.
+    // Stop the live run with Escape — the composer's Stop button is the same
+    // stop — and it says so, naming the task, with Resume.
     const pane = page.locator('[data-task-pane]').first()
-    await pane.getByRole('button', { name: 'Stop', exact: true }).click()
+    await page.keyboard.press('Escape')
     const toast = page.locator('[data-toast]').filter({ hasText: 'Stopped' })
     await expect(toast).toContainText('Run the suite and build', { timeout: 20_000 })
     await expect(page.locator('[data-receipt-outcome="stopped"]').first()).toBeVisible({ timeout: 20_000 })
@@ -76,7 +88,7 @@ test.describe('Stop, Resume and the Inbox', () => {
     await expect(nav.locator('[data-nav-section="needs"]')).toContainText('Run the suite and build', { timeout: 40_000 })
 
     // Stopped again, the header's ⋯ leads with Resume, and it carries on too.
-    await pane.getByRole('button', { name: 'Stop', exact: true }).click()
+    await page.keyboard.press('Escape')
     await expect(page.locator('[data-toast]').filter({ hasText: 'Stopped' }).first()).toBeVisible({ timeout: 20_000 })
     await pane.getByRole('button', { name: /^More — resume/ }).click({ timeout: 20_000 })
     const menu = page.getByRole('menu', { name: 'Task actions' })

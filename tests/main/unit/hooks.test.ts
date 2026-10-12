@@ -7,7 +7,11 @@ const userData = mkdtempSync(join(tmpdir(), 'vyotiq-hooks-ud-'))
 vi.mock('electron', () => ({ app: { getPath: (n: string) => (n === 'userData' ? userData : tmpdir()) } }))
 
 import {
+  decideWorkspaceHooks,
+  ensureHooksFile,
+  forgetWorkspaceHooksDecision,
   hookCommands,
+  hooksOverview,
   loadRunHooks,
   parseHooksFile,
   readHooksFile,
@@ -91,6 +95,27 @@ describe('hooks', () => {
     expect(logged().find((l) => l.hook_event_name === 'Stop')).toMatchObject({ stop_hook_active: false })
   }, 30_000)
 
+  it('runs PreCompact with its trigger, SubagentStop as a helper\'s Stop, and SessionEnd with its reason', async () => {
+    writeHooks(join(userData, 'hooks.json'), {
+      PreCompact: [{ matcher: 'auto', hooks: [{ type: 'command', command: script('fold', 0, '') }] }],
+      SubagentStop: [{ hooks: [{ type: 'command', command: script('child', 2, 'helper must also run the tests') }] }],
+      SessionEnd: [{ hooks: [{ type: 'command', command: script('end', 0, '') }] }]
+    })
+    const hooks = await loadRunHooks(ws, 'run-3', null)
+    await hooks.preCompact('manual')
+    await hooks.preCompact('auto')
+    expect(await hooks.subagentStop(false)).toBe('helper must also run the tests')
+    // Awaited here only so the hook's process is gone before the folder is removed (Windows holds it).
+    await hooks.sessionEnd('done')
+    const events = logged().map((l) => [l.hook_event_name, l.trigger ?? l.reason ?? l.stop_hook_active])
+    // The matcher names the trigger: the manual fold ran nothing.
+    expect(events).toEqual([
+      ['PreCompact', 'auto'],
+      ['SubagentStop', false],
+      ['SessionEnd', 'done']
+    ])
+  }, 60_000)
+
   it('runs a workspace file only once the person allows that exact file', async () => {
     const path = join(ws, '.vyotiq', 'hooks.json')
     writeHooks(path, { PreToolUse: [{ hooks: [{ type: 'command', command: script('ws', 2, 'from the repo') }] }] })
@@ -145,6 +170,7 @@ describe('hooks', () => {
         SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'git status --short' }] }],
         SubagentStop: [{ hooks: [{ type: 'command', command: 'echo done' }] }],
         PreCompact: [{ hooks: [{ type: 'command', command: 'echo compacting' }] }],
+        PermissionRequest: [{ hooks: [{ type: 'command', command: 'echo asked' }] }],
         Stop: 'not even a list'
       }
     }
@@ -154,13 +180,14 @@ describe('hooks', () => {
       PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '"$CLAUDE_PROJECT_DIR"/.claude/hooks/check.sh', timeout: 30 }] }],
       PostToolUse: [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'npx prettier --check .', timeout: 900 }] }],
       UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node .claude/hooks/prompt.js' }] }],
-      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'git status --short' }] }]
+      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'git status --short' }] }],
+      SubagentStop: [{ hooks: [{ type: 'command', command: 'echo done' }] }],
+      PreCompact: [{ hooks: [{ type: 'command', command: 'echo compacting' }] }]
     })
     expect(parsed.skipped).toEqual([
       'PreToolUse[0].hooks[1] (a "prompt" hook)',
       'PreToolUse[1].hooks[0] (a "prompt" hook)',
-      'SubagentStop (not an event Agent V runs)',
-      'PreCompact (not an event Agent V runs)',
+      'PermissionRequest (not an event Agent V runs)',
       'Stop (not a list)'
     ])
 
@@ -173,14 +200,16 @@ describe('hooks', () => {
       'PreToolUse (Bash): "$CLAUDE_PROJECT_DIR"/.claude/hooks/check.sh',
       'PostToolUse (Edit|Write): npx prettier --check .',
       'UserPromptSubmit: node .claude/hooks/prompt.js',
-      'SessionStart (startup): git status --short'
+      'SessionStart (startup): git status --short',
+      'PreCompact: echo compacting',
+      'SubagentStop: echo done'
     ])
   })
 
   it('logs skipped entries once per file version', () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
     const path = join(ws, 'h.json')
-    writeFileSync(path, JSON.stringify({ hooks: { SubagentStop: [] } }))
+    writeFileSync(path, JSON.stringify({ hooks: { PermissionRequest: [] } }))
     readHooksFile(path, 'user')
     readHooksFile(path, 'user')
     expect(warn.mock.calls.filter(([m]) => m === 'Hooks file entries skipped')).toHaveLength(1)
@@ -238,4 +267,43 @@ describe('hooks', () => {
     expect(loaded.file.hooks.Stop?.[0]?.hooks[0]?.timeout).toBe(3600)
     expect(await (await loadRunHooks(ws, 'run-t', null)).stop(false)).toBeNull()
   }, 30_000)
+})
+
+
+describe('hooks in Settings', () => {
+  it('shows both files, the workspace file’s standing, and lets it be allowed, changed and forgotten', async () => {
+    expect(hooksOverview(ws)).toMatchObject({ user: { exists: false }, workspace: { exists: false }, workspaceDecision: null })
+    const path = join(ws, '.vyotiq', 'hooks.json')
+    writeHooks(path, { PreToolUse: [{ matcher: 'terminal', hooks: [{ type: 'command', command: script('s', 0) }] }] })
+    expect(hooksOverview(ws).workspaceDecision).toBe('none')
+    expect(hooksOverview(ws).workspace?.commands).toEqual([expect.stringMatching(/^PreToolUse \(terminal\): node/)])
+
+    expect(decideWorkspaceHooks(ws, 'allow')).toBe(true)
+    expect(hooksOverview(ws).workspaceDecision).toBe('allow')
+    expect(hooksOverview(ws).trust).toEqual([expect.objectContaining({ decision: 'allow' })])
+
+    writeHooks(path, { Stop: [{ hooks: [{ type: 'command', command: script('s2', 0) }] }] })
+    expect(hooksOverview(ws).workspaceDecision).toBe('changed')
+
+    expect(forgetWorkspaceHooksDecision(ws)).toBe(true)
+    expect(hooksOverview(ws)).toMatchObject({ workspaceDecision: 'none', trust: [] })
+    expect(forgetWorkspaceHooksDecision(ws)).toBe(false)
+  })
+
+  it('logs each hook that ran, newest first', async () => {
+    writeHooks(join(userData, 'hooks.json'), { PreToolUse: [{ hooks: [{ type: 'command', command: script('blocker', 2, 'no') }] }] })
+    const hooks = await loadRunHooks(ws, 'run-1', null)
+    expect(await hooks.preToolUse('terminal', {})).toBe('no')
+    const [run] = hooksOverview(null).runs
+    expect(run).toMatchObject({ event: 'PreToolUse', source: 'user', runId: 'run-1', code: 2, stderr: 'no', timedOut: false })
+  }, 30_000)
+
+  it('writes an empty hooks file to open, and leaves an existing one alone', () => {
+    const path = join(ws, '.vyotiq', 'hooks.json')
+    ensureHooksFile(path)
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ hooks: {} })
+    writeFileSync(path, '{"hooks":{"Stop":[]}}')
+    ensureHooksFile(path)
+    expect(readFileSync(path, 'utf8')).toBe('{"hooks":{"Stop":[]}}')
+  })
 })

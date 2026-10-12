@@ -5,12 +5,33 @@ function isDarwin(): boolean {
   return typeof window !== 'undefined' && window.vyotiq?.platform === 'darwin'
 }
 
-function keyGlyph(key: string): string {
-  if (key === 'escape') return 'Esc'
-  if (key === ',') return ','
-  if (key === 'arrowup') return '↑'
-  if (key === 'arrowdown') return '↓'
-  return key.toUpperCase()
+/** Keys whose `KeyboardEvent.key` is a word: the keycap a person reads instead. */
+const KEY_GLYPHS: Record<string, string> = {
+  escape: 'Esc',
+  arrowup: '↑',
+  arrowdown: '↓',
+  arrowleft: '←',
+  arrowright: '→',
+  enter: '↵',
+  backspace: '⌫',
+  delete: 'Del',
+  tab: 'Tab',
+  ' ': 'Space',
+  space: 'Space',
+  home: 'Home',
+  end: 'End',
+  pageup: 'PgUp',
+  pagedown: 'PgDn',
+  insert: 'Ins'
+}
+
+/** One key as its keycap: a glyph or a short word, never `ARROWLEFT`. */
+export function keyGlyph(key: string): string {
+  const lower = key.toLowerCase()
+  const glyph = KEY_GLYPHS[lower]
+  if (glyph) return lower === 'tab' && isDarwin() ? '⇥' : glyph
+  // F1–F12 and single characters read as typed, upper-cased.
+  return key.length === 1 || /^f\d{1,2}$/i.test(key) ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1)
 }
 
 function modPrefix(): string {
@@ -19,7 +40,7 @@ function modPrefix(): string {
 
 /** `Alt+A` — `⌥A` on macOS. */
 export function altChordLabel(key: string): string {
-  return isDarwin() ? `⌥${key.toUpperCase()}` : `Alt+${key.toUpperCase()}`
+  return isDarwin() ? `⌥${keyGlyph(key)}` : `Alt+${keyGlyph(key)}`
 }
 
 /** Platform-correct label for a shortcut (Darwin `⌘K` vs `Ctrl+K`). */
@@ -39,12 +60,14 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   nextNeedsYou: 'Next task that needs you',
   prevTask: 'Previous task in the list',
   nextTask: 'Next task in the list',
+  navBack: 'Back',
+  navForward: 'Forward',
   newChat: 'New task',
   goHome: 'Home',
   settings: 'Settings',
   focusComposer: 'Focus the instruction line',
   stop: 'Stop the run',
-  find: 'Find in record, changes, PR, or open file',
+  find: 'Find in this view',
   refresh: 'Refresh changes or PR',
   dictation: 'Dictation',
   cycleMode: 'Switch Ask / Agent mode',
@@ -57,7 +80,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   closeChat: 'Close task tab',
   splitPane: 'Open a second task pane',
   findInFiles: 'Find in files',
-  commandPalette: 'Search and commands (alternate)',
+  commandPalette: 'Search (second chord)',
   shortcutsHelp: 'Show keyboard shortcuts',
   workspace1: 'Switch to workspace 1',
   workspace2: 'Switch to workspace 2',
@@ -103,6 +126,7 @@ export function referenceShortcutCatalog(): ShortcutCatalogEntry[] {
   return [
     { id: 'edit-last', title: 'Edit last instruction (empty instruction line)', label: '↑' },
     { id: 'steer', title: 'Send an instruction now, while a run is live', label: isDarwin() ? '⇧↵' : 'Shift+Enter' },
+    { id: 'structure', title: 'Structure the instruction into a brief', label: isDarwin() ? '⌘⇧↵' : 'Ctrl+Shift+Enter' },
     { id: 'approval-allow', title: 'Allow the pending approval once', label: altChordLabel('a') },
     { id: 'approval-deny', title: 'Deny the pending approval', label: altChordLabel('d') },
     { id: 'font-smaller', title: 'Smaller text', label: `${mod}-` },

@@ -13,13 +13,13 @@ Builds are published on the [releases page](https://github.com/vyotiqai/vyotiq-a
 
 | System | What to get |
 | --- | --- |
-| Windows (x64) | The `Vyotiq-<version>-setup.exe` installer. It asks whether to install for you only (the default) or for everyone on the computer, and lets you pick the folder. |
+| Windows | The `Vyotiq-<version>-x64-setup.exe` installer, or `-arm64-setup.exe` on a Windows on Arm PC. It asks whether to install for you only (the default) or for everyone on the computer, and lets you pick the folder. |
 | macOS | The `.dmg` for Apple silicon (`arm64`) or Intel (`x64`). |
-| Linux (x64) | An `AppImage`, a `.deb` or an `.rpm`. |
+| Linux (x64 or arm64) | An `AppImage`, a `.deb` or an `.rpm`, each in an x64 and an arm64 build. |
 
 ### Updates
 
-Agent V checks GitHub for a new version when it starts and every 6 hours after that. Nothing downloads or installs on its own. You can turn the check off in Settings, "About", under "Updates": "Check automatically".
+Agent V checks GitHub for a new version when it starts and every 6 hours after that. Nothing downloads or installs on its own. You can turn the check off in Settings, "About", under "Updates": "Check automatically". "Channel" there picks "Stable" (the default) or "Beta", which also offers pre-releases: newer features, rougher edges. Going back to Stable never downgrades; the next stable release newer than yours is offered.
 
 ## First launch: "Set up Agent V"
 
@@ -27,7 +27,12 @@ The first screen is "Set up Agent V": "Three things, then hand it its first task
 
 ### 1. "Connect a model provider"
 
-The step checks the provider that is set, Ollama by default. To pick another one or paste an API key, click "Add a key or choose a provider" (or "Change"). It opens Settings, "Providers".
+The step checks the provider that is set, Ollama by default. When it has nothing to connect with, the step offers what it can right there:
+
+- **"Found on this computer"**: an API key already set in your environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` or `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`) with "Use this key", which copies it into the key vault; and Ollama or LM Studio running on this machine, with how many models it has and "Use it".
+- **Paste a key**: pick the provider, paste its key and click "Save".
+
+"More providers in Settings" (or "Change") opens Settings, "Providers", for every other provider and option.
 
 The step only counts as done after Agent V reads the provider's model list successfully, so a wrong key or an unreachable server shows up here, not in your first task. If the check fails you get the reason, with "Check again" and "Choose a provider".
 
@@ -47,7 +52,7 @@ Click "Choose a folder…" or drop a folder onto the step. Folders you opened be
 | --- | --- |
 | "Edits and commands" | "Recommended. Reading is free; changing things asks first." This is selected when setup opens, unless you already picked another mode in Settings. |
 | "Every tool" | "Even reads and searches ask." |
-| "Unattended" | "For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask." |
+| "Nothing" | "For runs nobody is watching. MCP tools, tools the agent writes and risky commands still ask." |
 
 With MCP protection off in Settings, "Agent", MCP tools no longer ask. [Approvals](/docs/approvals) explains each mode in detail.
 

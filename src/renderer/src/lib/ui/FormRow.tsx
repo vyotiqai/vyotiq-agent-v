@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, type ReactNode } from 'react'
+import { cloneElement, createContext, isValidElement, useContext, useEffect, useId, useRef, type ReactNode } from 'react'
 import { Icon } from '../icons'
 import { SECTION_LABEL } from '../utils/layout'
 import { Tooltip } from './Tooltip'
@@ -183,6 +183,19 @@ export function FormRow({
 }) {
   useFormChange(changed, onReset, resetToken)
 
+  // The hint is the control's description: it gets an id and the wrapped
+  // control points at it, merging with any describedby it already carries.
+  // Non-element children (fragments, arrays of controls) pass through
+  // untouched — only a single element can take the association.
+  const hintId = useId()
+  const describeHint = (node: ReactNode): ReactNode => {
+    if (!hint || !isValidElement(node)) return node
+    const prev = (node.props as { 'aria-describedby'?: string })['aria-describedby']
+    return cloneElement(node, {
+      'aria-describedby': prev ? `${prev} ${hintId}` : hintId
+    } as Record<string, string>)
+  }
+
   const control = wide ? null : children
   const under = wide ? children : below
   return (
@@ -224,13 +237,13 @@ export function FormRow({
               </button>
             ) : null}
           </div>
-          {hint ? <div className="mt-0.5 text-xs leading-[18px] text-muted [overflow-wrap:anywhere]">{hint}</div> : null}
+          {hint ? <div id={hintId} className="mt-0.5 text-xs leading-[18px] text-muted [overflow-wrap:anywhere]">{hint}</div> : null}
         </div>
         {control != null && control !== false ? (
-          <div className="flex max-w-[min(100%,24rem)] shrink-0 flex-col items-end gap-1.5 pt-px">{control}</div>
+          <div className="flex max-w-[min(100%,24rem)] shrink-0 flex-col items-end gap-1.5 pt-px">{describeHint(control)}</div>
         ) : null}
       </div>
-      {under != null && under !== false ? <div className="mt-2.5">{under}</div> : null}
+      {under != null && under !== false ? <div className="mt-2.5">{wide ? describeHint(under) : under}</div> : null}
     </div>
   )
 }

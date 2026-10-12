@@ -6,13 +6,14 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/re
 import type { UiItem } from '@shared/transcript'
 import { buildRecordModel, type BuildOptions } from '@renderer/features/task/recordModel'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
-import { RecordActionsContext, workSummary, type RecordActions } from '@renderer/features/task/record/WorkItems'
-import { RecordOpenContext, foldsToOpen, looseOpenKey } from '@renderer/features/task/recordFind'
+import { RecordActionsContext, NowLine, workSummary, type RecordActions } from '@renderer/features/task/record/WorkItems'
+import { RecordBody } from '@renderer/features/task/record/RecordLayout'
+import { RecordOpenContext, foldsToOpen, workOpenKey } from '@renderer/features/task/recordFind'
 import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
 
 /**
  * The record reads in the order the work happened — brief, work, result —
- * and a settled run with an answer folds its loose work to one line, so the
+ * and a settled run with an answer folds its work behind one line, so the
  * answer sits a few rows under the brief.
  */
 
@@ -70,7 +71,7 @@ describe('the record’s reading order', () => {
   it('reads brief, then work, then the result, then the receipt', () => {
     const { container } = show(noPlanRun(), { running: false })
     const brief = container.querySelector('[data-brief="1"]')!
-    const work = container.querySelector('[data-loose-work]')!
+    const work = container.querySelector('[data-work-fold]')!
     const result = container.querySelector('section[aria-label="Result"]')!
     expect(brief).not.toBeNull()
     expect(result.textContent).toContain('ANSWER_TEXT')
@@ -79,34 +80,72 @@ describe('the record’s reading order', () => {
   })
 })
 
-describe('a settled run’s loose work', () => {
-  it('folds to one line saying what it amounts to', () => {
+describe('a settled run’s work', () => {
+  it('folds behind one line saying how long it took and what it amounts to', () => {
     const { container, getByRole } = show(noPlanRun(), { running: false })
-    const row = getByRole('button', { name: /2 lookups · 1 command · 2 edits/ })
+    const row = getByRole('button', { name: /^Worked for 14s 2 lookups · 1 command · 2 edits$/ })
     expect(row.getAttribute('aria-expanded')).toBe('false')
     expect(container.textContent).not.toContain('WORK_NOTE')
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')
+    // Opened, every row shows: the work is not folded a second time inside it.
+    expect(container.textContent).toContain('WORK_NOTE')
+    // A toggle of yours holds; another click folds it again.
+    fireEvent.click(row)
+    expect(row.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('leaves time spent waiting on you out of “Worked for”, and says it beside', () => {
+    const items = noPlanRun()
+    // The command waited 8s on an approval; it ran from 6s to 7s.
+    const command = items[4] as Extract<UiItem, { kind: 'tool' }>
+    items[4] = { ...command, tool: { ...command.tool, waitedMs: 8000 } }
+    const { getByRole, container } = show(items, { running: false })
+    expect(getByRole('button', { name: /^Worked for 6s · waited 8s for you/ })).toBeTruthy()
+    expect(container.querySelector('[data-work-waited]')?.textContent).toBe('waited 8s for you')
+  })
+
+  it('counts a question the agent asked as waiting', () => {
+    const items = noPlanRun()
+    items.splice(2, 0, tool('ask_question', { questions: [] }, 'You chose: keep it', 1))
+    const asked = items[2] as Extract<UiItem, { kind: 'tool' }>
+    items[2] = { ...asked, endedAt: at(4) }
+    const { getByRole } = show(items, { running: false })
+    expect(getByRole('button', { name: /^Worked for 11s · waited 3s for you/ })).toBeTruthy()
+  })
+
+  it('is open, saying it is working, while the run is live', () => {
+    const { container, getByRole } = show(noPlanRun(false), { running: true })
+    expect(getByRole('button', { name: /^Working/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('[data-work-fold="working"]')).not.toBeNull()
     expect(container.textContent).toContain('WORK_NOTE')
   })
 
-  it('shows every row while the run is live', () => {
-    const { container } = show(noPlanRun(false), { running: true })
-    expect(container.querySelector('[data-loose-work]')).toBeNull()
+  it('stays open when the run ended without an answer', () => {
+    const { container, getByRole } = show(noPlanRun(false), { running: false, stopped: true })
+    expect(getByRole('button', { name: /^Stopped after/ }).getAttribute('aria-expanded')).toBe('true')
     expect(container.textContent).toContain('WORK_NOTE')
   })
 
-  it('shows every row when the run ended without an answer', () => {
-    const { container } = show(noPlanRun(false), { running: false, stopped: true })
-    expect(container.querySelector('[data-loose-work]')).toBeNull()
-    expect(container.textContent).toContain('WORK_NOTE')
+  it('folds itself the moment the run settles with an answer', () => {
+    const live = show(noPlanRun(false), { running: true })
+    const items = noPlanRun()
+    const options: BuildOptions = { running: false }
+    live.rerender(
+      <RecordOpenContext.Provider value={new Set()}>
+        <TaskRecord model={buildRecordModel(items, options)} options={options} messageCount={items.length} />
+      </RecordOpenContext.Provider>
+    )
+    expect(live.getByRole('button', { name: /^Worked for/ }).getAttribute('aria-expanded')).toBe('false')
   })
 
   it('opens for a find match inside it', () => {
     const items = noPlanRun()
     const model = buildRecordModel(items, { running: false })
     const open = foldsToOpen(model.runs, 'work_note')
-    expect([...open]).toContain(looseOpenKey(1, 'after'))
+    expect([...open]).toContain(workOpenKey(1))
+    // A match only in the answer opens nothing.
+    expect([...foldsToOpen(model.runs, 'answer_text')]).not.toContain(workOpenKey(1))
     const { container } = show(items, { running: false }, open)
     expect(container.textContent).toContain('WORK_NOTE')
   })
@@ -115,8 +154,8 @@ describe('a settled run’s loose work', () => {
     const items = noPlanRun()
     items.splice(7, 0, { kind: 'run_error', id: 'err-1', message: 'ERROR_TEXT provider hiccup', at: at(12) } as UiItem)
     const { container, getByRole } = show(items, { running: false })
-    expect(getByRole('button', { name: /1 error/ }).getAttribute('aria-expanded')).toBe('false')
-    expect(container.textContent).toContain('ERROR_TEXT')
+    expect(getByRole('button', { name: /^Worked for/ }).getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-work-errors]')?.textContent).toContain('ERROR_TEXT')
     expect(container.textContent).not.toContain('WORK_NOTE')
   })
 })
@@ -504,5 +543,81 @@ describe('a call waiting on you', () => {
     expect(step.getAttribute('data-step-state')).toBe('done')
     // Settled, yet open: what waits on you is never folded away.
     expect(step.contains(card)).toBe(true)
+  })
+})
+
+describe('the record scroll region', () => {
+  it('is a polite additions live region with aria-busy passthrough', () => {
+    const { container, rerender } = render(
+      <RecordBody>
+        <div>row one</div>
+      </RecordBody>
+    )
+    const scroller = container.querySelector('[data-record-scroll]')!
+    expect(scroller.getAttribute('aria-live')).toBe('polite')
+    expect(scroller.getAttribute('aria-relevant')).toBe('additions text')
+    expect(scroller.getAttribute('aria-atomic')).toBe('false')
+    expect(scroller.hasAttribute('aria-busy')).toBe(false)
+    rerender(
+      <RecordBody busy>
+        <div>row one</div>
+      </RecordBody>
+    )
+    expect(container.querySelector('[data-record-scroll]')!.getAttribute('aria-busy')).toBe('true')
+  })
+})
+
+describe('NowLine announcements', () => {
+  it('announces only the text line; the per-second tick stays hidden', () => {
+    vi.useFakeTimers()
+    try {
+      const since = new Date(Date.now() - 5000).toISOString()
+      const { container } = render(<NowLine text={'working on it'} since={since} />)
+      const live = container.querySelector('[aria-live="polite"]')!
+      expect(live.textContent).toContain('working on it')
+      expect(live.getAttribute('aria-atomic')).toBe('false')
+      // The whole row must not be a live region, or the tick re-announces it.
+      expect(live.tagName.toLowerCase()).not.toBe('div')
+      const hiddenCandidates = Array.from(live.parentElement!.querySelectorAll('[aria-hidden="true"]'))
+      const hidden = hiddenCandidates.find((el) => /\d+s/.test(el.textContent ?? ''))!
+      expect(hidden).toBeTruthy()
+      const before = live.textContent
+      vi.advanceTimersByTime(5000)
+      expect(live.textContent).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('leaves the per-tool doing line outside any live region', () => {
+    const child = 'c0ffee00-1111-4222-8333-444455556666'
+    const spawn: UiItem = tool(
+      'spawn_agent_instance',
+      { goal: 'Map it', step_id: 'a' },
+      `Agent V Instance id; ${child} (short c0ffee00)\nrun_id: ${child}`,
+      2
+    )
+    const { container } = render(
+      <RunSessionProvider
+        value={{
+          workspacePath: '/ws',
+          runId: 'r1',
+          agentInstances: {
+            [child]: {
+              instanceRunId: child,
+              phase: 'started',
+              step: '2',
+              activity: 'DOING_TEXT reading files',
+              startedAt: new Date(Date.now() - 1000).toISOString()
+            } as never
+          }
+        } as never}
+      >
+        <TaskRecord model={buildRecordModel([user('Ship it', 0), spawn], { running: true })} options={{ running: true }} messageCount={2} />
+      </RunSessionProvider>
+    )
+    const doing = Array.from(container.querySelectorAll('p')).find((p) => p.textContent?.includes('DOING_TEXT'))!
+    expect(doing).toBeTruthy()
+    expect(doing.closest('[aria-live]')).toBeNull()
   })
 })

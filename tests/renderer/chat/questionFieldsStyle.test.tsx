@@ -32,7 +32,7 @@ describe('question fields', () => {
 
   it('draws Other with the Input field chrome', () => {
     field({ id: 'a', prompt: 'Mode?', type: 'single', options: ['Ask'], allowCustom: true })
-    const other = screen.getByRole('textbox', { name: 'Other answer' })
+    const other = screen.getByRole('textbox', { name: 'Something else' })
     expect(other.hasAttribute('data-vy-text-entry')).toBe(true)
   })
 

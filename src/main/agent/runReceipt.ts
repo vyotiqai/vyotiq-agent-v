@@ -21,7 +21,7 @@ import { isFileMutationToolName, isRunArtifactEditPath } from './loopPolicy'
 import { looksLikeWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 import { parseDiagnosticLines } from './tools/diagnostics'
 import { parseTestResultHeader, parseTestSummary } from './tools/runTests'
-import { isCheckCommand } from './feedback/checkCommands'
+import { countsAsCheck } from './feedback/checkCommands'
 import { logger } from '../../shared/logger'
 import { stepUsageTotalsFromPersistedEvents } from '../../shared/utils/runTelemetry'
 import { isTerminalSessionInProgress, parseTerminalOutput } from '../../shared/utils/terminalFormat'
@@ -303,7 +303,7 @@ export function checkVerdict(
     // run_tests runs whatever command it is handed; only a test, typecheck
     // or lint runner verified anything.
     const ran = /^command: (.*)$/m.exec(text)?.[1]
-    if (ran != null && !isCheckCommand(ran)) return 'skip'
+    if (ran != null && !countsAsCheck(ran)) return 'skip'
   }
   const clean = name === 'run_tests' ? runTestsCheckClean(text) : diagnosticsCheckClean(text)
   return clean ? 'clean' : 'failed'
@@ -318,7 +318,7 @@ export function checkVerdict(
 function terminalCheckVerdict(text: string, command: string | undefined): CheckVerdict {
   if (!text) return 'skip'
   const parsed = parseTerminalOutput(text)
-  if (!isCheckCommand(parsed.command ?? command)) return 'skip'
+  if (!countsAsCheck(parsed.command ?? command)) return 'skip'
   if (isTerminalSessionInProgress(parsed.sessionStatus)) return 'skip'
   let exitCode: number | null = null
   for (const match of text.matchAll(TERMINAL_EXIT_CODE_RE)) exitCode = Number(match[1])

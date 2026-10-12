@@ -53,7 +53,7 @@ export const McpAuthKindSchema = z.enum(['none', 'oauth', 'oauth-client', 'token
 export type McpAuthKind = z.infer<typeof McpAuthKindSchema>
 
 /** External binaries a stdio package needs on PATH before it can be spawned. */
-export const McpRuntimeRequirementSchema = z.enum(['node', 'uv', 'git'])
+export const McpRuntimeRequirementSchema = z.enum(['node', 'uv', 'git', 'docker'])
 export type McpRuntimeRequirement = z.infer<typeof McpRuntimeRequirementSchema>
 
 /**
@@ -365,9 +365,34 @@ export const MarketplaceInstalledItemSchema = z.object({
         )
       },
       { message: 'packagePath must be id/version with safe segments' }
-    )
+    ),
+  /**
+   * Where an npm, git or registry install came from, for Check for updates:
+   * the package name, clone URL or catalog id, and what was installed (the
+   * npm version or the commit). Absent on items installed before it was kept.
+   */
+  origin: z.object({ target: z.string().min(1), ref: z.string().optional() }).optional()
 })
 export type MarketplaceInstalledItem = z.infer<typeof MarketplaceInstalledItemSchema>
+
+/** A newer version of an installed package, found by Check for updates. */
+export const MarketplacePackageUpdateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  source: z.enum(['npm', 'git', 'registry']),
+  current: z.string(),
+  latest: z.string(),
+  /** What Update installs from: the npm name, the clone URL, or the catalog id. */
+  target: z.string()
+})
+export type MarketplacePackageUpdate = z.infer<typeof MarketplacePackageUpdateSchema>
+
+export const MarketplaceUpdateCheckResultSchema = z.object({
+  updates: z.array(MarketplacePackageUpdateSchema),
+  checked: z.number().int().min(0),
+  failed: z.array(z.string())
+})
+export type MarketplaceUpdateCheckResult = z.infer<typeof MarketplaceUpdateCheckResultSchema>
 
 export const MarketplaceInstallResultSchema = z.object({
   item: MarketplaceInstalledItemSchema,
@@ -391,7 +416,9 @@ export type MarketplaceIndex = z.infer<typeof MarketplaceIndexSchema>
 export const MarketplaceOverridesSchema = z.object({
   mcp: z.record(z.string(), z.boolean()).optional(),
   skills: z.record(z.string(), z.boolean()).optional(),
-  plugins: z.record(z.string(), z.boolean()).optional()
+  plugins: z.record(z.string(), z.boolean()).optional(),
+  /** Workspace rule files switched off here, by path (`false`); they stay on disk and @-mentionable. */
+  rules: z.record(z.string(), z.boolean()).optional()
 })
 export type MarketplaceOverrides = z.infer<typeof MarketplaceOverridesSchema>
 
@@ -408,7 +435,13 @@ export const DEFAULT_MARKETPLACE_SETTINGS: MarketplaceSettings = {
 
 /** Main-only ack write — renderer must not set remoteInstallAcked via setSettings. */
 export const MarketplaceRemoteInstallAckRequestSchema = z.object({
-  acked: z.boolean()
+  acked: z.boolean(),
+  /**
+   * The person already read the warning and the exact command in the app's
+   * own dialog (Add an MCP server) and chose to run it; main then records the
+   * ack without a second, native message box.
+   */
+  confirmedInApp: z.literal(true).optional()
 })
 export type MarketplaceRemoteInstallAckRequest = z.infer<
   typeof MarketplaceRemoteInstallAckRequestSchema
@@ -511,6 +544,22 @@ export const McpDetectResultSchema = z.object({
   catalogMatch: z.object({ id: z.string().min(1), name: z.string().min(1) }).optional()
 })
 export type McpDetectResult = z.infer<typeof McpDetectResultSchema>
+
+/** A server from the official MCP Registry, as the paste line Add server detects. */
+export const McpRegistryServerSchema = z.object({
+  name: z.string(),
+  title: z.string().nullable(),
+  description: z.string(),
+  version: z.string().nullable(),
+  repository: z.string().nullable(),
+  /** `npx -y pkg`, `uvx pkg`, `docker run -i --rm image`, or an https URL. */
+  launch: z.string(),
+  remote: z.boolean(),
+  env: z.array(z.object({ name: z.string(), description: z.string(), required: z.boolean(), secret: z.boolean() }))
+})
+export type McpRegistryServer = z.infer<typeof McpRegistryServerSchema>
+
+export const McpRegistrySearchRequestSchema = z.object({ query: z.string().max(200) })
 
 export const McpApplyDetectedRequestSchema = z.object({
   /** Result from detect, or a user-edited server. */

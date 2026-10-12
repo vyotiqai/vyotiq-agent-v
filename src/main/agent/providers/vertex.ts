@@ -15,12 +15,16 @@ import type { ListModelsRequest, LlmProvider, ProviderChatRequest, StreamChunk }
 import { logProviderFailure, providerFetchFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
 import { formatProviderHttpError } from './httpErrors'
+import { createOpenAiCompatibleProvider } from './openai'
 
 export { vertexBaseUrl } from '../../../shared/domain/cloudProviders'
 
 /**
  * Google Cloud Vertex AI: Gemini through `streamGenerateContent`, Claude
- * through `streamRawPredict` in the Anthropic Messages shape. Signs in with a
+ * through `streamRawPredict` in the Anthropic Messages shape, and the open and
+ * partner models served as a service (Llama, DeepSeek, Qwen, gpt-oss, Kimi…)
+ * through Vertex's OpenAI-compatible Chat Completions endpoint, named
+ * `publisher/model` (`meta/llama-3.3-70b-instruct-maas`). Signs in with a
  * service-account key or this computer's gcloud login (see googleAuth).
  */
 
@@ -28,14 +32,30 @@ export function isVertexClaude(model: string): boolean {
   return /^(?:anthropic\/)?claude-/i.test(model.trim())
 }
 
-/** `gemini-2.5-pro` or `google/gemini-2.5-pro` → the publisher-scoped model name. */
-function vertexModelPath(model: string): { publisher: 'google' | 'anthropic'; name: string } | null {
+/** Publishers whose models Vertex serves through its own native routes, not Chat Completions. */
+const NATIVE_ONLY_PUBLISHERS = /^(?:mistralai|ai21)\//i
+
+/**
+ * `gemini-2.5-pro` or `google/gemini-2.5-pro` → Google's route; Claude →
+ * Anthropic's; any other `publisher/model` → the OpenAI-compatible endpoint,
+ * which takes the name whole. Null for what neither speaks.
+ */
+function vertexModelPath(model: string): { publisher: 'google' | 'anthropic' | 'openapi'; name: string } | null {
   const id = model.trim()
   if (isVertexClaude(id)) return { publisher: 'anthropic', name: id.replace(/^anthropic\//i, '') }
   const bare = id.replace(/^google\//i, '')
-  if (bare.includes('/')) return null
-  return { publisher: 'google', name: bare }
+  if (!bare.includes('/')) return { publisher: 'google', name: bare }
+  if (NATIVE_ONLY_PUBLISHERS.test(bare) || !/^[a-z0-9._-]+\/[A-Za-z0-9._:@-]+$/.test(bare)) return null
+  return { publisher: 'openapi', name: bare }
 }
+
+/** Vertex's Chat Completions endpoint; the token rides as the Bearer key. */
+const vertexOpenApi = createOpenAiCompatibleProvider('vertex', {
+  defaultBaseUrl: '',
+  includeUsage: true,
+  // The base is built from the project and location, never typed; tests aim it at a local mock.
+  allowLocal: true
+})
 
 /** Gemini 3 takes a thinking level; 2.5 thinks by its own budget. */
 function vertexGeminiThinking(req: ProviderChatRequest): Record<string, unknown> | undefined {
@@ -64,7 +84,7 @@ export async function* streamVertex(req: ProviderChatRequest, endpoint: VertexEn
   if (!path) {
     yield {
       type: 'error',
-      error: `Vertex AI models from other publishers aren't supported yet: ${req.model}. Use a Gemini or Claude model.`
+      error: `Vertex AI can't run ${req.model} here: Mistral and AI21 models use routes Agent V does not speak yet. Use a Gemini, Claude or open model (publisher/model).`
     }
     return
   }
@@ -78,6 +98,22 @@ export async function* streamVertex(req: ProviderChatRequest, endpoint: VertexEn
     return
   }
   const base = endpoint.baseUrl.replace(/\/$/, '')
+
+  if (path.publisher === 'openapi') {
+    const { Authorization, ...rest } = headers
+    for await (const chunk of vertexOpenApi.streamChat({
+      ...req,
+      model: path.name,
+      baseUrl: `${base}/endpoints/openapi`,
+      apiKey: Authorization?.replace(/^Bearer\s+/i, '') ?? '',
+      headers: { ...(req.headers ?? {}), ...rest }
+    })) {
+      if (chunk.type === 'error' && chunk.httpStatus === 401) dropGoogleAccessToken(endpoint.credentials)
+      yield chunk
+    }
+    return
+  }
+
   const modelUrl = `${base}/publishers/${path.publisher}/models/${encodeURIComponent(path.name)}`
 
   if (path.publisher === 'anthropic') {
@@ -131,7 +167,7 @@ export async function* streamVertex(req: ProviderChatRequest, endpoint: VertexEn
   yield* consumeGeminiStream(res, req, 'vertex')
 }
 
-/** Chat models Vertex serves that this adapter speaks: Gemini and Claude. */
+/** Chat models Vertex serves that this adapter speaks: Gemini, Claude, and open models by `publisher/model`. */
 const VERTEX_SKIP_RE = /tts|image|embedding|live|audio|-customtools/i
 
 /**
@@ -152,8 +188,10 @@ export async function listVertexModels(
     // `@default` is models.dev's alias; Vertex's own ids for current Claude
     // models are bare (`claude-sonnet-5-5`), dated ones keep `@date`.
     const id = m.id.replace(/@default$/i, '')
-    if (!/^(?:claude-|gemini-)/i.test(id) || VERTEX_SKIP_RE.test(id) || seen.has(id)) continue
-    if (!m.outputModalities.includes('text')) continue
+    const open = id.includes('/') && vertexModelPath(id)?.publisher === 'openapi'
+    if (!(open || /^(?:claude-|gemini-)/i.test(id)) || VERTEX_SKIP_RE.test(id) || seen.has(id)) continue
+    // The registry lists some open models without modalities; they are chat models.
+    if (!m.outputModalities.includes('text') && !(open && m.outputModalities.length === 0)) continue
     seen.add(id)
     const vision = m.inputModalities.includes('image')
     out.push(

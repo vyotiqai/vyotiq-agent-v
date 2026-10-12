@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { PrPanel } from '@renderer/features/chat/components/PrPanel'
+import { clearPrDraftsForTests } from '@renderer/features/chat/components/PrConversation'
 import type { PrView } from '@shared/ipc'
 
 function prWith(overrides: Partial<PrView> = {}): PrView {
@@ -69,7 +70,10 @@ beforeEach(() => {
   Object.defineProperty(window, 'vyotiq', { configurable: true, writable: true, value: api })
 })
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  clearPrDraftsForTests()
+})
 
 async function openTab(name: RegExp | string): Promise<void> {
   fireEvent.click(await screen.findByRole('tab', { name }))
@@ -196,5 +200,136 @@ describe('PrPanel Checks: auto-merge', () => {
     expect(on.textContent).toMatch(/Auto-merge is on: GitHub will squash and merge once its requirements are met · by octocat/)
     fireEvent.click(within(on).getByRole('button', { name: 'Turn off' }))
     await waitFor(() => expect(api.prAutoMerge).toHaveBeenCalledWith({ workspacePath: '/ws', number: 63, enable: false }))
+  })
+})
+
+describe('PrPanel Checks: merge queue', () => {
+  it('offers Add to merge queue in place of the methods and Merge when ready, even while checks still block', async () => {
+    api.prView!.mockResolvedValue({ ok: true, data: prWith({ mergeQueueRequired: true, mergeQueue: null, canAutoMerge: true }) })
+    api.prMerge = vi.fn().mockResolvedValue({ ok: true, data: { detail: "In the merge queue at position 2: GitHub merges it once the queue's checks pass" } })
+    render(<PrPanel workspacePath="/ws" />)
+    const add = await screen.findByRole('button', { name: /Add to merge queue/ })
+    expect((add as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByRole('button', { name: /Squash and merge/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Merge when ready/ })).toBeNull()
+    expect(screen.getByText(/The merge queue takes it once its requirements are met/)).toBeTruthy()
+    fireEvent.click(add)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }))
+    await waitFor(() => expect(api.prMerge).toHaveBeenCalledWith('/ws', 'squash', 63))
+    expect(await screen.findByText(/In the merge queue at position 2/)).toBeTruthy()
+  })
+
+  it('shows a queued PR where it stands, with nothing to merge again', async () => {
+    api.prView!.mockResolvedValue({ ok: true, data: prWith({ mergeQueueRequired: true, mergeQueue: { position: 1 } }) })
+    render(<PrPanel workspacePath="/ws" />)
+    const queued = await waitFor(() => {
+      const el = document.querySelector('[data-merge-queue="queued"]')
+      if (!el) throw new Error('not shown yet')
+      return el as HTMLElement
+    })
+    expect(queued.textContent).toBe('In the merge queue for main · position 1Leave the queue')
+    expect(screen.queryByRole('button', { name: /Add to merge queue|Squash and merge|Merge when ready/ })).toBeNull()
+  })
+
+  it('with auto-merge set to join the queue, says so and does not offer to add it again', async () => {
+    api.prView!.mockResolvedValue({
+      ok: true,
+      data: prWith({ mergeQueueRequired: true, mergeQueue: null, autoMerge: { method: 'SQUASH', enabledBy: 'octocat' } })
+    })
+    render(<PrPanel workspacePath="/ws" />)
+    const on = await waitFor(() => {
+      const el = document.querySelector('[data-auto-merge="on"]')
+      if (!el) throw new Error('not shown yet')
+      return el as HTMLElement
+    })
+    expect(on.textContent).toMatch(/Auto-merge is on: it joins the merge queue once its requirements are met · by octocat/)
+    expect(screen.queryByRole('button', { name: /Add to merge queue/ })).toBeNull()
+  })
+})
+
+describe('PrPanel About: drafts outlive a reload', () => {
+  it('a half-written comment and description survive leaving the panel and coming back', async () => {
+    const view = render(<PrPanel workspacePath="/ws" active />)
+    await openTab(/About/)
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Comment on this pull request' }), { target: { value: 'Half a thought' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit the description' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Pull request description' }), { target: { value: 'My new description' } })
+    // Another panel, then back: the PR is read again, with "Loading…" in its place meanwhile.
+    view.rerender(<PrPanel workspacePath="/ws" active={false} />)
+    view.rerender(<PrPanel workspacePath="/ws" active />)
+    await waitFor(() => expect(api.prView!.mock.calls.length).toBeGreaterThanOrEqual(2))
+    await openTab(/About/)
+    expect(((await screen.findByRole('textbox', { name: 'Comment on this pull request' })) as HTMLTextAreaElement).value).toBe('Half a thought')
+    expect((screen.getByRole('textbox', { name: 'Pull request description' }) as HTMLTextAreaElement).value).toBe('My new description')
+  })
+
+  it('shows the saved description at once, not the old one until the reload', async () => {
+    let reload: (value: unknown) => void = () => undefined
+    render(<PrPanel workspacePath="/ws" />)
+    await openTab(/About/)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit the description' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Pull request description' }), { target: { value: 'New text' } })
+    api.prView!.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          reload = resolve
+        })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('New text')).toBeTruthy()
+    expect(screen.queryByText(/Bumps the group/)).toBeNull()
+    reload({ ok: true, data: prWith({ body: 'New text' }) })
+  })
+
+  it('a reviewer list that failed to load is asked for again', async () => {
+    api.prReviewerSuggestions!.mockResolvedValueOnce({ ok: false, error: 'offline' })
+    render(<PrPanel workspacePath="/ws" />)
+    await openTab(/Reviews/)
+    const field = await screen.findByRole('combobox', { name: 'Request a review from' })
+    fireEvent.focus(field)
+    await waitFor(() => expect(api.prReviewerSuggestions).toHaveBeenCalledTimes(1))
+    fireEvent.blur(field)
+    fireEvent.focus(field)
+    await waitFor(() => expect(api.prReviewerSuggestions).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('PrPanel About: the full conversation, a preview, and the merge queue', () => {
+  it('reads every comment when only the latest few came with the PR', async () => {
+    api.prView!.mockResolvedValue({ ok: true, data: prWith({ commentCount: 3 }) })
+    api.prCommentsAll = vi.fn().mockResolvedValue({
+      ok: true,
+      data: [
+        { author: 'first', body: 'The oldest comment', createdAt: null, url: null, minimized: false },
+        ...prWith().comments!
+      ]
+    })
+    render(<PrPanel workspacePath="/ws" />)
+    await openTab(/About/)
+    fireEvent.click(await screen.findByRole('button', { name: 'Show all 3' }))
+    await waitFor(() => expect(api.prCommentsAll).toHaveBeenCalledWith({ workspacePath: '/ws', number: 63 }))
+    expect(await screen.findByText('The oldest comment')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show all 3' })).toBeNull()
+  })
+
+  it('previews the description while it is edited', async () => {
+    render(<PrPanel workspacePath="/ws" />)
+    await openTab(/About/)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit the description' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Pull request description' }), { target: { value: '**Bold** words' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'Preview' }))
+    const preview = document.querySelector('[data-pr-body-preview]') as HTMLElement
+    expect(preview.querySelector('strong')?.textContent).toBe('Bold')
+    fireEvent.click(screen.getByRole('radio', { name: 'Write' }))
+    expect((screen.getByRole('textbox', { name: 'Pull request description' }) as HTMLTextAreaElement).value).toBe('**Bold** words')
+  })
+
+  it('takes a queued pull request out of the merge queue', async () => {
+    api.prView!.mockResolvedValue({ ok: true, data: prWith({ mergeQueueRequired: true, mergeQueue: { position: 2 } }) })
+    api.prLeaveMergeQueue = vi.fn().mockResolvedValue({ ok: true, data: { detail: 'Left the merge queue' } })
+    render(<PrPanel workspacePath="/ws" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave the queue' }))
+    await waitFor(() => expect(api.prLeaveMergeQueue).toHaveBeenCalledWith({ workspacePath: '/ws', number: 63 }))
+    expect(await screen.findByText('Left the merge queue')).toBeTruthy()
   })
 })

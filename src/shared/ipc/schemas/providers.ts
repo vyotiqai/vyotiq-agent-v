@@ -132,7 +132,14 @@ export const ModelInfoSchema = z.object({
   thinkingMode: ThinkingModeSchema.optional(),
   supportedServiceTiers: z.array(ServiceTierSchema).optional(),
   /** True for bundled offline seed models whose IDs are illustrative placeholders. */
-  isPlaceholder: z.boolean().optional()
+  isPlaceholder: z.boolean().optional(),
+  /**
+   * Where `contextWindow` / `maxOutputTokens` came from when it is not the
+   * catalog: `'user'` = set by hand on a custom endpoint or local server,
+   * `'server'` = read from the running server (llama.cpp `/props`, LM Studio,
+   * Ollama's loaded context). Absent = catalog or the 128k guess.
+   */
+  limitsSource: z.enum(['user', 'server']).optional()
 })
 export type ModelInfo = z.infer<typeof ModelInfoSchema>
 
@@ -144,6 +151,27 @@ export const ListModelsRequestSchema = z.object({
   model: z.string().optional()
 })
 export type ListModelsRequest = z.infer<typeof ListModelsRequestSchema>
+
+/** A model server Set up found running on this machine. */
+export const SetupLocalServerSchema = z.object({
+  id: z.enum(['ollama', 'lmstudio']),
+  name: z.string(),
+  baseUrl: z.string(),
+  models: z.array(z.string())
+})
+export type SetupLocalServer = z.infer<typeof SetupLocalServerSchema>
+
+/** What Set up can offer: providers with a key in the environment (never the key), and local servers. */
+export const SetupDetectionSchema = z.object({
+  envKeys: z.array(z.object({ provider: ProviderIdSchema, envVar: z.string() })),
+  local: z.array(SetupLocalServerSchema)
+})
+export type SetupDetection = z.infer<typeof SetupDetectionSchema>
+
+export const SetupUseEnvKeyRequestSchema = z.object({ provider: ProviderIdSchema })
+
+/** A page to read for an @-mention. */
+export const ComposerFetchUrlRequestSchema = z.object({ url: z.string().url().max(2048) })
 
 export const ListModelsResultSchema = z.object({
   models: z.array(ModelInfoSchema),

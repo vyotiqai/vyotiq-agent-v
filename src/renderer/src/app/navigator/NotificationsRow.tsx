@@ -46,6 +46,8 @@ export function NotificationGlyph({ item }: { item: Pick<NotificationItem, 'kind
       return <Icon name="warning" size={14} className="shrink-0 text-muted" />
     case 'update_ready':
       return <Icon name="download" size={14} className="shrink-0 text-muted" />
+    case 'budget':
+      return <Icon name="chart" size={14} className="shrink-0 text-muted" />
     default: {
       const exhaustive: never = item.kind
       return exhaustive

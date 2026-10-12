@@ -31,7 +31,7 @@ export const ASK_QUESTION_SUPERSEDED_GUIDANCE =
 
 /** Tool result when autonomous mode skips the form. */
 export const ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE =
-  'Question skipped (autonomous mode). Continue with a reasonable default.'
+  'Question skipped (questions are set to skip). Continue with a reasonable default.'
 
 export type AgentQuestionItem = {
   id: string
@@ -147,7 +147,10 @@ function parseTypedItem(raw: unknown, index: number): AgentQuestionItem | { erro
   const id = typeof rec.id === 'string' ? rec.id.trim() : ''
   const prompt = questionPromptFromRecord(rec)
   const options = uniqueTrimmedStrings(rec.options)
-  const allowCustom = rec.allowCustom === true
+  // A choice always takes "Something else…": the person's answer may not be
+  // on the model's list, and skipping then explaining in the composer was the
+  // only way to say MySQL to "SQLite or Postgres?". The model no longer opts in.
+  const allowCustom = true
   // Models routinely omit `type` on items that carry options (live failures:
   // 3d334c22/870cde12/829b9ada all sent id+prompt+options without type).
   // Infer it the same way the legacy {question, options, allowMultiple} form
@@ -185,8 +188,8 @@ function parseTypedItem(raw: unknown, index: number): AgentQuestionItem | { erro
 }
 
 /**
- * Accepts typed `questions[]` or legacy `{ question, options, allowMultiple, allowCustom }`.
- * Typed forms default `allowCustom` off; legacy defaults it on when options exist.
+ * Accepts typed `questions[]` or legacy `{ question, options, allowMultiple }`.
+ * Every single/multi choice offers a typed "Something else…" answer.
  */
 export function normalizeAskQuestionArgs(
   args: Record<string, unknown>
@@ -251,8 +254,8 @@ export function normalizeAskQuestionArgs(
 
   const options = uniqueTrimmedStrings(args.options)
   const allowMultiple = args.allowMultiple === true
-  // Legacy: custom text on by default when options are present.
-  const allowCustom = args.allowCustom !== false
+  // Always on, as for typed questions (see parseTypedItem).
+  const allowCustom = true
 
   // Fewer than 2 distinct non-blank options cannot render a choice — degrade
   // to freeform text instead of failing the whole form.

@@ -4,7 +4,13 @@
  * are mounted once, in the app shell.
  */
 
-export type RepeatTaskRequest = { workspacePath: string; runId: string; title: string }
+/**
+ * What to repeat: a task (its first brief and checks are read from its record),
+ * or — from New task — a brief not started yet, with its checks.
+ */
+export type RepeatTaskRequest =
+  | { workspacePath: string; runId: string; title: string }
+  | { workspacePath: string; runId?: undefined; title: string; instruction: string; doneWhen?: string[]; worktree?: boolean }
 
 const listRequests = new Set<() => void>()
 const repeatRequests = new Set<(task: RepeatTaskRequest) => void>()

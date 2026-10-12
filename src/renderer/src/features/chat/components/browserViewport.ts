@@ -9,18 +9,25 @@ export type BrowserViewportPresetId =
 export type BrowserViewportPreset = {
   id: BrowserViewportPresetId
   label: string
+  /** What the size stands for, so a bare "390" reads as a phone. */
+  device: string
   width: number
   height: number
 }
 
 export const BROWSER_VIEWPORT_PRESETS: readonly BrowserViewportPreset[] = [
-  { id: 'fit', label: 'Fit', width: 0, height: 0 },
-  { id: 'iphone-se', label: '375×667', width: 375, height: 667 },
-  { id: 'iphone', label: '390×844', width: 390, height: 844 },
-  { id: 'ipad', label: '768×1024', width: 768, height: 1024 },
-  { id: 'laptop', label: '1280×800', width: 1280, height: 800 },
-  { id: 'desktop', label: '1440×900', width: 1440, height: 900 }
+  { id: 'fit', label: 'Fit', device: 'Fit', width: 0, height: 0 },
+  { id: 'iphone-se', label: '375×667', device: 'Small phone', width: 375, height: 667 },
+  { id: 'iphone', label: '390×844', device: 'Phone', width: 390, height: 844 },
+  { id: 'ipad', label: '768×1024', device: 'Tablet', width: 768, height: 1024 },
+  { id: 'laptop', label: '1280×800', device: 'Laptop', width: 1280, height: 800 },
+  { id: 'desktop', label: '1440×900', device: 'Desktop', width: 1440, height: 900 }
 ]
+
+/** The toolbar's word for a fixed size: "Phone 390px", the full size in its title. */
+export function browserViewportShortLabel(preset: BrowserViewportPreset): string {
+  return preset.id === 'fit' ? 'Fit' : `${preset.device.replace(/^Small /, '')} ${preset.width}px`
+}
 
 export const BROWSER_VIEWPORT_KEY = 'vyotiq.browserViewport'
 

@@ -1,5 +1,5 @@
 import type { RunSummary } from '@shared/ipc'
-import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
+import { briefOutcome, formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import {
   PLACEHOLDER_GOAL,
   SPAWN_PREFIX,
@@ -80,11 +80,21 @@ function namedInstanceHead(lines: string[]): string | undefined {
 export function instanceDisplayTitle(
   goal: string | undefined,
   runId: string,
-  pathScope?: string[]
+  pathScope?: string[],
+  stepTitle?: string
 ): string {
+  // Spawned for a step of its parent's plan: that step's title is what the
+  // parent's record calls it, so the navigator and the pane say the same.
+  const step = stepTitle?.trim()
+  if (step) return clipTitle(stripGoalMarkdown(step) || step)
   const lines = goal?.trim() ? goalLines(goal) : []
   const named = namedInstanceHead(lines)
   if (named) return named
+
+  // A spawned child's brief opens "Outcome: …": the one deliverable is what
+  // tells it from its siblings, whose background is often the same words.
+  const outcome = briefOutcome(goal)
+  if (outcome) return clipTitle(stripGoalMarkdown(outcome) || outcome)
 
   const scope = pathScopeLabel(pathScope)
   if (scope) return scope
@@ -107,7 +117,7 @@ export function instanceDisplayTitle(
 export function runTitle(run: RunSummary): string {
   const goal = run.goal?.trim()
   if (run.inlineInstance) {
-    return instanceDisplayTitle(goal, run.runId, run.pathScope)
+    return instanceDisplayTitle(goal, run.runId, run.pathScope, run.stepTitle)
   }
   if (!goal) return run.runId.slice(0, 8)
   if (goal.toLowerCase() === PLACEHOLDER_GOAL) return UNTITLED_TASK

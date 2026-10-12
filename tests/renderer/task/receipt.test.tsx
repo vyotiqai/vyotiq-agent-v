@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { emptyStepUsageTotals, type StepUsageTotals } from '@shared/utils/runTelemetry'
-import { ReceiptLine, receiptParts } from '@renderer/features/task/record/Receipt'
+import { ReceiptLine, costLabel, receiptParts } from '@renderer/features/task/record/Receipt'
 
 afterEach(cleanup)
 
@@ -46,7 +46,7 @@ describe('receiptParts', () => {
 })
 
 describe('ReceiptLine', () => {
-  it('prints the shared captions and keeps every meaning off the visual line but on the sr-only text', () => {
+  it('prints time and cost, keeps tokens, speed and cache for its hover, and every meaning on the sr-only text', () => {
     const startedAt = Date.parse('2026-09-25T10:00:00.000Z')
     const { container } = render(
       <ReceiptLine
@@ -56,20 +56,20 @@ describe('ReceiptLine', () => {
         live={false}
       />
     )
-    const line = container.querySelector('[data-receipt]')
-    expect(line?.textContent).toContain('380 tok (in+out)')
-    expect(line?.textContent).toContain('85% cache hit')
+    const line = container.querySelector<HTMLElement>('[data-receipt]')!
+    // What the run took and cost; the harness telemetry is the line's hover.
+    const shown = [...line.querySelectorAll('[title]')].filter((el) => el !== line).map((el) => el.getAttribute('title'))
+    expect(shown).toEqual(['Wall time', 'Billed by the provider'])
+    expect(line.getAttribute('title')).toBe('380 tok (in+out) · 32 output tok/s · 85% cache hit')
 
     const meanings = [...container.querySelectorAll('.sr-only')].map((el) => el.textContent)
     expect(meanings).toEqual([
       'Wall time: ',
-      'Fresh input + output tokens: ',
-      'Output speed: ',
-      'Prompt cache hits: ',
-      'Billed by the provider: '
+      'Billed by the provider: ',
+      'Fresh input + output tokens: 380 tok (in+out); Output speed: 32 output tok/s; Prompt cache hits: 85% cache hit'
     ])
     // The sr-only text never joins the caption glyphs or the separators.
-    expect(line?.querySelectorAll('[aria-hidden="true"]').length).toBe(4)
+    expect(line.querySelectorAll('[aria-hidden="true"]').length).toBe(1)
   })
 
   it('keeps the hover title on each part alongside its sr-only meaning', () => {
@@ -81,5 +81,14 @@ describe('ReceiptLine', () => {
       'Prompt cache hits',
       'Billed by the provider'
     ])
+  })
+})
+
+describe('costLabel', () => {
+  it('marks an estimate, but not an estimate of nothing', () => {
+    expect(costLabel({ cost: 0.012, estimated: true })).toBe('~$0.012')
+    expect(costLabel({ cost: 0.012, estimated: false })).toBe('$0.012')
+    // A free model's run: "~$0" on every row said nothing.
+    expect(costLabel({ cost: 0, estimated: true })).toBe('$0')
   })
 })

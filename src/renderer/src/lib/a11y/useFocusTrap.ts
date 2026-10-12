@@ -35,12 +35,29 @@ export function useFocusTrap({
 
     return () => {
       const restore = returnFocusRef?.current ?? previousFocus.current
-      restore?.focus?.()
+      if (
+        !restore ||
+        !restore.isConnected ||
+        restore.getAttribute('aria-hidden') === 'true' ||
+        restore.closest?.('[aria-hidden="true"]') != null
+      ) {
+        return
+      }
+      restore.focus?.()
     }
   }, [active, containerRef, initialFocusRef, returnFocusRef])
 
   useEffect(() => {
     if (!active || !contain) return
+    const onFocusIn = (event: FocusEvent): void => {
+      const container = containerRef.current
+      if (!container) return
+      const target = event.target as Node | null
+      if (target && container.contains(target)) return
+      const focusable = getFocusableElements(container)
+      const pullTarget = focusable[0] ?? container
+      if (document.activeElement !== pullTarget) pullTarget.focus()
+    }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Tab') return
       const container = containerRef.current
@@ -57,7 +74,11 @@ export function useFocusTrap({
         first.focus()
       }
     }
+    document.addEventListener('focusin', onFocusIn)
     document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('keydown', onKeyDown)
+    }
   }, [active, contain, containerRef])
 }

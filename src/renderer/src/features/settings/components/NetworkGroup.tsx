@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { DEFAULT_NETWORK_SETTINGS, type NetworkSettings, type ProxyMode } from '@shared/ipc'
 import { normalizeProxyBypass, validateProxyUrl, type ProxyStatus } from '@shared/domain/network'
 import { Icon } from '@renderer/lib/icons'
-import { Input } from '@renderer/lib/ui'
+import { Button, Input } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsOption } from '../types'
 import { SegmentedField } from './SegmentedField'
@@ -56,6 +56,15 @@ export function NetworkGroup({ form }: { form: SettingsFormState }) {
   const [url, setUrl] = useState(net.proxyUrl)
   const [bypass, setBypass] = useState(net.proxyBypass)
   const [urlError, setUrlError] = useState<string | null>(null)
+  const [username, setUsername] = useState(net.proxyUsername ?? '')
+  const [password, setPassword] = useState('')
+  const [passwordSaved, setPasswordSaved] = useState(false)
+  useEffect(() => setUsername(net.proxyUsername ?? ''), [net.proxyUsername])
+  useEffect(() => {
+    void window.vyotiq?.toolSecretStatus?.().then((res) => {
+      if (res?.ok) setPasswordSaved(res.data.proxy === true)
+    })
+  }, [])
 
   const refreshStatus = useCallback(() => {
     void window.vyotiq
@@ -85,6 +94,27 @@ export function NetworkGroup({ form }: { form: SettingsFormState }) {
     if (parsed.ok) {
       setUrl(parsed.url)
       void save({ proxyUrl: parsed.url })
+    }
+  }
+
+  const commitUsername = (): void => {
+    const next = username.trim()
+    if (next !== (net.proxyUsername ?? '')) void save({ proxyUsername: next })
+  }
+  const savePassword = async (): Promise<void> => {
+    if (!password) return
+    const res = await window.vyotiq.toolSecretSet({ name: 'proxy', key: password })
+    if (res.ok) {
+      setPasswordSaved(res.data.proxy === true)
+      setPassword('')
+      refreshStatus()
+    }
+  }
+  const clearPassword = async (): Promise<void> => {
+    const res = await window.vyotiq.toolSecretClear({ name: 'proxy' })
+    if (res.ok) {
+      setPasswordSaved(res.data.proxy === true)
+      refreshStatus()
     }
   }
 
@@ -120,7 +150,7 @@ export function NetworkGroup({ form }: { form: SettingsFormState }) {
           <SettingsField
             id="proxy-url"
             title="Proxy address"
-            hint="http://host:port. For a proxy that needs a password, set HTTPS_PROXY instead."
+            hint="http://host:port. A user name and password, if it needs them, go below."
             nested
           >
             <div className="flex w-[240px] flex-col gap-1">
@@ -144,6 +174,65 @@ export function NetworkGroup({ form }: { form: SettingsFormState }) {
                 <p id="proxy-url-error" className="m-0 text-xs text-danger" role="alert">
                   {urlError}
                 </p>
+              ) : null}
+            </div>
+          </SettingsField>
+          <SettingsField
+            id="proxy-username"
+            title="User name"
+            hint="Only for a proxy that asks you to sign in."
+            nested
+          >
+            <div className="w-[240px]">
+              <Input
+                size="sm"
+                aria-label="Proxy user name"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={form.formLocked}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                onBlur={commitUsername}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                }}
+              />
+            </div>
+          </SettingsField>
+          <SettingsField
+            id="proxy-password"
+            title="Password"
+            hint={
+              passwordSaved
+                ? 'Saved in the key vault. Commands the agent runs get the address without it.'
+                : 'Kept in the key vault, never in settings.json.'
+            }
+            nested
+          >
+            <div className="flex w-[240px] items-center gap-1.5">
+              <div className="min-w-0 flex-1">
+                <Input
+                  size="sm"
+                  type="password"
+                  autoComplete="off"
+                  aria-label="Proxy password"
+                  placeholder={passwordSaved ? '••••••••' : ''}
+                  disabled={form.formLocked}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void savePassword()
+                  }}
+                />
+              </div>
+              {password ? (
+                <Button size="sm" variant="secondary" onClick={() => void savePassword()}>
+                  Save
+                </Button>
+              ) : passwordSaved ? (
+                <Button size="sm" variant="ghost" onClick={() => void clearPassword()}>
+                  Clear
+                </Button>
               ) : null}
             </div>
           </SettingsField>

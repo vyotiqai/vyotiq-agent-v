@@ -8,6 +8,7 @@ import { applyEventTimestamps, type UiItem } from '@shared/transcript'
 import { buildRecordModel, type BuildOptions } from '@renderer/features/task/recordModel'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
 import { approvedByText } from '@renderer/features/task/record/WorkItems'
+import { openWork } from './helpers/openWork'
 
 /**
  * Once a held call is answered, the record says who let it run and for how
@@ -34,7 +35,9 @@ function call(id: string, name: string, args: Record<string, unknown>, content: 
 
 function show(items: UiItem[], options: BuildOptions = { running: false }) {
   const model = buildRecordModel(items, options)
-  return render(<TaskRecord model={model} options={options} messageCount={items.length} />)
+  const view = render(<TaskRecord model={model} options={options} messageCount={items.length} />)
+  openWork(view.container)
+  return view
 }
 
 describe('approvedByText', () => {

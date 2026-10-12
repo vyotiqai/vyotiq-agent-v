@@ -19,10 +19,10 @@ function tool(name: string, status: 'ok' | 'fail', content: string, summary = ''
 
 describe('MarkdownContent size and tone', () => {
   it('puts exactly one size and one colour class on its root', () => {
-    const { container } = render(<MarkdownContent content="Done." size="md" tone="strong" />)
+    const { container } = render(<MarkdownContent content="Done." size="caption" tone="secondary" />)
     const root = container.querySelector('.markdown-body')!
-    expect(root.classList.contains('text-md')).toBe(true)
-    expect(root.classList.contains('text-fg-strong')).toBe(true)
+    expect(root.classList.contains('text-caption')).toBe(true)
+    expect(root.classList.contains('text-secondary')).toBe(true)
     // cn() has no merge: the defaults must not ride along.
     expect(root.classList.contains('text-sm')).toBe(false)
     expect(root.classList.contains('text-fg')).toBe(false)
@@ -95,7 +95,8 @@ describe('CompactSummaryBlock', () => {
     expect(toggle.className).not.toContain('hover:opacity')
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    const root = document.querySelector('[data-compact-summary] .markdown-body')!
-    expect(root.classList.contains('text-secondary')).toBe(true)
+    // The model's summary reads as the agent's other words in the record do.
+    const root = document.querySelector('[data-compact-summary] [data-reply]')!
+    expect(root.getAttribute('data-tone')).toBe('secondary')
   })
 })

@@ -6,9 +6,16 @@ export const MAX_PARALLEL_INSTANCES_LIMIT = 16
 /** Upper bound for Settings → Agent → Spend limit per task, in dollars. */
 export const TASK_SPEND_LIMIT_MAX_USD = 10_000
 import {
+  AnnounceVerbositySchema,
+  ContrastSchema,
+  DEFAULT_ALWAYS_SHOW_FOCUS_RING,
+  DEFAULT_ANNOUNCE_VERBOSITY,
+  DEFAULT_CONTRAST,
   DEFAULT_FONT_SCALE,
+  DEFAULT_REDUCE_MOTION,
   DEFAULT_SKIN_ID,
   FontScaleSchema,
+  ReduceMotionSchema,
   SkinIdSchema
 } from '../../appearance'
 import type { ThemeId } from '../../theme'
@@ -51,6 +58,14 @@ export const ThemeIdSchema = z.enum(['system', 'light', 'dark'])
 export type { ThemeId } from '../../theme'
 
 export { FontScaleSchema, SkinIdSchema, type FontScale, type SkinId } from '../../appearance'
+export {
+  ReduceMotionSchema,
+  ContrastSchema,
+  AnnounceVerbositySchema,
+  type ReduceMotion,
+  type Contrast,
+  type AnnounceVerbosity
+} from '../../appearance'
 
 const McpServerIdSchema = z
   .string()
@@ -215,13 +230,40 @@ export type AutonomousSkipQuestions = z.infer<typeof AutonomousSkipQuestionsSche
 export const DesktopNotificationModeSchema = z.enum(['off', 'unfocused', 'always'])
 export type DesktopNotificationMode = z.infer<typeof DesktopNotificationModeSchema>
 
+/** `HH:MM`, 24-hour, local time. */
+const ClockTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+
+/**
+ * Hours when desktop notifications stay quiet (the inbox still fills). The
+ * window may wrap midnight: 22:00 to 07:00.
+ */
+export const QuietHoursSchema = z.object({
+  enabled: z.boolean().default(false),
+  start: ClockTimeSchema.catch('22:00').default('22:00'),
+  end: ClockTimeSchema.catch('07:00').default('07:00')
+})
+export type QuietHours = z.infer<typeof QuietHoursSchema>
+
+export const DEFAULT_QUIET_HOURS: QuietHours = { enabled: false, start: '22:00', end: '07:00' }
+
+/** Where notifications go off this computer: an ntfy topic, a webhook, or nowhere. */
+export const RemoteNotificationModeSchema = z.enum(['off', 'ntfy', 'webhook'])
+export type RemoteNotificationMode = z.infer<typeof RemoteNotificationModeSchema>
+
 export const NotificationSettingsSchema = z.object({
   enabled: z.boolean().default(true),
   desktop: DesktopNotificationModeSchema.default('unfocused'),
   agentRunFinished: z.boolean().default(true),
   agentRunFailed: z.boolean().default(true),
   agentNeedsYou: z.boolean().default(true),
-  system: z.boolean().default(true)
+  system: z.boolean().default(true),
+  /** Desktop notifications play the system sound. */
+  sound: z.boolean().catch(false).default(false),
+  quietHours: QuietHoursSchema.catch(DEFAULT_QUIET_HOURS).default(DEFAULT_QUIET_HOURS),
+  /** Also send to a phone; the URL is in the key vault (tool key `notify`). */
+  remote: RemoteNotificationModeSchema.catch('off').default('off'),
+  /** `away`: only while the window is unfocused, minimized or in the tray. */
+  remoteWhen: z.enum(['away', 'always']).catch('away').default('away')
 })
 export type NotificationSettings = z.infer<typeof NotificationSettingsSchema>
 
@@ -238,7 +280,9 @@ export const NetworkSettingsSchema = z.object({
   /** `http(s)://host:port`, no credentials (see validateProxyUrl). */
   proxyUrl: z.string().trim().max(500).catch('').default(''),
   /** Hosts that skip the manual proxy, comma-separated (`localhost, *.corp`). */
-  proxyBypass: z.string().trim().max(2000).catch('').default('')
+  proxyBypass: z.string().trim().max(2000).catch('').default(''),
+  /** The manual proxy's user name; its password is in the key vault (tool key `proxy`). */
+  proxyUsername: z.string().trim().max(200).catch('').default('')
 })
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>
 
@@ -254,7 +298,8 @@ export type ShortcutChordSetting = z.infer<typeof ShortcutChordSchema>
 export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   proxyMode: 'system',
   proxyUrl: '',
-  proxyBypass: ''
+  proxyBypass: '',
+  proxyUsername: ''
 }
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
@@ -263,7 +308,27 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   agentRunFinished: true,
   agentRunFailed: true,
   agentNeedsYou: true,
-  system: true
+  system: true,
+  sound: false,
+  quietHours: DEFAULT_QUIET_HOURS,
+  remote: 'off',
+  remoteWhen: 'away'
+}
+
+/** Minutes since midnight for `HH:MM`; NaN when unreadable. */
+function clockMinutes(time: string): number {
+  const match = /^(\d{2}):(\d{2})$/.exec(time)
+  return match ? Number(match[1]) * 60 + Number(match[2]) : Number.NaN
+}
+
+/** Whether `now` (local time) falls inside quiet hours; a window may wrap midnight. */
+export function inQuietHours(quiet: QuietHours | undefined, now: Date): boolean {
+  if (!quiet?.enabled) return false
+  const start = clockMinutes(quiet.start)
+  const end = clockMinutes(quiet.end)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start === end) return false
+  const minute = now.getHours() * 60 + now.getMinutes()
+  return start < end ? minute >= start && minute < end : minute >= start || minute < end
 }
 
 /** What a permission rule does to a call it matches. Precedence: deny > ask > allow. */
@@ -305,7 +370,12 @@ export const PermissionRulesSchema = z.array(z.unknown()).transform((items) =>
 )
 
 export const ToolApprovalSettingsSchema = z.object({
-  mode: ToolApprovalModeSchema.default('off'),
+  /**
+   * Edits and commands ask, the mode Set up recommends. Until 1.3 the default
+   * was `off`, so Reset section, a new workspace override or a rebuilt
+   * settings file silently turned every approval off.
+   */
+  mode: ToolApprovalModeSchema.default('mutating'),
   /** Tool names the user chose to always allow, persisted per workspace. */
   allowlist: z.array(z.string()).default([]),
   /**
@@ -319,7 +389,7 @@ export const ToolApprovalSettingsSchema = z.object({
 export type ToolApprovalSettings = z.infer<typeof ToolApprovalSettingsSchema>
 
 export const DEFAULT_TOOL_APPROVAL: ToolApprovalSettings = {
-  mode: 'off',
+  mode: 'mutating',
   allowlist: [],
   mcpProtection: true,
   rules: []
@@ -338,7 +408,10 @@ export type AgentSandboxNetwork = z.infer<typeof AgentSandboxNetworkSchema>
 
 export const AgentSandboxSettingsSchema = z.object({
   mode: AgentSandboxModeSchema.catch('off').default('off'),
-  /** `deny` cuts sandboxed commands off the network (localhost stays on macOS). */
+  /**
+   * `deny` cuts sandboxed commands off the network (localhost stays on macOS).
+   * Not on Windows: low integrity cannot block the network.
+   */
   network: AgentSandboxNetworkSchema.catch('allow').default('allow')
 })
 export type AgentSandboxSettings = z.infer<typeof AgentSandboxSettingsSchema>
@@ -351,8 +424,8 @@ export const DEFAULT_AGENT_SANDBOX: AgentSandboxSettings = {
 /** Whether this machine can sandbox agent commands, and why not when it can't. */
 export const SandboxCapabilitySchema = z.object({
   available: z.boolean(),
-  /** `seatbelt` = macOS sandbox-exec, `bubblewrap` = Linux bwrap. */
-  mechanism: z.enum(['seatbelt', 'bubblewrap']).nullable(),
+  /** `seatbelt` = macOS sandbox-exec, `bubblewrap` = Linux bwrap, `low-integrity` = Windows. */
+  mechanism: z.enum(['seatbelt', 'bubblewrap', 'low-integrity']).nullable(),
   /** Why it is unavailable, in words fit to show; null when available. */
   reason: z.string().nullable()
 })
@@ -433,7 +506,7 @@ export type CodeIndexPauseRequest = z.infer<typeof CodeIndexPauseRequestSchema>
 export const DictationEngineSchema = z.enum(['openai', 'openrouter', 'local'])
 export type DictationEngine = z.infer<typeof DictationEngineSchema>
 
-export const DictationLocalModelIdSchema = z.enum(['whisper-tiny.en', 'whisper-small.en', 'moonshine-base'])
+export const DictationLocalModelIdSchema = z.enum(['whisper-tiny.en', 'whisper-small.en', 'moonshine-base', 'whisper-small'])
 export type DictationLocalModelId = z.infer<typeof DictationLocalModelIdSchema>
 
 /** What Enter does while a take is open; Ctrl/Cmd+Enter does the other. */
@@ -451,7 +524,7 @@ export const DictationSettingsSchema = z.object({
   localModelId: z.union([z.literal(''), DictationLocalModelIdSchema]).default(''),
   /** `MediaDeviceInfo.deviceId` of the chosen microphone; empty follows the OS default. */
   deviceId: z.string().max(512).default(''),
-  /** ISO-639-1 hint for the cloud engines; empty detects. Local Whisper is English-only. */
+  /** ISO-639-1 hint for the cloud engines and the multilingual local model; empty detects. The `.en` models are English-only. */
   language: z.string().max(8).default(''),
   /** Holding the shortcut records until it is let go; a tap still starts and stops a take. */
   holdToTalk: z.boolean().default(true),
@@ -561,7 +634,7 @@ export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
 }
 
 /** Current persisted settings format. Bump with a matching load-time rewrite. */
-export const SETTINGS_FORMAT_VERSION = 6
+export const SETTINGS_FORMAT_VERSION = 7
 
 /**
  * One user-defined OpenAI-compatible provider entry. `id` is a dynamic
@@ -676,6 +749,21 @@ export function dropLegacyCustomProviderSeed(
 }
 
 /** A provider and one of its models, for the helper and utility model settings. */
+/** The editor "Open in editor" uses; `auto` = the first one installed, `system` = the OS default app. */
+export const PreferredEditorSchema = z.enum([
+  'auto',
+  'vscode',
+  'cursor',
+  'windsurf',
+  'zed',
+  'sublime',
+  'webstorm',
+  'idea',
+  'pycharm',
+  'system'
+])
+export type PreferredEditor = z.infer<typeof PreferredEditorSchema>
+
 export const ModelRefSchema = z.object({
   provider: ProviderIdSchemaAny,
   model: z.string().min(1)
@@ -714,6 +802,58 @@ export type ModelFallbackSettings = z.infer<typeof ModelFallbackSettingsSchema>
 
 export const DEFAULT_MODEL_FALLBACK: ModelFallbackSettings = { enabled: false, models: [] }
 
+/** web_search's engine. Brave and Tavily keys live in the key vault, not here. */
+export const WebSearchProviderSchema = z.enum(['duckduckgo', 'brave', 'tavily', 'searxng'])
+export type WebSearchProvider = z.infer<typeof WebSearchProviderSchema>
+
+export const WebSearchSettingsSchema = z.object({
+  provider: WebSearchProviderSchema.catch('duckduckgo').default('duckduckgo'),
+  /** A SearXNG instance's address (`http://localhost:8888`), for provider `searxng`. */
+  searxngUrl: z.string().trim().max(500).catch('').default('')
+})
+export type WebSearchSettings = z.infer<typeof WebSearchSettingsSchema>
+
+export const DEFAULT_WEB_SEARCH: WebSearchSettings = { provider: 'duckduckgo', searxngUrl: '' }
+
+/** Most prices that can be set by hand. */
+export const MAX_CUSTOM_MODEL_PRICES = 100
+
+const PriceRateSchema = z.number().finite().min(0).max(100_000)
+
+/**
+ * A per-model price set in Settings (USD per 1M tokens), matched before the
+ * built-in table — see `resolveModelPrice` in shared/pricing/modelPrices.ts.
+ */
+export const CustomModelPriceSchema = z.object({
+  /** Provider id (`custom:<slug>` for an added endpoint), or `*` for any. */
+  provider: z.string().trim().min(1).max(80),
+  /** Exact model id, or a prefix ending in `*`. */
+  model: z.string().trim().min(1).max(200),
+  input: PriceRateSchema,
+  output: PriceRateSchema,
+  cachedInput: PriceRateSchema.optional(),
+  cacheWrite: PriceRateSchema.optional()
+})
+export type CustomModelPriceSetting = z.infer<typeof CustomModelPriceSchema>
+
+/**
+ * Spend across all tasks, in whole US dollars per local day and per calendar
+ * month. 0 is off. Reaching one warns once in that period; it never stops a
+ * task — the per-task limit is what stops.
+ */
+export const SpendBudgetSettingsSchema = z.object({
+  dailyUsd: z.number().int().min(0).max(TASK_SPEND_LIMIT_MAX_USD).catch(0).default(0),
+  monthlyUsd: z.number().int().min(0).max(TASK_SPEND_LIMIT_MAX_USD * 10).catch(0).default(0),
+  /**
+   * Once a budget is spent, new tasks, follow-ups, schedules and loops wait
+   * until the next day or month (or a higher budget). Running tasks finish.
+   */
+  holdAtBudget: z.boolean().catch(false).default(false)
+})
+export type SpendBudgetSettings = z.infer<typeof SpendBudgetSettingsSchema>
+
+export const DEFAULT_SPEND_BUDGET: SpendBudgetSettings = { dailyUsd: 0, monthlyUsd: 0, holdAtBudget: false }
+
 export const SettingsSchema = z.object({
   provider: ProviderIdSchemaAny,
   model: z.string().min(1),
@@ -726,6 +866,20 @@ export const SettingsSchema = z.object({
    * builtin `custom` provider and `customOpenAiBaseUrl` stay alongside them.
    */
   customProviders: z.array(CustomProviderSchema).default([]),
+  /**
+   * Context window / max output set by hand per model, keyed
+   * `<providerId>::<modelId>` (modelLimitKey). Wins over the catalog, the
+   * 128k guess and what a local server reports.
+   */
+  modelLimits: z
+    .record(
+      z.string().min(1).max(300),
+      z.object({
+        contextWindow: z.number().int().min(1024).max(10_000_000).optional(),
+        maxOutputTokens: z.number().int().min(256).max(1_000_000).optional()
+      })
+    )
+    .default({}),
   /** Amazon Bedrock region (the key's calls go only to that region's host). */
   bedrockRegion: z.string().trim().regex(BEDROCK_REGION_RE).catch(BEDROCK_DEFAULT_REGION).default(BEDROCK_DEFAULT_REGION),
   /** Google Cloud project Vertex AI bills; empty until set up. */
@@ -744,6 +898,18 @@ export const SettingsSchema = z.object({
   skinId: SkinIdSchema.catch(DEFAULT_SKIN_ID).default(DEFAULT_SKIN_ID),
   /** Local user CSS overlay path. Empty = none. */
   customCssPath: z.string().default(''),
+  /**
+   * Motion preference. `system` follows the OS reduced-motion setting,
+   * `on` always reduces motion, `off` keeps app motion (the OS setting can
+   * still reduce motion through the media query).
+   */
+  reduceMotion: ReduceMotionSchema.default(DEFAULT_REDUCE_MOTION),
+  /** Contrast preference. `system` follows the OS, `more` strengthens borders and text. */
+  contrast: ContrastSchema.default(DEFAULT_CONTRAST),
+  /** When true, the focus ring shows on focus, not just keyboard focus. */
+  alwaysShowFocusRing: z.boolean().default(DEFAULT_ALWAYS_SHOW_FOCUS_RING),
+  /** How much screen readers are told: nothing, failures/questions only, or everything. */
+  announceVerbosity: AnnounceVerbositySchema.default(DEFAULT_ANNOUNCE_VERBOSITY),
   telemetryEnabled: z.boolean().default(false),
   mcpServers: z.array(McpServerSchema).default([]),
   /**
@@ -769,6 +935,14 @@ export const SettingsSchema = z.object({
   thinkingEnabled: z.boolean().default(true),
   thinkingEffort: ThinkingEffortSchema.default(DEFAULT_THINKING_EFFORT),
   showThinking: z.boolean().default(true),
+  /**
+   * Keep Anthropic's prompt cache for an hour instead of five minutes. A
+   * prefix written with the long cache costs 2x base input instead of 1.25x,
+   * but survives an approval or question wait, which otherwise re-sends the
+   * whole prompt at full price. Off by default: worth it only when runs often
+   * wait on you (see `pnpm usage:report`, "idle" misses).
+   */
+  longPromptCache: z.boolean().default(false),
   favoriteModels: z.array(z.string()).default([]),
   /** Session keys (`${workspacePath}␀${runId}`) pinned above the Home recency list. */
   pinnedRuns: z.array(z.string()).max(24).default([]),
@@ -779,8 +953,15 @@ export const SettingsSchema = z.object({
   serviceTierByModel: z.record(z.string(), ServiceTierSchema).default({}),
   serviceTier: ServiceTierSchema.default('default'),
   toolApproval: ToolApprovalSettingsSchema.default(DEFAULT_TOOL_APPROVAL),
+  /**
+   * Minutes an approval card waits before the call is denied; 0 waits for an
+   * answer however long that takes (an unattended run then parks there).
+   */
+  approvalTimeoutMinutes: z.number().int().min(0).max(1440).default(15),
   /** Default search engine for browser_search. */
   searchEngine: SearchEngineSchema.default('duckduckgo'),
+  /** Where web_search asks: DuckDuckGo's HTML page (no key), a search API, or your SearXNG. */
+  webSearch: WebSearchSettingsSchema.catch(DEFAULT_WEB_SEARCH).default(DEFAULT_WEB_SEARCH),
   /**
    * When non-empty, agent browser navigation is limited to these hostnames
    * (exact or `*.suffix` wildcards). Empty = no extra host filter (SSRF rules still apply).
@@ -790,6 +971,8 @@ export const SettingsSchema = z.object({
   toolApprovalOnboardingDone: z.boolean().default(false),
   /** Shell used by the terminal tool. `auto` prefers PowerShell on Windows when available. */
   terminalShell: TerminalShellSchema.default('auto'),
+  /** Where "Open in editor" opens files, folders and worktrees. */
+  preferredEditor: PreferredEditorSchema.default('auto'),
   /**
    * Terminal screen-reader mode. `auto` follows OS assistive-tech detection
    * (Chromium reports it via accessibility-support-changed); `on`/`off` force
@@ -797,6 +980,12 @@ export const SettingsSchema = z.object({
    * it on without a screen reader costs significant CPU on chatty output.
    */
   terminalScreenReader: z.enum(['auto', 'on', 'off']).default('auto'),
+  /**
+   * Draw the terminal with WebGL (@xterm/addon-webgl). Much faster on busy
+   * output; falls back to the DOM renderer when WebGL is missing or its
+   * context is lost. Off is for GPUs that draw it wrong.
+   */
+  terminalGpuRendering: z.boolean().default(true),
   /** OS sandbox for agent-run commands. Never applies to the terminal panel you type into. */
   agentSandbox: AgentSandboxSettingsSchema.catch(DEFAULT_AGENT_SANDBOX).default(DEFAULT_AGENT_SANDBOX),
   /**
@@ -804,6 +993,8 @@ export const SettingsSchema = z.object({
    * Empty = auto-detect from package.json scripts / tsc.
    */
   diagnosticsCommand: z.string().default(''),
+  /** A shell program for the terminal panel's own tabs (blank: the Shell setting). Not the agent's. */
+  terminalShellPath: z.string().max(1024).default(''),
   /**
    * When true, the agent may call `switch_mode` mid-run as the task phase changes.
    * When false, only the user changes mode (composer picker or slash). Default on.
@@ -832,6 +1023,32 @@ export const SettingsSchema = z.object({
    * Priced models only: a step with no billed or published price adds nothing.
    */
   taskSpendLimitUsd: z.number().int().min(0).max(TASK_SPEND_LIMIT_MAX_USD).default(0),
+  /** Daily and monthly spend across tasks; reaching one warns, never stops. */
+  spendBudget: SpendBudgetSettingsSchema.catch(DEFAULT_SPEND_BUDGET).default(DEFAULT_SPEND_BUDGET),
+  /**
+   * Prices set by hand for models the table and models.dev do not price, or
+   * price differently. Unreadable entries are dropped rather than failing
+   * the settings file.
+   */
+  customModelPrices: z
+    .array(z.unknown())
+    .catch([])
+    .transform((items) => {
+      const out: CustomModelPriceSetting[] = []
+      for (const item of items) {
+        const parsed = CustomModelPriceSchema.safeParse(item)
+        if (parsed.success) out.push(parsed.data)
+        if (out.length === MAX_CUSTOM_MODEL_PRICES) break
+      }
+      return out
+    })
+    .default([]),
+  /**
+   * Draft a commit message in the background while Changes shows uncommitted
+   * work. Off: the message is written when Commit… opens. Each draft is a
+   * billed model call, recorded in Usage.
+   */
+  commitMessageAutoDraft: z.boolean().default(false),
   /**
    * Model helper instances run on. Null: the task's own model — the one the
    * task was started with, not the workspace default.
@@ -853,6 +1070,16 @@ export const SettingsSchema = z.object({
   maxChatPanes: z.number().int().min(0).max(6).default(0),
   /** Packaged builds check for app updates at launch and every 6 hours. */
   autoCheckUpdates: z.boolean().default(true),
+  /** `beta` also offers releases marked pre-release; never downgrades back to stable. */
+  updateChannel: z.enum(['stable', 'beta']).catch('stable').default('stable'),
+  /**
+   * Closing the window hides it to the tray instead of quitting, so tasks,
+   * loops and schedules keep going (Windows and Linux; a Mac app already
+   * keeps running). Quit from the tray or the menu.
+   */
+  closeToTray: z.boolean().default(false),
+  /** Ask before a close or quit stops running tasks. */
+  confirmQuitWithRunningTasks: z.boolean().default(true),
   /**
    * Shared Google Cloud OAuth client ID for Gmail/Drive/Calendar MCP.
    * Non-secret. Client secret lives in OS secure storage, never settings.json.
@@ -864,14 +1091,15 @@ export const SettingsSchema = z.object({
   /** Composer dictation engine + which local Whisper weights to use. */
   dictation: DictationSettingsSchema.default(DEFAULT_DICTATION_SETTINGS),
   /**
-   * Unattended runs: auto-approve gated tools (high-risk still gated). Off by
-   * default.
+   * "Approve low-risk tools on their own": auto-approve gated tools that are
+   * not high-risk (see isAutonomousHighRiskTool). Off by default.
    */
   autonomousMode: z.boolean().default(false),
   /**
-   * When autonomousMode is on: skip ask_question immediately, or wait for the
-   * user's answer. There is no question timeout, so 'wait' can park an
-   * unattended run until someone answers or cancels it.
+   * "When the agent asks a question": skip ask_question (and decline MCP
+   * servers' questions) immediately, or wait for the user's answer. Applies
+   * whatever autonomousMode says (v7 on). There is no question timeout, so
+   * 'wait' can park a run nobody is watching until someone answers or cancels it.
    */
   autonomousSkipQuestions: AutonomousSkipQuestionsSchema.default('wait'),
   /** Storage retention policy (checkpoint GC, orphan reaper, size cap). */
@@ -912,6 +1140,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1',
   customProviders: [],
+  modelLimits: {},
   bedrockRegion: BEDROCK_DEFAULT_REGION,
   vertexProject: '',
   vertexLocation: VERTEX_DEFAULT_LOCATION,
@@ -921,6 +1150,10 @@ export const DEFAULT_SETTINGS: Settings = {
   fontScale: DEFAULT_FONT_SCALE,
   skinId: DEFAULT_SKIN_ID,
   customCssPath: '',
+  reduceMotion: DEFAULT_REDUCE_MOTION,
+  contrast: DEFAULT_CONTRAST,
+  alwaysShowFocusRing: DEFAULT_ALWAYS_SHOW_FOCUS_RING,
+  announceVerbosity: DEFAULT_ANNOUNCE_VERBOSITY,
   telemetryEnabled: false,
   mcpServers: [],
   mcpToolLoading: 'on-demand',
@@ -930,6 +1163,7 @@ export const DEFAULT_SETTINGS: Settings = {
   thinkingEnabled: true,
   thinkingEffort: DEFAULT_THINKING_EFFORT,
   showThinking: true,
+  longPromptCache: false,
   favoriteModels: [],
   pinnedRuns: [],
   archivedRuns: [],
@@ -938,23 +1172,34 @@ export const DEFAULT_SETTINGS: Settings = {
   serviceTierByModel: {},
   serviceTier: 'default',
   toolApproval: DEFAULT_TOOL_APPROVAL,
+  approvalTimeoutMinutes: 15,
   searchEngine: 'duckduckgo',
+  webSearch: DEFAULT_WEB_SEARCH,
   browserDomainAllowlist: [],
   toolApprovalOnboardingDone: false,
   terminalShell: 'auto',
+  preferredEditor: 'auto',
   terminalScreenReader: 'auto',
+  terminalGpuRendering: true,
   agentSandbox: DEFAULT_AGENT_SANDBOX,
   diagnosticsCommand: '',
+  terminalShellPath: '',
   autoModeSwitch: true,
   autoResumeInterruptedRuns: true,
   newTaskWorktree: false,
   maxParallelInstances: DEFAULT_MAX_PARALLEL_INSTANCES,
   taskSpendLimitUsd: 0,
+  spendBudget: DEFAULT_SPEND_BUDGET,
+  customModelPrices: [],
+  commitMessageAutoDraft: false,
   helperModel: null,
   utilityModel: null,
   modelFallback: DEFAULT_MODEL_FALLBACK,
   maxChatPanes: 0,
   autoCheckUpdates: true,
+  updateChannel: 'stable',
+  closeToTray: false,
+  confirmQuitWithRunningTasks: true,
   googleMcpClientId: '',
   marketplace: DEFAULT_MARKETPLACE_SETTINGS,
   codeIndex: DEFAULT_CODE_INDEX_SETTINGS,

@@ -18,6 +18,7 @@ import {
   GitStatusChangedPayloadSchema,
   NotificationListSchema,
   NotificationActionSchema,
+  TrayCommandSchema,
   DeepLinkPayloadSchema,
   TaskScheduleWorktreeOpenRequestSchema
 } from '../shared/ipc'
@@ -148,6 +149,7 @@ const api: VyotiqApi = {
   restoreHunk: (payload) => ipcRenderer.invoke(IPC.runsRestoreHunk, payload),
   homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),
   usageExportCsv: (payload) => ipcRenderer.invoke(IPC.usageExportCsv, payload),
+  usageBudget: () => ipcRenderer.invoke(IPC.usageBudget),
   runFeedbackGet: (payload) => ipcRenderer.invoke(IPC.runFeedbackGet, payload),
   runsSearch: (payload) => ipcRenderer.invoke(IPC.runsSearch, payload),
   settingsExport: () => ipcRenderer.invoke(IPC.settingsExport),
@@ -194,8 +196,16 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.toolApprovalRequest, listener)
     }
   },
-  respondToolApproval: (requestId, decision, runId) =>
-    ipcRenderer.invoke(IPC.toolApprovalResponse, { requestId, decision, runId }),
+  respondToolApproval: (requestId, decision, runId, extras) =>
+    ipcRenderer.invoke(IPC.toolApprovalResponse, {
+      requestId,
+      decision,
+      runId,
+      ...(extras?.note ? { note: extras.note } : {}),
+      ...(extras?.editedCommand ? { editedCommand: extras.editedCommand } : {}),
+      ...(extras?.allowFolder ? { allowFolder: true } : {}),
+      ...(extras?.allowProgram ? { allowProgram: true } : {})
+    }),
   listPendingToolApprovals: (runId) =>
     ipcRenderer.invoke(IPC.toolApprovalListPending, { runId }),
   onAgentQuestionRequest: (handler) => {
@@ -304,6 +314,10 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.loadRunEvents, { workspacePath, runId }),
   loadToolResult: (workspacePath, runId, toolCallId) =>
     ipcRenderer.invoke(IPC.loadToolResult, { workspacePath, runId, toolCallId }),
+  listDeletedRuns: (workspacePath) => ipcRenderer.invoke(IPC.runsDeletedList, { workspacePath }),
+  restoreDeletedRun: (workspacePath, runId) => ipcRenderer.invoke(IPC.runsDeletedRestore, { workspacePath, runId }),
+  purgeDeletedRuns: (workspacePath, runId) =>
+    ipcRenderer.invoke(IPC.runsDeletedPurge, { workspacePath, ...(runId ? { runId } : {}) }),
   deleteRun: (workspacePath, runId) =>
     ipcRenderer.invoke(IPC.runsDelete, { workspacePath, runId }),
   exportRun: (workspacePath, runId) =>
@@ -318,11 +332,14 @@ const api: VyotiqApi = {
   setGoalStatus: (payload) => ipcRenderer.invoke(IPC.runsSetGoalStatus, payload),
   setLoop: (payload) => ipcRenderer.invoke(IPC.runsSetLoop, payload),
   listActiveRuns: () => ipcRenderer.invoke(IPC.runsActive),
-  gitStatus: (workspacePath) => ipcRenderer.invoke(IPC.gitStatus, { workspacePath }),
+  gitStatus: (workspacePath, opts) =>
+    ipcRenderer.invoke(IPC.gitStatus, { workspacePath, ...(opts?.limit ? { limit: opts.limit } : {}) }),
   gitInit: (payload) => ipcRenderer.invoke(IPC.gitInit, payload),
   gitAllowRepoCommands: (payload) => ipcRenderer.invoke(IPC.gitAllowRepoCommands, payload),
   gitGenerateCommitMessage: (payload) =>
     ipcRenderer.invoke(IPC.gitGenerateCommitMessage, payload),
+  promptStructure: (payload) => ipcRenderer.invoke(IPC.promptStructure, payload),
+  promptStructureCancel: (payload) => ipcRenderer.invoke(IPC.promptStructureCancel, payload),
   gitCommit: (workspacePath, message, push, mode, runId) =>
     ipcRenderer.invoke(IPC.gitCommit, { workspacePath, message, push, mode, ...(runId ? { runId } : {}) }),
   gitStageAll: (workspacePath) => ipcRenderer.invoke(IPC.gitStageAll, { workspacePath }),
@@ -334,6 +351,7 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.gitCheckout, { workspacePath, branch, ...(options?.leaveChanges ? { leaveChanges: true } : {}) }),
   gitBranchStash: (payload) => ipcRenderer.invoke(IPC.gitBranchStash, payload),
   gitStashRestore: (payload) => ipcRenderer.invoke(IPC.gitStashRestore, payload),
+  gitStashDrop: (payload) => ipcRenderer.invoke(IPC.gitStashDrop, payload),
   gitStageHunk: (payload) => ipcRenderer.invoke(IPC.gitStageHunk, payload),
   gitLastCommit: (payload) => ipcRenderer.invoke(IPC.gitLastCommit, payload),
   gitAmend: (payload) => ipcRenderer.invoke(IPC.gitAmend, payload),
@@ -347,7 +365,8 @@ const api: VyotiqApi = {
   gitBranchDiff: (workspacePath) => ipcRenderer.invoke(IPC.gitBranchDiff, { workspacePath }),
   gitBlame: (workspacePath, path) =>
     ipcRenderer.invoke(IPC.gitBlame, { workspacePath, path }),
-  prView: (workspacePath) => ipcRenderer.invoke(IPC.prView, { workspacePath }),
+  prView: (workspacePath, number) => ipcRenderer.invoke(IPC.prView, number ? { workspacePath, number } : { workspacePath }),
+  composerFetchUrl: (url) => ipcRenderer.invoke(IPC.composerFetchUrl, { url }),
   prCreate: (workspacePath, options) =>
     ipcRenderer.invoke(IPC.prCreate, { workspacePath, ...options }),
   prMerge: (workspacePath, method, number) =>
@@ -399,6 +418,7 @@ const api: VyotiqApi = {
   ptyResize: (id, cols, rows, workspacePath) =>
     ipcRenderer.invoke(IPC.ptyResize, { id, cols, rows, workspacePath }),
   ptyKill: (id, workspacePath) => ipcRenderer.invoke(IPC.ptyKill, { id, workspacePath }),
+  ptyRename: (payload) => ipcRenderer.invoke(IPC.ptyRename, payload),
   onPtyData: (handler) => {
     const listener = (_: IpcRendererEvent, raw: unknown): void => {
       if (!raw || typeof raw !== 'object') return
@@ -426,6 +446,8 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.ptyExit, listener)
     }
   },
+  terminalKeptList: (workspacePath) => ipcRenderer.invoke(IPC.terminalKeptList, { workspacePath }),
+  terminalKeptStop: (id, workspacePath) => ipcRenderer.invoke(IPC.terminalKeptStop, { id, workspacePath }),
   onPtySessionsChanged: (handler) => {
     const listener = (): void => {
       handler()
@@ -531,6 +553,8 @@ const api: VyotiqApi = {
   telemetryStatus: () => ipcRenderer.invoke(IPC.telemetryStatus),
   stopTrace: () => ipcRenderer.invoke(IPC.traceStop),
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
+  cliPathStatus: () => ipcRenderer.invoke(IPC.cliPathStatus),
+  cliPathSet: (req) => ipcRenderer.invoke(IPC.cliPathSet, req),
   getSandboxCapability: () => ipcRenderer.invoke(IPC.sandboxCapability, {}),
   updater: {
     getState: () => ipcRenderer.invoke(IPC.updaterGetState),
@@ -562,6 +586,16 @@ const api: VyotiqApi = {
   mcpStatus: (payload) => ipcRenderer.invoke(IPC.mcpStatus, payload ?? {}),
   mcpRefresh: (payload) => ipcRenderer.invoke(IPC.mcpRefresh, payload ?? {}),
   toolsCatalogGet: (payload) => ipcRenderer.invoke(IPC.toolsCatalogGet, payload ?? {}),
+  agentToolSource: (name) => ipcRenderer.invoke(IPC.agentToolSource, { name }),
+  hooksOverview: (payload) => ipcRenderer.invoke(IPC.hooksOverview, payload ?? {}),
+  setupDetect: () => ipcRenderer.invoke(IPC.setupDetect),
+  setupUseEnvKey: (provider) => ipcRenderer.invoke(IPC.setupUseEnvKey, { provider }),
+  mcpRegistrySearch: (query) => ipcRenderer.invoke(IPC.mcpRegistrySearch, { query }),
+  marketplaceCheckUpdates: () => ipcRenderer.invoke(IPC.marketplaceCheckUpdates),
+  hooksDecide: (payload) => ipcRenderer.invoke(IPC.hooksDecide, payload),
+  hooksForget: (workspace) => ipcRenderer.invoke(IPC.hooksForget, { workspace }),
+  hooksOpenFile: (payload) => ipcRenderer.invoke(IPC.hooksOpenFile, payload),
+  agentToolDelete: (name) => ipcRenderer.invoke(IPC.agentToolDelete, { name }),
   mcpSetAuthToken: (serverId, token) =>
     ipcRenderer.invoke(IPC.mcpSetAuthToken, { serverId, token }),
   mcpClearAuthToken: (serverId) => ipcRenderer.invoke(IPC.mcpClearAuthToken, { serverId }),
@@ -592,8 +626,11 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.marketplaceSetEnabled, { id, enabled }),
   marketplacePickLocal: () => ipcRenderer.invoke(IPC.marketplacePickLocal),
   marketplaceGetContents: (id) => ipcRenderer.invoke(IPC.marketplaceGetContents, { id }),
-  marketplaceAckRemoteInstall: (acked) =>
-    ipcRenderer.invoke(IPC.marketplaceAckRemoteInstall, { acked }),
+  marketplaceAckRemoteInstall: (acked, opts) =>
+    ipcRenderer.invoke(IPC.marketplaceAckRemoteInstall, {
+      acked,
+      ...(opts?.confirmedInApp ? { confirmedInApp: true } : {})
+    }),
   getSystemTheme: () => ipcRenderer.invoke(IPC.getSystemTheme),
   appearancePickCustomCss: () => ipcRenderer.invoke(IPC.appearancePickCustomCss),
   appearanceReadCustomCss: () => ipcRenderer.invoke(IPC.appearanceReadCustomCss),
@@ -618,6 +655,9 @@ const api: VyotiqApi = {
     }
   },
   clearWorkspaceMemory: (payload) => ipcRenderer.invoke(IPC.workspaceClearMemory, payload),
+  workspaceMemoryNotes: (payload) => ipcRenderer.invoke(IPC.workspaceMemoryNotes, payload),
+  workspaceMemoryNoteRead: (payload) => ipcRenderer.invoke(IPC.workspaceMemoryNoteRead, payload),
+  workspaceMemoryNoteDelete: (payload) => ipcRenderer.invoke(IPC.workspaceMemoryNoteDelete, payload),
   codeIndexStatus: () => ipcRenderer.invoke(IPC.codeIndexStatus),
   codeIndexReindex: (payload) => ipcRenderer.invoke(IPC.codeIndexReindex, payload ?? {}),
   codeIndexPause: (workspacePath) => ipcRenderer.invoke(IPC.codeIndexPause, { workspacePath }),
@@ -671,6 +711,7 @@ const api: VyotiqApi = {
   listNotifications: () => ipcRenderer.invoke(IPC.notificationsList),
   markNotificationsRead: (payload) => ipcRenderer.invoke(IPC.notificationsMarkRead, payload),
   dismissNotifications: (payload) => ipcRenderer.invoke(IPC.notificationsDismiss, payload),
+  notificationsRemoteTest: (payload) => ipcRenderer.invoke(IPC.notificationsRemoteTest, payload),
   onNotificationsChanged: (handler) => {
     const listener = (_: IpcRendererEvent, raw: unknown): void => {
       const parsed = NotificationListSchema.safeParse(raw)
@@ -704,6 +745,29 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.notificationsActivate, listener)
     }
   },
+  prCommentsAll: (payload) => ipcRenderer.invoke(IPC.prCommentsAll, payload),
+  prLeaveMergeQueue: (payload) => ipcRenderer.invoke(IPC.prLeaveMergeQueue, payload),
+  gitBranchDelete: (payload) => ipcRenderer.invoke(IPC.gitBranchDelete, payload),
+  gitDiscardUndo: (payload) => ipcRenderer.invoke(IPC.gitDiscardUndo, payload),
+  gitBranchRename: (payload) => ipcRenderer.invoke(IPC.gitBranchRename, payload),
+  gitStashList: (workspacePath) => ipcRenderer.invoke(IPC.gitStashList, { workspacePath }),
+  gitStashApply: (payload) => ipcRenderer.invoke(IPC.gitStashApply, payload),
+  gitStashDropAny: (payload) => ipcRenderer.invoke(IPC.gitStashDropAny, payload),
+  gitIntegrate: (payload) => ipcRenderer.invoke(IPC.gitIntegrate, payload),
+  toolSecretSet: (payload) => ipcRenderer.invoke(IPC.toolSecretSet, payload),
+  toolSecretClear: (payload) => ipcRenderer.invoke(IPC.toolSecretClear, payload),
+  toolSecretStatus: () => ipcRenderer.invoke(IPC.toolSecretStatus),
+  onTrayCommand: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = TrayCommandSchema.safeParse(raw)
+      if (!parsed.success) return
+      handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.trayCommand, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.trayCommand, listener)
+    }
+  },
   onDeepLinkOpened: (handler) => {
     const listener = (_: IpcRendererEvent, raw: unknown): void => {
       const parsed = DeepLinkPayloadSchema.safeParse(raw)
@@ -727,6 +791,8 @@ const api: VyotiqApi = {
   workspaceFileMove: (payload) => ipcRenderer.invoke(IPC.workspaceFileMove, payload),
   workspaceFileDelete: (payload) => ipcRenderer.invoke(IPC.workspaceFileDelete, payload),
   workspaceFileReveal: (payload) => ipcRenderer.invoke(IPC.workspaceFileReveal, payload),
+  editorOpen: (payload) => ipcRenderer.invoke(IPC.editorOpen, payload),
+  editorList: () => ipcRenderer.invoke(IPC.editorList),
   workspaceFormatterStatus: (payload) =>
     ipcRenderer.invoke(IPC.workspaceFormatterStatus, payload),
   workspaceFormatFile: (payload) => ipcRenderer.invoke(IPC.workspaceFormatFile, payload),

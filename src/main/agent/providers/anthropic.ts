@@ -177,8 +177,20 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
   return { system: systemText, messages: merged }
 }
 
+/**
+ * Cache mark for the stable prefix (tools, stable system). A `'1h'` mark must
+ * come before any 5-minute one, which holds here: tools → system → messages,
+ * and history always keeps the 5-minute mark.
+ */
+function prefixCacheControl(ttl: ProviderChatRequest['promptCacheTtl']): Record<string, unknown> {
+  return ttl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' }
+}
+
 /** Official cache order is tools → system → messages. Last-tool breakpoint keeps the tools prefix when system later changes. */
-function toAnthropicTools(tools: ProviderChatRequest['tools']): Array<Record<string, unknown>> {
+function toAnthropicTools(
+  tools: ProviderChatRequest['tools'],
+  ttl?: ProviderChatRequest['promptCacheTtl']
+): Array<Record<string, unknown>> {
   return tools.map((t, i) => {
     const def: Record<string, unknown> = {
       name: t.name,
@@ -186,7 +198,7 @@ function toAnthropicTools(tools: ProviderChatRequest['tools']): Array<Record<str
       input_schema: t.parameters
     }
     if (i === tools.length - 1) {
-      def.cache_control = { type: 'ephemeral' }
+      def.cache_control = prefixCacheControl(ttl)
     }
     return def
   })
@@ -194,7 +206,8 @@ function toAnthropicTools(tools: ProviderChatRequest['tools']): Array<Record<str
 
 function applyCacheControl(
   system: string | { stable: string; volatile: string } | undefined,
-  messages: Array<Record<string, unknown>>
+  messages: Array<Record<string, unknown>>,
+  ttl?: ProviderChatRequest['promptCacheTtl']
 ): {
   system: Array<Record<string, unknown>> | undefined
   messages: Array<Record<string, unknown>>
@@ -209,14 +222,14 @@ function applyCacheControl(
       systemBlocks.push({
         type: 'text',
         text: system.stable,
-        cache_control: { type: 'ephemeral' }
+        cache_control: prefixCacheControl(ttl)
       })
     }
     const vol = system.volatile?.trim()
     if (vol) volatileText = vol
     if (!systemBlocks.length) systemBlocks = undefined
   } else if (typeof system === 'string' && system) {
-    systemBlocks = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+    systemBlocks = [{ type: 'text', text: system, cache_control: prefixCacheControl(ttl) }]
   }
 
   // Mark the last cacheable history block, then append volatile after it (OpenAI/Gemini pattern).
@@ -351,8 +364,8 @@ export function buildAnthropicBody(req: ProviderChatRequest): Record<string, unk
     req.systemStable !== undefined || req.systemVolatile !== undefined
       ? { stable: req.systemStable ?? '', volatile: req.systemVolatile ?? '' }
       : req.system
-  const cached = applyCacheControl(systemForCache, converted.messages)
-  const tools = toAnthropicTools(req.tools)
+  const cached = applyCacheControl(systemForCache, converted.messages, req.promptCacheTtl)
+  const tools = toAnthropicTools(req.tools, req.promptCacheTtl)
   const body: Record<string, unknown> = {
     model: req.model,
     max_tokens: defaultMaxTokens(req.model, req.maxOutputTokens),
@@ -561,6 +574,11 @@ export const anthropicProvider: LlmProvider = {
         ? usage.cache_creation_input_tokens
         : lastUsage?.cacheCreationInputTokens
       const reasoningTokens = hasReasoning ? usage.thinking_tokens : lastUsage?.reasoningTokens
+      const creation = usage.cache_creation as Record<string, unknown> | undefined
+      const cacheCreationLongInputTokens =
+        typeof creation?.ephemeral_1h_input_tokens === 'number'
+          ? creation.ephemeral_1h_input_tokens
+          : lastUsage?.cacheCreationLongInputTokens
 
       const billed = billedCostFromUsage(usage)
 
@@ -570,6 +588,7 @@ export const anthropicProvider: LlmProvider = {
         outputTokens: outputTokens as number | undefined,
         cachedInputTokens: cachedInputTokens as number | undefined,
         cacheCreationInputTokens: cacheCreationInputTokens as number | undefined,
+        ...(cacheCreationLongInputTokens ? { cacheCreationLongInputTokens } : {}),
         reasoningTokens: reasoningTokens as number | undefined,
         ...billed
       }

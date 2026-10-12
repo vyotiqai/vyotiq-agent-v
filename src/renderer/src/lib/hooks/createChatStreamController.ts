@@ -9,6 +9,7 @@ import type {
   ProviderIdAny,
   PersistedEvent,
   ToolApprovalDecision,
+  ToolApprovalExtras,
   ToolApprovalGrant,
   ToolApprovalRequest,
   AgentQuestionAnswer,
@@ -39,6 +40,7 @@ import {
   contentDisplayText,
   contentImages,
   RUN_DISMISSED_ERRORS_MAX,
+  STRUCTURED_FROM_MAX_CHARS,
   type MessageContent
 } from '@shared/ipc'
 import {
@@ -184,6 +186,12 @@ function withPresentationLock(tool: UiToolRow, name: string, argsPreview?: strin
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** A brief Structure wrote keeps the words it replaced on the message, for the record. */
+function structuredFromOf(extras?: ComposerSendExtras): { structuredFrom?: string } {
+  const words = extras?.structuredFrom?.trim()
+  return words ? { structuredFrom: words.slice(0, STRUCTURED_FROM_MAX_CHARS) } : {}
 }
 
 /** Prefer event.code from main; fall back for older events without a code. */
@@ -894,6 +902,16 @@ export type RevertWritesOutcome = {
   edited: string[]
 }
 
+/**
+ * An event that shows the run moved past an earlier `incomplete`: the loop
+ * auto-continued (cut-off reply, empty reply, repetition, tool burst) and a
+ * later step started streaming. Runs recorded before `continuing` existed
+ * only have this to go on.
+ */
+function isStepProgressEvent(event: AgentEvent): boolean {
+  return event.type === 'tool_start' || event.type === 'step_usage' || event.type === 'text_delta'
+}
+
 function incompleteFromPersisted(events: PersistedEvent[]): IncompleteTurnState | null {
   let incomplete: IncompleteTurnState | null = null
   for (const row of events) {
@@ -904,7 +922,12 @@ function incompleteFromPersisted(events: PersistedEvent[]): IncompleteTurnState 
       incomplete = null
       continue
     }
-    if (event.type === 'incomplete') {
+    // A recovery the loop made on its own is a note, never the turn's stop.
+    if (incomplete && isStepProgressEvent(event)) {
+      incomplete = null
+      continue
+    }
+    if (event.type === 'incomplete' && !event.continuing) {
       incomplete = { reason: event.reason, message: event.message }
     }
   }
@@ -1409,7 +1432,7 @@ export type ChatStreamController = ChatStreamState & {
   loadToolContent: (toolCallId: string) => Promise<string | null>
   /** Park a gated tool call on its transcript row until the reader answers. */
   handleApprovalRequest: (request: ToolApprovalRequest) => void
-  respondToApproval: (requestId: string, decision: ToolApprovalDecision) => Promise<void>
+  respondToApproval: (requestId: string, decision: ToolApprovalDecision, extras?: ToolApprovalExtras) => Promise<void>
   handleQuestionRequest: (request: AgentQuestionRequest) => void
   /** Reconcile question cards with the ones main still waits on for this run. */
   refreshPendingQuestions: (runId: string) => Promise<void>
@@ -2722,7 +2745,8 @@ export function createChatStreamController(
                   : applyThinkingSnapshot(item.thinking, event.thinking),
                 thinkingStreaming: false,
                 streaming: false,
-                at: item.at ?? messageAt
+                at: item.at ?? messageAt,
+                ...(event.cutOff ? { cutOff: true as const } : {})
               }
             : item
         )
@@ -2735,7 +2759,8 @@ export function createChatStreamController(
           thinking: event.thinking,
           thinkingStreaming: false,
           streaming: false,
-          at: messageAt
+          at: messageAt,
+          ...(event.cutOff ? { cutOff: true as const } : {})
         }, stepRowIds)
       }
       reasoningId = null
@@ -2847,7 +2872,8 @@ export function createChatStreamController(
                 content: event.content ?? existing.tool.content,
                 contentTruncated: event.contentTruncated ?? existing.tool.contentTruncated,
                 images: event.images ?? existing.tool.images,
-                ...(event.approvedBy ? { approvedBy: event.approvedBy } : {})
+                ...(event.approvedBy ? { approvedBy: event.approvedBy } : {}),
+                ...(event.waitedMs ? { waitedMs: event.waitedMs } : {})
               }
             },
             event.toolCallId
@@ -2885,7 +2911,8 @@ export function createChatStreamController(
                     content: event.content ?? row.tool.content,
                     contentTruncated: event.contentTruncated ?? row.tool.contentTruncated,
                     images: event.images ?? row.tool.images,
-                    ...(event.approvedBy ? { approvedBy: event.approvedBy } : {})
+                    ...(event.approvedBy ? { approvedBy: event.approvedBy } : {}),
+                    ...(event.waitedMs ? { waitedMs: event.waitedMs } : {})
                   }
                 },
                 event.toolCallId
@@ -2907,7 +2934,8 @@ export function createChatStreamController(
                 content: event.content,
                 contentTruncated: event.contentTruncated,
                 ...(event.images ? { images: event.images } : {}),
-                ...(event.approvedBy ? { approvedBy: event.approvedBy } : {})
+                ...(event.approvedBy ? { approvedBy: event.approvedBy } : {}),
+                ...(event.waitedMs ? { waitedMs: event.waitedMs } : {})
               }
             },
             state.runStartedAt
@@ -3068,8 +3096,10 @@ export function createChatStreamController(
       patch({ items: nextItems, networkWait: null })
     } else if (event.type === 'incomplete') {
       const items = event.reason === 'empty_response' ? withoutEmptyAssistantTail(state.items) : state.items
+      // An auto-continue is not a stop: it must not leave the turn "Failed"
+      // once the run finishes (see incompleteFromPersisted for the disk path).
       patch({
-        incomplete: { reason: event.reason, message: event.message },
+        ...(event.continuing ? {} : { incomplete: { reason: event.reason, message: event.message } }),
         ...(items !== state.items ? { items } : {})
       })
     } else if (event.type === 'compaction_started') {
@@ -3198,7 +3228,8 @@ export function createChatStreamController(
                 images: imageUrls.length ? imageUrls : undefined,
                 attachments: attachments.length ? attachments : undefined,
                 at: msg.at ?? new Date().toISOString(),
-                ...(msg.midTurn ? { midTurn: true as const } : {})
+                ...(msg.midTurn ? { midTurn: true as const } : {}),
+                ...(msg.structuredFrom ? { structuredFrom: msg.structuredFrom } : {})
               }
             })
           if (newItems.length > 0) nextItems = prependClosed(state.items, newItems)
@@ -3442,7 +3473,8 @@ export function createChatStreamController(
     turnSeq += 1
     const content = buildUserContent(text, images, files, extras)
     const sentAt = new Date().toISOString()
-    const user: ChatMessage = { role: 'user', content, at: sentAt }
+    const structured = structuredFromOf(extras)
+    const user: ChatMessage = { role: 'user', content, at: sentAt, ...structured }
     const priorMessages = state.messages
     const priorTurnUsage = turnUsageSlots
     const priorTurnStatus = state.turnStatus
@@ -3466,7 +3498,8 @@ export function createChatStreamController(
         content: displayText,
         images: imageUrls.length ? imageUrls : undefined,
         attachments: attachments.length ? attachments : undefined,
-        at: sentAt
+        at: sentAt,
+        ...structured
       })
     })
     assistantId = null
@@ -3747,7 +3780,7 @@ export function createChatStreamController(
 
     const content = buildUserContent(text, images, files, extras)
     const sentAt = new Date().toISOString()
-    const user: ChatMessage = { role: 'user', content, at: sentAt }
+    const user: ChatMessage = { role: 'user', content, at: sentAt, ...structuredFromOf(extras) }
     const priorMessages = state.messages
     // Resolve the rewind anchor from the pre-patch transcript: state.messages is
     // replaced below, so reading it after the patch would send the edited
@@ -4065,7 +4098,7 @@ export function createChatStreamController(
       return false
     }
     const content = buildUserContent(text, images, files, extras)
-    const user: ChatMessage = { role: 'user', content, at: new Date().toISOString() }
+    const user: ChatMessage = { role: 'user', content, at: new Date().toISOString(), ...structuredFromOf(extras) }
     const displayText = contentDisplayText(content)
     const preview = displayText.trim() || (uiAttachments(content).length ? uiAttachments(content)[0]!.name : 'Follow-up')
     const res = await window.vyotiq.chatFollowUp({
@@ -4671,7 +4704,11 @@ export function createChatStreamController(
       argsPreview: request.argsPreview,
       mutating: request.mutating,
       ...(request.alwaysAllowCommand !== undefined ? { alwaysAllowCommand: request.alwaysAllowCommand } : {}),
+      ...(request.alwaysAllowProgram ? { alwaysAllowProgram: request.alwaysAllowProgram } : {}),
       ...(request.danger ? { danger: request.danger } : {}),
+      ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),
+      ...(request.changePreview ? { changePreview: request.changePreview } : {}),
+      ...(request.alwaysAllowFolder ? { alwaysAllowFolder: request.alwaysAllowFolder } : {}),
       // The wait starts now — not when the call's arguments began to stream.
       requestedAt: new Date().toISOString()
     }
@@ -4717,13 +4754,16 @@ export function createChatStreamController(
 
   const respondToApproval = async (
     requestId: string,
-    decision: ToolApprovalDecision
+    decision: ToolApprovalDecision,
+    extras?: ToolApprovalExtras
   ): Promise<void> => {
     // Failures throw for the approval row's own error only — do not patch composer error.
     if (!runId) {
       throw new Error('No active run for approval response.')
     }
-    const res = await window.vyotiq?.respondToolApproval?.(requestId, decision, runId)
+    const res = extras
+      ? await window.vyotiq?.respondToolApproval?.(requestId, decision, runId, extras)
+      : await window.vyotiq?.respondToolApproval?.(requestId, decision, runId)
     // The task may no longer be waiting on you; let the navigator re-read now.
     signalActiveRunsChanged()
     if (!res) {

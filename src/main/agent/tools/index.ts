@@ -23,11 +23,13 @@ import { toolConceptSearch, CONCEPT_SEARCH_DEFAULT_LIMIT } from './conceptSearch
 import { scheduleWorkspaceIndexSync } from '../workspaceIndex'
 import { isSkillRelatedRelPath } from '../skills/local'
 import { isRuleRelatedRelPath, clearRulesCache } from '../context/rules'
+import { isOptionalBuiltinName } from '../context/toolsBudget'
 import { notifySkillsChanged } from '../skills/notify'
 import { toolListDir } from './listDir'
 import { toolStrReplaceAsync } from './strReplace'
 import { executeCheckDoneWhen } from '../doneWhenChecks'
 import { toolDeleteAsync } from './deletePath'
+import { movedFileDestinations, toolMoveAsync } from './movePath'
 import {
   assertInlineInstancePathScope,
   assertNotRetiredAgentDataPath,
@@ -55,10 +57,11 @@ import {
   toolMemoryRead,
   toolMemoryWrite
 } from './memory'
+import { deleteMemoryNote } from '../context/memory'
 import { toolSkill, summarizeSkillArgs } from './skill'
 import { toolDiagnosticsAsync } from './diagnostics'
 import { toolRunTestsAsync } from './runTests'
-import { AGENT_BUILT_TOOL_SANDBOX_REFUSAL, prepareAgentSandbox } from '../sandbox'
+import { AGENT_BUILT_TOOL_SANDBOX_REFUSAL, prepareAgentSandboxReady } from '../sandbox'
 import { toolEditNotebookAsync, type EditNotebookArgs } from './editNotebook'
 import { toolLsp, applyLspRenameEdits } from './lsp'
 import { getSettings } from '@main/settings/settings'
@@ -74,6 +77,7 @@ import { invalidateGitStatusCache } from '@main/git/gitStatusCache'
 import { invalidateSlashCommandsCache } from '../slashCommands/listCache'
 import { clearGitignoreMatcherCache, isGitignoreRelPath } from './gitignore'
 import { browserHandlers } from './browserTools'
+import { webHandlers } from './webTools'
 import { screenSnipHandlers } from './screenSnipTool'
 import { mcpHandlers } from './mcpTools'
 import { terminalHandlers } from './terminalHandlers'
@@ -227,6 +231,12 @@ export type ToolExecutionContext = {
   mcpLastUsedByName?: Map<string, number>
   /** Current agent step (for pin / invoke last-used stamps). */
   currentStep?: number
+  /**
+   * The model's reply for this step stopped on the output limit, so a write
+   * tool's unusable arguments were cut off, not mistyped (see
+   * formatMalformedToolArgsError).
+   */
+  stepCutOff?: boolean
   /** Invalidate the loop MCP catalog cache after pinning. */
   invalidateMcpToolCatalogCache?: () => void
   /**
@@ -560,6 +570,22 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     invalidateAfterToolMutation(workspace, context, path)
     return toolOk('delete', path, content)
   },
+  move: async (workspace, args, signal, context) => {
+    throwIfAborted(signal)
+    const from = readString(args, 'from')?.trim() ?? ''
+    const to = readString(args, 'to')?.trim() ?? ''
+    if (!from || !to) return toolFail('move', from || 'move', 'move requires from and to')
+    const checkpoint = context.skipWriteCheckpoint ? null : getWriteCheckpoint(context.runDir)
+    if (checkpoint) {
+      // Undo restores the source and removes what landed at the destination.
+      for (const dest of movedFileDestinations(workspace, from, to)) await checkpoint.recordPrior(dest, 'write')
+      await checkpoint.recordPrior(from, 'delete', { recursiveDir: true })
+    }
+    const content = await toolMoveAsync(workspace, from, to, args.overwrite === true)
+    invalidateAfterToolMutation(workspace, context, from)
+    invalidateAfterToolMutation(workspace, context, to)
+    return toolOk('move', `${from} → ${to}`, content)
+  },
   todo_write: (_workspace, args, signal, context) => {
     throwIfAborted(signal)
     const todos = args.todos as TodoItem[]
@@ -666,6 +692,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     return toolOk('create_plan', result.summary, result.content)
   },
   ...browserHandlers,
+  ...webHandlers,
   ...screenSnipHandlers,
   ...mcpHandlers,
   ask_question: async (_workspace, args, signal, context) => {
@@ -689,9 +716,9 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       ...(form.view ? { view: form.view } : {})
     }
     // The invoke snapshot, like the approval gate's autonomousMode (loop.ts):
-    // Unattended mode is decided once per turn, not mid-step.
+    // "When the agent asks a question" is decided once per turn, not mid-step.
     const settings = context.invokeSettings ?? getSettings()
-    if (settings.autonomousMode && settings.autonomousSkipQuestions === 'skip') {
+    if (settings.autonomousSkipQuestions === 'skip') {
       return toolOk('ask_question', summary, ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE)
     }
     const ask =
@@ -816,6 +843,18 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     clearWorkspaceSnapshotCache(workspace)
     return toolOk('memory_write', path, content)
   },
+  memory_delete: async (workspace, args, signal) => {
+    throwIfAborted(signal)
+    const path = requirePathArg('memory_delete', args)
+    const rel = normalizeMemoryRelPath(path)
+    const removed = await withWorkspaceMutation(workspace, `.vyotiq/memory/${rel}`, () =>
+      deleteMemoryNote(workspace, rel)
+    )
+    clearWorkspaceSnapshotCache(workspace)
+    return removed
+      ? toolOk('memory_delete', path, `Deleted ${rel} from memory (and its index.md pointer).`)
+      : toolFail('memory_delete', path, `No memory file at ${rel}.`)
+  },
   Skill: (workspace, args, signal) => {
     throwIfAborted(signal)
     const name = args.name as string
@@ -832,7 +871,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
   diagnostics: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const kind = args.kind === 'lint' ? 'lint' : 'typecheck'
-    const sandbox = prepareAgentSandbox({
+    const sandbox = await prepareAgentSandboxReady({
       workspace,
       extraRoots: context.extraRoots,
       settings: getSettings().agentSandbox
@@ -851,7 +890,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
   },
   run_tests: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
-    const sandbox = prepareAgentSandbox({
+    const sandbox = await prepareAgentSandboxReady({
       workspace,
       extraRoots: context.extraRoots,
       settings: getSettings().agentSandbox
@@ -917,6 +956,8 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
 }
 
 export { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from '../schemas/tools'
+/** For callers outside tools/: importing `./webTools` directly loads it before this barrel. */
+export { webHandlers }
 
 function normalizeParsedToolArgs(
   name: string,
@@ -1215,8 +1256,9 @@ export async function executeTool(
             ask: context.askQuestion ?? ((req, sig) => askQuestionThroughRenderer(req, sig, context.invokeId)),
             skipQuestions: () => {
               const settings = context.invokeSettings ?? getSettings()
-              return settings.autonomousMode && settings.autonomousSkipQuestions === 'skip'
-            }
+              return settings.autonomousSkipQuestions === 'skip'
+            },
+            workspacePath: workspace
           }
         : undefined
     )
@@ -1233,7 +1275,7 @@ export async function executeTool(
 
   const args = parseToolArgs(name, argsJson)
   const validation = toolCallArgumentsUnusable(name, argsJson)
-    ? { ok: false as const, error: formatMalformedToolArgsError(name) }
+    ? { ok: false as const, error: formatMalformedToolArgsError(name, { cutOff: context.stepCutOff }) }
     : validateParsedToolArgs(name, args)
   // The browser adapter intentionally accepts a selector with neither value
   // nor label and lets the live page report the available options.
@@ -1261,6 +1303,12 @@ export async function executeTool(
   const summary = summarizeToolArgsFromRecord(name, validatedArgs)
   if (!Object.prototype.hasOwnProperty.call(BUILTIN_HANDLERS, name)) {
     return toolFail(name, name, formatUnknownToolError(name))
+  }
+  // A held-back builtin the run just called: it runs now, and joins the
+  // catalog from the next step so the model sees its schema from then on.
+  if (isOptionalBuiltinName(name) && context.runStickyToolNames && !context.runStickyToolNames.has(name)) {
+    context.runStickyToolNames.add(name)
+    context.invalidateMcpToolCatalogCache?.()
   }
   const handler = BUILTIN_HANDLERS[name as AgentToolName]
 
@@ -1389,6 +1437,21 @@ export async function executeTool(
     } catch (err) {
       const message = formatToolResultError(err)
       return toolFail(name, summary, message)
+    }
+  }
+
+  // A move changes two paths: both must clear the same guards a write does.
+  if (effectiveWorkspace === workspace && name === 'move') {
+    const paths = [readString(effectiveArgs, 'from'), readString(effectiveArgs, 'to')].filter(
+      (p): p is string => typeof p === 'string' && p.trim().length > 0
+    )
+    try {
+      assertNotRetiredAgentDataPath(paths)
+      assertInlineInstancePathScope(effectiveContext.runDir, paths, {
+        inlineInstance: effectiveContext.inlineInstance
+      })
+    } catch (err) {
+      return toolFail(name, summary, formatToolResultError(err))
     }
   }
 

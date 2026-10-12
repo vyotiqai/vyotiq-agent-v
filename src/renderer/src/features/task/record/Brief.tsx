@@ -73,13 +73,40 @@ function AppFollowUp({
 }
 
 /**
+ * A brief Structure wrote: the words you typed are one click away, under it,
+ * a step quieter — the brief is what the agent worked from.
+ */
+function StructuredFrom({ words }: { words: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mt-0.5" data-brief-structured-from>
+      {/* 24px tall: it sits a line under "Show all", and two small targets that close must each be 24px (WCAG 2.5.8). */}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="inline-flex min-h-6 items-center gap-1 rounded-sm text-xs text-muted hover:text-fg focus-visible:vy-focus-ring"
+      >
+        <Icon name="sparkles" size={12} className="shrink-0" />
+        {open ? 'Hide what you wrote' : 'Structured from what you wrote'}
+      </button>
+      {open ? (
+        <p className="m-0 mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted [overflow-wrap:anywhere]">
+          <BriefText text={words} />
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/**
  * The instruction a run started from — the brief, or a follow-up. It is the
- * one thing in the record you wrote, so it sits on its own quiet plane: a
- * surface fill that bleeds into the gutter as far as every other fill in the
- * record (a live step, a hovered row), its text on the column's edge like
- * every row under it. No heading and no avatar — the plane says whose words
- * these are. Edit-and-rerun and rewind sit at its right edge on hover, beside
- * the words rather than over them.
+ * one thing in the record you wrote, so it reads as your side of the
+ * conversation: a bubble on the column's right edge, as wide as its words,
+ * its fill bleeding into the gutter as far as every other fill in the record
+ * (a live step, a hovered row). No heading and no avatar — the side says
+ * whose words these are. Edit-and-rerun and rewind sit just left of it on
+ * hover, beside the words rather than over them.
  */
 export function Brief({
   run,
@@ -87,6 +114,7 @@ export function Brief({
   editComposer,
   onEdit,
   onRewind,
+  onFork,
   onImageClick
 }: {
   run: RecordRun
@@ -95,6 +123,8 @@ export function Brief({
   editComposer?: ReactNode
   onEdit?: () => void
   onRewind?: () => void
+  /** A new task with the record up to here, this instruction's turn included. */
+  onFork?: () => void
   onImageClick?: (src: string) => void
 }) {
   const [userOpen, setOpen] = useState(false)
@@ -119,8 +149,8 @@ export function Brief({
   const title = when ? `${run.n === 1 ? 'Brief' : 'Follow-up'} · ${when}` : undefined
   return (
     <RecordRow className="pt-5">
-      <div className="group -mx-2 flex items-start gap-3 rounded-lg bg-surface px-2 py-2.5" data-brief={run.n}>
-        <div className="min-w-0 flex-1">
+      <div className="group relative -mr-2 ml-auto w-fit min-w-0 max-w-[85%] rounded-lg bg-surface px-3.5 py-2.5" data-brief={run.n}>
+        <div className="min-w-0">
           {run.command ? (
             // The command it invoked, as the composer showed it, slash and all —
             // not the prompt it expanded to.
@@ -154,6 +184,7 @@ export function Brief({
               {open ? 'Show less' : 'Show all'}
             </button>
           ) : null}
+          {run.structuredFrom && !origin ? <StructuredFrom words={run.structuredFrom} /> : null}
           {run.images.length > 0 || run.attachments.length > 0 ? (
             <div className="mt-2.5 flex flex-wrap gap-1.5">
               {run.images.map((src, i) => (
@@ -167,9 +198,10 @@ export function Brief({
                   <img src={src} alt="" className="h-14 w-20 object-cover" />
                 </button>
               ))}
-              {run.attachments.map((a) => (
+              {run.attachments.map((a, i) => (
                 <span
-                  key={a.name}
+                  // Names repeat: every dictated clip is "audio".
+                  key={`${i}:${a.name}`}
                   className="inline-flex h-7 items-center gap-2 rounded-md bg-bg pl-1.5 pr-2 text-xs text-secondary"
                 >
                   {a.mime.startsWith('image/') ? (
@@ -184,17 +216,26 @@ export function Brief({
             </div>
           ) : null}
         </div>
-        {onEdit || onRewind ? (
-          // Centred on the first line; hidden until the brief is hovered or holds focus.
-          <div className="-my-px flex shrink-0 gap-1 opacity-0 vy-transition group-hover:opacity-100 group-focus-within:opacity-100">
-            {onEdit ? <IconButton icon="edit" label="Edit and rerun" size="sm" tone="onSurface" onClick={onEdit} /> : null}
+        {onEdit || onRewind || onFork ? (
+          // Beside the first line, outside the bubble; hidden until the brief is hovered or holds focus.
+          <div className="absolute right-full top-2 mr-1 flex gap-1 opacity-0 vy-transition group-hover:opacity-100 group-focus-within:opacity-100">
+            {onEdit ? <IconButton icon="edit" label="Edit and rerun" size="sm" tone="muted" onClick={onEdit} /> : null}
             {onRewind ? (
               <IconButton
                 icon="undo"
                 label="Rewind files and record to before this instruction"
                 size="sm"
-                tone="onSurface"
+                tone="muted"
                 onClick={onRewind}
+              />
+            ) : null}
+            {onFork ? (
+              <IconButton
+                icon="fork"
+                label="Fork from here: a new task with the record up to this instruction's result"
+                size="sm"
+                tone="muted"
+                onClick={onFork}
               />
             ) : null}
           </div>

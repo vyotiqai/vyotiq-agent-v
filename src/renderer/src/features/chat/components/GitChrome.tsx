@@ -3,12 +3,14 @@ import type {
   GitCommitResult,
   GitPullResult,
   GitPullStrategy,
+  GitStashRestoreResult,
   GitStatus,
   GitStatusResult,
   PrCreateResult
 } from '@shared/ipc'
 import type { HunkIdentity } from '@shared/utils/hunkPatch'
 import { useGitStatus } from './useGitStatus'
+import { pushToast } from '@renderer/lib/ui'
 
 export type GitChrome = {
   status: GitStatus | null
@@ -66,9 +68,15 @@ export type GitChrome = {
   /** Push, publishing the branch when it has no upstream. Never forced. */
   push: () => Promise<boolean>
   createBranch: (name: string) => Promise<boolean>
+  /** Put back the changes a switch left on this branch (`sha` is that stash), open files saved first. */
+  restoreStash: (sha: string) => Promise<GitStashRestoreResult | false>
+  /** Drop that stash: after a restore with conflicts, or to throw its changes away. */
+  dropStash: (sha: string) => Promise<boolean>
 }
 
 export type GitSyncAction = 'fetch' | 'pull' | 'push' | 'branch'
+
+const SYNC_WORDS: Record<GitSyncAction, string> = { fetch: 'fetch', pull: 'pull', push: 'push', branch: 'branch change' }
 
 /** How often the app asks main for a background fetch while the window has focus; main spaces them out further. */
 export const BACKGROUND_FETCH_EVERY_MS = 5 * 60_000
@@ -340,6 +348,24 @@ export function useGitChrome(
         const result = await window.vyotiq.gitDiscardPaths({ workspacePath, paths, scope })
         setNotice(result.ok ? result.data.detail : result.error)
         setNoticeFailed(!result.ok)
+        const undoId = result.ok ? result.data.undoId : undefined
+        if (undoId) {
+          const where = workspacePath
+          pushToast(result.ok ? result.data.detail : '', {
+            kind: 'info',
+            durationMs: 12_000,
+            action: {
+              label: 'Undo',
+              onClick: () => {
+                void window.vyotiq.gitDiscardUndo({ workspacePath: where, id: undoId }).then((res) => {
+                  setNotice(res.ok ? res.data.detail : res.error)
+                  setNoticeFailed(!res.ok)
+                  refresh()
+                })
+              }
+            }
+          })
+        }
         return result.ok
       } finally {
         setBusy(false)
@@ -366,7 +392,13 @@ export function useGitChrome(
       call: (path: string) => Promise<{ ok: true; data: T } | { ok: false; error: string }>,
       describe: (data: T) => { text: string; failed?: boolean }
     ): Promise<T | false> => {
-      if (!workspacePath || busy || syncing) return false
+      if (!workspacePath) return false
+      if (busy || syncing) {
+        // Said, not dropped: a branch picked during a slow fetch used to snap back with no word.
+        setNotice(`Wait for the ${syncing ? SYNC_WORDS[syncing] : 'git action in progress'} to finish, then try again`)
+        setNoticeFailed(true)
+        return false
+      }
       setSyncing(action)
       setNotice(null)
       setNoticeFailed(false)
@@ -433,26 +465,54 @@ export function useGitChrome(
 
   // The app's own fetch, so "N to pull" is true without a click. Asked only
   // while the window has focus; main keeps it to one every few minutes per
-  // checkout, holds off after a failure, and stays quiet either way.
+  // repository, holds off after a failure, and stays quiet either way.
   useEffect(() => {
     if (!workspacePath || !enabled) return undefined
     const ask = (): void => {
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return
       void window.vyotiq
         ?.gitFetch?.({ workspacePath, background: true })
-        // A fetch that ran moved the remote-tracking refs: read ahead/behind again.
+        // A fetch that ran moved the remote-tracking refs: read ahead/behind
+        // again. So did one from another worktree of the repository, just now.
         .then((res) => {
-          if (res.ok && !res.data.skipped) refresh()
+          if (res.ok && (!res.data.skipped || res.data.refsMoved)) refresh()
         })
         .catch(() => undefined)
     }
     const first = window.setTimeout(ask, BACKGROUND_FETCH_FIRST_MS)
     const every = window.setInterval(ask, BACKGROUND_FETCH_EVERY_MS)
+    // Coming back to the window asks too, so a fetch skipped while it was in
+    // the background is not five minutes late; main's spacing still holds.
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') ask()
+    }
+    window.addEventListener('focus', ask)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       window.clearTimeout(first)
       window.clearInterval(every)
+      window.removeEventListener('focus', ask)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [workspacePath, enabled, refresh])
+
+  const restoreStash = useCallback(
+    (sha: string): Promise<GitStashRestoreResult | false> =>
+      runSync(
+        'branch',
+        true,
+        (path) => window.vyotiq.gitStashRestore({ workspacePath: path, sha }),
+        (d) => ({ text: d.detail, failed: d.conflicted })
+      ),
+    [runSync]
+  )
+
+  const dropStash = useCallback(
+    async (sha: string): Promise<boolean> =>
+      (await runSync('branch', false, (path) => window.vyotiq.gitStashDrop({ workspacePath: path, sha }), (d) => ({ text: d.detail }))) !==
+      false,
+    [runSync]
+  )
 
   const createBranch = useCallback(
     async (name: string): Promise<boolean> =>
@@ -490,7 +550,9 @@ export function useGitChrome(
       fetch,
       pull,
       push,
-      createBranch
+      createBranch,
+      restoreStash,
+      dropStash
     }),
     [
       status,
@@ -515,7 +577,9 @@ export function useGitChrome(
       fetch,
       pull,
       push,
-      createBranch
+      createBranch,
+      restoreStash,
+      dropStash
     ]
   )
 }

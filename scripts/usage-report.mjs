@@ -211,8 +211,13 @@ function cost(bucket) {
 const COLD_HIT = 0.5
 /** Providers cache nothing shorter than this (Anthropic and OpenAI both use 1024). */
 const MIN_CACHEABLE_PROMPT = 1024
-/** A gap this long can outlive a provider cache, so a miss after it is expiry. */
-const IDLE_MS = 10 * 60 * 1000
+/**
+ * A gap this long can outlive a provider cache, so a miss after it is expiry.
+ * Anthropic's default cache lives 5 minutes (refreshed on each hit), so a miss
+ * after an approval or question wait longer than that is ours, not the
+ * provider's. Was 10 minutes, which blamed 5–10 minute waits on the gateway.
+ */
+const IDLE_MS = 5 * 60 * 1000
 
 /** The whole prompt of a step, however the provider split its usage. */
 function promptTokens(ev) {
@@ -270,7 +275,7 @@ function classifyColdStep(ev, at, prev) {
 const COLD_CAUSES = [
   ['first', 'first of an invoke'],
   ['prefix', 'prefix changed'],
-  ['idle', 'idle > 10 min'],
+  ['idle', 'idle > 5 min'],
   ['provider', 'provider'],
   ['unknown', 'unknown']
 ]

@@ -45,17 +45,17 @@ const FORMER_FALLBACK_TOOLS = [
 ] as const
 
 describe('tool UI registry coverage', () => {
-  it('keeps a dedicated entry for every executable builtin plus replay-only web_* tools', () => {
+  it('keeps a dedicated entry for every executable builtin, and nothing else', () => {
     const registered = new Set(registeredBuiltinToolUiNames())
     const executable = new Set(AGENT_TOOLS.map((t) => t.name))
     for (const name of executable) {
       expect(registered.has(name), `missing UI registry entry for ${name}`).toBe(true)
     }
-    // Intentional extras: transcript replay for deleted browser/web tools.
-    expect(registered.has('web_fetch')).toBe(true)
-    expect(registered.has('web_search')).toBe(true)
+    // web_fetch and web_search used to be replay-only extras; they run again now.
+    expect(executable.has('web_fetch')).toBe(true)
+    expect(executable.has('web_search')).toBe(true)
     const extras = [...registered].filter((n) => !executable.has(n)).sort()
-    expect(extras).toEqual(['web_fetch', 'web_search'])
+    expect(extras).toEqual([])
   })
 
   it('registers structured bodies for all former FallbackBody builtins', () => {

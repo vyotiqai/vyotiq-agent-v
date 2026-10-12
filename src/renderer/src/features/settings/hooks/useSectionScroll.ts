@@ -10,6 +10,12 @@ export const SECTION_ANCHOR_ATTRIBUTE = 'data-settings-anchor'
  * the section in view — a heading that has just arrived counts.
  */
 const SPY_OFFSET = 48
+/**
+ * A section whose heading has come up into the column's top third is the one
+ * being read: with only the 48px edge, the band said "Shortcuts" while the
+ * Providers heading sat in plain view below it.
+ */
+const SPY_REACH = 220
 
 /** How far beyond the visible column a section mounts, so it is ready before it shows. */
 const MOUNT_MARGIN = '400px 0px'
@@ -137,7 +143,7 @@ export function useSectionScroll(section: SettingsSection, setSection: (section:
       const box = scrollerRef.current
       if (!box || pinned.current) return
       const all = blocks(box)
-      const top = box.getBoundingClientRect().top + SPY_OFFSET
+      const top = box.getBoundingClientRect().top + Math.max(SPY_OFFSET, Math.min(box.clientHeight / 3, SPY_REACH))
       const atEnd = box.scrollTop > 0 && box.scrollTop + box.clientHeight >= box.scrollHeight - 2
       const current = atEnd ? all.at(-1) : (all.filter((el) => el.getBoundingClientRect().top <= top).at(-1) ?? all[0])
       const id = current?.getAttribute(SECTION_ANCHOR_ATTRIBUTE) as SettingsSection | null | undefined

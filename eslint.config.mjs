@@ -33,6 +33,20 @@ const sharedRules = {
   'no-redeclare': 'off'
 }
 
+/**
+ * Tool modules that import the ./tools barrel back: the barrel spreads their
+ * handlers, so loading one of them first builds BUILTIN_HANDLERS while that
+ * module is still in its temporal dead zone. register.ts importing webTools
+ * directly did exactly that on 2026-10-09 ("Cannot access 'YY' before
+ * initialization" at boot) with typecheck, lint and 9k unit tests green.
+ * Outside agent/tools, reach them through the barrel.
+ */
+const BARREL_CYCLIC_TOOL_MODULES = {
+  regex: '(^|/)tools/(browserTools|gitGithubTools|instanceTools|mcpTools|screenSnipTool|terminalHandlers|webTools)(\\.ts)?$',
+  message:
+    'This tool module imports the ./tools barrel; importing it first breaks the barrel at boot. Import it from the barrel (agent/tools) instead.'
+}
+
 export default [
   {
     // errand-main is a separate reference codebase (no node_modules of its own);
@@ -96,9 +110,9 @@ export default [
       ...jsxA11y.configs.recommended.rules,
       // Click/keyboard widgets must be real controls. Drag, image load, and
       // title-bar double-click are not click-target patterns.
-      'jsx-a11y/click-events-have-key-events': 'warn',
+      'jsx-a11y/click-events-have-key-events': 'error',
       'jsx-a11y/no-static-element-interactions': [
-        'warn',
+        'error',
         {
           handlers: [
             'onClick',
@@ -112,7 +126,7 @@ export default [
         }
       ],
       'jsx-a11y/no-noninteractive-element-interactions': [
-        'warn',
+        'error',
         {
           handlers: [
             'onClick',
@@ -124,7 +138,7 @@ export default [
           ]
         }
       ],
-      'jsx-a11y/interactive-supports-focus': 'warn',
+      'jsx-a11y/interactive-supports-focus': 'error',
       // APG: tabpanel/region/application may take Tab so the surface can scroll.
       'jsx-a11y/no-noninteractive-tabindex': [
         'warn',
@@ -136,7 +150,7 @@ export default [
       'jsx-a11y/label-has-associated-control': [
         'warn',
         {
-          controlComponents: ['Input', 'Switch', 'Textarea'],
+          controlComponents: ['Input', 'Switch', 'Textarea', 'SelectField', 'SegmentedField', 'SwitchField', 'SettingsField'],
           depth: 3
         }
       ],
@@ -201,7 +215,8 @@ export default [
             {
               group: ['@renderer', '@renderer/*'],
               message: 'Main/preload must not import renderer code (@renderer/*).'
-            }
+            },
+            BARREL_CYCLIC_TOOL_MODULES
           ]
         }
       ]
@@ -228,7 +243,8 @@ export default [
             {
               group: ['@renderer', '@renderer/*'],
               message: 'Main/preload must not import renderer code (@renderer/*).'
-            }
+            },
+            BARREL_CYCLIC_TOOL_MODULES
           ]
         }
       ]

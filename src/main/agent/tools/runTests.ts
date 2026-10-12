@@ -5,7 +5,7 @@ import {
   resolveDiagnosticsBin,
   runSafeCommand
 } from './diagnostics'
-import { sanitizedTerminalEnv } from './terminal'
+import { agentCommandEnv } from './terminal'
 import { abortError } from '../../../shared/errors'
 import { sandboxHeaderLines, sandboxHintLines, type SandboxLaunch } from '../sandbox/wrap'
 
@@ -111,7 +111,7 @@ export async function toolRunTestsAsync(
   try {
     const { stdout, stderr, exitCode, killed } = await runSafeCommand(bin, argv, {
       cwd: workspace,
-      env: sanitizedTerminalEnv(),
+      env: agentCommandEnv(),
       signal,
       timeoutMs: TEST_TIMEOUT_MS,
       sandbox

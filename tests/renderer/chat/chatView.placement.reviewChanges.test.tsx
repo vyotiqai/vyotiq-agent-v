@@ -121,8 +121,9 @@ const baseProps = {
 }
 
 /** Heavy dock panels are React.lazy code-split — wait for the chunk. */
+/** The task pane is lazy: its first load transforms the whole record, well past waitFor's 1s on a cold run (as in chatView.placement.composer). */
 async function waitForPanel(selector: string): Promise<void> {
-  await waitFor(() => expect(document.querySelector(selector)).toBeTruthy())
+  await waitFor(() => expect(document.querySelector(selector)).toBeTruthy(), { timeout: 5000 })
 }
 
 describe('ChatView review-changes request', () => {

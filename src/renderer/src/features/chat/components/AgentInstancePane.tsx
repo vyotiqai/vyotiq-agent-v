@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import type { ChatMessage, RunSummary } from '@shared/ipc'
 import type { UiAgentQuestionAnswer } from '@shared/transcript'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
-import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
+import { briefOutcome, formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { instanceDisplayTitle, stripGoalMarkdown } from '@renderer/app/navigator/runTitle'
 import type { InlineInstanceGate } from '../hooks/useInlineInstanceUi'
@@ -13,16 +13,20 @@ import {
   type ChatStreamController
 } from '@renderer/lib/hooks/createChatStreamController'
 import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
+import { stripEdgeMask, useStripEdges } from '@renderer/lib/hooks/useStripEdges'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { Button, IconButton, MarkdownContent, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { Button, IconButton, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
 import { focusComposerMessage, shortcutLabel } from '@renderer/lib/shortcuts'
+import { draftIntoComposer } from './composer/composerMentionEvent'
+import { openInEditor } from '@renderer/lib/openInEditor'
 import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
 import { ContextMeter } from './composer/ContextMeter'
 import { useResolvedTurnUsage } from './ChatStreamLeaves'
 import { buildRecordModel, type BuildOptions } from '@renderer/features/task/recordModel'
 import { RecordBody, RecordRow } from '@renderer/features/task/record/RecordLayout'
+import { RecordProse } from '@renderer/features/task/record/RecordProse'
 import { RecordActionsContext } from '@renderer/features/task/record/WorkItems'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
 import { useRecordScroll } from '@renderer/features/task/useRecordScroll'
@@ -96,7 +100,8 @@ const InstanceRecord = memo(function InstanceRecord({
   onLoadToolContent: (id: string) => Promise<string | null>
   onApprovalDecision: (
     requestId: string,
-    decision: Parameters<ChatStreamController['respondToApproval']>[1]
+    decision: Parameters<ChatStreamController['respondToApproval']>[1],
+    extras?: Parameters<ChatStreamController['respondToApproval']>[2]
   ) => void
   onQuestionSubmit: (requestId: string, answers: UiAgentQuestionAnswer[]) => void
   approvalAutoFocus: boolean
@@ -177,7 +182,6 @@ const InstanceRecord = memo(function InstanceRecord({
             approvalAutoFocus={approvalAutoFocus}
             lead={lead}
             omitFirstBrief
-            workLabel="Work"
             messageCount={0}
           />
         )}
@@ -386,8 +390,11 @@ export function AgentInstancePane({
   useEscapeToClose(onClose, true, { deferToMenus: true })
 
   const onApprovalDecision = useCallback(
-    (requestId: string, decision: Parameters<typeof controller.respondToApproval>[1]) =>
-      controller.respondToApproval(requestId, decision),
+    (
+      requestId: string,
+      decision: Parameters<typeof controller.respondToApproval>[1],
+      extras?: Parameters<typeof controller.respondToApproval>[2]
+    ) => controller.respondToApproval(requestId, decision, extras),
     [controller]
   )
 
@@ -424,14 +431,28 @@ export function AgentInstancePane({
   )
 
   const shortId = formatAgentInstanceShortId(instanceRunId)
-  const fullGoal = instanceMeta?.goal ?? goalFromDisk
-  const title = instanceDisplayTitle(fullGoal, instanceRunId, instanceMeta?.pathScope)
+  // The brief it was given. A child started before its start event carried
+  // the brief has only its background there; its first message has the brief.
+  const fullGoal =
+    briefOutcome(goalFromDisk) && !briefOutcome(instanceMeta?.goal) ? goalFromDisk : (instanceMeta?.goal ?? goalFromDisk)
+  // Named as the navigator names it: by its step, as the parent's plan titles it now.
+  const title = instanceDisplayTitle(
+    fullGoal,
+    instanceRunId,
+    instanceMeta?.pathScope,
+    instanceRun?.stepTitle ?? instanceMeta?.stepTitle
+  )
   const tooltip = fullGoal ? stripGoalMarkdown(fullGoal) || fullGoal : instanceRunId
   const waitingIds = new Set(pendingGates.map((g) => g.runId))
   const state: TaskState = running || pendingRun
     ? instancePhaseState('started', waitingIds.has(instanceRunId))
     : instancePhaseState(instanceMeta?.phase ?? (controller.turnStatus === 'error' ? 'error' : controller.turnStatus === 'cancelled' ? 'cancelled' : 'done'), false)
+  /** Still working: the parent can still redirect it. */
+  const childRunning = Boolean(running || pendingRun)
   const siblingIds = siblings ? Object.keys(siblings) : []
+  const showSiblings = siblingIds.length > 1 && Boolean(onOpenInstance)
+  const siblingStripRef = useRef<HTMLDivElement>(null)
+  const siblingEdges = useStripEdges(siblingStripRef, `${instanceRunId}:${siblingIds.length}`, { current: '[aria-current="page"]' })
   const pathScope = instanceMeta?.pathScope ?? instanceRun?.pathScope
   const branch = instanceRun?.worktreeBranch
 
@@ -439,9 +460,8 @@ export function AgentInstancePane({
     <>
       {fullGoal ? (
         <RecordRow label="Goal">
-          <div className="text-md leading-[22px] text-fg-strong">
-            <MarkdownContent content={fullGoal} />
-          </div>
+          {/* The parent agent wrote it: read as its other words are, paths open. */}
+          <RecordProse text={fullGoal} size="md" tone="strong" />
         </RecordRow>
       ) : null}
       <RecordRow label="Scope">
@@ -450,6 +470,18 @@ export function AgentInstancePane({
             <Icon name="branch" size={13} className="shrink-0 text-muted" />
             Works in its own worktree
             <span className="font-mono text-caption text-muted">{branch}</span>
+            {instanceRun?.worktreePath ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                icon="code"
+                onClick={() =>
+                  void openInEditor({ workspacePath, worktreePath: instanceRun.worktreePath })
+                }
+              >
+                Open in editor
+              </Button>
+            ) : null}
           </p>
         ) : null}
         {pathScope?.length ? (
@@ -487,7 +519,7 @@ export function AgentInstancePane({
         />
         {parentTitle ? (
           <>
-            <span className="min-w-0 max-w-[220px] truncate text-muted" title={parentTitle}>
+            <span className="min-w-0 max-w-[220px] shrink-[4] truncate text-muted" title={parentTitle}>
               {parentTitle}
             </span>
             <Icon name="chevronRight" size={11} className="shrink-0 text-tertiary" />
@@ -499,35 +531,52 @@ export function AgentInstancePane({
         <h1 className="min-w-0 truncate text-sm font-semibold text-fg-strong" title={tooltip}>
           {title}
         </h1>
-        <span className="shrink-0 font-mono text-caption text-tertiary" title="Instance id">
-          {shortId}
-        </span>
-        <span className="flex-1" />
-        {siblingIds.length > 1 && onOpenInstance
-          ? siblingIds.map((id) => {
-              const key = formatAgentInstanceShortId(id)
-              const current = id === instanceRunId
-              const sibling = siblings![id]!
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  title={`Instance ${key} · ${instanceDisplayTitle(sibling.goal, id, sibling.pathScope)}`}
-                  aria-current={current ? 'page' : undefined}
-                  onClick={() => {
-                    if (!current) onOpenInstance(id)
-                  }}
-                  className={cn(
-                    'inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-caption vy-transition focus-visible:vy-focus-ring',
-                    current ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface'
-                  )}
-                >
-                  <StatusGlyph state={instancePhaseState(sibling.phase, waitingIds.has(id))} size={10} />
-                  {key}
-                </button>
-              )
-            })
-          : null}
+        {/* With siblings, the current chip says the id (and is kept in view). */}
+        {showSiblings ? null : (
+          <span className="shrink-0 font-mono text-caption text-tertiary" title="Instance id">
+            {shortId}
+          </span>
+        )}
+        {/* The siblings take what the title leaves (it is what the pane is):
+            past that they scroll, an edge with more past it fades, and the
+            one you're on stays in view. */}
+        <div
+          ref={siblingStripRef}
+          className={cn(
+            'flex flex-1 basis-0 self-stretch overflow-x-auto [scrollbar-width:none]',
+            showSiblings ? 'min-w-14' : 'min-w-0',
+            stripEdgeMask(siblingEdges)
+          )}
+          data-instance-siblings=""
+        >
+          {showSiblings && onOpenInstance ? (
+            <div className="ml-auto flex w-max items-center gap-0.5 px-0.5" role="group" aria-label="Instances of this task">
+              {siblingIds.map((id) => {
+                const key = formatAgentInstanceShortId(id)
+                const current = id === instanceRunId
+                const sibling = siblings![id]!
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    title={`Instance ${key} · ${instanceDisplayTitle(sibling.goal, id, sibling.pathScope, sibling.stepTitle)}`}
+                    aria-current={current ? 'page' : undefined}
+                    onClick={() => {
+                      if (!current) onOpenInstance(id)
+                    }}
+                    className={cn(
+                      'inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-caption vy-transition focus-visible:vy-focus-ring',
+                      current ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface'
+                    )}
+                  >
+                    <StatusGlyph state={instancePhaseState(sibling.phase, waitingIds.has(id))} size={10} />
+                    {key}
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+        </div>
         <ContextMeter usage={contextUsage} />
         {running || pendingRun ? (
           <Button size="xs" variant="ghost" icon="stop" aria-label="Stop instance" onClick={onStopInstance}>
@@ -576,7 +625,11 @@ export function AgentInstancePane({
       </RunSessionProvider>
       <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-muted">
         <Icon name="lock" size={13} className="shrink-0" />
-        <span className="min-w-0 truncate">Instances take instructions from their parent task.</span>
+        <span className="min-w-0 truncate">
+          {childRunning
+            ? 'Instances take instructions from their parent task, which can redirect this one.'
+            : 'Instances take instructions from their parent task.'}
+        </span>
         <Button
           size="xs"
           variant="ghost"
@@ -584,15 +637,25 @@ export function AgentInstancePane({
             // This pane goes back to the parent task: focus its instruction
             // line, not the first one on the page (the leftmost of a split).
             const pane = event.currentTarget.closest('[data-chat-pane]')
+            const parentRunId = instanceRun?.parentRunId ?? null
             onClose()
             requestAnimationFrame(() =>
               requestAnimationFrame(() => {
+                // A running child: start the instruction for the parent, which
+                // passes it on with message_agent_instance and keeps the work.
+                if (childRunning && parentRunId) {
+                  draftIntoComposer({
+                    workspacePath,
+                    runId: parentRunId,
+                    text: `Tell instance ${formatAgentInstanceShortId(instanceRunId)} (run_id ${instanceRunId}) to `
+                  })
+                }
                 if (!(pane?.isConnected && focusComposerMessage(pane))) focusComposerMessage()
               })
             )
           }}
         >
-          Add an instruction to the parent
+          {childRunning ? 'Redirect it from the parent' : 'Add an instruction to the parent'}
         </Button>
       </div>
     </div>

@@ -214,7 +214,8 @@ export type SlashMenuBlock = {
 
 /**
  * Split the flat display list into labelled runs: one per group, and one per
- * server for MCP tools — there is no MCP heading above the servers.
+ * server for MCP tools — there is no MCP heading above the servers. A group's
+ * rows that are not ready yet trail the ready band as "More …" (More skills).
  */
 export function buildSlashMenuBlocks(
   commands: SlashCommandDescriptor[],
@@ -223,7 +224,8 @@ export function buildSlashMenuBlocks(
   const blocks: SlashMenuBlock[] = []
   commands.forEach((cmd, index) => {
     const serverId = cmd.group === 'MCP' ? (cmd.mcpServerId ?? cmd.id) : null
-    const key = serverId ? `MCP:${serverId}` : cmd.group
+    const more = cmd.availability !== 'ready'
+    const key = serverId ? `MCP:${serverId}` : more ? `${cmd.group}:more` : cmd.group
     const last = blocks[blocks.length - 1]
     if (last?.key === key) {
       last.items.push(cmd)
@@ -231,7 +233,11 @@ export function buildSlashMenuBlocks(
     }
     blocks.push({
       key,
-      label: serverId ? slashMcpServerName(serverId, servers) : slashGroupDisplayName(cmd.group),
+      label: serverId
+        ? slashMcpServerName(serverId, servers)
+        : more
+          ? `More ${slashGroupDisplayName(cmd.group).toLowerCase()}`
+          : slashGroupDisplayName(cmd.group),
       items: [cmd],
       startIndex: index
     })

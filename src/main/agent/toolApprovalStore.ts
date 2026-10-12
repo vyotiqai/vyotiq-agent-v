@@ -1,4 +1,4 @@
-import { DEFAULT_TOOL_APPROVAL } from '../../shared/ipc'
+import { DEFAULT_TOOL_APPROVAL, type PermissionRule } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
 import { getSettings, setSettings, enqueueSettingsMutation } from '@main/settings/settings'
 import {
@@ -40,5 +40,40 @@ export function persistAlwaysAllow(workspacePath: string, toolName: string): voi
       tool: toolName,
       err
     })
+  }
+}
+
+function sameRule(a: PermissionRule, b: PermissionRule): boolean {
+  return a.effect === b.effect && a.tool === b.tool && a.command === b.command && a.path === b.path
+}
+
+/**
+ * Persist allow rules ("Always allow edits under src/") where the run reads
+ * rules back: the workspace override when it has one, otherwise global
+ * settings. A rule already there is not added twice.
+ */
+export function persistAllowRules(workspacePath: string, rules: readonly PermissionRule[]): void {
+  try {
+    const override = findWorkspaceSettingsOverride(readWorkspacesState(), workspacePath)
+    if (override?.useOverride) {
+      const current = override.toolApproval ?? DEFAULT_TOOL_APPROVAL
+      const add = rules.filter((rule) => !(current.rules ?? []).some((have) => sameRule(have, rule)))
+      if (add.length === 0) return
+      void enqueueWorkspaceMutation(() =>
+        setWorkspaceSettingsOverride(workspacePath, {
+          ...override,
+          toolApproval: { ...current, rules: [...(current.rules ?? []), ...add] }
+        })
+      )
+      return
+    }
+    const settings = getSettings()
+    const current = settings.toolApproval ?? DEFAULT_TOOL_APPROVAL
+    const add = rules.filter((rule) => !(current.rules ?? []).some((have) => sameRule(have, rule)))
+    if (add.length === 0) return
+    void enqueueSettingsMutation(() => setSettings({ toolApproval: { ...current, rules: [...(current.rules ?? []), ...add] } }))
+  } catch (err) {
+    // A failed write costs the user one extra prompt next run, nothing more.
+    logger.warn('Failed to persist allow rules', { scope: 'agent', err })
   }
 }

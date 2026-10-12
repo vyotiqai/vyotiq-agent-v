@@ -24,7 +24,9 @@ const EDIT_TOOLS = new Set([
   'edit',
   'str_replace',
   'memory_write',
+  'memory_delete',
   'delete',
+  'move',
   'edit_notebook',
   // Writes a module to disk; grouped with the other writers.
   'build_tool'
@@ -56,9 +58,11 @@ const SEARCH_TOOLS = new Set([
   'pull_agent_instance',
   'merge_agent_instance',
   'cancel_agent_instance',
+  'message_agent_instance',
   'git_status',
   'git_diff',
   'github_pr_checks',
+  'github_pr_comments',
   'Skill',
   'lsp'
 ])
@@ -79,7 +83,8 @@ const BROWSER_TOOLS = new Set([
   'browser_hover',
   'browser_handle_dialog',
   'browser_press_key',
-  'browser_select_option'
+  'browser_select_option',
+  'browser_console'
 ])
 const BROWSE_TOOLS = new Set(['list_dir', 'memory_list'])
 const COMMAND_TOOLS = new Set(['terminal', 'diagnostics', 'git_commit'])
@@ -254,6 +259,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   glob: 'folderSearch',
   list_dir: 'folderOpen',
   delete: 'trash',
+  move: 'file',
   todo_write: 'listTodo',
   create_goal: 'flag',
   update_goal: 'flag',
@@ -277,6 +283,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   browser_handle_dialog: 'globe',
   browser_press_key: 'globe',
   browser_select_option: 'globe',
+  browser_console: 'terminal',
   screen_snip: 'monitor',
   mcp_list_tools: 'plug',
   mcp_list_resources: 'plug',
@@ -293,6 +300,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   memory_list: 'memory',
   memory_read: 'memory',
   memory_write: 'memory',
+  memory_delete: 'memory',
   git_status: 'branch',
   git_diff: 'branch',
   git_commit: 'branch',
@@ -302,6 +310,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   pull_agent_instance: 'mcp',
   merge_agent_instance: 'branch',
   cancel_agent_instance: 'close',
+  message_agent_instance: 'chat',
   diagnostics: 'scanSearch',
   run_tests: 'scanSearch',
   git_apply: 'branch',
@@ -309,6 +318,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   github_pr_review: 'branch',
   github_issue: 'branch',
   github_pr_checks: 'pullRequest',
+  github_pr_comments: 'pullRequest',
   edit_notebook: 'file',
   lsp: 'scanSearch',
   create_plan: 'listTodo'

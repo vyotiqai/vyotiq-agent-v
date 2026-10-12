@@ -26,7 +26,6 @@
     "tests/main/unit/assembleMemoryWorkspace.test.ts": 1,
     "tests/main/unit/atomicWrite.test.ts": 2,
     "tests/main/unit/codeindex.denseStore.test.ts": 1,
-    "tests/main/unit/codeindex.embedClient.test.ts": 7,
     "tests/main/unit/compactionVerifyRefusal.test.ts": 1,
     "tests/main/unit/composerAttachmentsStore.test.ts": 1,
     "tests/main/unit/context.test.ts": 5,
@@ -73,7 +72,7 @@
     "tests/main/unit/skillTool.test.ts": 1,
     "tests/main/unit/streamRetry.test.ts": 3,
     "tests/main/unit/thinkingProviders.test.ts": 2,
-    "tests/main/unit/toolApprovalStore.test.ts": 4,
+    "tests/main/unit/toolApprovalStore.test.ts": 2,
     "tests/main/unit/traceAutoCapture.test.ts": 5,
     "tests/main/unit/usageLedger.test.ts": 17,
     "tests/main/unit/userRulesInjection.test.ts": 4,
@@ -88,7 +87,7 @@
   },
   "tsconfig.tests-web.json": {
     "tests/renderer/app/appPaneIdentity.test.tsx": 4,
-    "tests/renderer/app/appShell.test.tsx": 4,
+    "tests/renderer/app/appShell.test.tsx": 3,
     "tests/renderer/chat/agentContextCard.test.tsx": 1,
     "tests/renderer/chat/app.sessionDrop.test.tsx": 2,
     "tests/renderer/chat/autoResume.test.tsx": 1,
@@ -130,7 +129,6 @@
     "tests/renderer/task/recordModel.test.ts": 1
   },
   "tsconfig.tests-e2e.json": {
-    "tests/gui-e2e/agent-context-card.spec.ts": 2,
     "tests/gui-e2e/app-update.spec.ts": 2,
     "tests/gui-e2e/appearance.spec.ts": 7,
     "tests/gui-e2e/git-init.spec.ts": 1,

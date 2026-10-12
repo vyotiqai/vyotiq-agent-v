@@ -67,7 +67,7 @@ export function TitleBar({
         }}
         data-titlebar-brand
       >
-        <VyotiqMark size={15} className="text-fg-strong" decorative />
+        <VyotiqMark size={16} className="text-fg-strong" decorative />
         {/* Beside the mark, open or collapsed: the toggle never moves. */}
         <IconButton
           icon="sidebar"

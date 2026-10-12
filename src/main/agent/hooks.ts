@@ -1,12 +1,13 @@
 import { spawn } from 'child_process'
 import { createHash } from 'crypto'
-import { readFileSync } from 'fs'
-import { join, resolve } from 'path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname, join, resolve } from 'path'
 import { app } from 'electron'
 import { z } from 'zod'
 import { logger } from '../../shared/logger'
 import { atomicWriteJson } from '../storage/atomicWrite'
 import { killProcessTree, sanitizedTerminalEnv } from './tools/terminal'
+import type { HookRunLogEntry, HooksFileView, HooksOverview, HookTrustEntry } from '../../shared/ipc/schemas/hooks'
 
 /**
  * Hooks: your own commands around the agent's work, in the shape Claude Code
@@ -26,6 +27,12 @@ import { killProcessTree, sanitizedTerminalEnv } from './tools/terminal'
  *                 error shown. What it prints on exit 0 goes to the agent.
  *   SessionStart  when a task starts or resumes (`source`: startup | resume,
  *                 which `matcher` can name). What it prints goes to the agent.
+ *   PreCompact    before older turns are folded into a summary (`trigger`:
+ *                 auto | manual, which `matcher` can name). Output is ignored.
+ *   SubagentStop  when a helper instance is about to finish, in place of
+ *                 Stop. Exit 2 keeps the helper going, stderr as the reason.
+ *   SessionEnd    when a turn ends (`reason`: done | cancelled | error, which
+ *                 `matcher` can name). Output is ignored.
  *
  * Each hook gets one JSON object on stdin (session_id, cwd, hook_event_name,
  * and tool_name / tool_input / tool_response, message, prompt or source). Any
@@ -42,7 +49,8 @@ import { killProcessTree, sanitizedTerminalEnv } from './tools/terminal'
  * hooks.json`. A workspace's file came with the folder, so its commands run
  * only after the person allows that exact file; a change to it asks again.
  * Events and hook types Agent V doesn't run (a Claude Code `prompt` hook, a
- * `SubagentStop` list) are skipped and logged once, not fatal to the file.
+ * `PermissionRequest` list) are skipped and logged once, not fatal to the
+ * file, and listed in Settings › Hooks.
  */
 
 export const HOOK_EVENTS = [
@@ -51,7 +59,10 @@ export const HOOK_EVENTS = [
   'Stop',
   'Notification',
   'UserPromptSubmit',
-  'SessionStart'
+  'SessionStart',
+  'PreCompact',
+  'SubagentStop',
+  'SessionEnd'
 ] as const
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
@@ -224,9 +235,92 @@ export function recordWorkspaceHooksDecision(workspace: string, hash: string, de
   trustCache = next
 }
 
+/** Forget the decision for a workspace (its key as listed); its hooks ask again next time. */
+export function forgetWorkspaceHooksDecision(workspace: string): boolean {
+  const trust = readTrust()
+  const key = trust.workspaces[workspace] ? workspace : trustKey(workspace)
+  if (!trust.workspaces[key]) return false
+  const workspaces = { ...trust.workspaces }
+  delete workspaces[key]
+  const next: TrustFile = { version: 1, workspaces }
+  atomicWriteJson(trustPath(), next, 0o600)
+  trustCache = next
+  return true
+}
+
+/** Every remembered decision, by workspace. */
+export function listHookTrust(): HookTrustEntry[] {
+  return Object.entries(readTrust().workspaces)
+    .map(([workspace, entry]) => ({ workspace, decision: entry.decision }))
+    .sort((a, b) => a.workspace.localeCompare(b.workspace))
+}
+
+/** Allow or deny a workspace's hooks file as it is right now (Settings, not a run's question). */
+export function decideWorkspaceHooks(workspace: string, decision: 'allow' | 'deny'): boolean {
+  const loaded = readHooksFile(workspaceHooksPath(workspace), 'workspace')
+  if (!loaded || typeof loaded === 'string') return false
+  recordWorkspaceHooksDecision(workspace, loaded.hash, decision)
+  return true
+}
+
+// ── What ran ───────────────────────────────────────────────────────────────
+
+const HOOK_RUN_LOG_CAP = 100
+const hookRunLog: HookRunLogEntry[] = []
+
+function logHookRun(entry: HookRunLogEntry): void {
+  hookRunLog.push(entry)
+  if (hookRunLog.length > HOOK_RUN_LOG_CAP) hookRunLog.splice(0, hookRunLog.length - HOOK_RUN_LOG_CAP)
+}
+
+/** Hooks that ran since the app started, newest first. */
+export function recentHookRuns(): HookRunLogEntry[] {
+  return [...hookRunLog].reverse()
+}
+
+function fileView(path: string, source: LoadedHooks['source']): { view: HooksFileView; loaded: LoadedHooks | null } {
+  const loaded = readHooksFile(path, source)
+  if (loaded === null) return { view: { path, exists: false, commands: [], skipped: [], error: null }, loaded: null }
+  if (typeof loaded === 'string') {
+    return { view: { path, exists: true, commands: [], skipped: [], error: loaded }, loaded: null }
+  }
+  return {
+    view: { path, exists: true, commands: hookCommands(loaded.file), skipped: loaded.skipped, error: null },
+    loaded
+  }
+}
+
+/** Settings' view of hooks: both files, the workspace's standing, decisions, and recent runs. */
+export function hooksOverview(workspace: string | null): HooksOverview {
+  const user = fileView(userHooksPath(), 'user').view
+  let workspaceView: HooksFileView | null = null
+  let workspaceDecision: HooksOverview['workspaceDecision'] = null
+  if (workspace) {
+    const { view, loaded } = fileView(workspaceHooksPath(workspace), 'workspace')
+    workspaceView = view
+    if (loaded) {
+      const entry = readTrust().workspaces[trustKey(workspace)]
+      workspaceDecision = !entry ? 'none' : entry.hash === loaded.hash ? entry.decision : 'changed'
+    }
+  }
+  return { user, workspace: workspaceView, workspaceDecision, trust: listHookTrust(), runs: recentHookRuns() }
+}
+
+const EMPTY_HOOKS_FILE = `${JSON.stringify({ hooks: {} }, null, 2)}\n`
+
+/** The file to open for editing, written empty first when there is none. */
+export function ensureHooksFile(path: string): string {
+  if (!existsSync(path)) {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, EMPTY_HOOKS_FILE, 'utf8')
+  }
+  return path
+}
+
 export function resetHooksForTests(): void {
   trustCache = null
   loggedSkips.clear()
+  hookRunLog.length = 0
 }
 
 // ── Running one hook ────────────────────────────────────────────────────────
@@ -374,6 +468,7 @@ export class RunHooks {
       for (const group of set.file.hooks[event] ?? []) {
         if (!groupMatches(group, toolName)) continue
         for (const hook of group.hooks) {
+          const started = Date.now()
           const run = await runHookCommand(
             hook.command,
             { session_id: this.ctx.runId, cwd: this.ctx.workspace, hook_event_name: event, ...payload },
@@ -383,6 +478,18 @@ export class RunHooks {
               signal
             }
           )
+          logHookRun({
+            at: new Date(started).toISOString(),
+            event,
+            command: hook.command,
+            source: set.source,
+            workspace: this.ctx.workspace,
+            runId: this.ctx.runId,
+            code: run.code,
+            timedOut: run.timedOut,
+            ms: Date.now() - started,
+            stderr: run.code === 0 ? '' : run.stderr.trim().slice(0, 300)
+          })
           if (run.code !== 0 && run.code !== 2) {
             logger.warn(`${event} hook failed; carrying on`, {
               scope: 'agent',
@@ -476,6 +583,34 @@ export class RunHooks {
       .map((run) => hookBlockReason(run, 'Stop', 'A Stop hook asked to keep going.'))
       .filter((reason): reason is string => reason !== null)
     return reasons.length > 0 ? reasons.join('\n') : null
+  }
+
+  /** Older turns are about to be folded. Waits for the hooks; their output is ignored. */
+  async preCompact(trigger: 'auto' | 'manual', signal?: AbortSignal): Promise<void> {
+    if (!this.has('PreCompact')) return
+    await this.runAll('PreCompact', trigger, { trigger, custom_instructions: '' }, signal)
+  }
+
+  /** A helper instance is about to finish: why it should keep going, or null. */
+  async subagentStop(stopHookActive: boolean, signal?: AbortSignal): Promise<string | null> {
+    if (!this.has('SubagentStop')) return null
+    const runs = await this.runAll('SubagentStop', undefined, { stop_hook_active: stopHookActive }, signal)
+    const reasons = runs
+      .map((run) => hookBlockReason(run, 'SubagentStop', 'A SubagentStop hook asked to keep going.'))
+      .filter((reason): reason is string => reason !== null)
+    return reasons.length > 0 ? reasons.join('\n') : null
+  }
+
+  /**
+   * A turn ended. The loop doesn't wait for it; the promise settles once every
+   * hook has exited, for a caller (a test) that must know the process is gone.
+   */
+  sessionEnd(reason: 'done' | 'cancelled' | 'error'): Promise<void> {
+    if (!this.has('SessionEnd')) return Promise.resolve()
+    return this.runAll('SessionEnd', reason, { reason }).then(
+      () => undefined,
+      () => undefined
+    )
   }
 
   /** Fire and forget. */

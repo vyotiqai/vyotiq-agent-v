@@ -14,6 +14,11 @@ import {
 } from '../../../shared/domain/providers'
 import { getSettings } from '../../settings/settings'
 import { isChatFixtureReplayEnabled } from '../../e2e/chatFixtureReplay'
+import { applyModelLimitOverrides } from '../../../shared/domain/modelLimits'
+import { modelLimitSettings } from '../modelLimitSettings'
+import { OLLAMA_LOCAL_DEFAULT, ollamaNativeHost } from '../../../shared/domain/providers'
+import { findOllamaCatalogModel } from '../../../shared/reasoning'
+import { ollamaLoadedContext, withLocalServerLimits } from './localServerLimits'
 import { anthropicProvider } from './anthropic'
 import { geminiProvider } from './gemini'
 import {
@@ -156,7 +161,16 @@ async function applyOllamaSelectedShow(
     signal: input.signal
   })
   if (cacheKey && next !== models) setCachedModels(cacheKey, next)
-  return next
+  // Read live, never cached: what the loaded model runs with right now.
+  const selected = findOllamaCatalogModel(next, input.model)
+  if (!selected) return next
+  const loaded = await ollamaLoadedContext(
+    ollamaNativeHost(input.baseUrl || OLLAMA_LOCAL_DEFAULT),
+    selected.id,
+    input.signal
+  )
+  if (!loaded) return next
+  return next.map((m) => (m.id === selected.id ? { ...m, contextWindow: loaded, limitsSource: 'server' as const } : m))
 }
 
 /** Race a shared catalog fetch against one caller’s abort without cancelling the fetch. */
@@ -191,9 +205,28 @@ export async function awaitCatalogWithCallerSignal<T>(
   })
 }
 
+/**
+ * A provider's models, with the limits the person set by hand (Settings ›
+ * Providers › Model limits) applied over whatever the catalog or the server
+ * said. Every caller — the picker, the context meter, a run's budget — reads
+ * through here, so they agree.
+ */
 export async function listProviderModels(input: {
   provider: ProviderIdAny
   /** Display name for warnings; a custom endpoint's own name, not "Custom". */
+  label?: string
+  apiKey?: string | null
+  baseUrl?: string
+  signal?: AbortSignal
+  forceRefresh?: boolean
+  model?: string
+}): Promise<{ models: ModelInfo[]; warning?: string }> {
+  const listed = await listProviderModelsCatalog(input)
+  return { ...listed, models: applyModelLimitOverrides(input.provider, listed.models, modelLimitSettings()) }
+}
+
+async function listProviderModelsCatalog(input: {
+  provider: ProviderIdAny
   label?: string
   apiKey?: string | null
   baseUrl?: string
@@ -308,11 +341,16 @@ async function listProviderModelsUncached(
         warning: `${label} live catalog was empty; showing illustrative placeholder model IDs (not installed models).`
       }
     }
-    const enriched = await applyOllamaSelectedShow(
+    const shown = await applyOllamaSelectedShow(
       { ...input, signal: timeout },
       enrichCatalogModels(input.provider, models),
       key
     )
+    // A local llama.cpp / LM Studio server knows the window it actually runs.
+    const enriched =
+      catalogProviderId(input.provider) === 'custom' && input.baseUrl
+        ? await withLocalServerLimits(input.baseUrl, shown, timeout)
+        : shown
     setCachedModels(key, enriched, generation)
     return { models: enriched }
   } catch (err) {

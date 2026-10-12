@@ -10,6 +10,7 @@ import {
   listWorkspaceRulesForMention,
   parseRuleFrontmatter,
   readWorkspaceRules,
+  setRulesOffSource,
   shouldAutoInjectRule
 } from '@main/agent/context/rules'
 
@@ -315,6 +316,21 @@ describe('workspace rules', () => {
     for (let i = 0; i < 5; i++) {
       clearRulesCache(workspace)
       expect(await readWorkspaceRules(workspace)).toEqual(first)
+    }
+  })
+
+  it('leaves out a rule file switched off in the workspace, cached or not', async () => {
+    mkdirSync(join(workspace, '.vyotiq', 'rules'), { recursive: true })
+    writeFileSync(join(workspace, 'CLAUDE.md'), 'root')
+    writeFileSync(join(workspace, '.vyotiq', 'rules', 'style.md'), 'style')
+    expect((await readWorkspaceRules(workspace)).map((f) => f.path.replace(/\\/g, '/'))).toEqual(['CLAUDE.md', '.vyotiq/rules/style.md'])
+    setRulesOffSource(() => new Set(['.vyotiq/rules/style.md']))
+    try {
+      expect((await readWorkspaceRules(workspace)).map((f) => f.path)).toEqual(['CLAUDE.md'])
+      // The mention list still offers it.
+      expect((await listWorkspaceRulesForMention(workspace)).map((r) => r.path)).toContain('.vyotiq/rules/style.md')
+    } finally {
+      setRulesOffSource(() => new Set())
     }
   })
 })

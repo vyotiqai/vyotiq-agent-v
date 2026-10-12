@@ -49,29 +49,74 @@ export function useRovingTabIndex({
     []
   )
 
+  const isDisabled = useCallback(
+    (index: number): boolean => {
+      const el = refs.current[index]
+      if (!el) return true
+      if (el.hasAttribute('disabled')) return true
+      return el.getAttribute('aria-disabled') === 'true'
+    },
+    []
+  )
+
   const focusIndex = useCallback(
-    (index: number): void => {
-      if (index < 0 || index >= count) return
+    (index: number): boolean => {
+      if (index < 0 || index >= count) return false
       const target = refs.current[index]
-      if (!target || target.getAttribute('aria-disabled') === 'true') return
+      if (!target || target.getAttribute('aria-disabled') === 'true' || target.hasAttribute('disabled')) return false
       target.focus()
       onActiveIndexChange(index)
       onSelect?.(index)
+      return true
     },
     [count, onActiveIndexChange, onSelect]
+  )
+
+  const findFirstEnabled = useCallback((): number => {
+    for (let i = 0; i < count; i += 1) {
+      if (!isDisabled(i)) return i
+    }
+    return -1
+  }, [count, isDisabled])
+
+  const findLastEnabled = useCallback((): number => {
+    for (let i = count - 1; i >= 0; i -= 1) {
+      if (!isDisabled(i)) return i
+    }
+    return -1
+  }, [count, isDisabled])
+
+  const findNextEnabled = useCallback(
+    (from: number, delta: 1 | -1): number => {
+      if (count === 0) return -1
+      if (loop) {
+        for (let step = 1; step <= count; step += 1) {
+          const cand = (from + delta * step + count * step) % count
+          if (!isDisabled(cand)) return cand
+        }
+        return -1
+      }
+      let cand = from + delta
+      while (cand >= 0 && cand < count) {
+        if (!isDisabled(cand)) return cand
+        cand += delta
+      }
+      return -1
+    },
+    [count, isDisabled, loop]
   )
 
   const onContainerKeyDown = useCallback(
     (event: KeyboardEvent): void => {
       if (count === 0) return
       if (event.key === 'Home') {
-        event.preventDefault()
-        focusIndex(0)
+        const first = findFirstEnabled()
+        if (first >= 0 && focusIndex(first)) event.preventDefault()
         return
       }
       if (event.key === 'End') {
-        event.preventDefault()
-        focusIndex(count - 1)
+        const last = findLastEnabled()
+        if (last >= 0 && focusIndex(last)) event.preventDefault()
         return
       }
       const delta = isNextKey(event.key, orientation)
@@ -81,22 +126,16 @@ export function useRovingTabIndex({
           : 0
       if (delta === 0) return
       const current = refs.current.findIndex((el) => el === document.activeElement)
-      if (current < 0 && activeIndex >= 0) {
-        event.preventDefault()
-        focusIndex(activeIndex)
+      const origin = current >= 0 ? current : activeIndex
+      if (origin < 0 || origin >= count) return
+      if (!isDisabled(origin) && current < 0) {
+        if (focusIndex(origin)) event.preventDefault()
         return
       }
-      if (current < 0) return
-      event.preventDefault()
-      let next = current + delta
-      if (loop) {
-        next = (next + count) % count
-      } else {
-        next = Math.max(0, Math.min(count - 1, next))
-      }
-      focusIndex(next)
+      const next = findNextEnabled(origin, delta as 1 | -1)
+      if (next >= 0 && focusIndex(next)) event.preventDefault()
     },
-    [activeIndex, count, focusIndex, loop, orientation]
+    [activeIndex, count, focusIndex, findFirstEnabled, findLastEnabled, findNextEnabled, isDisabled, orientation]
   )
 
   return { tabIndexFor, setOptionRef, onContainerKeyDown }

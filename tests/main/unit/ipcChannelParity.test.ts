@@ -1,8 +1,7 @@
-import { readFileSync } from 'fs'
-import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import { IPC } from '@shared/channels'
 import { PUSH_ONLY_CHANNEL_NAMES } from '../../helpers/ipcChannelRoles'
+import { readIpcRegistrationSource } from '../../helpers/ipcRegistrationSource'
 
 /**
  * Every invoke channel in the IPC catalog must have a matching ipcMain
@@ -13,7 +12,7 @@ import { PUSH_ONLY_CHANNEL_NAMES } from '../../helpers/ipcChannelRoles'
 const PUSH_ONLY = PUSH_ONLY_CHANNEL_NAMES
 
 function registeredChannels(): Set<string> {
-  const src = readFileSync(join(process.cwd(), 'src/main/ipc/register.ts'), 'utf8')
+  const src = readIpcRegistrationSource()
   return new Set(
     [...src.matchAll(/ipcMain\.(?:handle|on)\(\s*IPC\.(\w+)/g)].map((m) => m[1]!)
   )

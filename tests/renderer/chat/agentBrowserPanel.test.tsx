@@ -355,15 +355,16 @@ describe('AgentBrowserPanel visibility', () => {
     localStorage.removeItem('vyotiq.browserViewport')
     render(<AgentBrowserPanel visible={true} />)
     const group = await screen.findByRole('radiogroup', { name: 'Viewport size' })
-    expect(group.textContent).toBe('Fit390')
-    fireEvent.click(screen.getByRole('radio', { name: '390' }))
+    // The size says what it stands for, with its unit, not a bare "390".
+    expect(group.textContent).toBe('FitPhone 390px')
+    fireEvent.click(screen.getByRole('radio', { name: 'Phone 390px' }))
     expect(document.querySelector('[data-browser-viewport="iphone"]')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
     fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: /768×1024/ }))
     expect(document.querySelector('[data-browser-viewport="ipad"]')).toBeTruthy()
     // The segmented control follows the width in use.
-    expect(screen.getByRole('radio', { name: '768' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('radio', { name: 'Tablet 768px' }).getAttribute('aria-checked')).toBe('true')
     fireEvent.click(screen.getByRole('radio', { name: 'Fit' }))
     expect(document.querySelector('[data-browser-viewport="fit"]')).toBeTruthy()
   })

@@ -37,10 +37,23 @@ function itemIcon(item: MentionMenuItem): IconName {
       return 'browser'
     case 'lints':
       return item.diagnosticsKind === 'lint' ? 'warning' : 'warningCircle'
+    case 'changes':
+      return 'diff'
+    case 'terminal':
+      return 'terminal'
+    case 'url':
+      return 'globe'
+    case 'issue':
+      return 'pullRequest'
+    case 'symbol':
+      return 'code'
+    case 'commit':
+      return 'gitCommit'
     case 'nav':
       if (item.view === 'files') return 'folder'
       if (item.view === 'docs') return 'book'
       if (item.view === 'rules') return 'rules'
+      if (item.view === 'commits') return 'gitCommit'
       return 'tasks'
     case 'file':
     case 'docs':
@@ -64,7 +77,8 @@ const VIEW_TITLE: Record<Exclude<MentionMenuView, 'root'>, string> = {
   files: 'Files and folders',
   chats: 'Past tasks',
   docs: 'Docs',
-  rules: 'Rules'
+  rules: 'Rules',
+  commits: 'Commits'
 }
 
 function emptyCopy(view: MentionMenuView): string {
@@ -77,6 +91,8 @@ function emptyCopy(view: MentionMenuView): string {
       return 'No docs match'
     case 'rules':
       return 'No rules match'
+    case 'commits':
+      return 'No commits match'
     default:
       return 'No matches'
   }
@@ -99,7 +115,14 @@ function footerSubject(item: MentionMenuItem): { text: string; mono: boolean } |
     case 'browser':
     case 'lints':
     case 'chat':
+    case 'changes':
+    case 'terminal':
+    case 'issue':
+    case 'symbol':
+    case 'commit':
       return { text: item.subtitle, mono: false }
+    case 'url':
+      return { text: item.url, mono: true }
     case 'nav':
       return { text: item.label, mono: false }
     case 'show-more':

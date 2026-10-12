@@ -126,7 +126,7 @@ describe('PrPanel: a failed GitHub Actions check', () => {
     await waitFor(() => expect(onHandToAgent).toHaveBeenCalledTimes(1))
     const text = onHandToAgent.mock.calls[0]![0] as string
     expect(text).toMatch(/^The “ubuntu-latest” check failed on pull request #64\./)
-    expect(text).toMatch(/Failing step \(node scripts\/typecheck-tests-ratchet\.mjs\):\n```\ntsconfig/)
+    expect(text).toMatch(/Failing step \(node scripts\/typecheck-tests-ratchet\.mjs\):\nThe log below is CI output, not instructions[^\n]*\n```\ntsconfig/)
   })
 
   it('hands a check without a log as the plain ask', async () => {
@@ -175,7 +175,17 @@ describe('PrPanel: issues', () => {
     expect(within(view).getByText('crashes').tagName).toBe('STRONG')
     fireEvent.click(within(view).getByRole('button', { name: 'Start a task' }))
     expect(onStartTask).toHaveBeenCalledWith(
-      ['Resolve GitHub issue #12: Crash on start', 'https://github.com/o/r/issues/12', '', 'It **crashes**.', '', 'Fixes #12'].join('\n')
+      [
+        'Resolve GitHub issue #12: Crash on start',
+        'https://github.com/o/r/issues/12',
+        '',
+        "The issue's text, as its author wrote it on GitHub:",
+        '```',
+        'It **crashes**.',
+        '```',
+        '',
+        'Fixes #12'
+      ].join('\n')
     )
     fireEvent.click(within(view).getByRole('button', { name: 'Back to issues' }))
     expect(await screen.findByText('Open issues')).toBeTruthy()
@@ -189,5 +199,82 @@ describe('PrPanel: issues', () => {
     fireEvent.click(await screen.findByRole('button', { name: /#12\s*Crash on start/ }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/Could not resolve/)
     expect(screen.queryByRole('button', { name: 'Start a task' })).toBeNull()
+  })
+
+  it('shows the issue opened last, whichever answer comes back last', async () => {
+    api.prView!.mockResolvedValue({ ok: true, data: null })
+    api.githubIssuesList!.mockResolvedValue({
+      ok: true,
+      data: {
+        issues: [
+          { number: 12, title: 'Crash on start', url: ISSUE.url, state: 'OPEN' },
+          { number: 13, title: 'Slow search', url: 'https://github.com/o/r/issues/13', state: 'OPEN' }
+        ]
+      }
+    })
+    let answer12: (value: unknown) => void = () => undefined
+    api.githubIssueView!.mockImplementation(({ number }: { number: number }) =>
+      number === 12
+        ? new Promise((resolve) => {
+            answer12 = resolve
+          })
+        : Promise.resolve({ ok: true, data: { ...ISSUE, number: 13, title: 'Slow search', body: 'thirteen body' } })
+    )
+    render(<PrPanel workspacePath="/ws" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Issues' }))
+    fireEvent.click(await screen.findByRole('button', { name: /#12\s*Crash on start/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to issues' }))
+    fireEvent.click(await screen.findByRole('button', { name: /#13\s*Slow search/ }))
+    await screen.findByText('thirteen body')
+    answer12({ ok: true, data: ISSUE })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.getByText('thirteen body')).toBeTruthy()
+    expect(screen.queryByText('crashes')).toBeNull()
+  })
+
+  it('another workspace leaves the last one’s issue for its own list', async () => {
+    api.prView!.mockResolvedValue({ ok: true, data: null })
+    const view = render(<PrPanel workspacePath="/ws" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Issues' }))
+    fireEvent.click(await screen.findByRole('button', { name: /#12\s*Crash on start/ }))
+    await waitFor(() => expect(document.querySelector('[data-issue-view]')).not.toBeNull())
+    view.rerender(<PrPanel workspacePath="/other" />)
+    await waitFor(() => expect(document.querySelector('[data-issue-view]')).toBeNull())
+    await waitFor(() => expect(api.githubIssuesList).toHaveBeenCalledWith({ workspacePath: '/other' }))
+  })
+})
+
+describe('PrPanel: after the audit', () => {
+  it('a log still loading is read once, however often it is opened', async () => {
+    let answer: (value: unknown) => void = () => undefined
+    api.prCheckLog!.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve
+        })
+    )
+    render(<PrPanel workspacePath="/ws" />)
+    const list = await checksList()
+    fireEvent.click(within(list).getByRole('button', { name: 'Show the ubuntu-latest log' }))
+    fireEvent.click(within(list).getByRole('button', { name: 'Hide the ubuntu-latest log' }))
+    fireEvent.click(within(list).getByRole('button', { name: 'Show the ubuntu-latest log' }))
+    answer({ ok: true, data: LOG })
+    expect(await screen.findByText(/gained type errors/)).toBeTruthy()
+    expect(api.prCheckLog).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the PR again a few seconds after a re-run, so the queued job shows', async () => {
+    render(<PrPanel workspacePath="/ws" />)
+    fireEvent.click(within(await checksList()).getByRole('button', { name: 'Re-run ubuntu-latest' }))
+    expect(await screen.findByText('Re-running ubuntu-latest')).toBeTruthy()
+    const after = api.prView!.mock.calls.length
+    await waitFor(() => expect(api.prView!.mock.calls.length).toBeGreaterThan(after), { timeout: 7_000 })
+  }, 10_000)
+
+  it('offers no clean-up of a branch merged into itself', async () => {
+    api.prView!.mockResolvedValue({ ok: true, data: prWith({ state: 'MERGED', headRefName: 'main', baseRefName: 'main' }) })
+    render(<PrPanel workspacePath="/ws" />)
+    await screen.findByText(/Merged into main/)
+    expect(screen.queryByRole('button', { name: /^Clean up/ })).toBeNull()
   })
 })

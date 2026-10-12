@@ -60,7 +60,8 @@ export function parseStatusMessageData(tool: UiToolRow): StatusMessageParsed {
     if (/^Question timed out or was dismissed/i.test(content)) {
       return { chip: 'No answer', message: content, answers: [] }
     }
-    if (/^Question skipped \(autonomous mode\)/i.test(content)) {
+    // "(autonomous mode)" is the pre-v7 wording, kept in older records.
+    if (/^Question skipped \((autonomous mode|questions are set to skip)\)/i.test(content)) {
       return { chip: 'Skipped', message: content, answers: [] }
     }
     if (

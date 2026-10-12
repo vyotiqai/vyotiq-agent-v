@@ -32,6 +32,8 @@ function note(preview: Preview): string | null {
 export function ApprovalChangePreview({ preview }: { preview: Preview }) {
   const extra = note(preview)
   const tinted = preview.action !== 'create'
+  // Where in the file it lands: old and new line numbers, as in Changes.
+  const numbered = preview.lines.some((l) => l.oldNo != null || l.newNo != null)
   return (
     <div className="overflow-hidden rounded-md border border-border bg-sunken" data-approval-change="">
       <div className={cn('flex min-w-0 items-center gap-2 border-b px-3 py-1.5 text-xs', BORDER_DIVIDER)}>
@@ -51,6 +53,16 @@ export function ApprovalChangePreview({ preview }: { preview: Preview }) {
         ) : (
           preview.lines.map((line, index) => (
             <div key={index} className={cn('flex min-w-max', tinted ? ROW[line.kind] : line.kind === '@' ? ROW['@'] : '')}>
+              {numbered ? (
+                <>
+                  <span className="w-9 shrink-0 select-none pr-1 text-right tabular-nums text-tertiary" aria-hidden="true">
+                    {line.oldNo ?? ''}
+                  </span>
+                  <span className="w-9 shrink-0 select-none pr-1 text-right tabular-nums text-tertiary" aria-hidden="true">
+                    {line.newNo ?? ''}
+                  </span>
+                </>
+              ) : null}
               <span className={cn('w-6 shrink-0 select-none text-center', SIGN_TONE[line.kind])} aria-hidden={!SIGN[line.kind]}>
                 {SIGN[line.kind]}
               </span>

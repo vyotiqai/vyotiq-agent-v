@@ -153,15 +153,33 @@ export type WorkspaceFileMoveResult = z.infer<typeof WorkspaceFileMoveResultSche
 export const WorkspaceFileDeleteRequestSchema = z.object({
   workspacePath: WorkspacePathSchema,
   path: WorkspacePathSchema,
-  recursive: z.boolean().default(false)
+  recursive: z.boolean().default(false),
+  /** Skip the OS trash and remove from disk. Asked for only after trashing failed. */
+  permanent: z.boolean().optional()
 })
 export type WorkspaceFileDeleteRequest = z.infer<typeof WorkspaceFileDeleteRequestSchema>
 
 export const WorkspaceFileDeleteResultSchema = z.object({
   path: WorkspacePathSchema,
-  kind: WorkspaceFileKindSchema
+  kind: WorkspaceFileKindSchema,
+  /** True when the entry went to the OS trash rather than off the disk. */
+  trashed: z.boolean().default(false)
 })
 export type WorkspaceFileDeleteResult = z.infer<typeof WorkspaceFileDeleteResultSchema>
+
+/**
+ * Open in the person's editor: a workspace file (at a line), the workspace
+ * itself (`.`), or a helper instance's worktree (`worktreePath`).
+ */
+export const EditorOpenRequestSchema = z.object({
+  workspacePath: WorkspacePathSchema,
+  path: z.string().min(1).max(4096).optional(),
+  /** An instance worktree under this workspace's app-data folder. */
+  worktreePath: z.string().min(1).max(4096).optional(),
+  line: z.number().int().min(1).optional(),
+  column: z.number().int().min(1).optional()
+})
+export type EditorOpenRequest = z.infer<typeof EditorOpenRequestSchema>
 
 export const WorkspaceFileRevealRequestSchema = z.object({
   workspacePath: WorkspacePathSchema,

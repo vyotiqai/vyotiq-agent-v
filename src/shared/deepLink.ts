@@ -1,22 +1,32 @@
 import { RunIdSchema } from './ipc/schemas/agent'
+import { DEEP_LINK_BRIEF_MAX, type DeepLinkTarget } from './ipc/schemas/deepLink'
 import { canonicalizeWorkspacePath } from './utils/workspacePath'
 
 export const DEEP_LINK_SCHEME = 'vyotiq'
 export const DEEP_LINK_RUN_HOST = 'run'
+export const DEEP_LINK_OPEN_HOST = 'open'
+export const DEEP_LINK_NEW_HOST = 'new'
 
 /** A parsed deep-link target. `workspacePath` is null when the URL omitted `ws`. */
-export type DeepLinkRunTarget = {
-  type: 'open_run'
-  workspacePath: string | null
-  runId: string
+export type DeepLinkRunTarget = Extract<DeepLinkTarget, { type: 'open_run' }>
+
+/** Longest URL accepted: room for a full brief once percent-encoded. */
+const DEEP_LINK_URL_MAX = 4096 + DEEP_LINK_BRIEF_MAX * 3
+
+function wsParam(url: URL): string | null {
+  const raw = url.searchParams.get('ws')
+  return raw && raw.trim().length > 0 ? canonicalizeWorkspacePath(raw.trim()) : null
 }
 
 /**
- * Parse a `vyotiq://run/<runId>?ws=<encoded workspace path>` URL into a target.
- * Returns null for anything that is not a well-formed vyotiq run link.
+ * Parse a vyotiq:// URL into a target:
+ * - `vyotiq://run/<runId>?ws=<path>` opens a task;
+ * - `vyotiq://open?ws=<path>` opens a workspace;
+ * - `vyotiq://new?ws=<path>&brief=<text>` opens New task with the brief filled in.
+ * Returns null for anything that is not a well-formed vyotiq link.
  */
-export function parseDeepLinkUrl(raw: string): DeepLinkRunTarget | null {
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 4096) return null
+export function parseDeepLinkUrl(raw: string): DeepLinkTarget | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > DEEP_LINK_URL_MAX) return null
   let url: URL
   try {
     url = new URL(raw)
@@ -24,6 +34,16 @@ export function parseDeepLinkUrl(raw: string): DeepLinkRunTarget | null {
     return null
   }
   if (url.protocol !== `${DEEP_LINK_SCHEME}:`) return null
+  if (url.hostname === DEEP_LINK_OPEN_HOST) {
+    const workspacePath = wsParam(url)
+    return workspacePath ? { type: 'open_workspace', workspacePath, fromCommandLine: false } : null
+  }
+  if (url.hostname === DEEP_LINK_NEW_HOST) {
+    const brief = (url.searchParams.get('brief') ?? '').trim()
+    if (brief.length > DEEP_LINK_BRIEF_MAX) return null
+    return { type: 'new_task', workspacePath: wsParam(url), brief }
+  }
+  if (raw.length > 4096) return null
   if (url.hostname !== DEEP_LINK_RUN_HOST) return null
   let runId: string
   try {

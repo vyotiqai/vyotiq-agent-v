@@ -32,6 +32,7 @@ import { buildWorkspaceSnapshotAsync } from './workspaceSnapshot'
 import { perfLog, perfNow } from './perfDebug'
 import { logger } from '../../../shared/logger'
 import { splitHarnessSections } from '../harnessSections'
+import { defaultDoneWhenBlock } from '../../../shared/doneWhenChecks'
 import { formatPromptSection, parseOuterPromptSection, wrapPromptSection } from '../promptSections'
 
 /**
@@ -42,6 +43,20 @@ import { formatPromptSection, parseOuterPromptSection, wrapPromptSection } from 
  * It also runs to completion once started — it took an `AbortSignal` it never
  * read, so passing one implied a cancellation it never performed.
  */
+
+/**
+ * A contract with no Done when of its own carries createRun's stub ("The goal
+ * above is satisfied…"), which says nothing the harness doesn't. It stays in
+ * contract.md, where the run may still write real checks over it, and leaves
+ * the prompt.
+ */
+export function withoutDefaultDoneWhen(contract: string): string {
+  const stub = defaultDoneWhenBlock()
+  const normalized = contract.replace(/\r\n/g, '\n')
+  if (!normalized.includes(stub)) return contract
+  return normalized.replace(stub, '').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export type AssembleContextRequest = AssembleInput & {
   providerId: ProviderId
   /**
@@ -461,7 +476,7 @@ function buildStableSystem(parts: {
   }
 
   if (parts.contract?.trim()) {
-    const contractBody = parts.contract.trim().replace(/^#+\s*Run contract\s*(?:\r?\n)*/i, '')
+    const contractBody = withoutDefaultDoneWhen(parts.contract.trim().replace(/^#+\s*Run contract\s*(?:\r?\n)*/i, ''))
     const contract = capWithinSystem(
       'contract',
       wrapPromptSection('run_contract', contractBody),

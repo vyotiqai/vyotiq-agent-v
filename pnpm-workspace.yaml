@@ -35,8 +35,28 @@ overrides:
   # no patched release exists upstream — this override tracks compatibility
   # only and is NOT a fix.
   adm-zip: '>=0.6.0'
-  sharp: '>=0.35.3'
+  # GHSA-wq5f-xc86-pv6w (high, CVE-2026-96889): librsvg vulnerability in
+  # sharp <0.35.5, reached through @huggingface/transformers (dictation models)
+  # and the bundled sharp. 0.35.5 (2026-09-27) is a patch within the 0.35 line
+  # already pinned above, past minimumReleaseAge.
+  sharp: '>=0.35.5'
   nanoid: '>=3.3.18'
+  # GHSA-jqcg-44mw-7w3h (critical): proxy-addr <2.0.8 trusts an IPv4-mapped
+  # IPv6 subnet, so X-Forwarded-For spoofing. Reached only through
+  # @modelcontextprotocol/sdk > express, a dev-time server nothing here
+  # exposes — but the audit gate is critical. 2.0.8 (2026-09-15) is a patch
+  # within 2.x.
+  proxy-addr: '>=2.0.8'
+  # GHSA-68fv-2mgg-jv7q (high): event-loop DoS through indexed source-map
+  # section offsets in source-map-js <1.2.2. Build-time only — postcss and
+  # css-tree under electron-vite, vite, jsdom and eslint, which parse our own
+  # stylesheets and our own source map sections. 1.2.2 (2026-09-30) is a patch
+  # within 1.x.
+  source-map-js: '>=1.2.2'
+  # GHSA-6qxp-vccf-f47h (high): an OAuth client could send its credentials to
+  # an authorization server chosen by the MCP server rather than the user.
+  # Patched in 1.31.0 (2026-09-28), past minimumReleaseAge.
+  '@modelcontextprotocol/sdk': '>=1.31.0'
   # GHSA-5jgf-p345-68v8 + GHSA-f65p-4m7j-42xc (high): SSRF/host-confusion in
   # fast-uri <3.1.6, pulled in via ajv (@modelcontextprotocol/sdk, app-builder-lib).
   fast-uri: '>=3.1.6'

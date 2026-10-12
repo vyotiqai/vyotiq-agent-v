@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { delimiter, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { McpRuntimeRequirementSchema } from '@shared/ipc'
 import {
   clearLoginShellPathForTests,
   findMissingMcpBinary,
@@ -157,7 +158,7 @@ describe('findMissingMcpBinary', () => {
   })
 
   it('maps every requirement to a binary and an install page', () => {
-    for (const req of ['node', 'uv', 'git'] as const) {
+    for (const req of McpRuntimeRequirementSchema.options) {
       expect(mcpRequirementBinary(req)).toBeTruthy()
       expect(mcpRequirementInstallUrl(req)).toMatch(/^https:\/\//)
     }

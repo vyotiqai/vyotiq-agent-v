@@ -58,10 +58,10 @@ import {
   prComment,
   prEditBody,
   prEditReviewers,
+  prMerge,
   prReviewerSuggestions,
   prSetAutoMerge,
-  prView,
-  resetAutoMergeCacheForTests
+  prView
 } from '@main/git/gh'
 
 /** `gh pr view 63 --json …` on this repository, 2026-10-08 (gh 2.98): a closed PR with one bot comment. */
@@ -69,6 +69,15 @@ const REAL_PR_63 = JSON.parse(readFileSync(join(__dirname, '../../fixtures/githu
   string,
   unknown
 >
+/** The conversation and auto-merge read for #63 (`gh api graphql`, PR_EXTRAS_QUERY, 2026-10-08) — this repository has auto-merge off. */
+const REAL_PR_63_EXTRAS = readFileSync(join(__dirname, '../../fixtures/github/pr-63-extras-graphql.json'), 'utf8')
+/** The same answer from a repository that allows auto-merge. */
+const extrasAllowing = (can: boolean): string => {
+  const data = JSON.parse(REAL_PR_63_EXTRAS) as { data: { repository: Record<string, unknown> & { pullRequest: Record<string, unknown> } } }
+  data.data.repository.autoMergeAllowed = true
+  data.data.repository.pullRequest.viewerCanEnableAutoMerge = can
+  return JSON.stringify(data)
+}
 /**
  * `autoMergeRequest` as gh 2.98 returned it for an open PR with auto-merge on
  * (microsoft/vscode#340326, 2026-10-08); the person's name and email are
@@ -90,15 +99,31 @@ function ghError(stderr: string): Error {
 const isGraphql = (args: string[]): boolean => args[0] === 'api' && args[1] === 'graphql'
 const graphqlQuery = (args: string[]): string => args[args.indexOf('-f') + 1] ?? ''
 
+/**
+ * A PR in a merge queue, as GitHub returned it for zed-industries/zed#65291
+ * (2026-10-08): the read-back after a merge, and the conversation read.
+ * `autoMergeRequest` is null for a queued PR, and gh's `pr view --json` has
+ * no queue field at all.
+ */
+const REAL_QUEUED_MERGE_STATE = readFileSync(join(__dirname, '../../fixtures/github/zed-65291-queued-merge-state-graphql.json'), 'utf8')
+const REAL_QUEUED_EXTRAS = readFileSync(join(__dirname, '../../fixtures/github/zed-65291-queued-extras-graphql.json'), 'utf8')
+
+/** The merge read-back in the fixture's shape, with fields set for a case. */
+function mergeState(pr: Record<string, unknown>): string {
+  const data = JSON.parse(REAL_QUEUED_MERGE_STATE) as { data: { repository: { pullRequest: Record<string, unknown> } } }
+  Object.assign(data.data.repository.pullRequest, pr)
+  return JSON.stringify(data)
+}
+const NOT_QUEUED = { isMergeQueueEnabled: false, isInMergeQueue: false, mergeQueueEntry: null }
+
 beforeEach(() => {
   ghRoute.mockReset()
   bodies.length = 0
-  resetAutoMergeCacheForTests()
 })
 
 describe('prView: the conversation and auto-merge', () => {
-  it('maps the real comment shape and leaves auto-merge off; a closed PR asks GitHub nothing more', async () => {
-    ghRoute.mockImplementation((args) => (args[0] === 'pr' && args[1] === 'view' ? JSON.stringify(REAL_PR_63) : new Error(`unexpected ${args.join(' ')}`)))
+  it('reads the latest comments in one GraphQL call, not by paging `pr view --json comments`', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? REAL_PR_63_EXTRAS : JSON.stringify(REAL_PR_63)))
     const pr = await prView('/repo', 63)
     expect(pr?.comments).toEqual([
       {
@@ -111,55 +136,70 @@ describe('prView: the conversation and auto-merge', () => {
     ])
     expect(pr?.commentCount).toBe(1)
     expect(pr?.autoMerge).toBeNull()
+    // Closed: auto-merge is not offered whatever GitHub says.
     expect(pr?.canAutoMerge).toBeUndefined()
-    expect(ghRoute).toHaveBeenCalledTimes(1)
-    // The two fields ride the one `pr view` call.
-    expect(ghRoute.mock.calls[0]![0].join(' ')).toMatch(/--json .*comments,autoMergeRequest/)
+    const viewArgs = ghRoute.mock.calls.find((call) => call[0][1] === 'view')![0].join(' ')
+    expect(viewArgs).toMatch(/--json .*autoMergeRequest/)
+    expect(viewArgs).not.toMatch(/comments/)
+    const query = graphqlQuery(ghRoute.mock.calls.find((call) => isGraphql(call[0]))![0])
+    expect(query).toContain('comments(last: 50)')
+    expect(query).toContain('viewerCanEnableAutoMerge')
+  })
+
+  it('lists each requested reviewer once, though GitHub can list one twice', async () => {
+    // `gh pr view 13251 -R cli/cli --json reviewRequests`, 2026-10-08: GraphQL returns the same request twice too.
+    const twice = [
+      { __typename: 'User', login: 'babakks' },
+      { __typename: 'User', login: 'babakks' }
+    ]
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? REAL_PR_63_EXTRAS : JSON.stringify({ ...REAL_PR_63, reviewRequests: twice })))
+    expect((await prView('/repo', 63))?.reviewRequests).toEqual(['babakks'])
+  })
+
+  it('counts every comment when only the latest are read', async () => {
+    const many = JSON.parse(REAL_PR_63_EXTRAS) as { data: { repository: { pullRequest: { comments: { totalCount: number } } } } }
+    many.data.repository.pullRequest.comments.totalCount = 908
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? JSON.stringify(many) : JSON.stringify(REAL_PR_63)))
+    expect((await prView('/repo', 63))?.commentCount).toBe(908)
   })
 
   it('maps auto-merge as gh reports it', async () => {
-    ghRoute.mockImplementation(() => JSON.stringify({ ...REAL_PR_63, state: 'OPEN', mergeStateStatus: 'BLOCKED', autoMergeRequest: REAL_AUTO_MERGE }))
+    ghRoute.mockImplementation((args) =>
+      isGraphql(args) ? extrasAllowing(false) : JSON.stringify({ ...REAL_PR_63, state: 'OPEN', mergeStateStatus: 'BLOCKED', autoMergeRequest: REAL_AUTO_MERGE })
+    )
     const pr = await prView('/repo', 63)
     expect(pr?.autoMerge).toEqual({ method: 'SQUASH', enabledBy: 'octocat' })
-    // Already on: nothing more to ask.
-    expect(ghRoute).toHaveBeenCalledTimes(1)
+    // Already on: "Merge when ready" is not offered again.
+    expect(pr?.canAutoMerge).toBeUndefined()
   })
 
   it('offers auto-merge only when GitHub says the viewer can enable it', async () => {
-    const open = { ...REAL_PR_63, state: 'OPEN', mergeStateStatus: 'BLOCKED' }
+    const open = JSON.stringify({ ...REAL_PR_63, state: 'OPEN', mergeStateStatus: 'BLOCKED' })
     ghRoute.mockImplementation((args) => {
       if (isGraphql(args)) {
-        expect(graphqlQuery(args)).toContain('viewerCanEnableAutoMerge')
         expect(args).toContain('number=63')
-        return JSON.stringify({ data: { repository: { autoMergeAllowed: true, pullRequest: { viewerCanEnableAutoMerge: true } } } })
+        return extrasAllowing(true)
       }
-      return JSON.stringify(open)
+      return open
     })
     expect((await prView('/repo', 63))?.canAutoMerge).toBe(true)
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? REAL_PR_63_EXTRAS : open))
+    // This repository's real answer: auto-merge not allowed.
+    expect((await prView('/repo', 63))?.canAutoMerge).toBe(false)
   })
 
-  it('a repository that does not allow auto-merge is asked once, not on every poll', async () => {
-    const open = { ...REAL_PR_63, state: 'OPEN', mergeStateStatus: 'BLOCKED' }
-    let graphqlCalls = 0
-    ghRoute.mockImplementation((args) => {
-      if (isGraphql(args)) {
-        graphqlCalls += 1
-        // What GitHub answered for this repository on 2026-10-08.
-        return JSON.stringify({ data: { repository: { autoMergeAllowed: false, pullRequest: { viewerCanEnableAutoMerge: false } } } })
-      }
-      return JSON.stringify(open)
-    })
-    expect((await prView('/repo', 63))?.canAutoMerge).toBe(false)
-    expect((await prView('/repo', 63))?.canAutoMerge).toBe(false)
-    expect(graphqlCalls).toBe(1)
+  it('a draft is not offered auto-merge', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? extrasAllowing(true) : JSON.stringify({ ...REAL_PR_63, state: 'OPEN', isDraft: true })))
+    expect((await prView('/repo', 63))?.canAutoMerge).toBeUndefined()
   })
 
-  it('a failed auto-merge question leaves the PR readable and the offer absent', async () => {
+  it('a failed GraphQL read leaves the PR readable, without its conversation or the offer', async () => {
     ghRoute.mockImplementation((args) =>
       isGraphql(args) ? ghError('gh: Could not resolve to a Repository') : JSON.stringify({ ...REAL_PR_63, state: 'OPEN' })
     )
     const pr = await prView('/repo', 63)
     expect(pr?.number).toBe(63)
+    expect(pr?.comments).toBeUndefined()
     expect(pr?.canAutoMerge).toBeUndefined()
   })
 })
@@ -205,12 +245,23 @@ describe('prEditBody', () => {
 
 describe('prEditReviewers', () => {
   it('requests and withdraws in one edit, then reads back who is requested', async () => {
+    // gh 2.98's export (api/export_pr.go): a user by login, a team by name and `org/slug`.
     ghRoute.mockImplementation((args) =>
-      args[1] === 'view' ? JSON.stringify({ reviewRequests: [{ __typename: 'User', login: 'alice' }, { __typename: 'Team', login: 'org/core' }] }) : ''
+      args[1] === 'view'
+        ? JSON.stringify({ reviewRequests: [{ __typename: 'User', login: 'alice' }, { __typename: 'Team', name: 'Core', slug: 'org/core' }] })
+        : ''
     )
     const result = await prEditReviewers('/repo', 5, ['alice', 'org/core'], ['bob'])
     expect(ghRoute.mock.calls[0]![0]).toEqual(['pr', 'edit', '5', '--add-reviewer', 'alice', '--add-reviewer', 'org/core', '--remove-reviewer', 'bob'])
     expect(result).toEqual({ detail: 'Reviewers updated', reviewRequests: ['alice', 'org/core'] })
+  })
+
+  it('says when GitHub does not list a request it took, as with Copilot', async () => {
+    // gh exports no Bot entry, so a Copilot request never reads back.
+    ghRoute.mockImplementation((args) => (args[1] === 'view' ? JSON.stringify({ reviewRequests: [] }) : ''))
+    const result = await prEditReviewers('/repo', 5, ['@copilot'], [])
+    expect(result.reviewRequests).toEqual([])
+    expect(result.detail).toBe('Review requested from @copilot. GitHub does not list @copilot among the requests; see it on GitHub')
   })
 
   it("passes gh's refusal on", async () => {
@@ -232,7 +283,7 @@ describe('prReviewerSuggestions', () => {
 describe('prSetAutoMerge', () => {
   it('turns it on by the method asked and reads back what GitHub set', async () => {
     ghRoute.mockImplementation((args) =>
-      args[1] === 'view' ? JSON.stringify({ state: 'OPEN', autoMergeRequest: { ...REAL_AUTO_MERGE, mergeMethod: 'REBASE' } }) : ''
+      isGraphql(args) ? mergeState({ ...NOT_QUEUED, autoMergeRequest: { ...REAL_AUTO_MERGE, mergeMethod: 'REBASE' } }) : ''
     )
     const result = await prSetAutoMerge('/repo', 4, true, 'rebase')
     expect(ghRoute.mock.calls[0]![0]).toEqual(['pr', 'merge', '4', '--auto', '--rebase', '--delete-branch=false'])
@@ -243,18 +294,75 @@ describe('prSetAutoMerge', () => {
   })
 
   it('turns it off', async () => {
-    ghRoute.mockImplementation((args) => (args[1] === 'view' ? JSON.stringify({ state: 'OPEN', autoMergeRequest: null }) : ''))
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? mergeState(NOT_QUEUED) : ''))
     expect(await prSetAutoMerge('/repo', 4, false)).toEqual({ detail: 'Auto-merge off', autoMerge: null })
     expect(ghRoute.mock.calls[0]![0]).toEqual(['pr', 'merge', '4', '--disable-auto'])
   })
 
   it('says so when GitHub did not take it, rather than claiming it is on', async () => {
-    ghRoute.mockImplementation((args) => (args[1] === 'view' ? JSON.stringify({ state: 'OPEN', autoMergeRequest: null }) : ''))
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? mergeState(NOT_QUEUED) : ''))
     await expect(prSetAutoMerge('/repo', 4, true)).rejects.toThrow('GitHub did not turn auto-merge on')
+  })
+
+  it('behind a merge queue, a PR GitHub queued at once is a success, not "did not turn auto-merge on"', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? REAL_QUEUED_MERGE_STATE : ''))
+    expect(await prSetAutoMerge('/repo', 65291, true)).toEqual({
+      detail: "In the merge queue at position 1: GitHub merges it once the queue's checks pass",
+      autoMerge: null
+    })
+    expect(graphqlQuery(ghRoute.mock.calls.find((call) => isGraphql(call[0]))![0])).toContain('isInMergeQueue')
+  })
+
+  it('behind a merge queue, a PR still waiting says it joins the queue, not how it will merge', async () => {
+    ghRoute.mockImplementation((args) =>
+      isGraphql(args) ? mergeState({ isInMergeQueue: false, mergeQueueEntry: null, autoMergeRequest: REAL_AUTO_MERGE }) : ''
+    )
+    expect((await prSetAutoMerge('/repo', 4, true)).detail).toBe('Auto-merge on: it joins the merge queue once its requirements are met')
   })
 
   it("passes gh's refusal on", async () => {
     ghRoute.mockImplementation(() => ghError('GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)'))
     await expect(prSetAutoMerge('/repo', 4, true)).rejects.toThrow(/Auto merge is not allowed/)
+  })
+})
+
+describe('merge queue', () => {
+  it('prView says the base merges through a queue, and where the PR stands in it', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? REAL_QUEUED_EXTRAS : JSON.stringify({ ...REAL_PR_63, state: 'OPEN' })))
+    const pr = await prView('/repo', 65291)
+    expect(pr?.mergeQueueRequired).toBe(true)
+    expect(pr?.mergeQueue).toEqual({ position: 1 })
+  })
+
+  it('prView without a queue says so', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? REAL_PR_63_EXTRAS : JSON.stringify(REAL_PR_63)))
+    const pr = await prView('/repo', 63)
+    expect(pr?.mergeQueueRequired).toBe(false)
+    expect(pr?.mergeQueue).toBeNull()
+  })
+
+  it('prMerge behind a queue reports the PR queued, not merged', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? REAL_QUEUED_MERGE_STATE : ''))
+    expect(await prMerge('/repo', 'squash', 65291)).toEqual({
+      detail: "In the merge queue at position 1: GitHub merges it once the queue's checks pass"
+    })
+    expect(ghRoute.mock.calls[0]![0]).toEqual(['pr', 'merge', '65291', '--squash', '--delete-branch=false'])
+  })
+
+  it('prMerge behind a queue, with checks still running, says it joins the queue later', async () => {
+    ghRoute.mockImplementation((args) =>
+      isGraphql(args) ? mergeState({ isInMergeQueue: false, mergeQueueEntry: null, autoMergeRequest: REAL_AUTO_MERGE }) : ''
+    )
+    expect((await prMerge('/repo', 'squash', 4)).detail).toBe('It joins the merge queue once its requirements are met')
+  })
+
+  it('prMerge reads back a real merge (gh prints nothing off a terminal)', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? mergeState({ ...NOT_QUEUED, state: 'MERGED' }) : ''))
+    expect(await prMerge('/repo', 'rebase', 4)).toEqual({ detail: 'Rebased and merged' })
+  })
+
+  it('prMerge does not claim a merge it could not read back', async () => {
+    ghRoute.mockImplementation((args) => (isGraphql(args) ? ghError('HTTP 502: Bad Gateway') : ''))
+    expect((await prMerge('/repo', 'squash', 4)).detail).toMatch(/^GitHub took the merge, but reading the pull request back failed: .*Refresh to see it\.$/)
   })
 })

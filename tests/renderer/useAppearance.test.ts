@@ -11,7 +11,7 @@ function applyAppearanceDom(
 ): void {
   const root = document.documentElement
   root.setAttribute('data-theme', resolvedTheme)
-  root.setAttribute('data-font-scale', appearance.fontScale)
+  root.setAttribute('data-font-scale', String(appearance.fontScale))
   root.setAttribute('data-skin', appearance.skinId)
 }
 
@@ -25,7 +25,11 @@ describe('useAppearance DOM contract', () => {
       theme: 'dark',
       fontScale: 'default',
       skinId: 'bench',
-      customCssPath: ''
+      customCssPath: '',
+      reduceMotion: 'system',
+      contrast: 'system',
+      alwaysShowFocusRing: false,
+      announceVerbosity: 'full'
     })
     applyAppearanceDom(appearance, resolveTheme('dark', false))
     expect(document.documentElement.getAttribute('data-skin')).toBe('bench')
@@ -36,7 +40,11 @@ describe('useAppearance DOM contract', () => {
       theme: 'system',
       fontScale: 'default',
       skinId: DEFAULT_SKIN_ID,
-      customCssPath: '/tmp/custom.css'
+      customCssPath: '/tmp/custom.css',
+      reduceMotion: 'system',
+      contrast: 'system',
+      alwaysShowFocusRing: false,
+      announceVerbosity: 'full'
     })
     expect(appearance.skinId).toBe('native')
     expect(appearance.customCssPath).toBe('/tmp/custom.css')

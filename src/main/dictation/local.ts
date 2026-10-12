@@ -9,7 +9,12 @@ import {
   type DictationTranscribeResult,
   type Settings
 } from '../../shared/ipc'
-import { DICTATION_LOCAL_CATALOG, dictationCatalogEntry, DICTATION_LOCAL_MODEL_IDS } from '../../shared/dictation'
+import {
+  DICTATION_LOCAL_CATALOG,
+  dictationCatalogEntry,
+  dictationModelIsMultilingual,
+  DICTATION_LOCAL_MODEL_IDS
+} from '../../shared/dictation'
 import { getSettings, setSettings } from '../settings/settings'
 import {
   DICTATION_MOONSHINE_OPTIONAL_FILES,
@@ -477,7 +482,9 @@ export async function transcribeLocalDictation(
     const backend = await resolveBackend(provisional ? 'draft' : 'final')
     const startedAt = Date.now()
     try {
-      raw = await backend.transcribe(pcmB64, 16000, signal, modelId)
+      // The multilingual model takes the Language setting; the `.en` ones refuse it.
+      const language = dictationModelIsMultilingual(modelId) ? (getSettings().dictation?.language ?? '').trim() : ''
+      raw = await backend.transcribe(pcmB64, 16000, signal, modelId, language || undefined)
     } catch (err) {
       if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) throw err
       const msg = err instanceof Error ? err.message : String(err)

@@ -39,6 +39,7 @@ import type {
   RunArtifactName,
   HomeActivityResult,
   UsageExportResult,
+  UsageBudgetStatus,
   ImportRunResult,
   RunFeedbackGetResult,
   RunSearchResult,
@@ -49,6 +50,9 @@ import type {
   GitCommitResult,
   GitBlameResult,
   GitGenerateCommitMessageResult,
+  PromptStructureCancelRequest,
+  PromptStructureRequest,
+  PromptStructureResult,
   GitStatusChangedPayload,
   GitStatusResult,
   GitBranchDiffResult,
@@ -89,6 +93,8 @@ import type {
   DictationLiveEvent,
   TelemetryStatus,
   AppInfo,
+  CliPathSetRequest,
+  CliPathStatus,
   SandboxCapability,
   UpdateInfo,
   UpdaterStatePayload,
@@ -108,6 +114,7 @@ import type {
   CrashRecoveryPending,
   TraceStopResult,
   ToolApprovalDecision,
+  ToolApprovalExtras,
   ToolApprovalRequest,
   AgentQuestionRequest,
   AgentQuestionAnswer,
@@ -189,7 +196,17 @@ import type {
   SkillsWriteLocalResult,
   NotificationList,
   NotificationMutateRequest,
-  NotificationAction
+  NotificationAction,
+  GitBranchDeleteResult,
+  GitStashEntry,
+  GitIntegrateResult,
+  GitStashRestoreResult,
+  DeletedRunSummary,
+  WorkspaceMemoryNote,
+  WorkspaceMemoryNoteRequest,
+  TrayCommand,
+  ToolSecretName,
+  ToolSecretStatus
 } from './ipc'
 import type { GoogleAdcStatus, ProxyStatus } from './domain/network'
 
@@ -406,6 +423,8 @@ export interface VyotiqApi {
     windowDays: number
     endDay?: string
   }) => Promise<IpcResult<UsageExportResult>>
+  /** Usage's budget line: today and this month against the budgets, across every workspace. */
+  usageBudget: () => Promise<IpcResult<UsageBudgetStatus>>
   /** Save settings to a file (no keys, no MCP servers). */
   settingsExport: () => Promise<IpcResult<SettingsExportResult>>
   /** Choose a settings file and see what importing it would change. */
@@ -435,7 +454,9 @@ export interface VyotiqApi {
   respondToolApproval: (
     requestId: string,
     decision: ToolApprovalDecision,
-    runId: string
+    runId: string,
+    /** A deny's note to the agent; a command edited before Allow once. */
+    extras?: ToolApprovalExtras
   ) => Promise<IpcResult<boolean>>
   listPendingToolApprovals: (runId: string) => Promise<IpcResult<ToolApprovalRequest[]>>
   onAgentQuestionRequest: (handler: (request: AgentQuestionRequest) => void) => () => void
@@ -500,7 +521,12 @@ export interface VyotiqApi {
     runId: string,
     toolCallId: string
   ) => Promise<IpcResult<{ content: string }>>
+  /** Delete a task: it goes to Recently deleted for 30 days. */
   deleteRun: (workspacePath: string, runId: string) => Promise<IpcResult<true>>
+  listDeletedRuns: (workspacePath: string) => Promise<IpcResult<DeletedRunSummary[]>>
+  restoreDeletedRun: (workspacePath: string, runId: string) => Promise<IpcResult<true>>
+  /** One deleted task for good, or (no runId) all of them. Returns how many went. */
+  purgeDeletedRuns: (workspacePath: string, runId?: string) => Promise<IpcResult<number>>
   exportRun: (
     workspacePath: string,
     runId: string
@@ -526,7 +552,8 @@ export interface VyotiqApi {
   setLoop: (payload: SetLoopRequest) => Promise<IpcResult<SetLoopResult>>
   listActiveRuns: () => Promise<IpcResult<ActiveRunsResult>>
   /** Discriminated: ok | not_repo | unavailable (git missing from PATH). */
-  gitStatus: (workspacePath: string) => Promise<IpcResult<GitStatusResult>>
+  /** `limit`: how many changed files to list (default 200, "Show all" up to 5,000). */
+  gitStatus: (workspacePath: string, opts?: { limit?: number }) => Promise<IpcResult<GitStatusResult>>
   /**
    * `git init` in an open workspace. Manual only — the UI calls this from an
    * explicit button, never on open and never for the agent.
@@ -545,6 +572,13 @@ export interface VyotiqApi {
     /** Write a new message even when this exact diff already has one. */
     force?: boolean
   }) => Promise<IpcResult<GitGenerateCommitMessageResult>>
+  /**
+   * Structure: rewrite the composer's instruction as a brief, or ask what it
+   * needs first. Only from the person's click; the result goes into the draft.
+   */
+  promptStructure: (payload: PromptStructureRequest) => Promise<IpcResult<PromptStructureResult>>
+  /** Stop a Structure call in flight (Esc). */
+  promptStructureCancel: (payload: PromptStructureCancelRequest) => Promise<IpcResult<{ cancelled: boolean }>>
   gitCommit: (
     workspacePath: string,
     message: string,
@@ -581,6 +615,8 @@ export interface VyotiqApi {
   gitBranchStash: (payload: { workspacePath: string }) => Promise<IpcResult<import('./ipc').GitBranchStashResult>>
   /** Put changes a switch left on this branch back. Only from an explicit button. */
   gitStashRestore: (payload: { workspacePath: string; sha: string }) => Promise<IpcResult<import('./ipc').GitStashRestoreResult>>
+  /** Drop a stash a switch left on the current branch. */
+  gitStashDrop: (payload: { workspacePath: string; sha: string }) => Promise<IpcResult<{ detail: string }>>
   /** Stage one hunk of the unstaged diff, or unstage one of the staged diff. */
   gitStageHunk: (payload: {
     workspacePath: string
@@ -627,7 +663,9 @@ export interface VyotiqApi {
     vsHead?: boolean
   }) => Promise<IpcResult<{ content: string }>>
   gitBlame: (workspacePath: string, path: string) => Promise<IpcResult<GitBlameResult>>
-  prView: (workspacePath: string) => Promise<IpcResult<import('./ipc').PrView | null>>
+  prView: (workspacePath: string, number?: number) => Promise<IpcResult<import('./ipc').PrView | null>>
+  /** A web page as text for an @-mention, read through web_fetch's rules (allowlist, size cap). */
+  composerFetchUrl: (url: string) => Promise<IpcResult<{ content: string }>>
   prCreate: (
     workspacePath: string,
     options?: {
@@ -745,6 +783,8 @@ export interface VyotiqApi {
     workspacePath: string
     cols?: number
     rows?: number
+    /** Which shell; unset follows Settings. */
+    shell?: import('./ipc').PtyShellChoice
   }) => Promise<IpcResult<import('./ipc').PtySessionInfo>>
   ptyList: (workspacePath?: string) => Promise<IpcResult<import('./ipc').PtySessionInfo[]>>
   ptyWrite: (id: string, data: string, workspacePath: string) => Promise<IpcResult<boolean>>
@@ -755,10 +795,16 @@ export interface VyotiqApi {
     workspacePath: string
   ) => Promise<IpcResult<boolean>>
   ptyKill: (id: string, workspacePath: string) => Promise<IpcResult<boolean>>
+  /** Name a terminal tab; every window's list shows it. */
+  ptyRename: (payload: { id: string; workspacePath: string; title: string }) => Promise<IpcResult<boolean>>
   onPtyData: (handler: (event: { id: string; data: string }) => void) => () => void
   onPtyExit: (handler: (event: { id: string; exitCode: number | null }) => void) => () => void
-  /** The set of live PTY sessions changed (e.g. the agent mirror appeared). */
+  /** The set of live PTY sessions changed (e.g. the agent mirror appeared, or a kept process exited). */
   onPtySessionsChanged: (handler: () => void) => () => void
+  /** Background processes the agent left running past its turn (dev servers, watchers). */
+  terminalKeptList: (workspacePath: string) => Promise<IpcResult<import('./ipc').KeptTerminalInfo[]>>
+  /** Stop one of them (its whole process tree). */
+  terminalKeptStop: (id: string, workspacePath: string) => Promise<IpcResult<boolean>>
   windowMinimize: () => Promise<IpcResult<true>>
   windowMaximize: () => Promise<IpcResult<boolean>>
   windowClose: () => Promise<IpcResult<true>>
@@ -810,6 +856,10 @@ export interface VyotiqApi {
   telemetryStatus: () => Promise<IpcResult<TelemetryStatus>>
   stopTrace: () => Promise<IpcResult<TraceStopResult>>
   getAppInfo: () => Promise<IpcResult<AppInfo>>
+  /** Whether `vyotiq` is on your PATH, and whether this build can put it there. */
+  cliPathStatus: () => Promise<IpcResult<CliPathStatus>>
+  /** Add `vyotiq` to your user PATH, or take it off. */
+  cliPathSet: (req: CliPathSetRequest) => Promise<IpcResult<CliPathStatus>>
   /** Re-detected on each call, so installing bwrap shows up without a restart. */
   getSandboxCapability: () => Promise<IpcResult<SandboxCapability>>
   updater: VyotiqUpdaterApi
@@ -850,6 +900,26 @@ export interface VyotiqApi {
     failedOnly?: boolean
   }) => Promise<IpcResult<McpStatusResult>>
   toolsCatalogGet: (payload?: ToolCatalogRequest) => Promise<IpcResult<ToolCatalogResult>>
+  /** Newer versions of packages installed from npm, git or a registry; nothing is downloaded. */
+  marketplaceCheckUpdates: () => Promise<IpcResult<import('./ipc').MarketplaceUpdateCheckResult>>
+  /** Search the official MCP Registry; each result carries the line Add server detects. */
+  mcpRegistrySearch: (query: string) => Promise<IpcResult<import('./ipc').McpRegistryServer[]>>
+  /** Keys in the environment (which providers, never the value) and model servers running here. */
+  setupDetect: () => Promise<IpcResult<import('./ipc').SetupDetection>>
+  /** Copy a provider's key from the environment into the key vault. */
+  setupUseEnvKey: (provider: import('./ipc').ProviderId) => Promise<IpcResult<true>>
+  /** Both hooks files, the workspace file's standing, remembered decisions, and recent runs. */
+  hooksOverview: (payload?: { workspacePath?: string }) => Promise<IpcResult<import('./ipc').HooksOverview>>
+  /** Allow or deny the workspace's hooks file as it is now, or forget the decision. */
+  hooksDecide: (payload: { workspacePath: string; decision: 'allow' | 'deny' | 'forget' }) => Promise<IpcResult<boolean>>
+  /** Forget a remembered decision by its listed workspace. */
+  hooksForget: (workspace: string) => Promise<IpcResult<boolean>>
+  /** Open a hooks file in the editor, writing an empty one first. */
+  hooksOpenFile: (payload: { scope: 'user' | 'workspace'; workspacePath?: string }) => Promise<IpcResult<string>>
+  /** An agent-built tool's module: its file and code, read as text (never run). */
+  agentToolSource: (name: string) => Promise<IpcResult<import('./ipc').AgentToolSource>>
+  /** Move an agent-built tool's module to the trash; `trashed` false means it was deleted outright. */
+  agentToolDelete: (name: string) => Promise<IpcResult<{ trashed: boolean }>>
   mcpSetAuthToken: (serverId: string, token: string) => Promise<IpcResult<true>>
   mcpClearAuthToken: (serverId: string) => Promise<IpcResult<true>>
   mcpStartOAuth: (
@@ -898,7 +968,8 @@ export interface VyotiqApi {
   ) => Promise<IpcResult<MarketplaceIndex>>
   marketplacePickLocal: () => Promise<IpcResult<string | null>>
   marketplaceGetContents: (id: string) => Promise<IpcResult<PackageContents>>
-  marketplaceAckRemoteInstall: (acked: boolean) => Promise<IpcResult<Settings>>
+  /** `confirmedInApp`: the app's own dialog already showed the warning; no native box. */
+  marketplaceAckRemoteInstall: (acked: boolean, opts?: { confirmedInApp?: boolean }) => Promise<IpcResult<Settings>>
   slashCommandsList: (payload?: {
     workspacePath?: string | null
   }) => Promise<IpcResult<{ commands: SlashCommandDescriptor[]; mcpServers?: SlashMcpServer[] }>>
@@ -974,6 +1045,10 @@ export interface VyotiqApi {
   workspaceFileDelete: (
     payload: WorkspaceFileDeleteRequest
   ) => Promise<IpcResult<WorkspaceFileDeleteResult>>
+  /** Open a file (at a line), the workspace, or an instance worktree in the preferred editor; says which opened it. */
+  editorOpen: (payload: import('./ipc').EditorOpenRequest) => Promise<IpcResult<{ editor: string }>>
+  /** Editors whose command is on PATH, for Settings. */
+  editorList: () => Promise<IpcResult<string[]>>
   workspaceFileReveal: (
     payload: WorkspaceFileRevealRequest
   ) => Promise<IpcResult<true>>
@@ -1036,6 +1111,11 @@ export interface VyotiqApi {
    * Delete the workspace's memory notes, index.md and state.md — nothing else
    * under .vyotiq/memory. Irreversible: callers confirm first.
    */
+  /** The workspace's memory notes, newest first. */
+  workspaceMemoryNotes: (payload: { workspacePath: string }) => Promise<IpcResult<WorkspaceMemoryNote[]>>
+  workspaceMemoryNoteRead: (payload: WorkspaceMemoryNoteRequest) => Promise<IpcResult<string>>
+  /** Delete one note and the index line pointing at it. */
+  workspaceMemoryNoteDelete: (payload: WorkspaceMemoryNoteRequest) => Promise<IpcResult<boolean>>
   clearWorkspaceMemory: (
     payload: WorkspaceClearMemoryRequest
   ) => Promise<IpcResult<WorkspaceClearMemoryResult>>
@@ -1060,10 +1140,37 @@ export interface VyotiqApi {
   listNotifications: () => Promise<IpcResult<NotificationList>>
   markNotificationsRead: (payload: NotificationMutateRequest) => Promise<IpcResult<NotificationList>>
   dismissNotifications: (payload: NotificationMutateRequest) => Promise<IpcResult<NotificationList>>
+  /** Send a test message to the phone (ntfy or webhook); fails with the server's answer. */
+  notificationsRemoteTest: (payload: import('./ipc').NotificationsRemoteTestRequest) => Promise<IpcResult<true>>
   onNotificationsChanged: (handler: (payload: NotificationList) => void) => () => void
   /** Pushed from main after a workspace's git status may have changed. */
   onGitStatusChanged: (handler: (payload: GitStatusChangedPayload) => void) => () => void
   onNotificationActivate: (handler: (action: NotificationAction) => void) => () => void
+  onTrayCommand: (handler: (command: TrayCommand) => void) => () => void
+  /** Every comment in a pull request's conversation, oldest first (up to 1,000). */
+  prCommentsAll: (payload: { workspacePath: string; number: number }) => Promise<IpcResult<import('./ipc').PrComment[]>>
+  /** Take a pull request out of the merge queue; GitHub is read back after. */
+  prLeaveMergeQueue: (payload: { workspacePath: string; number: number }) => Promise<IpcResult<{ detail: string }>>
+  /** Put back what a Discard took, from the copies kept for it; files changed since are left alone. */
+  gitDiscardUndo: (payload: { workspacePath: string; id: string }) => Promise<IpcResult<import('./ipc').GitDiscardUndoResult>>
+  /** Delete a local branch; `unmerged` when git refused for unmerged commits (ask, then force). */
+  gitBranchDelete: (payload: { workspacePath: string; branch: string; force?: boolean }) => Promise<IpcResult<GitBranchDeleteResult>>
+  gitBranchRename: (payload: { workspacePath: string; from: string; to: string }) => Promise<IpcResult<{ detail: string }>>
+  /** Every stash in the repository, newest first. */
+  gitStashList: (workspacePath: string) => Promise<IpcResult<GitStashEntry[]>>
+  /** Apply a stash; `drop` pops it. */
+  gitStashApply: (payload: { workspacePath: string; sha: string; drop?: boolean }) => Promise<IpcResult<GitStashRestoreResult>>
+  gitStashDropAny: (payload: { workspacePath: string; sha: string }) => Promise<IpcResult<{ detail: string }>>
+  /** Revert or cherry-pick a commit, or merge a branch in; conflicts are an answer. */
+  gitIntegrate: (payload: {
+    workspacePath: string
+    op: 'revert' | 'cherry-pick' | 'merge'
+    target: string
+  }) => Promise<IpcResult<GitIntegrateResult>>
+  /** web_search's API keys, in the key vault; each answer is which are saved. */
+  toolSecretSet: (payload: { name: ToolSecretName; key: string }) => Promise<IpcResult<ToolSecretStatus>>
+  toolSecretClear: (payload: { name: ToolSecretName }) => Promise<IpcResult<ToolSecretStatus>>
+  toolSecretStatus: () => Promise<IpcResult<ToolSecretStatus>>
   /** Pushed from main when a vyotiq:// deep link is activated (null target = unrecognized). */
   onDeepLinkOpened: (handler: (payload: DeepLinkPayload) => void) => () => void
   /** Drain a deep link that arrived before the renderer was listening (cold start). */

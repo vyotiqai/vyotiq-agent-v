@@ -44,6 +44,35 @@ export function commandAllowPrefix(command: string): string | null {
   return sub && SUBCOMMAND.test(sub) ? `${program} ${sub}` : program
 }
 
+/**
+ * Programs never offered a program-wide allow: a shell or package runner runs
+ * whatever follows it, and these delete, rewrite history, reach the network or
+ * act as another user. Their commands keep the narrower `program subcommand`.
+ */
+const NO_PROGRAM_WIDE_ALLOW = new Set([
+  'bash', 'sh', 'zsh', 'fish', 'cmd', 'cmd.exe', 'powershell', 'pwsh', 'wsl',
+  'sudo', 'su', 'doas', 'runas',
+  'rm', 'rmdir', 'rd', 'del', 'erase', 'mv', 'move', 'dd', 'shred', 'format',
+  'git', 'gh', 'ssh', 'scp', 'rsync', 'curl', 'wget', 'invoke-webrequest',
+  'npx', 'pnpx', 'bunx', 'dlx', 'docker', 'kubectl', 'terraform',
+  'chmod', 'chown', 'icacls', 'takeown', 'reg', 'setx', 'kill', 'taskkill', 'pkill', 'killall'
+])
+
+/**
+ * The broader "Always allow" a card may offer beside `program subcommand`: the
+ * program alone (`npm` for `npm test`, `node` for `node test.js`), so `npm run
+ * lint` and `node other.js` stop asking too. Null when the narrow allow is
+ * already the program, or the program is one that must stay narrow.
+ */
+export function commandAllowProgram(command: string): string | null {
+  const prefix = commandAllowPrefix(command)
+  if (!prefix || !prefix.includes(' ')) return null
+  const program = prefix.split(' ')[0]!
+  const base = program.replace(/^.*[\\/]/, '').toLowerCase()
+  if (NO_PROGRAM_WIDE_ALLOW.has(base) || NO_PROGRAM_WIDE_ALLOW.has(base.replace(/\.exe$/, ''))) return null
+  return program
+}
+
 export function commandAllowKey(prefix: string): string {
   return `${TERMINAL_ALLOW_PREFIX}${prefix}`
 }

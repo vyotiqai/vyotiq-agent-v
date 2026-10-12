@@ -21,12 +21,13 @@ export function mergeAgentInstanceUpdate(
   const next: AgentInstanceUiState = {
     instanceRunId: event.instanceRunId,
     phase: event.phase,
-    // The first goal stands: the terminal update carries the child's composed
-    // brief (status.json's, cut at 200 chars), not the goal the parent wrote.
+    // The first goal stands: the start carries the child's whole brief, the
+    // terminal update status.json's (cut at 200 chars).
     goal: prior?.goal ?? event.goal,
     summary: event.summary ?? prior?.summary,
     pathScope: event.pathScope ?? prior?.pathScope,
     stepId: event.stepId ?? prior?.stepId,
+    stepTitle: event.stepTitle ?? prior?.stepTitle,
     agentType: event.agentType ?? prior?.agentType,
     startedAt: prior?.startedAt ?? (event.phase === 'started' ? at : undefined),
     endedAt: terminal ? (at ?? prior?.endedAt) : prior?.endedAt,
@@ -68,6 +69,7 @@ export function mergeAgentInstanceMaps(
       summary: disk.summary ?? live.summary,
       pathScope: disk.pathScope ?? live.pathScope,
       stepId: disk.stepId ?? live.stepId,
+      stepTitle: disk.stepTitle ?? live.stepTitle,
       agentType: disk.agentType ?? live.agentType,
       startedAt: disk.startedAt ?? live.startedAt,
       endedAt: disk.endedAt ?? live.endedAt,

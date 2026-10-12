@@ -72,6 +72,11 @@ export function setupProvider(
     return { ready: false, state: 'checking', label, detail: host ? `checking ${host}…` : 'checking…' }
   }
   if (check.state === 'failed') {
+    // The shipped default is Ollama, which nobody chose: not finding it is
+    // not an error worth leading with — the ways to connect are below.
+    if (provider === 'ollama') {
+      return { ready: false, state: 'failed', label, detail: 'no local model found', reason: check.reason }
+    }
     return { ready: false, state: 'failed', label, detail: 'not connected', reason: check.reason }
   }
   if (secrets[provider]) return { ready: true, state: 'done', label, detail: 'key saved, encrypted on this device' }
@@ -94,11 +99,12 @@ export function setupWorkspace(
 }
 
 /**
- * The mode Set up's step 3 starts on. Settings ship with approvals off, which
- * nobody chose; any other saved mode was set in Settings, so it stays.
+ * The mode Set up's step 3 starts on. Settings files written before 1.3
+ * carry approvals off, the old default, which nobody chose; any other saved
+ * mode was set in Settings, so it stays.
  */
 export function setupStartingMode(saved: ToolApprovalMode): ToolApprovalMode {
-  return saved === DEFAULT_TOOL_APPROVAL.mode ? 'mutating' : saved
+  return saved === 'off' ? DEFAULT_TOOL_APPROVAL.mode : saved
 }
 
 /** Folders opened before, most recent first, without the open ones or the scratch folder. */

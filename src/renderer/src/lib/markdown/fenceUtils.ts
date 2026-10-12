@@ -97,15 +97,19 @@ function balanceInlineSegment(text: string): string {
 
 /** Balance unclosed inline markdown outside fenced regions when a stream completes. */
 export function balanceOutsideFences(content: string): string {
-  const closed = closeOpenFence(content)
-  const lines = closed.split('\n')
+  return mapOutsideFences(closeOpenFence(content), balanceInlineSegment)
+}
+
+/** `fn` applied to each run of prose between fences; a fence's lines pass through untouched. */
+export function mapOutsideFences(content: string, fn: (prose: string) => string): string {
+  const lines = content.split('\n')
   const out: string[] = []
   let open: FenceOpen | null = null
   let outside: string[] = []
 
   const flushOutside = (): void => {
     if (!outside.length) return
-    out.push(...balanceInlineSegment(outside.join('\n')).split('\n'))
+    out.push(...fn(outside.join('\n')).split('\n'))
     outside = []
   }
 

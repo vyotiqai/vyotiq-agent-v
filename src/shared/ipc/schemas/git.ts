@@ -41,6 +41,8 @@ export const GitStatusSchema = z.object({
   removed: z.number().int().min(0),
   hasRemote: z.boolean(),
   hasCommits: z.boolean(),
+  /** HEAD's commit; absent before the first commit. Moves on commit, amend, pull, reset. */
+  head: z.string().optional(),
   /** Commits on HEAD not on the upstream — only when a tracking ref exists. */
   ahead: z.number().int().min(0).optional(),
   /** Commits on the upstream not on HEAD — only when a tracking ref exists. */
@@ -72,8 +74,15 @@ export const GitAllowRepoCommandsResultSchema = z.object({
 })
 export type GitAllowRepoCommandsResult = z.infer<typeof GitAllowRepoCommandsResultSchema>
 
+/** Files a status lists by default; the rest are counted, and "Show all" asks for more. */
+export const GIT_STATUS_FILE_LIMIT_DEFAULT = 200
+/** The most a status lists when asked for all of them. */
+export const GIT_STATUS_FILE_LIMIT_MAX = 5000
+
 export const GitStatusRequestSchema = z.object({
-  workspacePath: z.string().min(1)
+  workspacePath: z.string().min(1),
+  /** How many changed files to list; the default when absent. */
+  limit: z.number().int().min(1).max(GIT_STATUS_FILE_LIMIT_MAX).optional()
 })
 
 /**
@@ -101,7 +110,9 @@ export const GitGenerateCommitMessageRequestSchema = z.object({
   workspacePath: z.string().min(1),
   mode: z.enum(['all', 'staged']).optional().default('all'),
   /** Write a new message even when this exact diff already has one. */
-  force: z.boolean().optional()
+  force: z.boolean().optional(),
+  /** The task whose Changes asked: the call's spend is recorded on it. */
+  runId: z.string().min(1).max(200).optional()
 })
 
 export const GitGenerateCommitMessageResultSchema = z.object({
@@ -179,8 +190,21 @@ export const GitDiscardPathsResultSchema = z.object({
   /** Paths whose changes were dropped. */
   discarded: z.array(z.string()),
   /** How many of them had their discarded copy put in the OS trash first. */
-  backedUp: z.number().int().min(0)
+  backedUp: z.number().int().min(0),
+  /** Hand to gitDiscardUndo to put the files back; absent when nothing can be. */
+  undoId: z.string().optional()
 })
+
+export const GitDiscardUndoRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  id: z.string().regex(/^[0-9a-f-]{36}$/)
+})
+export const GitDiscardUndoResultSchema = z.object({
+  restored: z.array(z.string()),
+  skipped: z.array(z.string()),
+  detail: z.string()
+})
+export type GitDiscardUndoResult = z.infer<typeof GitDiscardUndoResultSchema>
 export type GitDiscardPathsResult = z.infer<typeof GitDiscardPathsResultSchema>
 
 export const GitBranchEntrySchema = z.object({
@@ -243,6 +267,54 @@ export type GitBranchStash = z.infer<typeof GitBranchStashSchema>
 export const GitBranchStashResultSchema = GitBranchStashSchema.nullable()
 export type GitBranchStashResult = z.infer<typeof GitBranchStashResultSchema>
 
+const BranchNameArg = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .refine((name) => !name.startsWith('-') && !/\s/.test(name), { message: 'Invalid branch name' })
+
+export const GitBranchDeleteRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  branch: BranchNameArg,
+  /** Delete it even with commits merged nowhere (asked for after git refused). */
+  force: z.boolean().optional()
+})
+export const GitBranchDeleteResultSchema = z.object({ detail: z.string(), unmerged: z.boolean().optional() })
+export type GitBranchDeleteResult = z.infer<typeof GitBranchDeleteResultSchema>
+
+export const GitBranchRenameRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  from: BranchNameArg,
+  to: z.string().trim().min(1).max(255)
+})
+
+export const GitStashEntrySchema = z.object({
+  sha: z.string().regex(/^[0-9a-f]{40,64}$/),
+  ref: z.string().min(1),
+  message: z.string(),
+  branch: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  files: z.number().int().min(0)
+})
+export type GitStashEntry = z.infer<typeof GitStashEntrySchema>
+
+export const GitStashApplyRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  sha: z.string().regex(/^[0-9a-f]{40,64}$/, 'Invalid stash'),
+  /** Pop: drop it after a clean apply. */
+  drop: z.boolean().optional()
+})
+
+/** Revert or cherry-pick a commit, or merge a branch into the current one. */
+export const GitIntegrateRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  op: z.enum(['revert', 'cherry-pick', 'merge']),
+  target: z.string().trim().min(1).max(255)
+})
+export const GitIntegrateResultSchema = z.object({ detail: z.string(), conflicted: z.boolean() })
+export type GitIntegrateResult = z.infer<typeof GitIntegrateResultSchema>
+
 export const GitStashRestoreRequestSchema = z.object({
   workspacePath: z.string().min(1),
   sha: z.string().regex(/^[0-9a-f]{40,64}$/, 'Invalid stash')
@@ -302,7 +374,8 @@ export type GitLastCommitResult = z.infer<typeof GitLastCommitResultSchema>
 
 export const GitAmendRequestSchema = z.object({
   workspacePath: z.string().min(1),
-  message: z.string().min(1).max(2000),
+  /** Above Commit's cap: the box starts with the commit's own message, which may have been written anywhere. */
+  message: z.string().min(1).max(20_000),
   mode: z.enum(['all', 'staged']).optional().default('all'),
   /** The commit being amended: it must still be HEAD. */
   sha: z.string().regex(/^[0-9a-f]{40,64}$/, 'Invalid commit'),
@@ -326,7 +399,13 @@ export const GitFetchResultSchema = z.object({
   ahead: z.number().int().min(0).optional(),
   behind: z.number().int().min(0).optional(),
   /** Background only: nothing was fetched (too soon, no upstream, or held off after a failure). */
-  skipped: z.boolean().optional()
+  skipped: z.boolean().optional(),
+  /**
+   * Background only, with `skipped`: another workspace of this repository (a
+   * worktree, a subfolder) fetched since this one last asked, so its counts
+   * are worth reading again.
+   */
+  refsMoved: z.boolean().optional()
 })
 export type GitFetchResult = z.infer<typeof GitFetchResultSchema>
 

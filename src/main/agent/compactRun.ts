@@ -73,6 +73,7 @@ import {
 } from './state'
 import { readTodos } from './tools/todo'
 import { resolveRunDir } from '@main/storage/paths'
+import { loadRunHooks } from './hooks'
 
 /**
  * Wall-clock budget for compaction. Align with stream idle tolerance so slow
@@ -368,7 +369,7 @@ function drainAuxUsageEvents(plan: CompactPlan, invokeId: number | undefined): A
   const drained = samples.splice(0, samples.length)
   // Billed to whoever wrote the summary.
   const writer = plan.summarizer ?? plan
-  const price = resolveModelPrice(writer.providerId, writer.model.id)
+  const price = resolveModelPrice(writer.providerId, writer.model.id, writer.baseUrl ? { baseUrl: writer.baseUrl } : {})
   const events: AgentEvent[] = []
   for (const sample of drained) {
     const { usage } = sample
@@ -779,6 +780,8 @@ export type AutoCompactEventsInput = {
   focus?: string
   triggerReason?: 'proactive' | 'overflow'
   invokeId?: number
+  /** Runs once a fold is certain, before it starts (PreCompact hooks). */
+  beforeFold?: () => Promise<void>
 }
 
 /**
@@ -803,6 +806,11 @@ export async function* autoCompactLlmEvents(
     return compactOutcomeFromCaught(err)
   }
 
+  try {
+    await input.beforeFold?.()
+  } catch {
+    // A hook never stops a fold.
+  }
   const started: AgentEvent = {
     type: 'compaction_started',
     runId: input.runId,
@@ -845,6 +853,13 @@ export async function compactRunNow(input: {
     throwCompactionAbort(plan.abort)
   }
   const focus = input.focus?.trim() || undefined
+  // PreCompact hooks the person already allowed; a manual fold never asks.
+  try {
+    const hooks = await loadRunHooks(input.workspacePath, input.runId, null)
+    await hooks.preCompact('manual', input.signal)
+  } catch {
+    // A hook never stops a fold.
+  }
   const gen = executeCompactEvents(plan, focus, 'manual')
   let next = await gen.next()
   while (!next.done) {

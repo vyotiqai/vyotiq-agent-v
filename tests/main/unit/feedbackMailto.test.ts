@@ -19,7 +19,7 @@ describe('buildFeedbackMailto', () => {
     expect(url.startsWith(`mailto:${FEEDBACK_EMAIL}?subject=`)).toBe(true)
     expect(url).toBe(
       `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
-        '[Vyotiq 1.2.3] bug: Crash on save'
+        '[Agent V 1.2.3] bug: Crash on save'
       )}&body=${encodeURIComponent('App crashed when saving')}`
     )
   })
@@ -38,7 +38,7 @@ describe('buildFeedbackMailto', () => {
     expect(buildFeedbackMailto(base)).not.toContain('App%20version')
     expect(buildFeedbackMailto({ ...base, includeDiagnostics: true })).toBe(
       `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
-        '[Vyotiq 1.2.3] bug: Crash on save'
+        '[Agent V 1.2.3] bug: Crash on save'
       )}&body=${encodeURIComponent(expectedBody)}`
     )
   })
@@ -56,7 +56,7 @@ describe('buildFeedbackMailto', () => {
     for (const type of ['bug', 'feature', 'praise', 'other'] as const) {
       const url = buildFeedbackMailto({ ...base, type })
       expect(url).toContain(
-        encodeURIComponent(`[Vyotiq 1.2.3] ${type}: Crash on save`)
+        encodeURIComponent(`[Agent V 1.2.3] ${type}: Crash on save`)
       )
     }
   })
@@ -69,7 +69,7 @@ describe('buildFeedbackMailto', () => {
       message: 'line1\nline2 & more'
     })
     expect(url).toContain(
-      encodeURIComponent('[Vyotiq 1.2.3] feature: A & B <test> 100% "quoted" ?')
+      encodeURIComponent('[Agent V 1.2.3] feature: A & B <test> 100% "quoted" ?')
     )
     expect(url.endsWith(`&body=${encodeURIComponent('line1\nline2 & more')}`)).toBe(true)
   })

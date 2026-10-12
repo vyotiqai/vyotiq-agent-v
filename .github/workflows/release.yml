@@ -95,7 +95,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          echo "Vyotiq v$VERSION installers and update metadata." > release-notes.md
+          echo "Agent V v$VERSION installers and update metadata." > release-notes.md
 
       - name: Create the draft release in the public releases repo
         if: startsWith(github.ref, 'refs/tags/')
@@ -120,7 +120,7 @@ jobs:
             gh release create "$TAG" \
               --repo vyotiqai/vyotiq-agent-v-releases \
               --draft \
-              --title "Vyotiq v$VERSION" \
+              --title "Agent V v$VERSION" \
               --notes-file release-notes.md
           fi
 
@@ -134,11 +134,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: windows-x64
+          - name: windows
             os: windows-latest
-            builder_args: --win
+            # x64 and arm64 in one run so one latest.yml lists both installers
+            # (nsis.buildUniversalInstaller: false). Separate jobs would each
+            # write latest.yml and the last upload would win. The install also
+            # fetches arm64 optional natives (sharp's, for transformers) so
+            # the arm64 app carries them; node-pty and onnxruntime ship both.
+            builder_args: --win --x64 --arm64
+            install_args: --cpu x64 --cpu arm64
             artifacts: dist-package/*.exe
-            artifact: Vyotiq-windows-x64-setup
+            artifact: Vyotiq-windows-setup
           - name: linux-x64
             os: ubuntu-latest
             builder_args: --linux
@@ -147,6 +153,19 @@ jobs:
               dist-package/*.deb
               dist-package/*.rpm
             artifact: Vyotiq-linux-x64-appimage
+          - name: linux-arm64
+            # A native arm64 runner: node-pty has no Linux prebuilds and is
+            # compiled during install, so it must be compiled for arm64. Linux
+            # writes latest-linux-arm64.yml for arm64, so this job cannot
+            # overwrite the x64 job's latest-linux.yml. deb and rpm names
+            # already carry the arch; the AppImage's is set here.
+            os: ubuntu-24.04-arm
+            builder_args: --linux --arm64 '--config.appImage.artifactName=${productName}-${version}-arm64.${ext}'
+            artifacts: |
+              dist-package/*.AppImage
+              dist-package/*.deb
+              dist-package/*.rpm
+            artifact: Vyotiq-linux-arm64-appimage
           - name: macOS
             os: macos-latest
             # Both arches in one electron-builder invocation so a single
@@ -185,7 +204,7 @@ jobs:
           node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. electron-builder would publish '+pkg.version+'-named assets onto the v'+tag+' release. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile ${{ matrix.install_args || '' }}
 
       - name: Build bundles
         env:
@@ -250,9 +269,9 @@ jobs:
   finalize-release:
     # Post-publish verification: the release body must be non-empty (the stub
     # body is written if the create step left it empty; the in-app update panel
-    # parses it) and the three updater manifests
-    # must all be present (a missing latest*.yml silently kills auto-update
-    # on that OS — happened on v1.1.0).
+    # parses it) and the four updater manifests (latest-linux-arm64.yml is
+    # Linux arm64's) must all be present (a missing latest*.yml silently kills
+    # auto-update on that OS — happened on v1.1.0).
     name: Finalize release
     needs: package
     if: startsWith(github.ref, 'refs/tags/')
@@ -280,7 +299,7 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           TAG="$GITHUB_REF_NAME"
           BODY=$(gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --json body --jq .body)
-          STUB="Vyotiq v$VERSION installers and update metadata."
+          STUB="Agent V v$VERSION installers and update metadata."
           if [ "$BODY" = "$STUB" ] || [ -z "$BODY" ]; then
             echo "Release body is empty or the pre-automation stub; writing stub body"
             printf '%s' "$STUB" > release-notes.md
@@ -300,16 +319,17 @@ jobs:
           ASSETS=$(gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --json assets --jq '.assets[].name')
           echo "Release assets:"; echo "$ASSETS"
           FAIL=0
-          for required in latest.yml latest-linux.yml latest-mac.yml; do
+          for required in latest.yml latest-linux.yml latest-linux-arm64.yml latest-mac.yml; do
             if ! echo "$ASSETS" | grep -qx "$required"; then
               echo "::error::Missing updater manifest $required — auto-update is dead on that OS (see the v1.1.0 incident)"
               FAIL=1
             fi
           done
-          echo "$ASSETS" | grep -q -- '-setup\.exe$' || { echo "::error::Missing Windows NSIS installer"; FAIL=1; }
-          echo "$ASSETS" | grep -q -- '\.AppImage$' || { echo "::error::Missing Linux AppImage"; FAIL=1; }
-          echo "$ASSETS" | grep -q -- '\.deb$' || { echo "::error::Missing Linux .deb package"; FAIL=1; }
-          echo "$ASSETS" | grep -q -- '\.rpm$' || { echo "::error::Missing Linux .rpm package"; FAIL=1; }
+          echo "$ASSETS" | grep -q -- '-x64-setup\.exe$' || { echo "::error::Missing Windows x64 installer"; FAIL=1; }
+          echo "$ASSETS" | grep -q -- '-arm64-setup\.exe$' || { echo "::error::Missing Windows arm64 installer"; FAIL=1; }
+          [ "$(echo "$ASSETS" | grep -c -- '\.AppImage$')" -ge 2 ] || { echo "::error::Missing Linux AppImages (x64 + arm64)"; FAIL=1; }
+          [ "$(echo "$ASSETS" | grep -c -- '\.deb$')" -ge 2 ] || { echo "::error::Missing Linux .deb packages (x64 + arm64)"; FAIL=1; }
+          [ "$(echo "$ASSETS" | grep -c -- '\.rpm$')" -ge 2 ] || { echo "::error::Missing Linux .rpm packages (x64 + arm64)"; FAIL=1; }
           [ "$(echo "$ASSETS" | grep -c -- '\.dmg$')" -ge 2 ] || { echo "::error::Missing macOS DMGs (arm64 + x64)"; FAIL=1; }
           [ "$(echo "$ASSETS" | grep -c -- 'mac\.zip$')" -ge 2 ] || { echo "::error::Missing macOS zips (arm64 + x64)"; FAIL=1; }
           exit $FAIL
@@ -346,7 +366,7 @@ jobs:
           } > pointer.md
           gh release create "v$VERSION" \
             --repo vyotiqai/vyotiq-agent-v \
-            --title "Vyotiq v$VERSION" \
+            --title "Agent V v$VERSION" \
             --notes-file pointer.md \
             --latest
 

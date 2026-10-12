@@ -73,6 +73,18 @@ function mentionChipIcon(mention: ComposerMention): IconName | null {
       return 'target'
     case 'chat':
       return 'tasks'
+    case 'changes':
+      return 'diff'
+    case 'terminal':
+      return 'terminal'
+    case 'commit':
+      return 'gitCommit'
+    case 'url':
+      return 'globe'
+    case 'issue':
+      return 'pullRequest'
+    case 'symbol':
+      return 'code'
     case 'slash':
       return slashKindIcon(mention.slashKind, mention.trigger)
     default: {
@@ -624,7 +636,7 @@ export const ComposerMentionInput = forwardRef<
           size === 'sm'
             ? 'min-h-5 text-sm leading-5 text-fg-strong'
             : size === 'brief'
-              ? 'min-h-[132px] text-md leading-[22px] text-fg-strong'
+              ? 'min-h-[88px] text-md leading-[22px] text-fg-strong'
               : 'min-h-9 text-md leading-snug text-fg',
           size === 'brief' ? 'max-h-[50vh]' : COMPOSER_TEXTAREA_MAX_CLASS,
           'border-0 bg-transparent p-0 outline-none ring-0',

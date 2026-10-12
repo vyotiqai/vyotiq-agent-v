@@ -10,6 +10,7 @@ import { getMcpReadOnlyHint, listMcpToolDefinitions, parseMcpToolName } from './
 import type { McpToolLoading } from './context/mcpToolLoading'
 import { BUILTIN_TOOL_NAMES, TOOL_REGISTRY } from './schemas/tools'
 import { agentBuiltToolDefinitions } from './agentTools/loader'
+import { dropInapplicableTools, mayHaveGitRemote, mayHaveNotebooks } from './toolApplicability'
 import { filterToolDefsForCodeIndex, isBuiltinAllowedInMode } from './tools/modePolicy'
 import { AGENT_INTERACTION_MODES } from '../../shared/ipc'
 
@@ -153,7 +154,7 @@ export async function computeToolCatalog(
   const authAllowedServerIds = new Set(
     servers.filter((s) => s.enabled && mcpAuthAllowedForWorkspace(s, workspace)).map((s) => s.id)
   )
-  return buildToolCatalog({
+  const catalog = buildToolCatalog({
     autoModeSwitch: settings.autoModeSwitch === true,
     codeIndexEnabled: settings.codeIndex?.enabled !== false,
     mcpToolDefs: listMcpToolDefinitions(),
@@ -163,6 +164,17 @@ export async function computeToolCatalog(
     mcpReadOnlyHint: getMcpReadOnlyHint,
     agentToolDefs: await agentBuiltToolDefinitions()
   })
+  if (!workspace) return catalog
+  // The run's own pruning (loop.ts): what New task counts is what a run here sends.
+  const builtins = catalog.entries.filter((e) => e.source === 'builtin').map((e) => ({ name: e.name }))
+  const kept = new Set(
+    dropInapplicableTools(builtins, {
+      mcpServers: servers.some((s) => s.enabled),
+      gitRemote: mayHaveGitRemote(workspace),
+      notebooks: mayHaveNotebooks(workspace)
+    }).map((t) => t.name)
+  )
+  return { ...catalog, notApplicable: builtins.filter((t) => !kept.has(t.name)).map((t) => t.name) }
 }
 
 /** Push the live catalog to every renderer window (same pattern as skills:changed). */

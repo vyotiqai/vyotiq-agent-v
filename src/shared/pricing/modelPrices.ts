@@ -388,6 +388,9 @@ function lookup(
   return null
 }
 
+/** Where a resolved price came from, in the order they are tried. */
+export type ModelPriceOrigin = 'custom' | 'table' | 'registry'
+
 /** A model price plus long-context tier info, as resolved for one model id. */
 export interface ResolvedModelPrice {
   price: ModelPrice
@@ -396,6 +399,85 @@ export interface ResolvedModelPrice {
   longContext?: ModelPrice
   /** Provenance of the rates (pricing page + verification date). */
   source: string
+  /** Which source answered; read an absent one as 'table'. */
+  origin?: ModelPriceOrigin
+}
+
+/**
+ * A price someone set in Settings for a model the table does not know, or
+ * prices differently (a negotiated rate, a gateway's markup). Matched before
+ * the table: an explicit price is the person's decision.
+ */
+export interface CustomModelPrice {
+  /** Provider id (`custom:<slug>` for an added endpoint), or `*` for any. */
+  provider: string
+  /** Exact model id, or a prefix ending in `*` (`claude-sonnet-*`). Case-insensitive. */
+  model: string
+  /** USD per 1M input tokens. */
+  input: number
+  /** USD per 1M output tokens. */
+  output: number
+  /** USD per 1M cached input tokens; the input rate when absent. */
+  cachedInput?: number
+  /** USD per 1M cache-write tokens; the input rate when absent. */
+  cacheWrite?: number
+}
+
+/**
+ * Prices from outside the table — the models.dev catalog, which main loads
+ * at start. Synchronous: it answers from what is already loaded, or null.
+ */
+export type ExternalPriceLookup = (
+  provider: string,
+  modelId: string,
+  opts: { baseUrl?: string }
+) => ModelPrice | null
+
+let customPrices: readonly CustomModelPrice[] = []
+let externalLookup: ExternalPriceLookup | null = null
+
+/** Replace the prices set in Settings (each process sets its own copy). */
+export function setCustomModelPrices(prices: readonly CustomModelPrice[] | undefined): void {
+  customPrices = prices ?? []
+}
+
+/** Install (or clear) the catalog lookup tried after the table. */
+export function setExternalPriceLookup(lookup: ExternalPriceLookup | null): void {
+  externalLookup = lookup
+}
+
+/** The custom price that applies to this model: exact ids before prefixes, longest prefix first. */
+export function matchCustomModelPrice(
+  prices: readonly CustomModelPrice[],
+  provider: string,
+  modelId: string
+): CustomModelPrice | null {
+  const id = modelId.trim().toLowerCase()
+  if (!id) return null
+  let best: { entry: CustomModelPrice; score: number } | null = null
+  for (const entry of prices) {
+    if (entry.provider !== '*' && entry.provider !== provider) continue
+    const pattern = entry.model.trim().toLowerCase()
+    if (!pattern) continue
+    let score: number
+    if (pattern.endsWith('*')) {
+      const prefix = pattern.slice(0, -1)
+      if (!id.startsWith(prefix)) continue
+      score = prefix.length * 2
+    } else {
+      if (pattern !== id) continue
+      // An exact id beats any prefix.
+      score = Number.MAX_SAFE_INTEGER - 1
+    }
+    // A provider-specific entry beats a `*` one at the same score.
+    if (entry.provider !== '*') score += 1
+    if (!best || score > best.score) best = { entry, score }
+  }
+  return best?.entry ?? null
+}
+
+function validRate(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0
 }
 
 function toResolved(rule: PriceRule): ResolvedModelPrice {
@@ -405,25 +487,46 @@ function toResolved(rule: PriceRule): ResolvedModelPrice {
       ? { longContextThreshold: rule.longContextThreshold }
       : {}),
     ...(rule.longContext !== undefined ? { longContext: rule.longContext } : {}),
-    source: rule.source
+    source: rule.source,
+    origin: 'table'
   }
 }
 
 /**
- * Resolve the published price for a provider + model id.
+ * Resolve the price for a provider + model id, from the first source that
+ * has one:
  *
- * Handles dated model ids via prefix matching and OpenRouter-style
- * `vendor/model` ids (the bare model part is matched against every provider
- * so an OpenRouter run without a provider-reported cost can still be
- * estimated). Unknown providers/models (custom endpoints, enterprise-only
- * catalogs) resolve to `null` — never a guessed price.
+ * 1. A price set in Settings (`setCustomModelPrices`).
+ * 2. The table above — dated ids by prefix, OpenRouter-style `vendor/model`
+ *    ids by their bare part (so an OpenRouter run without a provider-reported
+ *    cost can still be estimated), gateway free tiers at $0.
+ * 3. The models.dev catalog (`setExternalPriceLookup`), serving-specific by
+ *    the endpoint's host where `baseUrl` is given — Bedrock, Vertex, Azure,
+ *    custom endpoints and models newer than the table.
+ *
+ * Anything else resolves to `null` — never a guessed price.
  */
 export function resolveModelPrice(
   provider: string,
-  modelId: string
+  modelId: string,
+  opts: { baseUrl?: string } = {}
 ): ResolvedModelPrice | null {
   const id = modelId.trim().toLowerCase()
   if (id.length === 0) return null
+
+  const custom = matchCustomModelPrice(customPrices, provider, id)
+  if (custom && validRate(custom.input) && validRate(custom.output)) {
+    return {
+      price: {
+        input: custom.input,
+        output: custom.output,
+        ...(validRate(custom.cachedInput) ? { cachedInput: custom.cachedInput } : {}),
+        ...(validRate(custom.cacheWrite) ? { cacheWrite: custom.cacheWrite } : {})
+      },
+      source: 'your price, set in Settings',
+      origin: 'custom'
+    }
+  }
 
   // Gateway free tiers bill nothing: OpenCode Zen `*-free` ids and OpenRouter
   // `*:free` / `*-free` ids. Checked before prefix rules so a free variant of
@@ -432,7 +535,7 @@ export function resolveModelPrice(
     (provider === 'opencode' || provider === 'openrouter') &&
     (id.endsWith('-free') || id.endsWith(':free'))
   ) {
-    return { price: { input: 0, output: 0 }, source: 'free-tier model id — no per-token billing' }
+    return { price: { input: 0, output: 0 }, source: 'free-tier model id — no per-token billing', origin: 'table' }
   }
 
   const direct = lookup(provider, id)
@@ -446,6 +549,18 @@ export function resolveModelPrice(
       }
     }
   }
+
+  if (externalLookup) {
+    let price: ModelPrice | null = null
+    try {
+      price = externalLookup(provider, modelId.trim(), opts.baseUrl ? { baseUrl: opts.baseUrl } : {})
+    } catch {
+      price = null
+    }
+    if (price && validRate(price.input) && validRate(price.output)) {
+      return { price, source: 'models.dev catalog', origin: 'registry' }
+    }
+  }
   return null
 }
 
@@ -457,6 +572,8 @@ export interface PricedTokenUsage {
   outputTokens?: number
   cachedInputTokens?: number
   cacheCreationInputTokens?: number
+  /** The share of cache writes made with Anthropic's 1-hour TTL: billed at 2x input, not `cacheWrite`. */
+  cacheCreationLongInputTokens?: number
   reasoningTokens?: number
 }
 
@@ -508,10 +625,18 @@ export function estimateStepCost(
     ? Math.max(0, input - cached)
     : input
 
+  const longWrite =
+    usage.cacheCreationLongInputTokens !== undefined &&
+    Number.isFinite(usage.cacheCreationLongInputTokens) &&
+    usage.cacheCreationLongInputTokens > 0
+      ? Math.min(usage.cacheCreationLongInputTokens, cacheWrite)
+      : 0
+
   let cost =
     (uncachedInput / 1_000_000) * billedPrice.input +
     (cached / 1_000_000) * (billedPrice.cachedInput ?? billedPrice.input) +
-    (cacheWrite / 1_000_000) * (billedPrice.cacheWrite ?? billedPrice.input) +
+    ((cacheWrite - longWrite) / 1_000_000) * (billedPrice.cacheWrite ?? billedPrice.input) +
+    (longWrite / 1_000_000) * billedPrice.input * 2 +
     (output / 1_000_000) * billedPrice.output
 
   if (billedPrice.reasoningSeparate) {

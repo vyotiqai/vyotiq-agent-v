@@ -167,7 +167,7 @@ export async function runHeadlessTask(input: HeadlessTaskInput): Promise<Headles
   const onParentEvent = (ev: AgentEvent): void => {
     if (!markedHeadless && runExists(workspacePath, runId)) {
       markedHeadless = true
-      void updateStatus(resolveRunDir(workspacePath, runId), { headless: true })
+      void updateStatus(resolveRunDir(workspacePath, runId), { headless: true, ownerPid: process.pid })
     }
     if (overStepBudget(tally, input.maxSteps, ev)) stop('max_steps')
     tallyEvent(tally, ev)

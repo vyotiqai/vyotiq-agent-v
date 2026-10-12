@@ -78,7 +78,8 @@ async function measure(page: Page, label: string): Promise<Align> {
     const round = (n: number | undefined) => (n === undefined ? null : +n.toFixed(2))
     const scroll = document.querySelector('[data-record-scroll]')
     const recordColumn = rect(scroll?.firstElementChild ?? null)
-    const brief = rect(scroll?.querySelector('[data-brief]') ?? null)
+    // The brief is a bubble as wide as its words; the work line is the record's full-width row.
+    const brief = rect(scroll?.querySelector('[data-work-fold] > div > button') ?? null)
     const composerColumn = rect(document.querySelector('[data-composer-column]'))
     const composerShell = rect(document.querySelector('[data-composer-line] [data-composer-shell]'))
     return {
@@ -117,7 +118,7 @@ test('the composer column and box sit on the record column and card edges', asyn
   await brief.fill('Run the suite and report')
   await brief.press('Control+Enter')
 
-  // The record's brief card and step rows exist once the run asks for you.
+  // The record's work line and step rows exist once the run asks for you.
   await expect(page.locator('[data-needs-you]')).toBeVisible({ timeout: 30_000 })
   // The composer's column is the record's column: centred inside the gutter.
   await expect(page.locator('[data-composer-gutter] [data-composer-column]')).toHaveCount(1)
@@ -131,9 +132,9 @@ test('the composer column and box sit on the record column and card edges', asyn
       m.composerColumnLeft,
       m.recordColumnLeft
     )
-    withinOnePx(`${label} composer box left == record card left`, m.composerShellLeft, m.briefLeft)
+    withinOnePx(`${label} composer box left == record row left`, m.composerShellLeft, m.briefLeft)
     withinOnePx(
-      `${label} composer box right == record card right`,
+      `${label} composer box right == record row right`,
       m.composerShellRight,
       m.briefRight
     )

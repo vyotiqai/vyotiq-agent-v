@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { CompactionVerifyStatus } from '@shared/transcript'
 import { Icon } from '@renderer/lib/icons'
-import { MarkdownContent, cn } from '@renderer/lib/ui'
+import { cn } from '@renderer/lib/ui'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import { NUM } from '@renderer/lib/utils/layout'
+import { RecordProse } from '@renderer/features/task/record/RecordProse'
 import { ExpandPanel } from '../toolUi/ExpandPanel'
 import { firstLinePreview } from '../utils/firstLinePreview'
 
@@ -120,7 +121,7 @@ export function CompactSummaryBlock({
               ))}
             </ul>
           ) : null}
-          <MarkdownContent content={summary} streaming={false} tone="secondary" />
+          <RecordProse text={summary} tone="secondary" />
         </div>
       </ExpandPanel>
     </div>

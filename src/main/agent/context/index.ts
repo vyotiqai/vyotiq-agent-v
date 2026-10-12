@@ -1,7 +1,7 @@
 export { assembleContext } from './assemble'
 export { contentWindow, contextWindowFor } from './budget'
 export { shouldTriggerAutoCompact } from './estimate'
-export { buildStepToolCatalog } from './toolsBudget'
+export { buildStepToolCatalog, deferredBuiltinsLine, wireBuiltinTools } from './toolsBudget'
 export { splitToolCatalogDetail } from './toolsDetail'
 export { applyFoldedMessagesWatermark } from './foldWatermark'
 export { buildSessionEnvSection } from './sessionEnv'

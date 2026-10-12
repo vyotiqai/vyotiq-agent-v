@@ -32,11 +32,13 @@ import { editStatOf, sumEditStats, type EditStat } from './editStat'
  * - work done while no step was in progress stays between the steps, after
  *   the one that last was — unless the next snapshot marks exactly one step
  *   done that was never marked started, which is then the step it served;
- * - a child instance belongs to the step it was spawned for (`step_id`), and
- *   its awaits, pulls and merges follow it there. A spawn naming no step,
+ * - a child instance belongs to the step it was spawned for (`step_id`, or
+ *   main's reading of it on the child's start when the args preview is cut),
+ *   and its awaits, pulls and merges follow it there. A spawn naming no step,
  *   made while the model had set several steps in progress together, takes
  *   the next of those steps that has no child yet — `create_plan` tells the
- *   model each such step is one child;
+ *   model each such step is one child. Children spawned before the run listed
+ *   any step are filed by the same rules once its first list arrives;
  * - a step running a child is running while the child is, and its time is
  *   the child's and its own calls', not when the model got round to ticking it;
  * - durations come from the `at` stamps the items carry, never estimates.
@@ -64,6 +66,8 @@ export type WorkItem =
   | { kind: 'note'; id: string; item: MessageItem; text: string }
   | { kind: 'thought'; id: string; item: MessageItem; text: string; streaming: boolean }
   | { kind: 'error'; id: string; message: string; code?: string }
+  /** What you said into the run while it worked (Send now): it carried on with it. */
+  | { kind: 'said'; id: string; item: MessageItem; text: string }
   | { kind: 'compaction'; id: string; item: Extract<UiItem, { kind: 'compaction' }> }
   /** A one-line note from the run itself: the step moved to a fallback model. */
   | { kind: 'notice'; id: string; item: Extract<UiItem, { kind: 'notice' }> }
@@ -125,6 +129,8 @@ export type RecordRun = {
   text: string
   /** The slash command the instruction invoked — a skill, or an MCP tool as server-tool. */
   command?: string
+  /** The instruction is a brief Structure wrote: what the person typed before it. */
+  structuredFrom?: string
   images: string[]
   attachments: UiAttachment[]
   at: number | null
@@ -139,6 +145,11 @@ export type RecordRun = {
   /** First and last stamp seen in the run. */
   startedAt: number | null
   endedAt: number | null
+  /**
+   * Time inside that span spent waiting on you: approvals, and questions the
+   * agent asked. "Worked for" leaves it out.
+   */
+  waitedMs: number
   /** Where the latest work of the run went. */
   tail: RecordTail
   /** The run's last event was an error: that turn failed, whatever its steps say. */
@@ -149,10 +160,12 @@ export type RecordRun = {
    */
   endedStopped?: true
   /**
-   * A follow-up sent while the agent was mid-turn took over: this run did not
-   * end, it carried on as the next one, plan and all.
+   * The user turns the run spans, for its usage: the turn its instruction
+   * opened (0-based) and how many — one, plus each message said into it while
+   * it worked.
    */
-  continued?: true
+  turn: number
+  turns: number
 }
 
 export type RecordModel = { runs: RecordRun[] }
@@ -176,6 +189,7 @@ const LOOKUP_TOOLS = new Set([
   'git_status',
   'git_diff',
   'github_pr_checks',
+  'github_pr_comments',
   'lsp',
   'web_fetch',
   'web_search',
@@ -202,7 +216,8 @@ const INSTANCE_TOOLS = new Set([
   'await_agent_instance',
   'pull_agent_instance',
   'merge_agent_instance',
-  'cancel_agent_instance'
+  'cancel_agent_instance',
+  'message_agent_instance'
 ])
 
 function stamp(iso: string | undefined): number | null {
@@ -359,7 +374,7 @@ function lastStampOf(work: readonly WorkItem[]): number | null {
     if (t != null && (last == null || t > last)) last = t
   }
   for (const w of work) {
-    if (w.kind === 'note' || w.kind === 'thought') see(stamp(w.item.at))
+    if (w.kind === 'note' || w.kind === 'thought' || w.kind === 'said') see(stamp(w.item.at))
     else if (w.kind === 'compaction' || w.kind === 'notice') see(stamp(w.item.at))
   }
   for (const tool of toolsOf(work)) {
@@ -370,7 +385,7 @@ function lastStampOf(work: readonly WorkItem[]): number | null {
 }
 
 /** What the record knows of a child instance: its phase, and when it ran. */
-export type InstanceFacts = Pick<AgentInstanceUiState, 'phase' | 'startedAt' | 'endedAt'>
+export type InstanceFacts = Pick<AgentInstanceUiState, 'phase' | 'startedAt' | 'endedAt' | 'stepId'>
 
 type ChildFacts = { phase: InstanceFacts['phase'] | null; start: number | null; end: number | null }
 
@@ -425,10 +440,22 @@ function childFacts(runId: string, tools: readonly ToolItem[], instances: BuildO
  * and neither does an await that timed out on a child that went on to finish
  * or is still running: the child's own phase says how its work went.
  */
-function stepWorkFailed(items: ToolItem[], instances: BuildOptions['instances']): boolean {
+/** main's reply when an await's wait ran out before the child finished. */
+const AWAIT_TIMED_OUT = /^\s*Timed out waiting for\b/
+
+function stepWorkFailed(items: ToolItem[], instances: BuildOptions['instances'], runStopped: boolean): boolean {
   return items.some((item) => {
     if (!INSTANCE_TOOLS.has(item.tool.name) || item.tool.status !== 'fail') return false
+    // Cut off by your Stop: the run stopped, nothing in the step broke. In a
+    // run that carried on, a child cancelled under it is the step's failure.
+    if (runStopped && isInterruptedToolContent(item.tool.content)) return false
+    // A spawn refused before any child ran (its args, a cap): its own row
+    // says so, and the step goes the way of the child that did run.
+    if (item.tool.name === 'spawn_agent_instance' && !parseAgentInstanceRunId(item.tool.content)) return false
     if (item.tool.name === 'await_agent_instance') {
+      // A wait that ran out left the child running: nothing failed then, and
+      // a Stop that cancels the child later does not make it a failure.
+      if (AWAIT_TIMED_OUT.test(item.tool.content ?? '')) return false
       const runId = parseAgentInstanceRunIdFromArgs(item.tool.argsPreview)
       const phase = runId ? childFacts(runId, items, instances).phase : null
       if (phase === 'done' || phase === 'started') return false
@@ -550,7 +577,11 @@ type RunBuilder = {
   parallel: string[]
   /** Steps a child has been filed under. */
   claimed: Set<string>
+  /** Children spawned before the run had a list to name their step from: filed once it has one. */
+  early: EarlySpawn[]
 }
+
+type EarlySpawn = { item: ToolItem; runId: string | null; stepId: string; bucket: Bucket }
 
 function bucketFor(b: RunBuilder, key: string): Bucket {
   let bucket = b.buckets.get(key)
@@ -600,6 +631,7 @@ function applySnapshot(b: RunBuilder, todos: TodoItem[], at: number | null, para
       b.lastCompleted.set(key, at)
     }
   }
+  fileEarlySpawns(b)
   // Steps this snapshot finished: what comes next follows the last of them.
   // A model that never marks a step in progress left no step "last active",
   // so every later row went to "setup", above all the steps it had just ticked
@@ -656,7 +688,7 @@ function briefOf(content: string): { text: string; command?: string } {
   return { text: content }
 }
 
-function startRun(n: number, user: MessageItem | null, id: string, notBefore: number | null): RunBuilder {
+function startRun(n: number, user: MessageItem | null, id: string, notBefore: number | null, turn: number): RunBuilder {
   const at = stamp(user?.at)
   // A follow-up queued while the last run worked is stamped when it was typed;
   // its run starts when it was taken up, which is no earlier than that run's end.
@@ -668,6 +700,7 @@ function startRun(n: number, user: MessageItem | null, id: string, notBefore: nu
       id,
       text: brief.text,
       ...(brief.command ? { command: brief.command } : {}),
+      ...(user?.structuredFrom ? { structuredFrom: user.structuredFrom } : {}),
       images: user?.images ?? [],
       attachments: user?.attachments ?? [],
       at,
@@ -678,7 +711,12 @@ function startRun(n: number, user: MessageItem | null, id: string, notBefore: nu
       needs: [],
       startedAt: user ? startedAt : null,
       endedAt: user ? startedAt : null,
-      tail: { kind: 'setup' }
+      waitedMs: 0,
+      tail: { kind: 'setup' },
+      turn,
+      // Work from before any instruction (a transcript window that opens
+      // mid-run) has no turn of its own: its usage is binned with the next run's.
+      turns: user ? 1 : 0
     },
     buckets: new Map(),
     todos: null,
@@ -694,29 +732,20 @@ function startRun(n: number, user: MessageItem | null, id: string, notBefore: nu
     endedStopped: false,
     childStep: new Map(),
     parallel: [],
-    claimed: new Set()
+    claimed: new Set(),
+    early: []
   }
-}
-
-/** A mid-turn follow-up's run picks the plan up where the last one left it. */
-function inheritPlan(next: RunBuilder, prior: RunBuilder): void {
-  next.todos = prior.todos
-  next.seen = new Map(prior.seen)
-  next.target = prior.target
-  next.lastActive = prior.lastActive
-  next.firstStarted = new Map(prior.firstStarted)
-  next.lastCompleted = new Map(prior.lastCompleted)
-  next.lastSnapshotAt = prior.lastSnapshotAt
-  next.childStep = new Map(prior.childStep)
-  next.parallel = [...prior.parallel]
-  next.claimed = new Set(prior.claimed)
 }
 
 /**
  * The bucket an instance call goes to: its child's step, when the record can
  * tell which that is; null leaves it with the rest of the current work.
  */
-function instanceBucket(b: RunBuilder, item: ToolItem): Bucket | null {
+function instanceBucket(
+  b: RunBuilder,
+  item: ToolItem,
+  instances: Readonly<Record<string, InstanceFacts>> | undefined
+): Bucket | null {
   const name = item.tool.name
   if (!INSTANCE_TOOLS.has(name)) return null
   if (name !== 'spawn_agent_instance') {
@@ -724,31 +753,97 @@ function instanceBucket(b: RunBuilder, item: ToolItem): Bucket | null {
     const key = runId ? b.childStep.get(runId) : undefined
     return key ? bucketFor(b, stepBucket(key)) : null
   }
-  const key = spawnStepKey(b, item)
   const runId = parseAgentInstanceRunId(item.tool.content)
+  const stepId = spawnStepId(item, runId ? instances?.[runId] : undefined)
+  const key = namedStep(b, stepId) ?? b.parallel.find((k) => !b.claimed.has(k)) ?? null
   if (!key) {
     // Spawned from the step in progress: its awaits follow it there, even
     // once another step has started.
     if (runId && b.target.startsWith('s:')) b.childStep.set(runId, b.target.slice(2))
+    // Spawned before the run listed any step: the list that follows names it.
+    else if (!b.todos || b.todos.length === 0) b.early.push({ item, runId, stepId, bucket: current(b) })
     return null
   }
-  b.claimed.add(key)
-  if (runId) b.childStep.set(runId, key)
-  // A step first run by its child starts when the child is spawned.
-  const at = stamp(item.at)
-  if (at != null && !b.firstStarted.has(key)) b.firstStarted.set(key, at)
+  fileChild(b, key, runId, item)
   return bucketFor(b, stepBucket(key))
 }
 
-function spawnStepKey(b: RunBuilder, item: ToolItem): string | null {
+/** A child's step from here on: its awaits follow it, and the step starts no later than its spawn. */
+function fileChild(b: RunBuilder, key: string, runId: string | null, item: ToolItem): void {
+  b.claimed.add(key)
+  if (runId) b.childStep.set(runId, key)
+  const at = stamp(item.at)
+  const first = b.firstStarted.get(key)
+  if (at != null && (first == null || at < first)) b.firstStarted.set(key, at)
+}
+
+/**
+ * The step a spawn names. The args preview is cut short on a long brief and a
+ * model can send them malformed, so main's own reading of `step_id`, carried
+ * on the child's start, is the fallback.
+ */
+function spawnStepId(item: ToolItem, child: InstanceFacts | undefined): string {
   const args = parseArgsRecord(item.tool.argsPreview)
   const raw = typeof args?.step_id === 'string' ? args.step_id.trim() : ''
-  if (raw) {
-    const id = canonicalTodoId(raw)
-    if (b.seen.has(id)) return id
-    if (b.seen.has(raw)) return raw
+  if (raw) return raw
+  if (child?.stepId?.trim()) return child.stepId.trim()
+  // Args that do not parse (cut, or sent malformed) can still say it in so many words.
+  return STEP_ID_IN_ARGS.exec(item.tool.argsPreview ?? '')?.[1]?.trim() ?? ''
+}
+
+const STEP_ID_IN_ARGS = /"step_id"\s*:\s*"([^"\\]{1,80})"/
+
+/** The step `stepId` names, when the run's list has it. */
+function namedStep(b: RunBuilder, stepId: string): string | null {
+  if (!stepId) return null
+  const id = canonicalTodoId(stepId)
+  if (b.seen.has(id)) return id
+  return b.seen.has(stepId) ? stepId : null
+}
+
+/**
+ * Children spawned before the run had a list, filed under the steps the first
+ * list gives them: the one each names, then, in order, the steps that list set
+ * in progress together that no child has yet. One it gives none stays where it
+ * was spawned.
+ */
+function fileEarlySpawns(b: RunBuilder): void {
+  if (b.early.length === 0 || !b.todos || b.todos.length === 0) return
+  const early = b.early
+  b.early = []
+  const named = early.map((spawn) => namedStep(b, spawn.stepId))
+  // Named first, so a child that named no step cannot take a named one's.
+  // Two naming the same step (a retry) both go there, as they would later.
+  early.forEach((spawn, i) => {
+    const key = named[i]
+    if (key) moveSpawn(b, spawn, key)
+  })
+  early.forEach((spawn, i) => {
+    if (named[i]) return
+    const key = b.parallel.find((k) => !b.claimed.has(k))
+    if (key) moveSpawn(b, spawn, key)
+  })
+}
+
+function moveSpawn(b: RunBuilder, spawn: EarlySpawn, key: string): void {
+  const pending = spawn.bucket.pending.indexOf(spawn.item)
+  if (pending >= 0) spawn.bucket.pending.splice(pending, 1)
+  else {
+    const at = spawn.bucket.work.findIndex((w) => w.kind === 'instance' && w.tool === spawn.item)
+    if (at < 0) return
+    spawn.bucket.work.splice(at, 1)
   }
-  return b.parallel.find((key) => !b.claimed.has(key)) ?? null
+  fileChild(b, key, spawn.runId, spawn.item)
+  bucketFor(b, stepBucket(key)).pending.push(spawn.item)
+}
+
+/** How long a call waited on you: its approval, or the whole of a question the agent asked. */
+function waitedOn(item: Extract<UiItem, { kind: 'tool' }>): number {
+  if (item.tool.waitedMs) return item.tool.waitedMs
+  if (item.tool.name !== 'ask_question' || item.tool.status === 'running') return 0
+  const start = stamp(item.at)
+  const end = stamp(item.endedAt)
+  return start != null && end != null && end > start ? end - start : 0
 }
 
 function touch(b: RunBuilder, at: number | null): void {
@@ -770,7 +865,26 @@ function stepOrder(b: RunBuilder, finalKeys: string[], superseded: string[]): st
   return out
 }
 
-function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean, continued = false): RecordRun {
+/** Markdown that structures a reply: a heading, a table or a fence. */
+const ANSWER_BLOCK = /^(?:#{1,6}\s|\s*\||\s*(?:`{3}|~{3}))/m
+/** A list item: an answer's, or narration's "I'll look at three places:". */
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/m
+
+/**
+ * Words that read as the closing answer while they are still being written:
+ * structured, or several paragraphs long. A line of narration before the next
+ * call ("Let me read the config.") is neither, so it never jumps out of the
+ * work and back; nor is a short list of where it will look next, so a list
+ * alone needs the length of a reply.
+ */
+export function answerShaped(text: string): boolean {
+  const body = text.trim()
+  if (body.length >= 120 && ANSWER_BLOCK.test(body)) return true
+  if (body.length >= 400 && LIST_ITEM.test(body)) return true
+  return body.length >= 200 && body.split(/\n\s*\n/).filter((p) => p.trim()).length >= 3
+}
+
+function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean): RecordRun {
   for (const bucket of b.buckets.values()) flush(bucket)
   const workOf = (key: string): WorkItem[] => b.buckets.get(key)?.work ?? []
 
@@ -778,19 +892,23 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean, contin
   // after it (reasoning after it is not work, and neither is a compaction —
   // a /compact run once the task is idle folded the context, it did not
   // answer anything, and it used to take the run's Result away). It leaves the work list and
-  // becomes the result — but only once the run is over: mid-run narration is
-  // not an answer yet, and a run a follow-up took over did not close.
+  // becomes the result once the run is over: mid-run narration is not an
+  // answer yet. While the run is live, only words shaped like an answer are
+  // read as it being written; a call after them puts them back in the work,
+  // and reasoning after them does not (it may end in nothing more to do).
   const live = isLast && options.running
-  const last = live || continued ? null : b.lastAssistant
+  const last = b.lastAssistant
   if (last) {
     for (const bucket of b.buckets.values()) {
       const at = bucket.work.findIndex((w) => w.kind === 'note' && w.item.id === last.id)
       if (at < 0) continue
-      if (!bucket.work.slice(at + 1).every((w) => w.kind === 'thought' || w.kind === 'compaction' || w.kind === 'notice')) break
+      const after = bucket.work.slice(at + 1)
+      if (!after.every((w) => w.kind === 'thought' || w.kind === 'compaction' || w.kind === 'notice')) break
       const note = bucket.work[at] as Extract<WorkItem, { kind: 'note' }>
       // A serialized payload is not an answer: it stays a visible note and
       // the run keeps no result, so the title falls back to the brief.
       if (isSerializedPayloadText(note.text)) break
+      if (live && !answerShaped(note.text)) break
       bucket.work.splice(at, 1)
       b.run.result = { item: last, text: note.text, streaming: Boolean(last.streaming) }
       break
@@ -819,9 +937,8 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean, contin
       if (state === 'running' || state === 'queued') state = 'stopped'
     } else if (!live && (state === 'running' || (state === 'queued' && started))) {
       // A step left in progress (or started, then set back) by a run that is
-      // over did not finish; one a mid-turn follow-up took over is paused here
-      // and carries on in the next run.
-      state = continued ? (state === 'running' ? 'paused' : 'queued') : isLast && options.failed ? 'failed' : 'stopped'
+      // over did not finish.
+      state = isLast && options.failed ? 'failed' : 'stopped'
     }
     // A step that runs a child goes the way its child does: running while it
     // runs — main keeps one todo in progress, and a fan-out's other steps
@@ -835,12 +952,12 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean, contin
       else if (kids.every((k) => k.phase === 'done') && (state === 'queued' || state === 'stopped')) state = 'done'
     }
     // The todo can claim a step finished while its own sub-agent work did not.
-    if (stepWorkFailed(stepTools, options.instances)) state = 'failed'
+    if (stepWorkFailed(stepTools, options.instances, !live && (b.endedStopped || (isLast && options.stopped === true)))) state = 'failed'
     let startedAt = b.firstStarted.get(key) ?? null
     let endedAt =
       todo.status === 'completed'
         ? (b.lastCompleted.get(key) ?? null)
-        : state === 'stopped' || state === 'failed' || state === 'paused'
+        : state === 'stopped' || state === 'failed'
           ? started
             ? (lastStampOf(work) ?? runEnd)
             : null
@@ -891,7 +1008,6 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean, contin
   }
   if (b.endedInError) b.run.endedInError = true
   else if (!live && (b.endedStopped || (isLast && options.stopped))) b.run.endedStopped = true
-  if (continued) b.run.continued = true
   return b.run
 }
 
@@ -935,27 +1051,37 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
   }
 
   const ensure = (id: string): RunBuilder => {
-    if (!b) b = startRun(runs.length + 1, null, id, null)
+    if (!b) b = startRun(runs.length + 1, null, id, null, 0)
     return b
   }
 
+  // Each user message is a turn its usage is counted under, whichever run shows it.
+  let turn = -1
   for (const item of items) {
     if (item.kind === 'message' && item.role === 'user') {
+      turn += 1
       const prior: RunBuilder | null = b
-      if (prior) {
-        const midTurn = item.midTurn === true
-        const finished = finishRun(prior, options, false, midTurn)
+      if (prior && item.midTurn === true) {
+        // Said while the run worked (Send now): the run carries on with it, so
+        // it is a line in the work where it landed, not a run of its own.
+        touch(prior, stamp(item.at))
+        prior.lastAssistant = null
+        flush(current(prior))
+        current(prior).work.push({ kind: 'said', id: item.id, item, text: item.content })
+        prior.run.turns += 1
+      } else if (prior) {
+        const finished = finishRun(prior, options, false)
         runs.push(finished)
-        b = startRun(runs.length + 1, item, item.id, finished.endedAt)
-        if (midTurn) inheritPlan(b, prior)
+        b = startRun(runs.length + 1, item, item.id, finished.endedAt, turn)
       } else {
-        b = startRun(runs.length + 1, item, item.id, null)
+        b = startRun(runs.length + 1, item, item.id, null, Math.max(turn, 0))
       }
       continue
     }
     const run = ensure(item.id)
     touch(run, stamp(item.at))
     if (item.kind === 'tool') touch(run, stamp(item.endedAt))
+    if (item.kind === 'tool') run.run.waitedMs += waitedOn(item)
     // Anything after an error (a retry carrying on) means the run did not end there.
     run.endedInError = item.kind === 'run_error'
     run.endedStopped =
@@ -967,8 +1093,15 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
         if (snapshot) {
           if (isStatusPatch(run.todos, snapshot)) snapshot = mergeTodos(run.todos, snapshot)
           const late = takeLateStarters(current(run), item)
+          // A child spawned with this write ran under the list it set: it
+          // waits for no list, and files by the step it names like any other.
+          const spawnedWith = new Set(run.early.filter((s) => late.includes(s.item)).map((s) => s.item))
+          run.early = run.early.filter((s) => !spawnedWith.has(s.item))
           applySnapshot(run, snapshot, stamp(item.at), parallelSteps(item.tool))
-          current(run).pending.push(...late)
+          for (const call of late) {
+            const bucket = spawnedWith.has(call) ? instanceBucket(run, call, options.instances) : null
+            ;(bucket ?? current(run)).pending.push(call)
+          }
         }
         continue
       }
@@ -990,7 +1123,7 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
       run.lastAssistant = null
       // A call waiting on your answer is its card until then: one place, not two.
       if (item.approval || questionGated.has(item.id) || isUndecidedCommand(item)) continue
-      ;(instanceBucket(run, item) ?? current(run)).pending.push(item)
+      ;(instanceBucket(run, item, options.instances) ?? current(run)).pending.push(item)
       if (snapshot) {
         if (item.tool.name === 'create_plan') snapshot = mergeTodos(run.todos, snapshot)
         applySnapshot(run, snapshot, stamp(item.at), parallelSteps(item.tool))
@@ -1088,8 +1221,6 @@ export function runStateOf(run: RecordRun, isLast: boolean, options: BuildOption
   if (isLast && options.failed) return 'failed'
   if (run.endedInError) return 'failed'
   if (run.steps.some((s) => s.state === 'failed')) return 'failed'
-  // Taken over by a mid-turn follow-up: its part is done, the work carried on.
-  if (run.continued) return 'done'
   if (run.endedStopped && !run.result) return 'stopped'
   if (run.steps.some((s) => s.state === 'stopped' && !s.superseded) && !run.result) return 'stopped'
   return 'done'

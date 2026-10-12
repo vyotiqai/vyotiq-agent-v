@@ -1014,6 +1014,7 @@ export function ChatView({
                 items={items}
                 itemsStore={itemsStore}
                 taskKey={activeRunId}
+                onAskAgent={draftForAgent}
               />
             </Suspense>
           </ErrorBoundary>
@@ -1057,7 +1058,6 @@ export function ChatView({
               onTaskCommitted={taskCommitted}
               active={visiblePanelId === 'changes'}
               running={running}
-              onStopRun={onStop}
               preferredScope={changesPreferredScope}
               preferredScopeToken={changesScopeToken}
               preferredSelectedPath={changesPreferredPath}

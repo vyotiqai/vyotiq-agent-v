@@ -63,6 +63,7 @@ const RESULT_ONLY_TOOLS = new Set([
   'git_status',
   'git_diff',
   'github_pr_checks',
+  'github_pr_comments',
   'memory_list',
   'Skill',
   'diagnostics',
@@ -486,6 +487,24 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       icon: 'memory'
     })
   },
+  move: {
+    Body: FallbackBody,
+    hasBody: resultHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'file'
+    })
+  },
+  memory_delete: {
+    Body: FallbackBody,
+    hasBody: resultHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'memory'
+    })
+  },
   browser_navigate: browserActionEntry,
   browser_search: {
     Body: BrowserSnapshotBody,
@@ -617,6 +636,16 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       icon: 'close'
     })
   },
+  message_agent_instance: {
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'chat'
+    })
+  },
   Skill: {
     Body: SkillBody,
     hasBody: contentHasBody,
@@ -722,6 +751,16 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       opensPanel: 'pr'
     })
   },
+  github_pr_comments: {
+    Body: StatusMessageBody,
+    hasBody: contentHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'pullRequest',
+      opensPanel: 'pr'
+    })
+  },
   github_issue: {
     Body: StatusMessageBody,
     hasBody: contentHasBody,
@@ -738,6 +777,16 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       verb: toolLabel(tool.name, tool.status, tool.content),
       target: tool.summary,
       icon: 'file'
+    })
+  },
+  // The page's console and failed requests: plain lines, read like diagnostics.
+  browser_console: {
+    Body: DiagnosticsBody,
+    hasBody: resultHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'terminal'
     })
   },
   lsp: {

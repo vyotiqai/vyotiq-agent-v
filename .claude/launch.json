@@ -2,6 +2,26 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "redesign-glass",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--config",
+        "src/redesign/glass/vite.config.ts"
+      ],
+      "port": 5215
+    },
+    {
+      "name": "redesign-threads",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--config",
+        "src/redesign/threads/vite.config.ts"
+      ],
+      "port": 5211
+    },
+    {
       "name": "redesign-agents",
       "runtimeExecutable": "node",
       "runtimeArgs": [

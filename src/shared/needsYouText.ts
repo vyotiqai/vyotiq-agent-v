@@ -2,7 +2,7 @@ import type { AgentQuestionRequest, ToolApprovalRequest } from './ipc'
 import { TOOL_LABELS, isUnresolvedToolName, parseArgsRecord, parseMcpToolDisplay } from './utils/toolSummary'
 import { humanizeSnakeCase, mcpDoneLabel } from './utils/mcpToolMeta'
 
-const FILE_TOOLS = new Set(['edit', 'str_replace', 'delete', 'edit_notebook', 'memory_write'])
+const FILE_TOOLS = new Set(['edit', 'str_replace', 'delete', 'move', 'edit_notebook', 'memory_write'])
 
 function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim()

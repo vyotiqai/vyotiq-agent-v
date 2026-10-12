@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "brave-search",
+  "name": "Brave Search",
+  "version": "1.0.0",
+  "description": "Web, news, image and local search from the Brave Search API. Needs an API key.",
+  "transport": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@brave/brave-search-mcp-server"
+  ],
+  "env": {},
+  "auth": "token",
+  "requires": [
+    "node"
+  ],
+  "inputs": [
+    {
+      "name": "BRAVE_API_KEY",
+      "target": "env",
+      "label": "Brave Search API key",
+      "isSecret": true,
+      "isRequired": true
+    }
+  ],
+  "docsUrl": "https://github.com/brave/brave-search-mcp-server",
+  "setupUrl": "https://api-dashboard.search.brave.com/app/keys"
+}

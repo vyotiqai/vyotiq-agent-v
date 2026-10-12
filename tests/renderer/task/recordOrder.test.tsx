@@ -24,6 +24,9 @@ function todos(list: Array<[string, ' ' | '~' | 'x', string]>, s: number): UiIte
 }
 const read = (path: string, s: number): UiItem => tool('read', { path }, 'contents', s)
 
+/** An activity with more to it than "Working", which the work line already says. */
+const LIVE = 'Reconnecting (attempt 2)'
+
 function show(items: UiItem[], options: BuildOptions, activity: string | null = null) {
   const model = buildRecordModel(items, options)
   return render(<TaskRecord model={model} options={options} activity={activity} messageCount={1} />)
@@ -43,14 +46,14 @@ describe('the record draws work where it happened', () => {
       todos([['a', 'x', 'Find it'], ['b', ' ', 'Fix it']], 3),
       read('between.ts', 4)
     ]
-    const { container } = show(items, { running: true }, 'Working')
+    const { container } = show(items, { running: true }, LIVE)
     const between = container.querySelector('[data-step-between="1"]')!
     expect(between).not.toBeNull()
     // Outside step 1's own (folded) body, and before step 2's row.
     const step2 = container.querySelector('[data-step="2"]')!
     expect(before(between, step2)).toBe(true)
     expect(between.textContent).toContain('Now')
-    expect(between.textContent).toContain('Working')
+    expect(between.textContent).toContain(LIVE)
     // One live line in the record, not a second one after the steps.
     expect(screen.getAllByText('Now')).toHaveLength(1)
   })
@@ -67,7 +70,7 @@ describe('the record draws work where it happened', () => {
   it('draws the live line in the setup list while the plan waits to start', () => {
     const plan = tool('create_plan', { title: 'P', plan: '# P', todos: [{ id: '1', content: 'Step', status: 'pending' }] }, 'Wrote plan.md', 1)
     const items = [user('Go', 0), plan, read('context.ts', 2)]
-    const { container } = show(items, { running: true }, 'Working')
+    const { container } = show(items, { running: true }, LIVE)
     const steps = container.querySelector('ol[aria-label="Steps"]')!
     const now = screen.getByText('Now')
     expect(before(now, steps)).toBe(true)
@@ -82,7 +85,7 @@ describe('the record draws work where it happened', () => {
       todos([['a', 'x', 'Only step']], 3),
       said('Done — one more look.', 4)
     ]
-    const { container } = show(items, { running: true }, 'Working')
+    const { container } = show(items, { running: true }, LIVE)
     // All steps settled: the tail is the run's loose work, after the steps.
     const steps = container.querySelector('ol[aria-label="Steps"]')!
     expect(before(steps, screen.getByText('Now'))).toBe(true)

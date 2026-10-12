@@ -8,8 +8,9 @@ import {
   extractDeepLinkUrlFromArgv,
   parseDeepLinkUrl
 } from '../../shared/deepLink'
-import type { DeepLinkPayload } from '../../shared/ipc'
+import type { DeepLinkPayload, DeepLinkTarget } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
+import { canonicalizeWorkspacePath } from '../../shared/utils/workspacePath'
 import { getMainWindow } from './window'
 
 /**
@@ -25,6 +26,37 @@ function workspaceDirectoryExists(candidate: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * The folder named on a command line (`Vyotiq.exe C:\repo`, `vyotiq .`), or
+ * null. Positional arguments only, from `start` on (a dev run's argv[1] is the
+ * app itself); switches Chromium or the shell add are skipped. A relative path
+ * resolves against the launching process's folder, and it must exist as a
+ * directory: a file or a typo opens nothing.
+ */
+export function workspacePathFromArgv(
+  argv: readonly string[],
+  { start, cwd, isDirectory = workspaceDirectoryExists }: { start: number; cwd: string; isDirectory?: (p: string) => boolean }
+): string | null {
+  for (let i = argv.length - 1; i >= start; i -= 1) {
+    const arg = argv[i]
+    if (typeof arg !== 'string' || !arg.trim() || arg.startsWith('-')) continue
+    if (arg.toLowerCase().startsWith(`${DEEP_LINK_SCHEME}:`)) continue
+    const resolved = path.resolve(cwd, arg.trim())
+    if (isDirectory(resolved)) return canonicalizeWorkspacePath(resolved)
+  }
+  return null
+}
+
+/** Where a command line's own arguments start: past the exe, and past the app path in a dev run. */
+export function argvStart(): number {
+  return process.defaultApp ? 2 : 1
+}
+
+function deliver(rawUrl: string, target: DeepLinkTarget | null): void {
+  pendingDeepLink = { rawUrl: rawUrl.slice(0, 4096), target }
+  sendToRenderer(pendingDeepLink)
 }
 
 function sendToRenderer(payload: DeepLinkPayload): void {
@@ -54,16 +86,17 @@ export function handleDeepLinkUrl(raw: string): void {
       scope: 'main',
       workspacePath: parsed.workspacePath
     })
-    pendingDeepLink = { rawUrl: raw.slice(0, 4096), target: null }
-    sendToRenderer(pendingDeepLink)
+    deliver(raw, null)
     return
   }
-  const payload: DeepLinkPayload = {
-    rawUrl: raw.slice(0, 4096),
-    target: { type: 'open_run', workspacePath: parsed.workspacePath, runId: parsed.runId }
-  }
-  pendingDeepLink = payload
-  sendToRenderer(payload)
+  deliver(raw, parsed)
+}
+
+/** A folder named on the command line or dropped on the Dock icon: open it as a workspace. */
+export function handleOpenFolder(folder: string): void {
+  if (!workspaceDirectoryExists(folder)) return
+  const workspacePath = canonicalizeWorkspacePath(folder)
+  deliver(workspacePath, { type: 'open_workspace', workspacePath, fromCommandLine: true })
 }
 
 /** Drain the pending slot; the renderer calls this on mount to pick up cold-start links. */
@@ -92,10 +125,25 @@ export function registerDeepLinks(): void {
     event.preventDefault()
     handleDeepLinkUrl(url)
   })
+  // macOS: a folder dropped on the Dock icon, or `open -a "Agent V" ~/repo`.
+  app.on('open-file', (event, file) => {
+    if (!workspaceDirectoryExists(file)) return
+    event.preventDefault()
+    handleOpenFolder(file)
+  })
 }
 
-/** Windows/Linux: the OS hands the URL to a second instance's argv. */
-export function handleDeepLinkArgv(argv: readonly string[]): void {
+/**
+ * Windows/Linux: a vyotiq:// URL, or a folder (`Vyotiq.exe C:\repo`, Explorer's
+ * "Open in Agent V"), in our own argv at a cold start or in a second
+ * instance's. `cwd` is the folder that instance was started in.
+ */
+export function handleDeepLinkArgv(argv: readonly string[], cwd: string = process.cwd()): void {
   const url = extractDeepLinkUrlFromArgv(argv)
-  if (url) handleDeepLinkUrl(url)
+  if (url) {
+    handleDeepLinkUrl(url)
+    return
+  }
+  const folder = workspacePathFromArgv(argv, { start: argvStart(), cwd })
+  if (folder) handleOpenFolder(folder)
 }

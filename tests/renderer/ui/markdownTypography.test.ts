@@ -105,17 +105,17 @@ function scalePx(token: string): number {
 const MD = ['# One', '## Two', '### Three', '#### Four', '', 'Body paragraph.'].join('\n')
 
 function renderMd(): HTMLElement {
-  const { container } = render(createElement(MarkdownContent, { content: MD, size: 'md' }))
+  const { container } = render(createElement(MarkdownContent, { content: MD }))
   return container as HTMLElement
 }
 
 describe('markdown-body root class contract', () => {
-  it('carries exactly the md size and the relaxed line', () => {
+  it('carries exactly the body size and the relaxed line', () => {
     const root = renderMd().querySelector('.markdown-body')!
-    expect(root.classList.contains('text-md')).toBe(true)
+    expect(root.classList.contains('text-sm')).toBe(true)
     expect(root.classList.contains('leading-relaxed')).toBe(true)
     // cn() does no merge, so nothing else may ride along.
-    expect(root.classList.contains('text-sm')).toBe(false)
+    expect(root.classList.contains('text-md')).toBe(false)
     expect(root.classList.contains('text-lg')).toBe(false)
   })
 })
@@ -141,7 +141,7 @@ describe('.markdown-body heading scale', () => {
     expect(new Set(px).size).toBe(4)
   })
 
-  it('keeps h4 below the body paragraph at size="md"', () => {
+  it('keeps h4 below the md step', () => {
     expect(scalePx(headingToken('h4'))).toBeLessThan(scalePx('--text-md'))
   })
 
@@ -236,33 +236,24 @@ describe('.markdown-body tables draw horizontal rules only', () => {
   })
 })
 
-describe('markdown inline-code chip carries no fill', () => {
-  // Protects the chip from picking up a background again: with no surface
-  // behind it there is nothing to deepen, and a fill would be a weight the
-  // design system does not name on a control that is otherwise plain text —
-  // hover is an underline. The chip still has to say "code" (font-mono) and to
-  // keep its focus ring.
-  const chip = readFileSync(
+describe('markdown inline code carries no fill', () => {
+  // Protects inline code from picking up a background again: a filled box made
+  // a paragraph naming a dozen files read as a row of grey tiles. It still has
+  // to say "code" (font-mono). The agent's replies keep the same rule in
+  // reply/refs.tsx and reply.css.
+  const source = readFileSync(
     resolve(process.cwd(), 'src/renderer/src/lib/ui/MarkdownContent.tsx'),
     'utf8'
   ).replace(/\r\n/g, '\n')
-  const codeBase = chip.match(/const CODE_BASE = '([^']*)'/)?.[1]
-  const codeChipTemplate = chip.match(/const CODE_CHIP = `([^`]*)`/)?.[1]
+  const codeBase = source.match(/const CODE_BASE = '([^']*)'/)?.[1]
 
-  it('reads both class strings out of MarkdownContent.tsx', () => {
+  it('reads the class string out of MarkdownContent.tsx', () => {
     expect(codeBase, 'CODE_BASE not found').toBeDefined()
-    expect(codeChipTemplate, 'CODE_CHIP not found').toBeDefined()
   })
 
-  it('declares no bg- class on the chip, base or full', () => {
-    // CODE_CHIP is `${CODE_BASE} hover:underline …`, so resolve the template
-    // against the base before looking for a fill.
-    const classes = [codeBase!, codeChipTemplate!.replace('${CODE_BASE}', codeBase!)].join(' ')
-    expect(classes).toMatch(/\bfont-mono\b/)
-    expect(classes).toMatch(/\bfocus-visible:vy-focus-ring\b/)
-    expect(classes, 'inline-code chip must carry no background fill').not.toMatch(
-      /\bbg-(?!transparent)/
-    )
+  it('declares no bg- class on inline code', () => {
+    expect(codeBase).toMatch(/\bfont-mono\b/)
+    expect(codeBase, 'inline code must carry no background fill').not.toMatch(/\bbg-(?!transparent)/)
   })
 })
 
@@ -322,18 +313,21 @@ describe('.markdown-body constraints', () => {
   })
 })
 
-describe('.record-prose keeps a reading measure', () => {
+describe('the record’s replies keep a reading measure', () => {
   // A measure that silently grows back to 100ch+ is what made the record's
   // prose an unreadable wall, so the cap is asserted in `ch` and held at 80 or
-  // tighter — a px cap would drift with the type scale instead.
-  const PROSE_ELEMENTS = ['p', 'ul', 'ol', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']
-  const PROSE_SELECTOR = `.record-prose > :is(${PROSE_ELEMENTS.join(', ')})`
-  // The rule sits beside the `.markdown-body` block, not inside it, so it is
-  // read from the whole file rather than through `rules()`.
-  const proseRule = css.match(/\n(\.record-prose > :is\([^)]*\))\s*\{([^}]*)\}/)
+  // tighter — a px cap would drift with the type scale instead. The record
+  // renders the agent's words through reply/ReplyMarkdown, styled by reply.css.
+  const replyCss = readFileSync(
+    resolve(process.cwd(), 'src/renderer/src/features/task/record/reply/reply.css'),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const PROSE_ELEMENTS = ['p', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', '.vy-reply-alert', '.vy-reply-details > summary']
+  const PROSE_SELECTOR = `.vy-reply :is(${PROSE_ELEMENTS.join(', ')})`
+  const proseRule = replyCss.match(/\n(\.vy-reply :is\(p, ul[^)]*\)[^{]*?)\s*\{([^}]*)\}/)
 
   it('caps the agent’s words at 80ch or tighter', () => {
-    expect(proseRule, `${PROSE_SELECTOR} is not declared in styles.css`).not.toBeNull()
+    expect(proseRule, `${PROSE_SELECTOR} is not declared in reply.css`).not.toBeNull()
     expect(proseRule![1].replace(/\s+/g, ' '), 'the prose rule names a different element list').toBe(
       PROSE_SELECTOR
     )

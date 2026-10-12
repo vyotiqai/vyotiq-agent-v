@@ -13,6 +13,10 @@ export type RewindAsk = {
   runN: number | null
   /** Null when main's preview could not be read — then no list is claimed. */
   files: RewindFile[] | null
+  /** "Run this again": the same rewind, then the same instruction runs again. */
+  rerun?: boolean
+  /** A rerun: how many messages you said into the run while it worked — they are not sent again. */
+  said?: number
 }
 
 /** What the task did to the file — the letter git would show. */
@@ -34,6 +38,15 @@ function keptBecause(file: RewindFile): string | null {
   return null
 }
 
+/**
+ * Whether "Run this again" asks first: when it would put files back, when
+ * main's preview could not say, or when something you said into the run while
+ * it worked would be lost. An answer that changed nothing runs again at once.
+ */
+export function rerunNeedsConfirm(files: readonly RewindFile[] | null, said = 0): boolean {
+  return said > 0 || files == null || files.length > 0
+}
+
 /** How many files the rewind will actually put back. */
 export function rewindRestoreCount(files: readonly RewindFile[]): number {
   return files.filter((f) => keptBecause(f) == null).length
@@ -48,6 +61,7 @@ export function rewindRestoreCount(files: readonly RewindFile[]): number {
 const REDO_NOTE = 'It’s kept, so you can redo it until you send a new instruction or change those files.'
 
 export function rewindSummary(ask: RewindAsk): string {
+  if (ask.rerun) return rerunSummary(ask)
   const from = ask.runN != null ? `run ${ask.runN}’s instruction` : 'this instruction'
   const record = `Everything after ${from} leaves the record`
   if (ask.files == null) {
@@ -59,6 +73,27 @@ export function rewindSummary(ask: RewindAsk): string {
     return `${record}, and ${change}. ${REDO_NOTE}`
   }
   return `${record}, and ${files === 1 ? 'this file goes' : 'these files go'} back to how ${files === 1 ? 'it was' : 'they were'} before it. ${REDO_NOTE}`
+}
+
+/** A rerun says the same, as what happens before the instruction runs again. */
+function rerunSummary(ask: RewindAsk): string {
+  const record = 'This run’s work and answer leave the record and the same instruction runs again.'
+  const restore = ask.files ? rewindRestoreCount(ask.files) : 0
+  const files =
+    ask.files == null
+      ? 'First, the files it changed go back to how they were.'
+      : ask.files.length === 0
+        ? null
+        : restore === 0
+          ? 'No file goes all the way back first.'
+          : `First, ${restore === 1 ? 'this file goes' : 'these files go'} back to how ${restore === 1 ? 'it was' : 'they were'}.`
+  const n = ask.said ?? 0
+  // Only the instruction runs again: what you added while it worked is gone with the run.
+  const said =
+    n > 0
+      ? `${n === 1 ? 'What you said' : `The ${n} messages you sent`} while it worked ${n === 1 ? 'is' : 'are'} not sent again.`
+      : null
+  return [record, files, said].filter(Boolean).join(' ')
 }
 
 /**
@@ -81,7 +116,11 @@ export function RewindDialog({
   const cancelRef = useRef<HTMLButtonElement>(null)
   if (!ask) return null
   const restore = ask.files ? rewindRestoreCount(ask.files) : 0
-  const title = ask.runN != null ? `Rewind to before run ${ask.runN}?` : 'Rewind to before this instruction?'
+  const title = ask.rerun
+    ? 'Run this again?'
+    : ask.runN != null
+      ? `Rewind to before run ${ask.runN}?`
+      : 'Rewind to before this instruction?'
   return (
     <Dialog
       open
@@ -96,7 +135,7 @@ export function RewindDialog({
       <div data-rewind-dialog className="flex min-h-0 flex-col">
         <div className="px-5 pb-2 pt-5">
           <div className="flex items-center gap-2">
-            <Icon name="undo" size={18} className="text-muted" />
+            <Icon name={ask.rerun ? 'retry' : 'undo'} size={18} className="text-muted" />
             <h2 id={titleId} className="text-heading font-semibold text-fg-strong">
               {title}
             </h2>
@@ -140,8 +179,8 @@ export function RewindDialog({
           <Button ref={cancelRef} size="sm" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button size="sm" variant="primary" icon="undo" onClick={onConfirm}>
-            {restore > 0 ? `Rewind ${restore} ${restore === 1 ? 'file' : 'files'}` : 'Rewind'}
+          <Button size="sm" variant="primary" icon={ask.rerun ? 'retry' : 'undo'} onClick={onConfirm}>
+            {ask.rerun ? 'Run again' : restore > 0 ? `Rewind ${restore} ${restore === 1 ? 'file' : 'files'}` : 'Rewind'}
           </Button>
         </div>
       </div>

@@ -622,7 +622,10 @@ export function registerExtensionsIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const req = MarketplaceRemoteInstallAckRequestSchema.parse(raw ?? { acked: true })
-      if (req.acked) {
+      // Flows with their own in-app confirmation (the Add dialog shows the
+      // warning and the command) skip the native box, which ignores the skin
+      // and can open behind the window.
+      if (req.acked && !req.confirmedInApp) {
         const win = BrowserWindow.fromWebContents(event.sender)
         const message =
           'Marketplace packages (remote catalogs, git/npm/zip, local path folders) and MCP endpoints are unsigned. Install only from sources you trust.'

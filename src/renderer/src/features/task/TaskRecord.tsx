@@ -1,7 +1,7 @@
 import { useContext, useMemo, useState, type ReactNode } from 'react'
-import type { ToolApprovalDecision, RunFeedbackRating } from '@shared/ipc'
+import type { ToolApprovalDecision, ToolApprovalExtras, RunFeedbackRating } from '@shared/ipc'
 import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
-import type { StepUsageTotals } from '@shared/utils/runTelemetry'
+import { addTurnUsage, type StepUsageTotals } from '@shared/utils/runTelemetry'
 import { formatDisplayTime, formatElapsed } from '@shared/utils/timeFormat'
 import { formatUsdCost } from '@shared/utils/costDisplay'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
@@ -19,27 +19,33 @@ import { CheckedBlock, DoneWhenRow, checksByRun } from './record/Checks'
 import { runStateOf, type BuildOptions, type NeedsYou, type RecordModel, type RecordRun, type WorkItem } from './recordModel'
 import { ApprovalCard } from './record/ApprovalCard'
 import { Brief } from './record/Brief'
-import { ReceiptLine } from './record/Receipt'
+import { ReceiptLine, costLabel } from './record/Receipt'
+import { KeptProcesses } from '@renderer/features/chat/components/KeptProcesses'
+import { useKeptTerminals } from '@renderer/features/chat/hooks/useKeptTerminals'
 import { RecordRow, RunDivider } from './record/RecordLayout'
 import { RecordProse } from './record/RecordProse'
 import { RunViews } from './record/RunViews'
 import { ViewEraContext } from './record/reply/view/live'
 import { answerHeadline } from './record/plainText'
 import { Steps, instancesOf, placeKey } from './record/Steps'
+import { WorkFold, type WorkPhase } from './record/WorkFold'
 import {
   BrokeAtContext,
   EditMarksContext,
   FirstRuleGrantContext,
-  LooseWork,
   NowLine,
   RecordActionsContext,
+  WorkList,
   counted,
   plainLine,
   workIsLive
 } from './record/WorkItems'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { requestCommitBox } from '@renderer/features/chat/commitRequest'
-import { RecordOpenContext, looseOpenKey, runOpenKey } from './recordFind'
+import { RecordOpenContext, runOpenKey } from './recordFind'
+import { formatRunActivityLabel } from '@renderer/features/chat/utils/runActivity'
+
+const WORKING = formatRunActivityLabel({ kind: 'working' })
 
 export type TaskRecordProps = {
   model: RecordModel
@@ -49,10 +55,14 @@ export type TaskRecordProps = {
    * the network, compacting, or between calls. Null when it is idle.
    */
   activity?: string | null
-  /** Usage per run (index = run number − 1). */
+  /** Usage per user turn (index = the user message's turn); a run sums the turns it spans. */
   turnUsage?: readonly StepUsageTotals[]
   runFeedback?: { value: RunFeedbackRating | null; onRate: (rating: RunFeedbackRating | null) => void }
-  onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
+  onApprovalDecision?: (
+    requestId: string,
+    decision: ToolApprovalDecision,
+    extras?: ToolApprovalExtras
+  ) => void | Promise<void>
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   /** Focus the needs-you card only in the focused pane. */
   approvalAutoFocus?: boolean
@@ -65,22 +75,40 @@ export type TaskRecordProps = {
   lead?: ReactNode
   /** The first run's brief is already shown by `lead` (an instance's goal). */
   omitFirstBrief?: boolean
-  /** Heading for the run's loose work ("Work" in an instance record). */
-  workLabel?: string
   /** Edit-and-rerun / rewind, by the brief's message index. */
   editingUserMessageIndex?: number | null
   editComposer?: ReactNode
   onBeginEdit?: (messageIndex: number) => void
   /** Rewind to before the brief at `messageIndex`, the record's run `runN`. */
   onRevert?: (messageIndex: number, runN?: number) => void
+  /** Rerun the latest instruction as it was, by its message index and run. */
+  onRerun?: (messageIndex: number, runN?: number, said?: number) => void
+  /** A new task with the record through the instruction at `messageIndex` and its turn. */
+  onForkFrom?: (messageIndex: number) => void
   messageCount: number
+  /** Each user turn's message index, for a brief whose item id does not carry one. */
+  userMessageIndexes?: readonly number[]
   onImageClick?: (src: string) => void
 }
 
-/** The brief's message index, from the `user-<index>` id the transcript gives it. */
-function messageIndexOf(run: RecordRun): number | null {
+/**
+ * The brief's message index, from the `user-<index>` id the transcript gives
+ * it. A queued follow-up keeps the `followup-<id>` it was queued under until
+ * the task is read from disk again; its turn says which message it is.
+ */
+function messageIndexOf(run: RecordRun, userMessageIndexes: readonly number[] | undefined): number | null {
   const m = /^user-(\d+)$/.exec(run.id)
-  return m ? Number(m[1]) : null
+  if (m) return Number(m[1])
+  return run.id.startsWith('followup-') ? (userMessageIndexes?.[run.turn] ?? null) : null
+}
+
+/**
+ * A run's usage: its instruction's turn, plus each message said into it while
+ * it worked — every user message is a turn of its own in `turnUsage`.
+ */
+function runUsage(turnUsage: readonly StepUsageTotals[] | undefined, run: RecordRun): StepUsageTotals | null {
+  const slots = turnUsage?.slice(run.turn, run.turn + run.turns) ?? []
+  return slots.length > 0 ? slots.reduce(addTurnUsage) : null
 }
 
 function runDuration(run: RecordRun): number | null {
@@ -126,7 +154,12 @@ export function TaskRecord(props: TaskRecordProps) {
   const byRun = checksByRun(runs, props.checks ?? [])
   // The cost column is kept only when some run has a cost, so durations share
   // the right edge the work rows' durations use instead of stopping short of a gap.
-  const historyCost = earlier.some((run) => props.turnUsage?.[run.n - 1] && turnCost(props.turnUsage[run.n - 1]!))
+  // A free model's runs would each say "$0": the column waits for a run that cost something.
+  const historyCost = earlier.some((run) => {
+    const usage = runUsage(props.turnUsage, run)
+    const cost = usage != null ? turnCost(usage) : null
+    return cost != null && cost.cost > 0
+  })
 
   return (
     <>
@@ -148,8 +181,17 @@ export function TaskRecord(props: TaskRecordProps) {
       {runs.length > 1 ? (
         <RunDivider n={last.n} at={last.at != null ? formatDisplayTime(new Date(last.at).toISOString()) : undefined} />
       ) : null}
-      {/* Keyed by run: a follow-up's run must not inherit the last one's open steps. */}
-      <RunBody key={last.id} run={last} isLast props={props} checks={byRun.get(last.n) ?? []} needs={needCards} />
+      {/* Keyed by run: a follow-up's run must not inherit the last one's open steps.
+          Its instruction's time too: run again, or edited and rerun, it keeps its id
+          and is a new run all the same. */}
+      <RunBody
+        key={`${last.id}@${last.at ?? ''}`}
+        run={last}
+        isLast
+        props={props}
+        checks={byRun.get(last.n) ?? []}
+        needs={needCards}
+      />
     </>
   )
 }
@@ -180,9 +222,15 @@ function runTools(run: RecordRun): ToolItem[] {
  */
 function stoppedDetail(run: RecordRun, tools: readonly ToolItem[]): string | undefined {
   const plan = run.steps.filter((s) => s.n > 0)
-  const at = plan.find((s) => s.state === 'stopped' && !s.superseded)
+  const stoppedSteps = plan.filter((s) => s.state === 'stopped' && !s.superseded)
+  const at = stoppedSteps[0]
   const files = collectSessionChangedFiles(tools as ToolItem[]).length
-  const parts = [at ? `at step ${at.n} of ${plan.length}` : null, files > 0 ? `${counted(files, 'file')} changed` : null]
+  // Steps run side by side (one child each) stop together: "at step 1" would
+  // name only the first. Unfinished counts the ones never started as well.
+  const unfinished = plan.filter((s) => s.state !== 'done').length
+  const where =
+    stoppedSteps.length > 1 ? `${unfinished} of ${plan.length} steps unfinished` : at ? `at step ${at.n} of ${plan.length}` : null
+  const parts = [where, files > 0 ? `${counted(files, 'file')} changed` : null]
   const said = parts.filter((p): p is string => p != null)
   return said.length > 0 ? said.join(' · ') : undefined
 }
@@ -413,17 +461,22 @@ function RunBody({
   needs?: ReadonlyMap<string, ReactNode>
 }) {
   const live = isLast && props.options.running
-  const index = messageIndexOf(run)
+  const index = messageIndexOf(run, props.userMessageIndexes)
   const canRevert =
     index != null && props.messageCount > index + 1 && !props.options.running && props.editingUserMessageIndex == null
   // The activity line goes where the latest work is going — the setup list, a
   // step, after a step, or the loose work at the end — never beside an item
   // that is already showing it is live.
-  const activity = live ? (props.activity ?? null) : null
+  // "Working" alone is the work line's own word: a Now line saying only that
+  // is the same word twice. Anything more (compacting, reconnecting) shows.
+  const activity = live && props.activity && props.activity !== WORKING ? props.activity : null
   const tail = live ? run.tail : null
   const looseActivity = (list: readonly WorkItem[]): boolean =>
     activity != null && !(list.length > 0 && workIsLive(list[list.length - 1]!))
-  const setupActivity = tail?.kind === 'setup' && looseActivity(run.setup)
+  // Steps under way (children working in them) are where the run is now: an
+  // activity line above them, in the setup, read as the run still setting up.
+  const stepsGoing = run.steps.some((s) => s.state === 'running' || s.state === 'needs')
+  const setupActivity = tail?.kind === 'setup' && !stepsGoing && looseActivity(run.setup)
   const setupNeeds = needs?.get(placeKey({ kind: 'setup' })) ?? null
   const afterNeeds = needs?.get(placeKey({ kind: 'after' })) ?? null
   const state = live ? null : runStateOf(run, isLast, props.options)
@@ -445,11 +498,32 @@ function RunBody({
   )
   const marks = useMemo(() => outcomeMarks(outcome), [outcome])
   const settled = isLast && unkept === 0 ? summarizeOutcome(outcome) : null
+  // What the agent left running for this task ("the dev server is up"), under its answer.
+  const keptTerminals = useKeptTerminals(isLast && !live ? sessionWorkspace : null)
+  const keptHere = useMemo(
+    () => keptTerminals.kept.filter((k) => k.runId === sessionRunId),
+    [keptTerminals.kept, sessionRunId]
+  )
   // An error row with Retry already says how to carry on.
   const resume = state === 'stopped' && isLast && onRetry && !retryableErrorId ? onRetry : undefined
-  const afterActivity = tail?.kind === 'after' && looseActivity(run.after)
-  // A settled run with an answer folds its loose work; without one, the work is the record.
-  const foldLoose = !live && run.result != null
+  // A finished answer can be asked for again; a failed or stopped run has Retry or Resume instead.
+  const rerun =
+    state === 'done' && isLast && index != null && props.onRerun && props.editingUserMessageIndex == null
+      ? () => props.onRerun!(index, run.n, run.turns - 1)
+      : undefined
+  const afterActivity = (tail?.kind === 'after' || (tail?.kind === 'setup' && stepsGoing)) && looseActivity(run.after)
+  // All of it sits behind one line: open while the agent works, folded once it answers.
+  const hasWork = run.setup.length > 0 || run.steps.length > 0 || run.after.length > 0
+  const waiting = (needs?.size ?? 0) > 0
+  const phase: WorkPhase = live
+    ? run.needs.length > 0 || waiting
+      ? 'needs'
+      : run.result
+        ? 'writing'
+        : 'working'
+    : state === 'failed' || state === 'stopped'
+      ? state
+      : 'done'
   // A rule's grant is said once per run, on the first call it let through.
   const tools = useMemo(() => runTools(run), [run])
   const firstRuleGrant = useMemo(() => tools.find((t) => t.tool.approvedBy?.by === 'rule')?.id ?? null, [tools])
@@ -459,6 +533,10 @@ function RunBody({
     [state, tools]
   )
   const stopped = useMemo(() => (state === 'stopped' ? stoppedDetail(run, tools) : undefined), [state, run, tools])
+  const runShowsError = useMemo(
+    () => [...run.setup, ...run.steps.flatMap((step) => step.work), ...run.after].some((w) => w.kind === 'error'),
+    [run]
+  )
   return (
     // Views in an earlier run's answer stop following their sources: that answer was about then.
     <ViewEraContext.Provider value={isLast}>
@@ -476,29 +554,34 @@ function RunBody({
               : undefined
           }
           onRewind={props.onRevert && canRevert ? () => props.onRevert!(index!, run.n) : undefined}
+          onFork={props.onForkFrom && index != null && !live ? () => props.onForkFrom!(index) : undefined}
           onImageClick={props.onImageClick}
         />
       ) : null}
       {/* Open checks sit under the brief; once there is a result they move under it. */}
       {checks.length > 0 && (live || !run.result) ? <DoneWhenRow checks={checks} live={live} /> : null}
-      {run.setup.length > 0 || setupActivity || setupNeeds ? (
-        <RecordRow>
-          <div className="space-y-2">
-            {run.setup.length > 0 ? <LooseWork items={run.setup} fold={foldLoose} openKey={looseOpenKey(run.n, 'setup')} /> : null}
-            {setupActivity ? <NowLine text={activity!} /> : null}
-            {setupNeeds}
-          </div>
-        </RecordRow>
-      ) : null}
-      <Steps steps={run.steps} runN={run.n} tail={tail} activity={activity} needs={needs} />
-      {run.after.length > 0 || afterActivity || afterNeeds ? (
-        <RecordRow label={run.steps.length === 0 && run.after.length > 0 ? props.workLabel : undefined}>
-          <div className="space-y-2">
-            {run.after.length > 0 ? <LooseWork items={run.after} fold={foldLoose} openKey={looseOpenKey(run.n, 'after')} /> : null}
-            {afterActivity ? <NowLine text={activity!} /> : null}
-            {afterNeeds}
-          </div>
-        </RecordRow>
+      {hasWork || live || waiting ? (
+        <WorkFold run={run} phase={phase} answered={run.result != null} waiting={waiting}>
+          {run.setup.length > 0 || setupActivity || setupNeeds ? (
+            <RecordRow>
+              <div className="space-y-2">
+                {run.setup.length > 0 ? <WorkList items={run.setup} /> : null}
+                {setupActivity ? <NowLine text={activity!} /> : null}
+                {setupNeeds}
+              </div>
+            </RecordRow>
+          ) : null}
+          <Steps steps={run.steps} runN={run.n} tail={tail} activity={activity} needs={needs} />
+          {run.after.length > 0 || afterActivity || afterNeeds ? (
+            <RecordRow>
+              <div className="space-y-2">
+                {run.after.length > 0 ? <WorkList items={run.after} /> : null}
+                {afterActivity ? <NowLine text={activity!} /> : null}
+                {afterNeeds}
+              </div>
+            </RecordRow>
+          ) : null}
+        </WorkFold>
       ) : null}
       <RunViews run={run} />
       {run.result ? (
@@ -523,16 +606,24 @@ function RunBody({
           onPullRequest={onOpenPanel ? () => onOpenPanel('pr') : undefined}
         />
       ) : null}
+      <KeptProcesses
+        items={keptHere}
+        onStop={(id) => void keptTerminals.stop(id)}
+        onShowTerminal={onOpenPanel ? () => onOpenPanel('terminal') : undefined}
+        className="mt-2"
+      />
       <ReceiptLine
-        usage={props.turnUsage?.[run.n - 1] ?? null}
+        usage={runUsage(props.turnUsage, run)}
         startedAt={run.startedAt}
         endedAt={run.endedAt}
         live={live}
         feedback={isLast && !live ? props.runFeedback : undefined}
         checks={checks}
         summary={run.result && !run.result.streaming ? run.result.text : undefined}
-        outcome={state === 'stopped' || state === 'failed' ? state : undefined}
+        // An error row already says the run failed, with what to do; the receipt does not repeat it.
+        outcome={state === 'stopped' || (state === 'failed' && !runShowsError) ? state : undefined}
         outcomeDetail={stopped}
+        onRerun={rerun}
         actions={
           state === 'stopped' && isLast && (resume || (unkept > 0 && pendingWrites)) ? (
             <>
@@ -574,13 +665,17 @@ function HistoryRun({
   const forced = useContext(RecordOpenContext).has(runOpenKey(run.n))
   const open = userOpen || forced
   const state = runStateOf(run, false, props.options)
-  const usage = props.turnUsage?.[run.n - 1] ?? null
+  const usage = runUsage(props.turnUsage, run)
   const cost = usage ? turnCost(usage) : null
   const duration = runDuration(run)
+  const planSteps = run.steps.filter((s) => s.n > 0).length
   // The answer's first line, as words: "Checks recorded: **4 met**" showed its asterisks.
-  // An answer that opens with a view is named by the view's title, not its JSON.
+  // What you asked leads (it is what you scan History for); the answer's
+  // first line follows, quieter, without the colon that led into a list.
+  const askedLine = run.text.split('\n').find((l) => l.trim())
+  const asked = askedLine != null ? plainLine(askedLine) : run.command ? `/${run.command}` : ''
   const answerLine = run.result ? answerHeadline(run.result.text) : undefined
-  const title = answerLine != null ? plainLine(answerLine) : run.text || (run.command ? `/${run.command}` : '')
+  const answer = answerLine != null ? plainLine(answerLine).replace(/\s*:\s*$/, '') : ''
   return (
     <div data-history-run={run.n}>
       <button
@@ -601,11 +696,16 @@ function HistoryRun({
             {run.at != null ? formatDisplayTime(new Date(run.at).toISOString()) : ''}
           </span>
         ) : (
-          <span className="min-w-0 flex-1 truncate text-sm text-secondary">{title}</span>
+          <span className="min-w-0 flex-1 truncate text-sm">
+            {asked ? <span className="text-secondary">{asked}</span> : null}
+            {asked && answer ? <span className="text-tertiary"> · </span> : null}
+            {answer ? <span className={asked ? 'text-tertiary' : 'text-secondary'}>{answer}</span> : null}
+          </span>
         )}
-        {run.steps.length > 0 ? (
+        {/* The plan's steps, as the work line counts them: not ones it replaced. */}
+        {planSteps > 0 ? (
           <span className="shrink-0 text-xs text-tertiary">
-            {run.steps.length} {run.steps.length === 1 ? 'step' : 'steps'}
+            {planSteps} {planSteps === 1 ? 'step' : 'steps'}
           </span>
         ) : null}
         <span className="min-w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
@@ -613,7 +713,7 @@ function HistoryRun({
         </span>
         {costColumn ? (
           <span className="min-w-12 shrink-0 whitespace-nowrap text-right font-mono text-caption text-tertiary tnum">
-            {cost ? `${cost.estimated ? '~' : ''}${formatUsdCost(cost.cost)}` : ''}
+            {cost ? costLabel(cost) : ''}
           </span>
         ) : null}
         <Icon

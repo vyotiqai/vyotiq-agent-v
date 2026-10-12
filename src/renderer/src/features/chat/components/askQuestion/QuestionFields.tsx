@@ -61,8 +61,8 @@ function CustomOther({
       type="text"
       size="md"
       className="mt-1"
-      placeholder="Other…"
-      aria-label="Other answer"
+      placeholder="Something else…"
+      aria-label="Something else"
       maxLength={AGENT_QUESTION_MAX_ANSWER_CHARS}
       disabled={disabled}
       value={value}

@@ -4,6 +4,25 @@ import { resolve } from 'path'
 import react from '@vitejs/plugin-react'
 import { iifeBundlePlugin } from './scripts/viteIifePlugin'
 
+const TEST_INCLUDE = ['tests/**/*.test.ts', 'tests/**/*.test.tsx']
+const TEST_EXCLUDE = ['**/node_modules/**', '**/dist/**', 'tests/gui-e2e/**']
+
+/**
+ * Suites that start real shells through node-pty. Under a full run's load the
+ * ConPTY helper dies with "AttachConsole failed", no output ever arrives, and
+ * every one of these times out (then fails its cleanup with EPERM) — 2 to 26
+ * failures a run that all pass alone. They run as their own project in a later
+ * group, so they start only once everything else has finished.
+ */
+const PTY_SUITES = [
+  'tests/main/e2e/ptyLifecycle.test.ts',
+  'tests/main/unit/conptyKill.test.ts',
+  'tests/main/unit/loggingPipeErrors.test.ts',
+  'tests/main/unit/runArtifactRemap.test.ts',
+  'tests/main/unit/terminal*.test.ts',
+  'tests/main/unit/todoPlanGate.test.ts'
+]
+
 export default defineConfig({
   plugins: [react(), iifeBundlePlugin()],
   resolve: {
@@ -17,8 +36,15 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    exclude: ['**/node_modules/**', '**/dist/**', 'tests/gui-e2e/**'],
+    // Each project extends this config; vite concatenates arrays when it
+    // merges, so include and exclude live only on the projects.
+    projects: [
+      { extends: true, test: { name: 'unit', include: TEST_INCLUDE, exclude: [...TEST_EXCLUDE, ...PTY_SUITES] } },
+      {
+        extends: true,
+        test: { name: 'pty', include: PTY_SUITES, exclude: TEST_EXCLUDE, sequence: { groupOrder: 1 } }
+      }
+    ],
     setupFiles: ['tests/setup.ts'],
     testTimeout: 30_000,
     /**

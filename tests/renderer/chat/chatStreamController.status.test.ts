@@ -220,6 +220,80 @@ describe('createChatStreamController', () => {
     expect(controller.incomplete).toBeNull()
     expect(controller.error).toBeNull()
   })
+  it('a run that recovered from a cut-off reply is not left incomplete (live and reload)', () => {
+    const events = [
+      { at: '2026-10-09T10:00:00.000Z', event: { type: 'status', runId: 'r1', status: 'running' } },
+      {
+        at: '2026-10-09T10:00:01.000Z',
+        event: {
+          type: 'incomplete',
+          runId: 'r1',
+          reason: 'truncated',
+          step: 1,
+          message: 'Output was truncated; continuing automatically…',
+          continuing: true
+        }
+      },
+      { at: '2026-10-09T10:00:02.000Z', event: { type: 'status', runId: 'r1', status: 'done' } }
+    ]
+    const reloaded = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    reloaded.loadTranscript(
+      [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: 'partial', cutOff: true },
+        { role: 'assistant', content: 'done' }
+      ],
+      events as never
+    )
+    expect(reloaded.incomplete).toBeNull()
+    expect(reloaded.turnStatus).toBe('done')
+    const fragment = reloaded.items.find((i) => i.kind === 'message' && i.content === 'partial')
+    expect(fragment?.kind === 'message' ? fragment.cutOff : undefined).toBe(true)
+
+    const live = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    for (const row of events) live.handleEvent({ ...(row.event as object), invokeId: 1 } as never)
+    expect(live.incomplete).toBeNull()
+  })
+  it('a run recorded before the continuing flag clears incomplete once a later step streams', () => {
+    const reloaded = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    reloaded.loadTranscript(
+      [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: 'done' }
+      ],
+      [
+        { at: '2026-10-09T10:00:00.000Z', event: { type: 'status', runId: 'r1', status: 'running' } },
+        {
+          at: '2026-10-09T10:00:01.000Z',
+          event: { type: 'incomplete', runId: 'r1', reason: 'truncated', step: 1, message: 'cut' }
+        },
+        {
+          at: '2026-10-09T10:00:02.000Z',
+          event: { type: 'tool_start', runId: 'r1', toolCallId: 't1', name: 'read', summary: 'a' }
+        },
+        { at: '2026-10-09T10:00:03.000Z', event: { type: 'status', runId: 'r1', status: 'done' } }
+      ] as never
+    )
+    expect(reloaded.incomplete).toBeNull()
+  })
+  it('a run that stopped on a cut-off keeps its incomplete notice', () => {
+    const reloaded = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    reloaded.loadTranscript(
+      [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: 'partial' }
+      ],
+      [
+        { at: '2026-10-09T10:00:00.000Z', event: { type: 'status', runId: 'r1', status: 'running' } },
+        {
+          at: '2026-10-09T10:00:01.000Z',
+          event: { type: 'incomplete', runId: 'r1', reason: 'truncated', step: 4, message: 'stopped' }
+        },
+        { at: '2026-10-09T10:00:02.000Z', event: { type: 'status', runId: 'r1', status: 'done' } }
+      ] as never
+    )
+    expect(reloaded.incomplete?.reason).toBe('truncated')
+  })
   it('applies agent_instance_update after parent turn ends (ignoreStreamEvents)', () => {
     const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
     controller.handleEvent({ type: 'status', runId: 'r1', status: 'running', invokeId: 1 })

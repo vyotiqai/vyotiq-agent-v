@@ -5,6 +5,7 @@ import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { isKnownFileType } from '@renderer/features/inspector/fileFacts'
 import { isLinkableWorkspacePath } from '@shared/utils/linkableWorkspacePath'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
+import { openInEditor } from '@renderer/lib/openInEditor'
 
 /*
   Paths in an answer are the thing a coding reply is most often about, so a
@@ -76,8 +77,14 @@ export function FileRef({ path, line, bare = false }: { path: string; line?: num
   return (
     <button
       type="button"
-      onClick={() => open(path, line)}
-      title={`Open ${path}${line ? ` at line ${line}` : ''}`}
+      onClick={(event) => {
+        if ((event.ctrlKey || event.metaKey) && workspacePath) {
+          void openInEditor({ workspacePath, path, ...(line ? { line } : {}) })
+          return
+        }
+        open(path, line)
+      }}
+      title={`Open ${path}${line ? ` at line ${line}` : ''}${workspacePath ? ' · Ctrl+click: in your editor' : ''}`}
       data-code-chip
       className={
         bare

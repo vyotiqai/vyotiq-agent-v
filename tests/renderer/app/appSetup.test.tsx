@@ -221,7 +221,7 @@ describe('App → Set up', () => {
     await waitFor(() => expect(send.disabled).toBe(false), { timeout: 5000 })
     expect(screen.getByText('Sends in ws-first')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('radio', { name: /Unattended/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /^Nothing/ }))
     fireEvent.click(send)
 
     await waitFor(() =>

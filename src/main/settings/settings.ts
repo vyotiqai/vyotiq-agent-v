@@ -100,7 +100,7 @@ function quarantineCorruptSettings(p: string, err: unknown): boolean {
     source: 'system',
     kind: 'crash',
     title: "Settings couldn't be read",
-    body: `Vyotiq started with default settings. The damaged file is kept beside them as ${basename(target)}.`,
+    body: `Agent V started with default settings. The damaged file is kept beside them as ${basename(target)}.`,
     dedupeKey: SETTINGS_QUARANTINED_DEDUPE_KEY
   })
   return true
@@ -577,6 +577,12 @@ function migratePersistedSettingsDefaults(raw: Record<string, unknown>): {
   // picked after the v6 stamp is a user choice and survives.
   if (rawVersion < 6 && raw.skinId === LEGACY_SKIN_ID) {
     next.skinId = DEFAULT_SETTINGS.skinId
+  }
+  // Before v7 "Skip the question" only applied with autonomousMode on. It is
+  // its own setting now, so a Skip stored under a switch that was off had no
+  // effect then and must not start skipping now.
+  if (rawVersion < 7 && raw.autonomousMode !== true && raw.autonomousSkipQuestions === 'skip') {
+    next.autonomousSkipQuestions = 'wait'
   }
   return { data: next, persist: true }
 }

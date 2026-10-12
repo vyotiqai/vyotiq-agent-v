@@ -115,7 +115,7 @@ describe('local dictation Whisper cache', () => {
     })
     expect(result).toEqual({ text: 'hello local' })
     expect(transcribe).toHaveBeenCalledTimes(1)
-    expect(transcribe).toHaveBeenCalledWith(Buffer.from(pcm.buffer).toString('base64'), 16000, undefined, modelId)
+    expect(transcribe).toHaveBeenCalledWith(Buffer.from(pcm.buffer).toString('base64'), 16000, undefined, modelId, undefined)
   })
 
   it('re-ensures the worker session when the utility restarted between utterances', async () => {
