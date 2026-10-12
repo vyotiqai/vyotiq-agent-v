@@ -191,8 +191,8 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0(electron@44.4.5(supports-color@7.2.0))
       '@huggingface/transformers':
-        specifier: ^4.3.0
-        version: 4.3.0(@types/node@24.13.6)
+        specifier: ^4.3.1
+        version: 4.3.1(@types/node@24.13.6)
       '@modelcontextprotocol/sdk':
         specifier: '>=1.31.0'
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.5)
@@ -1432,8 +1432,8 @@ packages:
   '@huggingface/tokenizers@0.2.0':
     resolution: {integrity: sha512-LidMHe1FpcSYH4vcSjXooda34pC0M8m1gmDOv7SQi6Iv+ib1zX7J3sHBCC9/3FPCkn2k1b55FneVqMRxrr99pg==}
 
-  '@huggingface/transformers@4.3.0':
-    resolution: {integrity: sha512-fL1A/WUZwouPrOlYxU5dzIwD2T5J781JiB2jDR8bFe5DwCj0Gfudq+NEXCMno49kQgajHA7xQkrRLJlqG1veEA==}
+  '@huggingface/transformers@4.3.1':
+    resolution: {integrity: sha512-5+voSeUCFK6PCKlY15dPhNOKq3/zOTxDN7oC+Wy9dFb1QZ0TSQomZRRy7URRK8YRuUoE9fGMQTTPC5d/pWBJhA==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -8088,7 +8088,7 @@ snapshots:
 
   '@huggingface/tokenizers@0.2.0': {}
 
-  '@huggingface/transformers@4.3.0(@types/node@24.13.6)':
+  '@huggingface/transformers@4.3.1(@types/node@24.13.6)':
     dependencies:
       '@huggingface/jinja': 0.5.10
       '@huggingface/tokenizers': 0.2.0
