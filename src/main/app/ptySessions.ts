@@ -84,7 +84,7 @@ export function resolvePtyShell(
   if (choice === 'wsl') return { file: 'wsl.exe', args: [], title: 'WSL' }
   const custom = (opts.customPath ?? '').trim().replace(/^["']|["']$/g, '')
   if (choice === 'default' && custom) return { file: custom, args: [], title: shellProgramTitle(custom) }
-  const resolved = choice === 'default' ? resolveTerminalShell(getSettings().terminalShell ?? 'auto') : choice
+  const resolved = choice === 'default' ? resolveTerminalShell(getSettings().terminalShell ?? 'auto', platform) : choice
   if (resolved === 'powershell') {
     // Prefer pwsh on PATH (same as agent terminal tool), else Windows PowerShell 5.x.
     const file = platform === 'win32' ? (commandOnPath('pwsh') ? 'pwsh' : 'powershell.exe') : 'pwsh'

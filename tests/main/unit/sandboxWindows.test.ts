@@ -191,7 +191,7 @@ describe('resolveWindowsSandboxPolicy and its labels', () => {
   })
 })
 
-describe('applyWindowsLabels and restoreWindowsLabels', () => {
+describe.skipIf(process.platform !== 'win32')('applyWindowsLabels and restoreWindowsLabels', () => {
   let root = ''
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'vyotiq-win-labels-'))
@@ -253,7 +253,7 @@ describe('applyWindowsLabels and restoreWindowsLabels', () => {
 
     await restoreWindowsLabels(ud, run)
     expect(run.mock.calls).toEqual([[[ws, '/setintegritylevel', '(OI)(CI)medium', '/C', '/Q']]])
-    expect(JSON.parse(readFileSync(join(ud, 'sandbox', 'labels.json'), 'utf8'))).toEqual({})
+    expect(JSON.parse(readFileSync(win32.join(ud, 'sandbox', 'labels.json'), 'utf8'))).toEqual({})
   })
 
   it('puts back only a removed workspace’s labels, and remembers the rest', async () => {
@@ -273,7 +273,7 @@ describe('applyWindowsLabels and restoreWindowsLabels', () => {
 
     await restoreWindowsLabels(ud, run, gone)
     expect(run.mock.calls).toEqual([[[gone, '/setintegritylevel', '(OI)(CI)medium', '/C', '/Q']]])
-    const left = JSON.parse(readFileSync(join(ud, 'sandbox', 'labels.json'), 'utf8')) as Record<string, { path: string }>
+    const left = JSON.parse(readFileSync(win32.join(ud, 'sandbox', 'labels.json'), 'utf8')) as Record<string, { path: string }>
     expect(Object.values(left).map((e) => e.path)).toEqual([kept])
   })
 })

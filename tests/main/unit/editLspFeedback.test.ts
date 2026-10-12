@@ -6,7 +6,7 @@ const err = (line: number, message: string) => ({ line, character: 0, message, s
 
 describe('edit LSP feedback', () => {
   it('targets edit and str_replace inside the workspace only', () => {
-    const ws = join('C:', 'ws')
+    const ws = process.platform === 'win32' ? join('C:', 'ws') : '/ws'
     expect(lspEditPath(ws, 'str_replace', { path: 'src/a.ts' })).toBe('src/a.ts')
     expect(lspEditPath(ws, 'edit', { path: join(ws, 'src', 'b.ts') })).toBe('src/b.ts')
     expect(lspEditPath(ws, 'edit', { path: '../outside.ts' })).toBeNull()

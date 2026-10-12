@@ -1,3 +1,4 @@
+import { realpathSync } from 'fs'
 import { canonicalizeWorkspacePath, isWindowsStylePath } from '../../shared/workspacePath'
 import { fetchRemotes, hasGitRemote, isGitRepo, readGitAheadBehind, type GitFetchOutcome } from './git'
 import { resolveGitDirs } from './repoCommandGuard'
@@ -41,10 +42,24 @@ function folderKey(path: string): string {
  * The repository's shared git folder, where the remote-tracking refs live: the
  * same for a subfolder and for every worktree of one repository. Found the way
  * git finds it, without running git; the folder itself when there is none.
+ *
+ * Realpath'd, because the same repository is spelled differently depending on
+ * who asks: a worktree's `.git` pointer carries the real path git wrote, while
+ * the caller passes its own spelling — `/var` against `/private/var` on macOS,
+ * where the two are the same directory. Without this a worktree and its parent
+ * became two repositories as far as the fetch bookkeeping goes, so each
+ * fetched, and each decided the other's refs had moved.
  */
 function repoKey(workspacePath: string): string {
   const dirs = resolveGitDirs(workspacePath)
-  return folderKey(dirs ? dirs.commonDir : workspacePath)
+  const raw = dirs ? dirs.commonDir : workspacePath
+  let real = raw
+  try {
+    real = realpathSync(raw)
+  } catch {
+    // A repository that is gone keeps its resolved spelling.
+  }
+  return folderKey(real)
 }
 
 /** @internal */

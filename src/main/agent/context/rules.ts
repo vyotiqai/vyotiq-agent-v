@@ -1,3 +1,4 @@
+import { realpathSync } from 'fs'
 import { dirname, join, relative, sep } from 'path'
 import {
   instructionImports,
@@ -10,6 +11,10 @@ import {
   type RuleFrontmatter,
   type WorkspaceRuleApplies
 } from '@shared/rules'
+import {
+  canonicalizeWorkspacePath,
+  isWindowsStylePath
+} from '@shared/utils/workspacePath'
 import {
   CACHE_TTL_MS,
   collectWorkspaceFiles,
@@ -131,7 +136,15 @@ async function pushImports(
     } catch {
       continue
     }
-    const rel = slashPath(relative(workspacePath, abs))
+    // `resolveInsideWorkspace` returns the real path, and the real root is not
+    // always spelled the way this workspace was: /var against /private/var on
+    // macOS. Relativising against the caller's spelling then produced "../ws/
+    // docs/style.md" for a file that is inside the workspace, and the guard
+    // below dropped every imported file in turn — a whole layer of rules
+    // silently missing from the prompt.
+    const realRoot = realpathSync(canonicalizeWorkspacePath(workspacePath))
+    const rel = slashPath(relative(realRoot, canonicalizeWorkspacePath(abs)))
+    if (rel.startsWith('..') || !rel) continue
     if (files.some((file) => slashPath(file.path) === rel)) continue
     const raw = await readRuleFile(abs)
     if (!raw) continue

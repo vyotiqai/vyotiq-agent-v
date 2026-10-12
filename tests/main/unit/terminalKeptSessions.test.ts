@@ -36,6 +36,10 @@ describe('kept background terminals', () => {
     } catch {
       /* Windows may hold the cwd briefly */
     }
+    // Cleared, not just removed: each test starts its own folder. One reused
+    // after a previous afterEach deleted it left `writeFileSync` writing into a
+    // directory that no longer existed, so the shell had no file to run.
+    cwd = ''
   })
 
   async function startLong(runId: string, invokeId: number): Promise<string> {
@@ -99,7 +103,7 @@ describe('kept background terminals', () => {
   }, 20_000)
 
   it('writes input to a waiting process', async () => {
-    cwd ||= mkdtempSync(join(tmpdir(), 'vyotiq-kept-'))
+    cwd = mkdtempSync(join(tmpdir(), 'vyotiq-kept-'))
     writeFileSync(
       join(cwd, 'ask.js'),
       "process.stdin.once('data', (d) => { console.log('got:' + String(d).trim()); process.exit(0) })"
