@@ -263,7 +263,16 @@ export function lowIntegrityArgv(
       finalArgs = [...finalArgs.slice(0, at), '-ExecutionPolicy', 'Bypass', '-File', file, ...finalArgs.slice(at + 2)]
     }
   }
-  const line = [bin, ...finalArgs].map(quoteWindowsArg).join(' ')
+  // Quote the program even when its path holds no space. The whole line
+  // hangs in one pair of quotes for `cmd /d /s /c "…"`, and cmd's /S rule
+  // strips that pair and finds the program only when there is a quote pair
+  // left. A space-less execPath — the CI runner's node tool cache — reached
+  // cmd as one bare token inside the careted line and failed with
+  // "The filename, directory name, or volume label syntax is incorrect.",
+  // while the identical line passed wherever the path carried a space and
+  // quoted itself under quoteWindowsArg. Reproduced with the runner's
+  // space-less node path; the always-quoted form runs green there.
+  const line = [`"${bin}"`, ...finalArgs.map(quoteWindowsArg)].join(' ')
   return {
     bin: shells.cmd,
     args: ['/d', '/s', '/c', `"${escapeForCmd(line)}"`],

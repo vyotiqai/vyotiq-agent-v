@@ -88,6 +88,19 @@ describe('lowIntegrityArgv', () => {
     ])
   })
 
+  it('quotes the program even when its path holds no space', () => {
+    const out = lowIntegrityArgv(
+      SHELLS,
+      TEMP,
+      'C:\\hostedtoolcache\\windows\\node\\24.24.0\\x64\\node.exe',
+      ['-e', 'x'],
+      { writeScript }
+    )
+    expect(out.args[3]).toBe(
+      `"${escapeForCmd('"C:\\hostedtoolcache\\windows\\node\\24.24.0\\x64\\node.exe" -e x')}"`
+    )
+  })
+
   it('puts a PowerShell 7 script in a file, since cmd cannot carry its newlines or its length', () => {
     const out = lowIntegrityArgv(SHELLS, TEMP, 'pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'one\ntwo'], { writeScript })
     expect(writeScript).toHaveBeenCalledWith('.ps1', 'one\ntwo')
