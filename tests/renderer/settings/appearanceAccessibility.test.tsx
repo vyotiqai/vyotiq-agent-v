@@ -76,7 +76,7 @@ describe('appearance accessibility settings', () => {
 
   it('shows no preset selected while a numeric scale applies', () => {
     renderAppearance({ ...baseSettings, fontScale: 1.52 })
-    const group = screen.getByRole('radiogroup', { name: 'Text size preset' })
+    const group = screen.getByRole('radiogroup', { name: 'Text size' })
     for (const radio of within(group).getAllByRole('radio')) {
       expect(radio.getAttribute('aria-checked')).toBe('false')
     }

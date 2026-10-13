@@ -122,7 +122,7 @@ export function AppearanceSection({
           {...form.appearanceMark('fontScale')}
         >
           <Segmented
-            label="Text size preset"
+            label="Text size"
             value={typeof settings.fontScale === 'string' ? settings.fontScale : ''}
             disabled={locked}
             items={FONT_SCALE_OPTIONS.map((option) => ({

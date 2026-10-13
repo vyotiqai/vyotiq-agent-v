@@ -1342,7 +1342,14 @@
 
 .tool-expand-inner {
   min-height: 0;
-  overflow: hidden;
+  /* Only the animated axis clips. The record's work rows bleed 8px into the
+     column's gutter on each side (-mx-2) so their hover fills and card borders
+     reach the same edge the WorkFold header above them does, and a box that
+     clipped both axes sat exactly on the column's content edge: it squared off
+     every row inside the fold and cut the trailing 8px off the record's right
+     side. `visible clip` keeps the height disclosure animating and lets the
+     gutter paint. */
+  overflow: visible clip;
 }
 
 @media (prefers-reduced-motion: no-preference) {

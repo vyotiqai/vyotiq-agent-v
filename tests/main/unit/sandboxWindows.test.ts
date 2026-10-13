@@ -330,15 +330,40 @@ describe('prepareAgentSandbox on Windows', () => {
   })
 })
 
-type Ran = { code: number | null; out: string }
+type Ran = { code: number | null; out: string; err: string }
+
+/**
+ * The environment a wrapped command runs in.
+ *
+ * `pnpm test:coverage` puts `NODE_V8_COVERAGE` in this process, and node writes
+ * a coverage file of its own as it exits whenever it inherits that var. A
+ * low-integrity child cannot write the folder the var names — the write fails
+ * and takes the process down with exit code 1, after the command ran exactly as
+ * asked, which reads as a broken sandbox rather than a broken harness. The
+ * child is not what this file measures, so it runs without the var at all and
+ * its exit code keeps meaning what the assertions say it means.
+ */
+function childEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key === 'NODE_V8_COVERAGE') continue
+    env[key] = value
+  }
+  return env
+}
 
 function runWrapped(wrapped: WrappedCommand, cwd: string): Promise<Ran> {
   return new Promise((resolve) => {
-    const child = spawn(wrapped.bin, wrapped.args, { cwd, windowsHide: true, ...wrappedSpawnOptions(wrapped, process.env) })
+    const child = spawn(wrapped.bin, wrapped.args, {
+      cwd,
+      windowsHide: true,
+      ...wrappedSpawnOptions(wrapped, childEnv())
+    })
     let out = ''
+    let err = ''
     child.stdout.on('data', (d: Buffer) => (out += d.toString()))
-    child.stderr.on('data', (d: Buffer) => (out += d.toString()))
-    child.on('close', (code) => resolve({ code, out }))
+    child.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    child.on('close', (code) => resolve({ code, out, err }))
   })
 }
 
