@@ -43,19 +43,22 @@ function folderKey(path: string): string {
  * same for a subfolder and for every worktree of one repository. Found the way
  * git finds it, without running git; the folder itself when there is none.
  *
- * Realpath'd, because the same repository is spelled differently depending on
- * who asks: a worktree's `.git` pointer carries the real path git wrote, while
- * the caller passes its own spelling — `/var` against `/private/var` on macOS,
- * where the two are the same directory. Without this a worktree and its parent
- * became two repositories as far as the fetch bookkeeping goes, so each
- * fetched, and each decided the other's refs had moved.
+ * Realpath'd with `realpathSync.native`, the same helper `trustKeyOf` uses,
+ * because the same repository is spelled differently depending on who asks: a
+ * worktree's `.git` pointer carries the real path git wrote, while the caller
+ * passes its own spelling — `/var` against `/private/var` on macOS, a long name
+ * against an 8.3 short one (`C:\Users\RUNNER~1\…`) on Windows. Plain
+ * `realpathSync` resolves symlinks but keeps the short spelling, so on a runner
+ * a worktree and its parent stayed two repositories as far as the fetch
+ * bookkeeping goes: each fetched, and each then told the other its refs had
+ * moved.
  */
 function repoKey(workspacePath: string): string {
   const dirs = resolveGitDirs(workspacePath)
   const raw = dirs ? dirs.commonDir : workspacePath
   let real = raw
   try {
-    real = realpathSync(raw)
+    real = realpathSync.native(raw)
   } catch {
     // A repository that is gone keeps its resolved spelling.
   }
