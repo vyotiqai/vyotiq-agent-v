@@ -335,18 +335,24 @@ type Ran = { code: number | null; out: string; err: string }
 /**
  * The environment a wrapped command runs in.
  *
- * `pnpm test:coverage` sets `NODE_V8_COVERAGE` in this process, and every child
- * inherits it and writes a coverage file of its own as it exits. A
- * low-integrity child cannot write the folder that var names: its own write
+ * `pnpm test:coverage` sets `NODE_V8_COVERAGE` in this process and every child
+ * inherits it, so each one writes a coverage file of its own as it exits. A
+ * low-integrity child cannot write the folder that var names — its own write
  * fails with `EPERM` and takes the process down with exit code 1, after the
- * command itself ran exactly as asked — which reads as a broken sandbox rather
- * than a broken harness. Pointing it at a folder the sandbox already labels
- * low lets that write land, so the exit code still means what the assertions
- * say it means.
+ * command itself ran exactly as asked, which reads as a broken sandbox rather
+ * than a broken harness. Pointing it at a folder that exists and that the
+ * sandbox has already labelled low lets the write land, so the exit code still
+ * means what the assertions say it means. The folder is made first: node names
+ * its coverage file inside that directory and fails outright when it is not
+ * there.
  */
 function childEnv(cwd: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
-  if (env.NODE_V8_COVERAGE) env.NODE_V8_COVERAGE = join(cwd, 'child-coverage')
+  if (env.NODE_V8_COVERAGE) {
+    const own = join(cwd, 'child-coverage')
+    mkdirSync(own, { recursive: true })
+    env.NODE_V8_COVERAGE = own
+  }
   return env
 }
 
