@@ -74,7 +74,8 @@ test('pause stops the index and keeps it stopped; resume finishes it', async () 
   await expect(row.getByText('Paused', { exact: true })).toBeVisible({ timeout: 20_000 })
   await row.getByRole('button', { name: /^Resume indexing/ }).click()
   await expect(row.getByText('Ready', { exact: true })).toBeVisible({ timeout: 120_000 })
-  await expect(row).toContainText(/3,00\d files/)
+  // The row counts source files only; the totals land with the finished index.
+  await expect(row).toContainText(/3,00\d source (files|file)/, { timeout: 120_000 })
   const after = await page.evaluate(async () => {
     const settings = await window.vyotiq.getSettings()
     return settings.ok ? settings.data.codeIndex.pausedPaths : null
