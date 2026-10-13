@@ -153,7 +153,9 @@ test('settings go to a file and come back; reset keeps what it says it keeps', a
   await expect.poll(() => stored(page, (s) => [s.theme, s.keepRecentTurns])).toEqual(['light', 12])
 
   await page.getByRole('button', { name: 'Reset all…' }).click()
-  await page.getByRole('button', { name: 'Reset', exact: true }).click()
+  // Scoped: each settings row carries its own ghost Reset, which otherwise
+  // makes the dialog's Reset resolve to two elements (strict mode).
+  await page.getByRole('dialog').getByRole('button', { name: 'Reset', exact: true }).click()
   await expect.poll(() => stored(page, (s) => s.theme)).toBe('system')
   // Kept: the approval choice (no trip back to Set up) and the rebound shortcut is a preference, so it's reset.
   expect(await stored(page, (s) => s.toolApprovalOnboardingDone)).toBe(true)
