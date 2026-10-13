@@ -340,6 +340,31 @@ import { dictationKeywordsFromFiles } from '../dictation/keywords'
 import { dictationFinalModelId, prepareLocalDictation } from '../dictation/local'
 import { isDictationError } from '../dictation/errors'
 import { dictationMicAccess, openMicSettings } from '../dictation/micAccess'
+import { isVoiceError } from '../voice/errors'
+import { voiceKeyStatus } from '../voice/keys'
+import { removeVoiceKey, saveVoiceKey } from '../voice/keyService'
+import { listVoices, speak, stopSpeaking } from '../voice/speaker'
+import { followVoiceRun, startVoiceSession, stopVoiceSession, voiceSessionFor } from '../voice/sessions'
+import {
+  VoiceAudioInSchema,
+  VoiceClearKeyRequestSchema,
+  VoiceMuteRequestSchema,
+  VoiceFollowRequestSchema,
+  VoicePlaybackRequestSchema,
+  VoicePttRequestSchema,
+  VoiceSessionRequestSchema,
+  VoiceStartRequestSchema,
+  type VoiceStartResult,
+  VoiceListVoicesRequestSchema,
+  VoiceSetKeyRequestSchema,
+  VoiceSpeakRequestSchema,
+  VoiceStopSpeakingRequestSchema,
+  type VoiceKeyStatus,
+  type VoiceOptionInfo,
+  type VoiceSetKeyResult,
+  type VoiceSpeakResult
+} from '../../shared/ipc/schemas/voice'
+import { voiceIpcCode } from '../../shared/voice'
 import {
   listPendingToolApprovals,
   resolveToolApproval
@@ -1866,6 +1891,179 @@ export function registerIpc(): void {
     const files = peekWorkspaceFileListCached(req.workspacePath)
     return files ? { keywords: dictationKeywordsFromFiles(files) } : {}
   }
+
+  ipcMain.handle(IPC.voiceKeyStatus, async (event): Promise<IpcResult<VoiceKeyStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(voiceKeyStatus())
+    } catch (err) {
+      return failFrom(err, IPC.voiceKeyStatus)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceSetKey, async (event, raw): Promise<IpcResult<VoiceSetKeyResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSetKeyRequestSchema.parse(raw)
+      return ok(await saveVoiceKey(req.vendor, req.key))
+    } catch (err) {
+      // A refused key is an answer for the row to show, not a handler fault.
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceSetKey)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceClearKey, async (event, raw): Promise<IpcResult<VoiceKeyStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceClearKeyRequestSchema.parse(raw)
+      return ok(await removeVoiceKey(req.vendor))
+    } catch (err) {
+      return failFrom(err, IPC.voiceClearKey)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceSpeak, async (event, raw): Promise<IpcResult<VoiceSpeakResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSpeakRequestSchema.parse(raw)
+      const sender = event.sender
+      return ok(
+        speak(
+          req,
+          {
+            audio: (chunk) => {
+              if (!sender.isDestroyed()) sender.send(IPC.voiceAudioOut, chunk)
+            },
+            end: (utteranceId, error) => {
+              if (!sender.isDestroyed()) sender.send(IPC.voiceSpeakEnd, { utteranceId, ...(error ? { error } : {}) })
+            }
+          },
+          getSettings().voice
+        )
+      )
+    } catch (err) {
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceSpeak)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceStopSpeaking, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      stopSpeaking(VoiceStopSpeakingRequestSchema.parse(raw ?? {}).utteranceId)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceStopSpeaking)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceListVoices, async (event, raw): Promise<IpcResult<VoiceOptionInfo[]>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceListVoicesRequestSchema.parse(raw)
+      return ok(await listVoices(req.provider, req.refresh))
+    } catch (err) {
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceListVoices)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceStart, async (event, raw): Promise<IpcResult<VoiceStartResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceStartRequestSchema.parse(raw ?? {})
+      // The open workspace's names, so "run agent" can come out as runAgent; only from a list already walked.
+      const files =
+        req.workspacePath && isOpenWorkspace(req.workspacePath) ? peekWorkspaceFileListCached(req.workspacePath) : null
+      const keyterms = files ? dictationKeywordsFromFiles(files).slice(0, 100) : []
+      const sessionId = await startVoiceSession(
+        event.sender,
+        { events: IPC.voiceEvent, audio: IPC.voiceAudioOut },
+        keyterms,
+        req.workspacePath ?? null
+      )
+      return ok({ sessionId })
+    } catch (err) {
+      if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
+      return failFrom(err, IPC.voiceStart)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceStop, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSessionRequestSchema.parse(raw)
+      if (voiceSessionFor(event.sender.id, req.sessionId)) await stopVoiceSession(req.sessionId)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceStop)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceAudio, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    const parsed = VoiceAudioInSchema.safeParse(raw)
+    if (!parsed.success) return fail('Invalid audio')
+    // Hot path (~8 a second): no logging, no throw.
+    voiceSessionFor(event.sender.id, parsed.data.sessionId)?.pushAudio(parsed.data.pcm)
+    return ok(true)
+  })
+
+  ipcMain.handle(IPC.voicePtt, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoicePttRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.ptt(req.down)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voicePtt)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceMute, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceMuteRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.setMuted(req.muted)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceMute)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceFollow, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceFollowRequestSchema.parse(raw)
+      followVoiceRun(event.sender.id, req.sessionId, req.runId)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceFollow)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceInterrupt, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceSessionRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.interruptSpeech()
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceInterrupt)
+    }
+  })
+
+  ipcMain.handle(IPC.voicePlayback, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoicePlaybackRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.playback(req.contextId, req.phase)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voicePlayback)
+    }
+  })
 
   ipcMain.handle(IPC.dictationMicAccess, async (event): Promise<IpcResult<DictationMicAccess>> => {
     if (!senderOk(event)) return fail('Invalid sender')

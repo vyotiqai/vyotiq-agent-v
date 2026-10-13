@@ -12,6 +12,9 @@ import {
   UpdaterStatePayloadSchema,
   DictationRuntimeStatusSchema,
   DictationLiveEventSchema,
+  VoiceAudioOutSchema,
+  VoiceEventSchema,
+  VoiceSpeakEndSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
   ToolCatalogResultSchema,
@@ -278,6 +281,50 @@ const api: VyotiqApi = {
   dictationDeleteCache: (payload) => ipcRenderer.invoke(IPC.dictationDeleteCache, payload),
   dictationMicAccess: () => ipcRenderer.invoke(IPC.dictationMicAccess),
   dictationOpenMicSettings: () => ipcRenderer.invoke(IPC.dictationOpenMicSettings),
+  voiceKeyStatus: () => ipcRenderer.invoke(IPC.voiceKeyStatus),
+  voiceSetKey: (payload) => ipcRenderer.invoke(IPC.voiceSetKey, payload),
+  voiceClearKey: (payload) => ipcRenderer.invoke(IPC.voiceClearKey, payload),
+  voiceSpeak: (payload) => ipcRenderer.invoke(IPC.voiceSpeak, payload),
+  voiceStopSpeaking: (payload) => ipcRenderer.invoke(IPC.voiceStopSpeaking, payload),
+  voiceListVoices: (payload) => ipcRenderer.invoke(IPC.voiceListVoices, payload),
+  voiceStart: (payload) => ipcRenderer.invoke(IPC.voiceStart, payload),
+  voiceStop: (payload) => ipcRenderer.invoke(IPC.voiceStop, payload),
+  voiceAudio: (payload) => ipcRenderer.invoke(IPC.voiceAudio, payload),
+  voicePtt: (payload) => ipcRenderer.invoke(IPC.voicePtt, payload),
+  voiceMute: (payload) => ipcRenderer.invoke(IPC.voiceMute, payload),
+  voiceFollow: (payload) => ipcRenderer.invoke(IPC.voiceFollow, payload),
+  voicePlayback: (payload) => ipcRenderer.invoke(IPC.voicePlayback, payload),
+  voiceInterrupt: (payload) => ipcRenderer.invoke(IPC.voiceInterrupt, payload),
+  onVoiceEvent: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceEventSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceEvent, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceEvent, listener)
+    }
+  },
+  onVoiceAudioOut: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceAudioOutSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceAudioOut, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceAudioOut, listener)
+    }
+  },
+  onVoiceSpeakEnd: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceSpeakEndSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceSpeakEnd, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceSpeakEnd, listener)
+    }
+  },
   onDictationStatus: (handler) => {
     const listener = (_: IpcRendererEvent, status: unknown): void => {
       const parsed = DictationRuntimeStatusSchema.safeParse(status)

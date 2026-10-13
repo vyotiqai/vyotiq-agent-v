@@ -51,6 +51,7 @@ import {
   McpRuntimeRequirementSchema,
   McpTransportSchema
 } from './marketplace'
+import { DEFAULT_VOICE_SETTINGS, VoiceSettingsSchema } from './voice'
 
 export type { ThinkingEffort }
 
@@ -1090,6 +1091,8 @@ export const SettingsSchema = z.object({
   codeIndex: CodeIndexSettingsSchema.default(DEFAULT_CODE_INDEX_SETTINGS),
   /** Composer dictation engine + which local Whisper weights to use. */
   dictation: DictationSettingsSchema.default(DEFAULT_DICTATION_SETTINGS),
+  /** Voice mode: providers, voice and behaviour (docs/voice-mode.md §12). */
+  voice: VoiceSettingsSchema.default(DEFAULT_VOICE_SETTINGS),
   /**
    * "Approve low-risk tools on their own": auto-approve gated tools that are
    * not high-risk (see isAutonomousHighRiskTool). Off by default.
@@ -1204,6 +1207,7 @@ export const DEFAULT_SETTINGS: Settings = {
   marketplace: DEFAULT_MARKETPLACE_SETTINGS,
   codeIndex: DEFAULT_CODE_INDEX_SETTINGS,
   dictation: DEFAULT_DICTATION_SETTINGS,
+  voice: DEFAULT_VOICE_SETTINGS,
   autonomousMode: false,
   autonomousSkipQuestions: 'wait',
   storage: DEFAULT_STORAGE_SETTINGS,

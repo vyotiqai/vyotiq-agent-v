@@ -918,7 +918,7 @@ function validateEndpointUrl(raw: string, kind: CustomProvider['kind']) {
   return kind === 'azure' ? validateAzureOpenAiBaseUrl(raw) : validateCustomOpenAiBaseUrl(raw)
 }
 
-type NestedSettingKey = 'notifications' | 'storage' | 'codeIndex' | 'dictation' | 'network' | 'agentSandbox'
+type NestedSettingKey = 'notifications' | 'storage' | 'codeIndex' | 'dictation' | 'voice' | 'network' | 'agentSandbox'
 
 /** Settings a workspace override can own (see `runAgentUpdate`). */
 type AgentSettingKey = keyof AgentSettingsPatch & keyof Settings

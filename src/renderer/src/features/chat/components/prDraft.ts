@@ -2,6 +2,7 @@ import type { DoneWhenCheck } from '@shared/doneWhenChecks'
 import type { UiItem } from '@shared/transcript'
 import { stripGoalMarkdown } from '@shared/utils/taskTitle'
 import { buildRecordModel } from '@renderer/features/task/recordModel'
+import { stripSpokenBlock } from '@shared/spokenSummary'
 
 /** What the PR panel writes a draft pull request from: the task's own words. */
 export type PrDraftSource = {
@@ -65,7 +66,9 @@ export function latestResultText(items: readonly UiItem[]): string {
   const runs = buildRecordModel(items as UiItem[], { running: false }).runs
   for (let i = runs.length - 1; i >= 0; i -= 1) {
     const result = runs[i]!.result
-    if (result && !result.streaming && result.text.trim()) return result.text
+    // A voice answer's spoken summary is for the ear; the PR gets the written answer.
+    const text = result && !result.streaming ? stripSpokenBlock(result.text) : ''
+    if (text.trim()) return text
   }
   return ''
 }

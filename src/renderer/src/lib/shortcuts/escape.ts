@@ -28,6 +28,9 @@ export function shouldDeferAppEscapeStop(opts?: {
   if (document.querySelector('[role="listbox"][aria-label="Slash commands"]')) return true
   if (document.querySelector('[role="listbox"][aria-label="Mentions"]')) return true
 
+  // Voice mode is on — Esc stops the agent speaking (twice ends voice mode), it does not stop the run
+  if (document.querySelector('[data-voice-bar]')) return true
+
   // An open dictation take — Esc discards it (restorable), it does not stop the run
   if (document.querySelector('[data-take-open]')) return true
 

@@ -1,5 +1,6 @@
 import { createContext } from 'react'
 import { parseArgsRecord } from '@shared/toolSummary'
+import { stripSpokenBlock } from '@shared/spokenSummary'
 import type { RecordRun, WorkItem } from './recordModel'
 import { plainLine, untick } from './record/plainText'
 import { foldRepeats } from './record/repeats'
@@ -59,7 +60,8 @@ function commandOutput(w: WorkItem): string {
 }
 
 /** Markdown — a note, a Result — as its words: what the page shows of it. */
-const shownProse = (text: string | null | undefined): string => (text ? plainLine(text) : '')
+// Find matches what's on screen: a voice answer's spoken summary is hidden there.
+const shownProse = (text: string | null | undefined): string => (text ? plainLine(stripSpokenBlock(text)) : '')
 
 /** The text a work item shows once its step is open. */
 function workText(w: WorkItem): string {

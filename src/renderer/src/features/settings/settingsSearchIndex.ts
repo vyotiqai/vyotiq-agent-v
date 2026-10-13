@@ -560,6 +560,96 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
 
   // Voice
   {
+    id: 'voice-stt',
+    title: 'Listens with',
+    keywords: ['voice mode','voice','listen','speech to text','stt','deepgram','assemblyai','elevenlabs','scribe','openai','whisper','provider','transcribe'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-stt-model',
+    title: 'Listening model',
+    keywords: ['voice mode','voice','listen','model','flux','universal','scribe'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-tts',
+    title: 'Speaks with',
+    keywords: ['voice mode','voice','speak','text to speech','tts','elevenlabs','cartesia','openai','openrouter','provider','read aloud'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-tts-model',
+    title: 'Voice model',
+    keywords: ['voice mode','voice','speak','model','flash','sonic'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-voice',
+    title: 'Voice',
+    keywords: ['voice mode','voice','speaker','preview','sound','accent','clone','elevenlabs','cartesia','alloy','nova'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-speed',
+    title: 'Speaking speed',
+    keywords: ['voice mode','voice','speed','rate','faster','slower'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-language',
+    title: 'Language',
+    keywords: ['voice mode','voice','language','english','multilingual'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-keys',
+    title: 'Keys',
+    keywords: ['voice mode','voice','api key','key','deepgram','assemblyai','elevenlabs','cartesia','openai','openrouter'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-interrupt',
+    title: 'When you talk over it',
+    keywords: ['voice mode','voice','interrupt','barge in','talk over','steer','redirect','stop','cancel'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-patience',
+    title: 'Turn ending',
+    keywords: ['voice mode','voice','turn','pause','end of turn','patience','wait'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-progress',
+    title: 'Spoken progress',
+    keywords: ['voice mode','voice','progress','updates','narrate','cues'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-ptt-only',
+    title: 'Push to talk only',
+    keywords: ['voice mode','voice','push to talk','hold','space','noisy'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-approve',
+    title: 'Approve by voice',
+    keywords: ['voice mode','voice','approve','approval','yes','no'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-captions',
+    title: 'Captions',
+    keywords: ['voice mode','voice','captions','transcript','subtitles'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-earcons',
+    title: 'Sounds',
+    keywords: ['voice mode','voice','sounds','tones','earcons','beep'],
+    section: 'voice'
+  },
+  {
     id: 'dictation-engine',
     title: 'Runs on',
     keywords: ['dictation', 'voice', 'whisper', 'transcribe', 'speech', 'engine', 'this pc', 'local', 'offline', 'private', 'openai', 'openrouter', 'cloud'],

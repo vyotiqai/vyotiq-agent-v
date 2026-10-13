@@ -30,6 +30,32 @@ const pending = new Map<
   }
 >()
 
+/**
+ * Someone following questions as they're asked and settled — voice mode
+ * reads a question out and can answer it (docs/voice-mode.md §7.5). A
+ * watcher only listens; the card stays the way to answer.
+ */
+export type AgentQuestionWatcher = {
+  asked: (request: AgentQuestionRequest) => void
+  settled: (requestId: string, runId: string) => void
+}
+const questionWatchers = new Set<AgentQuestionWatcher>()
+
+export function watchAgentQuestions(watcher: AgentQuestionWatcher): () => void {
+  questionWatchers.add(watcher)
+  return () => questionWatchers.delete(watcher)
+}
+
+function tellQuestionWatchers(fn: (w: AgentQuestionWatcher) => void): void {
+  for (const w of [...questionWatchers]) {
+    try {
+      fn(w)
+    } catch {
+      /* a watcher's failure is its own */
+    }
+  }
+}
+
 function abortQuestionError(): Error {
   const err = new Error('Aborted')
   err.name = 'AbortError'
@@ -231,6 +257,7 @@ export function askQuestionThroughRenderer(
       pending.delete(request.requestId)
       notifyBadgeChange()
       clearWaiters()
+      tellQuestionWatchers((w) => w.settled(request.requestId, request.runId))
       resolve(answers)
     }
     const cancel = (err: Error): void => {
@@ -239,6 +266,7 @@ export function askQuestionThroughRenderer(
       pending.delete(request.requestId)
       notifyBadgeChange()
       clearWaiters()
+      tellQuestionWatchers((w) => w.settled(request.requestId, request.runId))
       reject(err)
     }
     function onAbort(): void {
@@ -275,6 +303,7 @@ export function askQuestionThroughRenderer(
       })
     }, AGENT_QUESTION_HEARTBEAT_MS)
     sender(request)
+    tellQuestionWatchers((w) => w.asked(request))
   })
 }
 
@@ -282,4 +311,5 @@ export function askQuestionThroughRenderer(
 export function resetAgentQuestionForTests(): void {
   senders.clear()
   pending.clear()
+  questionWatchers.clear()
 }

@@ -60,6 +60,10 @@ import { useComposerAudio, isAudioFile, MAX_AUDIO_FILES } from './useComposerAud
 import { useTake } from './take/useTake'
 import { TakeStrip } from './take/TakeStrip'
 import { MicControl } from './take/MicControl'
+import { VoiceBar } from '@renderer/features/voice/VoiceBar'
+import { VoiceModeButton } from '@renderer/features/voice/VoiceModeButton'
+import { beginVoiceHandoff, cancelVoiceHandoff, useVoiceMode } from '@renderer/features/voice/voiceMode'
+import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
 import { useComposerModels } from './useComposerModels'
 import { deriveModelReadiness, modelReadinessBlocksSend, modelReadinessSendReason } from './modelReadiness'
 import { ModelReadinessBanner } from './ModelReadinessBanner'
@@ -1175,7 +1179,47 @@ export function Composer({
 
   const isInline = variant === 'inline'
   const isLine = variant === 'line'
+  // Voice mode (docs/voice-mode.md §13): this line's own id, stable across its task getting a run id.
+  const voiceOwner = useId()
+  const voice = useVoiceMode()
   const isBrief = variant === 'brief'
+  const voiceOn = (isLine || isBrief) && voice.owner === voiceOwner
+  const runningRef = useRef(running)
+  runningRef.current = running
+  const runIdRef = useRef(activeRunId ?? null)
+  runIdRef.current = activeRunId ?? null
+  const voiceTarget: VoiceRunTarget = isBrief
+    ? {
+        // New task (§13.5, D-30): what you say starts the task, with the
+        // brief's checks, folders and attachments, after anything typed.
+        brief: true,
+        running: () => false,
+        runId: () => null,
+        send: async (spoken) => {
+          if (readinessBlocksSend) return false
+          const typed = text.trim() ? `${text.trimEnd()}\n\n` : ''
+          beginVoiceHandoff(voiceOwner)
+          const sent = await sendWithMentions(
+            `${typed}${spoken}`,
+            images.length ? images : undefined,
+            files.length ? files : undefined
+          )
+          if (sent === false) {
+            cancelVoiceHandoff(voiceOwner)
+            return false
+          }
+          setText('')
+          if (attachmentKey) clearComposerAttachments(attachmentKey)
+          return true
+        },
+        stop: () => {}
+      }
+    : {
+        running: () => runningRef.current,
+        runId: () => runIdRef.current,
+        send: async (text, opts) => Boolean(await onSend(text, undefined, undefined, opts.steer ? { steer: true } : undefined)),
+        stop: () => onStop?.()
+      }
 
   useLayoutEffect(() => {
     if (isInline) taRef.current?.focus()
@@ -1571,6 +1615,16 @@ export function Composer({
               screenshot={browserScreenshot}
             />
             <MicControl take={take} disabled={inputLocked} />
+            {(isLine || isBrief) && workspacePath ? (
+              <VoiceModeButton
+                owner={voiceOwner}
+                workspacePath={workspacePath}
+                // A dictation take owns the mic and the field until it's inserted or discarded.
+                disabled={inputLocked || takeOpen}
+                placement={isBrief ? 'down' : 'up'}
+                onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
+              />
+            ) : null}
             {/* Line only, and only while a run is live: Stop sits next to the one
                 action so the row still ends in it. Esc does the same thing. */}
             {isLine && running && onStop ? (
@@ -1697,6 +1751,17 @@ export function Composer({
             : undefined
         }
         onStart={() => submit()}
+        voice={
+          voiceOn ? (
+            <VoiceBar
+              owner={voiceOwner}
+              workspacePath={workspacePath ?? null}
+              target={voiceTarget}
+              idleCaption="Listening. Say what you want done."
+              onOpenVoiceSettings={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('voice') : undefined}
+            />
+          ) : null
+        }
         onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
         onOpenRules={slashHandlers?.onOpenRules}
         headerActions={briefHeaderActions}
@@ -1843,26 +1908,39 @@ export function Composer({
               </ul>
             ) : null}
 
-            <StructureStrip structure={structure} />
+            {voiceOn ? (
+              // Voice mode: the bar takes the box's place; the record stays above it.
+              <VoiceBar
+                owner={voiceOwner}
+                workspacePath={workspacePath ?? null}
+                target={voiceTarget}
+                onOpenVoiceSettings={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('voice') : undefined}
+                className={COMPOSER_BOX_BLEED}
+              />
+            ) : (
+              <>
+                <StructureStrip structure={structure} />
 
-            <form
-              onSubmit={submit}
-              className={cn(
-                'rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong',
-                COMPOSER_BOX_BLEED
-              )}
-              data-composer-shell
-              onDragOver={onAttachmentDragOver}
-              onDrop={onAttachmentDrop}
-            >
-              {fileInput}
-              {readiness ? <div className="px-3 pt-3">{readiness}</div> : null}
-              <div className="px-3 pt-2.5">{field}</div>
-              {attachments ? <div className="px-3 pt-2">{attachments}</div> : null}
-              <div className="pb-1 pl-3 pr-2 @container">
-                {controls(lineAction, { context: true, takeSendLabel: running ? 'Queue' : 'Send' })}
-              </div>
-            </form>
+                <form
+                  onSubmit={submit}
+                  className={cn(
+                    'rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong',
+                    COMPOSER_BOX_BLEED
+                  )}
+                  data-composer-shell
+                  onDragOver={onAttachmentDragOver}
+                  onDrop={onAttachmentDrop}
+                >
+                  {fileInput}
+                  {readiness ? <div className="px-3 pt-3">{readiness}</div> : null}
+                  <div className="px-3 pt-2.5">{field}</div>
+                  {attachments ? <div className="px-3 pt-2">{attachments}</div> : null}
+                  <div className="pb-1 pl-3 pr-2 @container">
+                    {controls(lineAction, { context: true, takeSendLabel: running ? 'Queue' : 'Send' })}
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
 

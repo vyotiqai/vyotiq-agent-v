@@ -53,6 +53,7 @@ import { RecordProse } from './RecordProse'
 import { foldRepeats, type RepeatRun } from './repeats'
 import { TickedText } from './TickedText'
 import { plainLine } from './plainText'
+import { stripSpokenBlock } from '@shared/spokenSummary'
 
 export { plainLine, plainProse } from './plainText'
 
@@ -530,12 +531,12 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
     case 'note':
       return item.item.cutOff ? (
         <div>
-          <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+          <RecordProse text={stripSpokenBlock(item.text)} streaming={Boolean(item.item.streaming)} tone="secondary" />
           {/* Quiet: the run recovered on its own; this only explains the fragment. */}
           <p className="mt-0.5 text-caption text-tertiary">Cut off at the output limit</p>
         </div>
       ) : (
-        <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+        <RecordProse text={stripSpokenBlock(item.text)} streaming={Boolean(item.item.streaming)} tone="secondary" />
       )
     case 'thought':
       return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought id={item.id} text={item.text} />

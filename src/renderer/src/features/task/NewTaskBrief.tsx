@@ -90,7 +90,8 @@ export function NewTaskBrief({
   extraRoots = NO_FOLDERS,
   onAddFolder,
   onExtraRootsChange,
-  compare
+  compare,
+  voice
 }: {
   workspacePath: string | null
   targets?: NewTaskTargets
@@ -141,6 +142,11 @@ export function NewTaskBrief({
    * tasks, each in its own worktree, to compare side by side. Absent hides it.
    */
   compare?: { options: readonly CompareModelOption[]; value: string | null; onChange: (next: string | null) => void }
+  /**
+   * Voice mode's bar, while it's open here: it takes the brief's place, and
+   * the first thing said starts the task (docs/voice-mode.md §13.5).
+   */
+  voice?: ReactNode
 }) {
   const [draftCheck, setDraftCheck] = useState('')
 
@@ -219,6 +225,8 @@ export function NewTaskBrief({
         <div className="mx-auto min-h-full w-full max-w-[1180px] px-5 pb-16 pt-10 @[720px]:px-8 @[900px]:pt-16 @[1100px]:grid @[1100px]:grid-cols-[minmax(0,1fr)_296px] @[1100px]:items-start @[1100px]:gap-x-10 @[1400px]:pt-24">
           <div className="mx-auto w-full max-w-[780px]">
             {banners}
+            {voice ?? (
+              <>
             <div
               className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
               data-brief
@@ -342,6 +350,8 @@ export function NewTaskBrief({
                 {approval ? <ApprovalNote approval={approval} onOpenSettings={onOpenSettings} /> : null}
               </div>
             </div>
+              </>
+            )}
           </div>
           {/* The rail: what the agent will see, where you change it. Beside
               the brief on a wide column; under it on a narrow one, where the

@@ -70,6 +70,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   find: 'Find in this view',
   refresh: 'Refresh changes or PR',
   dictation: 'Dictation',
+  voiceMode: 'Voice mode: start / end',
   cycleMode: 'Switch Ask / Agent mode',
   panelTerminal: 'Terminal panel',
   panelChanges: 'Changes panel',

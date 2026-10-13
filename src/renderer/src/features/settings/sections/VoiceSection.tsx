@@ -21,6 +21,7 @@ import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
+import { VoiceModeSettings } from './VoiceModeSettings'
 
 /*
   Settings → Voice. Where the audio goes (never disabled — choosing This PC
@@ -336,6 +337,7 @@ export function VoiceSection({
 
   return (
     <SettingsStack>
+      <VoiceModeSettings form={form} secrets={secrets} />
       <SettingsGroup title="Dictation" description="Speak a brief or an instruction; the words land at the cursor.">
         <SettingsField
           id="dictation-engine"

@@ -208,6 +208,28 @@ import type {
   ToolSecretName,
   ToolSecretStatus
 } from './ipc'
+import type {
+  VoiceFollowRequest,
+  VoicePlaybackRequest,
+  VoiceAudioIn,
+  VoiceEvent,
+  VoiceMuteRequest,
+  VoicePttRequest,
+  VoiceSessionRequest,
+  VoiceStartRequest,
+  VoiceStartResult,
+  VoiceAudioOut,
+  VoiceClearKeyRequest,
+  VoiceKeyStatus,
+  VoiceListVoicesRequest,
+  VoiceOptionInfo,
+  VoiceSetKeyRequest,
+  VoiceSetKeyResult,
+  VoiceSpeakEnd,
+  VoiceSpeakRequest,
+  VoiceSpeakResult,
+  VoiceStopSpeakingRequest
+} from './ipc/schemas/voice'
 import type { GoogleAdcStatus, ProxyStatus } from './domain/network'
 
 /** Host OS from preload `process.platform`. */
@@ -496,6 +518,32 @@ export interface VyotiqApi {
   dictationMicAccess: () => Promise<IpcResult<DictationMicAccess>>
   /** Open the OS page where microphone access is switched on. */
   dictationOpenMicSettings: () => Promise<IpcResult<boolean>>
+  /** Which voice-mode vendor keys are set (never the keys themselves). */
+  voiceKeyStatus: () => Promise<IpcResult<VoiceKeyStatus>>
+  /** Check a vendor key with the vendor, then save it. A rejected key fails with `voice:rejected_key`. */
+  voiceSetKey: (payload: VoiceSetKeyRequest) => Promise<IpcResult<VoiceSetKeyResult>>
+  voiceClearKey: (payload: VoiceClearKeyRequest) => Promise<IpcResult<VoiceKeyStatus>>
+  /** Speak text aloud (a voice preview, or an answer's spoken summary); stops anything already speaking. */
+  voiceSpeak: (payload: VoiceSpeakRequest) => Promise<IpcResult<VoiceSpeakResult>>
+  voiceStopSpeaking: (payload: VoiceStopSpeakingRequest) => Promise<IpcResult<boolean>>
+  /** Voices for a speaking provider, fetched with your key. */
+  voiceListVoices: (payload: VoiceListVoicesRequest) => Promise<IpcResult<VoiceOptionInfo[]>>
+  onVoiceAudioOut: (handler: (chunk: VoiceAudioOut) => void) => () => void
+  onVoiceSpeakEnd: (handler: (end: VoiceSpeakEnd) => void) => () => void
+  /** Open a live voice session for this window (one at a time). */
+  voiceStart: (payload: VoiceStartRequest) => Promise<IpcResult<VoiceStartResult>>
+  voiceStop: (payload: VoiceSessionRequest) => Promise<IpcResult<boolean>>
+  /** One chunk of 16 kHz mono mic audio. */
+  voiceAudio: (payload: VoiceAudioIn) => Promise<IpcResult<boolean>>
+  voicePtt: (payload: VoicePttRequest) => Promise<IpcResult<boolean>>
+  voiceMute: (payload: VoiceMuteRequest) => Promise<IpcResult<boolean>>
+  onVoiceEvent: (handler: (event: VoiceEvent) => void) => () => void
+  /** Speak the replies of this run (after sending it a voice turn). */
+  voiceFollow: (payload: VoiceFollowRequest) => Promise<IpcResult<boolean>>
+  /** The player started or drained a reply's audio. */
+  voicePlayback: (payload: VoicePlaybackRequest) => Promise<IpcResult<boolean>>
+  /** Stop speaking now (the run carries on). */
+  voiceInterrupt: (payload: VoiceSessionRequest) => Promise<IpcResult<boolean>>
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

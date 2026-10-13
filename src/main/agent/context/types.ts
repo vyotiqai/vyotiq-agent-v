@@ -122,6 +122,11 @@ export type AssembleInput = {
   /** Default answer length (settings.responseVerbosity). */
   responseVerbosity?: ResponseVerbosity
   modeSection?: string
+  /**
+   * A helper instance's run: its answer goes back to the parent agent, not to
+   * a person's ears, so it never gets the voice_reply section (docs/voice-mode.md §7.2).
+   */
+  inlineInstance?: boolean
   plan?: string
   /**
    * Keep the `<plan>` inner text equal to on-disk plan.md (no heading strip,

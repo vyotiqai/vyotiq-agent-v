@@ -43,6 +43,7 @@ import {
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { requestCommitBox } from '@renderer/features/chat/commitRequest'
 import { RecordOpenContext, runOpenKey } from './recordFind'
+import { stripSpokenBlock } from '@shared/spokenSummary'
 import { formatRunActivityLabel } from '@renderer/features/chat/utils/runActivity'
 
 const WORKING = formatRunActivityLabel({ kind: 'working' })
@@ -586,7 +587,7 @@ function RunBody({
       <RunViews run={run} />
       {run.result ? (
         <ResultRow
-          text={run.result.text}
+          text={stripSpokenBlock(run.result.text)}
           streaming={run.result.streaming}
           checks={live ? [] : checks}
           files={changedFiles}
@@ -621,6 +622,7 @@ function RunBody({
         checks={checks}
         summary={run.result && !run.result.streaming ? run.result.text : undefined}
         // An error row already says the run failed, with what to do; the receipt does not repeat it.
+        readAloudId={`answer:${sessionRunId ?? 'record'}:${run.n}`}
         outcome={state === 'stopped' || (state === 'failed' && !runShowsError) ? state : undefined}
         outcomeDetail={stopped}
         onRerun={rerun}
@@ -674,8 +676,10 @@ function HistoryRun({
   // first line follows, quieter, without the colon that led into a list.
   const askedLine = run.text.split('\n').find((l) => l.trim())
   const asked = askedLine != null ? plainLine(askedLine) : run.command ? `/${run.command}` : ''
-  const answerLine = run.result ? answerHeadline(run.result.text) : undefined
-  const answer = answerLine != null ? plainLine(answerLine).replace(/\s*:\s*$/, '') : ''
+  // A spoken summary before the model turned to tools is for the ear, not the record.
+  const answerLine = run.result ? stripSpokenBlock(run.result.text) : undefined
+  const answerHead = answerLine != null ? answerHeadline(answerLine) : undefined
+  const answer = answerHead != null ? plainLine(answerHead).replace(/\s*:\s*$/, '') : ''
   return (
     <div data-history-run={run.n}>
       <button

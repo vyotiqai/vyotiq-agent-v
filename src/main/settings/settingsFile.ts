@@ -84,6 +84,7 @@ export const EXPORTED_KEYS: readonly Key[] = [
   'confirmQuitWithRunningTasks',
   'codeIndex',
   'dictation',
+  'voice',
   'autonomousMode',
   'autonomousSkipQuestions',
   'storage',

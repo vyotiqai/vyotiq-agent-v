@@ -17,6 +17,8 @@ import {
   turnCost
 } from '@renderer/features/chat/utils/messageFooterStats'
 import { RecordRow } from './RecordLayout'
+import { stripSpokenBlock } from '@shared/spokenSummary'
+import { ReadAloudButton } from '@renderer/features/voice/ReadAloudButton'
 
 /** `detail`: telemetry (tokens, speed, cache) the line keeps for its hover, not its text. */
 export type ReceiptPart = { key: string; text: string; title: string; detail?: true }
@@ -80,7 +82,8 @@ export function ReceiptLine({
   outcomeDetail,
   actions,
   summary,
-  onRerun
+  onRerun,
+  readAloudId
 }: {
   usage: StepUsageTotals | null
   startedAt: number | null
@@ -100,6 +103,8 @@ export function ReceiptLine({
   summary?: string
   /** The latest finished run: run its instruction again. */
   onRerun?: () => void
+  /** Offer to read the result aloud; the id tells this answer's button from the others. */
+  readAloudId?: string
 }) {
   const now = useSharedNow(live && startedAt != null)
   const end = live ? now : endedAt
@@ -179,6 +184,7 @@ export function ReceiptLine({
                 />
               </>
             ) : null}
+            {copyable && readAloudId ? <ReadAloudButton text={summary!} owner={readAloudId} /> : null}
             {copyable ? (
               <IconButton icon="copy" label="Copy the summary" size="sm" tone="muted" onClick={() => copySummary(summary!)} />
             ) : null}
@@ -191,7 +197,8 @@ export function ReceiptLine({
 
 /** The result as it reads, markdown and all, onto the clipboard. */
 function copySummary(text: string): void {
-  void copyText(text.trim()).then((ok) => {
+  // A voice answer's spoken summary is for the ear; the copy is the written answer.
+  void copyText(stripSpokenBlock(text).trim()).then((ok) => {
     if (ok) pushToast('Summary copied', { icon: 'copy' })
     else pushToast('Could not copy the summary.', 'error')
   })
