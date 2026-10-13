@@ -165,5 +165,7 @@ describe('voice mode on the New task brief', () => {
     void handleVoiceTurn(turn('rename the config loader'))
     await vi.waitFor(() => expect(onSend).toHaveBeenCalled())
     expect((onSend.mock.calls[0] as unknown[])[0]).toBe('rename the config loader')
+    // Marked as said out loud, so its reply opens with a spoken summary (D-32).
+    expect((onSend.mock.calls[0] as unknown[])[3]).toEqual({ voice: true })
   })
 })

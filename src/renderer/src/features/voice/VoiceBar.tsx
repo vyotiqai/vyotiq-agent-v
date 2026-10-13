@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { sttEntry } from '@shared/voice'
+import { sttEntry, ttsEntry } from '@shared/voice'
 import { VOICE_STATE_LABEL } from '@shared/voiceSession'
 import { Icon } from '@renderer/lib/icons'
 import { Button, cn } from '@renderer/lib/ui'
@@ -167,7 +167,24 @@ export function VoiceBar({
   const fellBackFrom = v.listenerFellBackFrom ? sttEntry(v.listenerFellBackFrom) : null
   const problem = v.state === 'error' && v.error ? voiceProblem(v.error) : null
   // An error outside the error state is always the speaking side: the listener's errors end the session.
-  const voiceTrouble = v.state !== 'error' && v.error ? speakingProblem(v.error) : null
+  // No speaking provider at all is known from the start: say so then, not at the first reply.
+  const voiceTrouble =
+    v.state === 'error' || v.state === 'off'
+      ? null
+      : v.error
+        ? speakingProblem(v.error)
+        : v.speaker === null
+          ? speakingProblem('no_key')
+          : null
+  const speaker = v.speaker ? ttsEntry(v.speaker) : null
+  const speakerFellBackFrom = v.speakerFellBackFrom ? ttsEntry(v.speakerFellBackFrom) : null
+  // Never a silent fallback on either side (§9.5): the token says who listens and who speaks instead.
+  const fallbackNote = [
+    fellBackFrom && listener ? `Listening with ${listener.label}: no ${fellBackFrom.label} key.` : null,
+    speakerFellBackFrom && speaker ? `Speaking with ${speaker.label}: no ${speakerFellBackFrom.label} key.` : null
+  ]
+    .filter(Boolean)
+    .join(' ')
   const level = v.state === 'speaking' ? () => controller.speakingLevel() : () => controller.snapshot.micLevel
 
   // Caption: your words while you talk; the agent's while it speaks; else what's happening.
@@ -223,18 +240,18 @@ export function VoiceBar({
         {listener ? (
           <span
             className="flex shrink-0 items-center gap-1 text-caption text-tertiary"
-            // Never a silent fallback (§9.5): the listener you picked had no key, so say which one is in use.
-            title={fellBackFrom ? `Listening with ${listener.label}: no ${fellBackFrom.label} key. ${listener.privacy}` : listener.privacy}
+            title={fallbackNote ? `${fallbackNote} ${listener.privacy}` : listener.privacy}
             data-voice-engine={listener.id}
             data-voice-fell-back={fellBackFrom?.id}
+            data-voice-speaker-fell-back={speakerFellBackFrom?.id}
           >
-            {fellBackFrom ? (
+            {fallbackNote ? (
               <Icon name="warningCircle" size={12} className="text-warning" />
             ) : (
               <Icon name={local ? 'lock' : 'cloud'} size={12} />
             )}
             {listener.label}
-            {fellBackFrom ? <span className="sr-only">{`, instead of ${fellBackFrom.label}, which has no key`}</span> : null}
+            {fallbackNote ? <span className="sr-only">{`. ${fallbackNote}`}</span> : null}
           </span>
         ) : null}
       </div>

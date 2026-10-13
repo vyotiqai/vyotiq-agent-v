@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto'
 import {
   resolveModel,
   resolveSttProvider,
+  resolveTtsProvider,
   sttEntry,
   type SttProviderId,
   type VoiceErrorCode,
@@ -33,6 +34,14 @@ import { answerableByVoice, describeQuestion, questionAnswer } from './questionB
 export const RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 4000] as const
 /** Audio kept while reconnecting, at most (16 kHz samples): ten seconds. */
 const RING_SAMPLES = 16000 * 10
+/**
+ * Barge-in in two steps (§6.2, D-33): the agent's voice dips the moment you
+ * seem to start talking, and stops only once it's sure — this much voiced
+ * audio, or words from the listener that aren't the agent's own.
+ */
+export const DUCK_CONFIRM_MS = 600
+/** A dip that isn't confirmed by then was a cough, a click or an echo: the voice comes back. */
+export const DUCK_GIVE_UP_MS = 1200
 /** Keep a muted listener's connection alive this often. */
 const KEEPALIVE_MS = 5000
 
@@ -124,6 +133,8 @@ export class VoiceSession {
   private question: AgentQuestionRequest | null = null
   /** What the agent just said, to recognise it coming back through the mic (§6.4). */
   private readonly echo = new EchoGuard()
+  /** The agent's voice is dipped while we find out whether you're really talking. */
+  private duck: { since: number } | null = null
 
   constructor(private readonly deps: VoiceSessionDeps) {
     this.id = (deps.newId ?? randomUUID)()
@@ -201,7 +212,11 @@ export class VoiceSession {
     if (!this.playing.delete(contextId) || this.playing.size > 0) return
     this.echo.setPlaying(false, this.now())
     this.pause.setAgentSpeaking(false)
+    const wasDucked = this.duck !== null
+    if (wasDucked) this.endDuck()
     this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
+    // The agent finished while you might have been talking: if you still are, it's your turn.
+    if (wasDucked && this.pause.voicedMs > 0) this.onSpeechStart()
   }
 
   get state(): VoiceSessionState {
@@ -260,10 +275,18 @@ export class VoiceSession {
     this.stt = session
     this.sttId = entry.id
     this.turnDetection = entry.caps.turnDetection
+    // Who speaks, too: never a silent fallback on either side (§9.5).
+    const speaking = this.deps.openTts ? resolveTtsProvider(settings.ttsProvider, this.deps.keys()) : null
     this.emitEvent({
       kind: 'engine',
       stt: entry.id,
-      ...(resolved.fellBackFrom ? { sttFellBackFrom: resolved.fellBackFrom } : {})
+      ...(resolved.fellBackFrom ? { sttFellBackFrom: resolved.fellBackFrom } : {}),
+      ...(speaking
+        ? {
+            tts: speaking.ok ? speaking.id : null,
+            ...(speaking.ok && speaking.fellBackFrom ? { ttsFellBackFrom: speaking.fellBackFrom } : {})
+          }
+        : {})
     })
   }
 
@@ -286,6 +309,10 @@ export class VoiceSession {
       }
       // Listeners with their own turn model decide; the rest end on our pause.
       else if (!this.turnDetection && !ptt && ev.speechMs > 0) this.stt?.endTurn()
+    }
+    if (this.duck) {
+      if (this.pause.voicedMs >= DUCK_CONFIRM_MS) this.bargeIn()
+      else if (this.now() - this.duck.since > DUCK_GIVE_UP_MS) this.releaseDuck()
     }
   }
 
@@ -340,6 +367,7 @@ export class VoiceSession {
     this.unwatchApprovals = null
     this.approval = null
     this.echo.reset()
+    this.duck = null
     this.unwatchQuestions?.()
     this.unwatchQuestions = null
     this.question = null
@@ -362,8 +390,13 @@ export class VoiceSession {
         this.onSpeechStart()
         return
       case 'partial':
-        // The agent's own voice coming back isn't your caption.
-        if (this.echo.isEcho(event.text, this.now())) return
+        // The agent's own voice coming back isn't your caption, and doesn't cut it off.
+        if (this.echo.isEcho(event.text, this.now())) {
+          if (this.duck) this.releaseDuck()
+          return
+        }
+        // Words that aren't the agent's: you really are talking.
+        if (this.duck && event.text.trim()) this.bargeIn()
         if (this.deps.settings().captions) this.emitEvent({ kind: 'partial', text: event.text })
         return
       case 'final':
@@ -390,6 +423,7 @@ export class VoiceSession {
    */
   interruptSpeech(): void {
     if (this.stateValue !== 'speaking') return
+    if (this.duck) this.endDuck()
     const flushed = this.reply.interrupt()
     for (const contextId of new Set([...this.playing, ...(flushed ? [flushed] : [])])) {
       this.emitEvent({ kind: 'flush', contextId })
@@ -406,8 +440,36 @@ export class VoiceSession {
       this.dispatch({ type: 'speech_start' })
       return
     }
-    // Barge-in (§6.2): stop speaking now and clear the speakers. What happens
-    // to the run is the renderer's call when this turn ends (steer / cancel).
+    // The agent is talking: dip its voice first (D-33); `bargeIn` once it's sure.
+    if (this.playing.size > 0) {
+      if (!this.duck) {
+        this.duck = { since: this.now() }
+        this.emitEvent({ kind: 'duck', on: true })
+      }
+      return
+    }
+    this.bargeIn()
+  }
+
+  /** Not you after all: the agent's voice comes back, and the next sound starts afresh. */
+  private releaseDuck(): void {
+    if (!this.duck) return
+    this.endDuck()
+    this.pause.reset()
+  }
+
+  private endDuck(): void {
+    this.duck = null
+    this.emitEvent({ kind: 'duck', on: false })
+  }
+
+  /**
+   * Barge-in (§6.2): stop speaking now and clear the speakers. What happens
+   * to the run is the renderer's call when this turn ends (steer / cancel).
+   */
+  private bargeIn(): void {
+    if (this.duck) this.endDuck()
+    if (!AGENT_FLOOR_STATES.has(this.stateValue)) return
     const flushed = this.reply.interrupt()
     for (const contextId of new Set([...this.playing, ...(flushed ? [flushed] : [])])) {
       this.emitEvent({ kind: 'flush', contextId })
@@ -425,7 +487,12 @@ export class VoiceSession {
     this.ringSamples = 0
     // Nothing said, or only the agent's own words picked up by the mic (§6.4):
     // not a turn, and never a message to the agent.
-    if (!text || this.echo.isEcho(text, this.now())) {
+    const echo = Boolean(text) && this.echo.isEcho(text, this.now())
+    if (this.duck) {
+      if (!text || echo) this.releaseDuck()
+      else this.bargeIn()
+    }
+    if (!text || echo) {
       this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
       return
     }

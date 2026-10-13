@@ -6,7 +6,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import type { VoiceEvent } from '@shared/ipc/schemas/voice'
-import { parseVoiceIpcCode, type SttProviderId, type VoiceErrorCode } from '@shared/voice'
+import { parseVoiceIpcCode, type SttProviderId, type TtsProviderId, type VoiceErrorCode } from '@shared/voice'
 import type { VoiceSessionState } from '@shared/voiceSession'
 import { MicCaptureError, openMicCapture, type MicCapture, type OpenMicCapture } from '@renderer/lib/audio/micCapture'
 import { levelFromRms, rmsOfInt16 } from '@renderer/lib/audio/segmenter'
@@ -22,6 +22,9 @@ export type VoiceSnapshot = {
   saying: string
   listener: SttProviderId | null
   listenerFellBackFrom: SttProviderId | null
+  /** Who speaks the replies; null when nothing can (replies stay on screen), undefined before it's known. */
+  speaker?: TtsProviderId | null
+  speakerFellBackFrom: TtsProviderId | null
   /** Your mic level 0..1, for the orb. */
   micLevel: number
   error: VoiceErrorCode | null
@@ -39,6 +42,7 @@ export const IDLE_VOICE: VoiceSnapshot = {
   saying: '',
   listener: null,
   listenerFellBackFrom: null,
+  speakerFellBackFrom: null,
   micLevel: 0,
   error: null,
   reconnectAttempt: 0,
@@ -175,7 +179,11 @@ export class VoiceSessionController {
         })
         return
       case 'engine':
-        this.set({ listener: e.stt, listenerFellBackFrom: e.sttFellBackFrom ?? null })
+        this.set({
+          listener: e.stt,
+          listenerFellBackFrom: e.sttFellBackFrom ?? null,
+          ...(e.tts !== undefined ? { speaker: e.tts, speakerFellBackFrom: e.ttsFellBackFrom ?? null } : {})
+        })
         return
       case 'partial':
         this.set({ partial: e.text })
@@ -193,6 +201,9 @@ export class VoiceSessionController {
         this.sounding.delete(e.contextId)
         this.player?.cancel(e.contextId)
         this.set({ saying: '' })
+        return
+      case 'duck':
+        this.player?.duck(e.on)
         return
       case 'cue':
         this.set({ cues: this.snapshot.cues + 1 })

@@ -7,7 +7,7 @@ import { Composer } from '@renderer/features/chat/components/composer'
 import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
 import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
-import { resetVoiceModeForTests } from '@renderer/features/voice/voiceMode'
+import { resetVoiceModeForTests, startVoiceMode } from '@renderer/features/voice/voiceMode'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot } from '@renderer/features/voice/voiceSessionController'
 
 class FakeController extends VoiceSessionController {
@@ -136,6 +136,17 @@ describe('voice mode on the instruction line', () => {
     })
     await vi.waitFor(() => expect(document.querySelector('[data-voice-bar]')).toBeTruthy())
     expect(screen.queryByRole('dialog', { name: 'Talk with' })).toBeNull()
+  })
+
+  it('dictation waits while voice mode is on in another pane', async () => {
+    renderLine('/repo')
+    const mic = document.querySelector<HTMLButtonElement>('[data-take-mic]')!
+    expect(mic.disabled).toBe(false)
+    await act(() => startVoiceMode('another-pane', { workspacePath: '/repo' }))
+    const waiting = document.querySelector<HTMLButtonElement>('[data-take-mic]')!
+    expect(waiting.disabled).toBe(true)
+    // Said to screen readers on the button; the tooltip on its wrapper says it on hover.
+    expect(waiting.getAttribute('aria-description')).toBe('Voice mode is using the microphone')
   })
 
   it('has no voice button without a workspace', () => {

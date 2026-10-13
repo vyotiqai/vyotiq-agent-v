@@ -3474,7 +3474,13 @@ export function createChatStreamController(
     const content = buildUserContent(text, images, files, extras)
     const sentAt = new Date().toISOString()
     const structured = structuredFromOf(extras)
-    const user: ChatMessage = { role: 'user', content, at: sentAt, ...structured }
+    const user: ChatMessage = {
+      role: 'user',
+      content,
+      at: sentAt,
+      ...structured,
+      ...(extras?.voice ? { spoken: true as const } : {})
+    }
     const priorMessages = state.messages
     const priorTurnUsage = turnUsageSlots
     const priorTurnStatus = state.turnStatus
@@ -4098,7 +4104,13 @@ export function createChatStreamController(
       return false
     }
     const content = buildUserContent(text, images, files, extras)
-    const user: ChatMessage = { role: 'user', content, at: new Date().toISOString(), ...structuredFromOf(extras) }
+    const user: ChatMessage = {
+      role: 'user',
+      content,
+      at: new Date().toISOString(),
+      ...structuredFromOf(extras),
+      ...(extras?.voice ? { spoken: true as const } : {})
+    }
     const displayText = contentDisplayText(content)
     const preview = displayText.trim() || (uiAttachments(content).length ? uiAttachments(content)[0]!.name : 'Follow-up')
     const res = await window.vyotiq.chatFollowUp({

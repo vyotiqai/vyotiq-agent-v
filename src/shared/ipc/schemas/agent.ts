@@ -173,6 +173,11 @@ export const ChatMessageSchema = z.object({
    */
   structuredFrom: z.string().min(1).max(STRUCTURED_FROM_MAX_CHARS).optional(),
   /**
+   * Said out loud in voice mode (docs/voice-mode.md §7.2): the reply to it
+   * opens with a short spoken summary. A typed message never sets it.
+   */
+  spoken: z.literal(true).optional(),
+  /**
    * ISO timestamp: when the user sent a user message (turn-duration start);
    * when an assistant message finished streaming; when a tool result settled.
    */
@@ -2904,6 +2909,8 @@ export type ComposerSendExtras = {
   steer?: boolean
   /** The draft was rewritten by Structure: the words typed before it, kept on the message. */
   structuredFrom?: string
+  /** Said out loud in voice mode: the message is marked `spoken`. */
+  voice?: boolean
 }
 
 export function buildUserContent(

@@ -1011,13 +1011,18 @@ export function Composer({
     submitRef.current()
   }, [text])
 
+  // Voice mode (docs/voice-mode.md §13): one session per window. While it's on, dictation waits
+  // for the mic — except a take already under way, which keeps its keys until it's done.
+  const voice = useVoiceMode()
+  const takeLiveRef = useRef(false)
+  const dictationWaits = voice.owner !== null && !takeLiveRef.current
   const take = useTake({
     surface: variant,
     workspacePath,
     text,
     setText,
     secrets,
-    disabled: Boolean(disabled),
+    disabled: Boolean(disabled) || dictationWaits,
     getCaret: getDictationCaret,
     setCaret: setDictationCaret,
     isShortcutTarget: isDictationTarget,
@@ -1027,6 +1032,7 @@ export function Composer({
   })
   /** A take is writing into the field: typing, attaching and menus wait. */
   const takeOpen = take.field.locked
+  takeLiveRef.current = takeOpen
 
   // A chip from outside the field (an element picked in the Browser tab) lands
   // at the end of this task's draft. Focus stays where it is, so picking can go on.
@@ -1181,7 +1187,6 @@ export function Composer({
   const isLine = variant === 'line'
   // Voice mode (docs/voice-mode.md §13): this line's own id, stable across its task getting a run id.
   const voiceOwner = useId()
-  const voice = useVoiceMode()
   const isBrief = variant === 'brief'
   const voiceOn = (isLine || isBrief) && voice.owner === voiceOwner
   const runningRef = useRef(running)
@@ -1202,7 +1207,8 @@ export function Composer({
           const sent = await sendWithMentions(
             `${typed}${spoken}`,
             images.length ? images : undefined,
-            files.length ? files : undefined
+            files.length ? files : undefined,
+            { voice: true }
           )
           if (sent === false) {
             cancelVoiceHandoff(voiceOwner)
@@ -1217,7 +1223,8 @@ export function Composer({
     : {
         running: () => runningRef.current,
         runId: () => runIdRef.current,
-        send: async (text, opts) => Boolean(await onSend(text, undefined, undefined, opts.steer ? { steer: true } : undefined)),
+        // Marked as said out loud, so only this turn's reply opens with a spoken summary (D-32).
+        send: async (text, opts) => Boolean(await onSend(text, undefined, undefined, { voice: true, ...(opts.steer ? { steer: true } : {}) })),
         stop: () => onStop?.()
       }
 
@@ -1531,7 +1538,11 @@ export function Composer({
     takeOpen ? (
       <div className="flex h-10 min-w-0 items-center gap-1 @max-[480px]:[&_span:has(>kbd)]:hidden" data-composer-controls>
         <TakeStrip take={take} sendLabel={opts.takeSendLabel} className="min-w-0 flex-1" />
-        <MicControl take={take} disabled={inputLocked} />
+        <MicControl
+              take={take}
+              disabled={inputLocked || dictationWaits}
+              waitingReason={dictationWaits ? 'Voice mode is using the microphone' : undefined}
+            />
       </div>
     ) : (
       <>
@@ -1614,7 +1625,11 @@ export function Composer({
               onMention={mentionFromAttach}
               screenshot={browserScreenshot}
             />
-            <MicControl take={take} disabled={inputLocked} />
+            <MicControl
+              take={take}
+              disabled={inputLocked || dictationWaits}
+              waitingReason={dictationWaits ? 'Voice mode is using the microphone' : undefined}
+            />
             {(isLine || isBrief) && workspacePath ? (
               <VoiceModeButton
                 owner={voiceOwner}

@@ -24,7 +24,16 @@ const PANEL_WIDTH_PX = 380
  * useTake bails when the composer is disabled, so a live-looking glyph that
  * does nothing is worse than one that says so.
  */
-export function MicControl({ take, disabled = false }: { take: TakeHandle; disabled?: boolean }) {
+export function MicControl({
+  take,
+  disabled = false,
+  waitingReason
+}: {
+  take: TakeHandle
+  disabled?: boolean
+  /** Why the mic is waiting (voice mode has it): said on the greyed glyph instead of the usual tip. */
+  waitingReason?: string
+}) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const open = take.panel !== null
@@ -42,7 +51,7 @@ export function MicControl({ take, disabled = false }: { take: TakeHandle; disab
   })
 
   const chord = shortcutLabel('dictation')
-  const tip = `Dictate (${chord})\n${take.holdToTalk ? 'Hold to talk · ' : ''}${take.engineDetail}`
+  const tip = waitingReason ?? `Dictate (${chord})\n${take.holdToTalk ? 'Hold to talk · ' : ''}${take.engineDetail}`
 
   let button: ReactNode
   switch (take.mic) {
@@ -101,13 +110,14 @@ export function MicControl({ take, disabled = false }: { take: TakeHandle; disab
           ref={triggerRef}
           icon="mic"
           label="Set up dictation"
-          title={`Set up dictation (${chord})`}
+          title={waitingReason ?? `Set up dictation (${chord})`}
           size="md"
           tone="muted"
           disabled={disabled}
           aria-expanded={open}
           aria-haspopup="dialog"
           data-take-mic="setup"
+          aria-description={waitingReason}
           onMouseDown={(e) => e.preventDefault()}
           onClick={take.actions.press}
         />
@@ -124,6 +134,7 @@ export function MicControl({ take, disabled = false }: { take: TakeHandle; disab
           tone="muted"
           disabled={disabled}
           data-take-mic="idle"
+          aria-description={waitingReason}
           onPointerEnter={take.actions.warm}
           onFocus={take.actions.warm}
           onMouseDown={(e) => e.preventDefault()}

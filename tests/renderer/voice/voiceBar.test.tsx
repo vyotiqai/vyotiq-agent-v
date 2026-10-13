@@ -188,7 +188,19 @@ describe('VoiceBar', () => {
     const token = document.querySelector<HTMLElement>('[data-voice-engine="openai"]')!
     expect(token.getAttribute('data-voice-fell-back')).toBe('deepgram')
     expect(token.title).toContain('no Deepgram Flux key')
-    expect(token.textContent).toContain('instead of Deepgram Flux')
+    expect(token.textContent).toContain('Listening with OpenAI: no Deepgram Flux key.')
+  })
+
+  it('says when another voice speaks than the one picked, and when none can', async () => {
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() => fake.update({ speaker: 'openai', speakerFellBackFrom: 'elevenlabs' }))
+    render(<Bar onOpenVoiceSettings={vi.fn()} />)
+    const token = document.querySelector<HTMLElement>('[data-voice-engine]')!
+    expect(token.getAttribute('data-voice-speaker-fell-back')).toBe('elevenlabs')
+    expect(token.title).toContain('Speaking with OpenAI: no ElevenLabs key.')
+    act(() => fake.update({ speaker: null, speakerFellBackFrom: null }))
+    expect(screen.getByText(/No speaking voice has a key/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Voice settings' })).toBeTruthy()
   })
 
   it('shows the first-use tip until the first session ends', async () => {
