@@ -129,7 +129,8 @@ test('a manual proxy set in Settings carries the app’s own requests, and None 
   await expect.poll(() => stored(page, (s) => s.network)).toEqual({
     proxyMode: 'manual',
     proxyUrl: `http://127.0.0.1:${proxyPort}`,
-    proxyBypass: ''
+    proxyBypass: '',
+    proxyUsername: ''
   })
   await expect(page.locator('[data-proxy-status="manual"]')).toContainText(`http://127.0.0.1:${proxyPort}`)
 

@@ -783,7 +783,11 @@ describe('opencode go chat thinking body', () => {
   // 30s: the public fetch can exceed vitest's 10s default under full-suite load.
   beforeAll(async () => {
     await loadOpenCodeGoCatalog()
-  }, 30_000)
+    // 120s: models.dev/api.json is several MB, and a loaded runner has taken
+    // over 30s for it (measured 30.1s on windows-latest's full-suite run) —
+    // a timeout here would surface as a hook failure that says nothing about
+    // why, so give the fetch room and keep the ladders live.
+  }, 120_000)
 
   it('clamps medium to the declared ladder on glm-5.3-flash', () => {
     const body = buildOpenAiCompatBody(

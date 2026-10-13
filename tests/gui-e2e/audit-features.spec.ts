@@ -295,7 +295,8 @@ test.describe('Git sync in Changes', () => {
     await expect(sync).toHaveAttribute('aria-label', 'Sync — 1 to pull')
 
     await sync.click()
-    await menu.getByRole('menuitem', { name: /^Pull/ }).click()
+    // Exact: the menu also offers "Pull with rebase", which this prefix regex also matched.
+    await menu.getByRole('menuitem', { name: 'Pull', exact: true }).click()
     await expect.poll(() => existsSync(join(workspace, 'from-other.txt')), { timeout: 20_000 }).toBe(true)
     await expect(sync.locator('[data-git-behind]')).toHaveCount(0, { timeout: 20_000 })
     expect(git(workspace, 'rev-parse', 'HEAD')).toBe(git(other, 'rev-parse', 'HEAD'))

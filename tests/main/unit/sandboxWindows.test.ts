@@ -446,7 +446,7 @@ describe.skipIf(process.platform !== 'win32')('the low-integrity sandbox on this
       wrap(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...tricky]),
       ws
     )
-    expect(echoed.code).toBe(0)
+    expect(echoed.code, echoed.err).toBe(0)
     expect(JSON.parse(echoed.out)).toEqual(tricky)
   }, 60_000)
 })
