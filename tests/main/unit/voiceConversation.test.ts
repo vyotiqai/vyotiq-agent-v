@@ -513,12 +513,32 @@ describe('voice_reply and helper instances', () => {
   it('is never asked of a helper instance, whose answer goes to the parent agent', async () => {
     const { voiceReplyWanted } = await import('@main/voice/voiceReply')
     setVoiceReplyWorkspace('s2', '/repo')
+    const spoken = [{ role: 'user', spoken: true as const }]
     try {
-      expect(voiceReplyWanted({ workspacePath: '/repo' })).toBe(true)
-      expect(voiceReplyWanted({ workspacePath: '/repo/.worktrees/x', memoryWorkspacePath: '/repo' })).toBe(true)
-      expect(voiceReplyWanted({ workspacePath: '/repo', inlineInstance: true })).toBe(false)
+      expect(voiceReplyWanted({ workspacePath: '/repo', messages: spoken })).toBe(true)
+      expect(voiceReplyWanted({ workspacePath: '/repo/.worktrees/x', memoryWorkspacePath: '/repo', messages: spoken })).toBe(true)
+      expect(voiceReplyWanted({ workspacePath: '/repo', inlineInstance: true, messages: spoken })).toBe(false)
     } finally {
       setVoiceReplyWorkspace('s2', null)
+    }
+  })
+})
+
+describe('voice_reply only for turns said out loud (D-32)', () => {
+  it('a typed message, or another task in the same folder, gets a written answer', async () => {
+    const { voiceReplyWanted, lastTurnWasSpoken } = await import('@main/voice/voiceReply')
+    setVoiceReplyWorkspace('s3', '/repo')
+    try {
+      const said = { role: 'user', spoken: true as const }
+      const typed = { role: 'user' }
+      expect(voiceReplyWanted({ workspacePath: '/repo', messages: [typed] })).toBe(false)
+      expect(voiceReplyWanted({ workspacePath: '/repo', messages: [said, { role: 'assistant' }, { role: 'tool' }] })).toBe(true)
+      // The latest thing you said decides; a loop-injected turn doesn't count.
+      expect(lastTurnWasSpoken([said, { role: 'assistant' }, typed])).toBe(false)
+      expect(lastTurnWasSpoken([said, { role: 'user', synthetic: true }])).toBe(true)
+      expect(voiceReplyWanted({ workspacePath: '/elsewhere', messages: [said] })).toBe(false)
+    } finally {
+      setVoiceReplyWorkspace('s3', null)
     }
   })
 })

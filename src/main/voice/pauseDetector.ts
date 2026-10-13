@@ -40,6 +40,11 @@ export class PauseDetector {
     this.threshold = on ? 6 : 3
   }
 
+  /** Voiced time in the speech so far (a cough stays short; talking keeps growing). */
+  get voicedMs(): number {
+    return this.speechMs
+  }
+
   /** Forget the current turn (after push-to-talk ends it, or a barge-in). */
   reset(): void {
     this.speechMs = 0

@@ -183,7 +183,10 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
     sessionId: z.string(),
     kind: z.literal('engine'),
     stt: SttProviderIdSchema,
-    sttFellBackFrom: SttProviderIdSchema.optional()
+    sttFellBackFrom: SttProviderIdSchema.optional(),
+    /** Who speaks the replies; null when no speaking provider has a key (replies stay on screen). */
+    tts: TtsProviderIdSchema.nullable().optional(),
+    ttsFellBackFrom: TtsProviderIdSchema.optional()
   }),
   /** Unsettled words of the turn in progress, for captions. */
   z.object({ sessionId: z.string(), kind: z.literal('partial'), text: z.string() }),
@@ -199,6 +202,8 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
   z.object({ sessionId: z.string(), kind: z.literal('reconnecting'), attempt: z.number().int() }),
   /** What the agent is saying, a sentence at a time, for captions. */
   z.object({ sessionId: z.string(), kind: z.literal('say'), contextId: z.string(), text: z.string() }),
+  /** You may be talking over the agent: lower its voice (`on`), or bring it back — it was a cough or an echo (§6.2). */
+  z.object({ sessionId: z.string(), kind: z.literal('duck'), on: z.boolean() }),
   /** A slow step started and spoken progress is off: a soft sound instead of words (§8.4). */
   z.object({ sessionId: z.string(), kind: z.literal('cue') }),
   /** Barge-in: drop this reply's queued audio from the speakers now. */

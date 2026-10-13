@@ -15,6 +15,7 @@ import { resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
 import { resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
 import { getRunWorkspace } from '../agent/runRegistry'
 import { setVoiceReplyWorkspace } from './voiceReply'
+import { notifyBadgeChange } from '../app/badges'
 import {
   clampSpeed,
   resolveModel,
@@ -88,6 +89,8 @@ export async function startVoiceSession(
   const session = new VoiceSession({
     emit: (event: VoiceEvent) => {
       if (!owner.isDestroyed()) owner.send(channels.events, event)
+      // The taskbar/dock and the tray say the mic is on, even with the window hidden (§13.8).
+      if (event.kind === 'state') notifyBadgeChange()
     },
     settings: currentVoiceSettings,
     keys: () => voiceKeyAvailability(),
@@ -129,6 +132,17 @@ export function followVoiceRun(ownerId: number, sessionId: string, runId: string
   session.follow(runId)
 }
 
+/**
+ * A session has the mic open somewhere (any window, muted or not: the
+ * capture is still running). Off and error don't count.
+ */
+export function isVoiceListening(): boolean {
+  for (const { session } of sessions.values()) {
+    if (session.state !== 'off' && session.state !== 'error') return true
+  }
+  return false
+}
+
 /** The session, but only for the window that owns it. */
 export function voiceSessionFor(ownerId: number, sessionId: string): VoiceSession | null {
   const entry = sessions.get(sessionId)
@@ -142,6 +156,7 @@ export async function stopVoiceSession(sessionId: string): Promise<void> {
   setVoiceReplyWorkspace(sessionId, null)
   if (byOwner.get(entry.owner.id) === sessionId) byOwner.delete(entry.owner.id)
   await entry.session.stop()
+  notifyBadgeChange()
 }
 
 export async function stopAllVoiceSessions(): Promise<void> {

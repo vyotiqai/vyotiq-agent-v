@@ -46,7 +46,7 @@ import { flushBeforeQuit, type EditorFlushStatus } from '@main/quitFlush'
 import { shutdownTokenizerPool } from '@main/agent/context/tokenizerPool'
 import { shutdownDictationUtilityClients } from '@main/dictation/whisperUtilityClient'
 import { closeAllLiveTakes } from '@main/dictation/liveOpenAI'
-import { stopAllVoiceSessions } from '@main/voice/sessions'
+import { isVoiceListening, stopAllVoiceSessions } from '@main/voice/sessions'
 import {
   getWorkspaces,
   interruptOrphanRunsForWorkspaces
@@ -396,7 +396,8 @@ if (HEADLESS) {
       pendingApprovals: countPendingToolApprovals(),
       pendingQuestions: countPendingAgentQuestions(),
       unreadNotifications: unreadNotificationCount(),
-      activeRuns: listActiveRuns().length
+      activeRuns: listActiveRuns().length,
+      voiceListening: isVoiceListening()
     }))
     notifyBadgeChange()
     // Updater listeners + the background check schedule (deferred startup
@@ -448,7 +449,7 @@ if (HEADLESS) {
     applyBadgeNow()
     // The tray polls the run registry rather than being pushed at: run starts
     // and finishes are already chatty, and the tray only needs a count.
-    createTray({ getActiveRunCount: () => listActiveRuns().length })
+    createTray({ getActiveRunCount: () => listActiveRuns().length, isListening: isVoiceListening })
     initCustomCssWatchFromSettings()
     // Windows/Linux cold start: the OS launches us with the URL in our own argv.
     handleDeepLinkArgv(process.argv)

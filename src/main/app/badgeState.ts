@@ -2,7 +2,9 @@
  * Badge state machine — pure and electron-free so it stays unit-testable
  * (same pattern as app/secondInstance.ts). One badge shows at a time, ranked
  * by urgency: an agent blocked on the user beats unread results, which beats a
- * quiet run still working.
+ * quiet run still working. A live voice session sits just under "needs you":
+ * the mic being on is the one thing the person must always be able to see
+ * (docs/voice-mode.md §13.8), but an agent blocked on them still comes first.
  */
 
 export type BadgeInput = {
@@ -10,10 +12,13 @@ export type BadgeInput = {
   pendingQuestions: number
   unreadNotifications: number
   activeRuns: number
+  /** A voice-mode session has the mic open, in any window. */
+  voiceListening?: boolean
 }
 
 export type BadgeState =
   | { kind: 'needsyou'; count: number }
+  | { kind: 'listening' }
   | { kind: 'unread'; count: number }
   | { kind: 'working' }
   | { kind: 'idle' }
@@ -26,6 +31,7 @@ export function computeBadgeState(input: BadgeInput): BadgeState {
   if (blocked > 0) {
     return { kind: 'needsyou', count: Math.min(blocked, BADGE_MAX_COUNT) }
   }
+  if (input.voiceListening) return { kind: 'listening' }
   const unread = Math.max(0, input.unreadNotifications)
   if (unread > 0) {
     return { kind: 'unread', count: Math.min(unread, BADGE_MAX_COUNT) }
@@ -50,6 +56,8 @@ export function badgeAssetFileFor(state: BadgeState): string | null {
   switch (state.kind) {
     case 'needsyou':
       return `attention-${state.count}.png`
+    case 'listening':
+      return 'listening.png'
     case 'unread':
       return `unread-${state.count}.png`
     case 'working':
@@ -68,6 +76,8 @@ export function dockBadgeTextFor(state: BadgeState): string {
   switch (state.kind) {
     case 'needsyou':
       return '!'
+    case 'listening':
+      return 'Mic'
     case 'unread':
       return String(state.count)
     case 'working':

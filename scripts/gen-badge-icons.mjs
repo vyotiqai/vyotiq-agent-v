@@ -6,6 +6,7 @@
 //
 // Outputs (32x32, Electron/Windows scale overlays):
 //   working.png                    accent hex, no text
+//   listening.png                  red hex, white microphone (voice mode has the mic)
 //   attention-1..9.png, attention-10.png ("9+")   amber hex, dark digit
 //   unread-1..9.png,    unread-10.png    ("9+")   red hex, white digit
 //
@@ -32,6 +33,18 @@ const FONT_FILES = [
   'C:/Windows/Fonts/segoeuib.ttf'
 ]
 
+// A microphone in the hex: drawn, not a glyph, so it needs no font.
+const MIC = (ink) => `<rect x="13" y="7" width="6" height="11" rx="3" fill="${ink}"/>
+  <path d="M10.5 15 a5.5 5.5 0 0 0 11 0" fill="none" stroke="${ink}" stroke-width="2" stroke-linecap="round"/>
+  <path d="M16 20.5 V24 M13 24.5 H19" fill="none" stroke="${ink}" stroke-width="2" stroke-linecap="round"/>`
+
+function listeningSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <polygon points="${HEX_POINTS}" fill="${DANGER}" stroke="${OUTLINE}" stroke-width="2"/>
+  ${MIC(INK_ON_DANGER)}
+</svg>`
+}
+
 function svg({ fill, ink, label }) {
   const text = label
     ? `<text x="16" y="16" text-anchor="middle" dominant-baseline="central"
@@ -56,6 +69,7 @@ function render(label, outName, fill, ink) {
 mkdirSync(OUT_DIR, { recursive: true })
 
 render('', 'working.png', ACCENT, INK_ON_WARNING)
+writeFileSync(join(OUT_DIR, 'listening.png'), new Resvg(listeningSvg(), { fitTo: { mode: 'width', value: 32 } }).render().asPng())
 
 const targets = [
   ['attention', WARNING, INK_ON_WARNING],

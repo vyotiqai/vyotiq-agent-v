@@ -161,3 +161,22 @@ describe('echo in a live session', () => {
     expect(h.resolveQuestion).toHaveBeenCalledWith(expect.objectContaining({ answers: [{ questionId: 'q1', values: ['SQLite'] }] }))
   })
 })
+
+describe('the engine report names who speaks too', () => {
+  it('reports no speaking provider when none has a key', async () => {
+    const events: VoiceEvent[] = []
+    const session = new VoiceSession({
+      emit: (e) => events.push(e),
+      settings: () => ({ ...DEFAULT_VOICE_SETTINGS, ttsProvider: 'elevenlabs' }),
+      keys: () => ({ voice: { deepgram: true }, chat: { openai: true } }),
+      readKey: () => 'k',
+      sttProvider: (id) => ({ id, open: (o) => openFixtureStt(o) }),
+      openTts: () => null,
+      setTimer: () => null,
+      clearTimer: () => {}
+    })
+    await session.start()
+    // ElevenLabs was picked but has no key; OpenAI (the chat key) speaks instead.
+    expect(events.find((e) => e.kind === 'engine')).toMatchObject({ stt: 'deepgram', tts: 'openai', ttsFellBackFrom: 'elevenlabs' })
+  })
+})

@@ -162,6 +162,11 @@ export const ChatMessageSchema = z.object({
    */
   midTurn: z.literal(true).optional(),
   /**
+   * Said out loud in voice mode (docs/voice-mode.md §7.2): the reply to it
+   * opens with a short spoken summary. A typed message never sets it.
+   */
+  spoken: z.literal(true).optional(),
+  /**
    * ISO timestamp: when the user sent a user message (turn-duration start);
    * when an assistant message finished streaming; when a tool result settled.
    */
@@ -2720,6 +2725,8 @@ export type ComposerSendExtras = {
    * (Shift+Enter) — queued, then promoted as "Send now" does. Renderer only.
    */
   steer?: boolean
+  /** Said out loud in voice mode: the message is marked `spoken`. */
+  voice?: boolean
 }
 
 export function buildUserContent(

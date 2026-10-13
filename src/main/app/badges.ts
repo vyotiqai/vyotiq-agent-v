@@ -77,6 +77,8 @@ function descriptionFor(state: BadgeState): string {
       return `${state.count >= 10 ? '9+' : state.count} unread notification${
         state.count === 1 ? '' : 's'
       }`
+    case 'listening':
+      return 'Agent V is listening (voice mode)'
     case 'working':
       return 'Runs active'
     case 'idle':
@@ -112,7 +114,7 @@ function applyDock(state: BadgeState): void {
 }
 
 function overlayKeyFor(state: BadgeState): string {
-  return state.kind === 'working' || state.kind === 'idle'
+  return state.kind === 'working' || state.kind === 'idle' || state.kind === 'listening'
     ? state.kind
     : `${state.kind}:${state.count}`
 }

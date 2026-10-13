@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { logger } from '../../shared/logger'
 import { getMainWindow } from './window'
+import { paintListeningDot } from './trayDot'
 
 /**
  * Tray icon — the Agent V mark, spinning while runs are active.
@@ -49,6 +50,9 @@ const IDLE_FRAME = -1
 let tray: Tray | null = null
 let manifest: TrayManifest = FALLBACK_MANIFEST
 let provider: (() => number) | null = null
+/** Voice mode has the mic open: the icon gets a red dot and the tooltip says so. */
+let listeningProvider: (() => boolean) | null = null
+let listening = false
 let timer: ReturnType<typeof setTimeout> | null = null
 let frame = IDLE_FRAME
 let lastTooltip: string | null = null
@@ -98,7 +102,37 @@ function currentThemeDir(): string {
   return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
 }
 
-function loadFrameImage(theme: string, name: string): Electron.NativeImage | null {
+/** The frame with the listening dot painted on each of its scales. */
+function withListeningDot(image: Electron.NativeImage): Electron.NativeImage | null {
+  try {
+    const size = image.getSize()
+    let dotted: Electron.NativeImage | null = null
+    for (const scaleFactor of image.getScaleFactors()) {
+      const width = Math.round(size.width * scaleFactor)
+      const height = Math.round(size.height * scaleFactor)
+      const painted = Buffer.from(paintListeningDot(image.toBitmap({ scaleFactor }), width, height))
+      if (!dotted) dotted = nativeImage.createFromBitmap(painted, { width, height, scaleFactor })
+      else dotted.addRepresentation({ scaleFactor, width, height, buffer: painted })
+    }
+    dotted?.setTemplateImage(image.isTemplateImage())
+    return dotted && !dotted.isEmpty() ? dotted : null
+  } catch (err) {
+    logger.warn('Painting the tray listening dot failed', { scope: 'main', err })
+    return null
+  }
+}
+
+function loadFrameImage(theme: string, name: string, dot = false): Electron.NativeImage | null {
+  if (dot) {
+    const key = `${theme}:${name}:dot`
+    const cached = imageCache.get(key)
+    if (cached !== undefined) return cached
+    const base = loadFrameImage(theme, name)
+    // No dot (a paint failure) still leaves the plain frame: the tooltip says it either way.
+    const image = base ? (withListeningDot(base) ?? base) : null
+    imageCache.set(key, image)
+    return image
+  }
   const key = `${theme}:${name}`
   const cached = imageCache.get(key)
   if (cached !== undefined) return cached
@@ -132,7 +166,7 @@ function loadFrameImage(theme: string, name: string): Electron.NativeImage | nul
 function applyFrame(next: number): void {
   if (!tray || tray.isDestroyed()) return
   const name = next === IDLE_FRAME ? 'idle' : String(next).padStart(2, '0')
-  const image = loadFrameImage(currentThemeDir(), name)
+  const image = loadFrameImage(currentThemeDir(), name, listening)
   if (!image) return
   try {
     tray.setImage(image)
@@ -143,7 +177,9 @@ function applyFrame(next: number): void {
 
 function applyTooltip(count: number): void {
   if (!tray || tray.isDestroyed()) return
-  const text = count > 0 ? `Vyotiq — ${count} run${count === 1 ? '' : 's'} active` : 'Vyotiq'
+  const runs = count > 0 ? `${count} run${count === 1 ? '' : 's'} active` : null
+  const parts = [listening ? 'Agent V is listening' : null, runs].filter(Boolean)
+  const text = parts.length > 0 ? `Vyotiq — ${parts.join(' · ')}` : 'Vyotiq'
   if (text === lastTooltip) return
   lastTooltip = text
   try {
@@ -169,10 +205,26 @@ function schedule(ms: number): void {
   timer = setTimeout(tick, ms)
 }
 
+function readListening(): boolean {
+  if (!listeningProvider) return false
+  try {
+    return listeningProvider() === true
+  } catch (err) {
+    logger.warn('Tray listening provider failed', { scope: 'main', err })
+    return false
+  }
+}
+
 function tick(): void {
   timer = null
   if (!tray || tray.isDestroyed()) return
   const count = readActiveRunCount()
+  const nowListening = readListening()
+  if (nowListening !== listening) {
+    listening = nowListening
+    // A still icon would otherwise keep its old look until a run starts.
+    if (count === 0) applyFrame(IDLE_FRAME)
+  }
   if (count > 0) {
     // A chain rather than setInterval: a slow setImage then delays the next
     // frame instead of stacking one behind it.
@@ -199,12 +251,13 @@ function revealMainWindow(): void {
   win.focus()
 }
 
-export function createTray(options: { getActiveRunCount: () => number }): void {
+export function createTray(options: { getActiveRunCount: () => number; isListening?: () => boolean }): void {
   if (tray) {
     logger.warn('Tray already created', { scope: 'main' })
     return
   }
   provider = options.getActiveRunCount
+  listeningProvider = options.isListening ?? null
   manifest = readManifest()
 
   const idle = loadFrameImage(currentThemeDir(), 'idle')
@@ -264,6 +317,8 @@ export function destroyTray(): void {
   }
   tray = null
   provider = null
+  listeningProvider = null
+  listening = false
   frame = IDLE_FRAME
   lastTooltip = null
   imageCache.clear()

@@ -317,6 +317,16 @@ The effect is the same in every state where the agent has the floor:
 4. **Mark**: the record shows where the agent was cut off. The agent's text
    stays in full in the record; only the speech stops.
 
+**Built** (2026-10-13, D-33; replaces D-25's one-step stop). Any start of
+speech while the agent's audio is playing (the local detector or the
+listener's own) sends `duck on`: the player ramps to 20%. It is confirmed —
+`duck off`, flush, barge-in as above — by either 600 ms of voiced audio in the
+local detector, or a partial or finished turn whose words aren't the agent's
+own (§6.4). It is released — `duck off`, the voice comes back, the detector
+starts afresh — by an echo transcript, an empty turn, or 1.2 s with neither.
+If the agent's audio ends while ducked and you're still talking, it becomes
+your turn. Esc / Stop speaking during a duck stops as before.
+
 ### 6.3 What happens to the agent's *work* on barge-in
 
 Stopping the voice is easy. What to do with a run that's mid-work is a product
@@ -745,8 +755,12 @@ The cloud "Whisper" option is the OpenAI realtime row above. Local Whisper is th
   with OpenAI, ElevenLabs key rejected"). It never falls back silently.
   **Built for listening** (2026-10-11): the bar's engine token shows a warning
   glyph instead of the cloud, its tooltip reads "Listening with OpenAI: no
-  Deepgram Flux key", and screen readers hear the same. Speaking fallback is
-  shown in Settings → Voice; the bar doesn't report it yet.
+  Deepgram Flux key", and screen readers hear the same. **Speaking too**
+  (2026-10-13): the session's `engine` event also names who speaks (`tts`,
+  `ttsFellBackFrom`); the same token adds "Speaking with OpenAI: no
+  ElevenLabs key." With no speaking provider at all (`tts: null`) the bar says
+  "No speaking voice has a key. Replies are on screen." from the start, with a
+  Voice settings button, instead of at the first reply.
 - **Fallback during a session** (a provider fails mid-session): see §15.
 
 ### 9.6 Adding a provider later
@@ -1119,6 +1133,14 @@ Accessibility (checked with the `wcag-desktop` skill):
 - **Window focus:** a session keeps running when the window loses focus (that's
   the point of hands-free), with an OS-level "Agent V is listening" indicator in
   the title bar. A session never starts without a press.
+  **Built as tray + taskbar** (2026-10-13, Ajay's pick; the title-bar band is
+  left alone, §24.3): while any session is open (muted included, off and
+  error excluded) the taskbar overlay is a red hex with a microphone
+  (`resources/badges/listening.png`, tooltip "Agent V is listening (voice
+  mode)"), ranked under "needs you" and above unread and working; the macOS
+  dock badge reads "Mic"; the tray icon gets a red dot in its corner on every
+  frame (`app/trayDot.ts`) and its tooltip leads with "Agent V is listening".
+  Sessions push a badge refresh on every state change; the tray polls.
 - **Volume:** the player follows system volume; Settings has no separate
   volume slider in v1.
 
@@ -1368,11 +1390,14 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-22 | 2026-10-11 | ElevenLabs opens one websocket per spoken reply for now. Keeping one socket warm for the whole session (§14 "warm sockets") lands with the live session in Phase 5, where it saves the handshake on every turn | Proposed |
 | D-23 | 2026-10-11 | Mic chunks travel over `invoke` like dictation's `liveAudio` (about 8 a second), not a fire-and-forget `send`: it keeps the IPC contract test's invoke/push split and needs no new channel kind. Revisit only if the latency logging in §14 shows it matters | Proposed |
 | D-24 | 2026-10-11 | The voice bar opens the mic **before** asking main for a session, so a blocked or missing mic fails at once and nothing is billed | Decided |
-| D-25 | 2026-10-11 | Barge-in is one step for now: main's local speech detector (200 ms voiced, stricter while the agent speaks) stops speech at once, rather than §6.2's duck-then-confirm. Simpler and fast; if coughs cut the agent off in real use, add the duck stage | Proposed |
-| D-26 | 2026-10-11 | The voice_reply prompt section is keyed by workspace, not run: it must be in the very first step's prompt, before the renderer knows the run id. While voice is open on a workspace, every reply there is written to be heard | Decided |
+| D-25 | 2026-10-11 | Barge-in is one step for now: main's local speech detector (200 ms voiced, stricter while the agent speaks) stops speech at once, rather than §6.2's duck-then-confirm. Simpler and fast; if coughs cut the agent off in real use, add the duck stage | Superseded by D-33 |
+| D-26 | 2026-10-11 | The voice_reply prompt section is keyed by workspace, not run: it must be in the very first step's prompt, before the renderer knows the run id. While voice is open on a workspace, every reply there is written to be heard | Narrowed by D-32 |
 | D-27 | 2026-10-11 | Voice mode is started from the task's instruction line only (not the New task brief) in this cut: a session needs a task to steer. Starting a task by voice from the brief can follow | Superseded by D-30 |
 | D-28 | 2026-10-11 | The bar's single-letter keys (M, Space) yield to any text field, empty or not; the app's `isTypingIn` treats an empty field as not typing, which is right for chords but wrong for bare letters | Decided |
 | D-30 | 2026-10-11 | Voice mode on New task (Ajay: yes). The first spoken turn starts the task with everything the brief holds, typed text first, and the session is handed to the new task's line; there is no "confirm before starting" step, because the brief's Start task has none either and the task can be stopped by voice ("stop") | Decided |
+| D-32 | 2026-10-13 | `voice_reply` only for turns said out loud (Ajay: yes). A voice turn is sent with `{ voice: true }`, the user message is stored with `spoken: true`, and the prompt asks for a spoken summary only when the latest real user message is spoken and voice mode is still open on the folder. A typed message in the same task, other tasks in the folder, and helper instances get written answers. Supersedes D-26's folder-wide scope; the section stays in the stable zone, so switching between spoken and typed turns changes the prompt prefix | Decided |
+| D-33 | 2026-10-13 | Barge-in dips first (Ajay: yes): 20% on any speech start while audio plays, stop on 600 ms voiced or non-echo words, back to full on echo, an empty turn or 1.2 s. Supersedes D-25 | Decided |
+| D-34 | 2026-10-13 | "Mic is on" lives in the taskbar overlay, dock badge and tray (Ajay's pick), not the title bar: those are main-process, testable here, and visible with the window hidden. Dictation waits while voice mode is on in any pane (greyed, "Voice mode is using the microphone"), except a take already under way | Decided |
 | D-31 | 2026-10-11 | The echo filter errs towards letting words through: only during playback plus a 2.5 s tail, 75% in-order word match, and one- or two-word transcripts only by exact run while audio plays. Dropping something you really said is worse than an occasional echo; push-to-talk and headphones remain the strong defences | Decided |
 | D-29 | 2026-10-11 | Questions by voice answer only what's unambiguous, and only one-question forms; everything else is sent as a message, which the existing superseded path hands to the model as the likely answer. No separate setting: unlike approvals, a wrong answer to a question grants nothing | Decided |
 
@@ -1454,12 +1479,14 @@ checklist above.
 
 | Item | Where specced | Why not yet |
 | --- | --- | --- |
-| Title-bar "listening" indicator when the window is in the background | §13.8 | The top 36px band must be verified with the Electron e2e (repo rule); needs the built app |
-| Speaking-provider fallback shown in the bar | §9.5 | Shown in Settings → Voice; the bar reports listener fallback only |
-| Duck-then-confirm barge-in | §6.2, D-25 | One-step stop is simpler; add the duck stage if coughs or echo cut the agent off in real use |
+| A dot in the app's own title bar | §13.8 | Replaced by the tray + taskbar indicator (D-34); the top 36px band needs the Electron e2e (repo rule) |
 | Voice-only mode switching, wake word, mini window, multilingual, expressive markup | §23 | v2 backlog |
-| Dictation in another pane while voice mode is on | — | Both would capture the mic; rare, and each pane's mic is visibly on. Worth a guard after real use |
-| `voice_reply` reaches other tasks in the same workspace while voice is open | D-26 | Keyed by workspace so the first step has it; harmless (the block is stripped everywhere it's shown) but costs a few tokens on those runs |
+| Voice mode while a dictation take is live in *another* pane | D-34 | The take keeps its keys until it's inserted or discarded; voice can start meanwhile. Rare; guard after real use if needed |
+
+Closed on 2026-10-13: speaking fallback in the bar (§9.5), dip-then-stop
+barge-in (§6.2, D-33), the tray + taskbar "mic is on" indicator (§13.8,
+D-34), dictation waiting while voice mode is on (D-34), and `voice_reply`
+only for spoken turns (D-32).
 
 ### 24.4 Needs the real app or hardware
 
@@ -1469,5 +1496,8 @@ checklist above.
 - GUI e2e `tests/gui-e2e/voice.spec.ts` with Chromium's fake mic under
   `VYOTIQ_E2E_FIXTURE=1`.
 - Websockets through a proxy (R-04) and silence-pause billing (R-09).
+- The tray dot and taskbar/dock badge on Windows and macOS (no tray test
+  exists; the pixel painting and badge state are unit-tested).
+- Tuning the dip: 600 ms to confirm and 1.2 s to give up are first guesses.
 - Rebase onto Ajay's newer local code; merge `main` once #62/#64 land.
 
