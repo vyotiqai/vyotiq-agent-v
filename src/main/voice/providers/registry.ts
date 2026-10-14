@@ -5,7 +5,7 @@
  * tests never need keys or a network.
  */
 import type { SttProviderId, TtsProviderId } from '../../../shared/voice'
-import { openFixtureStt, openFixtureTts } from './fixture'
+import { fixtureTurnsFromEnv, openFixtureStt, openFixtureTts } from './fixture'
 import { assemblyAi } from './stt/assemblyai'
 import { deepgramFlux } from './stt/deepgramFlux'
 import { elevenLabsScribe } from './stt/elevenlabsScribe'
@@ -56,7 +56,7 @@ export function setTtsProviderForTests(id: TtsProviderId, provider: TtsProvider 
 
 let sttOverrides: Partial<Record<SttProviderId, SttProvider>> = {}
 
-const fixtureStt = (id: SttProviderId): SttProvider => ({ id, open: (opts) => openFixtureStt(opts) })
+const fixtureStt = (id: SttProviderId): SttProvider => ({ id, open: (opts) => openFixtureStt(opts, fixtureTurnsFromEnv()) })
 
 export function sttProvider(id: SttProviderId): SttProvider {
   const override = sttOverrides[id]

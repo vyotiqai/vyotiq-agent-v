@@ -7,7 +7,7 @@ import { matchShortcut } from '@renderer/lib/shortcuts/match'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { STT_AUTO_ORDER, resolveSttProvider, sttEntry, type VoiceKeyAvailability } from '@shared/voice'
 import type { VoiceKeyStatus, VoiceSettings } from '@shared/ipc/schemas/voice'
-import { endVoiceMode, noteVoiceLineFocus, registerVoiceLine, startVoiceMode, useVoiceMode, voiceShortcutTarget } from './voiceMode'
+import { endVoiceMode, noteVoiceLineFocus, startVoiceMode, useVoiceMode, voiceShortcutTarget } from './voiceMode'
 
 const PANEL_WIDTH_PX = 360
 
@@ -84,8 +84,6 @@ export function VoiceModeButton({
   // The shortcut and the palette reach this line through a listener set up once per change.
   const toggleRef = useRef(toggle)
   toggleRef.current = toggle
-
-  useEffect(() => registerVoiceLine(owner), [owner])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

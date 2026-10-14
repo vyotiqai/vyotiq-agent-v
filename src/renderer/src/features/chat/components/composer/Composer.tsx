@@ -62,7 +62,7 @@ import { TakeStrip } from './take/TakeStrip'
 import { MicControl } from './take/MicControl'
 import { VoiceBar } from '@renderer/features/voice/VoiceBar'
 import { VoiceModeButton } from '@renderer/features/voice/VoiceModeButton'
-import { beginVoiceHandoff, cancelVoiceHandoff, useVoiceMode } from '@renderer/features/voice/voiceMode'
+import { beginVoiceHandoff, cancelVoiceHandoff, registerVoiceLine, useVoiceMode } from '@renderer/features/voice/voiceMode'
 import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
 import { useComposerModels } from './useComposerModels'
 import { deriveModelReadiness, modelReadinessBlocksSend, modelReadinessSendReason } from './modelReadiness'
@@ -1189,6 +1189,10 @@ export function Composer({
   const voiceOwner = useId()
   const isBrief = variant === 'brief'
   const voiceOn = (isLine || isBrief) && voice.owner === voiceOwner
+  // The line is registered for voice for as long as it's on screen — not its
+  // button, which the voice bar replaces while a session is open (D-35).
+  const voiceLine = (isLine || isBrief) && Boolean(workspacePath)
+  useEffect(() => (voiceLine ? registerVoiceLine(voiceOwner) : undefined), [voiceLine, voiceOwner])
   const runningRef = useRef(running)
   runningRef.current = running
   const runIdRef = useRef(activeRunId ?? null)

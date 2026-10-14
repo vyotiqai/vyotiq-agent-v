@@ -2036,7 +2036,8 @@ export function registerIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const req = VoiceFollowRequestSchema.parse(raw)
-      followVoiceRun(event.sender.id, req.sessionId, req.runId)
+      if (req.runId) followVoiceRun(event.sender.id, req.sessionId, req.runId)
+      else voiceSessionFor(event.sender.id, req.sessionId)?.turnWentNowhere(req.reason ?? 'not_sent')
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.voiceFollow)

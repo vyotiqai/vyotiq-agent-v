@@ -191,7 +191,10 @@ export function VoiceBar({
   const caption =
     v.state === 'hearing' && v.partial ? (
       <span className="text-fg">{v.partial}</span>
-    ) : v.state === 'speaking' && v.saying ? (
+    ) : v.state === 'waiting_on_you' && (v.asked || v.saying) && settings.captions ? (
+      // While it waits on you, what it asked stays in view until you answer.
+      <span className="text-muted">{v.asked || v.saying}</span>
+    ) : v.state === 'speaking' && v.saying && settings.captions ? (
       <span className="text-muted">{v.saying}</span>
     ) : v.lastTurn && (v.state === 'thinking' || v.state === 'working') ? (
       <span className="text-muted">“{v.lastTurn}”</span>

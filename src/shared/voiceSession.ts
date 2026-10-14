@@ -78,6 +78,9 @@ export function nextVoiceState(state: VoiceSessionState, event: VoiceSessionEven
       return event.type === 'ready' ? 'listening' : null
     case 'listening':
       if (event.type === 'speech_start') return 'hearing'
+      // The reply's audio usually starts after the run has finished (the
+      // speech lags the text): it's still the agent speaking (D-37).
+      if (event.type === 'audio_start') return 'speaking'
       // A turn can end without a speech_start (push-to-talk on a quiet mic).
       if (event.type === 'end_of_turn') return 'thinking'
       if (event.type === 'needs_you') return 'waiting_on_you'

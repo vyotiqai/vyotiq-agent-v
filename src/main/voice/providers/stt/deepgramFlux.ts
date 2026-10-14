@@ -75,6 +75,15 @@ class FluxSession extends SocketStt {
     this.sendJson({ type: 'ForceEndTurn' })
   }
 
+  /**
+   * While muted. Deepgram closes a stream that gets no audio for about 10 s
+   * and documents silent audio as the way to keep it open; Flux documents no
+   * KeepAlive message. 100 ms of silence every few seconds.
+   */
+  keepAlive(): void {
+    this.pushAudio(new Int16Array(1600))
+  }
+
   setKeyterms(terms: readonly string[]): void {
     this.sendJson({ type: 'Configure', keyterms: terms.slice(0, 100) })
   }

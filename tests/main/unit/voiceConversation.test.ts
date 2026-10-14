@@ -440,8 +440,18 @@ describe('approvals by voice', () => {
 describe('approval wording and answers', () => {
   it('describes approvals in a few words', async () => {
     const { describeApproval } = await import('@main/voice/session')
-    expect(describeApproval({ name: 'edit_file', summary: 'src/main/loop.ts' })).toBe('change loop')
+    // The summaries the real approval gate builds (summarizeToolArgs) for the real tools.
+    expect(describeApproval({ name: 'terminal', summary: 'pnpm test' })).toBe('run pnpm test')
+    expect(describeApproval({ name: 'edit', summary: 'src/main/loop.ts' })).toBe('change the loop file')
+    expect(describeApproval({ name: 'write', summary: 'notes' })).toBe('change notes')
+    expect(describeApproval({ name: 'delete', summary: 'dist/old.js' })).toBe('delete the old file')
+    expect(describeApproval({ name: 'web_fetch', summary: 'https://www.example.com/docs' })).toBe('open example.com')
     expect(describeApproval({ name: 'web_fetch', summary: '' })).toBe('open a web page')
+    expect(describeApproval({ name: 'move', summary: 'src/old.ts' })).toBe('move the old file')
+    expect(cueForTool('web_search', 'vitest flaky')).toBe('Searching the web.')
+    expect(cueForTool('web_fetch', 'https://example.com')).toBe('Reading a web page.')
+    expect(cueForTool('grep', 'TODO')).toBe('Looking through the code.')
+    expect(cueForTool('str_replace', 'src/a.ts')).toBe('Making the change.')
   })
 
   it('only takes a whole-utterance yes or no', async () => {

@@ -25,6 +25,8 @@ type ModeState = {
 
 /** How long a brief's handoff waits for the new task's line to appear. */
 export const HANDOFF_MS = 10_000
+/** How long a session whose line went away waits for another line before it ends. */
+export const ORPHAN_MS = 3_000
 
 let mode: ModeState = { owner: null, settings: DEFAULT_VOICE_SETTINGS, startedAt: null }
 /** The brief that just started a task by voice, waiting for its line. */
@@ -153,6 +155,17 @@ export function registerVoiceLine(key: string): () => void {
   return () => {
     const i = lines.indexOf(key)
     if (i >= 0) lines.splice(i, 1)
+    // The line holding the session went away (the task view re-laid out, or
+    // you opened another task): the next line to appear takes it over. If
+    // none does, voice mode ends — a live mic with no bar anywhere is never
+    // left behind (D-35).
+    if (mode.owner === key) {
+      if (!handoff || handoff.from !== key) handoff = { from: key, until: Date.now() + ORPHAN_MS }
+      const until = handoff.until
+      setTimeout(() => {
+        if (mode.owner === key && handoff?.from === key) void endVoiceMode()
+      }, Math.max(0, until - Date.now()) + 50)
+    }
   }
 }
 

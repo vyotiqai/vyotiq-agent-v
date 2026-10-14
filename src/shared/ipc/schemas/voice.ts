@@ -217,7 +217,17 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
 ])
 export type VoiceEvent = z.infer<typeof VoiceEventSchema>
 
-export const VoiceFollowRequestSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(200) })
+/**
+ * What became of a finished turn (D-40): the run it went to (its reply is
+ * spoken), or null when it went nowhere — `stopped` (a stop phrase) or
+ * `not_sent` (the send failed). Every turn reports, so the session never
+ * waits in Thinking for a run that isn't coming.
+ */
+export const VoiceFollowRequestSchema = z.object({
+  sessionId: z.string().min(1).max(100),
+  runId: z.string().min(1).max(200).nullable(),
+  reason: z.enum(['stopped', 'not_sent']).optional()
+})
 export type VoiceFollowRequest = z.infer<typeof VoiceFollowRequestSchema>
 
 export const VoicePlaybackRequestSchema = z.object({

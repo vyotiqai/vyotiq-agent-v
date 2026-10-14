@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
 import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
 import {
+  ORPHAN_MS,
   HANDOFF_MS,
   beginVoiceHandoff,
   handleVoiceTurn,
@@ -114,6 +115,33 @@ describe('handing a session from the brief to the new task', () => {
     vi.setSystemTime(Date.now() + HANDOFF_MS + 1)
     registerVoiceLine('late')
     expect(voiceModeOwner()).toBe('brief')
+  })
+})
+
+describe('a session whose line goes away (D-35)', () => {
+  it('moves to the next line that appears', async () => {
+    await startVoiceMode('line-a', { workspacePath: '/repo' })
+    const off = registerVoiceLine('line-a')
+    off() // the task view re-laid out
+    registerVoiceLine('line-b')
+    expect(voiceModeOwner()).toBe('line-b')
+  })
+
+  it('ends when no line takes it, so the mic is never left on without a bar', async () => {
+    vi.useFakeTimers()
+    await startVoiceMode('line-a', { workspacePath: '/repo' })
+    const off = registerVoiceLine('line-a')
+    off()
+    expect(voiceModeOwner()).toBe('line-a')
+    await vi.advanceTimersByTimeAsync(ORPHAN_MS + 100)
+    expect(voiceModeOwner()).toBeNull()
+  })
+
+  it('a line that registers again keeps its own session', async () => {
+    await startVoiceMode('line-a', { workspacePath: '/repo' })
+    registerVoiceLine('line-a')
+    registerVoiceLine('line-b') // another pane appearing doesn't take it
+    expect(voiceModeOwner()).toBe('line-a')
   })
 })
 

@@ -11,8 +11,8 @@ import { VoiceError } from './errors'
 import { sttProvider, ttsProvider } from './providers/registry'
 import { VoiceSession } from './session'
 import { addRunEventTap } from '../agent/runEventTap'
-import { resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
-import { resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
+import { listPendingToolApprovals, resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
+import { listPendingAgentQuestions, resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
 import { getRunWorkspace } from '../agent/runRegistry'
 import { setVoiceReplyWorkspace } from './voiceReply'
 import { notifyBadgeChange } from '../app/badges'
@@ -70,9 +70,18 @@ function openSessionTts(
   })
 }
 
-type Owner = { id: number; isDestroyed(): boolean; send(channel: string, payload: unknown): void; once?(ev: 'destroyed', fn: () => void): unknown }
+type NavigationDetails = { isMainFrame: boolean; isSameDocument: boolean }
+type Owner = {
+  id: number
+  isDestroyed(): boolean
+  send(channel: string, payload: unknown): void
+  once?(ev: 'destroyed', fn: () => void): unknown
+  on?(ev: 'did-start-navigation', fn: (details: NavigationDetails) => void): unknown
+  off?(ev: 'did-start-navigation', fn: (details: NavigationDetails) => void): unknown
+}
 
 const sessions = new Map<string, { session: VoiceSession; owner: Owner }>()
+const navigationListeners = new Map<string, () => void>()
 const byOwner = new Map<number, string>()
 
 export type VoiceChannels = { events: string; audio: string }
@@ -107,12 +116,23 @@ export async function startVoiceSession(
     watchApprovals: watchToolApprovals,
     resolveApproval: (answer) => resolveToolApproval(answer),
     watchQuestions: watchAgentQuestions,
+    pendingApprovals: listPendingToolApprovals,
+    pendingQuestions: listPendingAgentQuestions,
     resolveQuestion: (answer) => resolveAgentQuestion(answer),
     logLatency: (t) => logger.info('Voice turn latency', { scope: 'voice', ...t })
   })
   sessions.set(session.id, { session, owner })
   byOwner.set(owner.id, session.id)
   owner.once?.('destroyed', () => void stopVoiceSession(session.id))
+  // A reload or navigation drops the window's mic and bar: end the session
+  // too, or the tray and taskbar would keep saying "listening" (D-41).
+  const onNavigate = (details: NavigationDetails): void => {
+    if (!details.isMainFrame || details.isSameDocument) return
+    owner.off?.('did-start-navigation', onNavigate)
+    void stopVoiceSession(session.id)
+  }
+  owner.on?.('did-start-navigation', onNavigate)
+  navigationListeners.set(session.id, () => owner.off?.('did-start-navigation', onNavigate))
   // While it's open, replies in this workspace are written to be heard.
   setVoiceReplyWorkspace(session.id, workspacePath)
   await session.start()
@@ -153,6 +173,8 @@ export async function stopVoiceSession(sessionId: string): Promise<void> {
   const entry = sessions.get(sessionId)
   if (!entry) return
   sessions.delete(sessionId)
+  navigationListeners.get(sessionId)?.()
+  navigationListeners.delete(sessionId)
   setVoiceReplyWorkspace(sessionId, null)
   if (byOwner.get(entry.owner.id) === sessionId) byOwner.delete(entry.owner.id)
   await entry.session.stop()

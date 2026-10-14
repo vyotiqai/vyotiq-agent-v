@@ -69,3 +69,12 @@ describe('voice session state machine', () => {
     for (const s of VOICE_SESSION_STATES) expect(VOICE_STATE_LABEL[s].length).toBeGreaterThan(0)
   })
 })
+
+describe('reply audio that starts after the run has finished (D-37)', () => {
+  it('is still the agent speaking, so talking over it is a barge-in', () => {
+    expect(nextVoiceState('listening', { type: 'audio_start' })).toBe('speaking')
+    expect(nextVoiceState('speaking', { type: 'barge_in' })).toBe('hearing')
+    expect(nextVoiceState('speaking', { type: 'audio_done', runActive: false })).toBe('listening')
+  })
+})
+

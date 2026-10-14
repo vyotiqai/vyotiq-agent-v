@@ -20,7 +20,7 @@ You can also start on **New task**. Press the waveform button in the brief and s
 ## The voice bar
 
 - **The orb** shows whose turn it is. It breathes while it listens, follows your voice while you talk, turns while the agent thinks or works, and follows the agent's voice while it speaks. Each state has its own shape, and it holds still if your system asks for reduced motion.
-- **The caption** shows the words it heard while you talk, and what the agent is saying while it speaks.
+- **The caption** shows the words it heard while you talk, and what the agent is saying while it speaks. When it asks you something, the question stays in view until you answer. Turning **Captions** off hides the words; the agent still speaks.
 - **The time** since voice mode started, and **who is listening**, with a cloud for a provider or a lock for this PC.
 - **Mute**, **Stop speaking**, **Stop the agent**, and **End**.
 
@@ -36,8 +36,10 @@ None of these act while the cursor is in a text field.
 
 - **Short answers.** One to three sentences, then the details are on screen. Ask for more ("walk me through it") and it says more.
 - **No dead air.** When a slow step starts, it says a few words, such as "Running the tests." Turn this off with "Spoken progress".
-- **Interrupt any time.** It stops the moment you talk. What happens to the work in progress is set by "When you talk over it": "Redirect the agent" (the default) applies what you say at its next step; "Stop the agent" cancels the run and starts on what you said; "Just stop talking" queues what you said for after the run.
+- **Interrupt any time.** The moment you start talking its voice dips; if you keep talking it stops, and if it was a cough it carries on. What happens to the work in progress is set by "When you talk over it": "Redirect the agent" (the default) applies what you say at its next step; "Stop the agent" cancels the run and starts on what you said; "Just stop talking" queues what you said for after the run.
 - **"Stop" or "Never mind"** on their own cancel the run.
+- **If something you said can't be sent** (no model set up, say), it tells you, and the reason is on screen.
+- **Voice mode goes where you go.** Open another task and the conversation moves to it; reload the window and voice mode ends, so the microphone is never left on without the voice bar.
 - **Approvals by voice.** When the agent needs your OK, it asks out loud ("It wants to run pnpm test. Say yes or no."). Yes allows it once; no denies it. Anything else you say goes to the agent as a message. Risky actions always need a click on the card. Turn this off with "Approve by voice".
 
 ## Choose who listens and who speaks

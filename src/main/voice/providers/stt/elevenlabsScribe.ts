@@ -10,7 +10,10 @@ import { SocketStt, int16Base64, str } from './socketStt'
 export function scribeUrl(opts: Pick<SttOpenOptions, 'model' | 'language'>): string {
   const params = new URLSearchParams({
     model_id: opts.model || 'scribe_v2_realtime',
-    audio_format: 'pcm_16000'
+    audio_format: 'pcm_16000',
+    // The session decides when a turn ends and commits it; the vendor's own
+    // default (VAD or turn prediction) isn't documented for this model.
+    commit_strategy: 'manual'
   })
   if (opts.language) params.set('language_code', opts.language)
   return `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${params}`

@@ -167,4 +167,39 @@ describe('VoiceSessionController', () => {
     t.audio('c2')
     expect(t.sources).toHaveLength(2)
   })
+
+  it('builds the caption sentence by sentence per reply, and keeps a question in view until answered', async () => {
+    const h = setup()
+    await h.c.start()
+    h.emit({ kind: 'say', contextId: 'r1', text: 'The test is fixed.' })
+    h.emit({ kind: 'say', contextId: 'r1', text: 'It runs green now.' })
+    expect(h.c.snapshot.saying).toBe('The test is fixed. It runs green now.')
+    // The run ends before the audio does: the words stay for when it plays.
+    h.emit({ kind: 'state', state: 'listening' })
+    expect(h.c.snapshot.saying).toBe('The test is fixed. It runs green now.')
+    h.emit({ kind: 'say', contextId: 'r2', text: 'A new reply.' })
+    expect(h.c.snapshot.saying).toBe('A new reply.')
+    h.emit({ kind: 'state', state: 'waiting_on_you' })
+    h.emit({ kind: 'say', contextId: 'a1', text: 'It wants to run pnpm test. Say yes or no.' })
+    expect(h.c.snapshot.asked).toBe('It wants to run pnpm test. Say yes or no.')
+    h.emit({ kind: 'state', state: 'hearing' })
+    expect(h.c.snapshot.asked).toBe('')
+    expect(h.c.snapshot.saying).toBe('')
+  })
+
+  it('reports a turn that went nowhere, so the session leaves Thinking', async () => {
+    const h = setup()
+    // onTurn returns run-7 in this harness; make the next one go nowhere.
+    ;(h.c as unknown as { deps: { onTurn: () => null } }).deps.onTurn = () => null
+    await h.c.start()
+    h.emit({ kind: 'turn', turnId: 't1', text: 'stop', stop: true })
+    await vi.waitFor(() =>
+      expect(h.bridge.voiceFollow).toHaveBeenCalledWith({ sessionId: 's1', runId: null, reason: 'stopped' })
+    )
+    h.emit({ kind: 'turn', turnId: 't2', text: 'fix it', stop: false })
+    await vi.waitFor(() =>
+      expect(h.bridge.voiceFollow).toHaveBeenCalledWith({ sessionId: 's1', runId: null, reason: 'not_sent' })
+    )
+  })
 })
+

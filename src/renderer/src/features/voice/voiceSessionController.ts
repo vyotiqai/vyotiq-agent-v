@@ -18,8 +18,10 @@ export type VoiceSnapshot = {
   partial: string
   /** The last turn you finished, until the next one starts. */
   lastTurn: string
-  /** What the agent is saying right now, for captions. */
+  /** What the agent is saying right now, for captions: the reply so far, newest words last. */
   saying: string
+  /** The question it asked while it waits on you (an approval, a question), kept until you answer. */
+  asked: string
   listener: SttProviderId | null
   listenerFellBackFrom: SttProviderId | null
   /** Who speaks the replies; null when nothing can (replies stay on screen), undefined before it's known. */
@@ -40,6 +42,7 @@ export const IDLE_VOICE: VoiceSnapshot = {
   partial: '',
   lastTurn: '',
   saying: '',
+  asked: '',
   listener: null,
   listenerFellBackFrom: null,
   speakerFellBackFrom: null,
@@ -98,6 +101,8 @@ export class VoiceSessionController {
   private player: VoicePlayer | null = null
   /** Replies main told us about (by `say`), whose audio we play. */
   private replies = new Set<string>()
+  /** The reply the caption is building up. */
+  private sayingId: string | null = null
   /** Replies whose audio started and hasn't drained. */
   private sounding = new Set<string>()
 
@@ -172,8 +177,14 @@ export class VoiceSessionController {
     if (this.sessionId && e.sessionId !== this.sessionId) return
     switch (e.kind) {
       case 'state':
+        // Your own turn starts the next caption afresh. Not on other state
+        // changes: a reply's words arrive while the run works, and its audio
+        // often starts only after the run has finished.
+        if (e.state === 'hearing') this.sayingId = null
         this.set({
+          ...(e.state === 'hearing' ? { saying: '' } : {}),
           state: e.state,
+          ...(e.state !== 'waiting_on_you' ? { asked: '' } : {}),
           ...(e.state === 'hearing' ? { partial: '', lastTurn: '' } : {}),
           ...(e.state === 'listening' ? { reconnectAttempt: 0, error: null } : {})
         })
@@ -192,10 +203,17 @@ export class VoiceSessionController {
         this.set({ partial: '', lastTurn: e.text, saying: '' })
         void this.routeTurn({ turnId: e.turnId, text: e.text, stop: e.stop })
         return
-      case 'say':
+      case 'say': {
+        // Sentences of one reply build up; a new reply starts the caption afresh.
+        const same = this.replies.has(e.contextId) && this.sayingId === e.contextId
         this.replies.add(e.contextId)
-        this.set({ saying: e.text })
+        this.sayingId = e.contextId
+        this.set({
+          saying: same && this.snap.saying ? `${this.snap.saying} ${e.text}` : e.text,
+          ...(this.snap.state === 'waiting_on_you' ? { asked: e.text } : {})
+        })
         return
+      }
       case 'flush':
         this.replies.delete(e.contextId)
         this.sounding.delete(e.contextId)
@@ -225,7 +243,10 @@ export class VoiceSessionController {
     } catch {
       runId = null
     }
-    if (runId && id && id === this.sessionId) void this.bridge().voiceFollow({ sessionId: id, runId })
+    if (!id || id !== this.sessionId) return
+    // Every turn reports where it went, so the session never waits on a run that isn't coming.
+    if (runId) void this.bridge().voiceFollow({ sessionId: id, runId })
+    else void this.bridge().voiceFollow({ sessionId: id, runId: null, reason: turn.stop ? 'stopped' : 'not_sent' })
   }
 
   private ensurePlayer(): VoicePlayer {
@@ -241,7 +262,7 @@ export class VoiceSessionController {
           const id = this.sessionId
           const drained = [...this.sounding]
           this.sounding.clear()
-          if (this.snap.saying) this.set({ saying: '' })
+          // The caption stays until the session leaves speaking (no flash of "Speaking").
           if (!id) return
           for (const contextId of drained) void this.bridge().voicePlayback({ sessionId: id, contextId, phase: 'drained' })
         }

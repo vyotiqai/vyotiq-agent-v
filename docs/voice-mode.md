@@ -6,10 +6,10 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated on every commit to the `feat/voice-mode` branch.
 
-> **Status:** built through Phase 6 plus approvals and questions by voice and most of Phase 7, on
-> `feat/voice-mode`, as local commits in the voice worktree (not pushed; D-19). Not yet run on
-> real hardware: the first run with real keys, a mic and speakers is the next real test.
-> PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft, holds the design only until pushed).
+> **Status:** on `main` (PR [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) merged
+> 2026-10-13, follow-up `e2c3985`). Verified end to end in the real built app with a fake
+> microphone and scripted vendors (`tests/gui-e2e/voice.spec.ts`, §24.5). Not yet run with real
+> vendor keys, a real mic and speakers: that first hands-on run is the next real test.
 
 ---
 
@@ -1355,7 +1355,7 @@ with the feature off.
   - [x] PRIVACY.md §7 "Voice mode": every listening and speaking endpoint, what is sent and what isn't, vocabulary hints, redaction, keys, previews; summary bullet. README: dictation bullet corrected (it said no audio ever leaves the app, untrue for cloud dictation) and a Voice mode bullet. **Ajay: the policy's effective date is unchanged; bump it when this ships**
   - [x] Site docs: new "Voice mode" page (Tasks), "What leaves your computer" and keyboard shortcuts updated
   - [x] Per-turn latency log: end of turn → sent → first sentence → first audio, timings only (`logLatency`, scope `voice`)
-  - [ ] GUI end-to-end spec with Chromium's fake mic under `VYOTIQ_E2E_FIXTURE=1` (`tests/gui-e2e/voice.spec.ts`): needs a built Electron app and a display; the cloud workspace installs without Electron's binary. Write it when the branch is next built on a full machine
+  - [x] GUI end-to-end spec (2026-10-14): `tests/gui-e2e/voice.spec.ts`, 5 tests in the real built app under Xvfb with an unlocked Secret Service keyring: a gated oscillator as the mic, `VYOTIQ_VOICE_FIXTURE_TURNS` scripting what the listener hears from that audio, the agent fixture `voice-reply.json` (an approval, then a spoken summary). It found seven wiring bugs unit tests had missed (§24.5)
   - [ ] Silence pause for billing (R-09) and the proxy check for websockets (R-04): need real providers to verify
 
 ---
@@ -1397,6 +1397,13 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-30 | 2026-10-11 | Voice mode on New task (Ajay: yes). The first spoken turn starts the task with everything the brief holds, typed text first, and the session is handed to the new task's line; there is no "confirm before starting" step, because the brief's Start task has none either and the task can be stopped by voice ("stop") | Decided |
 | D-32 | 2026-10-13 | `voice_reply` only for turns said out loud (Ajay: yes). A voice turn is sent with `{ voice: true }`, the user message is stored with `spoken: true`, and the prompt asks for a spoken summary only when the latest real user message is spoken and voice mode is still open on the folder. A typed message in the same task, other tasks in the folder, and helper instances get written answers. Supersedes D-26's folder-wide scope; the section stays in the stable zone, so switching between spoken and typed turns changes the prompt prefix | Decided |
 | D-33 | 2026-10-13 | Barge-in dips first (Ajay: yes): 20% on any speech start while audio plays, stop on 600 ms voiced or non-echo words, back to full on echo, an empty turn or 1.2 s. Supersedes D-25 | Decided |
+| D-35 | 2026-10-14 | A line registers for voice for as long as its composer is mounted (not its button, which the bar replaces). When the owning line unmounts, the next line to appear within 3 s takes the session; if none does, voice mode ends — a live mic is never left without a bar | Decided |
+| D-36 | 2026-10-14 | Following a run reads out any approval or question it is already waiting on: a fast model can ask before the renderer knows the run's id | Decided |
+| D-37 | 2026-10-14 | Reply audio that starts while Listening means Speaking: the speech lags the text, so the run has usually ended before the audio begins | Decided |
+| D-38 | 2026-10-14 | `say` events are always sent (they route the reply's audio in the window); the Captions setting only decides whether the bar shows the words | Decided |
+| D-39 | 2026-10-14 | A listener that closes while muted is reconnected on unmute (with the audio from before the mute dropped); Deepgram gets 100 ms of silence every 5 s while muted, its documented way to stay open | Decided |
+| D-40 | 2026-10-14 | Every turn reports where it went (`voice:follow` with `runId: null` and `stopped` / `not_sent`), so the session never waits in Thinking; a failed send is said out loud | Decided |
+| D-41 | 2026-10-14 | A window reload or navigation ends that window's session (the mic and bar are gone with the page) | Decided |
 | D-34 | 2026-10-13 | "Mic is on" lives in the taskbar overlay, dock badge and tray (Ajay's pick), not the title bar: those are main-process, testable here, and visible with the window hidden. Dictation waits while voice mode is on in any pane (greyed, "Voice mode is using the microphone"), except a take already under way | Decided |
 | D-31 | 2026-10-11 | The echo filter errs towards letting words through: only during playback plus a 2.5 s tail, 75% in-order word match, and one- or two-word transcripts only by exact run while audio plays. Dropping something you really said is worse than an occasional echo; push-to-talk and headphones remain the strong defences | Decided |
 | D-29 | 2026-10-11 | Questions by voice answer only what's unambiguous, and only one-question forms; everything else is sent as a message, which the existing superseded path hands to the model as the likely answer. No separate setting: unlike approvals, a wrong answer to a question grants nothing | Decided |
@@ -1493,11 +1500,58 @@ only for spoken turns (D-32).
 - First run with real keys, mic and speakers (Phase 1 spike): echo on
   speakers, latency per provider (`TurnLatency` is logged), vendor formats.
 - Look across the five skins × light/dark, the narrowest pane and large text.
-- GUI e2e `tests/gui-e2e/voice.spec.ts` with Chromium's fake mic under
-  `VYOTIQ_E2E_FIXTURE=1`.
 - Websockets through a proxy (R-04) and silence-pause billing (R-09).
 - The tray dot and taskbar/dock badge on Windows and macOS (no tray test
   exists; the pixel painting and badge state are unit-tested).
 - Tuning the dip: 600 ms to confirm and 1.2 s to give up are first guesses.
 - Rebase onto Ajay's newer local code; merge `main` once #62/#64 land.
+
+### 24.5 End-to-end audit in the real app (2026-10-14)
+
+The app was built (`electron-vite build`) and driven with Playwright under
+Xvfb, with a Secret Service keyring so keys really save. The microphone is an
+oscillator the test gates on and off; the listener and speaker are the
+scripted fixtures (vendors can't be reached from the audit machine); the
+agent is the replay fixture going through the real run path, approval gate
+and run tap. Every flow below passed at the end (`voice.spec.ts`, 5 tests),
+and the neighbouring GUI specs (chat send, dictation, composer modes, drafts)
+still pass.
+
+| Bug found by running it | Evidence | Fix |
+| --- | --- | --- |
+| Starting a task by voice lost the session | Logs: the session went to a short-lived line, then the real line registered too late; the bar vanished | D-35: registration by composer, hand-over on unmount, end if orphaned |
+| A line's registration ended the moment voice started | The button that registered sits in the box the bar replaces | D-35 |
+| An approval asked before follow was never read out | Run waiting on "Allow once"; orb stuck on Thinking | D-36 |
+| The spoken summary never showed as Speaking, and talking over it did nothing | Session log: `run_done working -> listening`, then `audio_start listening -> null` | D-37 |
+| Captions off silenced the agent | The window plays only replies it got a `say` for; `say` was gated on Captions | D-38 |
+| The question disappeared from the bar while it waited for you; the reply caption showed only its last sentence | Recorded caption history | Caption builds per reply; `asked` kept until you answer |
+| Answering while the question was still read out talked over it | Code path, then test | Speech in Waiting on you stops the reading (not a barge-in) |
+| "change a" / "open a link on screen" / web search cued as "Looking through the code" | Real summaries from `summarizeToolArgs` for the real tool names | File, host and web-tool wording |
+
+Found by reading against the running behaviour and vendor docs, then pinned
+with unit tests: a stop phrase or failed send left the session in Thinking
+(D-40); a reload left a session "listening" in the tray (D-41); a listener
+closed during a long mute left a dead session (D-39).
+
+Vendor protocols checked against their docs: Deepgram Flux (URL, `Token`
+auth, `eot_threshold` 0.5–1.0, `eot_timeout_ms`, `language_hint` only with
+`flux-general-multi`, `Configure`/`ForceEndTurn`/`CloseStream`, `TurnInfo`),
+AssemblyAI v3 (URL, auth without Bearer, `speech_model` values,
+`min_turn_silence`/`max_turn_silence`, `ForceEndpoint`/`UpdateConfiguration`/
+`Terminate`, `SpeechStarted`/`Turn`, 50–1000 ms chunks — ours are 128 ms),
+ElevenLabs Scribe (`input_audio_chunk` with all four required fields;
+`commit_strategy` now set to `manual`), OpenAI realtime transcription
+(`gpt-live-transcribe`, `languages`, `delay`, `keywords`, `turn_detection:
+null`), ElevenLabs multi-context TTS (init, `context_id`/`contextId`, `flush`,
+`close_context`, `close_socket`, `isFinal`, speed 0.7–1.2), Cartesia (version
+`2026-08-14`, `sonic-3.6`, speed 0.6–1.5), OpenAI speech (`speed` 0.25–4 for
+all models), OpenRouter speech (endpoint, dated model slug, `pcm`). Not
+confirmed from docs: Flux `StartOfTurn`/`Update` event names (the local
+detector covers speech start either way), `eleven_flash_v2_5` and
+`pcm_24000` on the multi-context page, Cartesia's websocket message fields
+(its docs page was not reachable from the audit machine).
+
+Not voice, seen while auditing: in the e2e fixture setup, a second run in the
+same task shows its user message but no answer, typed or spoken, with the
+stock `chat-send-stream.json` fixture too. Worth checking against a real model.
 

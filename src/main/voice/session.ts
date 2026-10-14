@@ -42,6 +42,8 @@ const RING_SAMPLES = 16000 * 10
 export const DUCK_CONFIRM_MS = 600
 /** A dip that isn't confirmed by then was a cough, a click or an echo: the voice comes back. */
 export const DUCK_GIVE_UP_MS = 1200
+/** Said when a turn couldn't be sent to the agent (D-40). */
+export const NOT_SENT_LINE = 'That didn’t go through. The reason is on screen.'
 /** Keep a muted listener's connection alive this often. */
 const KEEPALIVE_MS = 5000
 
@@ -87,6 +89,12 @@ export type VoiceSessionDeps = {
     asked: (request: AgentQuestionRequest) => void
     settled: (requestId: string, runId: string) => void
   }) => () => void
+  /**
+   * What a run is already waiting on when the session starts following it: a
+   * fast model can ask before the renderer knows the run's id (D-36).
+   */
+  pendingApprovals?: (runId: string) => readonly ToolApprovalRequest[]
+  pendingQuestions?: (runId: string) => readonly AgentQuestionRequest[]
   /** Answer the agent's question, as its card would. */
   resolveQuestion?: (answer: { requestId: string; runId: string; answers: AgentQuestionAnswer[] }) => boolean
   /** Per-turn timings, for tuning (§14). Timings only; never words. */
@@ -133,6 +141,8 @@ export class VoiceSession {
   private question: AgentQuestionRequest | null = null
   /** What the agent just said, to recognise it coming back through the mic (§6.4). */
   private readonly echo = new EchoGuard()
+  /** The listener went away while you were muted: reconnect when you unmute (D-39). */
+  private lostWhilePaused = false
   /** The agent's voice is dipped while we find out whether you're really talking. */
   private duck: { since: number } | null = null
 
@@ -146,7 +156,9 @@ export class VoiceSession {
       say: (contextId, text) => {
         this.echo.said(text, this.now())
         if (this.timing && this.timing.firstSayAt === undefined) this.timing.firstSayAt = this.now()
-        if (this.deps.settings().captions) this.emitEvent({ kind: 'say', contextId, text })
+        // Always sent: the window plays only the replies it has been told about
+        // (D-38). Whether the words show is the bar's call (Captions setting).
+        this.emitEvent({ kind: 'say', contextId, text })
       },
       onToolStart: () => this.dispatch({ type: 'tool_start' }),
       onRunEnd: () => this.dispatch({ type: 'run_done' }),
@@ -176,13 +188,33 @@ export class VoiceSession {
    */
   follow(runId: string): void {
     if (this.stateValue === 'off') return
-    if (this.followedRun !== runId) {
+    const newRun = this.followedRun !== runId
+    if (newRun) {
       this.untap?.()
       this.untap = this.deps.tapRun ? this.deps.tapRun(runId, (ev) => this.reply.handle(ev)) : null
       this.followedRun = runId
     }
     this.reply.beginTurn()
+    // Anything it asked before we were following it is read out now.
+    if (newRun) {
+      const approval = this.deps.pendingApprovals?.(runId)[0]
+      if (approval && this.approval?.requestId !== approval.requestId) this.onApprovalAsked(approval)
+      const question = this.deps.pendingQuestions?.(runId)[0]
+      if (question && this.question?.requestId !== question.requestId) this.onQuestionAsked(question)
+    }
     if (this.timing && this.timing.followedAt === undefined) this.timing.followedAt = this.now()
+  }
+
+  /**
+   * The renderer's report that the last turn went nowhere: a stop phrase with
+   * nothing running, or a send that failed (no model, offline). Back to
+   * listening; a failed send is said, since you may not be looking (D-40).
+   */
+  turnWentNowhere(reason: 'stopped' | 'not_sent'): void {
+    if (this.stateValue !== 'thinking' || this.reply.runActive) return
+    this.timing = null
+    this.dispatch({ type: 'run_done' })
+    if (reason === 'not_sent') this.reply.announce(NOT_SENT_LINE)
   }
 
   private now(): number {
@@ -333,8 +365,25 @@ export class VoiceSession {
       this.keepAliveTimer = this.setTimer(() => this.keepAlive(), KEEPALIVE_MS)
     } else {
       this.stopKeepAlive()
-      this.dispatch({ type: 'unmute' })
+      if (!this.dispatch({ type: 'unmute' })) return
+      if (this.lostWhilePaused) {
+        this.lostWhilePaused = false
+        // Nothing said before the mute belongs to what you say next.
+        this.ring = []
+        this.ringSamples = 0
+        this.beginReconnect()
+      }
     }
+  }
+
+  /** The listener closed while muted: let it go now, and reconnect on unmute. */
+  private dropListenerWhilePaused(): void {
+    this.generation++
+    this.ctrl.abort()
+    const stale = this.stt
+    this.stt = null
+    void stale?.close()
+    this.lostWhilePaused = true
   }
 
   private keepAlive(): void {
@@ -368,6 +417,7 @@ export class VoiceSession {
     this.approval = null
     this.echo.reset()
     this.duck = null
+    this.lostWhilePaused = false
     this.unwatchQuestions?.()
     this.unwatchQuestions = null
     this.question = null
@@ -405,12 +455,15 @@ export class VoiceSession {
         this.onEndOfTurn(event.text)
         return
       case 'error':
-        if (event.retryable) this.beginReconnect()
-        else this.failWith(event.code)
+        if (!event.retryable) this.failWith(event.code)
+        else if (this.stateValue === 'paused') this.dropListenerWhilePaused()
+        else this.beginReconnect()
         return
       case 'closed':
-        // Closed under us (not by stop): try to get it back.
-        if (this.stateValue !== 'off' && this.stateValue !== 'error') this.beginReconnect()
+        // Closed under us (not by stop): try to get it back — at once, or on
+        // unmute if you're muted (a vendor may close an idle connection).
+        if (this.stateValue === 'paused') this.dropListenerWhilePaused()
+        else if (this.stateValue !== 'off' && this.stateValue !== 'error') this.beginReconnect()
         return
       case 'open':
         return
@@ -437,6 +490,14 @@ export class VoiceSession {
   private onSpeechStart(): void {
     const s = this.stateValue
     if (!AGENT_FLOOR_STATES.has(s)) {
+      // Answering while it's still reading the question out: stop reading.
+      // Not a barge-in — the reply that follows your answer is still spoken.
+      if (s === 'waiting_on_you' && this.playing.size > 0) {
+        for (const contextId of this.playing) this.emitEvent({ kind: 'flush', contextId })
+        this.playing.clear()
+        this.echo.setPlaying(false, this.now())
+        this.pause.setAgentSpeaking(false)
+      }
       this.dispatch({ type: 'speech_start' })
       return
     }
@@ -660,9 +721,26 @@ export class VoiceSession {
 /** What an approval asks for, in a few spoken words (§7.5). */
 export function describeApproval(req: Pick<ToolApprovalRequest, 'name' | 'summary'>): string {
   const name = req.name.toLowerCase()
-  const summary = toSpeakable(req.summary).replace(/[.]+$/, '').slice(0, 120)
+  const raw = req.summary.trim()
+  const summary = toSpeakable(raw).replace(/[.]+$/, '').slice(0, 120)
   if (/terminal|shell|command|bash/.test(name)) return summary ? `run ${summary}` : 'run a command'
-  if (/edit|write|patch|create|replace|delete/.test(name)) return summary ? `change ${summary}` : 'change a file'
-  if (/fetch|browser|navigate/.test(name)) return summary ? `open ${summary}` : 'open a web page'
+  // A path is said as its file's name: "change the saveDraft file", not "change saveDraft".
+  const isPath = /[\\/]|\.\w{1,6}$/.test(raw)
+  if (/^move$|rename/.test(name)) return summary ? `move ${isPath ? `the ${summary} file` : summary}` : 'move a file'
+  if (/delete|remove/.test(name)) return summary ? `delete ${isPath ? `the ${summary} file` : summary}` : 'delete a file'
+  if (/edit|write|patch|create|replace/.test(name)) return summary ? `change ${isPath ? `the ${summary} file` : summary}` : 'change a file'
+  if (/fetch|browser|navigate/.test(name)) {
+    // Say where, not "a link on screen": the site's name is what you'd check.
+    const host = /^https?:\/\//i.test(raw) ? hostOf(raw) : null
+    return host ? `open ${host}` : summary ? `open ${summary}` : 'open a web page'
+  }
   return summary ? `use ${req.name}: ${summary}` : `use ${req.name}`
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '') || null
+  } catch {
+    return null
+  }
 }
