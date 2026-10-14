@@ -1553,5 +1553,9 @@ detector covers speech start either way), `eleven_flash_v2_5` and
 
 Not voice, seen while auditing: in the e2e fixture setup, a second run in the
 same task shows its user message but no answer, typed or spoken, with the
-stock `chat-send-stream.json` fixture too. Worth checking against a real model.
+stock `chat-send-stream.json` fixture too. Followed up (2026-10-14): after a
+window reload even the first run's messages are gone, because the replay
+skips `runAgent` and saves no transcript (`chatFixtureReplay.ts`). So the
+fixture can't show whether a real second run displays its answer; check it
+once with a real model before treating it as an app bug.
 
