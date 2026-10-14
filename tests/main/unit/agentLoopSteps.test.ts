@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, readFileSync, rmSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ProviderChatRequest, StreamChunk } from '@main/agent/providers/types'
@@ -94,6 +94,7 @@ vi.mock('@main/agent/tools', () => ({
 import { runAgent } from '@main/agent/loop'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
 import { flushEventAppends } from '@main/agent/eventAppendQueue'
+import { logger } from '@shared/logger'
 
 describe('runAgent steps', () => {
   let workspace: string
@@ -179,6 +180,76 @@ describe('runAgent steps', () => {
       (e) => e.type === 'context_usage' && (e as { source?: string }).source === 'provider'
     ) as { inputTokens?: number } | undefined
     expect(providerCtx?.inputTokens).toBe(1200)
+  })
+
+  // Anthropic reports input as the uncached slice alone. Read as the whole
+  // prompt it put the step hit rate at 1 (30000 / 1000, capped).
+  it('logs the step cache hit rate against the whole prompt', async () => {
+    const info = vi.spyOn(logger, 'info')
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'done' }
+      yield {
+        type: 'done',
+        usage: { inputTokens: 1000, inputTokensIncludesCache: false, cachedInputTokens: 30_000, outputTokens: 5 }
+      }
+    })
+
+    for await (const _ of runAgent({
+      runId: 'step-hit-rate',
+      messages: [{ role: 'user', content: 'hello' }],
+      workspacePath: workspace
+    })) {
+      // drain
+    }
+
+    const step = info.mock.calls.find(([message]) => message === 'Token cost step')?.[1] as
+      | { cacheHitRateStep?: number }
+      | undefined
+    expect(step?.cacheHitRateStep).toBeCloseTo(30_000 / 31_000, 5)
+    info.mockRestore()
+  })
+
+  // Each invoke re-seeds its totals from events.jsonl. After a rewind (or an
+  // events archive rotating out) that sum is lower than the ledger's snapshot,
+  // and the next invoke's spend was diffed against the larger number: 0.
+  it('records a follow-up invoke’s spend in the day ledger after step_usage rows are gone', async () => {
+    let inputTokens = 1000
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'answer' }
+      yield { type: 'done', stopReason: 'stop', usage: { inputTokens, outputTokens: 10 } }
+    })
+    const runId = 'ledger-after-rewind'
+    for await (const _ of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'first' }],
+      workspacePath: workspace
+    })) {
+      // drain
+    }
+    const runDir = resolveRunDir(workspace, runId)
+    await flushEventAppends(runDir)
+    // What a rewind past that turn leaves: no step_usage rows.
+    const eventsPath = join(runDir, 'events.jsonl')
+    const kept = readFileSync(eventsPath, 'utf8')
+      .split('\n')
+      .filter((line) => !line.includes('"type":"step_usage"'))
+    writeFileSync(eventsPath, kept.join('\n'))
+
+    inputTokens = 500
+    for await (const _ of runAgent({
+      runId,
+      newMessages: [{ role: 'user', content: 'second' }],
+      workspacePath: workspace,
+      resume: true
+    })) {
+      // drain
+    }
+
+    const ledger = JSON.parse(readFileSync(join(runDir, 'usage.json'), 'utf8')) as {
+      days: Record<string, { inputTokens: number }>
+    }
+    const recorded = Object.values(ledger.days).reduce((sum, day) => sum + day.inputTokens, 0)
+    expect(recorded).toBe(1500)
   })
 
   it('persists reasoning once per assistant message (no thinking + reasoningState double-store)', async () => {

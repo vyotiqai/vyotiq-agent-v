@@ -110,6 +110,28 @@ describe('statusWriteQueue', () => {
     expect(after.goal).toBe('updated goal')
   })
 
+  // A failed older write must go back UNDER a newer queued patch: re-merging it
+  // on top turned a terminal "error" back into "running" — a zombie run.
+  it('keeps a newer queued status over a failed older write', async () => {
+    let failRename!: (err: Error) => void
+    renameMock.mockImplementationOnce(
+      () => new Promise<void>((_, reject) => (failRename = reject))
+    )
+
+    enqueueStatusPatch(dir, { status: 'running', mode: 'agent' })
+    await vi.waitFor(() => expect(renameMock).toHaveBeenCalledTimes(1))
+    enqueueStatusPatch(dir, { status: 'error', error: 'provider failed' })
+    failRename(new Error('disk full'))
+    await flushStatusWrites(dir)
+
+    const after = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8')) as {
+      status: string
+      mode?: string
+      error?: string
+    }
+    expect(after).toMatchObject({ status: 'error', mode: 'agent', error: 'provider failed' })
+  })
+
   it('re-arms a bounded retry after a failed flush', async () => {
     renameMock.mockRejectedValueOnce(new Error('locked'))
     enqueueStatusPatch(dir, { goal: 'keep me' })

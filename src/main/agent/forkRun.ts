@@ -3,7 +3,7 @@ import { createRunId } from './loop'
 import { isActive } from './runRegistry'
 import {
   createRun,
-  loadMessagesAsync,
+  loadMessagesStrictAsync,
   loadStatus,
   runExists,
   syncMessagesAsync,
@@ -27,7 +27,8 @@ export async function forkRun(
   const parsed = loadStatus(resolveRunDir(workspacePath, runId))
   if (!parsed) throw new Error('Invalid run status')
 
-  const source = await loadMessagesAsync(workspacePath, runId)
+  // Strict: an unreadable source must fail the fork, not clone an empty chat.
+  const source = await loadMessagesStrictAsync(workspacePath, runId)
   const keep =
     forkIndex === undefined
       ? source.length

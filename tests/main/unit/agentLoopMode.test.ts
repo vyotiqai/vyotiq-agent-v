@@ -284,19 +284,18 @@ describe('runAgent mode and API key', () => {
     expect(streamChat).toHaveBeenCalledTimes(1)
   })
 
+  // Draft-ready (so it counts as published) but missing Scope/Architecture/Risks.
+  const THIN_PLAN = ['# Thin plan', '', '## Goal', '', 'Ship it.', '', '## Steps', '', '1. Do it.', '', '## Done when', '', '- [ ] Done.'].join('\n')
+
   it('nudges twice when a published plan is shallow, naming its quality issues', async () => {
+    const runId = 'plan-shallow-nudge'
+    const runDir = createRun(workspace, runId, 'plan the work', 'agent')
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      // Published during this invoke, as `create_plan` would.
+      writeFileSync(join(runDir, 'plan.md'), THIN_PLAN)
       yield { type: 'text', text: 'Plan is done.' }
       yield { type: 'done', stopReason: 'stop' }
     })
-
-    const runId = 'plan-shallow-nudge'
-    const runDir = createRun(workspace, runId, 'plan the work', 'agent')
-    // Draft-ready (so it counts as published) but missing Scope/Architecture/Risks.
-    writeFileSync(
-      join(runDir, 'plan.md'),
-      ['# Thin plan', '', '## Goal', '', 'Ship it.', '', '## Steps', '', '1. Do it.', '', '## Done when', '', '- [ ] Done.'].join('\n')
-    )
 
     for await (const _ of runAgent({
       runId,
@@ -337,6 +336,30 @@ describe('runAgent mode and API key', () => {
     for await (const _ of runAgent({
       runId,
       messages: [{ role: 'user', content: 'answer it' }],
+      workspacePath: workspace,
+      mode: 'agent'
+    })) {
+      // drain
+    }
+
+    expect(streamChat).toHaveBeenCalledTimes(1)
+  })
+
+  // A plan judged on an earlier invoke re-fired both nudges on every
+  // follow-up: two extra model calls per ordinary turn.
+  it('does not re-judge a shallow plan an earlier invoke published', async () => {
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'It is noon.' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+
+    const runId = 'plan-shallow-earlier-invoke'
+    const runDir = createRun(workspace, runId, 'plan the work', 'agent')
+    writeFileSync(join(runDir, 'plan.md'), THIN_PLAN)
+
+    for await (const _ of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'what time is it?' }],
       workspacePath: workspace,
       mode: 'agent'
     })) {
@@ -388,6 +411,37 @@ describe('runAgent mode and API key', () => {
     expect(seenTools).toContain('edit')
     expect(seenTools).toContain('terminal')
     expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+  })
+
+  it('leaves the always-denied tools out of a shared-scope instance catalog', async () => {
+    let seenTools: string[] = []
+    streamChat.mockImplementation(async function* (req: ProviderChatRequest): AsyncGenerator<StreamChunk> {
+      seenTools = (req.tools ?? []).map((t) => t.name)
+      yield { type: 'text', text: 'ok' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    const runId = 'shared-scope-catalog'
+    createRun(workspace, runId, 'edit in scope', {
+      mode: 'agent',
+      inlineInstance: true,
+      pathScope: ['src/']
+    })
+
+    for await (const _ of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'edit in scope' }],
+      workspacePath: workspace,
+      mode: 'agent'
+    })) {
+      // drain
+    }
+
+    expect(seenTools).toContain('edit')
+    for (const denied of ['terminal', 'git_commit']) {
+      expect(seenTools).not.toContain(denied)
+    }
+    // Writes nothing, and is how such a child checks its own work (modePolicy).
+    expect(seenTools).toContain('diagnostics')
   })
 
   it('exits early with PROVIDER_AUTH when a non-ollama API key is missing', async () => {

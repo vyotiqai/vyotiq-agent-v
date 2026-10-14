@@ -77,6 +77,21 @@ describe('loadToolResultContent', () => {
     expect(content).toBe(full)
   })
 
+  it('finds a result that rotated into an archive, preferring the newest copy', async () => {
+    const runDir = resolveRunDir(workspace, runId)
+    const toolLine = (content: string): string =>
+      `${JSON.stringify({ role: 'tool', toolCallId: 'call-old', toolName: 'read', content })}\n`
+    writeFileSync(join(runDir, 'messages.archive.2026-09-01T00-00-00-000Z.jsonl'), toolLine('older copy'))
+    writeFileSync(join(runDir, 'messages.archive.2026-09-02T00-00-00-000Z.jsonl'), toolLine('rotated body'))
+    writeFileSync(
+      join(runDir, 'messages.jsonl'),
+      `${JSON.stringify({ role: 'user', content: 'later turn' })}\n`,
+      'utf8'
+    )
+
+    expect(await loadToolResultContent(workspace, runId, 'call-old')).toBe('rotated body')
+  })
+
   it('returns null when tool call is missing', async () => {
     const runDir = resolveRunDir(workspace, runId)
     writeFileSync(

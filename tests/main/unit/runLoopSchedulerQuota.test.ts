@@ -27,6 +27,10 @@ vi.mock('@main/agent/startAgentRun', () => ({
   sendChatEventToRenderer: vi.fn()
 }))
 
+vi.mock('@main/workspace/workspaces', () => ({
+  getWorkspaces: () => ({ openPaths: workspaceState.path ? [workspaceState.path] : [] })
+}))
+
 import {
   armLoop,
   disarmLoop,
@@ -38,6 +42,7 @@ import { flushEventAppends } from '@main/agent/eventAppendQueue'
 import { flushMessageAppends } from '@main/agent/messageAppendQueue'
 import { clearStatusWritesForDir, flushStatusWrites } from '@main/agent/statusWriteQueue'
 import { createRun } from '@main/agent/state'
+import { enqueueFollowUp, registerRunAbort, resetActiveRunsForTests } from '@main/agent/runRegistry'
 import { resolveRunDir } from '@main/storage/paths'
 
 const LOOP_INTERVAL_MS = 30_000 // RunLoopSchema min
@@ -51,6 +56,7 @@ describe('armed prompt loop during quota exhaustion', () => {
     workspaceState.path = workspace
     launchMock.mockClear()
     resetRunLoopSchedulerForTests()
+    resetActiveRunsForTests()
     vi.useFakeTimers()
   })
 
@@ -157,5 +163,39 @@ describe('armed prompt loop during quota exhaustion', () => {
     await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
     expect(launchMock).not.toHaveBeenCalled()
     expect(listLoopSchedulerMetaRunIdsForTests()).not.toContain(runId)
+  })
+
+  it('holds while its workspace is closed and resumes when it reopens', async () => {
+    const runId = 'loop-closed-workspace'
+    createRun(workspace, runId, 'chat')
+    const runDir = resolveRunDir(workspace, runId)
+    armLoop({ workspacePath: workspace, runId, runDir, prompt: 'check CI', intervalMs: LOOP_INTERVAL_MS })
+
+    workspaceState.path = ''
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
+    expect(launchMock).not.toHaveBeenCalled()
+    expect(readLoop(runDir)?.status).toBe('armed')
+
+    workspaceState.path = workspace
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
+    expect(launchMock).toHaveBeenCalledTimes(1)
+    disarmLoop(runDir, runId, { workspacePath: workspace })
+  })
+
+  // A turn longer than the interval queued one identical prompt per tick; the
+  // queue never drained and the invoke never ended.
+  it('does not queue a tick whose prompt is still waiting in the busy run', async () => {
+    const runId = 'loop-busy-run'
+    createRun(workspace, runId, 'chat')
+    const runDir = resolveRunDir(workspace, runId)
+    registerRunAbort(runId, workspace)
+    expect(enqueueFollowUp(runId, { role: 'user', content: 'check CI' }).ok).toBe(true)
+    armLoop({ workspacePath: workspace, runId, runDir, prompt: 'check CI', intervalMs: LOOP_INTERVAL_MS })
+
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS * 3)
+    expect(launchMock).not.toHaveBeenCalled()
+    // Counted as delivered: the loop moves on to its next interval.
+    expect(readLoop(runDir)?.lastTickAt).toBeDefined()
+    disarmLoop(runDir, runId, { workspacePath: workspace })
   })
 })

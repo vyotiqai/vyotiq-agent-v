@@ -39,6 +39,7 @@ import { installNodeCaCertificates, recoverFuseStrippedExtraCaCerts } from '@mai
 import { closeAgentBrowser } from '@main/app/agentBrowser'
 import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptySessions'
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
+import { prewarmCommandOnPath } from '@main/agent/tools/terminal'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
 import { startTaskScheduler, stopTaskScheduler } from './schedules/taskScheduler'
@@ -46,7 +47,7 @@ import { initAutoUpdater, applyUpdateCheckSchedule, setUpdateChannelSource } fro
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
 import { primeLoginShellPath } from '@main/agent/mcp/binaries'
-import { resolveEffectiveMcpServers, repairMissingPackageDependencies, installDefaultBundledPackages, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
+import { resolveMcpServersForSessionMap, repairMissingPackageDependencies, installDefaultBundledPackages, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
 import { enqueueSettingsMutation, getSettings, setSettings } from '@main/settings/settings'
 import { installPriceSources } from '@main/agent/pricing'
 import { purgeExpiredDeletedRuns } from '@main/agent/deletedRuns'
@@ -503,6 +504,9 @@ if (HEADLESS) {
     // launched from Finder inherits only /usr/bin:/bin:/usr/sbin:/sbin, which
     // hides nvm's node and uv. Bounded and best-effort; no-op off macOS.
     await primeLoginShellPath()
+    // The first run's session env picks its shell from these; resolved here,
+    // off its critical path, instead of a blocking lookup inside it.
+    if (process.platform === 'win32') prewarmCommandOnPath(['pwsh', 'powershell'])
     try {
       const migration = migrateLegacySessions()
       if (migration.migrated > 0) {
@@ -613,7 +617,9 @@ if (HEADLESS) {
         })
       }
       await syncMarketplaceMcpIntoSettings()
-      void syncMcpServers(resolveEffectiveMcpServers()).catch((err) => {
+      // The session-map view, as every other sync: the global list alone
+      // left out a server forced on for an open workspace.
+      void syncMcpServers(resolveMcpServersForSessionMap()).catch((err) => {
         logger.warn('MCP sync on startup failed', { scope: 'main', err })
       })
     } catch (err) {
