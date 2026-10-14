@@ -28,6 +28,17 @@ describe('promptPrefixFingerprint', () => {
     expect(promptPrefixFingerprint([...tools].reverse(), 'system')).not.toBe(base)
   })
 
+  it('reuses the hash for the same catalog array and stable zone', () => {
+    let serialized = 0
+    const catalog = [{ toJSON: () => (serialized++, { name: 'read' }) }]
+    const first = promptPrefixFingerprint(catalog, 'stable zone')
+    expect(promptPrefixFingerprint(catalog, 'stable zone')).toBe(first)
+    expect(serialized).toBe(1)
+    // A new stable zone is hashed again.
+    expect(promptPrefixFingerprint(catalog, 'stable zone, folded')).not.toBe(first)
+    expect(serialized).toBe(2)
+  })
+
   it('does not let tools and system text alias across the boundary', () => {
     expect(promptPrefixFingerprint([], 'x')).not.toBe(promptPrefixFingerprint(['x'], ''))
   })

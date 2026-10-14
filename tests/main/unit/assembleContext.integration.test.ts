@@ -803,12 +803,14 @@ Run ${i}` })
       harness: 'harness',
       messages: [
         { role: 'user', content: 'Review auth then add tests' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 's1', name: 'Skill', arguments: '{}' }] },
         {
           role: 'tool',
           toolName: 'Skill',
           toolCallId: 's1',
           content: reviewBody
         },
+        { role: 'assistant', content: '', toolCalls: [{ id: 's2', name: 'Skill', arguments: '{}' }] },
         {
           role: 'tool',
           toolName: 'Skill',

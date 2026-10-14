@@ -85,11 +85,18 @@ function isSkillToolResultStubbed(content: unknown): boolean {
  * Stub skill bodies on user turns that already have follow-up messages so later
  * assemble / durable history do not resend the full skill text every step.
  * The latest message (open skill turn) keeps the full body for the current model call.
- * Earlier Skill **tool** results are stubbed the same way; the latest Skill tool
- * result stays intact for the current step.
+ *
+ * Earlier Skill **tool** results are stubbed the same way, with two limits:
+ * - Only results the model has read — those before the latest assistant turn.
+ *   A result that landed after it has not been in any request yet.
+ * - Never the results of the latest turn that called Skill. One step can load
+ *   a skill and its bundled file in parallel; keeping only the single last
+ *   result threw away the body before the model ever saw it.
+ * Failed calls keep their error: it is short, and "instructions were applied"
+ * would be false.
  */
 export function stubPastSkillInvocationsInMessages<
-  T extends { role: string; content: unknown; toolName?: string }
+  T extends { role: string; content: unknown; toolName?: string; ok?: boolean }
 >(messages: T[]): { messages: T[]; stubbedCount: number } {
   let stubbedCount = 0
   const afterSlash = messages.map((m, i) => {
@@ -100,20 +107,27 @@ export function stubPastSkillInvocationsInMessages<
     stubbedCount += 1
     return { ...m, content: stubbed }
   })
-  let lastSkillToolIdx = -1
-  for (let i = afterSlash.length - 1; i >= 0; i--) {
-    const msg = afterSlash[i]
-    if (msg && isSkillToolResultMessage(msg)) {
-      lastSkillToolIdx = i
-      break
+  let lastAssistantIdx = -1
+  let latestSkillTurn = -1
+  let turn = -1
+  for (let i = 0; i < afterSlash.length; i++) {
+    const msg = afterSlash[i]!
+    if (msg.role === 'assistant') {
+      lastAssistantIdx = i
+      turn = i
+    } else if (isSkillToolResultMessage(msg)) {
+      latestSkillTurn = turn
     }
   }
-  if (lastSkillToolIdx < 0) {
+  if (!afterSlash.some(isSkillToolResultMessage)) {
     return { messages: afterSlash, stubbedCount }
   }
+  turn = -1
   const out = afterSlash.map((m, i) => {
-    if (!isSkillToolResultMessage(m) || i === lastSkillToolIdx) return m
-    if (isSkillToolResultStubbed(m.content)) return m
+    if (m.role === 'assistant') turn = i
+    if (!isSkillToolResultMessage(m)) return m
+    if (i > lastAssistantIdx || turn === latestSkillTurn) return m
+    if (m.ok === false || isSkillToolResultStubbed(m.content)) return m
     stubbedCount += 1
     return { ...m, content: SKILL_BODY_STUB }
   })

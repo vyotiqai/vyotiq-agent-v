@@ -25,6 +25,17 @@ const REQUEST_TIMEOUT_MS = 30_000
  */
 const WORKER_MIN_LIFETIME_MS = 1_000
 
+/**
+ * Early deaths after which the pool stops trying for the rest of the process.
+ *
+ * Dropping a young worker instead of replacing it still left `ensurePool` to
+ * build a fresh pool on the next batch, so a worker bundle that exits on load
+ * spawned new threads on every other batch forever (measured: 6 threads over 5
+ * batches). Two pool generations is enough to tell a broken bundle from bad luck;
+ * after that counting stays on the main thread, which is correct, only slower.
+ */
+const MAX_EARLY_WORKER_DEATHS = 2 * 2
+
 type CountItem = { text: string; encoding: 'o200k_base' | 'cl100k_base' }
 
 type Pending = {
@@ -53,8 +64,12 @@ type WorkerSlot = {
 let slots: WorkerSlot[] | null = null
 /** Single lazy-initialization promise so concurrent first callers share one pool create. */
 let poolInit: Promise<WorkerSlot[] | null> | null = null
-/** Sticky only after worker create fails despite the script existing — not on a missing bundle. */
+/**
+ * Sticky once worker create fails despite the script existing, or once workers
+ * have died on startup `MAX_EARLY_WORKER_DEATHS` times — not on a missing bundle.
+ */
 let poolCreateFailed = false
+let earlyWorkerDeaths = 0
 let nextId = 1
 
 function workerScriptPath(): string {
@@ -110,8 +125,18 @@ function retireSlot(slot: WorkerSlot, err: Error): void {
   // the slot instead leaves `ensurePool` to retry lazily on a later batch, and
   // until then counting falls back to the main thread — which is correct, if
   // slower, rather than an endless respawn.
-  const replacement =
-    Date.now() - slot.createdAt < WORKER_MIN_LIFETIME_MS ? null : tryCreateWorker()
+  const diedYoung = Date.now() - slot.createdAt < WORKER_MIN_LIFETIME_MS
+  if (diedYoung) {
+    earlyWorkerDeaths += 1
+    if (earlyWorkerDeaths >= MAX_EARLY_WORKER_DEATHS && !poolCreateFailed) {
+      poolCreateFailed = true
+      logger.warn('Tokenizer workers keep exiting on startup; counting on the main thread', {
+        scope: 'tokenizer',
+        earlyDeaths: earlyWorkerDeaths
+      })
+    }
+  }
+  const replacement = diedYoung ? null : tryCreateWorker()
   if (replacement) {
     slots[idx] = replacement
     return
@@ -247,6 +272,7 @@ export function resetTokenizerPoolForTests(): void {
   slots = null
   poolInit = null
   poolCreateFailed = false
+  earlyWorkerDeaths = 0
   nextId = 1
 }
 

@@ -196,6 +196,70 @@ describe('stubPastSkillInvocationsInMessages', () => {
     expect(String(messages[1]?.content)).toContain('Review the diff before editing')
   })
 
+  it('keeps every Skill result of the latest Skill turn, even ones called in parallel', () => {
+    // One step loaded the body and a bundled file; the next step starts now.
+    const batch = [
+      { role: 'user', content: 'make the report' },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: 'a', name: 'Skill', arguments: '{"name":"docx"}' },
+          { id: 'b', name: 'Skill', arguments: '{"name":"docx","path":"reference.md"}' }
+        ]
+      },
+      { role: 'tool', toolName: 'Skill', toolCallId: 'a', content: 'DOCX MAIN BODY' },
+      { role: 'tool', toolName: 'Skill', toolCallId: 'b', content: 'REFERENCE FILE' }
+    ]
+    const unseen = stubPastSkillInvocationsInMessages(batch)
+    expect(unseen.stubbedCount).toBe(0)
+    expect(unseen.messages[2]?.content).toBe('DOCX MAIN BODY')
+
+    // Still that turn's results after the model has read them.
+    const read = stubPastSkillInvocationsInMessages([
+      ...batch,
+      { role: 'assistant', content: 'Drafting the report.' }
+    ])
+    expect(read.stubbedCount).toBe(0)
+    expect(read.messages[2]?.content).toBe('DOCX MAIN BODY')
+    expect(read.messages[3]?.content).toBe('REFERENCE FILE')
+  })
+
+  it('never stubs a Skill result the model has not read yet', () => {
+    const { messages } = stubPastSkillInvocationsInMessages([
+      { role: 'user', content: 'x' },
+      { role: 'tool', toolName: 'Skill', toolCallId: 'a', content: 'OLD BODY' },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'b', name: 'Skill', arguments: '{"name":"other"}' }]
+      },
+      { role: 'tool', toolName: 'Skill', toolCallId: 'b', content: 'NEW BODY' }
+    ])
+    // OLD BODY was read and belongs to an earlier turn; NEW BODY landed after
+    // the latest assistant turn.
+    expect(messages[1]?.content).toBe(SKILL_BODY_STUB)
+    expect(messages[3]?.content).toBe('NEW BODY')
+  })
+
+  it('keeps a failed Skill call error instead of claiming instructions were applied', () => {
+    const { messages, stubbedCount } = stubPastSkillInvocationsInMessages([
+      { role: 'user', content: 'x' },
+      {
+        role: 'tool',
+        toolName: 'Skill',
+        toolCallId: 'a',
+        content: 'Unknown skill/plugin-rule: foo',
+        ok: false
+      },
+      { role: 'assistant', content: 'trying another' },
+      { role: 'tool', toolName: 'Skill', toolCallId: 'b', content: 'BODY' },
+      { role: 'assistant', content: 'ok' }
+    ])
+    expect(stubbedCount).toBe(0)
+    expect(messages[1]?.content).toBe('Unknown skill/plugin-rule: foo')
+  })
+
   it('leaves non-Skill tool results intact', () => {
     const fileBody =
       'export function login(req: Request): Session {\n  return createSession(req)\n}\n'

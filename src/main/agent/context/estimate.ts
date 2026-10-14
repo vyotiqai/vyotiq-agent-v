@@ -102,21 +102,7 @@ export async function estimateMessagesTokensAsync(
   const encoding = encodingForModel(model)
   const countReasoningReplay = options?.countReasoningReplay !== false
 
-  const wholeArray = messagesTotalCache.get(messages)
-  if (
-    wholeArray &&
-    wholeArray.encoding === encoding &&
-    wholeArray.replay === countReasoningReplay
-  ) {
-    return wholeArray.total
-  }
-
-  const memoize = (total: number): number => {
-    messagesTotalCache.set(messages, { total, encoding, replay: countReasoningReplay })
-    return total
-  }
-
-  if (messages.length === 0) return memoize(0)
+  if (messages.length === 0) return 0
 
   // Single worker round-trip for all uncached messages (not one await per message).
   const texts: Array<{ text: string; encoding: EncodingName }> = []
@@ -140,7 +126,7 @@ export async function estimateMessagesTokensAsync(
     spans.push({ message, nonTextTokens, start, end: texts.length })
   }
 
-  if (spans.length === 0) return memoize(total)
+  if (spans.length === 0) return total
 
   const counts = await countTextsTokensAsync(texts)
   for (const span of spans) {
@@ -149,41 +135,20 @@ export async function estimateMessagesTokensAsync(
     messageTokenCache.set(span.message, { encoding, replay: countReasoningReplay, tokens: n })
     total += n
   }
-  return memoize(total)
+  return total
 }
 
+/**
+ * Per-message counts, keyed on the message object. This is the only cache: an
+ * unchanged history is N map lookups plus BPE for the appended tail.
+ *
+ * A whole-array total used to sit on top, keyed on the array object. Assemble
+ * builds a fresh array every call, so it never hit on the per-step path, and it
+ * answered for an array that had been pushed to since with the stale total.
+ */
 const messageTokenCache = new WeakMap<
   object,
   { encoding: EncodingName; replay: boolean; tokens: number }
->()
-
-/**
- * Whole-array totals, keyed on the array object.
- *
- * It can only ever answer for the *identical* array, which is the whole point. The
- * heuristic this replaced keyed on (length, identity of the message at
- * `length - 1`) and accepted any array at least as long whose tail message
- * matched — exactly the shape every history rewrite in this pipeline produces.
- * `trimToolResults` and `stubPastSkillInvocationsInMessages` both return a
- * *same-length* array whose tail passes through by identity and whose middle
- * bodies are replaced, so the post-trim re-count in `assembleContext` hit the
- * cache and served the pre-trim total: the tokens the wire trim had just
- * reclaimed never reached `estimatedTokens`, `layers.history` or `overflow`, and a
- * run could be sent to the summarizer on room it had already freed.
- *
- * Weak, not a single field: a field would pin the whole last-assembled wire
- * history — every kept tool body and every `reasoningState` — for the life of the
- * process, and would only ever describe one array while parallel runs assemble
- * against several.
- *
- * Dropping the incremental path costs nothing measurable. The per-message WeakMap
- * above still skips every unchanged message, so a grown array is N map lookups
- * plus BPE for the appended tail only — and that BPE now goes through the worker
- * batch instead of the synchronous main-thread encode the incremental path used.
- */
-const messagesTotalCache = new WeakMap<
-  readonly ChatMessage[],
-  { total: number; encoding: EncodingName; replay: boolean }
 >()
 
 /**

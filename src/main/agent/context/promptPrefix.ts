@@ -20,10 +20,22 @@ export function promptPrefixFingerprint(
   tools: readonly unknown[],
   systemStable: string | undefined
 ): string {
-  return createHash('sha256')
+  if (last && last.tools === tools && last.systemStable === systemStable) return last.hash
+  const hash = createHash('sha256')
     .update(JSON.stringify(tools))
     .update('\u0000')
     .update(systemStable ?? '')
     .digest('hex')
     .slice(0, 16)
+  last = { tools, systemStable, hash }
+  return hash
 }
+
+/**
+ * The last fingerprint. The loop keeps one tool-definition array until the
+ * catalog changes, and the stable zone is byte-identical between folds, so
+ * most steps re-serialized and re-hashed the same tens of KB (~0.6ms).
+ * Keyed on the array itself: a rebuilt catalog is always a new array.
+ */
+let last: { tools: readonly unknown[]; systemStable: string | undefined; hash: string } | null =
+  null

@@ -28,7 +28,7 @@ import {
   estimateTextTokensAsync
 } from './estimate'
 import { exceedsHardLimit } from '../../../shared/domain/contextBudget'
-import { stripLeadingOrphanToolMessages } from './foldWatermark'
+import { lastNonToolStart, stripLeadingOrphanToolMessages } from './foldWatermark'
 import { stripPinnedFactsAppendix } from './pinFoldFacts'
 import { KEEP_RECENT_TURNS, type CompactionRecord } from './types'
 
@@ -71,10 +71,37 @@ export function countUserTurns(messages: readonly ChatMessage[]): number {
 export async function shouldUseForkCompaction(
   messages: readonly ChatMessage[],
   window?: number,
-  modelInfo?: ModelInfo
+  modelInfo?: ModelInfo,
+  /**
+   * The rest of the fork request: its summarizer system prompt and the trailing
+   * user message, which carries the prior fold summary (up to `charCap`, about a
+   * quarter of the window). Measuring the history alone let a request that also
+   * carried both pass the check and 400 at the provider's hard limit.
+   */
+  requestTexts: readonly string[] = []
 ): Promise<boolean> {
   if (window == null || modelInfo == null) return true
-  return !exceedsHardLimit(window, await estimateMessagesTokensAsync(messages, modelInfo))
+  const [history, ...overhead] = await Promise.all([
+    estimateMessagesTokensAsync(messages, modelInfo),
+    ...requestTexts.map((text) => estimateTextTokensAsync(text, modelInfo))
+  ])
+  const total = overhead.reduce((sum, tokens) => sum + tokens, history)
+  return !exceedsHardLimit(window, total)
+}
+
+/**
+ * The provider refused the request for its size. Only meaningful on the fork,
+ * which sends the whole folded history in one request: the chunked path exists
+ * for exactly that case, so it is a fallback, not a dead endpoint. Everything
+ * else non-retriable (auth, billing, unknown model) stays a hard failure.
+ */
+const CONTEXT_LENGTH_RE =
+  /context[ _-]?(?:length|window)|maximum context|too many tokens|prompt is too long|input is too long|request too large|payload too large|token limit|exceeds? (?:the )?(?:model'?s? )?(?:maximum|max|limit)|reduce the length/i
+
+export function isContextLengthFailure(err: unknown): boolean {
+  if (!(err instanceof CompactionHardFailureError)) return false
+  if (err.httpStatus === 413) return true
+  return err.httpStatus === 400 && CONTEXT_LENGTH_RE.test(err.message)
 }
 
 /**
@@ -285,8 +312,9 @@ async function streamMessageSummary(input: {
   baseUrl?: string
   signal: AbortSignal
   messages: ChatMessage[]
-  focus?: string
-  priorSummary?: string
+  /** Built by the caller so the size pre-check measures the exact bytes sent. */
+  system: string
+  trailingUser: string
   promptCacheKey?: string
   modelInfo?: ModelInfo
   onAuxUsage?: CompactionUsageSink
@@ -304,11 +332,8 @@ async function streamMessageSummary(input: {
       tools: [],
       toolChoice: 'none',
       thinking: { enabled: false },
-      system: buildCompactionSystemPrompt('markdown', input.focus),
-      messages: [
-        ...input.messages,
-        { role: 'user', content: buildCompactForkUserMessage(input.priorSummary) }
-      ],
+      system: input.system,
+      messages: [...input.messages, { role: 'user', content: input.trailingUser }],
       ...(input.promptCacheKey ? { promptCacheKey: input.promptCacheKey } : {}),
       ...(input.modelInfo ? { modelInfo: input.modelInfo } : {})
     }
@@ -325,26 +350,41 @@ function formatMessagesForCompaction(messages: ChatMessage[]): string {
     .join('\n\n')
 }
 
-/** Split messages into chunks that fit under charCap (greedy by message). */
-function chunkMessagesForCap(messages: ChatMessage[], charCap: number): ChatMessage[][] {
-  if (messages.length === 0) return []
-  const chunks: ChatMessage[][] = []
-  let current: ChatMessage[] = []
-  let currentChars = 0
-  for (const message of messages) {
-    const piece = formatMessagesForCompaction([message])
-    const pieceLen = piece.length + (current.length > 0 ? 2 : 0)
-    if (current.length > 0 && currentChars + pieceLen > charCap) {
-      chunks.push(current)
-      current = [message]
-      currentChars = piece.length
-    } else {
-      current.push(message)
-      currentChars += pieceLen
+/** Headroom kept under `charCap` for the chunk's own framing. */
+const CHUNK_HEADROOM_CHARS = 500
+/** Smallest history slice a chunk carries, however large the rolling prefix grows. */
+const MIN_CHUNK_CHARS = 2000
+
+/**
+ * Take the next chunk of formatted history pieces that fits `room` characters,
+ * joined the way `formatMessagesForCompaction` joins them. Greedy by message; a
+ * single message larger than `room` is split and its remainder goes back on the
+ * queue, so nothing is dropped. Mutates `queue`.
+ *
+ * Sized per chunk because the room depends on the rolling prefix sent with it:
+ * chunks used to be cut once against the full cap, then each was sliced to what
+ * the prefix left over — silently dropping the newest messages of every chunk
+ * once the prior summary grew.
+ */
+function takeChunk(queue: string[], room: number): string {
+  const taken: string[] = []
+  let used = 0
+  while (queue.length > 0) {
+    const piece = queue[0]!
+    const cost = piece.length + (taken.length > 0 ? 2 : 0)
+    if (used + cost <= room) {
+      taken.push(piece)
+      used += cost
+      queue.shift()
+      continue
     }
+    if (taken.length === 0) {
+      taken.push(piece.slice(0, room))
+      queue[0] = piece.slice(room)
+    }
+    break
   }
-  if (current.length > 0) chunks.push(current)
-  return chunks
+  return taken.join('\n\n')
 }
 
 async function summarizeHistoryChunk(input: {
@@ -502,25 +542,45 @@ export async function compactMessages(input: {
     // run (observed: e7d7d807 — request resolved to 1,068,578 tokens on a
     // 1,048,576-token raw window). Skip the unchunked message-shape fork when the
     // history would exceed the window and let the chunked path below summarize it.
-    if (!(await shouldUseForkCompaction(input.messages, input.contextWindow, input.modelInfo))) {
+    const forkSystem = buildCompactionSystemPrompt('markdown', input.focus)
+    const forkUser = buildCompactForkUserMessage(prior || undefined)
+    if (
+      !(await shouldUseForkCompaction(input.messages, input.contextWindow, input.modelInfo, [
+        forkSystem,
+        forkUser
+      ]))
+    ) {
       logger.warn('Fork compaction skipped: history exceeds model window; using chunked fallback', {
         scope: 'agent',
         code: 'COMPACTION'
       })
     } else {
-      const forked = await streamMessageSummary({
-        provider: input.provider,
-        model: input.model,
-        apiKey: input.apiKey,
-        baseUrl: input.baseUrl,
-        signal: input.signal,
-        messages: input.messages,
-        focus: input.focus,
-        priorSummary: prior || undefined,
-        promptCacheKey: input.promptCacheKey,
-        modelInfo: input.modelInfo,
-        ...(input.onAuxUsage ? { onAuxUsage: input.onAuxUsage } : {})
-      })
+      let forked = ''
+      try {
+        forked = await streamMessageSummary({
+          provider: input.provider,
+          model: input.model,
+          apiKey: input.apiKey,
+          baseUrl: input.baseUrl,
+          signal: input.signal,
+          messages: input.messages,
+          system: forkSystem,
+          trailingUser: forkUser,
+          promptCacheKey: input.promptCacheKey,
+          modelInfo: input.modelInfo,
+          ...(input.onAuxUsage ? { onAuxUsage: input.onAuxUsage } : {})
+        })
+      } catch (err) {
+        // The estimate is a local tokenizer's; the provider's own count can still
+        // come in over. Chunks are sized to fit, so that is a fallback, not a
+        // reason to end the run.
+        if (!isContextLengthFailure(err)) throw err
+        logger.warn('Fork compaction rejected as too large; using chunked fallback', {
+          scope: 'agent',
+          code: 'COMPACTION',
+          httpStatus: (err as CompactionHardFailureError).httpStatus
+        })
+      }
       if (input.signal.aborted) return null
       if (forked) return mergeForkSummary(forked)
       logger.warn('Message-shape compaction produced no summary; falling back to structured tools=[] path', {
@@ -530,8 +590,8 @@ export async function compactMessages(input: {
     }
   }
 
-  const chunks = chunkMessagesForCap(input.messages, Math.max(2000, charCap - 500))
-  if (chunks.length === 0) {
+  const queue = input.messages.map((message) => formatMessagesForCompaction([message]))
+  if (queue.length === 0) {
     return prior
       ? {
           summary: prior,
@@ -544,17 +604,16 @@ export async function compactMessages(input: {
   let mergedPrior = prior
   const parts: string[] = []
 
-  for (let i = 0; i < chunks.length; i++) {
+  for (let i = 0; queue.length > 0; i++) {
     if (input.signal.aborted) return null
-    const chunk = chunks[i]!
     const rollingPrefix =
       i === 0 && prior
         ? `Previous session summary (already folded; stay consistent, do not drop its files or decisions):\n${prior}\n\n---\n\n`
         : i > 0 && mergedPrior
           ? `Summary so far this fold (preserve these facts):\n${mergedPrior}\n\n---\n\n`
           : ''
-    const room = Math.max(2000, charCap - rollingPrefix.length)
-    const historyText = `${rollingPrefix}${formatMessagesForCompaction(chunk).slice(0, room)}`
+    const room = Math.max(MIN_CHUNK_CHARS, charCap - CHUNK_HEADROOM_CHARS - rollingPrefix.length)
+    const historyText = `${rollingPrefix}${takeChunk(queue, room)}`
     if (!historyText.trim()) continue
 
     const summary = await summarizeHistoryChunk({
@@ -626,12 +685,7 @@ export async function preserveRecentMessagesAsync(
     start--
     kept = stripLeadingOrphanToolMessages(messages.slice(start))
   }
-  if (kept.length === 0) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role !== 'tool') return messages.slice(i)
-    }
-    return messages.slice(-1)
-  }
+  if (kept.length === 0) return messages.slice(lastNonToolStart(messages))
 
   if (historyBudgetTokens && model) {
     while (
