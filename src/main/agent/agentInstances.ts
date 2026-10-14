@@ -424,8 +424,16 @@ function formatChildSummary(
   if (parts.length > 0) return parts.join('\n\n')
   if (status?.status === 'cancelled') return 'Instance cancelled.'
   if (status?.status === 'error') return status.error ?? 'Instance failed.'
-  return 'Instance finished.'
+  // Reached only with no final text and no writes. A bare "Instance finished."
+  // read as success: child 0fd674f3 (2026-10-10) ended on four empty replies
+  // and its parent moved on as if the report had been written.
+  return CHILD_NO_ANSWER_SUMMARY
 }
+
+/** What the parent reads when a child ended without a final answer or any writes. */
+export const CHILD_NO_ANSWER_SUMMARY =
+  'Instance finished without a final answer: its last reply was empty and it wrote no files, so there is no report to use. ' +
+  'See what it did with pull_agent_instance (view "outline"), then spawn it again or do the work yourself. Do not treat its task as done.'
 
 export async function summarizeChildRunAsync(
   workspacePath: string,

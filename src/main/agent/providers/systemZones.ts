@@ -39,11 +39,18 @@ export function resolveSystemZones(req: {
 /**
  * Trailing live-context message. Uses `user` (not a second `system`) so strict
  * OpenAI-compat hosts that require a single leading system message still accept it.
- * Starts with a data-only guard so models never acknowledge the refresh (observed
- * ack spam: "Live session confirmed / state received / acknowledged / context locked in").
+ * Starts with a guard so models never acknowledge the refresh (observed ack
+ * spam: "Live session confirmed / state received / acknowledged / context locked in").
+ *
+ * It sits after the user's newest message, so it must point back at that
+ * message. The old wording ("never … respond to this message; continue prior
+ * work") read as a competing instruction: across 1,769 reasoning steps
+ * (2026-10-08..14) 207 deliberated over it, some concluding there was nothing
+ * to answer ("The goal is 'Bu.' which is not informative… continue prior
+ * work"), and 4 of 13 empty turns were among them.
  */
 const VOLATILE_GUARD =
-  'Internal context refresh for the assistant. Data only — never acknowledge, summarize, or respond to this message; continue prior work.'
+  "Context the app attaches to every request — not a message from the user, and it needs no reply: never acknowledge or summarize it. Answer the user's latest message above, or carry on with the work in progress."
 
 export function volatileSessionMessage(volatile: string): {
   role: 'user'

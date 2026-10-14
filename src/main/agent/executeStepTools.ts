@@ -6,7 +6,7 @@ import { logger } from '../../shared/logger'
 import { summarizeToolArgs } from '../../shared/toolSummary'
 import { toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import type { ToolCall } from './providers/types'
-import { executeTool, type ToolResult } from '@main/agent/tools'
+import { executeTool, type ToolExecutionContext, type ToolResult } from '@main/agent/tools'
 import { canonicalizeAgentToolName } from './schemas/tools'
 import {
   isParallelBatchClass,
@@ -246,6 +246,16 @@ type ToolOutcome = {
   ok: boolean
   events: AgentEvent[]
   message: ChatMessage
+  /** The handler's output before soft notes; absent when the handler never ran. */
+  raw?: { ok: boolean; content: string }
+}
+
+/** One call's handler output, in step order — what the poll guard compares. */
+export type StepRawResult = {
+  toolCallId: string
+  name: string
+  ok: boolean
+  content: string
 }
 
 function abortToolContent(ctx: ToolStepContext): string {
@@ -402,6 +412,58 @@ async function unreadExistingEditPathsForStep(
   return unreadExistingEditPaths(known, name, toolArgs, (rel) => exists.get(rel) === true)
 }
 
+function toolExecutionContext(
+  call: ToolCall,
+  ctx: ToolStepContext,
+  options: { toolCallId: string; liveTerminalOutput: boolean }
+): ToolExecutionContext {
+  return {
+    runDir: ctx.runDir,
+    sessionWorkspace: ctx.sessionWorkspace,
+    extraRoots: ctx.extraRoots,
+    inlineInstance: ctx.inlineInstance,
+    toolAllowlist: ctx.toolAllowlist,
+    runId: ctx.runId,
+    toolCallId: options.toolCallId,
+    invokeId: ctx.invokeId,
+    /** Hard run cancel only — soft stream interrupt stays on `signal`. */
+    runSignal: ctx.runSignal,
+    agentMode: ctx.getAgentMode?.() ?? ctx.agentMode,
+    getAgentMode: ctx.getAgentMode,
+    setAgentMode: ctx.setAgentMode,
+    autoModeSwitch: ctx.autoModeSwitch,
+    terminalShell: ctx.terminalShell,
+    diagnosticsCommand: ctx.diagnosticsCommand,
+    invokeSettings: ctx.invokeSettings,
+    emitAgentEvent: ctx.emitLiveEvent,
+    knownPaths: ctx.knownPaths,
+    runEnabledMcpIds: ctx.runEnabledMcpIds,
+    mcpToolPolicies: ctx.mcpToolPolicies,
+    stepMcpToolNames: ctx.stepMcpToolNames,
+    runAttachedMcpServerIds: ctx.runAttachedMcpServerIds,
+    runPinnedMcpToolNames: ctx.runPinnedMcpToolNames,
+    runStickyToolNames: ctx.runStickyToolNames,
+    mcpLastUsedByName: ctx.mcpLastUsedByName,
+    currentStep: ctx.currentStep,
+    stepCutOff: ctx.stepCutOff,
+    invalidateMcpToolCatalogCache: ctx.invalidateMcpToolCatalogCache,
+    mcpNotInCatalogCounts: ctx.mcpNotInCatalogCounts,
+    mutationPaths: ctx.mutationPaths,
+    approval: ctx.approval,
+    onTerminalOutput:
+      options.liveTerminalOutput && ctx.emitLiveEvent
+        ? (chunk) =>
+            ctx.emitLiveEvent?.({
+              type: 'terminal_output_delta',
+              runId: ctx.runId,
+              toolCallId: call.id,
+              text: chunk.text,
+              stream: chunk.stream
+            })
+        : undefined
+  }
+}
+
 async function runSingleTool(
   requestedCall: ToolCall,
   ctx: ToolStepContext,
@@ -515,50 +577,13 @@ async function runSingleTool(
     const lspTarget = lspEditTarget(ctx.workspace, canonicalizeAgentToolName(call.name), toolArgs)
     const lspBefore = lspTarget ? lspBaselineErrors(ctx.workspace, lspTarget) : null
 
-    const pending = executeTool(call.name, call.arguments, ctx.workspace, toolSignal, {
-      runDir: ctx.runDir,
-      sessionWorkspace: ctx.sessionWorkspace,
-      extraRoots: ctx.extraRoots,
-      inlineInstance: ctx.inlineInstance,
-      toolAllowlist: ctx.toolAllowlist,
-      runId: ctx.runId,
-      toolCallId: call.id,
-      invokeId: ctx.invokeId,
-      /** Hard run cancel only — soft stream interrupt stays on `signal`. */
-      runSignal: ctx.runSignal,
-      agentMode: ctx.getAgentMode?.() ?? ctx.agentMode,
-      getAgentMode: ctx.getAgentMode,
-      setAgentMode: ctx.setAgentMode,
-      autoModeSwitch: ctx.autoModeSwitch,
-      terminalShell: ctx.terminalShell,
-      diagnosticsCommand: ctx.diagnosticsCommand,
-      invokeSettings: ctx.invokeSettings,
-      emitAgentEvent: ctx.emitLiveEvent,
-      knownPaths: ctx.knownPaths,
-      runEnabledMcpIds: ctx.runEnabledMcpIds,
-      mcpToolPolicies: ctx.mcpToolPolicies,
-      stepMcpToolNames: ctx.stepMcpToolNames,
-      runAttachedMcpServerIds: ctx.runAttachedMcpServerIds,
-      runPinnedMcpToolNames: ctx.runPinnedMcpToolNames,
-      runStickyToolNames: ctx.runStickyToolNames,
-      mcpLastUsedByName: ctx.mcpLastUsedByName,
-      currentStep: ctx.currentStep,
-      stepCutOff: ctx.stepCutOff,
-      invalidateMcpToolCatalogCache: ctx.invalidateMcpToolCatalogCache,
-      mcpNotInCatalogCounts: ctx.mcpNotInCatalogCounts,
-      mutationPaths: ctx.mutationPaths,
-      approval: ctx.approval,
-      onTerminalOutput: ctx.emitLiveEvent
-        ? (chunk) =>
-            ctx.emitLiveEvent?.({
-              type: 'terminal_output_delta',
-              runId: ctx.runId,
-              toolCallId: call.id,
-              text: chunk.text,
-              stream: chunk.stream
-            })
-        : undefined
-    })
+    const pending = executeTool(
+      call.name,
+      call.arguments,
+      ctx.workspace,
+      toolSignal,
+      toolExecutionContext(call, ctx, { toolCallId: call.id, liveTerminalOutput: true })
+    )
 
     const result = await (DEADLINE_EXEMPT_TOOLS.has(call.name)
       ? pending
@@ -690,7 +715,8 @@ async function runSingleTool(
     return {
       ok: result.ok,
       events,
-      message: toolMsg
+      message: toolMsg,
+      raw: { ok: result.ok, content: result.content }
     }
   } catch (err) {
     if (isAbortError(err)) {
@@ -946,7 +972,12 @@ function hoistTodoWriteCalls(calls: ToolCall[]): ToolCall[] {
 export async function executeStepToolCalls(
   rawCalls: ToolCall[],
   ctx: ToolStepContext
-): Promise<{ messages: ChatMessage[]; events: AgentEvent[] }> {
+): Promise<{
+  messages: ChatMessage[]
+  events: AgentEvent[]
+  /** Every call whose handler ran, in call order. */
+  rawResults: StepRawResult[]
+}> {
   const calls = ensureToolCallIds(
     rawCalls.map((call) => {
       const name = canonicalizeAgentToolName(call.name)
@@ -958,6 +989,7 @@ export async function executeStepToolCalls(
   const orderedCalls = agentMode === 'agent' ? hoistTodoWriteCalls(calls) : calls
   const messages: ChatMessage[] = []
   const events: AgentEvent[] = []
+  const rawResults: StepRawResult[] = []
   const hasDiagnosticsSurface =
     Boolean(ctx.diagnosticsCommand?.trim()) ||
     workspaceHasDiagnosticsSurface(ctx.workspace)
@@ -1002,6 +1034,13 @@ export async function executeStepToolCalls(
     persistToolResult(ctx, outcome, settledAt)
     messages.push(message)
     events.push(...outcome.events)
+    if (outcome.raw && outcome.message.toolCallId) {
+      rawResults.push({
+        toolCallId: outcome.message.toolCallId,
+        name: outcome.message.toolName ?? '',
+        ...outcome.raw
+      })
+    }
   }
 
   // Set once an ask_question call settles: nothing after it in this step runs.
@@ -1061,5 +1100,32 @@ export async function executeStepToolCalls(
     }
   }
 
-  return { messages, events }
+  return { messages, events, rawResults }
+}
+
+/**
+ * Run one call again for the poll guard (pollGuard.ts): the same handler,
+ * signal and deadline as a step, but nothing reaches the transcript — no
+ * tool_start/tool_result, no message, no path bookkeeping, no live output on
+ * the tool row. A terminal command still shows in the Terminal panel's agent
+ * session, which is where the user can watch the re-checks happen.
+ *
+ * The caller has already confirmed the call runs without asking the user.
+ */
+export async function rerunToolCallForHold(
+  call: ToolCall,
+  ctx: ToolStepContext,
+  rerunId: string
+): Promise<{ ok: boolean; content: string }> {
+  const deadlineController = new AbortController()
+  const toolSignal = composeAbortSignal(ctx.signal, deadlineController.signal)
+  const pending = executeTool(
+    call.name,
+    call.arguments,
+    ctx.workspace,
+    toolSignal,
+    toolExecutionContext(call, ctx, { toolCallId: rerunId, liveTerminalOutput: false })
+  )
+  const result = await raceToolDeadline(pending, call.name, () => deadlineController.abort())
+  return { ok: result.ok, content: result.content }
 }

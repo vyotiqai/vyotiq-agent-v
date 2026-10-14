@@ -740,4 +740,23 @@ describe('tool error hints', () => {
     // Not a content write: resending is still the fix.
     expect(formatMalformedToolArgsError('read', { cutOff: true })).toMatch(/Resend the full arguments/)
   })
+
+  it('tells a long payload cut mid-value to shrink it, not resend it', () => {
+    // Run e48f1332: a 3,493-char create_plan cut mid-string, resent the same size nine times.
+    const msg = formatMalformedToolArgsError('create_plan', { argsLength: 3493 })
+    expect(msg).toContain('3493 characters')
+    expect(msg).toMatch(/shorter/)
+    expect(msg).not.toMatch(/Resend the full arguments/)
+    expect(formatMalformedToolArgsError('edit', { argsLength: 4000 })).toMatch(/in parts/)
+    // A short broken payload is a typo, and resending it is still the fix.
+    expect(formatMalformedToolArgsError('create_plan', { argsLength: 90 })).toMatch(/Resend the full arguments/)
+  })
+
+  it('validateToolArgs reports the cut length for a truncated payload', () => {
+    const truncated = `{"plan": "# Audit\\n\\n## Goal\\n${'x'.repeat(3000)}`
+    const result = validateToolArgs('create_plan', truncated)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toContain(`${truncated.length} characters`)
+  })
 })

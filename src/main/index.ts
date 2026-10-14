@@ -718,6 +718,13 @@ if (HEADLESS) {
       quitDecisionPending = false
       if (!proceed) return
       quitting = true
+      // The only line a clean quit leaves. Without it a quit and a killed
+      // process read the same in vyotiq.log: the 2026-10-10 and 10-13 audits
+      // found runs "awaiting" for 57h and 7h that were really the app being
+      // gone — told apart only by the "Interrupted N orphan run(s)" on the
+      // next boot, which a clean quit (runs cancelled below) leaves only when
+      // the cancel times out.
+      logger.info('App quitting', { scope: 'main', activeRuns: listActiveRuns().length })
       // No repeating task may start a run while the others are being stopped.
       stopTaskScheduler()
       try {

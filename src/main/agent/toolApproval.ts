@@ -514,6 +514,12 @@ export type ToolApprovalGate = {
     arguments: string
   }): Promise<AuthorizeResult>
   /**
+   * True when `authorize` would let the call through without asking anyone.
+   * Asks nothing and logs nothing. The poll guard re-runs a call on its own
+   * only when this holds; a gate without it is treated as always asking.
+   */
+  allowsWithoutAsking?(call: { name: string; arguments: string }): Promise<boolean>
+  /**
    * True when grep/search must leave this workspace-relative file out of what
    * they return — a permission rule denies it or asks before it is read.
    */
@@ -705,6 +711,42 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         }`
       })
       if (grant.allows.length > 0) activeSkills.set(key, { skill: grant.skill, allows: grant.allows })
+    },
+    /**
+     * The no-prompt paths of `authorize` below, read without logging or asking.
+     * Errs toward false: a wrong false only means the poll guard leaves the
+     * call to the model, a wrong true would run a gated call unattended.
+     */
+    async allowsWithoutAsking(call): Promise<boolean> {
+      const name = canonicalizeAgentToolName(call.name)
+      const agentBuiltAllowKey = await agentBuiltAllowKeyFor(name)
+      let permission: PermissionVerdict | null = null
+      if (options.permissions) {
+        try {
+          permission = options.permissions.evaluate(
+            name,
+            parseArgs(call.arguments),
+            activeSkills.size > 0 ? { skills: [...activeSkills.values()] } : undefined
+          )
+        } catch {
+          return false
+        }
+        if (permission?.effect === 'allow' && agentBuiltAllowKey) permission = null
+      }
+      if (permission?.effect === 'deny' || permission?.effect === 'ask') return false
+      if (options.commandGuard && guardedCommand(name, call.arguments, options.commandGuard)) return false
+      const gateOpts = { mcpProtection: options.mcpProtection, agentBuiltAllowKey }
+      if (!isToolGated(name, options.mode, sessionAllowlist, workspaceAllowlist, call.arguments, gateOpts)) {
+        return true
+      }
+      const editFolder = editAllowFolder(name, call.arguments, options.commandGuard?.workspaceRoot)
+      if (editFolder && allowedFolders.includes(editFolder)) return true
+      if (permission?.effect === 'allow') return true
+      return (
+        options.autonomousMode === true &&
+        !isAutonomousHighRiskTool(name, call.arguments) &&
+        !workspaceAllowlist.includes(name)
+      )
     },
     async authorize(call): Promise<AuthorizeResult> {
       const name = canonicalizeAgentToolName(call.name)

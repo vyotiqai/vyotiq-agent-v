@@ -121,6 +121,44 @@ describe('fetchWithRetry', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(900)
   })
 
+  it('hands a usage-limit 429 straight back instead of sleeping Retry-After four times', async () => {
+    // Verbatim body shape from the 2026-10-13 window (opencode, "Go usage limit exceeded").
+    const quota = (): Response =>
+      new Response(JSON.stringify({ error: { message: 'Go usage limit exceeded' } }), {
+        status: 429,
+        headers: { 'retry-after': '30' }
+      })
+    const fetchMock = vi.fn().mockImplementation(async () => quota())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const started = Date.now()
+    const res = await fetchWithRetry('https://quota.example.test', {}, { maxAttempts: CHAT_FETCH_MAX_ATTEMPTS })
+
+    expect(res.status).toBe(429)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(Date.now() - started).toBeLessThan(1000)
+    // The caller still reads the provider's message to classify it.
+    expect(await res.text()).toContain('Go usage limit exceeded')
+  })
+
+  it('still waits out a plain rate-limit 429 inside the attempt', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('{"error":{"message":"Rate limit exceeded, retry after 1s"}}', {
+          status: 429,
+          headers: { 'retry-after': '1' }
+        })
+      )
+      .mockResolvedValueOnce(response(200))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await fetchWithRetry('https://ratelimit.example.test', {})
+
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('stops retrying once the caller aborts', async () => {
     const controller = new AbortController()
     const fetchMock = vi.fn().mockImplementation(async () => {

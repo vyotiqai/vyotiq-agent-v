@@ -52,7 +52,8 @@ import {
   spawnAgentInstance,
   summarizeChildRunAsync,
   unregisterChildInstance,
-  waitForChildTerminal
+  waitForChildTerminal,
+  CHILD_NO_ANSWER_SUMMARY
 } from '@main/agent/agentInstances'
 import {
   instanceWorktreeBranch,
@@ -1313,6 +1314,24 @@ describe('agentInstances', () => {
       `${JSON.stringify({ role: 'user', content: 'go' })}\n${JSON.stringify({ role: 'assistant', content: report })}\n`
     )
     expect(await summarizeChildRunAsync(workspacePath, childRunId)).toBe(report)
+  })
+
+  it('says a child left no answer instead of reporting a bare "finished"', async () => {
+    // Child 0fd674f3's shape: the empty-reply retries ran out, nothing was written.
+    const childRunId = `noanswer-${Date.now()}`
+    createRun(workspacePath, childRunId, 'no answer', {
+      mode: 'agent',
+      parentRunId,
+      inlineInstance: true
+    })
+    writeFileSync(
+      join(resolveRunDir(workspacePath, childRunId), 'messages.jsonl'),
+      `${JSON.stringify({ role: 'user', content: 'go' })}\n${JSON.stringify({ role: 'assistant', content: '' })}\n`
+    )
+    const summary = await summarizeChildRunAsync(workspacePath, childRunId)
+    expect(summary).toBe(CHILD_NO_ANSWER_SUMMARY)
+    expect(summary).toContain('without a final answer')
+    expect(summary).toContain('pull_agent_instance')
   })
 
   it('tail shows only the newest 40 messages in original order with true counts', async () => {

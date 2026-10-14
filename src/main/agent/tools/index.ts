@@ -1275,7 +1275,10 @@ export async function executeTool(
 
   const args = parseToolArgs(name, argsJson)
   const validation = toolCallArgumentsUnusable(name, argsJson)
-    ? { ok: false as const, error: formatMalformedToolArgsError(name, { cutOff: context.stepCutOff }) }
+    ? {
+        ok: false as const,
+        error: formatMalformedToolArgsError(name, { cutOff: context.stepCutOff, argsLength: (argsJson ?? '').length })
+      }
     : validateParsedToolArgs(name, args)
   // The browser adapter intentionally accepts a selector with neither value
   // nor label and lets the live page report the available options.

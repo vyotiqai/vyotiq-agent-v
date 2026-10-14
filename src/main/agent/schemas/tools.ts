@@ -1788,6 +1788,9 @@ function formatToolArgsError(name: string, detail: string): string {
   return detail || 'Invalid tool arguments'
 }
 
+/** At or past this length, an unparsable payload is treated as cut off, not mistyped. */
+const LONG_ARGS_CHARS = 1500
+
 /** Tools whose arguments carry file content, so a cut-off reply can't resend them whole. */
 const CONTENT_WRITE_TOOLS = new Set(['edit', 'str_replace', 'edit_notebook', 'memory_write', 'build_tool', 'git_apply'])
 
@@ -1797,9 +1800,23 @@ const CONTENT_WRITE_TOOLS = new Set(['edit', 'str_replace', 'edit_notebook', 'me
  * large write is the one move that cannot work, so a content write is told to
  * split it instead.
  */
-export function formatMalformedToolArgsError(name: string, opts: { cutOff?: boolean } = {}): string {
+export function formatMalformedToolArgsError(
+  name: string,
+  opts: { cutOff?: boolean; argsLength?: number } = {}
+): string {
   if (opts.cutOff && CONTENT_WRITE_TOOLS.has(name)) {
     return `Arguments for ${name} were cut off: your reply hit the output token limit mid-write, so nothing was written. Resending the same content will be cut off again. Write it in parts instead: create the file with a short first section (edit), then add the rest in further str_replace calls or diff hunks, each well under the limit.`
+  }
+  // A long payload that stops mid-value without the step hitting its output
+  // limit was cut by the model or its provider. opencode/qwen3.8-flash sent 15
+  // unparsable payloads in 567 calls, 11 of them 2.5k–3.7k characters, while its
+  // longest intact one was 3,407; told only to "resend the full arguments",
+  // run e48f1332 resent a same-size create_plan nine times.
+  if (!opts.cutOff && opts.argsLength != null && opts.argsLength >= LONG_ARGS_CHARS) {
+    const split = CONTENT_WRITE_TOOLS.has(name)
+      ? ' For file content, write it in parts: a short first section, then the rest in further str_replace calls.'
+      : ''
+    return `Arguments for ${name} arrived incomplete after ${opts.argsLength} characters — cut off mid-value, so the call did not run. Resending the same payload will be cut off at the same place. Send a much shorter version (well under ${opts.argsLength} characters).${split}`
   }
   const base = `Arguments for ${name} must be one complete JSON object — the payload arrived malformed, truncated, or non-object. Resend the full arguments object.`
   return name === 'ask_question' ? `${base} ${ASK_QUESTION_ARGS_HINT}` : base
@@ -1895,7 +1912,7 @@ export function validateToolArgs(
   const canonical = canonicalizeAgentToolName(name)
   if (!toolRegistryEntry(canonical)) return { ok: false, error: formatUnknownToolError(name) }
   if (toolCallArgumentsUnusable(canonical, rawJson)) {
-    return { ok: false, error: formatMalformedToolArgsError(canonical) }
+    return { ok: false, error: formatMalformedToolArgsError(canonical, { argsLength: (rawJson || '').length }) }
   }
 
   const duplicateKey = duplicateTopLevelJsonKeyError(rawJson || '')

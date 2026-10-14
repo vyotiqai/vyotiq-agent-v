@@ -6,6 +6,7 @@ import {
   recordCircuitSuccess,
   releaseCircuitProbe
 } from '../circuitBreaker'
+import { isQuotaExhaustedMessage } from '../quotaGate'
 
 export class RetriableStreamError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -262,6 +263,28 @@ function isRedirect(res: Response): boolean {
   return res.status >= 300 && res.status < 400
 }
 
+/**
+ * A 429 whose body names a usage/plan limit. Retrying it here cannot help
+ * before the window resets, and it hides the wait: five attempts, each
+ * sleeping `Retry-After` (capped at 30s), sit inside this function before the
+ * loop can show a network wait. Measured 2026-10-13: 115 "Go usage limit
+ * exceeded" retries across three runs, each arriving a steady ~130s (p50 132s)
+ * after the last — four capped sleeps plus the requests; without the header
+ * the inner backoff totals under 3s. ~1h45m per run. The caller's own retry layer keeps
+ * waiting out the window (quota is retried on purpose — loopStopReason.test.ts),
+ * one visible attempt at a time. The body is read from a clone, so the caller
+ * still gets it whole.
+ */
+async function isQuotaLimitResponse(response: Response): Promise<boolean> {
+  if (response.status !== 429) return false
+  try {
+    const text = await response.clone().text()
+    return isQuotaExhaustedMessage(text.slice(0, 4000))
+  } catch {
+    return false
+  }
+}
+
 export async function fetchWithRetry(
   url: string,
   init: RequestInit & { signal?: AbortSignal },
@@ -305,7 +328,11 @@ export async function fetchWithRetry(
         : first
       // Headers arrived — stop the connect deadline; the body streams on freely.
       deadline.dispose()
-      if (isRetriableHttpStatus(response.status) && attempt < maxAttempts) {
+      if (
+        isRetriableHttpStatus(response.status) &&
+        attempt < maxAttempts &&
+        !(await isQuotaLimitResponse(response))
+      ) {
         const retryAfter = retryAfterMs(response.headers?.get('retry-after') ?? null)
         await discardBody(response)
         await sleepAbortable(retryAfter ?? httpRetryBackoffMs(attempt), init.signal)

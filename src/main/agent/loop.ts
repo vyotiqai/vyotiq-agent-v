@@ -83,7 +83,15 @@ import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
   proactiveCompactThresholdTokens
 } from '../../shared/domain/contextBudget'
-import { executeStepToolCalls } from './executeStepTools'
+import { executeStepToolCalls, rerunToolCallForHold } from './executeStepTools'
+import {
+  PollGuard,
+  pollHoldDoneText,
+  pollHoldNote,
+  pollHoldProgressText,
+  runPollHold,
+  type PollHoldOutcome
+} from './pollGuard'
 import {
   createVerificationTracker,
   evaluateVerificationGate,
@@ -2310,6 +2318,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
      * step resets it. See adaptiveThinkingEffort in loopPolicy.
      */
     let mechanicalStepStreak = 0
+    /**
+     * Same calls, same answers, step after step: re-check between steps
+     * instead of paying a model step per poll. See pollGuard.ts.
+     */
+    const pollGuard = new PollGuard()
     /** Frozen for the invoke; re-read after a fold (see PromptArtifacts). */
     let promptArtifacts: PromptArtifacts | null = null
     const costWarnOnce = new Set<string>()
@@ -2469,7 +2482,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         if (spend === 'aborted' || controller.signal.aborted) break
       }
       // Inject promoted follow-ups (Send now) before the next model call.
-      yield* applyDrainedFollowUps(runId, runDir, messages)
+      // A user message restarts the poll count: the model may change course.
+      if (yield* applyDrainedFollowUps(runId, runDir, messages)) pollGuard.reset()
       const modeBeforeBoundary = agentMode
       agentMode = yield* applyPendingModeChange(
         runId,
@@ -4007,7 +4021,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           step,
           'interrupted'
         )
-        yield* applyDrainedFollowUps(runId, runDir, messages)
+        if (yield* applyDrainedFollowUps(runId, runDir, messages)) pollGuard.reset()
         continue
       }
 
@@ -4071,6 +4085,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // A step that called no tools is not navigation — end the chain so a
         // retry or nudge resumes at the user's full effort.
         mechanicalStepStreak = 0
+        pollGuard.reset()
         // Reasoning persists once (see the tool-call path above): `reasoningState`
         // on the message, with `thinking` kept only when the payload carries no
         // recoverable text.
@@ -4788,7 +4803,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         !controller.signal.aborted &&
         (toolsSteered || hasReadyFollowUps(runId))
       ) {
-        yield* applyDrainedFollowUps(runId, runDir, messages)
+        if (yield* applyDrainedFollowUps(runId, runDir, messages)) pollGuard.reset()
         try {
           await flushMessageAppends(runDir)
         } catch {
@@ -4832,6 +4847,96 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       await persistLoopCheckpoint()
 
       if (controller.signal.aborted) break
+
+      // Poll guard: this step repeated the same calls and got the same answers
+      // for the Nth time. Re-check them here, between steps, and hand back
+      // only when an answer changes or the budget runs out — never for a call
+      // that would ask the user first. Run d0461a83 (2026-10-13) spent 409 of
+      // its 546 steps polling `gh run view` on CI; replayed against this rule
+      // 236 of those steps go.
+      if (pollGuard.observe(callsToExecute, toolOutcome.rawResults)) {
+        let unattended = true
+        for (const call of callsToExecute) {
+          if (!(await approvalGate.allowsWithoutAsking?.(call))) {
+            unattended = false
+            break
+          }
+        }
+        if (unattended) {
+          const rowId = callsToExecute[callsToExecute.length - 1]!.id
+          const holdEvents: AgentEvent[] = []
+          let wakeHold: (() => void) | null = null
+          let holdSettled = false
+          const pushHoldEvent = (kind: 'text' | 'done', text: string): void => {
+            const ev: AgentEvent = { type: 'tool_progress', runId, parentToolCallId: rowId, kind, text }
+            appendEvent(toolCtx.runDir, ev)
+            holdEvents.push(ev)
+            wakeHold?.()
+          }
+          let rerunCount = 0
+          // Cancel or Send now ends the hold (both fire this signal). A queued
+          // message does not: it waits for the turn to end, as it would behind
+          // the model's own polling steps.
+          const holdWork = runPollHold({
+            calls: callsToExecute,
+            baseline: toolOutcome.rawResults,
+            signal: toolCtx.signal,
+            rerun: (call) => rerunToolCallForHold(call, toolCtx, `${call.id}~hold${++rerunCount}`),
+            onWait: (info) => pushHoldEvent('text', pollHoldProgressText(info))
+          }).finally(() => {
+            holdSettled = true
+            wakeHold?.()
+          })
+          for (;;) {
+            while (holdEvents.length) yield holdEvents.shift()!
+            if (holdSettled) break
+            await new Promise<void>((resolve) => {
+              wakeHold = resolve
+            })
+            wakeHold = null
+          }
+          const hold: PollHoldOutcome = await holdWork
+          pushHoldEvent('done', pollHoldDoneText(hold))
+          yield holdEvents.shift()!
+          logger.info('Poll hold ended', {
+            scope: 'agent',
+            correlationId: runId,
+            step,
+            reason: hold.reason,
+            checks: hold.checks,
+            elapsedMs: hold.elapsedMs,
+            tools: callsToExecute.map((c) => c.name)
+          })
+          if (controller.signal.aborted) break
+          if (hold.reason === 'changed') pollGuard.rebase(callsToExecute, hold.results)
+          else if (hold.reason === 'interrupted') pollGuard.reset()
+          const holdNote: ChatMessage = {
+            role: 'user',
+            content: pollHoldNote(callsToExecute, hold),
+            // Loop-injected protocol turn — must never render as a user bubble.
+            synthetic: true
+          }
+          messages.push(holdNote)
+          appendMessage(runDir, holdNote)
+          try {
+            await flushMessageAppends(runDir)
+          } catch {
+            // Failure is recorded for emitMessageAppendFailureNotice below.
+          }
+          if (yield* emitMessageAppendFailureNotice(runId, runDir, invokeId)) {
+            yield* emitTerminalRunError({
+              runId,
+              invokeId,
+              runDir,
+              message: 'Failed to save a step to the record',
+              emitErrorEvent: false,
+              flushWriteCheckpoint,
+              writeStatus
+            })
+            return
+          }
+        }
+      }
       } finally {
         setStreamInterrupt(runId, null)
       }
