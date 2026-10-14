@@ -180,3 +180,16 @@ describe('the engine report names who speaks too', () => {
     expect(events.find((e) => e.kind === 'engine')).toMatchObject({ stt: 'deepgram', tts: 'openai', ttsFellBackFrom: 'elevenlabs' })
   })
 })
+
+describe('how long the agent has been quiet (for the listener’s lead-in)', () => {
+  it('is 0 while it plays, the time since it stopped after, and unbounded before it ever spoke', () => {
+    const g = new EchoGuard()
+    expect(g.msSinceVoice(5000)).toBe(Number.POSITIVE_INFINITY)
+    g.setPlaying(true, 5000)
+    expect(g.msSinceVoice(6000)).toBe(0)
+    g.setPlaying(false, 6000)
+    expect(g.msSinceVoice(6800)).toBe(800)
+    g.reset()
+    expect(g.msSinceVoice(7000)).toBe(Number.POSITIVE_INFINITY)
+  })
+})

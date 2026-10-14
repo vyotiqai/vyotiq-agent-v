@@ -343,19 +343,26 @@ import { dictationMicAccess, openMicSettings } from '../dictation/micAccess'
 import { isVoiceError } from '../voice/errors'
 import { voiceKeyStatus } from '../voice/keys'
 import { removeVoiceKey, saveVoiceKey } from '../voice/keyService'
-import { listVoices, speak, stopSpeaking } from '../voice/speaker'
-import { followVoiceRun, startVoiceSession, stopVoiceSession, voiceSessionFor } from '../voice/sessions'
+import { listVoices, prepareSpeaking, speak, stopSpeaking } from '../voice/speaker'
+import { listVoiceModels, openRouterCredit } from '../voice/modelCatalog'
+import { followVoiceRun, setVoiceTask, startVoiceSession, stopVoiceSession, voiceSessionFor } from '../voice/sessions'
 import {
+  DEFAULT_VOICE_SETTINGS,
   VoiceAudioInSchema,
   VoiceClearKeyRequestSchema,
   VoiceMuteRequestSchema,
   VoiceFollowRequestSchema,
+  VoiceTaskRequestSchema,
   VoicePlaybackRequestSchema,
+  VoiceHandOffFailedRequestSchema,
   VoicePttRequestSchema,
   VoiceSessionRequestSchema,
   VoiceStartRequestSchema,
   type VoiceStartResult,
   VoiceListVoicesRequestSchema,
+  VoiceModelsRequestSchema,
+  type VoiceModelList,
+  type VoiceOpenRouterCredit,
   VoiceSetKeyRequestSchema,
   VoiceSpeakRequestSchema,
   VoiceStopSpeakingRequestSchema,
@@ -364,7 +371,7 @@ import {
   type VoiceSetKeyResult,
   type VoiceSpeakResult
 } from '../../shared/ipc/schemas/voice'
-import { voiceIpcCode } from '../../shared/voice'
+import { voiceDetail, voiceIpcCode } from '../../shared/voice'
 import {
   listPendingToolApprovals,
   resolveToolApproval
@@ -581,6 +588,7 @@ import { registerPtyIpc } from './handlers/pty'
 import { registerExtensionsIpc } from './handlers/extensions'
 import { registerSecretsIpc } from './handlers/secrets'
 import { registerPromptIpc } from './handlers/prompt'
+import { registerVoiceConversationsIpc } from './handlers/voiceConversations'
 
 const dictationTranscriptions = new Map<string, AbortController>()
 
@@ -1940,6 +1948,8 @@ export function registerIpc(): void {
     try {
       const req = VoiceSpeakRequestSchema.parse(raw)
       const sender = event.sender
+      // The model's voices, so a voice it refuses is never sent (A-06).
+      await prepareSpeaking(req.provider, { ...DEFAULT_VOICE_SETTINGS, ...getSettings().voice })
       return ok(
         speak(
           req,
@@ -1947,8 +1957,12 @@ export function registerIpc(): void {
             audio: (chunk) => {
               if (!sender.isDestroyed()) sender.send(IPC.voiceAudioOut, chunk)
             },
-            end: (utteranceId, error) => {
-              if (!sender.isDestroyed()) sender.send(IPC.voiceSpeakEnd, { utteranceId, ...(error ? { error } : {}) })
+            end: (utteranceId, error, message) => {
+              const detail = error ? voiceDetail(message) : ''
+              if (error) logger.warn('Read aloud failed', { scope: 'voice', code: error, reason: detail })
+              if (!sender.isDestroyed()) {
+                sender.send(IPC.voiceSpeakEnd, { utteranceId, ...(error ? { error } : {}), ...(detail ? { detail } : {}) })
+              }
             }
           },
           getSettings().voice
@@ -1974,11 +1988,28 @@ export function registerIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const req = VoiceListVoicesRequestSchema.parse(raw)
-      return ok(await listVoices(req.provider, req.refresh))
+      return ok(await listVoices(req.provider, req.refresh, req.model))
     } catch (err) {
       if (isVoiceError(err)) return fail(err.message, voiceIpcCode(err.code))
       return failFrom(err, IPC.voiceListVoices)
     }
+  })
+
+  ipcMain.handle(IPC.voiceModels, async (event, raw): Promise<IpcResult<VoiceModelList>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceModelsRequestSchema.parse(raw)
+      // Never throws: a failed fetch comes back as the curated list with its reason.
+      return ok(await listVoiceModels(req.direction, req.provider, req.refresh))
+    } catch (err) {
+      return failFrom(err, IPC.voiceModels)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceOpenRouterCredit, async (event): Promise<IpcResult<VoiceOpenRouterCredit>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    // Never throws: no key or no answer is `unknown`.
+    return ok(await openRouterCredit())
   })
 
   ipcMain.handle(IPC.voiceStart, async (event, raw): Promise<IpcResult<VoiceStartResult>> => {
@@ -2048,10 +2079,23 @@ export function registerIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const req = VoiceFollowRequestSchema.parse(raw)
-      followVoiceRun(event.sender.id, req.sessionId, req.runId)
+      followVoiceRun(event.sender.id, req.sessionId, req.runId, req.handOffId)
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.voiceFollow)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceTask, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceTaskRequestSchema.parse(raw)
+      // Only an open workspace's folder is read; otherwise main's own record of the run decides.
+      const workspace = req.workspacePath && isOpenWorkspace(req.workspacePath) ? req.workspacePath : null
+      setVoiceTask(event.sender.id, req.sessionId, req.runId, workspace)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceTask)
     }
   })
 
@@ -2063,6 +2107,17 @@ export function registerIpc(): void {
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.voiceInterrupt)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceHandOffFailed, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = VoiceHandOffFailedRequestSchema.parse(raw)
+      voiceSessionFor(event.sender.id, req.sessionId)?.handOffFailed(req.handOffId, req.reason)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.voiceHandOffFailed)
     }
   })
 
@@ -4746,4 +4801,5 @@ export function registerIpc(): void {
   registerExtensionsIpc()
   registerSecretsIpc()
   registerPromptIpc()
+  registerVoiceConversationsIpc()
 }

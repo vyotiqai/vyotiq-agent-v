@@ -137,6 +137,11 @@ export interface ProviderChatRequest {
    * price (Anthropic: 2x base input instead of 1.25x). Default `'5m'`.
    */
   promptCacheTtl?: '5m' | '1h'
+  /**
+   * Route to the fastest-answering host (OpenRouter `provider.sort`). For a
+   * caller where the first word matters more than price: the voice model.
+   */
+  routing?: 'latency'
 }
 
 export interface LlmProvider {

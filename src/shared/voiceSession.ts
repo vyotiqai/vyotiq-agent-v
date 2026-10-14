@@ -38,6 +38,8 @@ export type VoiceSessionEvent =
   | { type: 'audio_done'; runActive: boolean }
   /** The run finished with nothing (more) to say. */
   | { type: 'run_done' }
+  /** The voice's answer ended without audio (nothing to say, or nothing can speak); `runActive`: the agent is working. */
+  | { type: 'reply_done'; runActive: boolean }
   /** The user started talking while the agent had the floor, confirmed (§6.2). */
   | { type: 'barge_in' }
   | { type: 'mute' }
@@ -80,6 +82,9 @@ export function nextVoiceState(state: VoiceSessionState, event: VoiceSessionEven
       if (event.type === 'speech_start') return 'hearing'
       // A turn can end without a speech_start (push-to-talk on a quiet mic).
       if (event.type === 'end_of_turn') return 'thinking'
+      // The agent you handed work to started, or speaks its result, after the voice went quiet (D-44).
+      if (event.type === 'tool_start') return 'working'
+      if (event.type === 'audio_start') return 'speaking'
       if (event.type === 'needs_you') return 'waiting_on_you'
       if (event.type === 'mute') return 'paused'
       if (event.type === 'connection_lost') return 'reconnecting'
@@ -93,6 +98,7 @@ export function nextVoiceState(state: VoiceSessionState, event: VoiceSessionEven
     case 'thinking':
       if (event.type === 'audio_start') return 'speaking'
       if (event.type === 'tool_start') return 'working'
+      if (event.type === 'reply_done') return event.runActive ? 'working' : 'listening'
       if (event.type === 'needs_you') return 'waiting_on_you'
       if (event.type === 'run_done') return 'listening'
       if (event.type === 'barge_in') return 'hearing'

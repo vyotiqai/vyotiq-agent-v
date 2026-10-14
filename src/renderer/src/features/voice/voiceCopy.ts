@@ -29,6 +29,23 @@ export function voiceProblem(code: VoiceErrorCode): VoiceProblem {
 }
 
 /**
+ * One spoken turn didn't go through, but the session is still listening
+ * (a whole-turn listener's upload failed, A-03). Retrying is saying it again,
+ * so no button for that; the settings fix is for credit and keys.
+ */
+export function turnProblem(code: VoiceErrorCode): VoiceProblem {
+  switch (code) {
+    case 'rate_limited':
+      return { message: 'That didn’t go through: the listening provider is busy. Say it again.', fix: null }
+    case 'offline':
+    case 'provider_down':
+      return { message: 'That didn’t go through: couldn’t reach the listening provider. Say it again.', fix: null }
+    default:
+      return { message: 'That didn’t go through. Say it again.', fix: null }
+  }
+}
+
+/**
  * A problem with the agent's speaking voice during a session. The
  * conversation goes on with replies on screen, so it is worded for the voice,
  * not the session (a missing key here is a speaking key, not a listening one).

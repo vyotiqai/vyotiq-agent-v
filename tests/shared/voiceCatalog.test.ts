@@ -63,6 +63,15 @@ describe('choosing a provider (§9.5)', () => {
     expect(resolveTtsProvider('elevenlabs', keys)).toEqual({ ok: true, id: 'openai', fellBackFrom: 'elevenlabs' })
   })
 
+  it('listens with OpenRouter on its key alone, but any streaming listener wins (D-35)', () => {
+    const openrouterOnly: VoiceKeyAvailability = { voice: {}, chat: { openrouter: true } }
+    expect(resolveSttProvider('auto', openrouterOnly)).toEqual({ ok: true, id: 'openrouter' })
+    expect(resolveSttProvider('auto', { voice: {}, chat: { openrouter: true, openai: true } })).toEqual({
+      ok: true,
+      id: 'openai'
+    })
+  })
+
   it('never picks the local listener automatically, but honours it when chosen', () => {
     expect(resolveSttProvider('auto', none)).toEqual({ ok: false, reason: 'no_key' })
     expect(resolveSttProvider('local', none)).toEqual({ ok: true, id: 'local' })

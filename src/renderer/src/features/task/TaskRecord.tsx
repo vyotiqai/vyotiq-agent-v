@@ -19,6 +19,8 @@ import { CheckedBlock, DoneWhenRow, checksByRun } from './record/Checks'
 import { runStateOf, type BuildOptions, type NeedsYou, type RecordModel, type RecordRun, type WorkItem } from './recordModel'
 import { ApprovalCard } from './record/ApprovalCard'
 import { Brief } from './record/Brief'
+import { useVoiceConversations, voiceOriginFor } from '@renderer/features/voice/history/voiceConversationStore'
+import { requestVoiceConversations } from '@renderer/features/voice/history/voiceHistoryRequests'
 import { ReceiptLine, costLabel } from './record/Receipt'
 import { KeptProcesses } from '@renderer/features/chat/components/KeptProcesses'
 import { useKeptTerminals } from '@renderer/features/chat/hooks/useKeptTerminals'
@@ -484,6 +486,12 @@ function RunBody({
   // The latest run's edits still open in the inspector, and what the record offers for them.
   const { pendingWrites, onOpenPanel, workspacePath: sessionWorkspace, runId: sessionRunId } = useRunSession()
   const { onOpenChanges, onRetry, retryableErrorId } = useContext(RecordActionsContext)
+  // An instruction said in voice mode links back to its conversation (docs/voice-mode.md §24.8).
+  const voiceConversations = useVoiceConversations(sessionWorkspace)
+  const voiceOrigin = useMemo(
+    () => voiceOriginFor(voiceConversations, sessionRunId, run.text),
+    [voiceConversations, sessionRunId, run.text]
+  )
   const unkept = isLast && !live ? (pendingWrites?.count ?? 0) : 0
   const changedFiles = useMemo(
     () => (run.result && !live ? collectSessionChangedFiles(runTools(run)) : []),
@@ -557,6 +565,14 @@ function RunBody({
           onRewind={props.onRevert && canRevert ? () => props.onRevert!(index!, run.n) : undefined}
           onFork={props.onForkFrom && index != null && !live ? () => props.onForkFrom!(index) : undefined}
           onImageClick={props.onImageClick}
+          voice={
+            voiceOrigin && sessionWorkspace
+              ? {
+                  turns: voiceOrigin.turns,
+                  onOpen: () => void requestVoiceConversations(sessionWorkspace, voiceOrigin.conversationId)
+                }
+              : undefined
+          }
         />
       ) : null}
       {/* Open checks sit under the brief; once there is a result they move under it. */}

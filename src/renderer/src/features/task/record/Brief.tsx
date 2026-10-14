@@ -100,6 +100,26 @@ function StructuredFrom({ words }: { words: string }) {
 }
 
 /**
+ * An instruction you said in voice mode: the conversation it came from is a
+ * click away (docs/voice-mode.md §24.8).
+ */
+function SaidByVoice({ turns, onOpen }: { turns: number; onOpen: () => void }) {
+  return (
+    <div className="mt-0.5" data-brief-voice>
+      {/* 24px tall, as "Structured from what you wrote" (WCAG 2.5.8). */}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="inline-flex min-h-6 items-center gap-1 rounded-sm text-xs text-muted hover:text-fg focus-visible:vy-focus-ring"
+      >
+        <Icon name="mic" size={12} className="shrink-0" />
+        Said by voice · {turns} {turns === 1 ? 'turn' : 'turns'}
+      </button>
+    </div>
+  )
+}
+
+/**
  * The instruction a run started from — the brief, or a follow-up. It is the
  * one thing in the record you wrote, so it reads as your side of the
  * conversation: a bubble on the column's right edge, as wide as its words,
@@ -115,9 +135,12 @@ export function Brief({
   onEdit,
   onRewind,
   onFork,
-  onImageClick
+  onImageClick,
+  voice
 }: {
   run: RecordRun
+  /** Said in voice mode: how long the conversation ran, and how to open it. */
+  voice?: { turns: number; onOpen: () => void }
   /** This brief is being edited: the editor takes its place. */
   editing?: boolean
   editComposer?: ReactNode
@@ -185,6 +208,7 @@ export function Brief({
             </button>
           ) : null}
           {run.structuredFrom && !origin ? <StructuredFrom words={run.structuredFrom} /> : null}
+          {voice && !origin ? <SaidByVoice turns={voice.turns} onOpen={voice.onOpen} /> : null}
           {run.images.length > 0 || run.attachments.length > 0 ? (
             <div className="mt-2.5 flex flex-wrap gap-1.5">
               {run.images.map((src, i) => (

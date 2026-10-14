@@ -210,7 +210,9 @@ import type {
 } from './ipc'
 import type {
   VoiceFollowRequest,
+  VoiceTaskRequest,
   VoicePlaybackRequest,
+  VoiceHandOffFailedRequest,
   VoiceAudioIn,
   VoiceEvent,
   VoiceMuteRequest,
@@ -222,6 +224,9 @@ import type {
   VoiceClearKeyRequest,
   VoiceKeyStatus,
   VoiceListVoicesRequest,
+  VoiceModelList,
+  VoiceModelsRequest,
+  VoiceOpenRouterCredit,
   VoiceOptionInfo,
   VoiceSetKeyRequest,
   VoiceSetKeyResult,
@@ -230,6 +235,12 @@ import type {
   VoiceSpeakResult,
   VoiceStopSpeakingRequest
 } from './ipc/schemas/voice'
+import type {
+  VoiceConversation,
+  VoiceConversationReadRequest,
+  VoiceConversationSummary,
+  VoiceConversationsListRequest
+} from './ipc/schemas/voiceConversations'
 import type { GoogleAdcStatus, ProxyStatus } from './domain/network'
 
 /** Host OS from preload `process.platform`. */
@@ -528,6 +539,10 @@ export interface VyotiqApi {
   voiceStopSpeaking: (payload: VoiceStopSpeakingRequest) => Promise<IpcResult<boolean>>
   /** Voices for a speaking provider, fetched with your key. */
   voiceListVoices: (payload: VoiceListVoicesRequest) => Promise<IpcResult<VoiceOptionInfo[]>>
+  /** A provider's models for listening or speaking: from its API where it has one, else curated (D-36). */
+  voiceModels: (payload: VoiceModelsRequest) => Promise<IpcResult<VoiceModelList>>
+  /** What an ordinary OpenRouter key can tell about credit: never paid, or its own limit nearly spent (A-08). */
+  voiceOpenRouterCredit: () => Promise<IpcResult<VoiceOpenRouterCredit>>
   onVoiceAudioOut: (handler: (chunk: VoiceAudioOut) => void) => () => void
   onVoiceSpeakEnd: (handler: (end: VoiceSpeakEnd) => void) => () => void
   /** Open a live voice session for this window (one at a time). */
@@ -540,10 +555,18 @@ export interface VyotiqApi {
   onVoiceEvent: (handler: (event: VoiceEvent) => void) => () => void
   /** Speak the replies of this run (after sending it a voice turn). */
   voiceFollow: (payload: VoiceFollowRequest) => Promise<IpcResult<boolean>>
+  /** The task the session is on, running or not: the voice reads its conversation. */
+  voiceTask: (payload: VoiceTaskRequest) => Promise<IpcResult<boolean>>
   /** The player started or drained a reply's audio. */
   voicePlayback: (payload: VoicePlaybackRequest) => Promise<IpcResult<boolean>>
   /** Stop speaking now (the run carries on). */
   voiceInterrupt: (payload: VoiceSessionRequest) => Promise<IpcResult<boolean>>
+  /** The voice's brief never reached the task: the voice says so. */
+  voiceHandOffFailed: (payload: VoiceHandOffFailedRequest) => Promise<IpcResult<boolean>>
+  /** A workspace's kept voice conversations, newest first. */
+  voiceConversationsList: (payload: VoiceConversationsListRequest) => Promise<IpcResult<VoiceConversationSummary[]>>
+  /** One kept voice conversation, line by line. */
+  voiceConversationRead: (payload: VoiceConversationReadRequest) => Promise<IpcResult<VoiceConversation>>
   listRuns: (workspacePath: string) => Promise<IpcResult<ListRunsResult>>
   listOlderRuns: (
     workspacePath: string,

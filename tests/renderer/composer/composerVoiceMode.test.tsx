@@ -116,6 +116,9 @@ describe('voice mode on the instruction line', () => {
     })
     const panel = await screen.findByRole('dialog', { name: 'Talk with' })
     expect(document.querySelector('[data-voice-bar]')).toBeNull()
+    // It opens on the 40px row every anchored popover starts with.
+    expect(panel.firstElementChild!.classList.contains('h-10')).toBe(true)
+    expect(panel.firstElementChild!.textContent).toBe('Talk with')
     expect(within(panel).getByText('Deepgram Flux')).toBeTruthy()
     const openai = panel.querySelector<HTMLElement>('[data-voice-setup-choice="openai"]')!
     fireEvent.click(within(openai).getByRole('button', { name: 'Add key' }))

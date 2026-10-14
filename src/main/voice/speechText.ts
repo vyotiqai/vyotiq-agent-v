@@ -38,8 +38,13 @@ function basenameWithoutExt(path: string): string {
   return dot > 0 ? base.slice(0, dot) : base
 }
 
+/**
+ * A line that already ends a sentence or a clause. A clause end (the comma
+ * the splitter cuts the first piece at) must not gain a full stop: "this
+ * chat,." makes the voice drop its pitch mid-sentence.
+ */
 function endsSentence(line: string): boolean {
-  return /[.!?:;]["'”’)]*$/.test(line)
+  return /[.!?:;,—–]["'”’)]*$/.test(line)
 }
 
 /**
@@ -224,6 +229,98 @@ export function isStopPhrase(utterance: string): boolean {
   return STOP_PHRASES.has(norm)
 }
 
+/**
+ * What transcription models write for a breath, a click or room noise when
+ * there were no words: fillers, and the stock lines Whisper-style models
+ * invent. Never a turn (D-43). Real one-word answers ("yes", "stop") pass.
+ */
+const NOISE_TRANSCRIPTS = new Set(['you', 'uh', 'um', 'umm', 'hmm', 'mm', 'mhm', 'ah', 'oh', 'eh', 'huh', 'thanks for watching', 'thank you for watching'])
+
+export function isNoiseTranscript(utterance: string): boolean {
+  const norm = utterance
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return norm === '' || NOISE_TRANSCRIPTS.has(norm)
+}
+
+/**
+ * Sound descriptions a listener writes in place of words: ElevenLabs Scribe
+ * (also through OpenRouter) tags audio events by default, and 2026-10-14's
+ * kept conversations show "[background noise]", "[clears throat]",
+ * "[phone ringing]" and "[laughs]" each taken as a turn and answered. Square
+ * brackets, music marks and asterisk actions always; parentheses only around
+ * a short phrase with no numbers ("(laughs)"), so "version (2)" is kept.
+ * Listeners don't write spoken asides in parentheses.
+ */
+const SOUND_TAG_RES = [/\[[^\]\n]{0,60}\]/g, /\*[^*\n]{1,40}\*/g, /\((?:[^()\n\d]{1,30})\)/g, /[♪♫♩♬]+/g]
+
+/** What you said, without the listener's sound descriptions. Empty when there were no words. */
+export function cleanTranscript(utterance: string): string {
+  let text = utterance
+  for (const re of SOUND_TAG_RES) text = text.replace(re, ' ')
+  return text
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .replace(/^[\s,.;:!?-]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Languages written in Latin letters: a transcript in another script is the listener inventing (はい。 for a cough). */
+const LATIN_LANGUAGES = new Set([
+  'en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'sv', 'da', 'no', 'nb', 'fi', 'pl', 'cs', 'sk', 'ro', 'hu', 'tr', 'id', 'ms', 'vi', 'ca', 'hr', 'sl', 'et', 'lv', 'lt', 'tl'
+])
+
+/**
+ * Letters, but none in the script of the language you set. Only for a
+ * Latin-script language: a mixed or Latin transcript always passes.
+ */
+export function isOtherScript(utterance: string, language: string | undefined): boolean {
+  const lang = language?.trim().toLowerCase().split(/[-_]/)[0]
+  if (!lang || !LATIN_LANGUAGES.has(lang)) return false
+  const letters = utterance.match(/\p{L}/gu)
+  if (!letters || letters.length === 0) return false
+  return !letters.some((ch) => /\p{Script=Latin}/u.test(ch))
+}
+
+/**
+ * Words that only acknowledge ("okay", "thanks", "cool"). Said to nothing in
+ * particular they need no answer, and answering each one ("Good — still
+ * running.") kept a noisy room talking in circles. They are still a turn when
+ * something was just asked: see the session.
+ */
+const BACKCHANNELS = new Set([
+  'ok', 'okay', 'k', 'alright', 'all right', 'right', 'cool', 'nice', 'great', 'good', 'wow', 'yeah', 'yep', 'yup', 'yes', 'sure',
+  'thanks', 'thank you', 'thank you so much', 'thanks a lot', 'got it', 'i see', 'mm hmm', 'mhm', 'uh huh', 'hm', 'hmm', 'aha', 'ah ok',
+  'ok thanks', 'okay thanks', 'okay thank you', 'ok thank you', 'bye', 'bye bye', 'you', 'so', 'and', 'oh', 'oh okay', 'oh ok', 'perfect',
+  'awesome', 'fine', 'sounds good', 'no problem'
+])
+
+export function isBackchannel(utterance: string): boolean {
+  const norm = utterance
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return BACKCHANNELS.has(norm)
+}
+
+/**
+ * Talk that stops mid-thought: "Can you", "and then the", "so,". The voice
+ * waits a moment before answering it, so the rest joins the same turn rather
+ * than getting "Can you what?" back (2026-10-14's kept conversations).
+ */
+const DANGLING_END_RE =
+  /(?:,|\b(?:and|or|but|because|then|to|the|an?|of|with|my|your|can you|could you|would you|will you|um|uh|if|i want to|let's)\s*[.…]?)$/i
+
+export function soundsUnfinished(utterance: string): boolean {
+  const text = utterance.trim()
+  if (!text || /[?!]$/.test(text)) return false
+  if (/(?:\.\.\.|…)$/.test(text)) return true
+  return DANGLING_END_RE.test(text)
+}
+
 function normaliseUtterance(utterance: string): string {
   return utterance
     .toLowerCase()
@@ -235,14 +332,30 @@ function normaliseUtterance(utterance: string): string {
 const YES = new Set(['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'do it', 'allow', 'allow it', 'approve', 'approve it', 'yes please', 'go for it', 'fine', 'yes go ahead'])
 const NO = new Set(['no', 'nope', 'nah', 'deny', 'deny it', "don't", 'do not', "don't do it", 'no thanks', 'skip', 'skip it', 'no don\'t'])
 
+const ALWAYS = new Set([
+  'always',
+  'always allow',
+  'always allow it',
+  'allow always',
+  'allow it always',
+  'yes always',
+  'always yes',
+  "yes and don't ask again",
+  "don't ask again",
+  'yes always allow'
+])
+
 /**
- * A spoken answer to an approval (§7.5): `once` for yes, `deny` for no, null
- * for anything else (which goes to the agent as a message). Whole utterance
- * only, like the stop phrases: "yes but use the other file" is a message.
+ * A spoken answer to an approval (§7.5): `once` for yes, `deny` for no,
+ * `always` for "always allow", null for anything else (which goes to the
+ * agent as a message). Whole utterance only, like the stop phrases: "yes but
+ * use the other file" is a message. Whether `always` may be given is the
+ * session's call (`voiceMayAlwaysAllow`).
  */
-export function approvalAnswer(utterance: string): 'once' | 'deny' | null {
+export function approvalAnswer(utterance: string): 'once' | 'deny' | 'always' | null {
   const norm = normaliseUtterance(utterance)
   if (YES.has(norm)) return 'once'
   if (NO.has(norm)) return 'deny'
+  if (ALWAYS.has(norm)) return 'always'
   return null
 }

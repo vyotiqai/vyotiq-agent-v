@@ -1,0 +1,147 @@
+/*
+  The renderer's own stylesheet — tokens, skins, @theme, @utility helpers —
+  imported whole, so every class here resolves exactly as it does in the app.
+  Tailwind's source detection starts at this Vite root, which does not reach
+  the renderer, so the primitives need an explicit @source.
+*/
+@import '../../../renderer/src/styles.css';
+
+@source '../../../renderer/src/lib';
+@source '.';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Proposed additions — motion only; colour comes from currentColor and the tokens. */
+
+/* Listening: a slow breath. */
+@keyframes vv-breathe {
+  0%,
+  100% {
+    transform: scale(0.94);
+  }
+
+  50% {
+    transform: scale(1);
+  }
+}
+
+@utility vv-breathe {
+  animation: vv-breathe 3.2s var(--vy-ease) infinite;
+}
+
+/* Thinking and speaking: rings leave the disc and fade. */
+@keyframes vv-ripple {
+  from {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+
+  to {
+    transform: scale(1.62);
+    opacity: 0;
+  }
+}
+
+@utility vv-ripple {
+  animation: vv-ripple 2.4s var(--vy-ease) infinite both;
+}
+
+@utility vv-ripple-fast {
+  animation: vv-ripple 1.4s var(--vy-ease) infinite both;
+}
+
+/* Working: one dot travels the track. */
+@keyframes vv-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@utility vv-orbit {
+  animation: vv-orbit 3.2s linear infinite;
+}
+
+/* Needs you: the ring pulses; the disc holds still. */
+@keyframes vv-hold {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@utility vv-hold {
+  animation: vv-hold 1.8s var(--vy-ease) infinite;
+}
+
+/* A row arriving: opacity plus a 4px rise. */
+@keyframes vv-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility vv-rise {
+  animation: vv-rise 200ms var(--vy-ease) both;
+}
+
+/* The conversation scrolls under a hard top edge, never into the orb. */
+@utility vv-fade-top {
+  mask-image: linear-gradient(to bottom, transparent 0, black 24px);
+}
+
+/* Folds open by height without measuring: grid rows 0fr → 1fr. */
+@utility vv-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--vy-ease);
+
+  &[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+
+  & > * {
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+.font-mono {
+  font-variant-ligatures: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vv-breathe,
+  .vv-orbit,
+  .vv-hold,
+  .vv-rise {
+    animation: none;
+  }
+
+  /* Still a different shape from listening (and from needs you's solid ring): the ripples rest as one dotted ring. */
+  .vv-ripple,
+  .vv-ripple-fast {
+    animation: none;
+    transform: scale(1.4);
+    opacity: 0.6;
+    stroke-dasharray: 2 5;
+  }
+
+  .vv-fold {
+    transition: none;
+  }
+}

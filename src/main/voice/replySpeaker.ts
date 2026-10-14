@@ -7,13 +7,16 @@
  *  - narration between tool steps is not spoken (B4); a slow tool gets one
  *    short cue instead, if the person wants spoken progress;
  *  - a retried stream (`stream_reset`) drops what wasn't said yet;
+ *  - one answer is said per turn: a check that sends the agent back after it
+ *    answered (the verification gate, a done-when reminder, a Stop hook) ends
+ *    in a second final message, which replaces the result but isn't said again;
  *  - after a barge-in nothing more is said until the person's next turn (B5).
  *
  * It knows nothing about audio devices or IPC: it opens text-to-speech
  * streams through an injected factory and reports to the session.
  */
 import type { AgentEvent } from '../../shared/ipc'
-import { SpokenStreamParser } from '../../shared/spokenSummary'
+import { SpokenStreamParser, extractSpokenBlock } from '../../shared/spokenSummary'
 import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import type { TtsStream } from './providers/types'
 import { SentenceSplitter, fallbackSummary, toSpeakable } from './speechText'
@@ -24,6 +27,32 @@ export const CUE_DELAY_MS = 1500
 export const CUE_GAP_MS = 6000
 
 export const RUN_FAILED_LINE = 'That run hit an error. The details are on screen.'
+
+/**
+ * What a run's failure was, in words, by the run's error code. "That run hit
+ * an error" alone left the person to find out at the screen that the
+ * provider was out of credit (seen 2026-10-14: PROVIDER_BILLING, said as the
+ * bare line).
+ */
+export function runFailedLine(code: string | undefined): string {
+  switch (code) {
+    case 'PROVIDER_BILLING':
+      return 'That run stopped: the model provider is out of credit. The details are on screen.'
+    case 'PROVIDER_AUTH':
+    case 'PROVIDER_KEYCHAIN':
+    case 'PROVIDER_KEY_DECRYPT':
+      return 'That run stopped: the model provider didn’t accept the key. The details are on screen.'
+    case 'PROVIDER_NETWORK':
+    case 'PROVIDER_TIMEOUT':
+      return 'That run stopped: the model provider couldn’t be reached. The details are on screen.'
+    case 'PROVIDER_HTTP':
+    case 'PROVIDER_STREAM':
+    case 'PROVIDER_REQUEST':
+      return 'That run stopped: the model provider returned an error. The details are on screen.'
+    default:
+      return RUN_FAILED_LINE
+  }
+}
 
 export type ReplySpeakerDeps = {
   /** A text-to-speech stream for one spoken piece, or null when nothing can speak. */
@@ -37,6 +66,15 @@ export type ReplySpeakerDeps = {
   speakProgress: () => boolean
   /** A slow step started and spoken progress is off: the renderer plays a soft sound. */
   quietCue?: () => void
+  /** The run's final answer, spoken or not: the voice keeps it to answer from (B5). */
+  onResult?: (answer: string) => void
+  /** The run failed, with its own message: the voice keeps it, so "why?" has an answer. */
+  onRunFailed?: (message: string) => void
+  /**
+   * The answer had no `<spoken>` block: have the voice say what it found (B7).
+   * False when it can't; a short summary of the answer is read instead.
+   */
+  reportResult?: () => boolean
   newId: () => string
   now: () => number
   setTimer: (fn: () => void, ms: number) => unknown
@@ -66,6 +104,12 @@ export class ReplySpeaker {
   private active = false
   private lastCueAt = Number.NEGATIVE_INFINITY
   private cueTimers = new Map<string, unknown>()
+  /** The run's latest final answer, until the run ends; `spoken` once its block was said. */
+  private answer: { text: string; spoken: boolean } | null = null
+  /** An answer was already said this turn; a later one is shown and kept, not said. */
+  private heard = false
+  /** The run's last error event, said and kept if the run then ends in error. */
+  private runError: { message: string; code?: string } | null = null
 
   constructor(private readonly deps: ReplySpeakerDeps) {}
 
@@ -78,7 +122,17 @@ export class ReplySpeaker {
   beginTurn(): void {
     this.quiet = false
     this.active = true
+    this.heard = false
     this.resetStep()
+  }
+
+  /**
+   * You took your turn: what the agent says next (its result) is spoken
+   * again. Talking over it stops its voice, never its work (D-46), so the
+   * result still matters after a barge-in.
+   */
+  resume(): void {
+    this.quiet = false
   }
 
   /** Barge-in: stop speaking now. Returns the reply to flush from the speakers, if any. */
@@ -95,21 +149,37 @@ export class ReplySpeaker {
     switch (ev.type) {
       case 'status':
         if (ev.status === 'running') {
+          // Once per invoke, as the gate nudges once per invoke: a turn typed in the task is said too.
           this.active = true
+          this.heard = false
+          this.runError = null
           return
         }
         this.active = false
         this.clearCues()
-        if (ev.status === 'error') this.speakOnce(RUN_FAILED_LINE)
+        this.settleAnswer(ev.status === 'done')
+        if (ev.status === 'error') {
+          const err = this.runError
+          if (err) this.deps.onRunFailed?.(err.message)
+          this.speakOnce(runFailedLine(err?.code))
+        }
+        this.runError = null
         this.finishReply()
         this.deps.onRunEnd()
         return
       case 'text_delta': {
         this.stepText += ev.text
         const spoken = this.parser.push(ev.text)
-        if (spoken) this.speak(spoken)
+        if (spoken && !this.heard) this.speak(spoken)
         return
       }
+      case 'error':
+        this.runError = { message: ev.message, ...(ev.code ? { code: ev.code } : {}) }
+        return
+      case 'follow_up_applied':
+        // A follow-up is a new turn inside the same run: its answer is said.
+        this.heard = false
+        return
       case 'stream_reset':
         // What was said can't be unsaid; what wasn't, won't be.
         this.resetStep()
@@ -125,13 +195,23 @@ export class ReplySpeaker {
         return
       case 'assistant_message': {
         const tail = this.parser.end()
-        if (tail) this.speak(tail)
+        if (tail && !this.heard) this.speak(tail)
         const final = !ev.toolCalls || ev.toolCalls.length === 0
         if (final) {
-          if (this.parser.phase === 'absent') {
-            const summary = fallbackSummary(ev.content || this.stepText)
-            if (summary) this.speak(`${summary} `)
+          const answer = ev.content || this.stepText
+          // Already said this turn: this one only replaces the result.
+          let spoken = this.heard || this.parser.phase !== 'absent'
+          if (!spoken) {
+            // A reply that arrived whole, with no deltas, still has its block: speak that, never the tags (A-20).
+            const block = extractSpokenBlock(answer)
+            if (block) {
+              this.speak(`${block} `)
+              spoken = true
+            }
           }
+          // Settled when the run ends: a check after this answer can still send the agent back to work.
+          this.answer = { text: answer, spoken }
+          if (spoken) this.heard = true
           this.finishReply()
         }
         this.resetStep()
@@ -146,6 +226,23 @@ export class ReplySpeaker {
     this.clearCues()
     this.reply?.stream.cancel()
     this.reply = null
+    this.answer = null
+  }
+
+  /**
+   * The run ended: its last answer goes to the voice's memory whether or not
+   * it was heard (B5). One without a `<spoken>` block is said by the voice
+   * (B7), or, without a voice model, as a short summary.
+   */
+  private settleAnswer(done: boolean): void {
+    const answer = this.answer
+    this.answer = null
+    if (!answer) return
+    this.deps.onResult?.(answer.text)
+    if (answer.spoken || !done || this.quiet) return
+    if (this.deps.reportResult?.()) return
+    const summary = fallbackSummary(answer.text)
+    if (summary) this.speak(`${summary} `)
   }
 
   // ── Speaking ─────────────────────────────────────────────────────────────

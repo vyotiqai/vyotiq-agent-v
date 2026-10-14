@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { FIRST_TIP, VoiceBar } from '@renderer/features/voice/VoiceBar'
 import { VoiceModeButton } from '@renderer/features/voice/VoiceModeButton'
 import { VoiceOrb } from '@renderer/features/voice/VoiceOrb'
+import { VoiceSessionEffects } from '@renderer/features/voice/VoiceView'
 import { endVoiceMode, resetVoiceModeForTests, startVoiceMode, useVoiceMode } from '@renderer/features/voice/voiceMode'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot } from '@renderer/features/voice/voiceSessionController'
 import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
@@ -74,14 +75,18 @@ afterEach(async () => {
   await resetVoiceModeForTests()
 })
 
+/** The bar as the app has it: with the session's keys and sounds mounted once beside it (D-48). */
 function Bar(props: { owner?: string; running?: boolean; onOpenVoiceSettings?: () => void }) {
   return (
-    <VoiceBar
-      owner={props.owner ?? 'line-1'}
-      workspacePath="/repo"
-      target={target(props.running)}
-      onOpenVoiceSettings={props.onOpenVoiceSettings}
-    />
+    <>
+      <VoiceSessionEffects />
+      <VoiceBar
+        owner={props.owner ?? 'line-1'}
+        workspacePath="/repo"
+        target={target(props.running)}
+        onOpenVoiceSettings={props.onOpenVoiceSettings}
+      />
+    </>
   )
 }
 
@@ -170,15 +175,54 @@ describe('VoiceBar', () => {
   it('a speaking problem is a quiet note: replies stay on screen', async () => {
     await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
     render(<Bar />)
-    act(() => fake.update({ state: 'listening', error: 'out_of_credit' }))
+    act(() => fake.update({ state: 'listening', speakError: { code: 'out_of_credit', detail: '' } }))
     expect(screen.queryByRole('alert')).toBeNull()
     expect(document.querySelector('[data-voice-row="controls"]')!.textContent).toContain('Replies are on screen.')
   })
 
-  it('offers Stop the agent while it works', async () => {
+  it('shows the provider’s reason after its own words (D-40)', async () => {
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    render(<Bar />)
+    act(() =>
+      fake.update({ state: 'error', error: 'out_of_credit', errorDetail: 'OpenRouter (402): requires at least $0.50 in balance' })
+    )
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('out of credit.')
+    expect(alert.querySelector('[data-voice-problem-detail]')!.textContent).toContain('OpenRouter (402): requires at least $0.50')
+  })
+
+  it('a lost turn is a note, not an alarm, and says to say it again (A-03)', async () => {
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    render(<Bar />)
+    act(() => fake.update({ state: 'listening', turnError: { code: 'provider_down', detail: 'OpenRouter (502): bad gateway' } }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    const row = document.querySelector('[data-voice-row="controls"]')!.textContent
+    expect(row).toContain('Say it again.')
+    expect(row).toContain('OpenRouter (502): bad gateway')
+  })
+
+  it('captions off hides the agent’s words, not its voice (A-09)', async () => {
+    const bridge = (window as unknown as { vyotiq: Record<string, unknown> }).vyotiq
+    bridge.getSettings = async () => ({ ok: true, data: { voice: { captions: false } } })
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() => fake.update({ state: 'speaking', saying: 'The tests pass.' }))
+    render(<Bar />)
+    const caption = document.querySelector('[data-voice-caption]')!.textContent
+    expect(caption).not.toContain('The tests pass.')
+    expect(caption).toContain('Speaking')
+  })
+
+  it('captions on shows the agent’s words', async () => {
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() => fake.update({ state: 'speaking', saying: 'The tests pass.' }))
+    render(<Bar />)
+    expect(document.querySelector('[data-voice-caption]')!.textContent).toContain('The tests pass.')
+  })
+
+  it('offers Stop the task while it works', async () => {
     await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
     render(<Bar running />)
-    expect(screen.getByRole('button', { name: 'Stop the agent' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop the task' })).toBeTruthy()
   })
 
   it('says when it listens with another service than the one picked', async () => {

@@ -14,6 +14,32 @@ export function bytesToInt16(bytes: Uint8Array): Int16Array {
 }
 
 /**
+ * Interleaved multi-channel samples to mono, by averaging each frame. A chunk
+ * can end partway through a frame; the remainder waits for the next one.
+ */
+export class MonoMixer {
+  private carry = new Int16Array(0)
+
+  constructor(private readonly channels: number) {}
+
+  push(samples: Int16Array): Int16Array {
+    if (this.channels <= 1) return samples
+    const joined = new Int16Array(this.carry.length + samples.length)
+    joined.set(this.carry)
+    joined.set(samples, this.carry.length)
+    const frames = Math.floor(joined.length / this.channels)
+    this.carry = joined.slice(frames * this.channels)
+    const out = new Int16Array(frames)
+    for (let f = 0; f < frames; f++) {
+      let sum = 0
+      for (let c = 0; c < this.channels; c++) sum += joined[f * this.channels + c]!
+      out[f] = Math.round(sum / this.channels)
+    }
+    return out
+  }
+}
+
+/**
  * Turns an HTTP body's arbitrary byte chunks into whole samples: a chunk can
  * end halfway through a sample, so the odd byte is carried to the next one.
  */

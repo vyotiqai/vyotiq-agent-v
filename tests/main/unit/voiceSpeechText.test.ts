@@ -42,6 +42,14 @@ describe('toSpeakable', () => {
   })
 })
 
+describe('toSpeakable on a first clause', () => {
+  it('never turns a clause into a sentence: "this chat,." made the voice drop its pitch mid-sentence', () => {
+    expect(toSpeakable('It found one session, this chat,')).toBe('It found one session, this chat,')
+    expect(toSpeakable('Two checks failed —')).toBe('Two checks failed —')
+    expect(toSpeakable('All green')).toBe('All green.')
+  })
+})
+
 describe('SentenceSplitter', () => {
   it('emits whole sentences as they complete and waits on an ambiguous end', () => {
     const s = new SentenceSplitter(Number.POSITIVE_INFINITY)

@@ -11,7 +11,7 @@ import {
   watchAgentQuestions
 } from '@main/agent/agentQuestion'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent } from '@shared/ipc/schemas/voice'
-import type { AgentQuestionItem, AgentQuestionRequest } from '@shared/ipc'
+import type { AgentEvent, AgentQuestionItem, AgentQuestionRequest } from '@shared/ipc'
 
 const R = 'run1'
 
@@ -95,12 +95,14 @@ describe('a spoken reply as an answer', () => {
 })
 
 describe('questions in a live session', () => {
-  function harness() {
+  /** `timers`: collect what the session schedules, for the test to run; otherwise nothing scheduled ever runs. */
+  function harness(opts: { timers?: Array<() => void> } = {}) {
     const events: VoiceEvent[] = []
     const said: string[] = []
     const stt: FixtureSttSession[] = []
     let watcher: { asked: (r: AgentQuestionRequest) => void; settled: (id: string, run: string) => void } | null = null
     const resolveQuestion = vi.fn(() => true)
+    let tap: ((e: AgentEvent) => void) | null = null
     let n = 0
     const session = new VoiceSession({
       emit: (e) => {
@@ -129,7 +131,12 @@ describe('questions in a live session', () => {
           onAudio: () => {},
           onError: () => {}
         }),
-      tapRun: () => () => {},
+      tapRun: (_runId, fn) => {
+        tap = fn
+        return () => {
+          tap = null
+        }
+      },
       watchQuestions: (w) => {
         watcher = w
         return () => {
@@ -137,13 +144,48 @@ describe('questions in a live session', () => {
         }
       },
       resolveQuestion,
-      setTimer: () => null,
+      responder: () =>
+        async function* () {
+          yield { type: 'text' as const, text: 'It is waiting on your answer.' }
+          yield { type: 'done' as const }
+        },
+      setTimer: opts.timers ? (fn) => opts.timers!.push(fn) : () => null,
       clearTimer: () => {},
       newId: () => `id${++n}`
     })
     const turns = () => events.filter((e) => e.kind === 'turn')
-    return { session, said, stt: () => stt.at(-1)!, ask: (r: AgentQuestionRequest) => watcher!.asked(r), watcher: () => watcher, resolveQuestion, turns }
+    return { session, said, stt: () => stt.at(-1)!, ask: (r: AgentQuestionRequest) => watcher!.asked(r), watcher: () => watcher, resolveQuestion, turns, events, tap: (e: AgentEvent) => tap!(e) }
   }
+
+  it('the view hears the run’s steps and the question it waits on, a few at a time (§25)', async () => {
+    const timers: Array<() => void> = []
+    const h = harness({ timers })
+    await h.session.start()
+    h.session.follow(R)
+    h.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    h.tap({ type: 'tool_start', runId: R, toolCallId: 'a', name: 'read', summary: 'db.ts' } as AgentEvent)
+    h.ask(request([single()]))
+    for (const fn of timers.splice(0)) fn()
+    const works = h.events.filter((e) => e.kind === 'work')
+    // Three changes, one event: steps can come many to a second.
+    expect(works).toHaveLength(1)
+    expect(works[0]).toMatchObject({
+      work: {
+        runId: R,
+        state: 'needs',
+        stepCount: 1,
+        steps: [{ id: 'a', tool: 'read', summary: 'db.ts', state: 'running' }],
+        ask: { kind: 'question', requestId: 'qr1', questionId: 'q1', options: ['Postgres', 'SQLite', 'MySQL'] }
+      }
+    })
+    // Most run events (streamed text, usage) change nothing the view shows: no event for them.
+    h.tap({ type: 'text_delta', runId: R, delta: 'Thinking it over…' } as unknown as AgentEvent)
+    for (const fn of timers.splice(0)) fn()
+    expect(h.events.filter((e) => e.kind === 'work')).toHaveLength(1)
+    h.tap({ type: 'tool_result', runId: R, toolCallId: 'a', name: 'read', summary: '', ok: true } as AgentEvent)
+    for (const fn of timers.splice(0)) fn()
+    expect(h.events.filter((e) => e.kind === 'work').at(-1)).toMatchObject({ work: { steps: [{ id: 'a', state: 'done' }] } })
+  })
 
   it('reads the question out and a clear pick answers it without a message', async () => {
     const h = harness()
@@ -174,6 +216,27 @@ describe('questions in a live session', () => {
     h.ask(request([single(), single({ id: 'q2' })], { requestId: 'qr2' }))
     h.stt().say('postgres')
     expect(h.resolveQuestion).not.toHaveBeenCalled()
+  })
+
+  it('stays on "needs you" after a reply while the question still waits', async () => {
+    const h = harness()
+    await h.session.start()
+    h.session.follow(R)
+    h.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    h.ask(request([single()]))
+    h.stt().say('how is it going')
+    expect(h.turns()).toHaveLength(1)
+    // The voice answers from its status (it may not answer the card), and its words play out.
+    await vi.waitFor(() => expect(h.said).toContain('It is waiting on your answer.'))
+    const say = h.events.findLast((e) => e.kind === 'say')!
+    const contextId = say.kind === 'say' ? say.contextId : ''
+    h.session.playback(contextId, 'started')
+    expect(h.session.state).toBe('speaking')
+    h.session.playback(contextId, 'drained')
+    // Still blocked on you, so not "working".
+    expect(h.session.state).toBe('waiting_on_you')
+    h.watcher()!.settled('qr1', R)
+    expect(h.session.state).toBe('thinking')
   })
 
   it('ignores other runs, and an answer on the card clears the wait', async () => {

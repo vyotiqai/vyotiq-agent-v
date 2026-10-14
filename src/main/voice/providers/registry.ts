@@ -11,6 +11,7 @@ import { deepgramFlux } from './stt/deepgramFlux'
 import { elevenLabsScribe } from './stt/elevenlabsScribe'
 import { makeLocalStt } from './stt/local'
 import { openAiRealtime } from './stt/openaiRealtime'
+import { makeOpenRouterStt } from './stt/openrouter'
 import { makeCartesiaTts } from './tts/cartesia'
 import { makeElevenLabsTts } from './tts/elevenlabs'
 import { OPENAI_VOICES, makeOpenAiCompatibleTts } from './tts/openaiSpeech'
@@ -71,6 +72,8 @@ export function sttProvider(id: SttProviderId): SttProvider {
       return elevenLabsScribe
     case 'openai':
       return openAiRealtime
+    case 'openrouter':
+      return makeOpenRouterStt()
     case 'local':
       return makeLocalStt()
   }

@@ -8,8 +8,9 @@ import { randomUUID } from 'crypto'
 import { extractSpokenBlock } from '../../shared/spokenSummary'
 import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import {
+  chooseModel,
   clampSpeed,
-  resolveModel,
+  pickVoice,
   resolveTtsProvider,
   ttsEntry,
   type TtsProviderId,
@@ -18,6 +19,7 @@ import {
 import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from '../../shared/ipc/schemas/voice'
 import { VoiceError, toVoiceError } from './errors'
 import { readVoiceSourceKey, requireVoiceSourceKey, voiceKeyAvailability } from './keys'
+import { cachedModelVoices, prepareVoiceModels } from './modelCatalog'
 import { ttsProvider } from './providers/registry'
 import type { VoiceOption } from './providers/types'
 import { SentenceSplitter, fallbackSummary, toSpeakable } from './speechText'
@@ -41,8 +43,8 @@ export type SpeakAudio = { utteranceId: string; seq: number; sampleRate: number;
 
 export type SpeakSink = {
   audio(chunk: SpeakAudio): void
-  /** All audio delivered (or stopped, or failed with `error`). */
-  end(utteranceId: string, error?: VoiceErrorCode): void
+  /** All audio delivered (or stopped, or failed with `error` and the provider's `message`). */
+  end(utteranceId: string, error?: VoiceErrorCode, message?: string): void
 }
 
 export type SpeakStarted = { utteranceId: string; provider: TtsProviderId; voiceId: string }
@@ -78,13 +80,15 @@ export function speak(opts: SpeakOptions, sink: SpeakSink, settings: VoiceSettin
   const utteranceId = randomUUID()
   const ctrl = new AbortController()
   current = { id: utteranceId, ctrl }
-  const voiceId = opts.voiceId ?? settings.tts[entry.id]?.voiceId ?? entry.defaultVoice.id
+  const model = chooseModel(entry, settings.tts[entry.id]?.model)
+  // Only a voice this model takes (A-06): "alloy" saved for one model is never sent to another.
+  const voiceId = pickVoice(cachedModelVoices(entry.id, model), opts.voiceId ?? settings.tts[entry.id]?.voiceId, entry.defaultVoice.id)
   let seq = 0
-  let failed: VoiceErrorCode | undefined
+  let failed: { code: VoiceErrorCode; message: string } | undefined
 
   const stream = ttsProvider(entry.id).stream({
     apiKey,
-    model: resolveModel(entry.models, settings.tts[entry.id]?.model),
+    model,
     voiceId,
     speed: clampSpeed(opts.speed ?? settings.speed, entry.caps.speed),
     contextId: utteranceId,
@@ -92,8 +96,9 @@ export function speak(opts: SpeakOptions, sink: SpeakSink, settings: VoiceSettin
     onAudio: (chunk) => {
       if (!ctrl.signal.aborted) sink.audio({ utteranceId, seq: seq++, sampleRate: chunk.sampleRate, pcm: chunk.pcm })
     },
-    onError: (code) => {
-      failed ??= code
+    onError: (code, message) => {
+      // Which model refused it: a bare "Provider returned 400" said nothing when models were being switched (B8).
+      failed ??= { code, message: message.includes(model) ? message : `${message} (${model})` }
     }
   })
 
@@ -107,11 +112,12 @@ export function speak(opts: SpeakOptions, sink: SpeakSink, settings: VoiceSettin
   void stream.done().then(
     () => {
       if (current?.id === utteranceId) current = null
-      sink.end(utteranceId, failed)
+      sink.end(utteranceId, failed?.code, failed?.message)
     },
     (err: unknown) => {
       if (current?.id === utteranceId) current = null
-      sink.end(utteranceId, toVoiceError(err).code)
+      const e = toVoiceError(err)
+      sink.end(utteranceId, e.code, e.message)
     }
   )
   return { utteranceId, provider: entry.id, voiceId }
@@ -120,9 +126,31 @@ export function speak(opts: SpeakOptions, sink: SpeakSink, settings: VoiceSettin
 const voiceCache = new Map<string, { at: number; voices: VoiceOption[] }>()
 const VOICE_CACHE_MS = 24 * 60 * 60 * 1000
 
-/** The voices for a provider, fetched with your key and cached for a day (§13.7). */
-export async function listVoices(id: TtsProviderId, refresh = false): Promise<VoiceOption[]> {
+/** Before speaking: the speaking provider's model list, so its voices are known (sync paths read the cache). */
+export async function prepareSpeaking(provider: TtsProviderId | undefined, settings: VoiceSettings): Promise<void> {
+  const resolved = resolveTtsProvider(settings.ttsProvider, voiceKeyAvailability())
+  const id = provider ?? (resolved.ok ? resolved.id : undefined)
+  if (id) await prepareVoiceModels(id)
+}
+
+/** "sarah" → "Sarah"; ids with their own shape ("aura-2-thalia-en", "en-US-Harper:MAI-Voice-2.1") stay as they are. */
+function voiceLabel(id: string): string {
+  return /^[a-z]+$/.test(id) ? id[0]!.toUpperCase() + id.slice(1) : id
+}
+
+/**
+ * The voices for a provider, fetched with your key and cached for a day
+ * (§13.7). On OpenRouter they're the chosen model's own (A-06).
+ */
+export async function listVoices(id: TtsProviderId, refresh = false, model?: string): Promise<VoiceOption[]> {
   const entry = ttsEntry(id)
+  if (id === 'openrouter') {
+    await prepareVoiceModels(id)
+    const voices = cachedModelVoices(id, model?.trim() || chooseModel(entry, undefined))
+    return voices && voices.length > 0
+      ? voices.map((v) => ({ id: v, label: voiceLabel(v) }))
+      : [{ id: entry.defaultVoice.id, label: entry.defaultVoice.label }]
+  }
   const provider = ttsProvider(id)
   const key = readVoiceSourceKey(entry.key)
   const fallback: VoiceOption[] = entry.defaultVoice.id ? [{ id: entry.defaultVoice.id, label: entry.defaultVoice.label }] : []

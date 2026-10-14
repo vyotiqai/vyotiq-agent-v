@@ -102,7 +102,7 @@ See [Appearance](/docs/appearance) for the text size setting.
 
 ## Dictation keys
 
-`Ctrl+M` starts a take anywhere you can type a brief or an instruction. Press it again to insert the words. With "Hold to talk" on in Settings, "Voice", you hold the shortcut while you speak and let go to insert. See [Writing a task](/docs/writing-a-task#dictation).
+`Ctrl+M` starts a take anywhere you can type a brief or an instruction. Press it again to insert the words. With "Hold to talk" on in Settings, "Voice", you hold the shortcut while you speak and let go to insert. In an empty brief or instruction line, you can also hold `Space` while you speak; a quick tap is still a space. See [Writing a task](/docs/writing-a-task#dictation).
 
 ## Voice mode keys
 

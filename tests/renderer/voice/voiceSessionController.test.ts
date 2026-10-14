@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import { VoiceSessionController, type VoiceTurn } from '@renderer/features/voice/voiceSessionController'
+import { MAX_WORKS, VoiceSessionController, keepWork, type VoiceControllerDeps, type VoiceTurn } from '@renderer/features/voice/voiceSessionController'
 import { MicCaptureError, type OpenMicCapture } from '@renderer/lib/audio/micCapture'
-import type { VoiceEvent } from '@shared/ipc/schemas/voice'
+import type { VoiceEvent, VoiceWork } from '@shared/ipc/schemas/voice'
 
 /** One event kind without its session id (distributes over the union). */
 type Bare<E = VoiceEvent> = E extends VoiceEvent ? Omit<E, 'sessionId'> : never
 
-function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
+function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }, extra: Partial<VoiceControllerDeps> = {}) {
   let handler: ((e: VoiceEvent) => void) | null = null
   let onSamples: ((pcm: Int16Array) => void) | null = null
-  let audioHandler: ((c: { utteranceId: string; seq: number; sampleRate: number; pcm: Int16Array }) => void) | null = null
+  let audioHandler: ((c: { utteranceId: string; seq: number; sampleRate: number; pcm: Int16Array; last?: boolean; piece?: number }) => void) | null = null
   const sources: Array<{ onended: (() => void) | null }> = []
   const stopCapture = vi.fn()
   const bridge = {
@@ -32,7 +32,9 @@ function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
     }),
     voiceFollow: vi.fn(async () => ({ ok: true, data: true })),
     voicePlayback: vi.fn(async () => ({ ok: true, data: true })),
-    voiceInterrupt: vi.fn(async () => ({ ok: true, data: true }))
+    voiceInterrupt: vi.fn(async () => ({ ok: true, data: true })),
+    voiceHandOffFailed: vi.fn(async () => ({ ok: true, data: true })),
+    voiceTask: vi.fn(async () => ({ ok: true, data: true }))
   }
   const openCapture: OpenMicCapture = vi.fn(async (o) => {
     onSamples = o.onSamples
@@ -63,7 +65,8 @@ function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
         createGain: () => ({ gain: { value: 1, setTargetAtTime: vi.fn() }, connect: vi.fn() }),
         createAnalyser: () => ({ fftSize: 0, connect: vi.fn(), getFloatTimeDomainData: vi.fn() }),
         close: vi.fn(async () => {})
-      }) as never
+      }) as never,
+    ...extra
   })
   return {
     c,
@@ -72,11 +75,169 @@ function setup(startResult: unknown = { ok: true, data: { sessionId: 's1' } }) {
     stopCapture,
     emit: (e: Bare) => handler?.({ ...e, sessionId: 's1' } as VoiceEvent),
     samples: (pcm: Int16Array) => onSamples?.(pcm),
-    audio: (utteranceId: string) => audioHandler?.({ utteranceId, seq: 0, sampleRate: 24000, pcm: new Int16Array(240) }),
+    audio: (utteranceId: string, piece?: number) =>
+      audioHandler?.({ utteranceId, seq: 0, sampleRate: 24000, pcm: new Int16Array(240), ...(piece !== undefined ? { piece } : {}) }),
+    /** Main: this reply's speech is complete (B9). */
+    end: (utteranceId: string) => audioHandler?.({ utteranceId, seq: 1, sampleRate: 24000, pcm: new Int16Array(0), last: true }),
     sources,
     openCapture
   }
 }
+
+describe('the task the voice is on', () => {
+  it('tells main once the session exists, and again only when the task changes', async () => {
+    const t = setup()
+    t.c.setTask('run-1', 'C:/ws')
+    expect(t.bridge.voiceTask).not.toHaveBeenCalled()
+    await t.c.start()
+    expect(t.bridge.voiceTask).toHaveBeenCalledWith({ sessionId: 's1', runId: 'run-1', workspacePath: 'C:/ws' })
+    t.c.setTask('run-1', 'C:/ws')
+    expect(t.bridge.voiceTask).toHaveBeenCalledTimes(1)
+    t.c.setTask('run-2')
+    expect(t.bridge.voiceTask).toHaveBeenLastCalledWith({ sessionId: 's1', runId: 'run-2' })
+  })
+})
+
+describe('hand-offs the task never took (R3)', () => {
+  it('marks the line and tells main, so the voice can say so', async () => {
+    const t = setup(undefined, { onTurn: async () => ({ failed: 'refused' as const }) })
+    await t.c.start()
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Run the tests.' })
+    await vi.waitFor(() => expect(t.bridge.voiceHandOffFailed).toHaveBeenCalledWith({ sessionId: 's1', handOffId: 'h1', reason: 'refused' }))
+    expect(t.c.snapshot.transcript.find((l) => l.id === 'h1')).toMatchObject({ who: 'agent', failed: 'refused' })
+    expect(t.bridge.voiceFollow).not.toHaveBeenCalled()
+  })
+
+  it('a send that throws is an error, not silence', async () => {
+    const t = setup(undefined, {
+      onTurn: async () => {
+        throw new Error('ipc closed')
+      }
+    })
+    await t.c.start()
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Run the tests.' })
+    await vi.waitFor(() => expect(t.bridge.voiceHandOffFailed).toHaveBeenCalledWith(expect.objectContaining({ reason: 'error' })))
+  })
+
+  it('sent with no run known yet is not a failure', async () => {
+    const t = setup(undefined, { onTurn: async () => null })
+    await t.c.start()
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Run the tests.' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(t.bridge.voiceHandOffFailed).not.toHaveBeenCalled()
+    expect(t.c.snapshot.transcript[0]!.failed).toBeUndefined()
+  })
+
+  it('a session ended while the task took it is left alone', async () => {
+    const sent = deferred<{ failed: 'refused' }>()
+    const t = setup(undefined, { onTurn: () => sent.promise })
+    await t.c.start()
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Run the tests.' })
+    await t.c.stop()
+    sent.resolve({ failed: 'refused' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(t.bridge.voiceHandOffFailed).not.toHaveBeenCalled()
+  })
+})
+
+describe('VoiceSessionController problems', () => {
+  it('a failed session lets go of the mic at once (A-11)', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'state', state: 'error' })
+    t.emit({ kind: 'error', code: 'out_of_credit', retryable: false, side: 'session', detail: 'needs $0.50' })
+    expect(t.stopCapture).toHaveBeenCalledTimes(1)
+    expect(t.c.snapshot).toMatchObject({ state: 'error', error: 'out_of_credit', errorDetail: 'needs $0.50' })
+  })
+
+  it('Try again closes the dead session and opens a new one, without passing through off (A-10)', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'state', state: 'error' })
+    const seen: string[] = []
+    t.c.subscribe(() => seen.push(t.c.snapshot.state))
+    await t.c.start()
+    expect(t.bridge.voiceStop).toHaveBeenCalledWith({ sessionId: 's1' })
+    expect(t.bridge.voiceStart).toHaveBeenCalledTimes(2)
+    expect(t.openCapture).toHaveBeenCalledTimes(2)
+    expect(seen).not.toContain('off')
+    expect(t.c.id).toBe('s1')
+  })
+
+  it('keeps a lost turn and a speaking failure apart from a session failure', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'state', state: 'listening' })
+    t.emit({ kind: 'error', code: 'provider_down', retryable: true, side: 'turn', detail: '502' })
+    t.emit({ kind: 'error', code: 'engine_failed', retryable: true, side: 'speak', detail: 'model not found' })
+    expect(t.c.snapshot).toMatchObject({
+      state: 'listening',
+      error: null,
+      turnError: { code: 'provider_down', detail: '502' },
+      speakError: { code: 'engine_failed', detail: 'model not found' }
+    })
+    // Talking again clears the lost turn; the speaking problem stays for the session.
+    t.emit({ kind: 'state', state: 'hearing' })
+    t.emit({ kind: 'state', state: 'listening' })
+    expect(t.c.snapshot.turnError).toBeNull()
+    expect(t.c.snapshot.speakError).toMatchObject({ code: 'engine_failed' })
+    expect(t.stopCapture).not.toHaveBeenCalled()
+  })
+})
+
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
+describe('VoiceSessionController start and End racing (R1, R2)', () => {
+  it('End while the mic is opening closes the mic when it arrives, and never starts a session', async () => {
+    const mic = deferred<{ deviceLabel: string; deviceId: string; stop: () => void }>()
+    const stop = vi.fn()
+    const t = setup(undefined, { openCapture: vi.fn(() => mic.promise) })
+    const starting = t.c.start()
+    await t.c.stop()
+    mic.resolve({ deviceLabel: 'Desk mic', deviceId: 'd1', stop })
+    await starting
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(t.bridge.voiceStart).not.toHaveBeenCalled()
+    expect(t.c.id).toBeNull()
+    expect(t.c.snapshot.state).toBe('off')
+  })
+
+  it('End while main opens the listener stops that session once its id comes back', async () => {
+    const started = deferred<unknown>()
+    const t = setup()
+    t.bridge.voiceStart.mockImplementationOnce(() => started.promise as never)
+    const starting = t.c.start()
+    await vi.waitFor(() => expect(t.bridge.voiceStart).toHaveBeenCalled())
+    await t.c.stop()
+    started.resolve({ ok: true, data: { sessionId: 's9' } })
+    await starting
+    expect(t.bridge.voiceStop).toHaveBeenCalledWith({ sessionId: 's9' })
+    expect(t.c.id).toBeNull()
+    expect(t.c.active).toBe(false)
+    expect(t.stopCapture).toHaveBeenCalled()
+    // A chunk from a mic that's already closed sends nothing.
+    t.samples(new Int16Array(160).fill(3000))
+    expect(t.bridge.voiceAudio).not.toHaveBeenCalled()
+  })
+
+  it('a start after an End that raced still opens normally', async () => {
+    const started = deferred<unknown>()
+    const t = setup()
+    t.bridge.voiceStart.mockImplementationOnce(() => started.promise as never)
+    const first = t.c.start()
+    await vi.waitFor(() => expect(t.bridge.voiceStart).toHaveBeenCalledTimes(1))
+    await t.c.stop()
+    await t.c.start()
+    started.resolve({ ok: true, data: { sessionId: 'stale' } })
+    await first
+    expect(t.c.id).toBe('s1')
+    expect(t.bridge.voiceStop).toHaveBeenCalledWith({ sessionId: 'stale' })
+  })
+})
 
 describe('VoiceSessionController', () => {
   it('opens the mic, then the session, and streams audio to it', async () => {
@@ -88,18 +249,87 @@ describe('VoiceSessionController', () => {
     const pcm = new Int16Array(2048).fill(4000)
     t.samples(pcm)
     expect(t.bridge.voiceAudio).toHaveBeenCalledWith({ sessionId: 's1', pcm })
-    expect(t.c.snapshot.micLevel).toBeGreaterThan(0)
+    expect(t.c.micLevel()).toBeGreaterThan(0)
+    expect(t.c.orbLevel()).toBe(t.c.micLevel())
   })
 
-  it('follows state, captions and turns, and hands each turn on', async () => {
+  it('mic chunks never re-render subscribers: the orb reads the level per frame (R6)', async () => {
+    const t = setup()
+    await t.c.start()
+    const notified = vi.fn()
+    t.c.subscribe(notified)
+    // Ten seconds of listening at one chunk every 128 ms, the level moving every time.
+    for (let i = 0; i < 78; i++) t.samples(new Int16Array(2048).fill(500 + i * 40))
+    expect(notified).not.toHaveBeenCalled()
+    expect(t.c.micLevel()).toBeGreaterThan(0)
+    t.c.setMuted(true)
+    expect(t.c.micLevel()).toBe(0)
+  })
+
+  it('follows state and captions; a turn is shown, and only a hand-off goes to the agent (D-44)', async () => {
     const t = setup()
     await t.c.start()
     t.emit({ kind: 'state', state: 'hearing' })
     t.emit({ kind: 'partial', text: 'fix the' })
     expect(t.c.snapshot).toMatchObject({ state: 'hearing', partial: 'fix the' })
     t.emit({ kind: 'turn', turnId: 't1', text: 'fix the test', stop: false })
-    expect(t.turns).toEqual([{ turnId: 't1', text: 'fix the test', stop: false }])
+    expect(t.turns).toEqual([])
     expect(t.c.snapshot).toMatchObject({ partial: '', lastTurn: 'fix the test' })
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Fix the failing test in the parser.' })
+    expect(t.turns).toEqual([{ turnId: 'h1', text: 'Fix the failing test in the parser.', stop: false }])
+  })
+
+  it('keeps the conversation: your turns, the voice’s sentences joined per reply, and work handed off', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'turn', turnId: 't1', text: 'Can you run the tests?', stop: false })
+    t.emit({ kind: 'say', contextId: 'c1', text: 'Sure.' })
+    t.emit({ kind: 'say', contextId: 'c1', text: 'I’ll have the agent run them.' })
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Run the tests.' })
+    expect(t.c.snapshot.transcript).toEqual([
+      { id: 't1', who: 'you', text: 'Can you run the tests?' },
+      { id: 'c1', who: 'voice', text: 'Sure. I’ll have the agent run them.' },
+      { id: 'h1', who: 'agent', text: 'Run the tests.' }
+    ])
+  })
+
+  it('a hand-off learns the run it went to, and that run’s work is kept for the view (§25)', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Run the tests.' })
+    await vi.waitFor(() => expect(t.bridge.voiceFollow).toHaveBeenCalledWith({ sessionId: 's1', runId: 'run-7', handOffId: 'h1' }))
+    expect(t.c.snapshot.transcript).toEqual([{ id: 'h1', who: 'agent', text: 'Run the tests.', runId: 'run-7' }])
+    const work: VoiceWork = {
+      runId: 'run-7',
+      state: 'running',
+      startedAt: 1,
+      stepCount: 1,
+      steps: [{ id: 'a', tool: 'terminal', summary: 'pnpm test', state: 'running' }]
+    }
+    t.emit({ kind: 'work', work })
+    expect(t.c.snapshot.works['run-7']).toEqual(work)
+    t.emit({ kind: 'work', work: { ...work, state: 'done', endedAt: 9, result: 'All pass.' } })
+    expect(t.c.snapshot.works['run-7']).toMatchObject({ state: 'done', result: 'All pass.' })
+  })
+
+  it('keeps the newest work of at most MAX_WORKS runs', () => {
+    let works = {}
+    for (let i = 0; i <= MAX_WORKS; i++) works = keepWork(works, { runId: `r${i}`, state: 'done', startedAt: i, stepCount: 0, steps: [] })
+    expect(Object.keys(works)).toHaveLength(MAX_WORKS)
+    expect(Object.keys(works)).not.toContain('r0')
+    // Hearing from an old run again makes it the newest.
+    works = keepWork(works, { runId: 'r1', state: 'running', startedAt: 99, stepCount: 0, steps: [] })
+    works = keepWork(works, { runId: 'r99', state: 'running', startedAt: 99, stepCount: 0, steps: [] })
+    expect(Object.keys(works)).toContain('r1')
+    expect(Object.keys(works)).not.toContain('r2')
+  })
+
+  it('the voice asked to stop the work: the task’s Stop is pressed', async () => {
+    const onStopAgent = vi.fn()
+    const t = setup(undefined, { onStopAgent })
+    await t.c.start()
+    t.emit({ kind: 'stop_agent' })
+    expect(onStopAgent).toHaveBeenCalledTimes(1)
   })
 
   it('ignores events for another session', async () => {
@@ -142,11 +372,11 @@ describe('VoiceSessionController', () => {
     expect(t.c.active).toBe(false)
   })
 
-  it('follows the run each turn went to', async () => {
+  it('follows the run each hand-off went to', async () => {
     const t = setup()
     await t.c.start()
-    t.emit({ kind: 'turn', turnId: 't1', text: 'go', stop: false })
-    await vi.waitFor(() => expect(t.bridge.voiceFollow).toHaveBeenCalledWith({ sessionId: 's1', runId: 'run-7' }))
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'go' })
+    await vi.waitFor(() => expect(t.bridge.voiceFollow).toHaveBeenCalledWith({ sessionId: 's1', runId: 'run-7', handOffId: 'h1' }))
   })
 
   it('plays reply audio it was told about, reports start and drain, and flushes on barge-in', async () => {
@@ -158,13 +388,102 @@ describe('VoiceSessionController', () => {
     expect(t.c.snapshot.saying).toBe('Done.')
     t.audio('c1')
     expect(t.bridge.voicePlayback).toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'started' })
+    // A gap while the next sentence is being made is not the end of the reply (B9).
     t.sources[0]!.onended?.()
+    expect(t.bridge.voicePlayback).not.toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'drained' })
+    t.audio('c1')
+    t.end('c1')
+    expect(t.bridge.voicePlayback).not.toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'drained' })
+    t.sources[1]!.onended?.()
     expect(t.bridge.voicePlayback).toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'drained' })
     t.emit({ kind: 'say', contextId: 'c2', text: 'Next.' })
     t.audio('c2')
     t.emit({ kind: 'flush', contextId: 'c2' })
     expect(t.c.snapshot.saying).toBe('')
     t.audio('c2')
-    expect(t.sources).toHaveLength(2)
+    expect(t.sources).toHaveLength(3)
+  })
+
+  it('holds each caption until its own audio starts playing', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      await t.c.start()
+      const voiceText = () => t.c.snapshot.transcript.filter((l) => l.who === 'voice').map((l) => l.text)
+      t.emit({ kind: 'say', contextId: 'c1', text: 'First.', audible: true })
+      t.emit({ kind: 'say', contextId: 'c1', text: 'Second.', audible: true })
+      // Ready to synthesise is not heard: nothing on screen yet.
+      expect(voiceText()).toEqual([])
+      expect(t.c.snapshot.saying).toBe('')
+      t.audio('c1', 0)
+      // Scheduled after the player's jitter buffer: shown as it plays, not before.
+      expect(voiceText()).toEqual([])
+      await vi.advanceTimersByTimeAsync(60)
+      expect(voiceText()).toEqual(['First.'])
+      expect(t.c.snapshot.saying).toBe('First.')
+      // More of the first sentence's audio moves nothing on.
+      t.audio('c1')
+      await vi.advanceTimersByTimeAsync(100)
+      expect(voiceText()).toEqual(['First.'])
+      t.audio('c1', 1)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(voiceText()).toEqual(['First. Second.'])
+      expect(t.c.snapshot.saying).toBe('Second.')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a caption at once when nothing will speak it, and never loses one whose audio fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      await t.c.start()
+      const voiceText = () => t.c.snapshot.transcript.filter((l) => l.who === 'voice').map((l) => l.text)
+      t.emit({ kind: 'say', contextId: 'c1', text: 'No voice here.', audible: false })
+      expect(voiceText()).toEqual(['No voice here.'])
+      // Audio was coming, then speaking failed: the words still show.
+      t.emit({ kind: 'say', contextId: 'c2', text: 'Lost audio.', audible: true })
+      expect(voiceText()).toEqual(['No voice here.'])
+      t.emit({ kind: 'error', code: 'out_of_credit', retryable: false, side: 'speak' })
+      expect(voiceText()).toEqual(['No voice here.', 'Lost audio.'])
+      // A reply whose speech ended without any audio shows its words.
+      t.emit({ kind: 'say', contextId: 'c3', text: 'Ended silent.', audible: true })
+      t.end('c3')
+      expect(voiceText().at(-1)).toBe('Ended silent.')
+      // One whose audio never comes at all shows after the stall wait.
+      t.emit({ kind: 'say', contextId: 'c4', text: 'Hung.', audible: true })
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(voiceText().at(-1)).toBe('Hung.')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a barge-in drops captions not yet heard', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      await t.c.start()
+      t.emit({ kind: 'say', contextId: 'c1', text: 'Heard.', audible: true })
+      t.emit({ kind: 'say', contextId: 'c1', text: 'Never heard.', audible: true })
+      t.audio('c1', 0)
+      await vi.advanceTimersByTimeAsync(60)
+      t.emit({ kind: 'flush', contextId: 'c1' })
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(t.c.snapshot.transcript.filter((l) => l.who === 'voice').map((l) => l.text)).toEqual(['Heard.'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a reply whose end marker comes after its audio has played drains at once', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'say', contextId: 'c1', text: 'Done.' })
+    t.audio('c1')
+    t.sources[0]!.onended?.()
+    t.end('c1')
+    expect(t.bridge.voicePlayback).toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'drained' })
   })
 })

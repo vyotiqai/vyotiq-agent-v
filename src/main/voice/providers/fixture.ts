@@ -75,10 +75,18 @@ export class FixtureTtsStream implements TtsStream {
   readonly spoken: string[] = []
   cancelled = false
   private buffer = ''
+  private pieces = 0
   private ended = false
   private inFlight: Promise<void> = Promise.resolve()
+  /** Settles on end (after the last piece's audio) or cancel, as the real adapters' `done` does. */
+  private finished: Promise<void>
+  private finish!: () => void
 
-  constructor(private readonly opts: TtsStreamOptions) {}
+  constructor(private readonly opts: TtsStreamOptions) {
+    this.finished = new Promise((resolve) => {
+      this.finish = resolve
+    })
+  }
 
   pushText(text: string): void {
     if (!this.cancelled && !this.ended) this.buffer += text
@@ -89,13 +97,16 @@ export class FixtureTtsStream implements TtsStream {
     this.buffer = ''
     if (!piece || this.cancelled) return
     this.spoken.push(piece)
+    // One chunk per piece, marked like the OpenAI-compatible speaker's (captions pace on it).
+    const index = this.pieces++
     this.inFlight = this.inFlight.then(async () => {
       await Promise.resolve()
       if (this.cancelled || this.opts.signal.aborted) return
       const chunk: TtsChunk = {
         pcm: new Int16Array(piece.length * SAMPLES_PER_CHAR),
         sampleRate: FIXTURE_TTS_SAMPLE_RATE,
-        contextId: this.opts.contextId
+        contextId: this.opts.contextId,
+        piece: index
       }
       this.opts.onAudio(chunk)
     })
@@ -104,15 +115,18 @@ export class FixtureTtsStream implements TtsStream {
   end(): void {
     this.flush()
     this.ended = true
+    void this.inFlight.then(() => this.finish())
   }
 
   cancel(): void {
     this.cancelled = true
     this.buffer = ''
+    this.finish()
   }
 
+  /** Called before any text is pushed, it still waits for the end: the window's "last" marker must follow the audio. */
   done(): Promise<void> {
-    return this.inFlight
+    return this.finished
   }
 }
 

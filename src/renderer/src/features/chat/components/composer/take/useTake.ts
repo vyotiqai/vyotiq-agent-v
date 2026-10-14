@@ -395,6 +395,9 @@ export function useTake(opts: {
     let downAt = 0
     let holdTimer: ReturnType<typeof setTimeout> | null = null
     let startedByKey = false
+    // Hold Space in an empty composer to talk, like Claude Code's /voice (D-49).
+    let spaceTimer: ReturnType<typeof setTimeout> | null = null
+    let startedBySpace = false
 
     const owns = (): boolean => activeOwner === me
     const target = (e: KeyboardEvent): boolean => {
@@ -433,6 +436,24 @@ export function useTake(opts: {
         }
         return
       }
+      if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (spaceTimer || startedBySpace) {
+          // Held down: no key-repeat spaces in the field.
+          if (e.repeat) e.preventDefault()
+          return
+        }
+        const idle = phaseNow === 'idle' || phaseNow === 'discarded'
+        if (!e.repeat && idle && !activeOwner && isShortcutTarget() && textRef.current.trim() === '') {
+          // A tap is a space, typed as usual; still held after HOLD_MS, it's a take.
+          spaceTimer = setTimeout(() => {
+            spaceTimer = null
+            if (textRef.current.trim() === '') setTextRef.current('')
+            startedBySpace = true
+            void pressRef.current.start(true)
+          }, HOLD_MS)
+        }
+        return
+      }
       if (!owns()) return
       const mod = e.ctrlKey || e.metaKey
       const open = phaseNow === 'listening' || phaseNow === 'starting'
@@ -459,6 +480,19 @@ export function useTake(opts: {
     }
 
     const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.code === 'Space') {
+        if (spaceTimer) {
+          clearTimeout(spaceTimer)
+          spaceTimer = null
+          return
+        }
+        if (!startedBySpace) return
+        startedBySpace = false
+        e.preventDefault()
+        // Released: the words go into the draft, to edit and send.
+        if (owns()) pressRef.current.finish('insert')
+        return
+      }
       if (!startedByKey) return
       const k = e.key.toLowerCase()
       if (k !== 'm' && k !== 'control' && k !== 'meta') return
@@ -485,6 +519,7 @@ export function useTake(opts: {
     window.addEventListener('vyotiq:command', onCommand)
     return () => {
       if (holdTimer) clearTimeout(holdTimer)
+      if (spaceTimer) clearTimeout(spaceTimer)
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)
       window.removeEventListener('vyotiq:command', onCommand)

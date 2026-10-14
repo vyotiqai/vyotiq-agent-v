@@ -5,7 +5,7 @@
  * when the local pause detector (or push-to-talk) ends the turn.
  */
 import type { SttOpenOptions, SttProvider } from '../types'
-import { SocketStt, int16Base64, str } from './socketStt'
+import { SocketStt, int16Base64, str, type KeyCheck } from './socketStt'
 
 export function scribeUrl(opts: Pick<SttOpenOptions, 'model' | 'language'>): string {
   const params = new URLSearchParams({
@@ -23,6 +23,10 @@ class ScribeSession extends SocketStt {
 
   constructor(opts: SttOpenOptions) {
     super(scribeUrl(opts), { 'xi-api-key': opts.apiKey }, opts, 'ElevenLabs')
+  }
+
+  protected keyCheck(): KeyCheck {
+    return { url: 'https://api.elevenlabs.io/v1/models', headers: { 'xi-api-key': this.opts.apiKey } }
   }
 
   protected audioFrame(pcm16k: Int16Array): string {

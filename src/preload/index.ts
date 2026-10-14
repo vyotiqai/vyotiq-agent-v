@@ -287,18 +287,28 @@ const api: VyotiqApi = {
   voiceSpeak: (payload) => ipcRenderer.invoke(IPC.voiceSpeak, payload),
   voiceStopSpeaking: (payload) => ipcRenderer.invoke(IPC.voiceStopSpeaking, payload),
   voiceListVoices: (payload) => ipcRenderer.invoke(IPC.voiceListVoices, payload),
+  voiceModels: (payload) => ipcRenderer.invoke(IPC.voiceModels, payload),
+  voiceOpenRouterCredit: () => ipcRenderer.invoke(IPC.voiceOpenRouterCredit),
   voiceStart: (payload) => ipcRenderer.invoke(IPC.voiceStart, payload),
   voiceStop: (payload) => ipcRenderer.invoke(IPC.voiceStop, payload),
   voiceAudio: (payload) => ipcRenderer.invoke(IPC.voiceAudio, payload),
   voicePtt: (payload) => ipcRenderer.invoke(IPC.voicePtt, payload),
   voiceMute: (payload) => ipcRenderer.invoke(IPC.voiceMute, payload),
   voiceFollow: (payload) => ipcRenderer.invoke(IPC.voiceFollow, payload),
+  voiceTask: (payload) => ipcRenderer.invoke(IPC.voiceTask, payload),
   voicePlayback: (payload) => ipcRenderer.invoke(IPC.voicePlayback, payload),
   voiceInterrupt: (payload) => ipcRenderer.invoke(IPC.voiceInterrupt, payload),
+  voiceHandOffFailed: (payload) => ipcRenderer.invoke(IPC.voiceHandOffFailed, payload),
+  voiceConversationsList: (payload) => ipcRenderer.invoke(IPC.voiceConversationsList, payload),
+  voiceConversationRead: (payload) => ipcRenderer.invoke(IPC.voiceConversationRead, payload),
   onVoiceEvent: (handler) => {
     const listener = (_: IpcRendererEvent, payload: unknown): void => {
       const parsed = VoiceEventSchema.safeParse(payload)
-      if (parsed.success) handler(parsed.data)
+      if (!parsed.success) {
+        console.warn('[vyotiq] Invalid voice event dropped', parsed.error.issues[0]?.message)
+        return
+      }
+      handler(parsed.data)
     }
     ipcRenderer.on(IPC.voiceEvent, listener)
     return () => {
@@ -308,7 +318,11 @@ const api: VyotiqApi = {
   onVoiceAudioOut: (handler) => {
     const listener = (_: IpcRendererEvent, payload: unknown): void => {
       const parsed = VoiceAudioOutSchema.safeParse(payload)
-      if (parsed.success) handler(parsed.data)
+      if (!parsed.success) {
+        console.warn('[vyotiq] Invalid voice audio dropped', parsed.error.issues[0]?.message)
+        return
+      }
+      handler(parsed.data)
     }
     ipcRenderer.on(IPC.voiceAudioOut, listener)
     return () => {
@@ -318,7 +332,11 @@ const api: VyotiqApi = {
   onVoiceSpeakEnd: (handler) => {
     const listener = (_: IpcRendererEvent, payload: unknown): void => {
       const parsed = VoiceSpeakEndSchema.safeParse(payload)
-      if (parsed.success) handler(parsed.data)
+      if (!parsed.success) {
+        console.warn('[vyotiq] Invalid voice speak end dropped', parsed.error.issues[0]?.message)
+        return
+      }
+      handler(parsed.data)
     }
     ipcRenderer.on(IPC.voiceSpeakEnd, listener)
     return () => {

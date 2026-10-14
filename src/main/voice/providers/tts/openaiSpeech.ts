@@ -6,12 +6,40 @@
  * is ready while this one plays.
  */
 import { voiceErrorFromStatus, type TtsProviderId, type VoiceErrorCode } from '../../../../shared/voice'
-import { PcmAssembler } from '../../pcm'
+import { MonoMixer, PcmAssembler } from '../../pcm'
 import type { TtsProvider, TtsStream, TtsStreamOptions, VoiceOption } from '../types'
 
 /** OpenAI's `pcm` format: 24 kHz, 16-bit, mono, little-endian. */
 export const OPENAI_PCM_RATE = 24000
+
+/**
+ * The PCM format a response states in `Content-Type`. OpenRouter says it
+ * per model (`audio/pcm;rate=44100;channels=1`), and it isn't always 24 kHz
+ * mono: HeyGen and Fish Audio send 44.1 kHz, ByteDance Seed sends stereo
+ * (probed 2026-10-14, A-16). Without one, OpenAI's 24 kHz mono.
+ */
+export function pcmFormat(contentType: string | null): { rate: number; channels: number } {
+  const rate = Number(/rate=(\d+)/i.exec(contentType ?? '')?.[1])
+  const channels = Number(/channels=(\d+)/i.exec(contentType ?? '')?.[1])
+  return {
+    rate: rate >= 8000 && rate <= 48000 ? rate : OPENAI_PCM_RATE,
+    channels: channels >= 1 && channels <= 8 ? channels : 1
+  }
+}
 const MAX_IN_FLIGHT = 2
+
+/**
+ * Models that refused `speed` this run (probed 2026-10-14: Eleven v4 answers
+ * 400 "speed is not supported by eleven_v4"). The sentence is asked again
+ * without it, and so is every later one: a changed speed must not cost the
+ * voice.
+ */
+const noSpeedModels = new Set<string>()
+
+/** Tests only. */
+export function resetSpeechModelQuirksForTests(): void {
+  noSpeedModels.clear()
+}
 
 /** How the voice should sound; honoured by models that take `instructions`. */
 export const SPEECH_INSTRUCTIONS =
@@ -31,14 +59,35 @@ export const OPENAI_VOICES: readonly VoiceOption[] = [
   { id: 'verse', label: 'Verse', description: 'Versatile, expressive' }
 ]
 
-type Endpoint = { url: string; headers: (key: string) => Record<string, string> }
+type Endpoint = { label: string; url: string; headers: (key: string) => Record<string, string> }
+
+/** The provider's own words from an error response: `error.message` in JSON, else the text. */
+async function errorReason(res: Response): Promise<string> {
+  let raw = ''
+  try {
+    raw = await res.text()
+  } catch {
+    return 'no details'
+  }
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: unknown } | string; message?: unknown }
+    const message =
+      typeof parsed.error === 'string' ? parsed.error : typeof parsed.error?.message === 'string' ? parsed.error.message : parsed.message
+    if (typeof message === 'string' && message.trim()) return message.trim()
+  } catch {
+    // not JSON
+  }
+  return raw.trim() || 'no details'
+}
 
 const ENDPOINTS: Readonly<Record<'openai' | 'openrouter', Endpoint>> = {
   openai: {
+    label: 'OpenAI',
     url: 'https://api.openai.com/v1/audio/speech',
     headers: (key) => ({ Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' })
   },
   openrouter: {
+    label: 'OpenRouter',
     url: 'https://openrouter.ai/api/v1/audio/speech',
     headers: (key) => ({
       Authorization: `Bearer ${key}`,
@@ -49,10 +98,12 @@ const ENDPOINTS: Readonly<Record<'openai' | 'openrouter', Endpoint>> = {
   }
 }
 
-type Job = { text: string; response: Promise<Response> | null; ctrl: AbortController }
+/** One flushed piece; `index` counts pieces in this stream, so its first audio can say which it is. */
+type Job = { text: string; index: number; response: Promise<Response> | null; ctrl: AbortController; sentSpeed: boolean }
 
 class SpeechHttpStream implements TtsStream {
   private buffer = ''
+  private pieces = 0
   private queue: Job[] = []
   private running = false
   private ended = false
@@ -79,7 +130,7 @@ class SpeechHttpStream implements TtsStream {
     const piece = this.buffer.trim()
     this.buffer = ''
     if (!piece || this.cancelled) return
-    this.queue.push({ text: piece, response: null, ctrl: new AbortController() })
+    this.queue.push({ text: piece, index: this.pieces++, response: null, ctrl: new AbortController(), sentSpeed: false })
     this.startRequests()
     void this.pump()
   }
@@ -105,23 +156,28 @@ class SpeechHttpStream implements TtsStream {
 
   private startRequests(): void {
     for (const job of this.queue.slice(0, MAX_IN_FLIGHT)) {
-      if (job.response) continue
-      job.response = this.fetchImpl(this.endpoint.url, {
-        method: 'POST',
-        headers: this.endpoint.headers(this.opts.apiKey),
-        body: JSON.stringify({
-          model: this.opts.model,
-          input: job.text,
-          voice: this.opts.voiceId,
-          response_format: 'pcm',
-          speed: this.opts.speed,
-          ...(this.opts.model.includes('gpt-4o-mini-tts') ? { instructions: SPEECH_INSTRUCTIONS } : {})
-        }),
-        signal: job.ctrl.signal
-      })
-      // Read in order by pump(); a rejection here is handled there.
-      job.response.catch(() => {})
+      if (!job.response) this.request(job)
     }
+  }
+
+  private request(job: Job): void {
+    // Only when changed: models without speed control may refuse any value (A-13).
+    job.sentSpeed = this.opts.speed !== 1 && !noSpeedModels.has(this.opts.model)
+    job.response = this.fetchImpl(this.endpoint.url, {
+      method: 'POST',
+      headers: this.endpoint.headers(this.opts.apiKey),
+      body: JSON.stringify({
+        model: this.opts.model,
+        input: job.text,
+        voice: this.opts.voiceId,
+        response_format: 'pcm',
+        ...(job.sentSpeed ? { speed: this.opts.speed } : {}),
+        ...(this.opts.model.includes('gpt-4o-mini-tts') ? { instructions: SPEECH_INSTRUCTIONS } : {})
+      }),
+      signal: job.ctrl.signal
+    })
+    // Read in order by pump(); a rejection here is handled there.
+    job.response.catch(() => {})
   }
 
   /** Deliver jobs' audio strictly in order, one at a time. */
@@ -155,18 +211,30 @@ class SpeechHttpStream implements TtsStream {
       return false
     }
     if (!res.ok || !res.body) {
-      this.fail(voiceErrorFromStatus(res.status), `speech HTTP ${res.status}`)
+      // Non-200s carry a JSON error body; its message is the reason worth showing (D-40).
+      const reason = res.ok ? 'no audio in the response' : await errorReason(res)
+      if (res.status === 400 && job.sentSpeed && /\bspeed\b/i.test(reason) && !this.cancelled) {
+        // This model takes no speed: say it at its own pace rather than not at all.
+        noSpeedModels.add(this.opts.model)
+        this.request(job)
+        return this.play(job)
+      }
+      this.fail(voiceErrorFromStatus(res.status), `${this.endpoint.label} (${res.status}): ${reason}`)
       return false
     }
     const reader = res.body.getReader()
     const pcm = new PcmAssembler()
+    const format = pcmFormat(res.headers.get('content-type'))
+    const mono = new MonoMixer(format.channels)
+    let first = true
     try {
       for (;;) {
         const { done, value } = await reader.read()
         if (done || this.cancelled) break
-        const samples = pcm.push(value)
+        const samples = mono.push(pcm.push(value))
         if (samples.length > 0) {
-          this.opts.onAudio({ pcm: samples, sampleRate: OPENAI_PCM_RATE, contextId: this.opts.contextId })
+          this.opts.onAudio({ pcm: samples, sampleRate: format.rate, contextId: this.opts.contextId, ...(first ? { piece: job.index } : {}) })
+          first = false
         }
       }
     } catch (err) {

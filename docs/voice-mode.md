@@ -4,12 +4,24 @@ A spoken conversation with Agent V: you talk, the agent works, and it answers
 out loud while the full result lands in the task record. This page is the
 design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
-sections are updated on every commit to the `feat/voice-mode` branch.
+sections are updated with every change to voice mode on `main`.
 
-> **Status:** built through Phase 6 plus approvals and questions by voice and most of Phase 7, on
-> `feat/voice-mode`, as local commits in the voice worktree (not pushed; D-19). Not yet run on
-> real hardware: the first run with real keys, a mic and speakers is the next real test.
-> PR: [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65) (draft, holds the design only until pushed).
+> **Status (2026-10-14):** on `main`. [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65)
+> merged, then `e2c3985` (dip-then-stop barge-in, mic-on indicator, spoken-only voice replies).
+> Built through Phase 6, approvals and questions by voice, and most of Phase 7. Since then: an
+> OpenRouter listener (D-35). **The first real run failed** (2026-10-14); the audit in §24.5 found why,
+> and steps 1–3 of its fixes are done (uncommitted): visible errors, models and voices fetched
+> from the providers, and the rest (A-08 to A-22).
+> **Then it ran but didn't converse** (2026-10-14): it talked back nothing useful. §24.6 has the
+> causes (A-23 to A-35); §25 is the redesign, done and uncommitted: a fast voice model answers
+> every turn and hands work to the agent (D-44), patient whole turns (D-43), a voice view over
+> the task pane (D-48), hold Space to dictate (D-49). **Checked in the running app:** a spoken
+> request is answered in about 1.5 s, handed to the agent, followed, and the agent's result is
+> spoken back. **Then Ajay talked to it live** (headset): three turns answered, the third handed
+> to the agent, 2.7–3.0 s from his turn to its voice with ElevenLabs Flash v2.5 (A-32 fixed).
+> Open: A-22 (MiniMax needs MP3); A-34 (one restart after End, not reproduced); speakers without
+> a headset (self-interruption) still untested. **Fourth audit** (§24.9, uncommitted): a run
+> already working when voice opens is followed, and the short answers to approvals are heard.
 
 ---
 
@@ -39,6 +51,7 @@ sections are updated on every commit to the `feat/voice-mode` branch.
 22. [References](#22-references)
 23. [Next version (v2 backlog)](#23-next-version-v2-backlog)
 24. [Wiring audit](#24-wiring-audit)
+25. [The conversation (2026-10-14 redesign)](#25-the-conversation-2026-10-14-redesign)
 
 ---
 
@@ -692,6 +705,8 @@ Rules every adapter follows:
 - Errors are mapped to `VoiceErrorCode` in the adapter (401/403 → `rejected_key`,
   429 → `rate_limited`, socket failure → `offline`…), never as raw provider text
   in the UI. This fixes dictation finding #6 for voice from the start.
+  **Changed by D-40:** the plain sentence still comes first, and the
+  provider's reason follows it, muted, redacted and cut to one line.
 - Audio out of the adapter is always Int16 PCM with its sample rate stated. The
   player handles 16/22.05/24/44.1 kHz.
 - There's a `fixture` adapter for each side, used by tests and by
@@ -723,6 +738,7 @@ speaking.
 | **AssemblyAI Universal Streaming** | `universal-3-6-pro` (default), `universal-streaming-english`, `universal-streaming-multilingual` | `wss://streaming.assemblyai.com/v3/ws` (US/EU residency hosts exist) | `Turn` messages with `end_of_turn`; `end_of_turn_confidence_threshold`, `min_turn_silence`, `max_turn_silence`; `ForceEndpoint` for push-to-talk | `keyterms_prompt` ≤ 100, updatable | AssemblyAI | `Authorization` header without `Bearer`; 50–1000 ms chunks |
 | **ElevenLabs Scribe Realtime** | `scribe_v2_realtime` | `wss://api.elevenlabs.io/v1/speech-to-text/realtime` | Commit-based: we commit on our local pause detector or push-to-talk release (VAD commit mode to evaluate in Phase 1) | to check | ElevenLabs | JSON chunks with base64 PCM 16 kHz; partial and committed transcripts |
 | **OpenAI realtime transcription** | `gpt-live-transcribe` | `wss://api.openai.com/v1/realtime?intent=transcription` | Server VAD, or our local pause detector (as dictation runs it today) | `prompt` / `keywords` | OpenAI (reused) | Code already exists in `dictation/liveOpenAI.ts` |
+| **OpenRouter** (D-35) | `openai/gpt-transcribe` (dictation's) | HTTP `POST /api/v1/audio/transcriptions`, one upload per turn | Local pause detector | — | OpenRouter (reused) | No streaming endpoint, so no live captions; the words arrive after the turn ends. Shares dictation's upload, errors and headers. Last in Automatic's order |
 | **This PC** (Whisper / Moonshine, beta) | dictation's installed model (no separate picker; see §24) | Local utility process | Local pause detector | — | none | Already built for dictation. Not streaming: each turn is transcribed when it ends, so replies start later. Offline and private. A bonus, not cloud-first |
 
 **Whisper, to be precise.** OpenAI's hosted Whisper (`whisper-1`) is batch-only
@@ -737,7 +753,7 @@ The cloud "Whisper" option is the OpenAI realtime row above. Local Whisper is th
 | **ElevenLabs** (recommended) | `eleven_flash_v2_5` (fast); higher-quality models selectable | WS `…/v1/text-to-speech/{voice}/multi-stream-input` | Yes, `flush` per sentence | `close_context` | `voice_settings.speed` (range to confirm) | ElevenLabs | ~100–150 ms to first byte (NA/EU); ≤ 5 contexts per socket; cloned voices appear in the list |
 | **Cartesia Sonic** | `sonic-3.6`, `sonic-latest` | WS `wss://api.cartesia.ai/tts/websocket` | Yes, `continue: true` per chunk, `context_id` | `{ context_id, cancel: true }` | 0.6–1.5 | Cartesia | Raw `pcm_s16le` at 24 kHz; also has volume and emotion controls; versioned API (`cartesia_version`) |
 | **OpenAI** | `gpt-4o-mini-tts` | HTTP `POST /v1/audio/speech`, streamed | Per sentence | Abort the request | 0.25–4.0 | OpenAI (reused) | `instructions` steer the delivery ("calm, brief"); fixed voice set |
-| **OpenRouter** | `openai/gpt-4o-mini-tts-…`, Gemini, Mistral Voxtral, Azure MAI-Voice and others | HTTP `POST /api/v1/audio/speech` (OpenAI-compatible) | Per sentence | Abort the request | `speed` where the model supports it | OpenRouter (reused) | Model list comes from `GET /api/v1/models?output_modalities=speech`; one key covers many voices |
+| **OpenRouter** | Fetched from its public list (D-36); default `elevenlabs/eleven-flash-v2.5`, voice Sarah. It has no OpenAI speech model (A-01) | HTTP `POST /api/v1/audio/speech` (OpenAI-compatible) | Per sentence | Abort the request | `speed` where the model supports it | OpenRouter (reused) | Model list comes from `GET /api/v1/models?output_modalities=speech`; one key covers many voices |
 | **Deepgram** | Aura / Flux TTS | `/v2/speak` | to verify | to verify | 0.5–1.5 | Deepgram | One vendor for both directions with a single key. Details checked in Phase 1 before it's listed |
 
 ### 9.5 Picking a default, and what happens without keys
@@ -746,9 +762,10 @@ The cloud "Whisper" option is the OpenAI realtime row above. Local Whisper is th
   It lists every provider, recommended first, each with *Add key*. It never fails
   with an error.
 - **Out of the box:** Listens with = the first provider in the order Deepgram,
-  AssemblyAI, ElevenLabs, OpenAI that has a key. Speaks with = the first in the
+  AssemblyAI, ElevenLabs, OpenAI, OpenRouter that has a key. Speaks with = the first in the
   order ElevenLabs, Cartesia, OpenAI, OpenRouter that has a key. If you only
-  have an OpenAI key, both are OpenAI and it just works (D-13).
+  have an OpenAI key, both are OpenAI and it just works (D-13). The same holds
+  for an OpenRouter key alone (D-35), with slower turns.
 - **Your choice wins.** Once you pick a provider, it's used. If its key is later
   removed or rejected, the session falls back to the next provider in the order
   that has a working key, and the engine token in the bar says so ("Speaking
@@ -1326,7 +1343,26 @@ with the feature off.
   - [x] IPC `voice:start`, `voice:stop`, `voice:audio`, `voice:ptt`, `voice:mute`; push `voice:event`. Mic audio crosses as `Int16Array` too (D-09 complete)
   - [x] Renderer controller: opens the mic first (a blocked mic fails before anything is billed), streams audio, follows events, hands each turn on (`features/voice/voiceSessionController.ts`)
   - [x] 50 more tests (voice total: 151)
-- [ ] Phase 4b · More providers
+- [ ] Phase 4b · More providers: AssemblyAI, ElevenLabs Scribe, Cartesia and This PC are built (above); Deepgram TTS is still unverified and unlisted
+  - [x] OpenRouter listener (2026-10-14, D-35): This PC's whole-turn session made generic (`TurnUploadSttSession`), sent through dictation's OpenRouter upload; dictation's error codes mapped to voice's, a 5xx is `provider_down`; last in Automatic's order. PRIVACY.md and site docs updated. 9 tests
+- [ ] First real run (2026-10-14): failed on Windows with an OpenRouter key; 20 findings in §24.5 (A-01..A-20)
+  - [x] Step 1: failures visible and recoverable (A-03, A-04, A-07, A-09, A-10, A-11, A-14, A-17, A-19, A-20)
+  - [x] Step 2: model and voice lists from the providers (A-01, A-05, A-06; D-36, D-37)
+  - [x] Step 3: the rest (A-08, A-12, A-13, A-15, A-16, A-18; and A-21)
+- [x] Conversation pass (2026-10-14, uncommitted): it ran but didn't converse; causes in §24.6, design in §25
+  - [x] Patient whole turns, never dropped, merged when they follow each other (D-43): pause 0.9 / 1.3 / 2.0 s, min speech 300 ms, noise fillers ignored, transcripts in agent-floor states kept
+  - [x] Voice responder in main (`voice/responder.ts`, `voice/responderChat.ts`): fast model, `hand_to_agent` and `stop_agent` tools, history capped, the agent's spoken results fed back in; usage site `voice_reply` ("Voice replies") (D-44, D-45)
+  - [x] Talking never cancels work; `interruptMode` retired from Settings (D-46)
+  - [x] English by default, settings v8 migrates a blank language (D-47)
+  - [x] Voice view over the task pane with the conversation, controls and a pill when closed; session keys and sounds moved out of the bar (`VoiceView.tsx`) (D-48)
+  - [x] Hold Space in an empty composer to dictate (D-49)
+  - [x] The owning line remounting no longer strands the session (A-31); "On it." before the hand-off shows (A-33)
+  - [x] Settings: "Answers with" model row; search index entry
+  - [x] Tests: 20 responder, 8 voice view, 4 remount hand-off, the migration, plus updated session, controller, routing, settings, bar and dictation suites
+  - [x] Checked in the running app (CDP, fake mic from a Windows-voice WAV): one whole turn; answer in ~1.3–1.8 s; brief handed off; the run followed; the agent's result spoken
+  - [x] Real mic, live (2026-10-14, Ajay on a headset): "Hello.", "Who are you?" answered; "Analyze the codebase." handed to the agent; no self-interruption (headset mic silent while it spoke)
+  - [x] ElevenLabs Flash v2.5 instead of HeyGen (A-32, Ajay's pick): 2.7–3.0 s from turn to voice
+  - [ ] Speakers without a headset: self-interruption and echo
 - [x] Phase 5 · Conversation (2026-10-11): 5a, 5b (approvals) and 5c (questions) done; echo filter done (Phase 7)
   - [x] Run event tap: the loop's events, before IPC batching and UI gating (`src/main/agent/runEventTap.ts`, one line in `startAgentRun.ts`)
   - [x] `voice_reply` prompt section in the stable zone while voice is open on the workspace; byte-identical prompt when it isn't (`context/userRules.ts`, `voice/voiceReply.ts`)
@@ -1394,12 +1430,29 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-26 | 2026-10-11 | The voice_reply prompt section is keyed by workspace, not run: it must be in the very first step's prompt, before the renderer knows the run id. While voice is open on a workspace, every reply there is written to be heard | Narrowed by D-32 |
 | D-27 | 2026-10-11 | Voice mode is started from the task's instruction line only (not the New task brief) in this cut: a session needs a task to steer. Starting a task by voice from the brief can follow | Superseded by D-30 |
 | D-28 | 2026-10-11 | The bar's single-letter keys (M, Space) yield to any text field, empty or not; the app's `isTypingIn` treats an empty field as not typing, which is right for chords but wrong for bare letters | Decided |
+| D-29 | 2026-10-11 | Questions by voice answer only what's unambiguous, and only one-question forms; everything else is sent as a message, which the existing superseded path hands to the model as the likely answer. No separate setting: unlike approvals, a wrong answer to a question grants nothing | Decided |
 | D-30 | 2026-10-11 | Voice mode on New task (Ajay: yes). The first spoken turn starts the task with everything the brief holds, typed text first, and the session is handed to the new task's line; there is no "confirm before starting" step, because the brief's Start task has none either and the task can be stopped by voice ("stop") | Decided |
+| D-31 | 2026-10-11 | The echo filter errs towards letting words through: only during playback plus a 2.5 s tail, 75% in-order word match, and one- or two-word transcripts only by exact run while audio plays. Dropping something you really said is worse than an occasional echo; push-to-talk and headphones remain the strong defences | Decided |
 | D-32 | 2026-10-13 | `voice_reply` only for turns said out loud (Ajay: yes). A voice turn is sent with `{ voice: true }`, the user message is stored with `spoken: true`, and the prompt asks for a spoken summary only when the latest real user message is spoken and voice mode is still open on the folder. A typed message in the same task, other tasks in the folder, and helper instances get written answers. Supersedes D-26's folder-wide scope; the section stays in the stable zone, so switching between spoken and typed turns changes the prompt prefix | Decided |
 | D-33 | 2026-10-13 | Barge-in dips first (Ajay: yes): 20% on any speech start while audio plays, stop on 600 ms voiced or non-echo words, back to full on echo, an empty turn or 1.2 s. Supersedes D-25 | Decided |
 | D-34 | 2026-10-13 | "Mic is on" lives in the taskbar overlay, dock badge and tray (Ajay's pick), not the title bar: those are main-process, testable here, and visible with the window hidden. Dictation waits while voice mode is on in any pane (greyed, "Voice mode is using the microphone"), except a take already under way | Decided |
-| D-31 | 2026-10-11 | The echo filter errs towards letting words through: only during playback plus a 2.5 s tail, 75% in-order word match, and one- or two-word transcripts only by exact run while audio plays. Dropping something you really said is worse than an occasional echo; push-to-talk and headphones remain the strong defences | Decided |
-| D-29 | 2026-10-11 | Questions by voice answer only what's unambiguous, and only one-question forms; everything else is sent as a message, which the existing superseded path hands to the model as the likely answer. No separate setting: unlike approvals, a wrong answer to a question grants nothing | Decided |
+| D-35 | 2026-10-14 | OpenRouter listens too (Ajay: yes, last in Automatic's order). OpenRouter has only a one-shot transcription endpoint, so it works like This PC: the local pause detector ends the turn and the whole turn is uploaded. No live captions, roughly 1–2 s more per turn, but anyone whose dictation already runs on OpenRouter gets voice mode with no new key. Any streaming listener with a key is picked first | Decided |
+| D-36 | 2026-10-14 | Model lists come from the providers' APIs wherever one exists (Ajay): OpenRouter both directions (public, no key), OpenAI, ElevenLabs and Deepgram with the key; cached a day with a refresh. AssemblyAI and Cartesia keep a curated list, labelled as such. Voices follow the chosen model (OpenRouter's `supported_voices`). The model row always shows, even with one model. **Amended in the build:** Deepgram stays curated, because its list has no Flux model (§24.5) | Decided |
+| D-37 | 2026-10-14 | OpenRouter's speech models are all listed, searchable, with price per 1,000 characters; default ElevenLabs Flash v2.5 via OpenRouter. Models that fail a real test call are marked (Ajay) | Decided |
+| D-38 | 2026-10-14 | Fix order (Ajay): failures made visible and recoverable first, then model and voice fetching, then the rest of §24.5. A-01 moves to step 2: a valid OpenRouter voice needs the model's voice list | Decided |
+| D-39 | 2026-10-14 | Ajay adds OpenRouter credit so fixes are checked with real calls, including each model family's PCM rate (A-16) | Decided |
+| D-40 | 2026-10-14 | Errors show our plain sentence first and the provider's own reason after it, muted, secrets redacted, one line; always logged (Ajay). Reverses §9.1's "never raw provider text" | Decided |
+| D-41 | 2026-10-14 | OpenRouter credit: an ordinary key can't read the balance, so Settings states the $0.50 audio floor and warns only on what `/api/v1/key` proves (never paid, or a key limit under $0.50). Replaces A-08's "show the balance" | Decided |
+| D-42 | 2026-10-14 | OpenRouter speech audio follows each response's `Content-Type` rate and channels (probed: 44.1 kHz and stereo exist), not a fixed 24 kHz | Decided |
+| D-43 | 2026-10-14 | Turns end automatically and patiently (Ajay): 0.9 / 1.3 / 2.0 s of quiet for Quick / Normal / Patient (was 0.5 / 0.75 / 1.2), at least 300 ms of speech. A transcript is never dropped, in any state. Words said before the answer has started join the same turn; words cut off by a barge-in before anything was said carry into the next one | Decided |
+| D-44 | 2026-10-14 | A fast voice model answers every turn, and the agent does the work (Ajay: "Fast voice + agent"). The voice talks, asks, and answers from what the agent reported; anything to do or check in the project goes through its `hand_to_agent` tool with a brief, which the window sends to the task (steering a running one) and then follows. Without a voice model or on a model error, the words go to the agent as they are. Supersedes sending every turn to the agent | Decided |
+| D-45 | 2026-10-14 | The voice model defaults to Claude Haiku 5.5 through OpenRouter (Ajay's pick), changeable under Settings → Voice → Answers with. Measured first word: gpt-5.4-mini ~1.0 s, glm-5.3-flash 1.4–1.6 s, Haiku 5.5 1.7–2.4 s (1.1 s on a work request), gemini-3.8-flash 2.1 s (12 s cold), qwen 2.8–3.2 s; all support tools and `tool_choice` | Decided |
+| D-46 | 2026-10-14 | Talking never cancels or redirects the agent's work by itself (Ajay: "Stop talking, keep working"). Speaking over the voice stops its audio; only "stop" (a stop phrase, or the voice model's `stop_agent`) stops the run. The Settings choice between redirect and stop (`interruptMode`) is retired; the field stays readable | Decided |
+| D-47 | 2026-10-14 | English by default (Ajay). A blank language let multilingual listeners auto-detect, and the agent's echo came back as Turkish and Russian. Settings format 8 turns a blank language into `en` once; picking "Detect" afterwards still works | Decided |
+| D-48 | 2026-10-14 | Voice mode opens a view over the task pane (Ajay), like the Claude app's voice screen: the conversation, the orb, Mute, Stop speaking, Stop the agent, End. "Show the task" closes it; the task's voice bar or a small pill brings it back. Keys and sounds belong to the session, not the bar | Decided |
+| D-49 | 2026-10-14 | Hold Space in an empty composer to dictate, like Claude Code's `/voice` (Ajay). Held 300 ms it starts a take; release puts the words in the field to edit and send; a tap is a space | Decided |
+| D-50 | 2026-10-14 | A hand-off in the voice view owns its run's live steps, what it waits on (answerable there, never a risky approval) and its result, from a `work` event main folds out of the run's own events; replaces the "To the agent" paragraph | Decided |
+| D-51 | 2026-10-14 | The voice view's layout (Conversation, Orb, Split) and the orb's look (nine canvas orbs, Liquid, Simple) are settings, not one fixed design (Ajay). Defaults: Conversation and Glow | Decided |
 
 ---
 
@@ -1454,7 +1507,7 @@ checklist above.
 | Piece | Path, start to end |
 | --- | --- |
 | IPC (17 channels) | `channels.ts` → `vyotiqApi.ts` → `preload/index.ts` (zod-checked push listeners) → `register.ts` (`senderOk` + zod) → `ipcContract.test.ts`; every invoke channel has a renderer caller (settings, speech playback, or the session controller's bridge) |
-| Settings (13 fields) | Every field is read where it acts: providers/models/voice/speed in `sessions.ts`/`speaker.ts`, language in all four cloud listeners, interrupt mode in `turnRouting.ts`, patience in the pause detector and listeners, push-to-talk in `session.ts`, approve-by-voice in `session.ts`, captions in `session.ts`, earcons in the bar, spoken progress in `replySpeaker.ts` |
+| Settings (13 fields) | Every field is read where it acts: providers/models/voice/speed in `sessions.ts`/`speaker.ts`, language in all four cloud listeners, interrupt mode in `turnRouting.ts`, patience in the pause detector and listeners, push-to-talk in `session.ts`, approve-by-voice in `session.ts`, captions in `session.ts`, earcons in the bar, spoken progress in `replySpeaker.ts`. (Interrupt mode was retired by D-46 and is read nowhere now.) |
 | Keys | Encrypted per vendor in `secrets.ts`; status/set/clear over IPC; checked on save; read only in main; the renderer sees set + last 4 |
 | Agent bridge | Run tap in `startAgentRun.ts` → `ReplySpeaker`; `voice_reply` in the stable prompt zone; approvals and questions through their watchers; follow-up promote for steer; stop for cancel |
 | Spoken summary on screen | Stripped from the answer (`TaskRecord`), copy (`Receipt`), narration notes (`WorkItems`), PR drafts (`prDraft.ts`) and find (`recordFind.ts`); kept raw only for Read aloud, which speaks it |
@@ -1473,6 +1526,7 @@ checklist above.
 | Read aloud during a conversation | Two voices at once | Starting voice mode stops Read aloud; the button is off while a session is open |
 | Voice mode during a dictation take | Two mic captures, and the take's field hidden by the bar | The voice button is off while a take is open |
 | This PC transcribed everything since the last turn | Silence, and the agent's own voice from the speakers, went into your next turn | The listener keeps only a 0.5 s lead-in from your speech start |
+| OpenRouter-only setups couldn't listen (found 2026-10-14) | Dictation ran on OpenRouter, but voice mode had no OpenRouter listener, so the same person was told to add a key | OpenRouter listener (D-35) |
 | This PC offered a model picker that chose nothing | It always runs dictation's installed model | One entry, "Same model as dictation"; no picker |
 
 ### 24.3 Not implemented (and why)
@@ -1499,5 +1553,515 @@ only for spoken turns (D-32).
 - The tray dot and taskbar/dock badge on Windows and macOS (no tray test
   exists; the pixel painting and badge state are unit-tested).
 - Tuning the dip: 600 ms to confirm and 1.2 s to give up are first guesses.
-- Rebase onto Ajay's newer local code; merge `main` once #62/#64 land.
+- The OpenRouter listener (D-35) on a real mic: turn timing with no provider turn detection, and how long the upload takes.
+
+### 24.5 First real run and audit (2026-10-14)
+
+The first real run, on Windows with only an OpenRouter key, got nothing to work.
+Each cause below was reproduced in the running app (CDP probes: a speak call, a
+Windows-voice WAV fed through a real session, and dictation's OpenRouter path),
+not inferred. Fixes follow D-38's order; each row says where it stands.
+
+**Step 1 done (2026-10-14, uncommitted): failures visible and recoverable.**
+Fixed: A-03, A-04, A-07, A-09, A-10, A-11, A-14, A-17, A-19, A-20. Error events
+now say which side failed (`session` / `turn` / `speak`) and carry the
+provider's reason (`voiceDetail`, D-40); the bar keeps the three apart. 17 new
+tests; 445 voice, settings and schema tests pass.
+
+**Step 2 done (2026-10-14, uncommitted): models and voices from the providers.**
+Fixed: A-01, A-05, A-06. `voice/modelCatalog.ts` fetches OpenRouter's public
+speech and transcription lists (with `supported_voices`), OpenAI's `/v1/models`
+and ElevenLabs' `/v1/models` with the key; cached a day per provider and key;
+a failed fetch returns the curated models with its reason, and a failed refresh
+keeps the last list. New IPC `voice:models`. Settings always shows both model
+rows: searchable, with price, recommended first, a refresh, and where the list
+came from. `chooseModel` honours any model a listing provider named;
+`pickVoice` never sends a voice the model refuses (saved "alloy" on an
+ElevenLabs model becomes Sarah). OpenRouter's default speaking model is now
+`elevenlabs/eleven-flash-v2.5`, voice Sarah. 20 new tests; 885 tests in the
+voice, composer, settings, dictation and IPC suites pass.
+
+Checked against the live APIs, not assumed:
+
+- Deepgram's `/v1/models` (public) lists 460 listening models and **no Flux
+  model**, and this listener only speaks Flux (`/v2/listen`). So Deepgram stays
+  curated, against D-36's first plan; the picker says why.
+- OpenRouter prices speech per character and transcription per second of audio
+  (`openai/gpt-transcribe` 0.000075/s = $0.0045/min, matching dictation's note).
+  Token-priced models (Gemini) and two "per second" figures that can't be
+  ($6–$21/min) show no price rather than a wrong one.
+
+Not verified (no key or no credit here):
+
+- Which ElevenLabs models the multi-context websocket accepts: ElevenLabs
+  doesn't say, and v4 Turbo is documented on a different websocket. A refused
+  model now fails with ElevenLabs' own reason (D-40).
+- Which OpenAI transcription models the realtime socket takes; and the older
+  OpenAI speech models (`tts-1`) take only six of the eleven voices.
+- On the very first reply of a session the OpenRouter voice list may still be
+  loading (it's fetched alongside, so the mic doesn't wait); that reply then
+  uses the saved voice. Later replies and Read aloud wait for the list.
+
+**Step 3 done (2026-10-14, uncommitted): the rest.** Fixed: A-08, A-12, A-13,
+A-15, A-16, A-18, and A-21 found on the way.
+
+- A-16: a probe called every OpenRouter speech family once (a throwaway
+  Electron app reading a copy of the key store). The real format is in each
+  response's `Content-Type` (`audio/pcm;rate=44100;channels=1`), and 24 kHz
+  mono was wrong for three: **HeyGen and Fish Audio send 44.1 kHz, ByteDance
+  Seed sends stereo**. The adapter now reads rate and channels from the header
+  (OpenAI's 24 kHz mono when absent) and mixes stereo to mono (D-42). In the
+  app, Ajay's own pick (`heygen/heygen-voice-1`) arrived at 44,100 Hz: before
+  this it played at about half speed. ElevenLabs, MAI, Deepgram, Qwen, Grok,
+  Orpheus, Sesame, Kokoro and Voxtral are 24 kHz mono. MiniMax refuses `pcm`
+  (MP3 only) and fails with its own reason (A-22). Gemini wasn't checked (402).
+- A-08: an ordinary key can't read the balance (`/api/v1/credits` needs a
+  management key), so Settings states the $0.50 floor under "Listens with" when
+  OpenRouter listens, and warns when `/api/v1/key` shows it's certainly short:
+  an account that never bought credit, or a key limit under $0.50 (D-41). New
+  IPC `voice:openrouter-credit`. Ajay's key: paid account, no key limit, so
+  the plain note shows.
+- A-12: a socket that fails before it ever opened asks the vendor's REST API
+  once with the same key (Deepgram `/v1/projects`, AssemblyAI
+  `/v2/transcript`, ElevenLabs and OpenAI `/v1/models`). 401 is "key
+  rejected" (not a restricted ElevenLabs key missing a permission), 402 "out of
+  credit", 429 "rate limited"; anything else stays a dropped connection.
+- A-13: `speed` is sent only when it isn't 1.
+- A-15: the blank language reads "Detect automatically" for ElevenLabs, OpenAI,
+  OpenRouter and This PC, which also get an explicit English; Deepgram and
+  AssemblyAI keep "English" (their blank is the English model).
+- A-18: main checks every voice event against its schema before sending and
+  logs a failure to vyotiq.log; the preload warns in the console when it drops
+  one, as it does for chat events.
+
+18 new tests; 861 tests in the voice, dictation, settings, composer and IPC
+suites pass; typecheck and lint clean. Checked in the running app: the credit
+call, the note, the language label, and a 44.1 kHz OpenRouter reply.
+
+**Why nothing worked**
+
+| # | Finding | Evidence |
+| --- | --- | --- |
+| A-01 | **Fixed (step 2)** OpenRouter speaking can never work: the catalog's model `openai/gpt-4o-mini-tts-2025-12-15` isn't on OpenRouter. It lists 35 speech models (ElevenLabs, Gemini TTS, Deepgram Aura, MiniMax, Kokoro…), no OpenAI one | `voice:speak` → `engine_failed` in 0.75 s, no audio; `GET /api/v1/models?output_modalities=speech` |
+| A-02 | The OpenRouter account has under $0.50; OpenRouter refuses audio below that (HTTP 402) | Dictation path: "This request requires at least $0.50 in balance for audio" |
+| A-03 | **Fixed (step 1)** A failed turn on a whole-turn listener (OpenRouter, This PC) is invisible: the error is retryable, the session "reconnects" (instantly, it's HTTP), the attempt counter restarts, the turn is lost, and the bar says Listening again. Forever | Probe: `hearing` → `reconnecting` → `listening`, no `turn`, no `error` |
+| A-04 | **Fixed (step 1)** 402 is `engine_failed` in dictation (no `out_of_credit` code there), so the OpenRouter listener (D-35) treats it as retryable | `postCloudTranscription` |
+
+**Missing**
+
+| # | Finding |
+| --- | --- |
+| A-05 | **Fixed (step 2)** No model choice: the model row only shows when the catalog lists 2+ models (`VoiceModeSettings.tsx`), so OpenRouter, OpenAI and Scribe show none; every list is hard-coded. OpenRouter publishes both lists without a key (`output_modalities=speech`: 35, `=transcription`: 25) |
+| A-06 | **Fixed (step 2)** OpenRouter's voice picker offers OpenAI's 11 names for any model; OpenRouter publishes each model's `supported_voices` |
+| A-07 | **Fixed (step 1)** Voice code logs nothing but per-turn latency: no session start/stop, no provider error, no vendor reason. `VoiceError` messages are "for logs only" and never logged; IPC failures aren't either |
+| A-08 | **Fixed (step 3)** No credit/balance shown anywhere, though a 402 is a likely first-run failure |
+
+**Bugs**
+
+| # | Finding |
+| --- | --- |
+| A-09 | **Fixed (step 1)** Captions off = the agent never speaks. The window plays only replies it learned of from `say`, and `say` is sent only with captions on (`session.ts`) |
+| A-10 | **Fixed (step 1)** "Try again" after a session error does nothing: the window still holds the dead session id, so `start()` returns early |
+| A-11 | **Fixed (step 1)** In the error state the mic keeps capturing, while the tray/taskbar indicator counts error as off |
+| A-12 | **Fixed (step 3)** A key refused at the websocket handshake surfaces as close 1006 → `offline` → five retries → "Lost the connection", not "key rejected" |
+| A-13 | **Fixed (step 3)** `speed` is always sent to OpenRouter; its docs say models without speed control may 400 on a non-default value |
+| A-14 | **Fixed (step 1)** Messages carry no reason: "It couldn't be read aloud.", "Voice mode stopped unexpectedly." |
+| A-15 | **Fixed (step 3)** Language `''` is labelled "English" but means "not specified" (auto-detect) for multilingual listeners |
+| A-16 | **Fixed (step 3)** OpenRouter `pcm` is assumed 24 kHz for every model; the docs state it only for Azure's. Unverified for the rest: needs a real call per family |
+| A-17 | **Fixed (step 1)** `failWith` marks offline/provider_down/rate_limited retryable; `isRetryableVoiceError` also counts `engine_failed`. Two answers to one question |
+| A-18 | **Fixed (step 3)** The preload drops any voice event that fails its schema, silently |
+| A-19 | The latency log's `listener` field was never written: string keys outside the log allowlist are dropped. Now `provider`. **Fixed** |
+| A-21 | **Fixed (step 3)** A listener socket that failed to open rejected with a plain `Error`, read as `engine_failed` (not retryable), so one failed reconnect attempt ended the session instead of backing off. It rejects with its typed code now |
+| A-22 | MiniMax's speech models refuse `pcm` ("only supports response_format=mp3 for streaming"). They fail with that reason; supporting them needs an MP3 decoder. **Open** |
+| A-20 | A reply that arrives whole (no streamed deltas) was summarised from its raw text, so the voice said "spoken" and read the tag's contents as prose. Its `<spoken>` block is used now. **Fixed** (found by a new test) |
+
+### 24.6 It ran, but didn't converse (2026-10-14)
+
+After §24.5 the session ran, but Ajay found it "just talks back nothing". Read
+from vyotiq.log, the sessions' run logs and traces, then reproduced with CDP
+probes on the running app (fake mic from Windows-voice WAVs, real keys).
+Settings at the time: OpenRouter listening (`openai/gpt-transcribe`), HeyGen
+speaking via OpenRouter with voice "bella", interrupt mode "steer", language
+blank, chat model `z-ai/glm-5.3-flash` with heavy reasoning.
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| A-23 | **Fixed** One sentence became several turns: 0.75 s of quiet ended a turn, and the pause between sentences is often longer. "Hello. Can you hear me?" went as two messages | D-43 |
+| A-24 | **Fixed** A transcript that arrived while the agent had the floor (thinking, working, speaking) was dropped, so a second sentence vanished | D-43 |
+| A-25 | **Fixed** With a whole-turn listener (OpenRouter, This PC), the transcript arriving reset the pause detector, trimming the start of the next words | Reset only when the listener does its own turn detection |
+| A-26 | **Fixed** Fragments ("Hello.") reached the agent and, with interrupt mode "steer", redirected or cancelled the work in progress | D-44, D-46 |
+| A-27 | **Fixed** Every turn went to the full coding agent: 25–60 s per step with this model's heavy reasoning, so "Can you hear me?" took a minute to answer, in writing-style prose | D-44, D-45 |
+| A-28 | **Fixed** A blank language meant auto-detect; the agent's own voice picked up by the mic came back as "Burada" and "Я здесь" | D-47 |
+| A-29 | **Fixed** Noise the listener invents ("you", "uh", "thanks for watching") became messages | `isNoiseTranscript` |
+| A-30 | **Fixed** Once the voice went quiet, the agent starting work or speaking again had no transition out of Listening | `listening` takes `tool_start` and `audio_start` |
+| A-31 | **Fixed** The agent's spoken reply never came. When a task starts, its line's composer remounts (and its input box is swapped for the voice bar), and each mount is a new owner id; the session stayed with the dead one, the hand-off waited 10 s for a run id that never came, and the run was never followed. This predates today's work: it's why "Yes, I'm here" was never heard | When the owning bar leaves, a line that appeared in the last 10 s takes over, or the next to appear does (`releaseVoiceLine`); checked after the commit, for StrictMode |
+| A-32 | **Fixed (Ajay's pick: ElevenLabs Flash v2.5, voice bella)** HeyGen takes 3–8 s to the first audio in a direct probe and 5–12 s in the app (vyotiq.log `firstAudioMs`); "bella" isn't a HeyGen voice, so it falls back to nadine. Measured alternatives: ElevenLabs Flash v2.5 0.71–0.83 s, Kokoro 0.66–0.82 s, Grok 0.75–0.87 s, Voxtral 1.1–1.3 s. In the app after the switch: first audio 0.6 s after the first words | Settings |
+| A-33 | **Fixed** "On it." was held for a whole sentence and went out after the hand-off, so the view showed the work before the voice said it heard you | Flushed before the hand-off |
+| A-35 | Speech heard but no turn left no trace: an empty, echo or filler transcript went back to Listening silently, which is what "talks back nothing" looks like. Now logged (`Voice heard speech but took no turn`, reason and length, never the words). Seen twice in the first out-loud run, where the recorded question played on speakers a headset mic couldn't hear | `onTurnDropped` |
+| A-34 | Once (10:17:45), a session ended and a new one started 2 s later. Not reproduced in three later runs; probably the probe's replayed mic. **Watching** | — |
+
+Checked after the fixes, in the running app: one whole turn; the voice's first
+words in 1.3–1.8 s; "On it."; the brief handed to the task; the view on "The
+agent is working"; the agent's result ("Project's on branch main…") spoken;
+back to Listening. My probe runs left tasks in Ajay's workspace (branch checks
+and "Hello." messages).
+
+Not a bug: the screenshot with This PC bold and OpenRouter outlined in "Runs on"
+was This PC selected and OpenRouter holding keyboard focus.
+
+### 24.7 It says it will, then nothing comes back (2026-10-14, second audit)
+
+Ajay: the voice "just says things but does not work on them", and it is slow.
+Read from vyotiq.log (11:40–12:16), run bf29ea47's events and messages, and the
+settings at the time: voice model `z-ai/glm-5.3-flash`, OpenRouter listening
+with `elevenlabs/scribe-v2`, OpenRouter speaking with Eleven v4 ("bella"),
+patience Normal. Checked afterwards with a CDP probe on a built copy of the app
+in an isolated profile (fake mic from Windows-voice WAVs, noise bursts, real key).
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| A-36 | **Fixed** The agent's result was never spoken. Any sound while the agent worked (a breath, headset hiss) was treated as a barge-in, which set the reply speaker quiet; the upload came back empty and nothing un-quieted it. Ajay asked three times to "report back now" | Sound over the agent's floor with nothing playing holds the voice instead (`hold`/`release`); only audible playback is ducked or barged |
+| A-37 | **Fixed** The same false barge-in aborted the voice's pending answer and restarted it from zero: first words at 26 s and 63 s | A held answer keeps streaming into a buffer; words merge into it (D-43) |
+| A-38 | **Fixed** ~40 empty uploads in 35 minutes, each billed | Voiced frames must also pass a zero-crossing check (broadband hiss doesn't); dropped turns log `speechMs` and `sttMs` |
+| A-39 | **Fixed** The chosen listening model was ignored: every turn went to `openai/gpt-transcribe` | `model` passes through to dictation's OpenRouter call |
+| A-40 | **Fixed** The voice never knew what the agent found, so "is it done?" became a new 10-minute job | `agentFinished` puts the answer in the voice's history; its status carries steps, the current tool, the last narration, how and when the run ended, and what it is blocked on |
+| A-41 | **Fixed** Status questions were handed to the agent (4.5 min listing processes) | The voice answers progress questions from its status and never hands them off |
+| A-42 | **Fixed** glm-5.3-flash skips the `<spoken>` block, so a markdown table was read aloud | Without one, the voice model reports the written answer in 1–3 sentences (no tools); `fallbackSummary` only if that fails |
+| A-43 | **Fixed** Read Aloud and previews failed on Eleven v4: "speed is not supported by eleven_v4" (400) | A 400 naming `speed` retries without it, remembered per model; failures name the model |
+| A-44 | **Fixed** The player's first underrun ended "speaking" mid-reply, so echo guard and state went wrong | Main marks each reply's last chunk; the player reports drained only after that chunk plays (8 s stall cap) |
+| A-45 | **Fixed** Latency started at the transcript, missing the pause and the upload | `Voice turn latency` adds `waitMs`, `sttMs` and `totalMs` (end of speech → first audio) |
+| A-46 | **Fixed** A cold TLS handshake on every turn (554 ms cold vs 46–144 ms warm) | One cheap request to openrouter.ai at session start and on speech start (throttled); Node's global fetch, so the proxy still applies |
+| A-47 | **Fixed** Briefs read as third-person narration ("The user asks you to…") | Briefs are direct instructions |
+| A-48 | **Fixed** Whole-turn listeners waited for the full pause before uploading | At 600 ms of quiet the turn is sent early; kept if the pause confirms it, aborted if you talk on (cloud only) |
+| A-49 | **Fixed** A workspace `hooks.json` with no hooks (`{"hooks": {}}`) still stopped the task to ask "Run them?" | Nothing to run: never asked |
+| A-50 | **Fixed** After the voice answered while a question or approval waited, the state said "working" | Back to "needs you" while the agent is blocked |
+| A-51 | **Fixed** OpenRouter spread the voice model's requests by price: glm-5.3-flash's first word took 2.0–6.0 s | The voice model asks for `provider.sort: latency` (1.7–2.1 s measured) |
+
+Probe, after the fixes (turn → first audio; `waitMs` is Normal patience):
+
+| Turn | Pause | Listening | Voice model, first text | Speaking, first audio | Total |
+| --- | --- | --- | --- | --- | --- |
+| The task (cold) | 1.3 s | 2.6 s | 3.3 s | 1.2 s | 8.3 s |
+| "How is it going?" | 1.3 s | 0.8 s | 5.3 s | 1.1 s | 8.6 s |
+| "Is it done?" | 1.3 s | 0.4 s | 4.0 s | 1.1 s | 6.8 s |
+
+The voice model is most of it, and that is the model, not the code:
+glm-5.3-flash's reasoning is mandatory on OpenRouter ("cannot be disabled", 400),
+and its first word took 2.0–6.0 s in direct probes, 1.7–2.1 s with latency
+routing. gpt-5.4-mini answered in 0.9–1.0 s in the same probe. Eleven v4 takes
+1.4–2.3 s to the first audio and doesn't stream (a long text took 71 s);
+ElevenLabs Flash v2.5 takes 0.5 s. The coding agent's own steps on
+glm-5.3-flash took 16–27 s each for 46–196 output tokens.
+
+The probe confirmed that the noise bursts no longer leave a trace,
+"How is it going?" was answered without a hand-off, the result (no `<spoken>`
+block) was reported in the voice's words, and "Is it done? What did it find?"
+was answered from what the agent found.
+
+
+### 24.8 Capabilities, async ownership and keys (2026-10-14, third audit)
+
+The question was whether voice mode can do everything the agent can, and
+whether its async parts end cleanly. Read end to end (renderer controller →
+preload → `register.ts` → `sessions.ts`/`session.ts` → the task's own send),
+checked against vyotiq.log (16:52–17:09: 21 turns, no voice errors, 4.3–6.6 s
+from your last word to the first sound), then reproduced in jsdom before any
+fix.
+
+**What voice can reach.** A hand-off is the task's own send (`onSend(…, { voice:
+true })`, or the brief's Start path), so the agent gets every tool, MCP server,
+skill and sub-agent it has from a typed message, under the same approval mode,
+permission rules and command guard. There is no voice-only agent path.
+
+| Capability | Through voice | Where |
+| --- | --- | --- |
+| Any agent work (files, terminal, browser, MCP, skills, sub-agents) | Yes, as typed | `Composer.tsx` voice target → `onSend` |
+| Start a task from New task | Yes, with the brief's checks, folders and attachments | `Composer.tsx` brief target |
+| Add to running work | Yes, steered between steps | `turnRouting.ts` |
+| Stop work | "Stop", or the voice's `stop_agent` | `session.ts` |
+| Progress, "is it done?", "what did it find?" | Answered from run events and the result | `agentStatus`, `agentFinished` |
+| Approvals | Yes / no / **always allow (new)** for ordinary ones; risky ones on the card | `answerApprovalByVoice` |
+| Agent questions | One single-pick or yes/no item; other forms on the task | `answerableByVoice` |
+| Folder or program "always" grants, editing a command, attaching files, model or mode, a separate new task from inside one | Not by voice | No tool; the card and composer keep them |
+
+**Always allow by voice (Ajay's pick, 2026-10-14).** "Always allow" (or "yes
+always", "don't ask again"; whole utterance only) answers `always`, the same
+decision as the card's plain Always allow, and only where the card offers it:
+never a risky (`danger`) request, never a terminal command main couldn't scope
+(`alwaysAllowCommand` null). The folder and program grants need the card's own
+choice and stay there. The voice offers it out loud ("Say yes, no, or always
+allow.") and says what it remembered ("It won't ask again for pnpm test in this
+workspace."). Off with Approve by voice.
+
+| # | Found (reproduced) | Fix |
+| --- | --- | --- |
+| A-52 | **Fixed** End while the mic was opening: the view said off, but the mic stayed open and a main session started and was fed audio | A start id that End bumps; a late mic is stopped, the session never started |
+| A-53 | **Fixed** End while main opened the listener: that session kept running (and billing) in main; the renderer never knew its id to stop it | A late id is stopped as it arrives |
+| A-54 | **Fixed** A hand-off the task refused (a file still being read, model not ready, no task line) was silent after "On it."; with nothing that can speak, the session sat in Thinking for good | `voice:hand-off-failed`: the voice says it didn't go and why, its status line drops the brief, and the line reads "Not sent" with the reason (icon and words) |
+| A-55 | **Fixed** With voice mode on, Esc couldn't close a dialog: the voice handler took it first (`useEscapeToClose` gives up on `defaultPrevented`), armed End, and a second Esc ended voice mode under the dialog | Esc yields to open menus, popovers and modal dialogs |
+| A-56 | **Fixed** With voice mode on, Space on any focused button, box or tab was swallowed as push-to-talk (WCAG 2.1.1), and its release ended your turn | Space on a control is the control's |
+| A-57 | **Fixed** Every mic chunk (every 128 ms) re-rendered every voice subscriber, Composer included: 78 store updates per 10 s of listening, though the orbs read the level per frame | The level lives on the controller (`micLevel()`/`orbLevel()`); 0 updates from the mic, tested |
+| A-58 | **Fixed** Each start added another `destroyed` listener to the window | One per window |
+| A-59 | **Fixed** The three layouts' control rows used two border weights | `BORDER_DIVIDER` in every layout and the bar |
+
+Checked and fine: every voice invoke validates with zod and checks the sender
+and the session's owner; child instances don't ask approvals through the
+window, so following only the task's run misses none; a stale listener's events
+are dropped by generation; work events are deduped and throttled.
+
+**The conversation is kept (Ajay's call, 2026-10-14).** Until now the
+conversation lived only in memory: of the 21 turns in the 16:52 session, only the
+two that became briefs (the same brief twice) could be found afterwards. Each
+session now writes `userData/workspaces/<id>/voice/<started>_<session>.jsonl`
+(`conversationLog.ts`): `start`, `you`, `voice`/`agent` (a sentence each, one
+`contextId` per reply), `hand_off`, `followed` (run and hand-off), `not_sent`
+(why), `answered` (an approval or question settled by voice), `stop_agent`
+(by you or the voice), `dropped` (reason and length, never words), `error`,
+`end`. Secrets are redacted before writing; writes are batched (250 ms) and
+asynchronous; the newest 200 per workspace are kept; a folder that can't be
+written costs the session nothing.
+
+**Reading it back (Ajay's picks, 2026-10-14).** Two ways in, both opening one
+working dialog (`features/voice/history/VoiceConversationsDialog.tsx`; the
+inspector never holds a conversation, so it isn't a panel there):
+
+- An instruction said by voice carries "Said by voice · N turns" under its
+  brief, which opens that conversation. It's matched by words, not by run
+  alone: a task holds typed and spoken instructions side by side, and the
+  hand-off's brief ends the instruction it became (a new task puts anything
+  typed first).
+- The navigator's View menu › Voice conversations… lists the workspace's
+  sessions by day (first words, time, turns, length, tasks, not sent).
+
+A conversation shows your turns and the voice's and the task's replies (one
+reply's sentences joined), each hand-off as "Asked …" with what became of it
+(sent, with Open task; not sent, with why; or the session ended first),
+answers given by voice, and stops. Dropped sounds and errors are one muted
+count at the end, never lines of their own. A break of five minutes or more
+shows the time it picked up.
+
+Main serves it through `voice:conversations` and `voice:conversation`
+(`ipc/handlers/voiceConversations.ts`): zod-validated, an open workspace only,
+and the id is a file name that can't leave the voice folder (no dots, no
+separators; the resolved path must sit directly in it; links and folders
+aren't read). Every line is parsed again on read; a torn or unknown one is
+skipped and counted. The record's lists are read once per workspace and again
+600 ms after a live session hands work to a new run.
+
+The "Not sent" line was shot in all five skins × light/dark (a scratch
+harness mounting `ConversationItems`): it reads in each, and its
+`text-danger` caption is 5.6–6.6:1 against the pane, AA everywhere.
+
+Not checked here: a real mic and provider run of the new hand-off line and
+"always allow" (the CDP probe, §24.6).
+
+### 24.9 A run voice didn't start, and answers you can hear (2026-10-14, fourth audit)
+
+The question was again whether voice reaches everything the agent can, and
+whether every reply it promises is actually heard. Each finding was
+reproduced in a failing test before it was fixed
+(`tests/main/unit/voiceLiveRun.test.ts`, `tests/renderer/voice/voiceLiveRun.test.tsx`).
+
+| # | Found (reproduced) | Fix |
+| --- | --- | --- |
+| A-60 | **Fixed** Voice mode opened on a task already working followed nothing (`voiceFollow` was sent only after a hand-off). "Stop" didn't stop that run (`stop_agent` needs a followed run), "is it done?" was answered with "idle", its result wasn't spoken, and its approvals weren't asked | The line's target reports a live run and the controller follows it once (`followRun`), also when the session moves to another task's line. The view shows it as a Task line, "Doing the task's current work" |
+| A-61 | **Fixed** A run already waiting on an approval or question when it was followed was never asked: the watchers only see new asks | `follow` asks the newest pending one out loud (`pendingAsks` → `listPendingToolApprovals` / `listPendingAgentQuestions`); following another run clears the last run's |
+| A-62 | **Fixed** "Allowed.", "Denied.", "It won't ask again…" and "Got it." were captions only: sent as `say` with no speaking stream, so never heard (and missing from the kept conversation) | `sayLine`: spoken, captioned, echo-guarded and kept like any reply |
+| A-63 | **Fixed** With nothing that can speak, a spoken yes left the orb on Thinking until the next tool started | `sayLine` moves the session on when no audio will come |
+| A-64 | **Fixed** A microphone unplugged (or taken by another app) mid-session ended voice mode silently: the view just vanished | Error "No microphone found." with the reason and Try again; the conversation stays on screen |
+| A-65 | **Fixed** The view's Allow once / Deny stayed disabled for the next approval in the same run, and an answer main refused never re-enabled them | One set of buttons per request; a refused answer can be given again |
+| A-66 | **Fixed** The view offered no Always allow, though the voice offers it out loud | **Always allow** where the card offers its plain one (`voiceMayAlwaysAllow`: never risky, never an unscoped command); the subline says "Say yes, no, or always allow" |
+| A-67 | **Fixed** "Sure, run it" while an approval waited isn't a whole-utterance yes, so the voice model handed it to the agent and said "On it." while the run stayed blocked | The voice model is told it can't answer for you and not to hand an answer off; it asks for a plain yes or no, or points to the card |
+| A-68 | **Fixed** A hand-off polled for its run id every 50 ms for up to 10 s | Resolved when the line reports the run id (`setVoiceTarget`), with the same 10 s limit |
+| A-69 | **Fixed** The "Talk with" popover didn't open on the 40px row anchored popovers start with | Header row, as the model picker and context meter |
+
+Not changed, by design: the whole-utterance approval words (B9), and the
+folder and program grants, which stay on the card.
+
+Not checked here: a real mic and provider run of A-60 to A-63 (the CDP probe,
+§24.6), and the five skins × light/dark for the new Always allow button and the
+popover row (they use `Button` and the same tokens as the rows beside them).
+
+### 24.10 Text first, voice after (2026-10-14, fifth audit)
+
+Reported: the reply's words appeared in the transcript, then the voice
+started, laggy. Measured from vyotiq.log `Voice turn latency` (20 turns):
+the first caption at 1.6–3.6 s after the turn, the first sound 0.9–2.1 s
+after the caption, behind a 1.3 s end-of-turn wait.
+
+| # | Found (measured or reproduced) | Fix |
+| --- | --- | --- |
+| A-70 | **Fixed** The voice model (glm-5.3-flash) can't turn reasoning off, and the call sent no effort, so it ran at the model's listed default, `max`. The call also never passed `modelInfo`, so models that *can* turn it off weren't told to. Real OpenRouter, 10 calls each: first word median 2.25 s, p90 5.4 s, 54–460 reasoning tokens. One call spent all 400 output tokens on reasoning and said nothing | `responderThinking`: off where allowed (`effort: none`), else the lowest listed effort. Model info is looked up once, starting when the session opens, with at most 1.5 s of waiting in a turn. Same 10 calls: median 1.0 s, p90 1.5 s, 1–77 reasoning tokens |
+| A-71 | **Fixed** Captions were shown when a sentence was *ready to synthesise*, 0.5–2 s before its audio played | Each caption waits for its own audio: OpenAI/OpenRouter tag a sentence's first chunk (`piece`), and the window shows it when that chunk plays (`captionPacer.ts`). Sockets (ElevenLabs, Cartesia) can't tell, so waiting captions show with the next audio. A caption is shown at once when nothing can speak, when speaking fails, when a reply ends without audio, or after 4 s of quiet. Barge-in drops captions not yet heard |
+| A-72 | **Fixed** A failed run was said as "That run hit an error" whatever the cause. Seen: PROVIDER_BILLING ("Prompt tokens limit exceeded… add more credits") | `runFailedLine(code)` names out of credit, rejected key, unreachable or provider error. The run's own message joins the voice's conversation (`agentFailed`), so "why did it stop?" has an answer |
+| A-73 | **Fixed** An agent result that came before you had said anything was dropped from the voice's memory (`remember` removed a leading assistant message), so "what did it find?" on a run voice mode opened on had nothing to go on | It is kept on your side as a note |
+| A-74 | **Fixed** The kept conversation's `error` lines had the code only (`out_of_credit`) | `detail`, the provider's reason, redacted |
+| A-85 | **Fixed** Turns at 20:43 took 5.0 s and 12.2 s from the pause to the words (17.5 s in total), and three sounds came back empty after 4.4–12.8 s. The log held only `sttMs`, which can't tell a long upload from a retry, a missed early start or a slow model. The same models on a 3 s sentence took 0.85–1.7 s afterwards | Whole-turn listeners report `audioMs`, `requestMs`, `earlyUsed` and `attempts` (counted through `headersForAttempt`, once per HTTP try). Both "Voice turn latency" and "took no turn" carry them |
+| A-86 | **Fixed** A short first word followed by a pause was cut. In the real app, "Hey, … can you hear me?" came through as "Can you hear me?": the detector fired 0.85 s after "Hey," ended, and only 0.5 s of lead-in was kept. A real turn read "You run several agents in parallel…" | Up to 1.5 s of lead-in, but never further back than the agent's voice stopped (`echo.msSinceVoice`), and never under 0.5 s. Real app after the fix: "Hey, can you hear me? What can you help me with today?" |
+
+Not changed, with numbers: starting the voice model on the early
+transcript (`settle`) would gain nothing. In every logged turn the listener's
+words arrived 0.3–2.2 s *after* the 1.3 s pause had already confirmed the turn.
+
+Checked in the real app (built, fixture speech, `voiceHandOffFailed` to make
+it speak). Trace: `say` +5 ms, audio piece 0 +7 ms, end marker +10 ms,
+speaking +11 ms. On a session's second line the caption reached the DOM
+64 ms after its audio was scheduled, the player's 60 ms jitter buffer. The
+first line costs a one-off 110–160 ms long task. That is the view swapping
+its 200 px empty-state orb for the 48 px one (a new WebGL context:
+`getContext`, shader compile), not the captions. The same run found the
+fixture speaker's `done()` resolving before its audio, so the window got
+"last" before the sound. It now waits for `end()`/`cancel()` as the real
+adapters do.
+
+Real providers, real app (21:20): a built app on a throwaway profile copy,
+with a recorded sentence as the mic, run through scribe-v2, glm-5.3-flash
+and eleven-v4-turbo. A 21:39 run, by the app's own `Voice turn latency`:
+1.3 s pause wait, 1.19 s for the words (`earlyUsed`, one attempt), 1.02 s to
+the first sentence (it was 1.6–3.6 s that day), and 1.05 s to its audio.
+`totalMs` was 4567 from your last voiced sound; that day's log had
+4.5–8 s. One sample: the clear gain is the voice model's step. Each
+sentence's audio carried its piece mark. Not checked: a live human voice
+through a physical mic.
+
+### 24.11 It knew nothing of the task, left turns unanswered, and answered noise (2026-10-14, sixth audit)
+
+Reported: voice mode on a task had no idea what the task was; some turns
+showed on screen and got no answer until said again; it kept answering
+sounds. Read from the kept conversations (§24.8) and vyotiq.log of the
+same afternoon: "I really don't have a record of the earlier session";
+"Resume the session." at 15:10:55Z with no reply and nothing logged;
+"[background noise]", "[clears throat]", "[phone ringing]", "[laughs]" and
+"はい。" each taken as a turn and answered, three in a row in one minute.
+
+| # | Found | Fix |
+| --- | --- | --- |
+| A-75 | **Fixed** The voice model started every session with an empty conversation and was never told which task it was on. Only a run that was *working* was followed (A-60); a finished task gave the voice nothing at all | The owning line reports its task's run, working or not (`voice:task`, `controller.setTask`). Main reads the end of its transcript (`taskContext.ts`: what you asked and the agent's last words per turn, never tool output, ~9k chars, the goal on top when the start is out of reach, and how its last run ended from status.json, error included) and sends it with the agent status every turn. Read again when the followed run ends and when you start talking (at most every 5 s). The prompt says it is shared history, and that "resume" means a brief that continues the task |
+| A-76 | **Fixed** The voice model call had no timeout. A call that never answered left your words on screen in Thinking until you spoke again | No first word in 12 s: asked again, once; then the turn goes to the agent as on any model failure. An answer that has started may run to 45 s. Every wait is raced, so a provider that ignores its abort signal can't hang the turn |
+| A-77 | **Fixed** A reply with no words and no tool call ended in silence and logged nothing | Asked again once; then "Sorry, I lost that. Could you say it again?". Logged either way (`Voice model answered with nothing`) |
+| A-78 | **Fixed** A reply whose speech produced no audio (the provider failed or sent nothing) was never reported drained by the window, so the session stayed in Thinking | The speaking stream reports whether any audio went out; one that ended unheard moves the session on (`endedUnheard`) and is logged (`VOICE_UNHEARD`) |
+| A-79 | **Fixed** A sound while the voice worked out an answer held the answer until the sound paused. Steady noise never pauses, so the answer never came | The hold lets go after 10 s whatever the room (`HOLD_MAX_MS`) |
+| A-80 | **Fixed** ElevenLabs Scribe (also through OpenRouter) writes sound tags in place of words, and each one was a turn | `cleanTranscript` removes `[…]`, `*…*`, music marks and short number-free `(…)` from turns and captions; nothing left is no turn. A transcript with letters but none in the script of the language you set (`はい。` with English) is no turn either |
+| A-81 | **Fixed** "Okay." to nothing in particular got "Good — the analysis is still running…" | A bare acknowledgement is no turn unless an approval or question is waiting, or the voice or agent asked something in the last minute. It doesn't cut the voice off while it speaks |
+| A-82 | **Fixed** The prompt told the model to "ask briefly" about anything unclear, so it remarked on every noise ("Still just noise coming through") | A `stay_quiet` tool for sounds, fillers and talk not meant for it; the prompt says not to remark on noise |
+| A-83 | **Fixed** "Can you" then "spawn subagents" 3 s later were two turns, the first answered "can you what?" | A turn that stops mid-thought (a trailing comma, "and", "the", "can you"…) waits 2.5 s before the model is called; words in that time join it (D-43) |
+| A-84 | **Fixed** An echo was judged at the time a whole-turn listener returned its words, often past the 2.5 s tail | Judged at when the words were heard (the pause that ended them) |
+| A-85 | **Fixed** `stay_quiet` let the model leave a real question or request unanswered: your words on screen and nothing back (the A-77 symptom again) | Quiet is honoured only for five words or fewer with no question mark; otherwise it counts as no answer, so the model is asked again and then says it lost it |
+| A-86 | **Fixed** "Yes" after an offer without a question mark ("I can have it check if you like.") was dropped as a backchannel; and only a reply's last sentence was checked, so "Want me to? It takes a minute." didn't count | The whole reply is checked, for a question mark or an offer ("want me to", "should I", "if you like"…) |
+| A-87 | **Fixed** With A-84, words you finished before the agent's reply began could match that reply and be dropped as its echo | The echo memory notes when its words began; talk heard before then is never their echo |
+| A-88 | **Fixed** A transcript in another script (A-80) still cut the agent's voice off when it came as a partial | It no longer confirms a barge-in, like noise and backchannels |
+
+Tests: `tests/main/unit/voiceTurnReliability.test.ts`, a `setTask` case in
+`tests/renderer/voice/voiceSessionController.test.ts`.
+
+Not checked here: a real mic and speaker run (same reason as §24.10).
+
+---
+
+## 25. The conversation (2026-10-14 redesign)
+
+What Ajay asked for: it should work like Claude's voice mode. Two ways to talk,
+from his answers: a hands-free conversation, and hold-to-talk dictation.
+
+### 25.1 A turn
+
+1. You talk. The listener hears; the pause detector ends the turn after the
+   chosen quiet (D-43). Noise fillers and the agent's own echo aren't turns.
+2. The **voice** (`VoiceResponder`, main) gets the turn with the recent
+   conversation and one status line (is the agent working, on what, for how
+   long). It streams one to three short sentences; each whole sentence is
+   cleaned, redacted and sent to the speaking model as it arrives.
+3. Work goes to the agent. When you want anything done or checked, the voice
+   calls `hand_to_agent` with a brief and says so ("On it." if it said
+   nothing). The window sends the brief to the task, steering it if it's
+   running, and follows the run. A New task brief starts the task, and the
+   new task's line takes the session over.
+4. The agent's spoken result is read out (§7.3) and also added to the voice's
+   conversation, so "what did it find?" is answered from it.
+5. "Stop" stops the work at once without the model; the voice can also call
+   `stop_agent` when you clearly ask. Nothing else you say cancels work (D-46).
+
+Talking over the voice stops its audio and answers the new words. Words said
+before an answer starts join the same turn; a turn that's cut off before it
+said anything carries its words into the next.
+
+Without a voice model (no key) the words go to the agent as they are, and
+Settings says why. If the voice model fails, it says "I'll pass that to the
+agent." and does.
+
+### 25.2 Models
+
+The voice model is `voice.responder`, default Claude Haiku 5.5 through
+OpenRouter (D-45), picked under Settings → Voice → **Answers with** from any
+configured chat provider. It runs without reasoning, at most 400 output
+tokens, with history capped at 24 messages or 12k characters. Its usage is
+recorded as `voice_reply` ("Voice replies" on the Usage page). The speaking
+model matters as much: see A-32.
+
+### 25.3 The voice view
+
+Voice mode opens a view over the task pane (D-48). It always has:
+
+- a 40px header: Voice, the time, which models hear and speak, and **Show the task**;
+- the orb, and what's happening in a word with one line under it;
+- the conversation: You, Agent V, and Task for each hand-off, with your words
+  appearing as you say them where the listener streams;
+- a footer: any problem or hint, Mute, Stop speaking while it speaks, Stop the
+  task while it works, and End.
+
+Closed, the task's voice bar offers **Voice view**; with no bar on screen, a
+small pill does. Esc stops speaking, Esc twice ends, M mutes, Space held is
+push-to-talk; never in a text field.
+
+**Hand-offs carry their work (D-50).** A hand-off is one folded line
+("Doing …", the brief one click away) that owns its run's live steps, what
+the run waits on, and its result. Main folds the followed run's events into a
+work record (`src/main/voice/work.ts`: tool name and one-line summary per
+step, never output; the final answer without its `<spoken>` block) and sends
+it as a `work` event, at most every 120 ms. The renderer links each hand-off
+to the run it went to; a second hand-off to the same run shows the work, the
+first keeps only its brief. Approvals offer **Allow once** and **Deny** here,
+through the same call as the card; **Always allow** shows where the card offers its plain one (A-66); a risky one
+(the command guard's `danger`) only says **Answer on the task**. A question with one single-pick or yes/no
+item offers its answers as buttons; any other form is answered on the task.
+Captions off hides the words, never the work.
+
+**Layout and orb are settings (D-51).** Settings › Voice mode › Voice view:
+
+| Layout | What it is |
+| --- | --- |
+| Conversation (default) | The conversation is the page; the orb docks in the bar under it, so nothing scrolls under the orb. An empty session starts on a large orb |
+| Orb | A large orb with the one thing worth reading under it (your words, its words, the live steps or the result); the conversation opens beside it |
+| Split | The conversation under the orb on the left; the task's every step, question and full result on the right |
+
+The orb's look is one of eleven: the nine WebGL orbs from the "Agent V voice
+orbs" design canvas (Glow, the default, Pearl, Aura, Wire, Cloud, Bubble,
+Halftone, Plasma, Contour; `features/voice/orb/orbLooks.ts`), Liquid (the
+first live orb), or Simple (the drawn orb, no GPU). Each look takes the same
+inputs (voice level, thinking, speaking) and its colour from the skin's
+tokens: the accent, or the text colour for Cloud and Halftone; warning while
+reconnecting, danger when stopped, grey when muted or off. On a light ground
+a tint is darkened along its hue to keep 3:1 against the page, and glows
+switch from emitted light to coverage. Each orb pauses offscreen and in a
+hidden window, shows one still frame per state under reduced motion, rebuilds
+after a lost WebGL context, and falls back to the drawn orb without WebGL.
+Under 40px (the bar, the pill) the drawn orb is used whatever the look: its
+rings, slash and bar say the state where a shader would be a dot.
+`pnpm redesign:voice-view` shows the shipped layouts (App · …) beside the
+mockups they came from.
+
+### 25.4 Dictation
+
+Hold Space in an empty, focused composer (D-49): after 300 ms the take starts,
+the typed space is removed, and key repeat is held back; release puts the
+words in the field. Ctrl/Cmd+M and the mic button are unchanged.
+
+### 25.5 Privacy
+
+Transcripts of what you say, the voice's replies and the agent's spoken
+results go to the voice model's provider (OpenRouter by default). Your words
+go as you said them, as they would to the agent; the agent's lines were
+redacted before they were spoken (D-10). The task voice mode is on goes too
+(A-75): your messages in it and the agent's written answers, redacted, never
+tool output. PRIVACY.md §7 and the site's voice page say so.
 

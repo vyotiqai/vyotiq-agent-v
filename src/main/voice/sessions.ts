@@ -5,20 +5,29 @@
  */
 import { getSettings } from '../settings/settings'
 import { logger } from '../../shared/logger'
-import { DEFAULT_VOICE_SETTINGS, type VoiceEvent } from '../../shared/ipc/schemas/voice'
+import { DEFAULT_VOICE_SETTINGS, VoiceEventSchema, type VoiceEvent } from '../../shared/ipc/schemas/voice'
 import { readVoiceSourceKey, voiceKeyAvailability } from './keys'
 import { VoiceError } from './errors'
 import { sttProvider, ttsProvider } from './providers/registry'
+import { cachedModelVoices, prepareVoiceModels } from './modelCatalog'
 import { VoiceSession } from './session'
+import { makeResponderChat, prepareResponderModel, recordResponderUsage } from './responderChat'
 import { addRunEventTap } from '../agent/runEventTap'
-import { resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
-import { resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
+import { listPendingToolApprovals, resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
+import { listPendingAgentQuestions, resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
 import { getRunWorkspace } from '../agent/runRegistry'
 import { setVoiceReplyWorkspace } from './voiceReply'
+import { VoiceConversationLog } from './conversationLog'
+import { resolveRunDir, userDataRoot, workspaceUsageDir } from '../storage/paths'
+import { loadMessagesWindowAsync, loadStatus } from '../agent/state'
+import { TASK_CONTEXT_MESSAGES, formatTaskContext } from './taskContext'
+import { join } from 'path'
 import { notifyBadgeChange } from '../app/badges'
 import {
+  chooseModel,
   clampSpeed,
-  resolveModel,
+  pickVoice,
+  resolveSttProvider,
   resolveTtsProvider,
   ttsEntry,
   type VoiceErrorCode
@@ -31,6 +40,23 @@ function currentVoiceSettings(): VoiceSettings {
 }
 
 /**
+ * Open the connection a turn's requests will use before they're made (B11):
+ * measured 2026-10-14, a cold connection to OpenRouter took ~550 ms and one
+ * idle past Node's 4 s keep-alive ~100 ms more than a warm one. An
+ * unauthenticated request: no key leaves, nothing is billed. Through the
+ * global fetch, so the app's proxy applies.
+ */
+export function warmVoiceConnections(settings: VoiceSettings, fetchImpl: typeof fetch = fetch): void {
+  const keys = voiceKeyAvailability()
+  const listener = resolveSttProvider(settings.sttProvider, keys)
+  const speaker = resolveTtsProvider(settings.ttsProvider, keys)
+  const usesOpenRouter =
+    (listener.ok && listener.id === 'openrouter') || (speaker.ok && speaker.id === 'openrouter') || settings.responder.provider === 'openrouter'
+  if (!usesOpenRouter) return
+  void fetchImpl('https://openrouter.ai/api/v1/key', { method: 'HEAD', signal: AbortSignal.timeout(5000) }).catch(() => {})
+}
+
+/**
  * A speaking stream for one piece of a session's reply, with the person's
  * provider, voice and speed; audio goes straight to the window. Null when
  * no speaking provider has a key.
@@ -39,41 +65,102 @@ function openSessionTts(
   owner: Owner,
   audioChannel: string,
   contextId: string,
-  onError: (code: VoiceErrorCode) => void
+  onError: (code: VoiceErrorCode, message: string) => void,
+  onEnd?: (heard: boolean) => void
 ): TtsStream | null {
   const settings = currentVoiceSettings()
   const resolved = resolveTtsProvider(settings.ttsProvider, voiceKeyAvailability())
   if (!resolved.ok) {
-    onError('no_key')
+    onError('no_key', 'No speaking provider has a key')
     return null
   }
   const entry = ttsEntry(resolved.id)
   const apiKey = entry.key.kind === 'none' ? '' : readVoiceSourceKey(entry.key)
   if (apiKey === null) {
-    onError('no_key')
+    onError('no_key', `No ${entry.label} key`)
     return null
   }
   let seq = 0
-  return ttsProvider(entry.id).stream({
+  let rate = 24000
+  const model = chooseModel(entry, settings.tts[entry.id]?.model)
+  const stream = ttsProvider(entry.id).stream({
     apiKey,
-    model: resolveModel(entry.models, settings.tts[entry.id]?.model),
-    voiceId: settings.tts[entry.id]?.voiceId ?? entry.defaultVoice.id,
+    model,
+    // Only a voice this model takes (A-06).
+    voiceId: pickVoice(cachedModelVoices(entry.id, model), settings.tts[entry.id]?.voiceId, entry.defaultVoice.id),
     speed: clampSpeed(settings.speed, entry.caps.speed),
     contextId,
     signal: new AbortController().signal,
     onAudio: (chunk) => {
+      rate = chunk.sampleRate
       if (!owner.isDestroyed()) {
-        owner.send(audioChannel, { utteranceId: contextId, seq: seq++, sampleRate: chunk.sampleRate, pcm: chunk.pcm })
+        owner.send(audioChannel, {
+          utteranceId: contextId,
+          seq: seq++,
+          sampleRate: chunk.sampleRate,
+          pcm: chunk.pcm,
+          ...(chunk.piece !== undefined ? { piece: chunk.piece } : {})
+        })
       }
     },
     onError
   })
+  // All of this reply's speech has been sent (or it was stopped): the window may call it drained (B9).
+  void stream.done().then(
+    () => {
+      const heard = seq > 0
+      if (!owner.isDestroyed()) {
+        owner.send(audioChannel, { utteranceId: contextId, seq: seq++, sampleRate: rate, pcm: new Int16Array(0), last: true })
+      }
+      onEnd?.(heard)
+    },
+    () => onEnd?.(seq > 0)
+  )
+  return stream
 }
 
 type Owner = { id: number; isDestroyed(): boolean; send(channel: string, payload: unknown): void; once?(ev: 'destroyed', fn: () => void): unknown }
 
-const sessions = new Map<string, { session: VoiceSession; owner: Owner }>()
+/**
+ * What a session did, for vyotiq.log (A-07): who listens and speaks, and
+ * every failure with its code and the provider's reason. Never what was said.
+ */
+function logVoiceEvent(event: VoiceEvent): void {
+  if (event.kind === 'engine') {
+    const notes = [
+      `speaks with ${event.tts ?? 'nothing'}`,
+      event.sttFellBackFrom ? `no ${event.sttFellBackFrom} key` : '',
+      event.ttsFellBackFrom ? `no ${event.ttsFellBackFrom} key` : ''
+    ]
+    logger.info('Voice session listening', { scope: 'voice', provider: event.stt, reason: notes.filter(Boolean).join('; ') })
+  } else if (event.kind === 'error') {
+    logger.warn('Voice problem', { scope: 'voice', kind: event.side ?? 'session', code: event.code, reason: event.detail ?? '' })
+  } else if (event.kind === 'reconnecting') {
+    logger.info('Voice listener reconnecting', { scope: 'voice', attempt: event.attempt })
+  }
+}
+
+/**
+ * Whether the window will take this event. The preload drops one that fails
+ * its schema, and the renderer's console never reaches vyotiq.log, so check
+ * here and log it where it can be found (A-18).
+ */
+export function voiceEventPasses(event: VoiceEvent): boolean {
+  const parsed = VoiceEventSchema.safeParse(event)
+  if (parsed.success) return true
+  const issue = parsed.error.issues[0]
+  logger.warn('Voice event failed its schema', {
+    scope: 'voice',
+    kind: event.kind,
+    reason: issue ? `${issue.path.join('.') || '(root)'}: ${issue.message}` : 'unknown'
+  })
+  return false
+}
+
+const sessions = new Map<string, { session: VoiceSession; owner: Owner; log: VoiceConversationLog | null }>()
 const byOwner = new Map<number, string>()
+/** Windows whose close already ends their session: one hook per window, not one per start. */
+const watchedOwners = new Set<number>()
 
 export type VoiceChannels = { events: string; audio: string }
 
@@ -86,11 +173,14 @@ export async function startVoiceSession(
   // One session per window: starting again replaces the old one.
   const previous = byOwner.get(owner.id)
   if (previous) await stopVoiceSession(previous)
+  // The conversation is kept beside the workspace's tasks (§24.8); its id is known once the session is.
+  let log: VoiceConversationLog | null = null
   const session = new VoiceSession({
     emit: (event: VoiceEvent) => {
-      if (!owner.isDestroyed()) owner.send(channels.events, event)
+      if (!owner.isDestroyed() && voiceEventPasses(event)) owner.send(channels.events, event)
       // The taskbar/dock and the tray say the mic is on, even with the window hidden (§13.8).
       if (event.kind === 'state') notifyBadgeChange()
+      logVoiceEvent(event)
     },
     settings: currentVoiceSettings,
     keys: () => voiceKeyAvailability(),
@@ -102,21 +192,79 @@ export async function startVoiceSession(
     },
     sttProvider,
     keyterms,
-    openTts: (contextId, onError) => openSessionTts(owner, channels.audio, contextId, onError),
+    openTts: (contextId, onError, onEnd) => openSessionTts(owner, channels.audio, contextId, onError, onEnd),
+    onUnheard: () => logger.warn('Voice reply ended without any audio', { scope: 'voice', code: 'VOICE_UNHEARD' }),
     tapRun: addRunEventTap,
     watchApprovals: watchToolApprovals,
     resolveApproval: (answer) => resolveToolApproval(answer),
     watchQuestions: watchAgentQuestions,
     resolveQuestion: (answer) => resolveAgentQuestion(answer),
-    logLatency: (t) => logger.info('Voice turn latency', { scope: 'voice', ...t })
+    pendingAsks: (runId) => ({ approvals: listPendingToolApprovals(runId), questions: listPendingAgentQuestions(runId) }),
+    // `provider`, not `listener`: log fields pass an allowlist, and an unknown string key is dropped (A-19).
+    logLatency: ({ listener, ...t }) => logger.info('Voice turn latency', { scope: 'voice', provider: listener ?? 'none', ...t }),
+    // The voice that answers (D-44): read per turn, so a Settings change applies to the next one.
+    responder: makeResponderChat,
+    onResponderUsage: (usage) => void recordResponderUsage(workspacePath, usage),
+    onResponderTrouble: (what, retried) =>
+      logger.warn(
+        what === 'timeout' ? 'Voice model was slow to answer' : 'Voice model answered with nothing',
+        { scope: 'voice', code: 'VOICE_REPLY', reason: retried ? 'asked again' : 'gave up' }
+      ),
+    loadTaskContext: (runId, taskWorkspace) => loadVoiceTaskContext(runId, getRunWorkspace(runId) ?? taskWorkspace ?? workspacePath),
+    onResponderFailed: (message) =>
+      logger.warn('Voice model failed; the turn went to the agent', { scope: 'voice', code: 'VOICE_REPLY', reason: message.slice(0, 300) }),
+    onStayedQuiet: (chars) => logger.info('Voice stayed quiet on a turn', { scope: 'voice', chars }),
+    onTurnDropped: (reason, chars, stats) =>
+      logger.info('Voice heard speech but took no turn', { scope: 'voice', reason, chars, ...stats }),
+    warm: () => warmVoiceConnections(currentVoiceSettings()),
+    record: (entry) => log?.add(entry)
   })
-  sessions.set(session.id, { session, owner })
+  log = openConversationLog(session.id, workspacePath)
+  sessions.set(session.id, { session, owner, log })
   byOwner.set(owner.id, session.id)
-  owner.once?.('destroyed', () => void stopVoiceSession(session.id))
+  if (owner.once && !watchedOwners.has(owner.id)) {
+    watchedOwners.add(owner.id)
+    owner.once('destroyed', () => {
+      watchedOwners.delete(owner.id)
+      const id = byOwner.get(owner.id)
+      if (id) void stopVoiceSession(id)
+    })
+  }
   // While it's open, replies in this workspace are written to be heard.
   setVoiceReplyWorkspace(session.id, workspacePath)
+  // The speaking model's voices, fetched alongside: the first reply is seconds away, the mic is open now.
+  const speaking = resolveTtsProvider(currentVoiceSettings().ttsProvider, voiceKeyAvailability())
+  if (speaking.ok) void prepareVoiceModels(speaking.id)
+  // The voice model's details (how it thinks) are looked up now, not on the first turn.
+  prepareResponderModel()
   await session.start()
   return session.id
+}
+
+/**
+ * The task's conversation so far, for the voice (taskContext.ts): read from
+ * the end of its transcript. Empty when it can't be read; the voice then
+ * goes on knowing only this conversation, as before.
+ */
+export async function loadVoiceTaskContext(runId: string, workspacePath: string | null): Promise<string> {
+  if (!workspacePath) return ''
+  try {
+    const window = await loadMessagesWindowAsync(workspacePath, runId, { limit: TASK_CONTEXT_MESSAGES })
+    const status = loadStatus(resolveRunDir(workspacePath, runId))
+    return formatTaskContext(window.messages, {
+      ...(status?.goal ? { goal: status.goal } : {}),
+      earlier: window.hasEarlier,
+      ...(status ? { ended: { status: status.status, ...(status.error ? { error: status.error } : {}) } } : {})
+    })
+  } catch (err) {
+    logger.warn('Voice could not read the task', { scope: 'voice', reason: err instanceof Error ? err.message : String(err) })
+    return ''
+  }
+}
+
+/** The task this window's session is on, followed or not: its conversation becomes the voice's context. */
+export function setVoiceTask(ownerId: number, sessionId: string, runId: string | null, workspacePath: string | null): void {
+  voiceSessionFor(ownerId, sessionId)?.setTask(runId, workspacePath)
 }
 
 /**
@@ -124,12 +272,33 @@ export async function startVoiceSession(
  * worktree runs in a folder the session didn't open on: from then on, replies
  * there are written to be heard too (D-30).
  */
-export function followVoiceRun(ownerId: number, sessionId: string, runId: string): void {
+export function followVoiceRun(ownerId: number, sessionId: string, runId: string, handOffId?: string): void {
   const session = voiceSessionFor(ownerId, sessionId)
   if (!session) return
   const workspace = getRunWorkspace(runId)
   if (workspace) setVoiceReplyWorkspace(sessionId, workspace)
-  session.follow(runId)
+  session.follow(runId, handOffId)
+}
+
+/** Where a session's conversation is kept: the workspace's data folder, or the app's without one. */
+export function voiceLogDir(workspacePath: string | null): string {
+  if (workspacePath) {
+    try {
+      return join(workspaceUsageDir(workspacePath), 'voice')
+    } catch {
+      /* not a path we can key: the app's folder */
+    }
+  }
+  return join(userDataRoot(), 'voice')
+}
+
+function openConversationLog(sessionId: string, workspacePath: string | null): VoiceConversationLog | null {
+  try {
+    return new VoiceConversationLog({ dir: voiceLogDir(workspacePath), sessionId })
+  } catch (err) {
+    logger.warn('Voice conversation could not be saved', { scope: 'voice', reason: err instanceof Error ? err.message : String(err) })
+    return null
+  }
 }
 
 /**
@@ -153,9 +322,11 @@ export async function stopVoiceSession(sessionId: string): Promise<void> {
   const entry = sessions.get(sessionId)
   if (!entry) return
   sessions.delete(sessionId)
+  logger.info('Voice session ended', { scope: 'voice', status: entry.session.state })
   setVoiceReplyWorkspace(sessionId, null)
   if (byOwner.get(entry.owner.id) === sessionId) byOwner.delete(entry.owner.id)
   await entry.session.stop()
+  await entry.log?.close()
   notifyBadgeChange()
 }
 

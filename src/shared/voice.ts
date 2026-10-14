@@ -6,8 +6,9 @@
  * up (docs/voice-mode.md §9.6). Nothing in this file talks to a network or
  * touches a key; it must stay importable from main and renderer alike.
  */
+import { redactSecretsInText } from './utils/redactSecrets'
 
-export const STT_PROVIDER_IDS = ['deepgram', 'assemblyai', 'elevenlabs', 'openai', 'local'] as const
+export const STT_PROVIDER_IDS = ['deepgram', 'assemblyai', 'elevenlabs', 'openai', 'openrouter', 'local'] as const
 export type SttProviderId = (typeof STT_PROVIDER_IDS)[number]
 
 export const TTS_PROVIDER_IDS = ['elevenlabs', 'cartesia', 'openai', 'openrouter'] as const
@@ -33,6 +34,14 @@ export type VoiceModelOption = {
   recommended?: boolean
 }
 
+/**
+ * Where a provider's models come from (D-36). `api`: fetched from the
+ * provider, so any model it lists may be picked and `models` is only the
+ * fallback when the fetch fails. `curated`: `models` is the whole list, and
+ * `why` says why (shown under the picker).
+ */
+export type VoiceModelSource = { from: 'api' } | { from: 'curated'; why: string }
+
 export type SttCatalogEntry = {
   id: SttProviderId
   label: string
@@ -40,6 +49,7 @@ export type SttCatalogEntry = {
   trait: string
   key: VoiceKeySource
   models: readonly VoiceModelOption[]
+  modelList: VoiceModelSource
   caps: {
     /** The provider decides when the speaker has finished. */
     turnDetection: boolean
@@ -61,6 +71,7 @@ export type TtsCatalogEntry = {
   trait: string
   key: VoiceKeySource
   models: readonly VoiceModelOption[]
+  modelList: VoiceModelSource
   caps: {
     /** Text can be streamed in as it is written (websocket input). */
     streamingInput: boolean
@@ -86,6 +97,8 @@ export const STT_CATALOG: readonly SttCatalogEntry[] = [
       { id: 'flux-general-en', label: 'Flux · English', recommended: true },
       { id: 'flux-general-multi', label: 'Flux · Multilingual' }
     ],
+    // Deepgram's /v1/models lists 460 listening models and no Flux one; this listener speaks only Flux (v2/listen).
+    modelList: { from: 'curated', why: 'Deepgram’s model list has no Flux models, the only ones this listener uses.' },
     caps: { turnDetection: true, keyterms: true, streaming: true, languages: 'multi' },
     privacy: 'Audio goes to Deepgram'
   },
@@ -99,6 +112,7 @@ export const STT_CATALOG: readonly SttCatalogEntry[] = [
       { id: 'universal-streaming-english', label: 'Universal Streaming · English' },
       { id: 'universal-streaming-multilingual', label: 'Universal Streaming · Multilingual' }
     ],
+    modelList: { from: 'curated', why: 'AssemblyAI has no model list to fetch.' },
     caps: { turnDetection: true, keyterms: true, streaming: true, languages: 'multi' },
     privacy: 'Audio goes to AssemblyAI'
   },
@@ -108,6 +122,8 @@ export const STT_CATALOG: readonly SttCatalogEntry[] = [
     trait: 'Same key as ElevenLabs voices',
     key: { kind: 'voice', vendor: 'elevenlabs' },
     models: [{ id: 'scribe_v2_realtime', label: 'Scribe v2 Realtime', recommended: true }],
+    // ElevenLabs' /v1/models lists speaking models only.
+    modelList: { from: 'curated', why: 'ElevenLabs lists only its speaking models.' },
     caps: { turnDetection: false, keyterms: false, streaming: true, languages: 'multi' },
     privacy: 'Audio goes to ElevenLabs'
   },
@@ -117,8 +133,21 @@ export const STT_CATALOG: readonly SttCatalogEntry[] = [
     trait: 'Uses your OpenAI key',
     key: { kind: 'chat', provider: 'openai' },
     models: [{ id: 'gpt-live-transcribe', label: 'Live transcribe', recommended: true }],
+    modelList: { from: 'api' },
     caps: { turnDetection: false, keyterms: true, streaming: true, languages: 'multi' },
     privacy: 'Audio goes to OpenAI'
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    trait: 'Uses your OpenRouter key · slower replies',
+    key: { kind: 'chat', provider: 'openrouter' },
+    // No streaming endpoint: each turn is sent whole once you pause, with
+    // the model dictation uses (dictation/transcribe.ts).
+    models: [{ id: 'openai/gpt-transcribe', label: 'OpenAI: GPT Transcribe', recommended: true }],
+    modelList: { from: 'api' },
+    caps: { turnDetection: false, keyterms: false, streaming: false, languages: 'multi' },
+    privacy: 'Audio goes to OpenRouter'
   },
   {
     id: 'local',
@@ -128,6 +157,7 @@ export const STT_CATALOG: readonly SttCatalogEntry[] = [
     // It runs dictation's installed model (Whisper or Moonshine), chosen in
     // dictation's settings; a second picker here would choose nothing.
     models: [{ id: 'dictation', label: 'Same model as dictation', recommended: true }],
+    modelList: { from: 'curated', why: 'Choose the model under Dictation below.' },
     caps: { turnDetection: false, keyterms: false, streaming: false, languages: 'en' },
     privacy: 'Audio stays on this PC',
     beta: true
@@ -144,6 +174,7 @@ export const TTS_CATALOG: readonly TtsCatalogEntry[] = [
       { id: 'eleven_flash_v2_5', label: 'Flash v2.5', recommended: true },
       { id: 'eleven_multilingual_v2', label: 'Multilingual v2 · slower, richer' }
     ],
+    modelList: { from: 'api' },
     // Range to confirm in the Phase 1 spike (docs/voice-mode.md §9.4).
     caps: { streamingInput: true, speed: [0.7, 1.2], supportsMarkup: false, voiceList: true },
     // A long-standing premade voice; confirm it is still listed in the spike.
@@ -159,6 +190,7 @@ export const TTS_CATALOG: readonly TtsCatalogEntry[] = [
       { id: 'sonic-3.6', label: 'Sonic 3.6', recommended: true },
       { id: 'sonic-latest', label: 'Sonic · latest' }
     ],
+    modelList: { from: 'curated', why: 'Cartesia has no model list to fetch.' },
     caps: { streamingInput: true, speed: [0.6, 1.5], supportsMarkup: false, voiceList: true },
     defaultVoice: { id: '', label: 'Cartesia default' },
     privacy: 'Reply text goes to Cartesia'
@@ -169,6 +201,7 @@ export const TTS_CATALOG: readonly TtsCatalogEntry[] = [
     trait: 'Uses your OpenAI key',
     key: { kind: 'chat', provider: 'openai' },
     models: [{ id: 'gpt-4o-mini-tts', label: 'GPT-4o mini TTS', recommended: true }],
+    modelList: { from: 'api' },
     caps: { streamingInput: false, speed: [0.25, 4], supportsMarkup: false, voiceList: false },
     defaultVoice: { id: 'alloy', label: 'Alloy' },
     privacy: 'Reply text goes to OpenAI'
@@ -178,15 +211,20 @@ export const TTS_CATALOG: readonly TtsCatalogEntry[] = [
     label: 'OpenRouter',
     trait: 'Many voice models, one key',
     key: { kind: 'chat', provider: 'openrouter' },
-    models: [{ id: 'openai/gpt-4o-mini-tts-2025-12-15', label: 'OpenAI GPT-4o mini TTS', recommended: true }],
+    // OpenRouter has no OpenAI speech model (A-01): its old id here 400'd "does not exist". Every model
+    // it serves comes from its list (D-37); this is the default and the fallback when the list can't load.
+    models: [{ id: 'elevenlabs/eleven-flash-v2.5', label: 'ElevenLabs: Eleven Flash v2.5', recommended: true }],
+    modelList: { from: 'api' },
+    // Its voices come with each model in OpenRouter's public list, not from a keyed voice list.
     caps: { streamingInput: false, speed: [0.25, 4], supportsMarkup: false, voiceList: false },
-    defaultVoice: { id: 'alloy', label: 'Alloy' },
+    // One of Eleven Flash v2.5's `supported_voices`; other models get their own first voice (`pickVoice`).
+    defaultVoice: { id: 'sarah', label: 'Sarah' },
     privacy: 'Reply text goes to OpenRouter'
   }
 ]
 
 /** Fallback order when the setting is `auto`, or the chosen provider has no working key (§9.5). */
-export const STT_AUTO_ORDER: readonly SttProviderId[] = ['deepgram', 'assemblyai', 'elevenlabs', 'openai']
+export const STT_AUTO_ORDER: readonly SttProviderId[] = ['deepgram', 'assemblyai', 'elevenlabs', 'openai', 'openrouter']
 export const TTS_AUTO_ORDER: readonly TtsProviderId[] = ['elevenlabs', 'cartesia', 'openai', 'openrouter']
 
 export function sttEntry(id: SttProviderId): SttCatalogEntry {
@@ -209,6 +247,29 @@ export function recommendedModel(models: readonly VoiceModelOption[]): string {
 export function resolveModel(models: readonly VoiceModelOption[], picked: string | undefined): string {
   if (picked && models.some((m) => m.id === picked)) return picked
   return recommendedModel(models)
+}
+
+/**
+ * The model to use (D-36). For a provider whose list comes from its API, the
+ * person's pick stands even if this catalog doesn't name it: the provider
+ * listed it, and if it's since gone the provider's own error says so (D-40).
+ */
+export function chooseModel(entry: { models: readonly VoiceModelOption[]; modelList: VoiceModelSource }, picked: string | undefined): string {
+  if (entry.modelList.from === 'api' && picked?.trim()) return picked.trim()
+  return resolveModel(entry.models, picked)
+}
+
+/**
+ * The voice to speak with, given the voices the model takes (null when that
+ * isn't known): the person's pick if the model takes it, else the
+ * catalog's default if it does, else the model's first. A voice saved for
+ * one model ("alloy") is never sent to a model that refuses it.
+ */
+export function pickVoice(voices: readonly string[] | null, picked: string | undefined, fallback: string): string {
+  if (!voices || voices.length === 0) return picked || fallback
+  if (picked && voices.includes(picked)) return picked
+  if (voices.includes(fallback)) return fallback
+  return voices[0]!
 }
 
 export function clampSpeed(speed: number, range: readonly [number, number]): number {
@@ -291,7 +352,7 @@ export const VOICE_KEY_VENDOR_LABEL: Readonly<Record<VoiceKeyVendor, string>> = 
 
 /**
  * Typed failures, mapped from vendor responses inside each adapter. The UI
- * words them; raw provider text never reaches the user (dictation finding #6).
+ * words them; the provider's own reason may follow, muted (`voiceDetail`, D-40).
  */
 export const VOICE_ERROR_CODES = [
   'no_key',
@@ -322,6 +383,27 @@ export function parseVoiceIpcCode(raw: string | undefined): VoiceErrorCode | nul
 /** Whether retrying the same request could succeed without the user changing anything. */
 export function isRetryableVoiceError(code: VoiceErrorCode): boolean {
   return code === 'rate_limited' || code === 'offline' || code === 'provider_down' || code === 'engine_failed'
+}
+
+/** Longest provider reason shown or logged (D-40). */
+export const VOICE_DETAIL_MAX = 200
+
+/**
+ * A provider's reason as one line that is safe to show after our own words
+ * (D-40): whitespace collapsed, anything shaped like a secret redacted, cut
+ * to a line. Empty when there's nothing worth showing.
+ */
+export function voiceDetail(message: string | undefined | null): string {
+  const line = redactSecretsInText(String(message ?? '')).replace(/\s+/g, ' ').trim()
+  return line.length > VOICE_DETAIL_MAX ? `${line.slice(0, VOICE_DETAIL_MAX - 1)}…` : line
+}
+
+/**
+ * What an unset language means to a listener (A-15): Deepgram and
+ * AssemblyAI pick their English model; the others detect the language.
+ */
+export function blankLanguageMeans(id: SttProviderId): 'en' | 'detect' {
+  return id === 'deepgram' || id === 'assemblyai' ? 'en' : 'detect'
 }
 
 /** HTTP status → code, shared by every adapter so they agree (§9.1). */

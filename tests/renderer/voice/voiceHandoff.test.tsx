@@ -11,6 +11,7 @@ import {
   HANDOFF_MS,
   beginVoiceHandoff,
   handleVoiceTurn,
+  registerVoiceBar,
   registerVoiceLine,
   resetVoiceModeForTests,
   setVoiceTarget,
@@ -38,6 +39,9 @@ class FakeController extends VoiceSessionController {
   override subscribe = (fn: () => void): (() => void) => {
     this.subs.add(fn)
     return () => this.subs.delete(fn)
+  }
+  override get active(): boolean {
+    return this.fakeSnap.state !== 'off'
   }
   override async start(): Promise<void> {
     this.fakeSnap = { ...this.fakeSnap, state: 'listening' }
@@ -123,6 +127,62 @@ describe('handing a session from the brief to the new task', () => {
   })
 })
 
+describe('the owning line remounting while the session is live', () => {
+  // What the real app does after a brief starts a task: the task's line takes
+  // over, then remounts as its pane settles, and each mount is a new owner id.
+  it('a line that appears after the owner’s bar left takes over, and the run is still followed', async () => {
+    await startVoiceMode('brief', { workspacePath: '/repo' })
+    setVoiceTarget('brief', briefTarget('brief'))
+    const followed = handleVoiceTurn(turn('what branch am I on'))
+    await Promise.resolve()
+    registerVoiceLine('line-1')()
+    expect(voiceModeOwner()).toBe('line-1')
+    const bar = registerVoiceBar('line-1')
+    setVoiceTarget('line-1', lineTarget(null))
+    bar()
+    await Promise.resolve()
+    registerVoiceLine('line-2')
+    expect(voiceModeOwner()).toBe('line-2')
+    registerVoiceBar('line-2')
+    setVoiceTarget('line-2', lineTarget('run-9'))
+    await expect(followed).resolves.toBe('run-9')
+  })
+
+  it('a line that appeared just before the owner’s bar left takes over at once', async () => {
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    const bar = registerVoiceBar('line-1')
+    registerVoiceLine('line-2')
+    expect(voiceModeOwner()).toBe('line-1')
+    bar()
+    await Promise.resolve()
+    expect(voiceModeOwner()).toBe('line-2')
+  })
+
+  it('a bar unmounted and remounted in one commit (StrictMode) keeps the session', async () => {
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    registerVoiceLine('line-2')
+    registerVoiceBar('line-1')()
+    registerVoiceBar('line-1')
+    await Promise.resolve()
+    expect(voiceModeOwner()).toBe('line-1')
+    registerVoiceLine('line-3')
+    expect(voiceModeOwner()).toBe('line-1')
+  })
+
+  it('a line that has been on screen a while isn’t a remount: the session waits for a new one', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    registerVoiceLine('other-task')
+    vi.setSystemTime(Date.now() + HANDOFF_MS + 1)
+    const bar = registerVoiceBar('line-1')
+    bar()
+    await Promise.resolve()
+    expect(voiceModeOwner()).toBe('line-1')
+    registerVoiceLine('line-1b')
+    expect(voiceModeOwner()).toBe('line-1b')
+  })
+})
+
 function renderBrief(onSend = vi.fn(async () => true)) {
   render(
     <Composer
@@ -189,5 +249,24 @@ describe('voice mode on the New task brief', () => {
     expect((onSend.mock.calls[0] as unknown[])[3]).toEqual({ voice: true, nativeFiles: [pdf], audio: [clip] })
     await vi.waitFor(() => expect(getComposerAttachments(key).nativeFiles).toEqual([]))
     clearComposerAttachments(key)
+  })
+})
+
+describe('a hand-off the task can’t take says why (R3)', () => {
+  it('with no task line to give it to', async () => {
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    await expect(handleVoiceTurn(turn('run the tests'))).resolves.toEqual({ failed: 'no_task' })
+  })
+
+  it('when the task refuses the message (not ready to send)', async () => {
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    setVoiceTarget('line-1', { ...lineTarget('run-1'), send: async () => false })
+    await expect(handleVoiceTurn(turn('run the tests'))).resolves.toEqual({ failed: 'refused' })
+  })
+
+  it('a sent hand-off still resolves to its run', async () => {
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    setVoiceTarget('line-1', lineTarget('run-1'))
+    await expect(handleVoiceTurn(turn('run the tests'))).resolves.toBe('run-1')
   })
 })

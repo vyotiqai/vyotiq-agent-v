@@ -19,9 +19,10 @@ advice and has not been reviewed by a lawyer.
   workspace memory are processed **on your own machine**.
 - Voice dictation sends audio to **OpenAI** by default, with your key. You can switch it to
   OpenRouter, or to a local engine that keeps audio on your machine (§7).
-- **Voice mode**, when you turn it on, sends your speech to the listening provider you chose
-  and the agent's short spoken replies to the speaking provider you chose, each with **your**
-  key. It is off until you press its button, and nothing is recorded to disk (§7).
+- **Voice mode**, when you turn it on, sends your speech to the listening provider you chose,
+  the words it heard to the voice model that answers you (OpenRouter by default), and the
+  spoken replies to the speaking provider you chose, each with **your** key. It is off until
+  you press its button, and nothing is recorded to disk (§7).
 - There is **no Vyotiq account**, no sign-in, no hosted workspace, and no Vyotiq server that
   your code or prompts pass through.
 - Model requests go **directly from your machine to the provider you configured**, using
@@ -163,18 +164,37 @@ it, close the window or quit. While it is on:
   - AssemblyAI — `wss://streaming.assemblyai.com/v3/ws`
   - ElevenLabs — `wss://api.elevenlabs.io/v1/speech-to-text/realtime`
   - OpenAI — `wss://api.openai.com/v1/realtime`
+  - OpenRouter — `https://openrouter.ai/api/v1/audio/transcriptions`, one upload per turn
+    after you pause (not streamed), with your OpenRouter key, as dictation does
   - This PC — no upload; your dictation model transcribes each turn on your machine
+- **What you said, as text,** goes to the voice model chosen under Answers with (default:
+  Claude Haiku 5.5 through `openrouter.ai`), using your key for that provider
+  (`src/main/voice/responder.ts`). With it go the recent conversation (up to 24 messages:
+  your words, the voice's replies, and the agent's spoken results), one line saying
+  whether the agent is working and on what, and the conversation of the task voice mode is
+  on: your messages in it and the agent's written answers (up to about 9,000 characters,
+  newest first kept, anything shaped like a key removed; `src/main/voice/taskContext.ts`).
+  The agent's tool calls and their output, and files, are not sent. Work
+  you ask for is passed to the agent as a short brief written by the voice model, and goes
+  to your chat model like any message.
 - **Text to be spoken** goes to the speaking provider chosen under Speaks with, using your
   key for that provider (`src/main/voice/providers/tts/`): ElevenLabs
   (`api.elevenlabs.io`), Cartesia (`api.cartesia.ai`), OpenAI (`api.openai.com`) or
-  OpenRouter (`openrouter.ai`). What is sent is the short spoken summary of each reply, a
-  few words about slow steps ("Running the tests."), an approval question, or, when you press
-  Read aloud on an answer, that answer's summary. Text that looks like a secret is redacted
-  before it is sent (`redactSecretsInText`).
+  OpenRouter (`openrouter.ai`). What is sent is the voice's replies, the short spoken
+  summary of the agent's results, a few words about slow steps ("Running the tests."), an
+  approval question, or, when you press Read aloud on an answer, that answer's summary. Text
+  that looks like a secret is redacted before it is sent (`redactSecretsInText`).
 - **Your workspace's file names** (up to 100 identifiers such as `runAgent`) may be sent to
   the listening provider as vocabulary hints, so it spells your code's names correctly.
-- **Nothing is stored.** Audio is not written to disk. Your spoken turns become ordinary
-  messages in the task record, like typed ones.
+- **The conversation is kept on your computer; audio is not.** Audio is never written to
+  disk. Each session's conversation is saved beside the workspace's task records, in
+  `userData/workspaces/<id>/voice/` (one file per session): what you said, what the voice
+  and the agent said aloud, and what became of each request (handed to a task and which
+  one, not sent and why, answered by voice). Anything shaped like a key is replaced before
+  it is written, as in task records; sounds that weren't words are noted without any words.
+  The newest 200 sessions per workspace are kept; they go with the workspace's data and with
+  Delete all data (`src/main/voice/conversationLog.ts`). The briefs it hands to the agent
+  also become ordinary messages in the task record, like typed ones.
 - **Keys** for Deepgram, AssemblyAI, ElevenLabs and Cartesia are stored like your other keys:
   encrypted with your operating system's secure storage, in main only; the window sees whether
   a key is set and its last four characters (`src/main/settings/secrets.ts`). Adding a key

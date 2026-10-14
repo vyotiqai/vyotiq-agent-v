@@ -81,7 +81,7 @@ async function speaking() {
 describe('barge-in dips first, then stops (D-33)', () => {
   it('a sound over the agent dips its voice without stopping it', async () => {
     const h = await speaking()
-    h.feed(tone(260))
+    h.feed(tone(320))
     expect(h.ducks()).toEqual([true])
     expect(h.flushed()).toBe(false)
     expect(h.session.state).toBe('speaking')
@@ -89,7 +89,7 @@ describe('barge-in dips first, then stops (D-33)', () => {
 
   it('a cough: the voice comes back once nothing more is heard', async () => {
     const h = await speaking()
-    h.feed(tone(260))
+    h.feed(tone(320))
     h.feed(silence(DUCK_GIVE_UP_MS + 100))
     expect(h.ducks()).toEqual([true, false])
     expect(h.flushed()).toBe(false)
@@ -108,12 +108,12 @@ describe('barge-in dips first, then stops (D-33)', () => {
 
   it('your words from the listener stop it at once; the agent’s own words bring it back', async () => {
     const h = await speaking()
-    h.feed(tone(260))
+    h.feed(tone(320))
     h.stt().say('the build broke on a missing import', false)
     expect(h.flushed()).toBe(false)
     expect(h.ducks().at(-1)).toBe(false)
     h.feed(silence(40))
-    h.feed(tone(260))
+    h.feed(tone(320))
     h.stt().say('wait, check the lockfile', false)
     expect(h.flushed()).toBe(true)
     expect(h.session.state).toBe('hearing')
@@ -121,9 +121,12 @@ describe('barge-in dips first, then stops (D-33)', () => {
 
   it('if the agent finishes while you’re talking, your turn carries on', async () => {
     const h = await speaking()
-    h.feed(tone(260))
+    h.feed(tone(320))
     h.session.playback(h.contextId, 'drained')
     expect(h.ducks()).toEqual([true, false])
-    expect(h.session.state).toBe('hearing')
+    // The run is still going: nothing is cut off for a sound (B1); your words still make a turn.
+    expect(h.session.state).toBe('working')
+    h.stt().say('and check the lockfile too')
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: 'turn', text: 'and check the lockfile too' }))
   })
 })

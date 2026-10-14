@@ -5,7 +5,8 @@
  * closes and errors into typed `SttEvent`s exactly once.
  */
 import type { VoiceErrorCode } from '../../../../shared/voice'
-import { isRetryableVoiceError } from '../../../../shared/voice'
+import { isRetryableVoiceError, voiceDetail } from '../../../../shared/voice'
+import { VoiceError } from '../../errors'
 import { SOCKET_OPEN, openVoiceSocket, parseFrame, type VoiceSocket } from '../../socket'
 import type { SttEvent, SttOpenOptions, SttSession } from '../types'
 
@@ -15,12 +16,47 @@ const MAX_PENDING_SAMPLES = 16000 * 10
 
 type Frame = string | Uint8Array
 
+/** A cheap authenticated GET that answers 401 for a bad key. */
+export type KeyCheck = { url: string; headers: Record<string, string> }
+
+const KEY_CHECK_TIMEOUT_MS = 5_000
+let keyCheckFetch: typeof fetch = (...args) => fetch(...args)
+
+/** Tests only: a fake `fetch` for the key check. */
+export function setKeyCheckFetchForTests(fn: typeof fetch | null): void {
+  keyCheckFetch = fn ?? ((...args) => fetch(...args))
+}
+
+/**
+ * Why a socket that never opened was refused (A-12). A refused handshake
+ * reaches us only as close 1006, with no HTTP status, so ask the vendor's
+ * REST API once with the same key. Only a clear answer counts: 401 (and not
+ * a restricted key missing a permission), 402 or 429. Anything else, or no
+ * answer, is null and the drop stays a dropped connection.
+ */
+export async function diagnoseRefusal(check: KeyCheck): Promise<{ code: VoiceErrorCode; reason: string } | null> {
+  let res: Response
+  try {
+    res = await keyCheckFetch(check.url, { headers: check.headers, signal: AbortSignal.timeout(KEY_CHECK_TIMEOUT_MS) })
+  } catch {
+    return null
+  }
+  const body = await res.text().catch(() => '')
+  const reason = voiceDetail(body)
+  if (res.status === 401 && !/permission/i.test(body)) return { code: 'rejected_key', reason }
+  if (res.status === 402) return { code: 'out_of_credit', reason }
+  if (res.status === 429) return { code: 'rate_limited', reason }
+  return null
+}
+
 export abstract class SocketStt implements SttSession {
   protected readonly socket: VoiceSocket
   protected readonly emit: (event: SttEvent) => void
   private outbox: Frame[] = []
   private pendingSamples = 0
   private closed = false
+  private opened = false
+  private diagnosing = false
   private openTimer: ReturnType<typeof setTimeout> | null
   private readyResolve!: () => void
   private readyReject!: (err: Error) => void
@@ -46,10 +82,11 @@ export abstract class SocketStt implements SttSession {
     })
     this.ready.catch(() => {})
     this.socket = openVoiceSocket(url, headers)
-    this.openTimer = setTimeout(() => this.fail('offline', `${vendor} did not connect`), OPEN_TIMEOUT_MS)
+    this.openTimer = setTimeout(() => this.refused('offline', `${vendor} did not connect`), OPEN_TIMEOUT_MS)
     this.socket.onopen = () => {
       if (this.openTimer) clearTimeout(this.openTimer)
       this.openTimer = null
+      this.opened = true
       this.onOpen()
       for (const frame of this.outbox) this.socket.send(frame)
       this.outbox = []
@@ -62,10 +99,10 @@ export abstract class SocketStt implements SttSession {
       const msg = parseFrame(ev.data)
       if (msg) this.onMessage(msg)
     }
-    this.socket.onerror = () => this.fail('offline', `${vendor} connection error`)
+    this.socket.onerror = () => this.refused('offline', `${vendor} connection error`)
     this.socket.onclose = (ev) => {
       if (this.closed) return
-      this.fail(this.closeCode(ev.code, ev.reason ?? ''), `${vendor} closed (${ev.code ?? '?'}) ${ev.reason ?? ''}`)
+      this.refused(this.closeCode(ev.code, ev.reason ?? ''), `${vendor} closed (${ev.code ?? '?'}) ${ev.reason ?? ''}`)
     }
     opts.signal.addEventListener('abort', () => void this.close(), { once: true })
   }
@@ -83,6 +120,29 @@ export abstract class SocketStt implements SttSession {
     if (code === 4002 || /credit|quota|payment|balance/i.test(reason)) return 'out_of_credit'
     if (code === 4029 || /rate|too many|concurren/i.test(reason)) return 'rate_limited'
     return code === 1000 ? 'engine_failed' : 'offline'
+  }
+
+  /** The vendor's key check, for a handshake that's refused (A-12); none by default. */
+  protected keyCheck(): KeyCheck | null {
+    return null
+  }
+
+  /**
+   * A failure from the socket. Before it ever opened, a plain "offline" may
+   * really be a refused key: check once, then fail with what was found.
+   */
+  private refused(code: VoiceErrorCode, message: string): void {
+    if (this.closed || this.diagnosing) return
+    const check = !this.opened && code === 'offline' ? this.keyCheck() : null
+    if (!check) return this.fail(code, message)
+    this.diagnosing = true
+    if (this.openTimer) clearTimeout(this.openTimer)
+    this.openTimer = null
+    void diagnoseRefusal(check).then((found) => {
+      this.diagnosing = false
+      if (found) this.fail(found.code, `${this.vendor} refused the connection${found.reason ? `: ${found.reason}` : ''}`)
+      else this.fail(code, message)
+    })
   }
 
   abstract endTurn(): void
@@ -110,7 +170,8 @@ export abstract class SocketStt implements SttSession {
   protected fail(code: VoiceErrorCode, message: string): void {
     if (this.closed) return
     this.emit({ kind: 'error', code, message, retryable: isRetryableVoiceError(code) })
-    this.readyReject(new Error(message))
+    // Typed, so a refused open keeps its code: a plain Error read as engine_failed and ended a reconnect.
+    this.readyReject(new VoiceError(code, message))
     this.shutdown(message)
   }
 

@@ -1,25 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { sttEntry, ttsEntry } from '@shared/voice'
 import { VOICE_STATE_LABEL } from '@shared/voiceSession'
 import { Icon } from '@renderer/lib/icons'
 import { Button, cn } from '@renderer/lib/ui'
-import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
-import { playEarcon } from './earcons'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { VoiceOrb } from './VoiceOrb'
-import { speakingProblem, voiceProblem } from './voiceCopy'
-import { endVoiceMode, setVoiceTarget, startVoiceMode, useVoiceMode, voiceController, voiceModeOwner } from './voiceMode'
+import { speakingProblem, turnProblem, voiceProblem, type VoiceProblem } from './voiceCopy'
+import { endVoiceMode, registerVoiceBar, setVoiceTarget, setVoiceViewOpen, startVoiceMode, useVoiceMode, voiceController } from './voiceMode'
+import type { VoiceSnapshot } from './voiceSessionController'
 import type { VoiceRunTarget } from './turnRouting'
 
 /*
   The voice bar (docs/voice-mode.md §13.2): in place of the instruction
   line's box while voice mode is on. The record stays above it, so what the
-  agent says aloud and what it did on screen are one glance apart.
+  agent says aloud and what it did on screen are one glance apart. The voice
+  view (D-48) covers the pane while it's open; this is what's left when it's
+  closed. Keys and sounds belong to the session, not the bar
+  (`VoiceSessionEffects`), so they work with no bar on screen.
 
   Row 1 (40px): orb · caption · time · where the audio goes.
   Row 2 (32px): Mute · Stop speaking · Stop the run · hint or problem · End.
 */
 
-function formatTime(ms: number): string {
+export function formatTime(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
@@ -28,7 +31,7 @@ function formatTime(ms: number): string {
 export const FIRST_TIP = 'Talk naturally · interrupt any time · headphones work best'
 const FIRST_TIP_KEY = 'vyotiq.voice.firstTipSeen'
 
-function firstTipSeen(): boolean {
+export function firstTipSeen(): boolean {
   try {
     return localStorage.getItem(FIRST_TIP_KEY) === '1'
   } catch {
@@ -36,7 +39,7 @@ function firstTipSeen(): boolean {
   }
 }
 
-function markFirstTipSeen(): void {
+export function markFirstTipSeen(): void {
   try {
     localStorage.setItem(FIRST_TIP_KEY, '1')
   } catch {
@@ -45,7 +48,45 @@ function markFirstTipSeen(): void {
 }
 
 /** Esc twice within this window ends voice mode. */
-const DOUBLE_ESC_MS = 2000
+export const DOUBLE_ESC_MS = 2000
+
+export type ShownProblem = VoiceProblem & { detail: string }
+
+export function withDetail(problem: VoiceProblem, detail: string, suffix = ''): ShownProblem {
+  return { ...problem, message: `${problem.message}${suffix}`, detail }
+}
+
+/** Our sentence, then the provider's own reason, muted (D-40). The whole line is the tooltip when it's cut. */
+export function ProblemText({ problem }: { problem: ShownProblem }) {
+  const full = problem.detail ? `${problem.message} ${problem.detail}` : problem.message
+  return (
+    <span className="min-w-0 truncate" title={full} data-voice-problem-detail={problem.detail || undefined}>
+      {problem.message}
+      {problem.detail ? <span className="text-muted">{` ${problem.detail}`}</span> : null}
+    </span>
+  )
+}
+
+/**
+ * What's wrong right now: `problem` ended the session; `trouble` is a note
+ * the session survived (a lost turn first, it's the newest; then the voice).
+ */
+export function sessionNotes(v: VoiceSnapshot): { problem: ShownProblem | null; trouble: ShownProblem | null } {
+  const problem = v.state === 'error' && v.error ? withDetail(voiceProblem(v.error), v.errorDetail) : null
+  // The session goes on, so these are notes, not alarms: a lost turn first (it's the newest), then the voice.
+  // No speaking provider at all is known from the start: say so then, not at the first reply.
+  const trouble =
+    v.state === 'error' || v.state === 'off'
+      ? null
+      : v.turnError
+        ? withDetail(turnProblem(v.turnError.code), v.turnError.detail)
+        : v.speakError
+          ? withDetail(speakingProblem(v.speakError.code), v.speakError.detail, ' Replies are on screen.')
+          : v.speaker === null
+            ? withDetail(speakingProblem('no_key'), '', ' Replies are on screen.')
+            : null
+  return { problem, trouble }
+}
 
 export function VoiceBar({
   owner,
@@ -64,118 +105,29 @@ export function VoiceBar({
   idleCaption?: string
   className?: string
 }) {
-  const { snapshot: v, settings, startedAt: sessionStartedAt } = useVoiceMode()
+  const { snapshot: v, settings, startedAt: sessionStartedAt, escArmed, viewOpen } = useVoiceMode()
   const controller = voiceController()
   // The session's clock, not this bar's: it keeps counting when the brief hands over to the task.
   const [mountedAt] = useState(() => Date.now())
   const [showFirstTip] = useState(() => !firstTipSeen())
   const startedAt = sessionStartedAt ?? mountedAt
   const [now, setNow] = useState(() => Date.now())
-  const [escArmed, setEscArmed] = useState(false)
-  const lastEsc = useRef(0)
-  const pttHeld = useRef(false)
-  const lastTurn = useRef('')
+  // On screen: the view's pill isn't needed while this bar shows. Leaving the
+  // screen while it owns the session (the line remounted), a newer line takes over.
+  useEffect(() => registerVoiceBar(owner), [owner])
 
   // The task's send/stop change every render; keep the store pointed at them.
-  setVoiceTarget(owner, target)
+  setVoiceTarget(owner, target, workspacePath)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
 
-  useEffect(() => {
-    // A bar taking over a running session (brief → task) opens quietly, and
-    // one handing it over closes quietly: the session goes on.
-    const opening = controller.snapshot.state === 'off' || controller.snapshot.state === 'connecting'
-    if (opening) playEarcon('start', settings.earcons)
-    return () => {
-      if (voiceModeOwner() !== null) return
-      playEarcon('end', settings.earcons)
-      markFirstTipSeen()
-    }
-    // Once per session, with the setting as it was when it opened.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // A soft sound for a slow step, when spoken progress is off.
-  const lastCues = useRef(v.cues)
-  useEffect(() => {
-    if (v.cues > lastCues.current) playEarcon('work', settings.earcons)
-    lastCues.current = v.cues
-  }, [v.cues, settings.earcons])
-
-  // A tick when a turn is accepted.
-  useEffect(() => {
-    if (v.lastTurn && v.lastTurn !== lastTurn.current) {
-      lastTurn.current = v.lastTurn
-      playEarcon('turn', settings.earcons)
-    }
-  }, [v.lastTurn, settings.earcons])
-
-  // Keys while the bar is up (§13.6). Capture phase, so Esc here never also stops the run.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        if (document.querySelector('[aria-expanded="true"][aria-haspopup]')) return
-        e.preventDefault()
-        e.stopPropagation()
-        if (controller.snapshot.state === 'speaking') {
-          controller.interrupt()
-          return
-        }
-        const t = Date.now()
-        if (t - lastEsc.current < DOUBLE_ESC_MS) {
-          void endVoiceMode()
-          return
-        }
-        lastEsc.current = t
-        setEscArmed(true)
-        setTimeout(() => setEscArmed(false), DOUBLE_ESC_MS)
-        return
-      }
-      // Bare letters and Space belong to any text field, empty or not.
-      if (isEditableShortcutTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.key === 'm' || e.key === 'M') {
-        e.preventDefault()
-        controller.setMuted(!controller.snapshot.muted)
-        return
-      }
-      if (e.code === 'Space' && !e.repeat && !pttHeld.current) {
-        e.preventDefault()
-        pttHeld.current = true
-        controller.ptt(true)
-      }
-    }
-    const onKeyUp = (e: KeyboardEvent): void => {
-      if (e.code === 'Space' && pttHeld.current) {
-        e.preventDefault()
-        pttHeld.current = false
-        controller.ptt(false)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    window.addEventListener('keyup', onKeyUp, true)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown, true)
-      window.removeEventListener('keyup', onKeyUp, true)
-    }
-  }, [controller])
-
   const listener = v.listener ? sttEntry(v.listener) : null
   const local = listener?.key.kind === 'none'
   const fellBackFrom = v.listenerFellBackFrom ? sttEntry(v.listenerFellBackFrom) : null
-  const problem = v.state === 'error' && v.error ? voiceProblem(v.error) : null
-  // An error outside the error state is always the speaking side: the listener's errors end the session.
-  // No speaking provider at all is known from the start: say so then, not at the first reply.
-  const voiceTrouble =
-    v.state === 'error' || v.state === 'off'
-      ? null
-      : v.error
-        ? speakingProblem(v.error)
-        : v.speaker === null
-          ? speakingProblem('no_key')
-          : null
+  const { problem, trouble: voiceTrouble } = sessionNotes(v)
   const speaker = v.speaker ? ttsEntry(v.speaker) : null
   const speakerFellBackFrom = v.speakerFellBackFrom ? ttsEntry(v.speakerFellBackFrom) : null
   // Never a silent fallback on either side (§9.5): the token says who listens and who speaks instead.
@@ -185,15 +137,17 @@ export function VoiceBar({
   ]
     .filter(Boolean)
     .join(' ')
-  const level = v.state === 'speaking' ? () => controller.speakingLevel() : () => controller.snapshot.micLevel
+  const level = (): number => controller.orbLevel()
 
   // Caption: your words while you talk; the agent's while it speaks; else what's happening.
+  // Captions off hides the words only; the agent still speaks (A-09).
+  const words = settings.captions
   const caption =
-    v.state === 'hearing' && v.partial ? (
+    words && v.state === 'hearing' && v.partial ? (
       <span className="text-fg">{v.partial}</span>
-    ) : v.state === 'speaking' && v.saying ? (
+    ) : words && v.state === 'speaking' && v.saying ? (
       <span className="text-muted">{v.saying}</span>
-    ) : v.lastTurn && (v.state === 'thinking' || v.state === 'working') ? (
+    ) : words && v.lastTurn && (v.state === 'thinking' || v.state === 'working') ? (
       <span className="text-muted">“{v.lastTurn}”</span>
     ) : (
       <span className="text-muted">
@@ -256,7 +210,7 @@ export function VoiceBar({
         ) : null}
       </div>
 
-      <div className="flex h-8 min-w-0 items-center gap-1 border-t border-border/60 pb-0.5 pl-2 pr-2" data-voice-row="controls">
+      <div className={cn('flex h-8 min-w-0 items-center gap-1 border-t pb-0.5 pl-2 pr-2', BORDER_DIVIDER)} data-voice-row="controls">
         <Button
           size="xs"
           variant="ghost"
@@ -274,14 +228,14 @@ export function VoiceBar({
         ) : null}
         {target.running() && v.state !== 'speaking' ? (
           <Button size="xs" variant="ghost" icon="stop" onClick={() => void target.stop()}>
-            Stop the agent
+            Stop the task
           </Button>
         ) : null}
 
         {problem ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-danger" role="alert">
             <Icon name="warningCircle" size={13} className="shrink-0" />
-            <span className="truncate">{problem.message}</span>
+            <ProblemText problem={problem} />
             {problem.fix === 'settings' && onOpenVoiceSettings ? (
               <Button size="xs" variant="secondary" onClick={onOpenVoiceSettings}>
                 Voice settings
@@ -301,7 +255,7 @@ export function VoiceBar({
         ) : voiceTrouble ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-warning" role="status">
             <Icon name="warningCircle" size={13} className="shrink-0" />
-            <span className="truncate">{`${voiceTrouble.message} Replies are on screen.`}</span>
+            <ProblemText problem={voiceTrouble} />
             {voiceTrouble.fix === 'settings' && onOpenVoiceSettings ? (
               <Button size="xs" variant="ghost" onClick={onOpenVoiceSettings}>
                 Voice settings
@@ -314,6 +268,11 @@ export function VoiceBar({
           </span>
         )}
 
+        {viewOpen ? null : (
+          <Button size="xs" variant="ghost" icon="expand" onClick={() => setVoiceViewOpen(true)} data-voice-open-view>
+            Voice view
+          </Button>
+        )}
         <Button size="xs" variant="secondary" icon="close" onClick={() => void endVoiceMode()} data-voice-end>
           End
         </Button>

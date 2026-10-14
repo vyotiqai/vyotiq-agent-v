@@ -79,7 +79,8 @@ describe('fixture providers', () => {
     })
     tts.pushText('Done. ')
     tts.flush()
-    await tts.done()
+    // Audio arrives before the stream is over: done() waits for end() or cancel().
+    await vi.waitFor(() => expect(chunks).toHaveLength(1))
     // Barge-in: audio not yet delivered is dropped, and nothing new is spoken.
     tts.pushText('Undelivered. ')
     tts.flush()

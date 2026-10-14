@@ -1,22 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
-import type { SecretProvider } from '@shared/ipc'
+import type { ProviderIdAny, SecretProvider } from '@shared/ipc'
+import { providerLabel } from '@shared/providers'
 import {
+  DEFAULT_VOICE_RESPONDER,
   DEFAULT_VOICE_SETTINGS,
+  type VoiceModelList,
   type VoiceEndOfTurnPatience,
-  type VoiceInterruptMode,
   type VoiceKeyStatus,
-  type VoiceSettings
+  type VoiceOpenRouterCredit,
+  type VoiceOrbLook,
+  type VoiceSettings,
+  type VoiceViewLayout
 } from '@shared/ipc/schemas/voice'
+import type { VoiceSessionState } from '@shared/voiceSession'
 import {
   STT_CATALOG,
   TTS_CATALOG,
   VOICE_KEY_VENDORS,
   VOICE_KEY_VENDOR_LABEL,
+  blankLanguageMeans,
+  chooseModel,
   clampSpeed,
   keySourceReady,
   parseVoiceIpcCode,
-  resolveModel,
+  pickVoice,
   resolveSttProvider,
   resolveTtsProvider,
   sttEntry,
@@ -26,15 +34,19 @@ import {
   type VoiceErrorCode,
   type VoiceKeyAvailability,
   type VoiceKeySource,
-  type VoiceKeyVendor
+  type VoiceKeyVendor,
+  type VoiceModelSource
 } from '@shared/voice'
+import { relativeTimeAgo } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Input, Menu, cn, selectTriggerClass } from '@renderer/lib/ui'
+import { Button, IconButton, Input, Menu, cn, selectTriggerClass } from '@renderer/lib/ui'
 import { speakText, stopSpeech, useSpeech } from '@renderer/features/voice/speechPlayback'
+import { AnimatedOrb, ORB_LOOK_OPTIONS } from '@renderer/features/voice/orb/AnimatedOrb'
 import type { VoiceOptionInfo } from '@shared/ipc/schemas/voice'
 import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup } from '../components/SettingsField'
+import { ModelRefPicker } from '../components/ModelRefField'
 import { SwitchField } from '../components/SwitchField'
 import type { SettingsOption } from '../types'
 
@@ -52,11 +64,42 @@ const SPEED_OPTIONS: readonly SettingsOption<string>[] = [
   { value: '1.3', label: 'Fastest' }
 ]
 
-const INTERRUPT_OPTIONS: readonly SettingsOption<VoiceInterruptMode>[] = [
-  { value: 'steer', label: 'Redirect the agent' },
-  { value: 'cancel', label: 'Stop the agent' },
-  { value: 'off', label: 'Just stop talking' }
+
+const LAYOUT_OPTIONS: readonly SettingsOption<VoiceViewLayout>[] = [
+  { value: 'conversation', label: 'Conversation' },
+  { value: 'orb', label: 'Orb' },
+  { value: 'split', label: 'Split' }
 ]
+
+const LAYOUT_HINT: Record<VoiceViewLayout, string> = {
+  conversation: 'The conversation fills the view; the orb sits in the bar under it.',
+  orb: 'A large orb with what’s happening now under it; the conversation opens beside it.',
+  split: 'The conversation on the left, the task’s steps and result on the right.'
+}
+
+/** The states the preview walks through, so a look is judged moving, not still. */
+const PREVIEW_STATES: readonly VoiceSessionState[] = ['listening', 'hearing', 'thinking', 'speaking']
+
+/** A small orb in the chosen look, walking through the states, with a voice-like level. */
+function OrbPreview({ look }: { look: VoiceOrbLook }) {
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setI((n) => (n + 1) % PREVIEW_STATES.length), 2600)
+    return () => clearInterval(t)
+  }, [])
+  const [started] = useState(() => performance.now())
+  const level = (): number => {
+    const t = (performance.now() - started) / 1000
+    return Math.min(1, Math.max(0, Math.sin(t * 9.1)) * Math.max(0, Math.sin(t * 2.3 + 0.6)) * 1.15)
+  }
+  const state = PREVIEW_STATES[i]!
+  return (
+    <div className="flex items-center gap-3 pt-1" data-voice-orb-preview={look}>
+      <AnimatedOrb look={look} state={state} size={72} level={level} />
+      <span className="text-caption text-tertiary">{state === 'hearing' ? 'Hearing you' : state[0]!.toUpperCase() + state.slice(1)}</span>
+    </div>
+  )
+}
 
 const PATIENCE_OPTIONS: readonly SettingsOption<VoiceEndOfTurnPatience>[] = [
   { value: 'quick', label: 'Quick' },
@@ -64,8 +107,8 @@ const PATIENCE_OPTIONS: readonly SettingsOption<VoiceEndOfTurnPatience>[] = [
   { value: 'patient', label: 'Patient' }
 ]
 
+/** The languages after the first rows, which depend on the listener (`languageOptions`). */
 const LANGUAGE_OPTIONS: readonly SettingsOption<string>[] = [
-  { value: '', label: 'English' },
   { value: 'es', label: 'Spanish' },
   { value: 'fr', label: 'French' },
   { value: 'de', label: 'German' },
@@ -76,13 +119,188 @@ const LANGUAGE_OPTIONS: readonly SettingsOption<string>[] = [
   { value: 'nl', label: 'Dutch' }
 ]
 
+/**
+ * An unset language is English to Deepgram and AssemblyAI and "work it out"
+ * to the rest, so the blank row says which, and the rest get an explicit
+ * English (A-15).
+ */
+function languageOptions(id: SttProviderId): readonly SettingsOption<string>[] {
+  return blankLanguageMeans(id) === 'en'
+    ? [{ value: '', label: 'English' }, ...LANGUAGE_OPTIONS]
+    : [{ value: '', label: 'Detect automatically' }, { value: 'en', label: 'English' }, ...LANGUAGE_OPTIONS]
+}
+
+/**
+ * OpenRouter refuses audio below $0.50 of credit (402). An ordinary key
+ * can't read the balance, so this says the floor, and warns when the key
+ * shows it's certainly short: an account that never paid, or a key limit
+ * nearly spent (A-08).
+ */
+function OpenRouterCreditNote() {
+  const [credit, setCredit] = useState<VoiceOpenRouterCredit | null>(null)
+  useEffect(() => {
+    let live = true
+    void window.vyotiq.voiceOpenRouterCredit?.()?.then((res) => {
+      if (live && res?.ok) setCredit(res.data)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  if (credit?.status === 'low') {
+    return (
+      <div className="flex items-center gap-2 text-xs text-warning" role="alert" data-voice-credit="low">
+        <Icon name="warningCircle" size={13} />
+        <span>
+          {credit.reason === 'never_paid'
+            ? 'This OpenRouter account hasn’t bought credit yet. It refuses audio under $0.50.'
+            : `This key’s own limit has $${(credit.keyRemaining ?? 0).toFixed(2)} left. OpenRouter refuses audio under $0.50.`}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <p className="m-0 text-xs text-muted" data-voice-credit={credit?.status ?? 'unknown'}>
+      OpenRouter takes audio only with at least $0.50 of credit.
+    </p>
+  )
+}
+
+/** How the default voice model reads in its menu (D-45). */
+const DEFAULT_RESPONDER_LABEL = 'Claude Haiku 5.5'
+
 /** What Preview says: short, and in the voice of a finished task. */
 export const PREVIEW_LINE = 'Done. I fixed the failing test, and the diff is on screen.'
+
+/** The provider selects' width, so the model rows share their left edge. */
+const SELECT_WIDTH = 260
+/** With a refresh button: the selects' width less the xs button (20px) and the gap (4px). */
+const MODEL_MENU_WIDTH = SELECT_WIDTH - 24
+
+/**
+ * The model for a provider and direction (D-36): fetched from the provider
+ * where it has a list, with prices (D-37); curated otherwise, saying why.
+ * Always shown, even with one model, so you can see what's in use.
+ */
+function ModelPicker({
+  id,
+  title,
+  direction,
+  provider,
+  providerLabel,
+  source,
+  fallbackModels,
+  value,
+  keysVersion,
+  locked,
+  onChange
+}: {
+  id: string
+  title: string
+  direction: 'stt' | 'tts'
+  provider: string
+  providerLabel: string
+  source: VoiceModelSource
+  fallbackModels: readonly { id: string; label: string; recommended?: boolean }[]
+  value: string
+  /** Bumps when keys change: OpenAI and ElevenLabs list models only for a key. */
+  keysVersion: string
+  locked: boolean
+  onChange: (model: string) => void
+}) {
+  const [list, setList] = useState<VoiceModelList | null>(null)
+  const [busy, setBusy] = useState(false)
+  const live = useRef(true)
+
+  const load = (refresh: boolean): void => {
+    setBusy(true)
+    const req =
+      direction === 'stt'
+        ? { direction, provider: provider as SttProviderId, refresh }
+        : { direction, provider: provider as TtsProviderId, refresh }
+    void window.vyotiq.voiceModels?.(req)?.then((res) => {
+      if (!live.current) return
+      setBusy(false)
+      if (res.ok) setList(res.data)
+    })
+  }
+
+  useEffect(() => {
+    live.current = true
+    setList(null)
+    load(false)
+    return () => {
+      live.current = false
+    }
+    // Load on what identifies the list; `load` is recreated every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [direction, provider, keysVersion])
+
+  const models: readonly { id: string; label: string; recommended?: boolean; price?: string }[] = list?.models ?? fallbackModels
+  const recommended = models.find((m) => m.recommended)?.id ?? models[0]?.id ?? ''
+  const current = value || recommended
+  const options = models.map((m) => ({
+    value: m.id,
+    label: [m.label, m.recommended ? 'Recommended' : '', m.price ?? ''].filter(Boolean).join(' · ')
+  }))
+  // A saved model the list no longer names still shows, as itself: it's what will be asked for.
+  if (current && !options.some((o) => o.value === current)) options.unshift({ value: current, label: current })
+
+  const hint = list?.error ? (
+    <span>
+      {`Couldn’t load ${providerLabel}’s models, so these are the usual ones.`}
+      {list.detail ? <span className="text-tertiary">{` ${list.detail}`}</span> : null}
+    </span>
+  ) : list?.source === 'api' ? (
+    `${models.length} models from ${providerLabel}${list.fetchedAt ? ` · updated ${relativeTimeAgo(new Date(list.fetchedAt).toISOString())}` : ''}`
+  ) : source.from === 'curated' ? (
+    source.why
+  ) : list === null ? (
+    'Loading models…'
+  ) : (
+    `Add your ${providerLabel} key to see all its models.`
+  )
+
+  return (
+    <SettingsField id={id} title={title} nested hint={hint} changed={Boolean(value)}>
+      <div className="flex items-center gap-1">
+        {/* Fixed, so menu + refresh span the selects' 260px and share their left edge; long names cut, title has them. */}
+        <div className="min-w-0" style={{ width: source.from === 'api' ? MODEL_MENU_WIDTH : SELECT_WIDTH }}>
+          <Menu
+            aria-label={title}
+            value={current}
+            options={options}
+            searchable={options.length > 8}
+            searchPlaceholder="Search models"
+            placement="down"
+            disabled={locked || options.length === 0}
+            title={options.find((o) => o.value === current)?.label}
+            triggerClassName={cn(selectTriggerClass({ quiet: !value, mono: false }), 'w-full')}
+            onChange={(next) => {
+              if (next !== current) onChange(next)
+            }}
+          />
+        </div>
+        {source.from === 'api' ? (
+          <IconButton
+            icon="refresh"
+            label={`Fetch ${providerLabel}’s models again`}
+            size="xs"
+            tone="muted"
+            disabled={busy}
+            onClick={() => load(true)}
+          />
+        ) : null}
+      </div>
+    </SettingsField>
+  )
+}
 
 /** The voice picker for the current speaking provider, with a Preview. */
 function VoicePicker({
   provider,
   providerLabel,
+  model,
   value,
   fallback,
   speed,
@@ -94,6 +312,8 @@ function VoicePicker({
 }: {
   provider: TtsProviderId
   providerLabel: string
+  /** The speaking model: on OpenRouter each model takes its own voices. */
+  model: string
   value: string
   fallback: { id: string; label: string }
   speed: number
@@ -112,7 +332,7 @@ function VoicePicker({
     let live = true
     setVoices(null)
     setLoadError(null)
-    void window.vyotiq.voiceListVoices?.({ provider })?.then((res) => {
+    void window.vyotiq.voiceListVoices?.({ provider, model })?.then((res) => {
       if (!live) return
       if (res.ok) setVoices(res.data)
       else setLoadError(`Couldn’t load ${providerLabel} voices.`)
@@ -120,10 +340,18 @@ function VoicePicker({
     return () => {
       live = false
     }
-  }, [provider, providerLabel, keysVersion])
+  }, [provider, providerLabel, model, keysVersion])
 
   const list = voices ?? []
-  const current = value || fallback.id || list[0]?.id || ''
+  // OpenRouter speaks with a voice the model takes (main's `pickVoice`): show that one, not a saved voice it would refuse.
+  const current =
+    provider === 'openrouter' && voices
+      ? pickVoice(
+          list.map((v) => v.id),
+          value,
+          fallback.id
+        )
+      : value || fallback.id || list[0]?.id || ''
   const options = list.map((v) => ({
     value: v.id,
     label: v.description ? `${v.label} · ${v.description}` : v.label,
@@ -433,8 +661,11 @@ export function VoiceModeSettings({
     (sttResolved.ok && sttResolved.fellBackFrom) || (ttsResolved.ok && ttsResolved.fellBackFrom) ? true : false
 
   const speedValue = SPEED_OPTIONS.some((o) => Number(o.value) === voice.speed) ? String(voice.speed) : '1'
-  const sttModel = resolveModel(stt.models, voice.stt[stt.id]?.model)
-  const ttsModel = resolveModel(tts.models, voice.tts[tts.id]?.model)
+  const isDefaultResponder =
+    voice.responder.provider === DEFAULT_VOICE_RESPONDER.provider && voice.responder.model === DEFAULT_VOICE_RESPONDER.model
+  const responderProviderLabel = providerLabel(voice.responder.provider as ProviderIdAny)
+  const responderReady = (secrets as Record<string, boolean | undefined>)[voice.responder.provider] === true
+  const ttsModel = chooseModel(tts, voice.tts[tts.id]?.model)
   const inUseVendors = new Set<VoiceKeyVendor>(
     [stt.key, tts.key].flatMap((k) => (k.kind === 'voice' ? [k.vendor] : []))
   )
@@ -454,22 +685,44 @@ export function VoiceModeSettings({
           width={260}
           disabled={locked}
           {...form.nestedDefaultMark('voice', 'sttProvider')}
-          below={voice.sttProvider === 'auto' ? null : missingKey(stt.key)}
+          below={
+            (voice.sttProvider === 'auto' ? null : missingKey(stt.key)) ??
+            (stt.id === 'openrouter' && keys.chat.openrouter ? <OpenRouterCreditNote /> : null)
+          }
           onChange={(v) => patch({ sttProvider: v as VoiceSettings['sttProvider'] })}
         />
-        {stt.models.length > 1 ? (
-          <SelectField
-            id="voice-stt-model"
-            title="Listening model"
-            nested
-            hint={stt.trait}
-            value={sttModel}
-            options={stt.models.map((m) => ({ value: m.id, label: m.recommended ? `${m.label} · Recommended` : m.label }))}
-            width={260}
-            disabled={locked}
-            onChange={(model) => patch({ stt: { ...voice.stt, [stt.id]: { ...voice.stt[stt.id], model } } })}
+        <ModelPicker
+          id="voice-stt-model"
+          title="Listening model"
+          direction="stt"
+          provider={stt.id}
+          providerLabel={stt.label}
+          source={stt.modelList}
+          fallbackModels={stt.models}
+          value={voice.stt[stt.id]?.model ?? ''}
+          keysVersion={JSON.stringify(keys)}
+          locked={locked}
+          onChange={(model) => patch({ stt: { ...voice.stt, [stt.id]: { ...voice.stt[stt.id], model } } })}
+        />
+        <SettingsField
+          id="voice-responder"
+          title="Answers with"
+          hint={
+            responderReady
+              ? 'Talks with you out loud and hands work to the agent. A fast model keeps it conversational.'
+              : `No ${responderProviderLabel} key: what you say goes straight to the agent.`
+          }
+          changed={!isDefaultResponder}
+        >
+          <ModelRefPicker
+            title="Answers with"
+            value={{ provider: voice.responder.provider as ProviderIdAny, model: voice.responder.model }}
+            form={form}
+            secrets={secrets}
+            emptyLabel={`Default (${DEFAULT_RESPONDER_LABEL})`}
+            onChange={(ref) => patch({ responder: ref ?? DEFAULT_VOICE_RESPONDER })}
           />
-        ) : null}
+        </SettingsField>
         <SelectField
           id="voice-tts"
           title="Speaks with"
@@ -482,22 +735,23 @@ export function VoiceModeSettings({
           below={voice.ttsProvider === 'auto' ? null : missingKey(tts.key)}
           onChange={(v) => patch({ ttsProvider: v as VoiceSettings['ttsProvider'] })}
         />
-        {tts.models.length > 1 ? (
-          <SelectField
-            id="voice-tts-model"
-            title="Voice model"
-            nested
-            hint={tts.trait}
-            value={ttsModel}
-            options={tts.models.map((m) => ({ value: m.id, label: m.recommended ? `${m.label} · Recommended` : m.label }))}
-            width={260}
-            disabled={locked}
-            onChange={(model) => patch({ tts: { ...voice.tts, [tts.id]: { ...voice.tts[tts.id], model } } })}
-          />
-        ) : null}
+        <ModelPicker
+          id="voice-tts-model"
+          title="Voice model"
+          direction="tts"
+          provider={tts.id}
+          providerLabel={tts.label}
+          source={tts.modelList}
+          fallbackModels={tts.models}
+          value={voice.tts[tts.id]?.model ?? ''}
+          keysVersion={JSON.stringify(keys)}
+          locked={locked}
+          onChange={(model) => patch({ tts: { ...voice.tts, [tts.id]: { ...voice.tts[tts.id], model } } })}
+        />
         <VoicePicker
           provider={tts.id}
           providerLabel={tts.label}
+          model={ttsModel}
           value={voice.tts[tts.id]?.voiceId ?? ''}
           fallback={tts.defaultVoice}
           speed={clampSpeed(voice.speed, tts.caps.speed)}
@@ -521,8 +775,10 @@ export function VoiceModeSettings({
           id="voice-language"
           title="Language"
           hint={stt.caps.languages === 'en' ? `${stt.label} understands English only.` : 'The language you speak in.'}
-          value={stt.caps.languages === 'en' ? '' : voice.language}
-          options={LANGUAGE_OPTIONS}
+          value={
+            stt.caps.languages === 'en' || (voice.language === 'en' && blankLanguageMeans(stt.id) === 'en') ? '' : voice.language
+          }
+          options={languageOptions(stt.id)}
           width={200}
           disabled={locked || stt.caps.languages === 'en'}
           {...form.nestedDefaultMark('voice', 'language')}
@@ -572,17 +828,32 @@ export function VoiceModeSettings({
         </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup title="Voice behaviour">
+      <SettingsGroup title="Voice view" description="How the voice view looks while you talk. Both change live.">
         <SegmentedField
-          id="voice-interrupt"
-          title="When you talk over it"
-          hint="It always stops speaking. This is what happens to the work in progress."
-          value={voice.interruptMode}
-          options={INTERRUPT_OPTIONS}
+          id="voice-layout"
+          title="Layout"
+          hint={LAYOUT_HINT[voice.viewLayout]}
+          value={voice.viewLayout}
+          options={LAYOUT_OPTIONS}
           disabled={locked}
-          {...form.nestedDefaultMark('voice', 'interruptMode')}
-          onChange={(interruptMode) => patch({ interruptMode })}
+          {...form.nestedDefaultMark('voice', 'viewLayout')}
+          onChange={(viewLayout) => patch({ viewLayout })}
         />
+        <SelectField
+          id="voice-orb"
+          title="Orb"
+          hint={ORB_LOOK_OPTIONS.find((o) => o.value === voice.orbLook)?.description}
+          value={voice.orbLook}
+          options={ORB_LOOK_OPTIONS.map(({ value, label }) => ({ value, label }))}
+          width={200}
+          disabled={locked}
+          {...form.nestedDefaultMark('voice', 'orbLook')}
+          below={<OrbPreview look={voice.orbLook} />}
+          onChange={(orbLook) => patch({ orbLook })}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="Voice behaviour">
         <SegmentedField
           id="voice-patience"
           title="Turn ending"
@@ -614,7 +885,7 @@ export function VoiceModeSettings({
         <SwitchField
           id="voice-approve"
           title="Approve by voice"
-          hint="Say yes or no to ordinary approvals. Risky actions always need a click."
+          hint="Say yes, no, or always allow to ordinary approvals. Always allow remembers only what the card would; risky actions always need a click."
           checked={voice.approveByVoice}
           disabled={locked}
           {...form.nestedDefaultMark('voice', 'approveByVoice')}
@@ -623,7 +894,7 @@ export function VoiceModeSettings({
         <SwitchField
           id="voice-captions"
           title="Captions"
-          hint="Show what it heard and what it’s saying in the voice bar."
+          hint="Show what it heard and what it’s saying in the voice view and bar."
           checked={voice.captions}
           disabled={locked}
           {...form.nestedDefaultMark('voice', 'captions')}

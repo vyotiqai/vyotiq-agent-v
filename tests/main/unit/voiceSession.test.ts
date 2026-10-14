@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PauseDetector } from '@main/voice/pauseDetector'
+import { MAX_VOICED_ZCR, MIN_SPEECH_MS, PauseDetector, SILENCE_MS, settleMs, zeroCrossingRate } from '@main/voice/pauseDetector'
 import { RECONNECT_DELAYS_MS, VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
 import { FixtureSttSession, openFixtureStt } from '@main/voice/providers/fixture'
 import type { SttOpenOptions, SttProvider } from '@main/voice/providers/types'
@@ -15,14 +15,57 @@ function tone(ms: number, amp = 8000): Int16Array {
 const silence = (ms: number) => new Int16Array(Math.round((ms / 1000) * 16000))
 
 describe('PauseDetector', () => {
-  it('reports speech after 200 ms and a pause after the patience window', () => {
+  it('reports speech after 300 ms and a pause after the patience window', () => {
     const d = new PauseDetector('normal')
     expect(d.push(silence(500))).toEqual([])
-    expect(d.push(tone(300))).toEqual([{ kind: 'speech_start' }])
-    expect(d.push(silence(500))).toEqual([])
+    expect(d.push(tone(320))).toEqual([{ kind: 'speech_start' }])
+    expect(d.push(silence(SILENCE_MS.normal - 200))).toEqual([{ kind: 'settling' }])
     const out = d.push(silence(400))
     expect(out).toHaveLength(1)
-    expect(out[0]).toMatchObject({ kind: 'pause' })
+    expect(out[0]).toEqual({ kind: 'pause', speechMs: 320, silenceMs: SILENCE_MS.normal })
+  })
+
+  it('says when the turn has probably ended, and when talking resumes after that (B10)', () => {
+    const d = new PauseDetector('normal')
+    d.push(tone(400))
+    expect(d.push(silence(settleMs('normal') - 40))).toEqual([])
+    expect(d.push(silence(60))).toEqual([{ kind: 'settling' }])
+    expect(d.push(tone(100))).toEqual([{ kind: 'resumed' }])
+    // Once per quiet stretch, and the turn still ends on the full pause.
+    const rest = [...d.push(silence(SILENCE_MS.normal + 100))].map((e) => e.kind)
+    expect(rest).toEqual(['settling', 'pause'])
+    expect(settleMs('quick')).toBe(500)
+    expect(settleMs('patient')).toBe(600)
+  })
+
+  it('hiss, breath and key clicks are not speech, however loud (B3)', () => {
+    let seed = 7
+    const noise = (ms: number, amp: number) => {
+      const out = new Int16Array(Math.round((ms / 1000) * 16000))
+      for (let i = 0; i < out.length; i++) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff
+        out[i] = Math.round(((seed / 0x7fffffff) * 2 - 1) * amp)
+      }
+      return out
+    }
+    const d = new PauseDetector('normal')
+    expect([...d.push(silence(300)), ...d.push(noise(2000, 6000)), ...d.push(silence(2000))]).toEqual([])
+    expect(zeroCrossingRate(noise(20, 6000), 0, 320)).toBeGreaterThan(MAX_VOICED_ZCR)
+    // A voice-like tone at the same loudness still is.
+    expect(zeroCrossingRate(tone(20), 0, 320)).toBeLessThan(MAX_VOICED_ZCR)
+    expect(d.push(tone(320))).toEqual([{ kind: 'speech_start' }])
+  })
+
+  it('a pause between two sentences doesn’t end the turn (D-43)', () => {
+    // "Hello." [0.8 s] "Can you hear me?" was two messages at 0.75 s.
+    const d = new PauseDetector('normal')
+    const events = [...d.push(tone(400)), ...d.push(silence(800)), ...d.push(tone(900)), ...d.push(silence(SILENCE_MS.normal + 100))]
+    expect(events.map((e) => e.kind).filter((k) => k === 'speech_start' || k === 'pause')).toEqual(['speech_start', 'pause'])
+  })
+
+  it('a sound under 300 ms is never speech', () => {
+    const d = new PauseDetector('normal')
+    expect([...d.push(tone(MIN_SPEECH_MS - 40)), ...d.push(silence(2000))]).toEqual([])
   })
 
   it('ignores a click too short to be speech', () => {
@@ -146,7 +189,7 @@ describe('VoiceSession', () => {
     const endTurn = vi.spyOn(h.stt(), 'endTurn')
     h.session.pushAudio(tone(400))
     expect(h.session.state).toBe('hearing')
-    h.session.pushAudio(silence(900))
+    h.session.pushAudio(silence(SILENCE_MS.normal + 100))
     expect(endTurn).toHaveBeenCalledTimes(1)
   })
 
@@ -230,6 +273,48 @@ describe('VoiceSession', () => {
     await h.session.start()
     expect(h.session.state).toBe('error')
     expect(h.events.at(-1)).toMatchObject({ kind: 'error', code: 'no_key', retryable: false })
+  })
+
+  it('a session failure says which side failed and carries the provider’s reason (D-40)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.session['onStt']({ kind: 'error', code: 'rejected_key', message: 'Deepgram closed (1008)  invalid   key', retryable: false })
+    expect(h.events.at(-1)).toMatchObject({ kind: 'error', side: 'session', detail: 'Deepgram closed (1008) invalid key' })
+  })
+
+  it('a whole-turn listener’s failed upload loses the turn, not the session (A-03)', async () => {
+    const h = harness({}, { voice: {}, chat: { openrouter: true } })
+    await h.session.start()
+    expect(h.session.listener).toBe('openrouter')
+    h.session.pushAudio(tone(300))
+    expect(h.session.state).toBe('hearing')
+    h.session['onStt']({ kind: 'error', code: 'provider_down', message: 'OpenRouter (502): bad gateway', retryable: true })
+    expect(h.session.state).toBe('listening')
+    expect(h.timers).toHaveLength(0)
+    expect(states(h.events)).not.toContain('reconnecting')
+    expect(h.events.at(-1)).toMatchObject({ kind: 'error', side: 'turn', code: 'provider_down', detail: 'OpenRouter (502): bad gateway' })
+  })
+
+  it('a whole-turn listener out of credit ends the session with the reason (A-03, A-04)', async () => {
+    const h = harness({}, { voice: {}, chat: { openrouter: true } })
+    await h.session.start()
+    h.session['onStt']({ kind: 'error', code: 'out_of_credit', message: 'needs $0.50 in balance for audio', retryable: false })
+    expect(h.session.state).toBe('error')
+    expect(h.events.at(-1)).toMatchObject({ side: 'session', code: 'out_of_credit', retryable: false })
+  })
+
+  it('a listener that drops again right after reconnecting keeps backing off, then gives up (A-03)', async () => {
+    const h = harness()
+    await h.session.start()
+    for (let i = 0; i < RECONNECT_DELAYS_MS.length; i++) {
+      h.session['onStt']({ kind: 'error', code: 'offline', message: 'closed (1006)', retryable: true })
+      expect(h.timers.at(-1)!.ms).toBe(RECONNECT_DELAYS_MS[i])
+      await h.runTimers()
+      await vi.waitFor(() => expect(h.session.state).toBe('listening'))
+    }
+    h.session['onStt']({ kind: 'error', code: 'offline', message: 'closed (1006)', retryable: true })
+    expect(h.session.state).toBe('error')
+    expect(h.events.at(-1)).toMatchObject({ code: 'offline', detail: 'Gave up reconnecting: closed (1006)' })
   })
 
   it('reports a fallback listener', async () => {

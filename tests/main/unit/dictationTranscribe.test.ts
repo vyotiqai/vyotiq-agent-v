@@ -123,6 +123,19 @@ describe('transcribeDictation', () => {
     expect(form.get('file')).toBeTruthy()
   })
 
+  it('counts HTTP attempts, so a retried transcription shows in the voice log', async () => {
+    getSettingsMock.mockReturnValue(settingsWithEngine('openrouter'))
+    getSecretMock.mockImplementation((provider: string) => (provider === 'openrouter' ? 'or-key' : null))
+    // The real wrapper asks for headers once per attempt: a 503, then a retry that works.
+    fetchWithRetryMock.mockImplementation(async (_url: string, _init: unknown, opts: { headersForAttempt?: () => Record<string, string> }) => {
+      expect(opts.headersForAttempt?.().Authorization).toBe('Bearer or-key')
+      expect(opts.headersForAttempt?.().Authorization).toBe('Bearer or-key')
+      return okResponse('retried')
+    })
+    const result = await transcribeDictation({ data: Buffer.from('fake-audio').toString('base64'), mime: 'audio/webm' })
+    expect(result).toEqual({ text: 'retried', attempts: 2 })
+  })
+
   it('posts OpenRouter transcriptions with pinned model and Referer/X-Title', async () => {
     getSettingsMock.mockReturnValue(settingsWithEngine('openrouter'))
     getSecretMock.mockImplementation((provider: string) =>

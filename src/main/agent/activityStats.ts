@@ -120,8 +120,8 @@ export type ActivityOptions = {
 export const NO_TASK_USAGE_GOAL = 'Commit messages and other side calls, no task'
 
 /** How the Usage page groups ledger aux sites. */
-function sideCallSite(site: UsageLedgerAuxSite): 'compaction' | 'commit_message' | 'mcp_sampling' | 'prompt_structure' {
-  return site === 'commit_message' || site === 'mcp_sampling' || site === 'prompt_structure' ? site : 'compaction'
+function sideCallSite(site: UsageLedgerAuxSite): 'compaction' | 'commit_message' | 'mcp_sampling' | 'prompt_structure' | 'voice_reply' {
+  return site === 'commit_message' || site === 'mcp_sampling' || site === 'prompt_structure' || site === 'voice_reply' ? site : 'compaction'
 }
 
 /** One task's usage on one local day — a row of the Usage CSV export. */
@@ -281,7 +281,7 @@ async function aggregateActivity(
   const errorRuns: Array<{ runId: string; workspacePath: string; goal?: string; writtenAt: string }> = []
   /** Side-call spend in the window, by site (already inside the totals). */
   const sideCalls = new Map<
-    'compaction' | 'commit_message' | 'mcp_sampling' | 'prompt_structure',
+    'compaction' | 'commit_message' | 'mcp_sampling' | 'prompt_structure' | 'voice_reply',
     { calls: number; billedInputTokens: number; outputTokens: number; billedCost?: number; estimatedCost?: number }
   >()
   const addSideCalls = (entry: UsageLedgerDay): void => {

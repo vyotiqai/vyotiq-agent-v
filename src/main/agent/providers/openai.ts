@@ -1223,6 +1223,11 @@ export function usesAnthropicCacheControlViaOpenRouter(
   baseUrl: string | undefined
 ): boolean {
   if (!/(^|\/)(anthropic\/|claude)/i.test(model.trim())) return false
+  return isOpenRouterEndpoint(providerId, baseUrl)
+}
+
+/** The OpenRouter provider, or a custom endpoint pointed at openrouter.ai. */
+function isOpenRouterEndpoint(providerId: ProviderId | undefined, baseUrl: string | undefined): boolean {
   if (providerId === 'openrouter') return true
   if (!baseUrl) return false
   try {
@@ -1445,6 +1450,12 @@ export function buildOpenAiCompatBody(
     if (!Array.isArray(supported) || supported.includes(tier)) {
       body.service_tier = tier
     }
+  }
+
+  // OpenRouter's default spreads requests by price; the voice model wants the quickest host
+  // (measured on glm-5.3-flash: first word 1.7–2.1 s sorted, 2.0–6.0 s unsorted).
+  if (req.routing === 'latency' && isOpenRouterEndpoint(providerId, req.baseUrl)) {
+    body.provider = { sort: 'latency' }
   }
 
   // Strict-host recovery: drop optional fields the host named as unknown (see

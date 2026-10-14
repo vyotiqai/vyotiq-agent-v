@@ -8,7 +8,7 @@
  * sentence could edit files (D-05). Push-to-talk release is `ForceEndTurn`.
  */
 import type { TurnPatience, SttOpenOptions, SttProvider } from '../types'
-import { SocketStt, int16Bytes, num, str } from './socketStt'
+import { SocketStt, int16Bytes, num, str, type KeyCheck } from './socketStt'
 
 export const FLUX_URL = 'wss://api.deepgram.com/v2/listen'
 
@@ -39,6 +39,10 @@ class FluxSession extends SocketStt {
 
   constructor(opts: SttOpenOptions) {
     super(fluxUrl(opts), { Authorization: `Token ${opts.apiKey}` }, opts, 'Deepgram')
+  }
+
+  protected keyCheck(): KeyCheck {
+    return { url: 'https://api.deepgram.com/v1/projects', headers: { Authorization: `Token ${this.opts.apiKey}` } }
   }
 
   protected audioFrame(pcm16k: Int16Array): Uint8Array {

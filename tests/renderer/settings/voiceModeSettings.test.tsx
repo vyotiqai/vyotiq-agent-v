@@ -117,8 +117,21 @@ describe('Settings → Voice mode', () => {
   it('writes behaviour changes into settings.voice', async () => {
     const { form, runUpdate } = makeForm()
     render(<VoiceModeSettings form={form} secrets={emptySecretStatus()} />)
-    fireEvent.click(screen.getByRole('radio', { name: 'Stop the agent' }))
-    expect(runUpdate).toHaveBeenCalledWith({ voice: expect.objectContaining({ interruptMode: 'cancel' }) })
+    fireEvent.click(screen.getByRole('radio', { name: 'Patient' }))
+    expect(runUpdate).toHaveBeenCalledWith({ voice: expect.objectContaining({ endOfTurnPatience: 'patient' }) })
+  })
+
+  it('says who answers out loud, and what happens without its key (D-44); talking over it is no longer a setting', () => {
+    const { form } = makeForm()
+    render(<VoiceModeSettings form={form} secrets={{ ...emptySecretStatus(), openrouter: true }} />)
+    const row = () => document.querySelector('[data-settings-field="voice-responder"]')!
+    expect(row().textContent).toContain('Answers with')
+    expect(row().textContent).toContain('hands work to the agent')
+    expect(screen.getByRole('button', { name: 'Answers with: model' }).textContent).toContain('anthropic/claude-haiku-5.5')
+    expect(document.querySelector('[data-settings-field="voice-interrupt"]')).toBeNull()
+    cleanup()
+    render(<VoiceModeSettings form={makeForm().form} secrets={emptySecretStatus()} />)
+    expect(row().textContent).toContain('No OpenRouter key: what you say goes straight to the agent.')
   })
 
   it('lists the provider’s voices and previews the chosen one at the chosen speed', async () => {
@@ -126,7 +139,7 @@ describe('Settings → Voice mode', () => {
       voice: { ...DEFAULT_SETTINGS.voice, speed: 1.15, tts: { openai: { voiceId: 'nova' } } }
     })
     render(<VoiceModeSettings form={form} secrets={{ ...emptySecretStatus(), openai: true }} />)
-    await waitFor(() => expect(voiceListVoices).toHaveBeenCalledWith({ provider: 'openai' }))
+    await waitFor(() => expect(voiceListVoices).toHaveBeenCalledWith({ provider: 'openai', model: 'gpt-4o-mini-tts' }))
     const row = document.querySelector('[data-settings-field="voice-voice"]')!
     await waitFor(() => expect(row.textContent).toContain('2 voices'))
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
@@ -151,5 +164,150 @@ describe('Settings → Voice mode', () => {
     expect(document.querySelector('[data-settings-field="voice-language"]')!.textContent).toContain(
       'understands English only'
     )
+  })
+
+  it('an unset language says what the listener does with it (A-15)', () => {
+    const { form } = makeForm({ voice: { ...DEFAULT_SETTINGS.voice, sttProvider: 'elevenlabs', language: '' } })
+    render(<VoiceModeSettings form={form} secrets={emptySecretStatus()} />)
+    const row = () => document.querySelector('[data-settings-field="voice-language"]')!.textContent
+    expect(row()).toContain('Detect automatically')
+    cleanup()
+    // Deepgram's blank is its English model, and an explicit English saved elsewhere reads the same.
+    const deepgram = makeForm({ voice: { ...DEFAULT_SETTINGS.voice, sttProvider: 'deepgram', language: 'en' } })
+    render(<VoiceModeSettings form={deepgram.form} secrets={emptySecretStatus()} />)
+    expect(row()).toContain('English')
+    expect(row()).not.toContain('Detect automatically')
+  })
+})
+
+describe('Settings → Voice mode: OpenRouter credit (A-08)', () => {
+  const openrouterListens = () =>
+    makeForm({ voice: { ...DEFAULT_SETTINGS.voice, sttProvider: 'openrouter' } })
+  const withCredit = (data: unknown) => {
+    const voiceOpenRouterCredit = vi.fn(async () => ({ ok: true, data }))
+    ;(window as unknown as { vyotiq: Record<string, unknown> }).vyotiq.voiceOpenRouterCredit = voiceOpenRouterCredit
+    return voiceOpenRouterCredit
+  }
+  const note = () => document.querySelector('[data-settings-field="voice-stt"] [data-voice-credit]')
+
+  it('states the $0.50 floor when OpenRouter listens', async () => {
+    withCredit({ status: 'ok' })
+    render(<VoiceModeSettings form={openrouterListens().form} secrets={{ ...emptySecretStatus(), openrouter: true }} />)
+    await waitFor(() => expect(note()?.getAttribute('data-voice-credit')).toBe('ok'))
+    expect(note()!.textContent).toContain('at least $0.50 of credit')
+  })
+
+  it('warns for an account that never paid, and for a nearly spent key limit', async () => {
+    withCredit({ status: 'low', reason: 'never_paid' })
+    render(<VoiceModeSettings form={openrouterListens().form} secrets={{ ...emptySecretStatus(), openrouter: true }} />)
+    await waitFor(() => expect(note()?.getAttribute('data-voice-credit')).toBe('low'))
+    expect(note()!.textContent).toContain('hasn’t bought credit yet')
+    cleanup()
+    withCredit({ status: 'low', reason: 'key_limit', keyRemaining: 0.12 })
+    render(<VoiceModeSettings form={openrouterListens().form} secrets={{ ...emptySecretStatus(), openrouter: true }} />)
+    await waitFor(() => expect(note()?.textContent).toContain('has $0.12 left'))
+  })
+
+  it('says nothing about credit for another listener, or without a key', () => {
+    const ask = withCredit({ status: 'ok' })
+    render(<VoiceModeSettings form={openrouterListens().form} secrets={emptySecretStatus()} />)
+    expect(note()).toBeNull()
+    expect(ask).not.toHaveBeenCalled()
+  })
+})
+
+describe('Settings → Voice mode: models from the providers (D-36, D-37)', () => {
+  const openrouterOnly = { ...emptySecretStatus(), openrouter: true }
+
+  function withModels(impl: (req: { direction: string; provider: string }) => unknown) {
+    const voiceModels = vi.fn(async (req: { direction: string; provider: string }) => ({ ok: true, data: impl(req) }))
+    ;(window as unknown as { vyotiq: Record<string, unknown> }).vyotiq.voiceModels = voiceModels
+    return voiceModels
+  }
+
+  it('shows both model rows for a provider with one curated model, fetched with prices', async () => {
+    const voiceModels = withModels((req) => ({
+      source: 'api',
+      fetchedAt: Date.now(),
+      models:
+        req.direction === 'tts'
+          ? [
+              { id: 'elevenlabs/eleven-flash-v2.5', label: 'ElevenLabs: Eleven Flash v2.5', price: '$0.02 / 1k characters', recommended: true },
+              { id: 'hexgrad/kokoro-82m', label: 'hexgrad: Kokoro 82M', price: '$0.00062 / 1k characters' }
+            ]
+          : [{ id: 'openai/gpt-transcribe', label: 'OpenAI: GPT Transcribe', price: '$0.0045 / min', recommended: true }]
+    }))
+    const { form } = makeForm()
+    render(<VoiceModeSettings form={form} secrets={openrouterOnly} />)
+    await waitFor(() => expect(voiceModels).toHaveBeenCalledWith({ direction: 'tts', provider: 'openrouter', refresh: false }))
+    expect(voiceModels).toHaveBeenCalledWith({ direction: 'stt', provider: 'openrouter', refresh: false })
+    const speakModel = document.querySelector('[data-settings-field="voice-tts-model"]')!
+    await waitFor(() => expect(speakModel.textContent).toContain('2 models from OpenRouter · updated just now'))
+    expect(speakModel.textContent).toContain('ElevenLabs: Eleven Flash v2.5 · Recommended · $0.02 / 1k characters')
+    const listenModel = document.querySelector('[data-settings-field="voice-stt-model"]')!
+    await waitFor(() => expect(listenModel.textContent).toContain('OpenAI: GPT Transcribe · Recommended · $0.0045 / min'))
+  })
+
+  it('a curated provider says why it has no fetched list', async () => {
+    withModels(() => ({ source: 'curated', models: [{ id: 'flux-general-en', label: 'Flux · English', recommended: true }] }))
+    const { form } = makeForm()
+    render(<VoiceModeSettings form={form} secrets={emptySecretStatus()} />)
+    const listenModel = document.querySelector('[data-settings-field="voice-stt-model"]')!
+    await waitFor(() => expect(listenModel.textContent).toContain('no Flux models'))
+    expect(listenModel.querySelector('button[aria-label^="Fetch"]')).toBeNull()
+  })
+
+  it('a failed fetch says so, with the reason, over the usual models', async () => {
+    withModels(() => ({
+      source: 'curated',
+      models: [{ id: 'elevenlabs/eleven-flash-v2.5', label: 'ElevenLabs: Eleven Flash v2.5', recommended: true }],
+      error: 'offline',
+      detail: 'fetch failed'
+    }))
+    const { form } = makeForm()
+    render(<VoiceModeSettings form={form} secrets={openrouterOnly} />)
+    const speakModel = document.querySelector('[data-settings-field="voice-tts-model"]')!
+    await waitFor(() => expect(speakModel.textContent).toContain('Couldn’t load OpenRouter’s models, so these are the usual ones.'))
+    expect(speakModel.textContent).toContain('fetch failed')
+  })
+
+  it('a pick is saved per provider, and Refresh fetches again', async () => {
+    const voiceModels = withModels(() => ({
+      source: 'api',
+      fetchedAt: Date.now(),
+      models: [
+        { id: 'elevenlabs/eleven-flash-v2.5', label: 'Eleven Flash', recommended: true },
+        { id: 'hexgrad/kokoro-82m', label: 'Kokoro' }
+      ]
+    }))
+    const { form, runUpdate } = makeForm()
+    render(<VoiceModeSettings form={form} secrets={openrouterOnly} />)
+    const speakModel = document.querySelector<HTMLElement>('[data-settings-field="voice-tts-model"]')!
+    await waitFor(() => expect(speakModel.textContent).toContain('2 models'))
+    fireEvent.click(speakModel.querySelector('button[aria-label="Voice model"]')!)
+    fireEvent.click(await screen.findByRole('option', { name: /Kokoro/ }))
+    expect(runUpdate).toHaveBeenCalledWith({
+      voice: expect.objectContaining({ tts: expect.objectContaining({ openrouter: expect.objectContaining({ model: 'hexgrad/kokoro-82m' }) }) })
+    })
+    fireEvent.click(speakModel.querySelector('button[aria-label="Fetch OpenRouter’s models again"]')!)
+    await waitFor(() => expect(voiceModels).toHaveBeenCalledWith({ direction: 'tts', provider: 'openrouter', refresh: true }))
+  })
+
+  it('shows the voice OpenRouter will really use, not a saved one the model refuses (A-06)', async () => {
+    withModels(() => ({ source: 'api', fetchedAt: Date.now(), models: [{ id: 'elevenlabs/eleven-flash-v2.5', label: 'Eleven Flash', recommended: true }] }))
+    voiceListVoices.mockImplementation(async () => ({
+      ok: true,
+      data: [
+        { id: 'george', label: 'George' },
+        { id: 'sarah', label: 'Sarah' }
+      ]
+    }))
+    const { form } = makeForm({ voice: { ...DEFAULT_SETTINGS.voice, tts: { openrouter: { voiceId: 'alloy' } } } } as Partial<Settings>)
+    render(<VoiceModeSettings form={form} secrets={openrouterOnly} />)
+    await waitFor(() =>
+      expect(voiceListVoices).toHaveBeenCalledWith({ provider: 'openrouter', model: 'elevenlabs/eleven-flash-v2.5' })
+    )
+    const voiceRow = document.querySelector('[data-settings-field="voice-voice"]')!
+    await waitFor(() => expect(voiceRow.querySelector('button[aria-label="Voice"]')!.textContent).toContain('Sarah'))
   })
 })

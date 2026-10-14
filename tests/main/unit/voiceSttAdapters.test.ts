@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setOpenVoiceSocketForTests, type VoiceSocket } from '@main/voice/socket'
 import { deepgramFlux, fluxUrl } from '@main/voice/providers/stt/deepgramFlux'
+import { setKeyCheckFetchForTests } from '@main/voice/providers/stt/socketStt'
 import { assemblyAi, assemblyAiUrl } from '@main/voice/providers/stt/assemblyai'
 import { elevenLabsScribe, scribeUrl } from '@main/voice/providers/stt/elevenlabsScribe'
 import { openAiRealtime } from '@main/voice/providers/stt/openaiRealtime'
-import { LEAD_IN_SAMPLES, makeLocalStt } from '@main/voice/providers/stt/local'
+import { LEAD_IN_SAMPLES, MIN_LEAD_IN_SAMPLES, makeLocalStt } from '@main/voice/providers/stt/local'
+import { makeOpenRouterStt } from '@main/voice/providers/stt/openrouter'
+import { DictationError } from '@main/dictation/errors'
 import type { SttEvent, SttOpenOptions, SttProvider } from '@main/voice/providers/types'
 
 class FakeSocket implements VoiceSocket {
@@ -45,7 +48,10 @@ function capture(): void {
     return s
   })
 }
-afterEach(() => setOpenVoiceSocketForTests(null))
+afterEach(() => {
+  setOpenVoiceSocketForTests(null)
+  setKeyCheckFetchForTests(null)
+})
 
 function opts(over: Partial<SttOpenOptions> = {}) {
   const events: SttEvent[] = []
@@ -199,6 +205,8 @@ describe('connection', () => {
     vi.useFakeTimers()
     try {
       capture()
+      // The key check that follows can't reach the vendor either.
+      setKeyCheckFetchForTests(vi.fn(async () => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch)
       const { o, events } = opts()
       // Handle the rejection before the clock moves: it happens during the advance.
       const rejected = expect(deepgramFlux.open(o)).rejects.toThrow(/did not connect/)
@@ -211,6 +219,68 @@ describe('connection', () => {
   })
 })
 
+describe('a refused handshake (A-12)', () => {
+  function keyCheckAnswers(status: number, body = '') {
+    const calls: Array<{ url: string; headers: Record<string, string> }> = []
+    setKeyCheckFetchForTests(
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, headers: (init?.headers ?? {}) as Record<string, string> })
+        return new Response(body, { status })
+      }) as unknown as typeof fetch
+    )
+    return calls
+  }
+
+  async function refuse(provider: SttProvider) {
+    capture()
+    const { o, events } = opts()
+    const pending = provider.open(o)
+    pending.catch(() => {})
+    await vi.waitFor(() => expect(sockets).toHaveLength(1))
+    // What a refused upgrade looks like from undici: an error, then close 1006.
+    sockets[0]!.onerror?.({})
+    sockets[0]!.onclose?.({ code: 1006, reason: '' })
+    const err = await pending.then(
+      () => null,
+      (e: unknown) => e as { code?: string; message?: string }
+    )
+    return { events, err }
+  }
+
+  it('asks the vendor once, and a 401 is a rejected key, not a lost connection', async () => {
+    const calls = keyCheckAnswers(401, '{"err_msg":"Invalid credentials."}')
+    const { events, err } = await refuse(deepgramFlux)
+    expect(calls).toEqual([{ url: 'https://api.deepgram.com/v1/projects', headers: { Authorization: 'Token key' } }])
+    const errors = events.filter((e) => e.kind === 'error')
+    expect(errors).toEqual([expect.objectContaining({ code: 'rejected_key', retryable: false })])
+    expect((errors[0] as { message: string }).message).toMatch(/Deepgram refused the connection: .*Invalid credentials/)
+    expect(err).toMatchObject({ code: 'rejected_key' })
+  })
+
+  it('402 is out of credit; anything unclear stays offline', async () => {
+    keyCheckAnswers(402)
+    expect((await refuse(assemblyAi)).err).toMatchObject({ code: 'out_of_credit' })
+    keyCheckAnswers(500)
+    expect((await refuse(openAiRealtime)).err).toMatchObject({ code: 'offline' })
+  })
+
+  it('a restricted ElevenLabs key missing a permission isn’t called rejected', async () => {
+    const calls = keyCheckAnswers(401, '{"detail":{"status":"missing_permissions"}}')
+    expect((await refuse(elevenLabsScribe)).err).toMatchObject({ code: 'offline' })
+    expect(calls[0]).toEqual({ url: 'https://api.elevenlabs.io/v1/models', headers: { 'xi-api-key': 'key' } })
+  })
+
+  it('a socket that had opened is never re-checked', async () => {
+    const calls = keyCheckAnswers(401)
+    capture()
+    const { o, events } = opts()
+    const { sock } = await openWith(deepgramFlux, o)
+    sock.onclose?.({ code: 1006, reason: '' })
+    expect(calls).toHaveLength(0)
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'error', code: 'offline' }))
+  })
+})
+
 describe('This PC (local)', () => {
   it('transcribes each turn’s audio once the turn ends', async () => {
     const transcribe = vi.fn(async () => ({ text: ' local words ' }))
@@ -219,13 +289,13 @@ describe('This PC (local)', () => {
     session.pushAudio(Int16Array.from([1, 2]))
     session.pushAudio(Int16Array.from([3]))
     session.endTurn()
-    await vi.waitFor(() => expect(events.at(-1)).toEqual({ kind: 'end_of_turn', text: 'local words' }))
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'end_of_turn', text: 'local words' }))
     const req = (transcribe.mock.calls[0] as unknown[])[0] as { pcm16k: string; engine: string }
     expect(req.engine).toBe('local')
     expect(Buffer.from(req.pcm16k, 'base64').length).toBe(6)
   })
 
-  it('drops what came before your speech, keeping half a second of lead-in', async () => {
+  it('drops what came before your speech, keeping a second and a half of lead-in', async () => {
     const transcribe = vi.fn(async () => ({ text: 'hi' }))
     const { o } = opts()
     const session = await makeLocalStt(transcribe as never).open(o)
@@ -237,5 +307,165 @@ describe('This PC (local)', () => {
     await vi.waitFor(() => expect(transcribe).toHaveBeenCalled())
     const req = (transcribe.mock.calls[0] as unknown[])[0] as { pcm16k: string }
     expect(Buffer.from(req.pcm16k, 'base64').length / 2).toBe(LEAD_IN_SAMPLES + 3200)
+    expect(LEAD_IN_SAMPLES).toBe(24000)
+  })
+
+  it('keeps no more lead-in than the quiet since the agent spoke, and never under half a second', async () => {
+    const sent = async (leadInMs: number): Promise<number> => {
+      const transcribe = vi.fn(async () => ({ text: 'hi' }))
+      const session = await makeLocalStt(transcribe as never).open(opts().o)
+      for (let i = 0; i < 100; i++) session.pushAudio(new Int16Array(1600))
+      session.speechStarted?.({ leadInMs })
+      session.endTurn()
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalled())
+      return Buffer.from(((transcribe.mock.calls[0] as unknown[])[0] as { pcm16k: string }).pcm16k, 'base64').length / 2
+    }
+    // The agent stopped 1 s ago: its voice is not kept.
+    expect(await sent(1000)).toBe(16000)
+    // It was still speaking: the floor.
+    expect(await sent(0)).toBe(MIN_LEAD_IN_SAMPLES)
+    // Long quiet: the full lead-in.
+    expect(await sent(Number.POSITIVE_INFINITY)).toBe(LEAD_IN_SAMPLES)
+  })
+})
+
+describe('OpenRouter (whole turns)', () => {
+  it('sends each turn through dictation’s OpenRouter path, in the session’s language', async () => {
+    const transcribe = vi.fn(async () => ({ text: ' heard you ' }))
+    const { o, events } = opts({ language: 'de' })
+    const session = await makeOpenRouterStt(transcribe as never).open(o)
+    expect(events[0]).toEqual({ kind: 'open' })
+    session.pushAudio(Int16Array.from([1, 2, 3]))
+    session.endTurn()
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'end_of_turn', text: 'heard you' }))
+    const req = (transcribe.mock.calls[0] as unknown[])[0] as { engine: string; language?: string; allowEmpty: boolean }
+    expect(req).toMatchObject({ engine: 'openrouter', language: 'de', allowEmpty: true })
+  })
+
+  it('transcribes with the model picked in Settings → Voice (B4), and dictation’s default without one', async () => {
+    const transcribe = vi.fn(async () => ({ text: 'x' }))
+    const picked = await makeOpenRouterStt(transcribe as never).open(opts({ model: 'elevenlabs/scribe-v2' }).o)
+    picked.pushAudio(Int16Array.from([1]))
+    picked.endTurn()
+    await vi.waitFor(() => expect(transcribe).toHaveBeenCalledTimes(1))
+    expect((transcribe.mock.calls[0] as unknown[])[2]).toEqual({ model: 'elevenlabs/scribe-v2' })
+    const none = await makeOpenRouterStt(transcribe as never).open(opts().o)
+    none.pushAudio(Int16Array.from([1]))
+    none.endTurn()
+    await vi.waitFor(() => expect(transcribe).toHaveBeenCalledTimes(2))
+    expect((transcribe.mock.calls[1] as unknown[])[2]).toBeUndefined()
+  })
+
+  it('starts transcribing at the first likely end, and the confirmed turn uses that result (B10)', async () => {
+    let finish: ((v: { text: string }) => void) | null = null
+    const transcribe = vi.fn(() => new Promise<{ text: string }>((r) => (finish = r)))
+    const { o, events } = opts()
+    const session = await makeOpenRouterStt(transcribe as never).open(o)
+    session.pushAudio(Int16Array.from([1, 2, 3]))
+    session.settle?.()
+    expect(transcribe).toHaveBeenCalledTimes(1)
+    // The quiet after the early start isn't sent again.
+    session.pushAudio(new Int16Array(8000))
+    session.endTurn()
+    finish!({ text: 'list the sessions' })
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'end_of_turn', text: 'list the sessions' }))
+    expect(transcribe).toHaveBeenCalledTimes(1)
+    const sent = (transcribe.mock.calls[0] as unknown[])[0] as { pcm16k: string }
+    expect(Buffer.from(sent.pcm16k, 'base64').length / 2).toBe(3)
+  })
+
+  it('talking again drops the early transcription: it is aborted and the whole turn is sent', async () => {
+    const signals: AbortSignal[] = []
+    const transcribe = vi.fn(async (_req: unknown, signal: AbortSignal) => {
+      signals.push(signal)
+      return { text: signals.length === 1 ? 'list the' : 'list the sessions please' }
+    })
+    const { o, events } = opts()
+    const session = await makeOpenRouterStt(transcribe as never).open(o)
+    session.pushAudio(Int16Array.from([1, 2]))
+    session.settle?.()
+    session.resume?.()
+    expect(signals[0]!.aborted).toBe(true)
+    session.pushAudio(Int16Array.from([3, 4]))
+    session.endTurn()
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'end_of_turn', text: 'list the sessions please' }))
+    const sent = (transcribe.mock.calls[1] as unknown[])[0] as { pcm16k: string }
+    expect(Buffer.from(sent.pcm16k, 'base64').length / 2).toBe(4)
+  })
+
+  it('an early transcription that failed is tried again on the whole turn', async () => {
+    const transcribe = vi
+      .fn()
+      .mockRejectedValueOnce(new DictationError('rate_limited', '429'))
+      .mockResolvedValueOnce({ text: 'heard' })
+    const { o, events } = opts()
+    const session = await makeOpenRouterStt(transcribe as never).open(o)
+    session.pushAudio(Int16Array.from([1]))
+    session.settle?.()
+    session.endTurn()
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'end_of_turn', text: 'heard' }))
+    expect(transcribe).toHaveBeenCalledTimes(2)
+  })
+
+  it('This PC never starts early: the one local model is kept for the real turn', async () => {
+    const transcribe = vi.fn(async () => ({ text: 'x' }))
+    const session = await makeLocalStt(transcribe as never).open(opts().o)
+    session.pushAudio(Int16Array.from([1]))
+    session.settle?.()
+    expect(transcribe).not.toHaveBeenCalled()
+  })
+
+  it('reports what each turn took, for the log: audio sent, request time, early start, retries', async () => {
+    const transcribe = vi.fn(async () => ({ text: 'Run the tests.', attempts: 2 }))
+    const { o, events } = opts()
+    const session = await makeOpenRouterStt(transcribe as never).open(o)
+    session.pushAudio(new Int16Array(16000 * 2))
+    session.endTurn()
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'end_of_turn' }))
+    expect(events.at(-1)).toMatchObject({
+      kind: 'end_of_turn',
+      text: 'Run the tests.',
+      listen: { audioMs: 2000, earlyUsed: false, attempts: 2, requestMs: expect.any(Number) }
+    })
+    // Started early at the likely end of the turn, and that result used.
+    session.pushAudio(new Int16Array(8000))
+    session.settle?.()
+    session.endTurn()
+    await vi.waitFor(() => expect(events.filter((e) => e.kind === 'end_of_turn')).toHaveLength(2))
+    expect(events.at(-1)).toMatchObject({ listen: { audioMs: 500, earlyUsed: true } })
+    expect(transcribe).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves the language out when the setting is automatic', async () => {
+    const transcribe = vi.fn(async () => ({ text: 'x' }))
+    const { o } = opts()
+    const session = await makeOpenRouterStt(transcribe as never).open(o)
+    session.pushAudio(Int16Array.from([1]))
+    session.endTurn()
+    await vi.waitFor(() => expect(transcribe).toHaveBeenCalled())
+    expect((transcribe.mock.calls[0] as unknown[])[0]).not.toHaveProperty('language')
+  })
+
+  it.each([
+    [new DictationError('no_key', 'Add an OpenRouter key'), 'no_key', false],
+    [new DictationError('rejected_key', 'turned down (401)'), 'rejected_key', false],
+    [new DictationError('rate_limited', '429'), 'rate_limited', true],
+    [new DictationError('offline', 'No connection'), 'offline', true],
+    [new DictationError('engine_failed', 'OpenRouter could not transcribe this (502)'), 'provider_down', true],
+    [
+      new DictationError('engine_failed', 'OpenRouter could not transcribe this (402): This request requires at least $0.50 in balance for audio'),
+      'out_of_credit',
+      false
+    ],
+    [new DictationError('too_long', 'too long'), 'engine_failed', false]
+  ] as const)('maps %s to %s', async (err, code, retryable) => {
+    const transcribe = vi.fn(async () => {
+      throw err
+    })
+    const { o, events } = opts()
+    const session = await makeOpenRouterStt(transcribe as never).open(o)
+    session.pushAudio(Int16Array.from([1]))
+    session.endTurn()
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'error', code, retryable }))
   })
 })

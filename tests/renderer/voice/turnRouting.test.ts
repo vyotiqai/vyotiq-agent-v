@@ -24,37 +24,26 @@ function target(running: boolean): VoiceRunTarget & { calls: string[]; setRunnin
 
 const turn = (text: string, stop = false) => ({ turnId: 't', text, stop })
 
-describe('routing a voice turn', () => {
+describe('routing the voice’s hand-off (D-44, D-46)', () => {
   it('starts or continues a task when the agent is idle', async () => {
     const t = target(false)
-    await expect(routeVoiceTurn(turn('add a test'), t, 'steer')).resolves.toEqual({ kind: 'sent', runId: 'r1' })
+    await expect(routeVoiceTurn(turn('add a test'), t)).resolves.toEqual({ kind: 'sent', runId: 'r1' })
     expect(t.calls).toEqual(['send:add a test:queue'])
   })
 
-  it('steers a running task by default', async () => {
+  it('joins a running task mid-turn, and never stops it', async () => {
     const t = target(true)
-    await routeVoiceTurn(turn('use the other file'), t, 'steer')
-    expect(t.calls).toEqual(['send:use the other file:steer'])
+    await routeVoiceTurn(turn('also check the docs'), t)
+    expect(t.calls).toEqual(['send:also check the docs:steer'])
+    expect(t.stop).not.toHaveBeenCalled()
   })
 
-  it('stop-the-agent mode cancels, waits, then sends', async () => {
+  it('a stop cancels a running task and never sends', async () => {
     const t = target(true)
-    await routeVoiceTurn(turn('start over'), t, 'cancel')
-    expect(t.calls).toEqual(['stop', 'send:start over:queue'])
-  })
-
-  it('just-stop-talking mode queues behind the run', async () => {
-    const t = target(true)
-    await routeVoiceTurn(turn('also check docs'), t, 'off')
-    expect(t.calls).toEqual(['send:also check docs:queue'])
-  })
-
-  it('a stop phrase cancels a running task and never sends', async () => {
-    const t = target(true)
-    await expect(routeVoiceTurn(turn('stop', true), t, 'steer')).resolves.toEqual({ kind: 'stopped' })
+    await expect(routeVoiceTurn(turn('stop', true), t)).resolves.toEqual({ kind: 'stopped' })
     expect(t.calls).toEqual(['stop'])
     const idle = target(false)
-    await expect(routeVoiceTurn(turn('never mind', true), idle, 'steer')).resolves.toEqual({ kind: 'dropped' })
+    await expect(routeVoiceTurn(turn('never mind', true), idle)).resolves.toEqual({ kind: 'dropped' })
     expect(idle.calls).toEqual([])
   })
 })

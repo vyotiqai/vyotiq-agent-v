@@ -43,6 +43,7 @@ import { UpdateChip } from './UpdateChip'
 import { DEFAULT_NAVIGATOR_VIEW, isCollapsed, type NavigatorView } from './useNavigatorView'
 import { requestScheduledTasks } from '@renderer/features/schedules/scheduleRequests'
 import { requestRecentlyDeleted } from '@renderer/features/deleted/RecentlyDeletedDialog'
+import { requestVoiceConversations } from '@renderer/features/voice/history/voiceHistoryRequests'
 
 export type NavigatorPlace = 'home' | 'extensions' | 'usage' | 'settings' | 'task' | 'other'
 
@@ -1049,7 +1050,7 @@ function ViewMenu({
   archiveAllDone?: () => void
   doneCount?: number
   canArchive?: boolean
-  /** The workspace whose Recently deleted the menu opens: the one listed, or the active one. */
+  /** The workspace whose Recently deleted and voice conversations the menu opens: the one listed, or the active one. */
   deletedPath?: string | null
 }) {
   const [open, setOpen] = useState(false)
@@ -1125,6 +1126,11 @@ function ViewMenu({
             id: 'recently-deleted',
             label: 'Recently deleted…',
             onSelect: () => void requestRecentlyDeleted(deletedPath)
+          },
+          {
+            id: 'voice-conversations',
+            label: 'Voice conversations…',
+            onSelect: () => void requestVoiceConversations(deletedPath)
           }
         ]
       : []),

@@ -13,6 +13,11 @@ export const JITTER_BUFFER_S = 0.06
 export const DUCKED_GAIN = 0.2
 /** Gain ramp time constant: short enough to feel instant, long enough not to click. */
 const RAMP_S = 0.03
+/**
+ * A reply whose end never arrives (its speech stream hung) still counts as
+ * drained after this much silence, so the session can't stay "speaking".
+ */
+export const STALL_DRAIN_MS = 8000
 
 export type PlayerChunk = { pcm: Int16Array; sampleRate: number; contextId: string }
 
@@ -28,6 +33,11 @@ export type VoicePlayerOptions = {
   onIdle?: () => void
   /** The first chunk of a context started (drives `audio_start`). */
   onContextStart?: (contextId: string) => void
+  /**
+   * A context marked ended (`endContext`) has played its last chunk (B9). A
+   * gap while more speech is still coming is not this.
+   */
+  onContextDrained?: (contextId: string) => void
 }
 
 export function int16ToFloat32(pcm: Int16Array): Float32Array {
@@ -47,6 +57,10 @@ export class VoicePlayer {
   private started = new Set<string>()
   /** Contexts cancelled by barge-in: late chunks for them are dropped. */
   private cancelled = new Set<string>()
+  /** Contexts whose speech is complete: drained once their last chunk has played. */
+  private ended = new Set<string>()
+  /** Started contexts gone quiet without an end: drained anyway after STALL_DRAIN_MS. */
+  private stalls = new Map<string, ReturnType<typeof setTimeout>>()
   private ducked = false
   private levelBuf: Float32Array<ArrayBuffer> | null = null
 
@@ -54,6 +68,11 @@ export class VoicePlayer {
 
   get playing(): boolean {
     return this.scheduled.length > 0
+  }
+
+  /** Audio of this context is scheduled and hasn't played out. */
+  sounding(contextId: string): boolean {
+    return this.scheduled.some((s) => s.contextId === contextId)
   }
 
   private ensure(): { ctx: PlayerAudioContext; gain: GainNode } {
@@ -72,8 +91,9 @@ export class VoicePlayer {
     return { ctx, gain }
   }
 
-  enqueue(chunk: PlayerChunk): void {
-    if (this.cancelled.has(chunk.contextId) || chunk.pcm.length === 0) return
+  /** Schedule a chunk; how many ms until it is heard, or null when it was dropped. */
+  enqueue(chunk: PlayerChunk): number | null {
+    if (this.cancelled.has(chunk.contextId) || chunk.pcm.length === 0) return null
     const { ctx, gain } = this.ensure()
     if (ctx.state === 'suspended') void ctx.resume?.()
     const buffer = ctx.createBuffer(1, chunk.pcm.length, chunk.sampleRate)
@@ -86,6 +106,7 @@ export class VoicePlayer {
     const startAt = this.nextStart > now ? this.nextStart : now + JITTER_BUFFER_S
     const entry: Scheduled = { source, contextId: chunk.contextId, endsAt: startAt + buffer.duration }
     source.onended = () => this.onEnded(entry)
+    this.clearStall(chunk.contextId)
     source.start(startAt)
     this.nextStart = entry.endsAt
     this.scheduled.push(entry)
@@ -93,13 +114,60 @@ export class VoicePlayer {
       this.started.add(chunk.contextId)
       this.opts.onContextStart?.(chunk.contextId)
     }
+    return Math.max(0, (startAt - now) * 1000)
   }
 
   private onEnded(entry: Scheduled): void {
     const i = this.scheduled.indexOf(entry)
     if (i === -1) return
     this.scheduled.splice(i, 1)
+    this.checkDrained(entry.contextId)
     if (this.scheduled.length === 0) this.opts.onIdle?.()
+  }
+
+  /**
+   * All of this context's speech has arrived. Drained now if it has played
+   * out, else when its last chunk ends. A context that never sounded isn't.
+   */
+  endContext(contextId: string): void {
+    if (this.cancelled.has(contextId)) return
+    this.ended.add(contextId)
+    this.checkDrained(contextId)
+  }
+
+  private checkDrained(contextId: string): void {
+    // Only live sessions track ends; a read-aloud finishes on `onIdle`.
+    if (!this.opts.onContextDrained) return
+    if (!this.started.has(contextId) || this.scheduled.some((s) => s.contextId === contextId)) return
+    if (this.ended.has(contextId)) {
+      this.drained(contextId)
+      return
+    }
+    // More may be coming (the next sentence is being made); a stream that hung isn't waited on forever.
+    if (!this.stalls.has(contextId)) {
+      this.stalls.set(
+        contextId,
+        setTimeout(() => {
+          this.stalls.delete(contextId)
+          if (!this.scheduled.some((s) => s.contextId === contextId)) this.drained(contextId)
+        }, STALL_DRAIN_MS)
+      )
+    }
+  }
+
+  private drained(contextId: string): void {
+    this.clearStall(contextId)
+    this.ended.delete(contextId)
+    // Played out: later chunks for it (there shouldn't be any) are dropped.
+    this.started.delete(contextId)
+    this.cancelled.add(contextId)
+    this.opts.onContextDrained?.(contextId)
+  }
+
+  private clearStall(contextId: string): void {
+    const t = this.stalls.get(contextId)
+    if (t !== undefined) clearTimeout(t)
+    this.stalls.delete(contextId)
   }
 
   /**
@@ -111,6 +179,11 @@ export class VoicePlayer {
     const victims = contextId ? this.scheduled.filter((s) => s.contextId === contextId) : [...this.scheduled]
     for (const s of victims) this.cancelled.add(s.contextId)
     if (contextId) this.cancelled.add(contextId)
+    // Cancelled is not drained: whoever cancelled it already knows it stopped.
+    for (const id of contextId ? [contextId] : [...this.stalls.keys(), ...this.ended]) {
+      this.clearStall(id)
+      this.ended.delete(id)
+    }
     if (!ctx || !this.gain || victims.length === 0) return
     const stopAt = ctx.currentTime + RAMP_S * 3
     if (victims.length === this.scheduled.length) {
@@ -157,6 +230,9 @@ export class VoicePlayer {
     this.analyser = null
     this.started.clear()
     this.cancelled.clear()
+    this.ended.clear()
+    for (const t of this.stalls.values()) clearTimeout(t)
+    this.stalls.clear()
     if (ctx && ctx.state !== 'closed') await ctx.close()
   }
 }

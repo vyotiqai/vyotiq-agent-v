@@ -535,6 +535,12 @@ function migrateRemovedDictationEngine(value: unknown): unknown {
   return dictation
 }
 
+function migrateBlankVoiceLanguage(value: unknown): unknown {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return value
+  const voice = value as Record<string, unknown>
+  return voice.language === '' || voice.language === undefined ? { ...voice, language: 'en' } : voice
+}
+
 /**
  * Rewrite old product defaults that were already written into settings.json.
  * Version is read from the raw file (not merged defaults) so a missing key
@@ -584,6 +590,11 @@ function migratePersistedSettingsDefaults(raw: Record<string, unknown>): {
   if (rawVersion < 7 && raw.autonomousMode !== true && raw.autonomousSkipQuestions === 'skip') {
     next.autonomousSkipQuestions = 'wait'
   }
+  // Before v8 a blank voice language was the default and meant "detect" to
+  // most listeners, which heard the agent's own voice as other languages.
+  // English is the default now (D-47); a "detect" picked after the v8 stamp
+  // is a user choice and survives.
+  if (rawVersion < 8) next.voice = migrateBlankVoiceLanguage(next.voice)
   return { data: next, persist: true }
 }
 

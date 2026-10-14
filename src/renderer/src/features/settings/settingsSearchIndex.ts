@@ -560,6 +560,18 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
 
   // Voice
   {
+    id: 'voice-layout',
+    title: 'Layout',
+    keywords: ['voice mode','voice','view','layout','conversation','orb','split','transcript','steps'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-orb',
+    title: 'Orb',
+    keywords: ['voice mode','voice','orb','animation','look','style','glow','pearl','aura','wire','cloud','bubble','halftone','plasma','contour','liquid','simple'],
+    section: 'voice'
+  },
+  {
     id: 'voice-stt',
     title: 'Listens with',
     keywords: ['voice mode','voice','listen','speech to text','stt','deepgram','assemblyai','elevenlabs','scribe','openai','whisper','provider','transcribe'],
@@ -608,9 +620,9 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'voice'
   },
   {
-    id: 'voice-interrupt',
-    title: 'When you talk over it',
-    keywords: ['voice mode','voice','interrupt','barge in','talk over','steer','redirect','stop','cancel'],
+    id: 'voice-responder',
+    title: 'Answers with',
+    keywords: ['voice mode','voice','responder','answers','model','haiku','conversation','talk back','reply'],
     section: 'voice'
   },
   {

@@ -55,7 +55,7 @@ function ensureWired(): VoicePlayer {
       if (end.utteranceId !== utteranceId) return
       mainDone = true
       if (end.error && state.owner) {
-        set({ error: { owner: state.owner, code: end.error, message: describeSpeechError(end.error) } })
+        set({ error: { owner: state.owner, code: end.error, message: describeSpeechError(end.error, end.detail) } })
         player?.cancel(end.utteranceId)
       }
       finishIfDrained()
@@ -68,7 +68,13 @@ function ensureWired(): VoicePlayer {
   return player
 }
 
-export function describeSpeechError(code: VoiceErrorCode | null): string {
+/** Our sentence, then the provider's own reason when there is one (D-40). */
+export function describeSpeechError(code: VoiceErrorCode | null, detail?: string): string {
+  const words = speechErrorWords(code)
+  return detail ? `${words} ${detail}` : words
+}
+
+function speechErrorWords(code: VoiceErrorCode | null): string {
   switch (code) {
     case 'no_key':
       return 'Add a key for a speaking provider in Settings → Voice to hear it.'

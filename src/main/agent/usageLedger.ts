@@ -17,6 +17,8 @@ export type UsageLedgerAuxSite =
   | 'commit_message'
   | 'mcp_sampling'
   | 'prompt_structure'
+  /** The voice that answers out loud in voice mode (D-44). */
+  | 'voice_reply'
 
 /** One call site's spend within a day bucket. */
 export type UsageLedgerAux = {

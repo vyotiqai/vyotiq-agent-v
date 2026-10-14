@@ -28,6 +28,7 @@
     "redesign:agents": "vite --config src/redesign/agents/vite.config.ts",
     "redesign:threads": "vite --config src/redesign/threads/vite.config.ts",
     "redesign:glass": "vite --config src/redesign/glass/vite.config.ts",
+    "redesign:voice-view": "vite --config src/redesign/voice-view/vite.config.ts",
     "typecheck:tests": "tsc -p tsconfig.tests-node.json --noEmit && tsc -p tsconfig.tests-web.json --noEmit && tsc -p tsconfig.tests-e2e.json --noEmit",
     "typecheck:tests:e2e": "tsc -p tsconfig.tests-e2e.json --noEmit",
     "test": "pnpm sync:harness && pnpm sync:docx-md && node scripts/test-exit-wrapper.cjs",

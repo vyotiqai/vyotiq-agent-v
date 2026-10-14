@@ -20,6 +20,7 @@ Agent V keeps its data on your computer. Nearly all of it lives in one app data 
 | "Allow for this task" grants | `approvals.json` inside the task's folder |
 | Where the task went on the network | `egress.json` inside the task's folder |
 | Drafts | `userData/workspaces/<id>/drafts.json` |
+| Voice mode conversations (no audio) | `userData/workspaces/<id>/voice/`, one file per session, the newest 200 kept |
 | Code index | `userData/workspaces/<id>/codeindex/` |
 | Instance worktrees | `userData/workspaces/<id>/instance-worktrees/` |
 | Worktree tasks | `userData/task-worktrees/` |
@@ -89,7 +90,7 @@ Nothing is uploaded to a Vyotiq server. The places Agent V connects to are:
 - **models.dev**, at start, for model details such as context windows and the OpenCode Go model list.
 - **Cloudflare (1.1.1.1)**, a small request to check that you are online: every 15 seconds while the Agent V window is visible, and every 2 seconds while a run waits for the network.
 - **OpenAI or OpenRouter**, when you dictate with one of them. OpenAI is the default. Pick "This PC" under Settings, "Voice", "Runs on" to keep audio on your computer.
-- **The voice providers you choose**, while [voice mode](/docs/voice-mode) is on: your speech to the one that listens (Deepgram, AssemblyAI, ElevenLabs or OpenAI; This PC uploads nothing), and the agent's short spoken replies to the one that speaks (ElevenLabs, Cartesia, OpenAI or OpenRouter), each with your key. Adding a key sends one request to check it.
+- **The voice providers you choose**, while [voice mode](/docs/voice-mode) is on: your speech to the one that listens (Deepgram, AssemblyAI, ElevenLabs, OpenAI or OpenRouter; This PC uploads nothing), the words it heard and the recent conversation to the voice model that answers (OpenRouter by default), and the spoken replies to the one that speaks (ElevenLabs, Cartesia, OpenAI or OpenRouter), each with your key. Adding a key sends one request to check it.
 - **MCP servers you add, web pages** the agent opens or fetches, and the search engine set in Settings, "Tools", "Search engine" (DuckDuckGo unless you change it), when the agent searches the web.
 - **Whatever a command reaches.** Commands the agent runs in the terminal, such as a package install or a `git push`, use the network like any other program.
 

@@ -40,6 +40,7 @@ import { ShortcutsHelpDialog } from '@renderer/features/help/ShortcutsHelpDialog
 import { RepeatTaskDialog } from '@renderer/features/schedules/RepeatTaskDialog'
 import { ScheduledTasksDialog } from '@renderer/features/schedules/ScheduledTasksDialog'
 import { RecentlyDeletedDialog } from '@renderer/features/deleted/RecentlyDeletedDialog'
+import { VoiceConversationsDialog } from '@renderer/features/voice/history/VoiceConversationsDialog'
 import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
 import { exportTaskJson } from '@renderer/features/task/taskBundle'
 import { TitleBar } from './TitleBar'
@@ -50,6 +51,7 @@ import { buildNavigatorSections, type NavRow, type NavSection } from './navigato
 import type { WaitingTask } from './navigator/NotificationsRow'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 import { useNavigatorView } from './navigator/useNavigatorView'
+import { VoiceView } from '@renderer/features/voice/VoiceView'
 
 export type ShellView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage' | 'screen'
 
@@ -700,7 +702,8 @@ function AppShellInner(props: AppShellProps) {
           id="main-content"
           ref={mainRef}
           className={cn(
-            'flex min-h-0 min-w-0 flex-1 flex-col bg-bg outline-none',
+            // relative: the voice view covers this pane while it's open (D-48).
+            'relative flex min-h-0 min-w-0 flex-1 flex-col bg-bg outline-none',
             showDesktopNavigator || showRail ? 'border-l border-border' : ''
           )}
           tabIndex={-1}
@@ -709,6 +712,7 @@ function AppShellInner(props: AppShellProps) {
           <NavigatorSlotContext.Provider value={lendsNavigatorColumn ? navigatorSlot : null}>
             {children}
           </NavigatorSlotContext.Provider>
+          <VoiceView onOpenVoiceSettings={onOpenSettingsSection ? () => onOpenSettingsSection('voice') : undefined} />
         </main>
 
         {drawerOpen && !isDesktop ? (
@@ -790,6 +794,7 @@ function AppShellInner(props: AppShellProps) {
           openTask(path, runId)
         }}
       />
+      <VoiceConversationsDialog onOpenTask={openTask} />
     </div>
   )
 }

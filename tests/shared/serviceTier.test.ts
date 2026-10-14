@@ -56,3 +56,26 @@ describe('buildOpenAiCompatBody service_tier', () => {
     expect(body.service_tier).toBe('priority')
   })
 })
+
+describe('buildOpenAiCompatBody routing', () => {
+  const req = {
+    model: 'z-ai/glm-5.3-flash',
+    messages: [],
+    tools: [],
+    signal: new AbortController().signal,
+    routing: 'latency' as const
+  } satisfies ProviderChatRequest
+  const opts = { defaultBaseUrl: 'https://openrouter.ai/api/v1' }
+
+  it('asks OpenRouter for its quickest host', () => {
+    expect(buildOpenAiCompatBody(req, opts, 'openrouter').provider).toEqual({ sort: 'latency' })
+    expect(buildOpenAiCompatBody({ ...req, baseUrl: 'https://openrouter.ai/api/v1' }, opts, 'custom').provider).toEqual({
+      sort: 'latency'
+    })
+  })
+
+  it('sends nothing to a host that would not know the field', () => {
+    expect(buildOpenAiCompatBody(req, opts, 'openai').provider).toBeUndefined()
+    expect(buildOpenAiCompatBody({ ...req, routing: undefined }, opts, 'openrouter').provider).toBeUndefined()
+  })
+})

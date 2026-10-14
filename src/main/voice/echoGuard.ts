@@ -63,11 +63,18 @@ export class EchoGuard {
   private playing = false
   /** Until when the remembered words still count; null when nothing was spoken. */
   private until: number | null = null
+  /** When the agent's audio last stopped. */
+  private stoppedAt = Number.NEGATIVE_INFINITY
+  /** When the remembered words began: talk heard before then can't be their echo. */
+  private since = Number.NEGATIVE_INFINITY
 
   /** The agent is about to say this (a caption went out for it). */
   said(text: string, now: number): void {
     // A new stretch of speech after a quiet gap starts a new memory.
-    if (!this.playing && (this.until === null || now > this.until)) this.words = []
+    if (!this.playing && (this.until === null || now > this.until)) {
+      this.words = []
+      this.since = now
+    }
     this.words.push(...echoWords(text))
     if (this.words.length > MAX_WORDS) this.words = this.words.slice(-MAX_WORDS)
     if (!this.playing) this.until = now + ECHO_TAIL_MS
@@ -76,19 +83,31 @@ export class EchoGuard {
   /** The agent's audio started (true) or stopped — drained or cut off — (false). */
   setPlaying(playing: boolean, now: number): void {
     this.playing = playing
-    if (!playing) this.until = now + ECHO_TAIL_MS
+    if (!playing) {
+      this.until = now + ECHO_TAIL_MS
+      this.stoppedAt = now
+    }
+  }
+
+  /** How long the agent's voice has been quiet: 0 while it plays, Infinity if it never spoke. */
+  msSinceVoice(now: number): number {
+    return this.playing ? 0 : now - this.stoppedAt
   }
 
   reset(): void {
     this.words = []
     this.playing = false
     this.until = null
+    this.stoppedAt = Number.NEGATIVE_INFINITY
+    this.since = Number.NEGATIVE_INFINITY
   }
 
   /** Whether a transcript is most likely the agent's own voice coming back. */
   isEcho(transcript: string, now: number): boolean {
     if (this.words.length === 0) return false
     if (!this.playing && (this.until === null || now > this.until)) return false
+    // Words you finished before the agent said these (a slow listener's turn) aren't their echo.
+    if (now < this.since) return false
     const heard = echoWords(transcript)
     if (heard.length === 0) return false
     if (heard.length < SHORT_WORDS) return this.playing && containsRun(this.words, heard)

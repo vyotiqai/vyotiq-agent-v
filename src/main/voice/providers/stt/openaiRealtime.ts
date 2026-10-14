@@ -7,7 +7,7 @@
  */
 import { Upsampler16To24 } from '../../../dictation/liveOpenAI'
 import type { SttOpenOptions, SttProvider } from '../types'
-import { SocketStt, int16Base64, str } from './socketStt'
+import { SocketStt, int16Base64, str, type KeyCheck } from './socketStt'
 
 export const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?intent=transcription'
 
@@ -19,6 +19,10 @@ class OpenAiRealtimeSession extends SocketStt {
 
   constructor(opts: SttOpenOptions) {
     super(OPENAI_REALTIME_URL, { Authorization: `Bearer ${opts.apiKey}` }, opts, 'OpenAI')
+  }
+
+  protected keyCheck(): KeyCheck {
+    return { url: 'https://api.openai.com/v1/models', headers: { Authorization: `Bearer ${this.opts.apiKey}` } }
   }
 
   protected onOpen(): void {

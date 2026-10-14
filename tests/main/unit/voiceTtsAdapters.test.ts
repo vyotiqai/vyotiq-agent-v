@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PcmAssembler, base64ToInt16 } from '@main/voice/pcm'
+import { MonoMixer, PcmAssembler, base64ToInt16 } from '@main/voice/pcm'
 import { setOpenVoiceSocketForTests, type VoiceSocket } from '@main/voice/socket'
-import { makeOpenAiCompatibleTts, OPENAI_PCM_RATE } from '@main/voice/providers/tts/openaiSpeech'
+import { makeOpenAiCompatibleTts, OPENAI_PCM_RATE, pcmFormat, resetSpeechModelQuirksForTests } from '@main/voice/providers/tts/openaiSpeech'
 import { elevenLabsErrorCode, elevenLabsStreamUrl, makeElevenLabsTts, toVoiceOption } from '@main/voice/providers/tts/elevenlabs'
 import { makeCartesiaTts } from '@main/voice/providers/tts/cartesia'
 import type { TtsChunk, TtsStreamOptions } from '@main/voice/providers/types'
@@ -41,6 +41,20 @@ describe('PCM helpers', () => {
     const first = a.push(bytes.subarray(0, 3))
     const second = a.push(bytes.subarray(3))
     expect([...first, ...second]).toEqual([1, -2, 300])
+  })
+
+  it('reads the PCM format from Content-Type, OpenAI’s 24 kHz mono when absent', () => {
+    expect(pcmFormat('audio/pcm;rate=44100;channels=2')).toEqual({ rate: 44100, channels: 2 })
+    expect(pcmFormat('audio/pcm')).toEqual({ rate: OPENAI_PCM_RATE, channels: 1 })
+    expect(pcmFormat(null)).toEqual({ rate: OPENAI_PCM_RATE, channels: 1 })
+    expect(pcmFormat('audio/pcm;rate=96000')).toEqual({ rate: OPENAI_PCM_RATE, channels: 1 })
+  })
+
+  it('mixes interleaved stereo to mono across chunk edges', () => {
+    const m = new MonoMixer(2)
+    expect([...m.push(Int16Array.from([2, 4, 6]))]).toEqual([3])
+    expect([...m.push(Int16Array.from([8]))]).toEqual([7])
+    expect([...new MonoMixer(1).push(Int16Array.from([1, 2]))]).toEqual([1, 2])
   })
 
   it('decodes base64 PCM', () => {
@@ -119,6 +133,18 @@ describe('OpenAI-compatible speech (OpenAI, OpenRouter)', () => {
     expect(calls[0]!.body.instructions).toBeTypeOf('string')
   })
 
+  it('marks the first audio of each sentence with its piece, so captions keep pace with the voice', async () => {
+    const { fn } = fakeFetch({ 'First.': [pcmBytes([1]), pcmBytes([2])], 'Second.': [pcmBytes([3]), pcmBytes([4])] })
+    const { opts, chunks } = streamOpts()
+    const s = makeOpenAiCompatibleTts('openrouter', fn).stream(opts)
+    s.pushText('First.')
+    s.flush()
+    s.pushText('Second.')
+    s.end()
+    await s.done()
+    expect(chunks.map((c) => c.piece)).toEqual([0, undefined, 1, undefined])
+  })
+
   it('targets OpenRouter with its headers and maps HTTP failures to typed codes', async () => {
     const { fn, calls } = fakeFetch({}, 401)
     const { opts, errors } = streamOpts()
@@ -128,6 +154,109 @@ describe('OpenAI-compatible speech (OpenAI, OpenRouter)', () => {
     await s.done()
     expect(calls[0]!.url).toBe('https://openrouter.ai/api/v1/audio/speech')
     expect(errors).toEqual(['rejected_key'])
+  })
+
+  it('keeps the provider’s reason from a JSON error body (D-40)', async () => {
+    const fn = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'Model openai/gpt-4o-mini-tts-2025-12-15 not found', code: 404 } }), {
+          status: 404
+        })
+    ) as unknown as typeof fetch
+    const messages: string[] = []
+    const { opts, errors } = streamOpts({ onError: (code, message) => (errors.push(code), messages.push(message)) })
+    const s = makeOpenAiCompatibleTts('openrouter', fn).stream(opts)
+    s.pushText('Hi.')
+    s.end()
+    await s.done()
+    expect(errors).toEqual(['engine_failed'])
+    expect(messages).toEqual(['OpenRouter (404): Model openai/gpt-4o-mini-tts-2025-12-15 not found'])
+  })
+
+  it('a 402 is out of credit, with the text of a non-JSON body', async () => {
+    const fn = vi.fn(async () => new Response('Insufficient credits', { status: 402 })) as unknown as typeof fetch
+    const messages: string[] = []
+    const { opts, errors } = streamOpts({ onError: (code, message) => (errors.push(code), messages.push(message)) })
+    const s = makeOpenAiCompatibleTts('openrouter', fn).stream(opts)
+    s.pushText('Hi.')
+    s.end()
+    await s.done()
+    expect(errors).toEqual(['out_of_credit'])
+    expect(messages).toEqual(['OpenRouter (402): Insufficient credits'])
+  })
+
+  it('sends speed only when it isn’t Normal (A-13)', async () => {
+    const { fn, calls } = fakeFetch({ 'Hi.': [pcmBytes([1])] })
+    const s = makeOpenAiCompatibleTts('openrouter', fn).stream(streamOpts({ speed: 1 }).opts)
+    s.pushText('Hi.')
+    s.end()
+    await s.done()
+    expect(calls[0]!.body).not.toHaveProperty('speed')
+  })
+
+  it('a model that refuses speed says it at its own pace, and isn’t asked with speed again (Eleven v4, probed)', async () => {
+    resetSpeechModelQuirksForTests()
+    const bodies: Array<Record<string, unknown>> = []
+    const fn = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>
+      bodies.push(body)
+      if ('speed' in body) {
+        return new Response(JSON.stringify({ error: { message: 'speed is not supported by eleven_v4; omit it or use a model with speed control.', code: 400 } }), {
+          status: 400
+        })
+      }
+      return new Response(pcmBytes([1, 2]), { status: 200, headers: { 'content-type': 'audio/pcm;rate=24000;channels=1' } })
+    }) as unknown as typeof fetch
+    const { opts, chunks, errors } = streamOpts({ model: 'elevenlabs/eleven-v4', speed: 1.1 })
+    const s = makeOpenAiCompatibleTts('openrouter', fn).stream(opts)
+    s.pushText('First.')
+    s.flush()
+    s.pushText('Second.')
+    s.end()
+    await s.done()
+    expect(errors).toEqual([])
+    expect(chunks).toHaveLength(2)
+    // The first sentence's two in-flight requests may both carry speed; nothing after the refusal does.
+    expect(bodies.filter((b) => !('speed' in b)).map((b) => b.input)).toEqual(['First.', 'Second.'])
+    const again = makeOpenAiCompatibleTts('openrouter', fn).stream(streamOpts({ model: 'elevenlabs/eleven-v4', speed: 1.1 }).opts)
+    const before = bodies.length
+    again.pushText('Third.')
+    again.end()
+    await again.done()
+    expect(bodies.slice(before)).toEqual([expect.not.objectContaining({ speed: expect.anything() })])
+    resetSpeechModelQuirksForTests()
+  })
+
+  it('plays at the rate the response states, and mixes stereo to mono (A-16)', async () => {
+    const respond = (contentType: string, samples: number[]) =>
+      vi.fn(async () => {
+        const bytes = pcmBytes(samples)
+        // Split mid-frame and mid-sample, as a network would.
+        const stream = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(bytes.subarray(0, 3))
+            c.enqueue(bytes.subarray(3))
+            c.close()
+          }
+        })
+        return new Response(stream, { status: 200, headers: { 'content-type': contentType } })
+      }) as unknown as typeof fetch
+
+    const fish = streamOpts()
+    const a = makeOpenAiCompatibleTts('openrouter', respond('audio/pcm;rate=44100;channels=1', [5, 6])).stream(fish.opts)
+    a.pushText('Hi.')
+    a.end()
+    await a.done()
+    expect(fish.chunks.every((c) => c.sampleRate === 44100)).toBe(true)
+    expect(fish.chunks.flatMap((c) => [...c.pcm])).toEqual([5, 6])
+
+    const seed = streamOpts()
+    const b = makeOpenAiCompatibleTts('openrouter', respond('audio/pcm;rate=24000;channels=2', [10, 20, -4, -8])).stream(seed.opts)
+    b.pushText('Hi.')
+    b.end()
+    await b.done()
+    expect(seed.chunks.flatMap((c) => [...c.pcm])).toEqual([15, -6])
+    expect(seed.chunks.every((c) => c.sampleRate === 24000)).toBe(true)
   })
 
   it('cancel stops delivery and finishes', async () => {

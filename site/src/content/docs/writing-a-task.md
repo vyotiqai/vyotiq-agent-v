@@ -89,7 +89,7 @@ Drafts are kept per workspace in the app's data, not in your project, up to 50 p
 
 ## Dictation
 
-You can speak a brief or an instruction instead of typing it. Press `Ctrl+M` to start a take and press it again to insert the words at the cursor. `Esc` discards a take. You can also hold `Ctrl+M` while you speak and let go to insert: that is "Hold to talk", on by default in Settings, "Voice".
+You can speak a brief or an instruction instead of typing it. Press `Ctrl+M` to start a take and press it again to insert the words at the cursor. `Esc` discards a take. You can also hold `Ctrl+M` while you speak and let go to insert: that is "Hold to talk", on by default in Settings, "Voice". When the line is empty, holding `Space` works the same way; a quick tap still types a space.
 
 "Runs on" decides where your audio goes:
 

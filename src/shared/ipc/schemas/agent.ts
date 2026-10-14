@@ -1698,7 +1698,7 @@ export const HomeActivityResultSchema = z.object({
     sideCalls: z
       .array(
         z.object({
-          site: z.enum(['compaction', 'commit_message', 'mcp_sampling', 'prompt_structure']),
+          site: z.enum(['compaction', 'commit_message', 'mcp_sampling', 'prompt_structure', 'voice_reply']),
           calls: z.number().int().min(0),
           billedInputTokens: z.number().int().min(0),
           outputTokens: z.number().int().min(0),

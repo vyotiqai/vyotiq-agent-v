@@ -338,7 +338,8 @@ const SIDE_CALL_LABEL: Record<HomeActivitySideCall['site'], string> = {
   compaction: 'Compaction summaries',
   commit_message: 'Commit messages',
   mcp_sampling: 'MCP server requests',
-  prompt_structure: 'Structured instructions'
+  prompt_structure: 'Structured instructions',
+  voice_reply: 'Voice replies'
 }
 
 /**

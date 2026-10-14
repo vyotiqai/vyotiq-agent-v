@@ -15,9 +15,25 @@ export type SttEvent =
   /** Settled words; more may follow in the same turn. */
   | { kind: 'final'; text: string; confidence?: number }
   /** The speaker has finished; `text` is the whole turn. */
-  | { kind: 'end_of_turn'; text: string; confidence?: number }
+  | { kind: 'end_of_turn'; text: string; confidence?: number; listen?: TurnListenStats }
   | { kind: 'error'; code: VoiceErrorCode; message: string; retryable: boolean }
   | { kind: 'closed'; reason: string }
+
+/**
+ * What a whole-turn listener did for one turn, for vyotiq.log: a slow turn
+ * logged only `sttMs: 12183`, which can't tell a long upload from a retry
+ * from a slow model.
+ */
+export type TurnListenStats = {
+  /** Audio sent, in ms. */
+  audioMs: number
+  /** The request that gave the words, from when it was sent. */
+  requestMs: number
+  /** The words came from the early request (started at `settle`). */
+  earlyUsed: boolean
+  /** HTTP attempts that request made (more than 1: retried). */
+  attempts?: number
+}
 
 export interface SttSession {
   /** 16 kHz mono Int16 LE. The adapter resamples if its provider wants another rate. */
@@ -31,9 +47,18 @@ export interface SttSession {
   /**
    * The session's own detector heard you start talking. A listener that
    * buffers whole turns drops what came before (silence, the agent's voice
-   * from the speakers), keeping a short lead-in.
+   * from the speakers), keeping a lead-in. `leadInMs`: how much it may keep,
+   * so the lead-in never reaches back into the agent's voice.
    */
-  speechStarted?(): void
+  speechStarted?(opts?: { leadInMs?: number }): void
+  /**
+   * Quiet long enough that the turn has probably ended (the session's
+   * detector, before its full pause). A listener that sends whole turns may
+   * start on this one now; `endTurn` then uses that result.
+   */
+  settle?(): void
+  /** Talking again after `settle`: whatever it started is stale. */
+  resume?(): void
   close(): Promise<void>
 }
 
@@ -64,6 +89,11 @@ export type TtsChunk = {
   sampleRate: number
   /** One context per spoken reply; barge-in cancels a whole context. */
   contextId: string
+  /**
+   * This chunk is the first audio of the n-th flushed piece (0-based), where
+   * the adapter can tell: captions are shown as their own words are heard.
+   */
+  piece?: number
 }
 
 export interface TtsStream {

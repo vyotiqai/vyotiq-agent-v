@@ -374,4 +374,37 @@ describe('Composer dictation (take)', () => {
     })
     await waitFor(() => expect(field().textContent).toBe('tapped'))
   })
+
+  it('holding Space in an empty composer talks until it is let go, like Claude Code (D-49)', async () => {
+    renderComposer()
+    await waitFor(() => expect(window.vyotiq.getSettings).toHaveBeenCalled())
+    field().focus()
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: ' ', code: 'Space' })
+    })
+    // Still held after the hold time: a take, held.
+    await waitFor(() => expect(strip()?.dataset.take).toBe('listening'), { timeout: 1500 })
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: ' ', code: 'Space', repeat: true })
+    })
+    replies.push({ ok: true, data: { text: 'spoken into the box' } })
+    speak(tone(900))
+    await act(async () => {
+      fireEvent.keyUp(field(), { key: ' ', code: 'Space' })
+    })
+    await waitFor(() => expect(field().textContent).toBe('spoken into the box'))
+  })
+
+  it('a quick tap of Space is just a space: no take, no microphone', async () => {
+    renderComposer()
+    await waitFor(() => expect(window.vyotiq.getSettings).toHaveBeenCalled())
+    field().focus()
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: ' ', code: 'Space' })
+      fireEvent.keyUp(field(), { key: ' ', code: 'Space' })
+    })
+    await new Promise((r) => setTimeout(r, 450))
+    expect(strip()).toBeNull()
+    expect(mic.opened).toBe(0)
+  })
 })

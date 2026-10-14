@@ -103,8 +103,11 @@ async function postCloudTranscription(opts: {
   extraHeaders?: Record<string, string>
   allowEmpty: boolean
   signal?: AbortSignal
-}): Promise<DictationTranscribeResult> {
+}): Promise<DictationTranscribeResult & { attempts?: number }> {
   const label = CLOUD_LABEL[opts.engine]
+  // Counted per attempt: a retry is otherwise invisible in the time a turn took.
+  let attempts = 0
+  const headers = { Authorization: `Bearer ${opts.apiKey}`, ...(opts.extraHeaders ?? {}) }
   const form = new FormData()
   const blob = new Blob([new Uint8Array(opts.audio.bytes)], { type: opts.audio.mime })
   form.append('file', blob, `dictation.${extensionForMime(opts.audio.mime)}`)
@@ -119,11 +122,18 @@ async function postCloudTranscription(opts: {
       opts.url,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${opts.apiKey}`, ...(opts.extraHeaders ?? {}) },
+        headers,
         body: form,
         signal: opts.signal
       },
-      { maxAttempts: 2, circuitKey: false }
+      {
+        maxAttempts: 2,
+        circuitKey: false,
+        headersForAttempt: () => {
+          attempts++
+          return headers
+        }
+      }
     )
   } catch (err) {
     if (isAbort(err)) throw err
@@ -158,7 +168,7 @@ async function postCloudTranscription(opts: {
   }
   text = text.trim()
   if (!text && !opts.allowEmpty) throw new DictationError('engine_failed', 'Nothing was heard in that take')
-  return { text }
+  return { text, ...(attempts > 0 ? { attempts } : {}) }
 }
 
 export function requireKey(engine: CloudEngine): string {
@@ -171,6 +181,8 @@ export function requireKey(engine: CloudEngine): string {
 export type DictationRequestExtras = {
   /** Names from the open workspace to listen for (OpenAI only). */
   keywords?: readonly string[]
+  /** OpenRouter only: the model voice mode's listener uses, instead of dictation's default. */
+  model?: string
 }
 
 function transcribeCloud(
@@ -178,7 +190,7 @@ function transcribeCloud(
   request: DictationTranscribeRequest,
   signal?: AbortSignal,
   extras: DictationRequestExtras = {}
-): Promise<DictationTranscribeResult> {
+): Promise<DictationTranscribeResult & { attempts?: number }> {
   const apiKey = requireKey(engine)
   const audio = cloudAudio(request, engine)
   const language = request.language?.trim() || undefined
@@ -203,7 +215,7 @@ function transcribeCloud(
     engine,
     url: OPENROUTER_TRANSCRIBE_URL,
     apiKey,
-    model: OPENROUTER_TRANSCRIBE_MODEL,
+    model: extras.model?.trim() || OPENROUTER_TRANSCRIBE_MODEL,
     audio,
     language,
     allowEmpty,
@@ -229,7 +241,7 @@ export async function transcribeDictation(
   request: DictationTranscribeRequest,
   signal?: AbortSignal,
   extras: DictationRequestExtras = {}
-): Promise<DictationTranscribeResult> {
+): Promise<DictationTranscribeResult & { attempts?: number }> {
   if (isDictationFixtureEnabled()) {
     return { text: DICTATION_FIXTURE_TEXT }
   }

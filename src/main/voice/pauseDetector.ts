@@ -14,11 +14,38 @@ import type { TurnPatience } from './providers/types'
 const SAMPLE_RATE = 16000
 const FRAME = 320 // 20 ms
 
-const SILENCE_MS: Readonly<Record<TurnPatience, number>> = { quick: 500, normal: 750, patient: 1200 }
+/**
+ * Quiet that ends a turn. A pause between sentences is often 0.6–0.9 s, so
+ * 0.75 s cut "Hello. Can you hear me?" into two messages (D-43).
+ */
+export const SILENCE_MS: Readonly<Record<TurnPatience, number>> = { quick: 900, normal: 1300, patient: 2000 }
 /** Speech shorter than this is a cough or a click, not a turn. */
-const MIN_SPEECH_MS = 200
+export const MIN_SPEECH_MS = 300
 
-export type PauseEvent = { kind: 'speech_start' } | { kind: 'pause'; speechMs: number }
+/**
+ * Quiet after which the turn has probably ended: a whole-turn listener starts
+ * transcribing then, and keeps the result if the full pause confirms it.
+ * Saves 300 ms (Quick) to 1.4 s (Patient) per turn.
+ */
+export function settleMs(patience: TurnPatience): number {
+  return Math.min(600, SILENCE_MS[patience] - 400)
+}
+
+/**
+ * A frame whose waveform crosses zero this often is hiss, breath or a key
+ * click, not a voice (B3): voiced speech sits well under 0.2 at 16 kHz,
+ * broadband noise near 0.5. Each such sound was a billed upload that came
+ * back empty, about one a minute on a headset.
+ */
+export const MAX_VOICED_ZCR = 0.3
+
+export type PauseEvent =
+  | { kind: 'speech_start' }
+  /** Quiet for `settleMs`: the turn has probably ended. */
+  | { kind: 'settling' }
+  /** Talking again after `settling`: anything started early is stale. */
+  | { kind: 'resumed' }
+  | { kind: 'pause'; speechMs: number; silenceMs: number }
 
 export class PauseDetector {
   private floor = 0.004
@@ -26,6 +53,7 @@ export class PauseDetector {
   private speechMs = 0
   private silenceMs = 0
   private inSpeech = false
+  private settled = false
   /** Raise while the agent is talking, so its own voice leaking into the mic isn't speech (§6.4). */
   private threshold = 3
 
@@ -50,6 +78,7 @@ export class PauseDetector {
     this.speechMs = 0
     this.silenceMs = 0
     this.inSpeech = false
+    this.settled = false
   }
 
   push(pcm: Int16Array): PauseEvent[] {
@@ -62,21 +91,27 @@ export class PauseDetector {
     }
     let i = 0
     for (; i + FRAME <= data.length; i += FRAME) {
-      const ev = this.frame(rms(data, i, i + FRAME))
+      const ev = this.frame(rms(data, i, i + FRAME), zeroCrossingRate(data, i, i + FRAME))
       if (ev) events.push(ev)
     }
     this.carry = data.slice(i)
     return events
   }
 
-  private frame(level: number): PauseEvent | null {
+  private frame(level: number, zcr: number): PauseEvent | null {
     const frameMs = (FRAME / SAMPLE_RATE) * 1000
-    const voiced = level > Math.max(0.012, this.floor * this.threshold)
-    // The floor tracks quiet frames quickly and voiced ones barely.
-    this.floor = Math.min(0.05, Math.max(0.0008, voiced ? this.floor * 0.9995 + level * 0.0005 : this.floor * 0.95 + level * 0.05))
+    const loud = level > Math.max(0.012, this.floor * this.threshold)
+    // Loud is not enough: hiss and breath are loud and cross zero far more than a voice does.
+    const voiced = loud && zcr <= MAX_VOICED_ZCR
+    // The floor tracks quiet frames quickly and loud ones barely.
+    this.floor = Math.min(0.05, Math.max(0.0008, loud ? this.floor * 0.9995 + level * 0.0005 : this.floor * 0.95 + level * 0.05))
     if (voiced) {
       this.speechMs += frameMs
       this.silenceMs = 0
+      if (this.settled) {
+        this.settled = false
+        return { kind: 'resumed' }
+      }
       if (!this.inSpeech && this.speechMs >= MIN_SPEECH_MS) {
         this.inSpeech = true
         return { kind: 'speech_start' }
@@ -89,10 +124,15 @@ export class PauseDetector {
       return null
     }
     this.silenceMs += frameMs
-    if (this.silenceMs >= SILENCE_MS[this.patience]) {
+    const silence = SILENCE_MS[this.patience]
+    if (this.silenceMs >= silence) {
       const speechMs = this.speechMs
       this.reset()
-      return { kind: 'pause', speechMs }
+      return { kind: 'pause', speechMs, silenceMs: silence }
+    }
+    if (!this.settled && this.silenceMs >= settleMs(this.patience)) {
+      this.settled = true
+      return { kind: 'settling' }
     }
     return null
   }
@@ -105,4 +145,16 @@ function rms(pcm: Int16Array, from: number, to: number): number {
     sum += v * v
   }
   return Math.sqrt(sum / (to - from))
+}
+
+/** How often the waveform changes sign, per sample (0..1). */
+export function zeroCrossingRate(pcm: Int16Array, from: number, to: number): number {
+  let crossings = 0
+  let prev = pcm[from] ?? 0
+  for (let i = from + 1; i < to; i++) {
+    const v = pcm[i] ?? 0
+    if ((v >= 0) !== (prev >= 0)) crossings++
+    prev = v
+  }
+  return crossings / Math.max(1, to - from - 1)
 }

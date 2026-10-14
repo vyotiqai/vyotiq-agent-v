@@ -5,7 +5,7 @@
  * `Bearer`.
  */
 import type { SttOpenOptions, SttProvider, TurnPatience } from '../types'
-import { SocketStt, int16Bytes, num, str } from './socketStt'
+import { SocketStt, int16Bytes, num, str, type KeyCheck } from './socketStt'
 
 export const ASSEMBLYAI_URL = 'wss://streaming.assemblyai.com/v3/ws'
 
@@ -38,6 +38,10 @@ class AssemblyAiSession extends SocketStt {
 
   constructor(opts: SttOpenOptions) {
     super(assemblyAiUrl(opts), { Authorization: opts.apiKey }, opts, 'AssemblyAI')
+  }
+
+  protected keyCheck(): KeyCheck {
+    return { url: 'https://api.assemblyai.com/v2/transcript?limit=1', headers: { Authorization: this.opts.apiKey } }
   }
 
   protected onOpen(): void {

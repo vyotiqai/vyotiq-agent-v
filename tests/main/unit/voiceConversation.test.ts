@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, cueForTool, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
-import { VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
+import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, cueForTool, runFailedLine, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
+import { HAND_OFF_FAILED_LINE, VoiceSession, emptyProgress, trackProgress, type VoiceSessionDeps } from '@main/voice/session'
 import { openFixtureStt, openFixtureTts, type FixtureSttSession, type FixtureTtsStream } from '@main/voice/providers/fixture'
 import { addRunEventTap, tapRunEvent } from '@main/agent/runEventTap'
 import { isVoiceReplyActive, setVoiceReplyWorkspace } from '@main/voice/voiceReply'
@@ -85,12 +85,108 @@ describe('ReplySpeaker', () => {
     expect(h.streams[0]!.spoken).toEqual(['I fixed the race.', 'Tests pass now.'])
   })
 
-  it('falls back to a short summary when the answer has no <spoken> block', () => {
+  it('falls back to a short summary when the answer has no <spoken> block and no voice can report it', () => {
     const h = speakerHarness()
     h.speaker.beginTurn()
     h.speaker.handle(delta('All green. Nothing else changed.'))
     h.speaker.handle(final('All green. Nothing else changed.'))
+    // Settled when the run ends: a check after the answer can still send the agent back to work.
+    expect(h.said).toEqual([])
+    h.speaker.handle(status('done'))
     expect(h.said.join(' ')).toBe('All green. Nothing else changed.')
+  })
+
+  it('an answer with no <spoken> block is reported by the voice, not read off a table (B7)', () => {
+    const onResult = vi.fn()
+    const reportResult = vi.fn(() => true)
+    const h = speakerHarness({ onResult, reportResult })
+    h.speaker.beginTurn()
+    const table = ['**Sessions**', '| Session | Started |', '| --- | --- |', '| This chat | today |'].join('\n')
+    h.speaker.handle(delta(table))
+    h.speaker.handle(final(table))
+    h.speaker.handle(status('done'))
+    expect(onResult).toHaveBeenCalledWith(table)
+    expect(reportResult).toHaveBeenCalledTimes(1)
+    expect(h.said).toEqual([])
+  })
+
+  it('the final answer reaches the voice even when it was silenced, and a spoken one is not reported twice (B5)', () => {
+    const onResult = vi.fn()
+    const reportResult = vi.fn(() => true)
+    const h = speakerHarness({ onResult, reportResult })
+    h.speaker.beginTurn()
+    h.speaker.interrupt()
+    h.speaker.handle(final('Six sessions ran.'))
+    h.speaker.handle(status('done'))
+    expect(onResult).toHaveBeenCalledWith('Six sessions ran.')
+    expect(reportResult).not.toHaveBeenCalled()
+    const spoken = speakerHarness({ onResult, reportResult })
+    spoken.speaker.beginTurn()
+    spoken.speaker.handle(delta('<spoken>Done. </spoken> More.'))
+    spoken.speaker.handle(final('<spoken>Done. </spoken> More.'))
+    spoken.speaker.handle(status('done'))
+    expect(reportResult).not.toHaveBeenCalled()
+    expect(spoken.said).toEqual(['Done.'])
+  })
+
+  it('only the last answer of a run is settled: a check that sends the agent back to work comes first', () => {
+    const onResult = vi.fn()
+    const h = speakerHarness({ onResult })
+    h.speaker.beginTurn()
+    h.speaker.handle(final('Done, I think.'))
+    h.speaker.handle(toolStart('v', 'run_terminal', 'pnpm test'))
+    h.speaker.handle(final('Verified: all tests pass.'))
+    h.speaker.handle(status('done'))
+    expect(onResult.mock.calls).toEqual([['Verified: all tests pass.']])
+  })
+
+  it('says one answer per run: the one the verification gate sent back is shown and kept, not said again', () => {
+    const onResult = vi.fn()
+    const reportResult = vi.fn(() => true)
+    const h = speakerHarness({ onResult, reportResult })
+    h.speaker.beginTurn()
+    h.speaker.handle(status('running'))
+    const first = '<spoken>I renamed the setting. </spoken> Details.'
+    h.speaker.handle(delta(first))
+    h.speaker.handle(final(first))
+    // The gate's nudge: a check, then the answer written again.
+    h.speaker.handle(toolStart('v', 'run_tests', 'voiceWork'))
+    h.speaker.handle(toolResult('v'))
+    const second = '<spoken>I renamed the setting, and the tests pass. </spoken> Details.'
+    h.speaker.handle(delta(second))
+    h.speaker.handle(final(second))
+    h.speaker.handle(status('done'))
+    expect(h.said).toEqual(['I renamed the setting.'])
+    expect(reportResult).not.toHaveBeenCalled()
+    expect(onResult.mock.calls).toEqual([[second]])
+  })
+
+  it('an answer with no <spoken> block, sent back by the gate, is reported once, from the last answer', () => {
+    const onResult = vi.fn()
+    const reportResult = vi.fn(() => true)
+    const h = speakerHarness({ onResult, reportResult })
+    h.speaker.beginTurn()
+    h.speaker.handle(final('Renamed it.'))
+    h.speaker.handle(toolStart('v', 'read_file', 'settings.ts'))
+    h.speaker.handle(toolResult('v'))
+    h.speaker.handle(final('Renamed it; the file reads back as expected.'))
+    h.speaker.handle(status('done'))
+    expect(reportResult).toHaveBeenCalledTimes(1)
+    expect(onResult.mock.calls).toEqual([['Renamed it; the file reads back as expected.']])
+    expect(h.said).toEqual([])
+  })
+
+  it('a follow-up applied mid-run, or the next invoke, is a new turn whose answer is said', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    h.speaker.handle(final('<spoken>First. </spoken>'))
+    h.speaker.handle({ type: 'follow_up_applied', runId: R, ids: ['f'], messages: [{ role: 'user', content: 'and?' }] } as AgentEvent)
+    h.speaker.handle(final('<spoken>Second. </spoken>'))
+    h.speaker.handle(status('done'))
+    // A turn typed in the task: no beginTurn, only the run starting again.
+    h.speaker.handle(status('running'))
+    h.speaker.handle(final('<spoken>Third. </spoken>'))
+    expect(h.said).toEqual(['First.', 'Second.', 'Third.'])
   })
 
   it('stays quiet through narration between tool calls', () => {
@@ -155,6 +251,33 @@ describe('ReplySpeaker', () => {
     expect(h.speaker.runActive).toBe(false)
   })
 
+  it('says why the run failed, from its error code, and keeps the provider’s words for the voice', () => {
+    const onRunFailed = vi.fn()
+    const h = speakerHarness({ onRunFailed })
+    h.speaker.beginTurn()
+    h.speaker.handle({
+      type: 'error',
+      runId: R,
+      message: 'Prompt tokens limit exceeded: 133397 > 4780. To increase, visit https://openrouter.ai/settings/credits',
+      code: 'PROVIDER_BILLING'
+    } as AgentEvent)
+    h.speaker.handle(status('error'))
+    expect(h.said).toEqual([runFailedLine('PROVIDER_BILLING')])
+    expect(h.said[0]).toContain('out of credit')
+    expect(onRunFailed).toHaveBeenCalledWith(expect.stringContaining('Prompt tokens limit exceeded'))
+  })
+
+  it('forgets an earlier invoke’s error once the run starts again', () => {
+    const onRunFailed = vi.fn()
+    const h = speakerHarness({ onRunFailed })
+    h.speaker.beginTurn()
+    h.speaker.handle({ type: 'error', runId: R, message: 'boom', code: 'PROVIDER_AUTH' } as AgentEvent)
+    h.speaker.handle(status('running'))
+    h.speaker.handle(status('error'))
+    expect(h.said).toEqual([RUN_FAILED_LINE])
+    expect(onRunFailed).not.toHaveBeenCalled()
+  })
+
   it('redacts secrets before they reach the speech vendor', () => {
     const h = speakerHarness()
     h.speaker.beginTurn()
@@ -167,6 +290,25 @@ describe('ReplySpeaker', () => {
     expect(cueForTool('edit_file', 'src/a.ts')).toBe('Making the change.')
     expect(cueForTool('grep', 'TODO')).toBe('Looking through the code.')
     expect(cueForTool('ask_question', '')).toBeNull()
+  })
+})
+
+describe('run progress for the voice (B6)', () => {
+  it('counts steps, names the running one, keeps the last narration, and records how it ended', () => {
+    let p = trackProgress(emptyProgress(), status('running'), 0)
+    p = trackProgress(p, toolStart('a', 'run_terminal', 'git for-each-ref refs/heads'), 1)
+    expect(p).toMatchObject({ running: true, steps: 1, current: 'run_terminal: git for-each-ref refs/heads' })
+    p = trackProgress(p, toolResult('a'), 2)
+    expect(p.current).toBeUndefined()
+    p = trackProgress(p, narration('Now the branches.'), 3)
+    p = trackProgress(p, toolStart('b', 'grep', 'TODO'), 4)
+    p = trackProgress(p, final('All done.'), 5)
+    expect(p).toMatchObject({ steps: 2, narration: 'Now the branches.' })
+    p = trackProgress(p, status('done'), 9)
+    expect(p).toMatchObject({ running: false, steps: 2, ended: { at: 9, outcome: 'done' } })
+    expect(p.current).toBeUndefined()
+    // A new run starts counting afresh.
+    expect(trackProgress(p, status('running'), 10)).toEqual({ running: true, steps: 0 })
   })
 })
 
@@ -271,6 +413,49 @@ describe('VoiceSession conversation', () => {
     expect(h.session.state).toBe('listening')
   })
 
+  it('still announces each spoken piece with captions off: the window plays only what it was told of (A-09)', async () => {
+    const h = sessionHarness({ captions: false })
+    await h.session.start()
+    h.stt().say('what failed?')
+    h.session.follow(R)
+    h.run(status('running'))
+    h.run(delta('<spoken>The lint step failed. </spoken>'))
+    h.run(final('<spoken>The lint step failed. </spoken> details'))
+    expect(h.events.find((e) => e.kind === 'say')).toMatchObject({ text: 'The lint step failed.' })
+  })
+
+  it('a reply that arrives whole, with no deltas, speaks its block and never the tags (A-20)', async () => {
+    const h = sessionHarness()
+    await h.session.start()
+    h.stt().say('what failed?')
+    h.session.follow(R)
+    h.run(status('running'))
+    h.run(final('<spoken>The lint step failed. </spoken> details'))
+    const said = h.events.flatMap((e) => (e.kind === 'say' ? [e.text] : []))
+    expect(said).toEqual(['The lint step failed.'])
+  })
+
+  it('a speaking failure is a note with its reason, once a session (D-40)', async () => {
+    const h = sessionHarness()
+    let fail: ((code: 'engine_failed', message: string) => void) | null = null
+    h.session['deps'].openTts = (contextId, onError) => {
+      fail = onError
+      return openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError })
+    }
+    await h.session.start()
+    h.stt().say('what failed?')
+    h.session.follow(R)
+    h.run(status('running'))
+    h.run(final('<spoken>Done. </spoken>'))
+    fail!('engine_failed', 'OpenRouter (404): model not found')
+    fail!('engine_failed', 'again')
+    const errors = h.events.filter((e) => e.kind === 'error')
+    expect(errors).toEqual([
+      expect.objectContaining({ side: 'speak', code: 'engine_failed', detail: 'OpenRouter (404): model not found' })
+    ])
+    expect(h.session.state).not.toBe('error')
+  })
+
   it('tool work shows as working, and the end with nothing said returns to listening', async () => {
     const h = sessionHarness()
     await h.session.start()
@@ -295,6 +480,126 @@ describe('VoiceSession conversation', () => {
     expect(h.session.state).toBe('hearing')
     expect(h.events).toContainEqual(expect.objectContaining({ kind: 'flush', contextId }))
     expect(h.tts[0]!.cancelled).toBe(true)
+  })
+
+  it('a breath while the agent works doesn’t silence its result (B1)', async () => {
+    const h = sessionHarness()
+    await h.session.start()
+    h.stt().say('list the sessions')
+    h.session.follow(R)
+    h.run(status('running'))
+    h.run(toolStart('a', 'run_terminal', 'git branch'))
+    expect(h.session.state).toBe('working')
+    // A sound that turns out to be no words, several times over.
+    for (let i = 0; i < 3; i++) {
+      h.stt().say('', false)
+      expect(h.session.state).toBe('working')
+      h.stt().endTurn()
+    }
+    expect(h.events.some((e) => e.kind === 'flush')).toBe(false)
+    h.run(delta('<spoken>Six kinds of sessions have run. </spoken>'))
+    h.run(final('<spoken>Six kinds of sessions have run. </spoken> details'))
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: 'say', text: 'Six kinds of sessions have run.' }))
+  })
+
+  it('real words while the agent works are a turn, and its result is still spoken after them', async () => {
+    const h = sessionHarness()
+    await h.session.start()
+    h.stt().say('list the sessions')
+    h.session.follow(R)
+    h.run(status('running'))
+    h.run(toolStart('a', 'run_terminal', 'git branch'))
+    h.stt().say('and the branches too')
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: 'turn', text: 'and the branches too' }))
+    h.session.follow(R)
+    h.run(final('<spoken>Here they are. </spoken>'))
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: 'say', text: 'Here they are.' }))
+  })
+
+  it('a hand-off the task never took is said out loud, and the session moves on (R3)', async () => {
+    const h = sessionHarness()
+    await h.session.start()
+    h.stt().say('run the tests')
+    const handOff = h.events.find((e) => e.kind === 'hand_off') as { handOffId: string }
+    // No voice model here: the words were the brief. The task refused it.
+    expect(h.session.state).toBe('thinking')
+    h.session.handOffFailed(handOff.handOffId, 'refused')
+    const say = h.events.filter((e) => e.kind === 'say').at(-1) as { contextId: string; text: string }
+    expect(say.text).toBe(HAND_OFF_FAILED_LINE.refused)
+    h.session.playback(say.contextId, 'started')
+    h.session.playback(say.contextId, 'drained')
+    expect(h.session.state).toBe('listening')
+  })
+
+  it('with nothing that can speak, a failed hand-off still leaves Thinking (R3)', async () => {
+    const h = sessionHarness()
+    h.session['deps'].openTts = undefined
+    await h.session.start()
+    h.stt().say('run the tests')
+    const handOff = h.events.find((e) => e.kind === 'hand_off') as { handOffId: string }
+    h.session.handOffFailed(handOff.handOffId, 'no_task')
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: 'say', text: HAND_OFF_FAILED_LINE.no_task }))
+    expect(h.session.state).toBe('listening')
+  })
+
+  it('the voice is told the work never went, so it doesn’t claim the agent is on it (R3)', async () => {
+    const h = sessionHarness()
+    const seen: Array<{ status: string; messages: Array<{ role: string; content: unknown }> }> = []
+    let handOffNext = true
+    h.session['deps'].responder = () => async function* (req) {
+      seen.push({ status: req.status, messages: req.messages as never })
+      if (handOffNext) {
+        handOffNext = false
+        yield { type: 'tool_call' as const, name: 'hand_to_agent', arguments: JSON.stringify({ brief: 'Run the tests' }) }
+      } else {
+        yield { type: 'text' as const, text: 'Sure. ' }
+      }
+      yield { type: 'done' as const }
+    }
+    await h.session.start()
+    h.stt().say('run the tests')
+    await vi.waitFor(() => expect(h.events.some((e) => e.kind === 'hand_off')).toBe(true))
+    const handOff = h.events.find((e) => e.kind === 'hand_off') as { handOffId: string }
+    h.session.handOffFailed(handOff.handOffId, 'refused')
+    h.stt().say('is it running?')
+    await vi.waitFor(() => expect(seen).toHaveLength(2))
+    expect(seen[1]!.status).toBe('The agent is idle.')
+    expect(JSON.stringify(seen[1]!.messages)).toContain('Nothing was handed to the agent.')
+  })
+
+  it('keeps the conversation: each turn, each reply by who said it, and what became of each request (§24.8)', async () => {
+    const h = sessionHarness()
+    const kept: Array<Record<string, unknown>> = []
+    h.session['deps'].record = (e) => kept.push(e)
+    await h.session.start()
+    h.stt().say('run the tests')
+    const handOff = h.events.find((e) => e.kind === 'hand_off') as { handOffId: string }
+    h.session.follow(R, handOff.handOffId)
+    h.run(status('running'))
+    h.run(final('<spoken>All tests pass. </spoken> details'))
+    h.stt().say('and lint')
+    const second = h.events.filter((e) => e.kind === 'hand_off').at(-1) as { handOffId: string }
+    h.session.handOffFailed(second.handOffId, 'refused')
+    h.stt().say('', true)
+    await h.session.stop()
+    expect(kept.map((e) => e.kind)).toEqual([
+      'start',
+      'you',
+      'hand_off',
+      'followed',
+      'agent',
+      'you',
+      'hand_off',
+      'not_sent',
+      'voice',
+      'dropped'
+    ])
+    expect(kept[0]).toMatchObject({ listener: 'deepgram' })
+    expect(kept[1]).toMatchObject({ text: 'run the tests' })
+    expect(kept[3]).toMatchObject({ runId: R, handOffId: handOff.handOffId })
+    expect(kept[4]).toMatchObject({ text: 'All tests pass.' })
+    expect(kept[7]).toMatchObject({ handOffId: second.handOffId, reason: 'refused' })
+    expect(kept[9]).toEqual({ kind: 'dropped', reason: 'empty', chars: 0 })
   })
 
   it('stop drops the run tap', async () => {
@@ -360,10 +665,11 @@ describe('approvals by voice', () => {
         requestId: 'a1',
         runId: R,
         toolCallId: 't1',
-        name: 'run_terminal',
+        name: 'terminal',
         summary: 'pnpm test',
         argsPreview: '{}',
         mutating: true,
+        alwaysAllowCommand: 'pnpm test',
         ...over2
       } as never)
     return { session, events, said, stt: () => stt.at(-1)!, ask, resolveApproval, watcher: () => watcher }
@@ -376,7 +682,7 @@ describe('approvals by voice', () => {
     h.session.follow(R)
     h.ask()
     expect(h.session.state).toBe('waiting_on_you')
-    expect(h.said.at(-1)).toBe('It wants to run pnpm test. Say yes or no.')
+    expect(h.said.at(-1)).toBe('It wants to run pnpm test. Say yes, no, or always allow.')
     const turnsBefore = h.events.filter((e) => e.kind === 'turn').length
     h.stt().say('Yes.')
     expect(h.resolveApproval).toHaveBeenCalledWith({ requestId: 'a1', runId: R, decision: 'once' })
@@ -395,7 +701,9 @@ describe('approvals by voice', () => {
     h.resolveApproval.mockClear()
     h.stt().say('yes but use the other script')
     expect(h.resolveApproval).not.toHaveBeenCalled()
-    expect(h.events.at(-1)).toMatchObject({ kind: 'turn', text: 'yes but use the other script' })
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: 'turn', text: 'yes but use the other script' }))
+    // No voice model in this harness: the words go to the agent as they are.
+    expect(h.events.at(-1)).toMatchObject({ kind: 'hand_off', brief: 'yes but use the other script' })
   })
 
   it('a risky action is never approved by voice', async () => {
@@ -417,6 +725,48 @@ describe('approvals by voice', () => {
     h.ask()
     expect(h.said.at(-1)).toContain('Approve or deny it on screen.')
     h.stt().say('yes')
+    expect(h.resolveApproval).not.toHaveBeenCalled()
+  })
+
+  it('"always allow" grants what the card’s Always allow would, and says what it remembers', async () => {
+    const h = approvalHarness()
+    await h.session.start()
+    h.session.follow(R)
+    h.ask()
+    const turnsBefore = h.events.filter((e) => e.kind === 'turn').length
+    h.stt().say('Always allow.')
+    expect(h.resolveApproval).toHaveBeenCalledWith({ requestId: 'a1', runId: R, decision: 'always' })
+    expect(h.events.filter((e) => e.kind === 'turn')).toHaveLength(turnsBefore)
+    expect(h.said.at(-1)).toBe('Allowed. It won’t ask again for pnpm test in this workspace.')
+  })
+
+  it('an approval answered by voice is kept with what was said and decided', async () => {
+    const h = approvalHarness()
+    const kept: Array<Record<string, unknown>> = []
+    h.session['deps'].record = (e) => kept.push(e)
+    await h.session.start()
+    h.session.follow(R)
+    h.ask()
+    h.stt().say('Yes.')
+    expect(kept.find((e) => e.kind === 'answered')).toEqual({ kind: 'answered', what: 'approval', text: 'Yes.', decision: 'once', tool: 'terminal' })
+  })
+
+  it('never says always where the card wouldn’t offer it: an unscoped command, or a risky one', async () => {
+    const h = approvalHarness()
+    await h.session.start()
+    h.session.follow(R)
+    // A command that chains: main gives no command to remember, and the card offers no Always.
+    h.ask({ alwaysAllowCommand: null, summary: 'pnpm test && rm -rf out' })
+    expect(h.said.at(-1)).toMatch(/Say yes or no\.$/)
+    h.stt().say('always allow')
+    expect(h.resolveApproval).not.toHaveBeenCalled()
+    expect(h.said.at(-1)).toBe('That one can only be allowed once. Say yes or no.')
+    // Still waiting: a yes now allows it once.
+    h.stt().say('yes')
+    expect(h.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ decision: 'once' }))
+    h.resolveApproval.mockClear()
+    h.ask({ requestId: 'a2', danger: 'force-pushes over the remote branch' })
+    h.stt().say('always allow')
     expect(h.resolveApproval).not.toHaveBeenCalled()
   })
 
@@ -450,6 +800,9 @@ describe('approval wording and answers', () => {
     expect(approvalAnswer('go ahead')).toBe('once')
     expect(approvalAnswer("Don't")).toBe('deny')
     expect(approvalAnswer('yes, and also run lint')).toBeNull()
+    expect(approvalAnswer('Always allow it.')).toBe('always')
+    expect(approvalAnswer("Yes, and don't ask again")).toBe('always')
+    expect(approvalAnswer('always allow the tests but not lint')).toBeNull()
   })
 })
 
@@ -506,6 +859,104 @@ describe('turn latency (§14)', () => {
     // Only the first audio of a turn is timed.
     session.playback('ctx2', 'started')
     expect(logged).toHaveLength(1)
+  })
+})
+
+describe('whole-turn latency (B10)', () => {
+  it('logs the quiet waited out, the listener’s time and the total from your last word', async () => {
+    let clock = 0
+    const logged: unknown[] = []
+    const dropped: unknown[] = []
+    const taps = new Map<string, (e: AgentEvent) => void>()
+    const stt: FixtureSttSession[] = []
+    const tone = (ms: number) => Int16Array.from({ length: (ms / 1000) * 16000 }, (_, i) => Math.round(Math.sin(i / 3) * 8000))
+    const session = new VoiceSession({
+      emit: () => {},
+      settings: () => DEFAULT_VOICE_SETTINGS,
+      // OpenRouter listens: it has no turn model, so the session's own pause ends the turn.
+      keys: () => ({ voice: {}, chat: { openrouter: true } }),
+      readKey: () => 'k',
+      sttProvider: (id) => ({
+        id,
+        open: async (o) => {
+          const s = await openFixtureStt(o)
+          stt.push(s)
+          return s
+        }
+      }),
+      openTts: (contextId) =>
+        openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError: () => {} }),
+      tapRun: (runId, fn) => {
+        taps.set(runId, fn)
+        return () => taps.delete(runId)
+      },
+      logLatency: (t) => logged.push(t),
+      onTurnDropped: (reason, chars, stats) => dropped.push({ reason, chars, ...stats }),
+      now: () => clock,
+      setTimer: () => null,
+      clearTimer: () => {},
+      newId: () => `id${Math.random()}`
+    })
+    await session.start()
+    // A breath-length sound that comes back as no words.
+    session.pushAudio(tone(400))
+    clock += 400
+    session.pushAudio(new Int16Array(16000 * 1.4))
+    expect(dropped).toEqual([{ reason: 'empty', chars: 0, speechMs: 400, sttMs: 0 }])
+    // A real turn.
+    session.pushAudio(tone(400))
+    stt[0]!.say('what failed', false)
+    clock += 400
+    session.pushAudio(new Int16Array(16000 * 1.4))
+    clock += 1000
+    session.follow(R)
+    taps.get(R)!(delta('<spoken>The lint step. </spoken>'))
+    clock += 200
+    session.playback('ctx', 'started')
+    expect(logged).toEqual([
+      expect.objectContaining({ listener: 'openrouter', waitMs: 1300, sttMs: 0, firstTextMs: 1000, firstAudioMs: 1200, totalMs: 2500 })
+    ])
+  })
+
+  it('says what the listener did: audio sent, request time, early start, retries (a 12 s turn logged none of it)', async () => {
+    const logged: unknown[] = []
+    const dropped: unknown[] = []
+    const taps = new Map<string, (e: AgentEvent) => void>()
+    const stt: FixtureSttSession[] = []
+    const session = new VoiceSession({
+      emit: () => {},
+      settings: () => DEFAULT_VOICE_SETTINGS,
+      keys: () => ({ voice: {}, chat: { openrouter: true } }),
+      readKey: () => 'k',
+      sttProvider: (id) => ({
+        id,
+        open: async (o) => {
+          const s = await openFixtureStt(o)
+          stt.push(s)
+          return s
+        }
+      }),
+      openTts: (contextId) =>
+        openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError: () => {} }),
+      tapRun: (runId, fn) => {
+        taps.set(runId, fn)
+        return () => taps.delete(runId)
+      },
+      logLatency: (t) => logged.push(t),
+      onTurnDropped: (reason, chars, stats) => dropped.push({ reason, chars, ...stats }),
+      setTimer: () => null,
+      clearTimer: () => {},
+      newId: () => `id${Math.random()}`
+    })
+    await session.start()
+    const emit = (stt[0] as unknown as { emit: (e: unknown) => void }).emit
+    emit({ kind: 'end_of_turn', text: '', listen: { audioMs: 61_000, requestMs: 12_000, earlyUsed: false, attempts: 2 } })
+    expect(dropped).toEqual([expect.objectContaining({ reason: 'empty', audioMs: 61_000, requestMs: 12_000, earlyUsed: false, attempts: 2 })])
+    emit({ kind: 'end_of_turn', text: 'what failed', listen: { audioMs: 2400, requestMs: 900, earlyUsed: true } })
+    session.follow(R)
+    taps.get(R)!(delta('<spoken>The lint step. </spoken>'))
+    session.playback('ctx', 'started')
+    expect(logged).toEqual([expect.objectContaining({ audioMs: 2400, requestMs: 900, earlyUsed: true })])
   })
 })
 
