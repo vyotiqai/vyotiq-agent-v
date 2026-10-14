@@ -9,23 +9,26 @@ import {
   EMPTY_LINE,
   FIRST_WORD_MS,
   QUIET_TOOL,
+  STILL_THINKING_LINE,
+  STILL_THINKING_MS,
   mayStayQuiet,
   VoiceResponder,
   type ResponderChat,
   type ResponderChunk,
   type ResponderDeps
 } from '@main/voice/responder'
-import { HOLD_MAX_MS, UNFINISHED_WAIT_MS, VoiceSession, asksSomething, type VoiceSessionDeps } from '@main/voice/session'
+import { HOLD_MAX_MS, RECONNECT_DELAYS_MS, STOPPED_LINE, UNFINISHED_WAIT_MS, VoiceSession, asksSomething, type VoiceSessionDeps } from '@main/voice/session'
 import { cleanTranscript, isBackchannel, isOtherScript, soundsUnfinished } from '@main/voice/speechText'
 import { formatTaskContext } from '@main/voice/taskContext'
 import { EchoGuard } from '@main/voice/echoGuard'
+import { MIN_SPEECH_AGENT_TALKING_MS, PauseDetector, SILENCE_MS } from '@main/voice/pauseDetector'
 import { openFixtureStt, type FixtureSttSession } from '@main/voice/providers/fixture'
 import type { SttOpenOptions, TtsStream } from '@main/voice/providers/types'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent, type VoiceSettings } from '@shared/ipc/schemas/voice'
 import type { ChatMessage } from '@shared/ipc'
 
 function fakeModel() {
-  type Call = { status: string; tools: Array<{ name: string }>; signal: AbortSignal; push: (c: ResponderChunk) => void; end: () => void }
+  type Call = { status: string; messages: ChatMessage[]; tools: Array<{ name: string }>; signal: AbortSignal; push: (c: ResponderChunk) => void; end: () => void }
   const calls: Call[] = []
   const chat: ResponderChat = (req) => {
     const queue: ResponderChunk[] = []
@@ -33,6 +36,7 @@ function fakeModel() {
     let wake: (() => void) | null = null
     calls.push({
       status: req.status,
+      messages: req.messages,
       tools: req.tools as Array<{ name: string }>,
       signal: req.signal,
       push: (c) => {
@@ -232,7 +236,7 @@ describe('every turn gets an answer', () => {
     await vi.waitFor(() => expect(h.done).toHaveLength(1))
     expect(h.said).toEqual([])
     // The one turn that ends in silence says so, for the log.
-    expect(h.done[0]).toEqual({ audible: false, handedOff: false, quiet: { chars: 'Mm, the fan.'.length } })
+    expect(h.done[0]).toEqual({ audible: false, handedOff: false, quiet: { chars: 'Mm, the fan.'.length, turnIds: [] } })
   })
 
   it('never stays quiet on a question or a real request: it is asked again, then says it lost it', async () => {
@@ -408,5 +412,168 @@ describe('the echo check', () => {
     // A whole-turn listener's words, finished at 4000, arrive while it plays.
     expect(g.isEcho('run the tests and tell me what fails', 4000)).toBe(false)
     expect(g.isEcho('run the tests and tell me what fails', 5200)).toBe(true)
+  })
+})
+
+function tone(ms: number, amp = 8000): Int16Array {
+  const n = Math.round((ms / 1000) * 16000)
+  const out = new Int16Array(n)
+  for (let i = 0; i < n; i++) out[i] = Math.round(Math.sin(i / 3) * amp)
+  return out
+}
+const silence = (ms: number) => new Int16Array(Math.round((ms / 1000) * 16000))
+const unanswered = (events: VoiceEvent[]) => events.flatMap((e) => (e.kind === 'unanswered' ? [e] : []))
+
+describe("this round's choices (2026-10-14)", () => {
+  it('words it chose not to answer stay on screen, marked', async () => {
+    const h = sessionHarness()
+    await h.session.start()
+    // Dropped before the model: a new line, with its words.
+    h.stt().say('Okay.')
+    await tick()
+    expect(unanswered(h.events)).toEqual([{ sessionId: 'id1', kind: 'unanswered', turnId: expect.any(String), text: 'Okay.' }])
+    // The model stayed quiet: the turn already on screen is marked.
+    h.stt().say('Mm, the fan.')
+    await tick()
+    const turn = h.events.find((e) => e.kind === 'turn')
+    h.model.calls[0]!.push({ type: 'tool_call', name: QUIET_TOOL, arguments: '{}' })
+    h.model.calls[0]!.end()
+    await vi.waitFor(() => expect(unanswered(h.events)).toHaveLength(2))
+    expect(unanswered(h.events)[1]).toEqual({ sessionId: 'id1', kind: 'unanswered', turnId: turn && 'turnId' in turn ? turn.turnId : '' })
+  })
+
+  it('says "One moment." when the model has not started by STILL_THINKING_MS, once, and never after it has', async () => {
+    const h = responder()
+    h.r.respond('What changed in the build?')
+    await tick()
+    h.t.advance(STILL_THINKING_MS)
+    expect(h.said).toEqual([STILL_THINKING_LINE])
+    h.model.calls[0]!.push({ type: 'text', text: 'Two files changed.' })
+    h.model.calls[0]!.end()
+    await vi.waitFor(() => expect(h.done).toHaveLength(1))
+    expect(h.said).toEqual([STILL_THINKING_LINE, 'Two files changed.'])
+    // A quick answer gets no filler.
+    const q = responder()
+    q.r.respond('Hello?')
+    await tick()
+    q.model.calls[0]!.push({ type: 'text', text: 'Hi.' })
+    q.model.calls[0]!.end()
+    await vi.waitFor(() => expect(q.done).toHaveLength(1))
+    q.t.advance(STILL_THINKING_MS)
+    expect(q.said).toEqual(['Hi.'])
+  })
+
+  it('moving to another task starts the voice fresh; the task a hand-off just made does not', async () => {
+    const h = sessionHarness({}, { loadTaskContext: async () => '' })
+    await h.session.start()
+    h.session.setTask(null)
+    h.stt().say('Make the button blue.')
+    await tick()
+    h.model.calls[0]!.push({ type: 'text', text: 'Sure.' })
+    h.model.calls[0]!.end()
+    await vi.waitFor(() => expect(h.events.some((e) => e.kind === 'say')).toBe(true))
+    // New task's brief → its run: same conversation.
+    h.session.setTask('run-a')
+    h.stt().say('Is it done yet?')
+    await tick()
+    expect(h.model.calls[1]!.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    h.model.calls[1]!.push({ type: 'text', text: 'Not yet.' })
+    h.model.calls[1]!.end()
+    await vi.waitFor(() => expect(h.events.filter((e) => e.kind === 'say')).toHaveLength(2))
+    // Another task: fresh.
+    h.session.setTask('run-b')
+    h.stt().say('Is it done yet?')
+    await tick()
+    expect(h.model.calls[2]!.messages).toHaveLength(1)
+  })
+
+  it('"stop" with work running stops it and says so; with nothing running it stays silent', async () => {
+    const h = sessionHarness()
+    await h.session.start()
+    h.stt().say('Stop.')
+    await tick()
+    expect(h.events.some((e) => e.kind === 'say')).toBe(false)
+    h.session.follow('run-1')
+    h.stt().say('Stop.')
+    await tick()
+    expect(h.events.some((e) => e.kind === 'stop_agent')).toBe(true)
+    expect(h.events.filter((e) => e.kind === 'say').map((e) => ('text' in e ? e.text : ''))).toEqual([STOPPED_LINE])
+    expect(h.model.calls).toHaveLength(0)
+  })
+
+  function streamingHarness(endTurns: number[], answer = true) {
+    return sessionHarness(
+      { sttProvider: 'openai' },
+      {
+        keys: () => ({ voice: {}, chat: { openai: true } }),
+        sttProvider: (id) => ({
+          id,
+          open: async (o: SttOpenOptions) => {
+            const s = await openFixtureStt(o)
+            const index = endTurns.length
+            endTurns.push(0)
+            const real = s.endTurn.bind(s)
+            s.endTurn = () => {
+              endTurns[index]!++
+              if (answer) real()
+            }
+            received.push(s.received)
+            return s
+          }
+        })
+      }
+    )
+  }
+  const received: Int16Array[][] = []
+
+  it('after a reconnect, a turn already answered is not played again', async () => {
+    const ends: number[] = []
+    received.length = 0
+    const h = streamingHarness(ends)
+    await h.session.start()
+    h.session.pushAudio(tone(400))
+    h.session.pushAudio(silence(SILENCE_MS.normal + 100))
+    expect(ends).toEqual([1])
+    h.session['onStt']({ kind: 'closed', reason: 'drop' })
+    expect(h.session.state).toBe('reconnecting')
+    h.t.advance(RECONNECT_DELAYS_MS[0])
+    await vi.waitFor(() => expect(h.session.state).toBe('listening'))
+    // Nothing of the answered turn went to the new connection, and nothing was ended again.
+    expect(received[1]!.some((pcm) => pcm.some((v) => v !== 0))).toBe(false)
+    expect(ends).toEqual([1, 0])
+  })
+
+  it('after a reconnect, a turn whose answer the drop took is played and ended again', async () => {
+    const ends: number[] = []
+    received.length = 0
+    const h = streamingHarness(ends, false)
+    await h.session.start()
+    h.session.pushAudio(tone(400))
+    h.session.pushAudio(silence(SILENCE_MS.normal + 100))
+    h.session['onStt']({ kind: 'closed', reason: 'drop' })
+    // And one said entirely while it was down.
+    h.session.pushAudio(tone(400))
+    h.session.pushAudio(silence(SILENCE_MS.normal + 100))
+    h.t.advance(RECONNECT_DELAYS_MS[0])
+    await vi.waitFor(() => expect(h.session.state).toBe('listening'))
+    expect(received[1]!.some((pcm) => pcm.some((v) => v !== 0))).toBe(true)
+    expect(ends).toEqual([1, 2])
+  })
+})
+
+describe('short words', () => {
+  it('a crisp "Stop." (about 150 ms of voice) is speech, a knock is not; while the agent talks the bar stays at 300 ms', () => {
+    const quiet = new PauseDetector('normal')
+    quiet.push(silence(500))
+    const heard = [...quiet.push(tone(150)), ...quiet.push(silence(SILENCE_MS.normal + 100))].map((e) => e.kind)
+    expect(heard).toContain('speech_start')
+    expect(heard).toContain('pause')
+    const knock = new PauseDetector('normal')
+    knock.push(silence(500))
+    expect([...knock.push(tone(60)), ...knock.push(silence(2000))]).toEqual([])
+    const talking = new PauseDetector('normal')
+    talking.setAgentSpeaking(true)
+    talking.push(silence(500))
+    expect([...talking.push(tone(MIN_SPEECH_AGENT_TALKING_MS - 60)), ...talking.push(silence(2000))]).toEqual([])
   })
 })

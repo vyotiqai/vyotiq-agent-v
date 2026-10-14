@@ -70,7 +70,7 @@ export type ResponderDeps = {
    * The reply ended. `audible`: audio is on its way, so the session moves
    * on when it drains; otherwise it moves on now.
    */
-  done: (result: { audible: boolean; handedOff: boolean; failed?: { message: string }; quiet?: { chars: number } }) => void
+  done: (result: { audible: boolean; handedOff: boolean; failed?: { message: string }; quiet?: { chars: number; turnIds: string[] } }) => void
   agentStatus: () => AgentStatus
   /**
    * The task the voice is on, as its conversation so far (what you asked it,
@@ -168,6 +168,10 @@ export const STOP_LINE = 'Stopping it.'
 export const FALLBACK_LINE = 'I’ll pass that to the agent.'
 /** The voice model answered with nothing, twice: never leave your words without a reply. */
 export const EMPTY_LINE = 'Sorry, I lost that. Could you say it again?'
+/** Said once when the model hasn't started answering a turn by STILL_THINKING_MS: you know it heard you. */
+export const STILL_THINKING_LINE = 'One moment.'
+/** Its first words usually come in 1–2.5 s; past this, the silence needs filling. */
+export const STILL_THINKING_MS = 4000
 
 /**
  * How long the voice model may take to start answering before it is asked
@@ -210,6 +214,12 @@ type Reply = {
   quiet: boolean
   /** Waiting out an unfinished phrase before the model call starts. */
   startTimer: unknown
+  /** Says STILL_THINKING_LINE if nothing has come by then. */
+  stillTimer: unknown
+  /** The model has begun its answer (words still held for a whole sentence count). */
+  begun: boolean
+  /** The turns this answers (yours, joined): marked unanswered on screen if it stays quiet. */
+  turnIds: string[]
 }
 
 export class VoiceResponder {
@@ -223,6 +233,7 @@ export class VoiceResponder {
   private pendingReport = false
   /** Your words from an answer cut off before it said anything: they start your next turn. */
   private carried = ''
+  private carriedIds: string[] = []
   /** What the voice said between turns (a hand-off that never went), until it joins the conversation. */
   private notes = ''
   /**
@@ -280,14 +291,17 @@ export class VoiceResponder {
    * yet is replaced, and its words joined to these: one stretch of talk is
    * one turn (D-43). One already speaking is cut off and kept as said.
    */
-  respond(text: string, opts?: { waitMs?: number }): void {
+  respond(text: string, opts?: { waitMs?: number; turnId?: string }): void {
     let userText = [this.carried, text.trim()].filter(Boolean).join(' ')
+    let turnIds = [...this.carriedIds, ...(opts?.turnId ? [opts.turnId] : [])]
     this.carried = ''
+    this.carriedIds = []
     this.held = false
     const prev = this.reply
     if (prev && !prev.finished) {
       if (this.pendingUnspoken && prev.kind === 'turn') {
         userText = `${prev.userText} ${userText}`
+        turnIds = [...prev.turnIds, ...turnIds]
         this.abort(prev, false)
       } else if (this.pendingUnspoken) {
         // A report not yet said: its answer stays in the conversation, and yours comes next.
@@ -309,7 +323,7 @@ export class VoiceResponder {
       this.deps.done({ audible: false, handedOff: true })
       return
     }
-    this.start(chat, 'turn', userText, RESPONDER_TOOLS, undefined, opts?.waitMs)
+    this.start(chat, 'turn', userText, RESPONDER_TOOLS, undefined, opts?.waitMs, turnIds)
   }
 
   /**
@@ -361,7 +375,8 @@ export class VoiceResponder {
     userText: string,
     tools: ToolDefinition[],
     report?: string,
-    waitMs?: number
+    waitMs?: number,
+    turnIds: string[] = []
   ): void {
     const reply: Reply = {
       kind,
@@ -378,7 +393,10 @@ export class VoiceResponder {
       failed: null,
       ...(report ? { report } : {}),
       quiet: false,
-      startTimer: null
+      startTimer: null,
+      stillTimer: null,
+      begun: false,
+      turnIds
     }
     this.reply = reply
     if (waitMs && waitMs > 0) {
@@ -404,8 +422,10 @@ export class VoiceResponder {
     const contextId = reply.contextId
     if (this.pendingUnspoken) {
       // Your words carry into your next turn; an unsaid report stays in the conversation.
-      if (reply.kind === 'turn') this.carried = reply.userText
-      else if (reply.report) this.agentReport = reply.report
+      if (reply.kind === 'turn') {
+        this.carried = reply.userText
+        this.carriedIds = reply.turnIds
+      } else if (reply.report) this.agentReport = reply.report
       this.abort(reply, false)
     } else {
       this.abort(reply, true)
@@ -453,8 +473,24 @@ export class VoiceResponder {
     if (this.reply && !this.reply.finished) this.abort(this.reply, false)
     this.reply = null
     this.carried = ''
+    this.carriedIds = []
     this.notes = ''
     this.held = false
+    this.pendingReport = false
+  }
+
+  /**
+   * Voice mode moved to another task: what was said about the last one goes,
+   * so "is it done?" means this task's work. The new task's own conversation
+   * comes with every turn (`taskContext`). An answer in progress carries on.
+   */
+  forget(): void {
+    this.history = []
+    this.agentReport = ''
+    this.agentOutcome = 'done'
+    this.notes = ''
+    this.carried = ''
+    this.carriedIds = []
     this.pendingReport = false
   }
 
@@ -466,6 +502,15 @@ export class VoiceResponder {
     // Roles alternate: a report after your unanswered words joins them.
     if (last?.role === 'user') messages[messages.length - 1] = { role: 'user', content: `${last.content}\n${reply.userText}` }
     else messages.push({ role: 'user', content: reply.userText })
+    // Nothing yet after a few seconds: say so, once, so you know it heard you.
+    if (reply.kind === 'turn') {
+      reply.stillTimer = this.setTimer(() => {
+        reply.stillTimer = null
+        if (!reply.finished && !this.held && !reply.begun) {
+          this.speakLine(STILL_THINKING_LINE)
+        }
+      }, STILL_THINKING_MS)
+    }
     // One more try when the model is slow to start or says nothing at all: a
     // turn that ends in silence is your words on screen and no answer.
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -479,6 +524,7 @@ export class VoiceResponder {
       // Said nothing twice: a report reads the agent's answer instead; a turn asks again (`finish`).
       else if (reply.kind === 'report') reply.failed = 'The voice model said nothing'
     }
+    this.stopStillTimer(reply)
     if (reply.finished) return
     reply.streamDone = true
     // Held: `release` plays the backlog and settles; words from you replace it instead.
@@ -538,7 +584,10 @@ export class VoiceResponder {
         }
         if (next.done) break
         const chunk = next.value
-        if ((chunk.type === 'text' && chunk.text.trim()) || (chunk.type === 'tool_call' && !refusedQuiet(reply, chunk.name))) produced = true
+        if ((chunk.type === 'text' && chunk.text.trim()) || (chunk.type === 'tool_call' && !refusedQuiet(reply, chunk.name))) {
+          produced = true
+          reply.begun = true
+        }
         if (chunk.type === 'error') errored = true
         if (this.held) reply.backlog.push(chunk)
         else this.take(reply, chunk)
@@ -635,7 +684,7 @@ export class VoiceResponder {
       audible: Boolean(said) && reply.stream !== null,
       handedOff: reply.handedOff,
       // Chose to say nothing: the only turn that ends in silence, so it is logged.
-      ...(reply.quiet && !said && !reply.handedOff ? { quiet: { chars: reply.userText.length } } : {})
+      ...(reply.quiet && !said && !reply.handedOff ? { quiet: { chars: reply.userText.length, turnIds: reply.turnIds } } : {})
     })
     this.afterReply()
   }
@@ -648,10 +697,16 @@ export class VoiceResponder {
     else this.pendingReport = false
   }
 
+  private stopStillTimer(reply: Reply): void {
+    if (reply.stillTimer) this.clearTimer(reply.stillTimer)
+    reply.stillTimer = null
+  }
+
   private abort(reply: Reply, keepSaid: boolean): void {
     reply.finished = true
     if (reply.startTimer) this.clearTimer(reply.startTimer)
     reply.startTimer = null
+    this.stopStillTimer(reply)
     reply.ctrl.abort()
     reply.stream?.cancel()
     if (this.reply === reply) this.reply = null

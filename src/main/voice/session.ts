@@ -111,6 +111,8 @@ export type TurnLatency = {
 
 /** A pause older than this belongs to an earlier turn, not the one whose words just came. */
 const PAUSE_MATCH_MS = 20_000
+/** Turns awaiting the listener's answer, at most: more means it skipped some. */
+const MAX_TURN_ENDS = 4
 
 /** An event without its session id; the session stamps it. */
 type Emitted = VoiceEvent extends infer E ? (E extends { sessionId: string } ? Omit<E, 'sessionId'> : never) : never
@@ -206,8 +208,17 @@ export class VoiceSession {
   private lastDropReason = ''
   private ctrl = new AbortController()
   private readonly pause: PauseDetector
-  private ring: Int16Array[] = []
+  /** The last seconds of mic audio, each piece with where it ends in all the audio so far. */
+  private ring: Array<{ pcm: Int16Array; end: number }> = []
   private ringSamples = 0
+  /** Samples of mic audio kept so far, in all: where each piece sits. */
+  private ringTotal = 0
+  /**
+   * Where each turn we ended sits in that audio, until the listener answers it.
+   * A connection that drops first takes the answer with it: the turn is played
+   * again and ended again once back, and turns already answered aren't.
+   */
+  private turnEnds: number[] = []
   private attempt = 0
   private reconnectTimer: unknown = null
   private keepAliveTimer: unknown = null
@@ -323,7 +334,11 @@ export class VoiceSession {
       },
       done: ({ audible, handedOff, failed, quiet }) => {
         if (failed) this.deps.onResponderFailed?.(failed.message)
-        if (quiet) this.deps.onStayedQuiet?.(quiet.chars)
+        if (quiet) {
+          this.deps.onStayedQuiet?.(quiet.chars)
+          // Your words stay on screen, marked: it heard them and chose not to answer.
+          for (const turnId of quiet.turnIds) this.emitEvent({ kind: 'unanswered', turnId })
+        }
         // With audio coming, its playback moves the session on; a hand-off waits for the agent.
         if (!audible && !handedOff) this.dispatch({ type: 'reply_done', runActive: this.reply.runActive })
       },
@@ -347,10 +362,24 @@ export class VoiceSession {
     if (this.stateValue === 'off') return
     if (workspacePath) this.taskWorkspace = workspacePath
     if (runId === this.taskRunId) return
+    // Moved from one task to another (not the new task a hand-off just made): the voice starts fresh.
+    if (this.taskRunId !== null) this.forgetTask()
     this.taskRunId = runId
     this.taskContext = ''
     this.taskContextGen++
     this.refreshTaskContext(true)
+  }
+
+  /**
+   * What the voice said and heard about the last task goes, and with nothing
+   * running, so does the work it last gave the agent: the status names this task's.
+   */
+  private forgetTask(): void {
+    this.responder.forget()
+    if (this.reply.runActive) return
+    this.agentBrief = undefined
+    this.agentSince = undefined
+    this.lastHandOff = null
   }
 
   /** Read the task's conversation again, unless it was read just now (`force`: always). */
@@ -660,6 +689,10 @@ export class VoiceSession {
     if (s === 'off' || s === 'connecting' || s === 'paused' || s === 'error') return
     if (s === 'reconnecting') {
       this.remember(pcm)
+      // A turn you finish while it's down is ended at the same place when it's back.
+      if (!this.turnDetection && !this.deps.settings().pushToTalkOnly) {
+        for (const ev of this.pause.push(pcm)) if (ev.kind === 'pause' && ev.speechMs > 0) this.markTurnEnd()
+      }
       return
     }
     const ptt = this.deps.settings().pushToTalkOnly
@@ -685,7 +718,10 @@ export class VoiceSession {
       }
       this.lastPause = { at: this.now(), silenceMs: ev.silenceMs, speechMs: ev.speechMs }
       // Listeners with their own turn model decide; the rest end on our pause.
-      if (!this.turnDetection && !ptt && ev.speechMs > 0) this.stt?.endTurn()
+      if (!this.turnDetection && !ptt && ev.speechMs > 0) {
+        this.markTurnEnd()
+        this.stt?.endTurn()
+      }
       // The sound stopped. If no turn comes of it, the voice lets go anyway.
       if (this.overFloor && !this.holdGraceTimer) {
         this.holdGraceTimer = this.setTimer(() => {
@@ -706,8 +742,9 @@ export class VoiceSession {
     this.pttDown = down
     if (!down && (this.stateValue === 'hearing' || this.stateValue === 'listening')) {
       this.pause.reset()
+      this.markTurnEnd()
       this.stt?.endTurn()
-    }
+    } else if (!down && this.stateValue === 'reconnecting') this.markTurnEnd()
   }
 
   setMuted(muted: boolean): void {
@@ -776,8 +813,7 @@ export class VoiceSession {
     this.ctrl.abort()
     const stt = this.stt
     this.stt = null
-    this.ring = []
-    this.ringSamples = 0
+    this.clearRing()
     await stt?.close()
   }
 
@@ -968,9 +1004,8 @@ export class VoiceSession {
     // already: resetting would re-fire speech_start and trim those words away (D-43).
     if (this.turnDetection) {
       this.pause.reset()
-      this.ring = []
-      this.ringSamples = 0
-    }
+      this.clearRing()
+    } else this.answeredUpTo(this.turnEnds.shift())
     // Nothing said, or only the agent's own words picked up by the mic (§6.4),
     // or a filler a listener invents from noise: not a turn, never a message.
     // Judged at when the words were heard, not when a whole-turn listener got them back
@@ -993,6 +1028,8 @@ export class VoiceSession {
         ...(pause ? { speechMs: pause.speechMs, sttMs: this.now() - pause.at } : {}),
         ...(listen ?? {})
       })
+      // Words it chose not to answer stay on screen, marked; an echo was never yours.
+      if (noise && text) this.emitEvent({ kind: 'unanswered', turnId: (this.deps.newId ?? randomUUID)(), text })
       // Not words: whatever the voice held while it listened is said now.
       this.endOverFloor()
       // A cough cut off an answer that hadn't started: answer what you'd said after all.
@@ -1028,15 +1065,27 @@ export class VoiceSession {
     this.deps.record?.({ kind: 'you', turnId, text, ...(stop ? { stop } : {}) })
     this.emitEvent({ kind: 'turn', turnId, text, stop })
     if (stop) {
-      if (this.reply.runActive) this.deps.record?.({ kind: 'stop_agent', by: 'you' })
+      const working = this.reply.runActive
+      if (working) this.deps.record?.({ kind: 'stop_agent', by: 'you' })
       // "Stop" needs no model: the voice goes quiet, and the work stops if there is any.
       this.responder.interrupt()
-      if (this.reply.runActive) this.emitEvent({ kind: 'stop_agent' })
-      this.dispatch({ type: 'reply_done', runActive: false })
+      if (!working) {
+        this.dispatch({ type: 'reply_done', runActive: false })
+        return
+      }
+      this.emitEvent({ kind: 'stop_agent' })
+      // Said so you know it took: the run's own end follows.
+      const contextId = (this.deps.newId ?? randomUUID)()
+      const stream = this.openReplyTts(contextId)
+      this.said(contextId, STOPPED_LINE, 'voice', stream !== null)
+      if (stream) {
+        stream.pushText(STOPPED_LINE)
+        stream.end()
+      } else this.dispatch({ type: 'reply_done', runActive: false })
       return
     }
     // "Can you…": wait a moment before answering, so the rest of the thought joins this turn.
-    this.responder.respond(text, soundsUnfinished(text) ? { waitMs: UNFINISHED_WAIT_MS } : undefined)
+    this.responder.respond(text, { turnId, ...(soundsUnfinished(text) ? { waitMs: UNFINISHED_WAIT_MS } : {}) })
   }
 
   // ── Approvals by voice (§7.5, B9) ──────────────────────────────────────
@@ -1138,8 +1187,7 @@ export class VoiceSession {
   private turnFailed(code: VoiceErrorCode, message: string): void {
     this.endOverFloor()
     this.pause.reset()
-    this.ring = []
-    this.ringSamples = 0
+    this.clearRing()
     this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
     this.emitError('turn', code, message)
   }
@@ -1147,9 +1195,30 @@ export class VoiceSession {
   // ── Reconnect (§15) ──────────────────────────────────────────────────────
 
   private remember(pcm: Int16Array): void {
-    this.ring.push(pcm)
+    this.ringTotal += pcm.length
+    this.ring.push({ pcm, end: this.ringTotal })
     this.ringSamples += pcm.length
-    while (this.ringSamples > RING_SAMPLES && this.ring.length > 1) this.ringSamples -= this.ring.shift()!.length
+    while (this.ringSamples > RING_SAMPLES && this.ring.length > 1) this.ringSamples -= this.ring.shift()!.pcm.length
+  }
+
+  /** A turn we end here; its answer is due from the listener. */
+  private markTurnEnd(): void {
+    if (this.turnDetection) return
+    this.turnEnds.push(this.ringTotal)
+    // A listener that never answered some turn mustn't make every later one replay.
+    if (this.turnEnds.length > MAX_TURN_ENDS) this.turnEnds.shift()
+  }
+
+  /** The listener answered the turn that ended here: its audio is never played again. */
+  private answeredUpTo(end: number | undefined): void {
+    if (end === undefined) return
+    while (this.ring.length > 0 && this.ring[0]!.end <= end) this.ringSamples -= this.ring.shift()!.pcm.length
+  }
+
+  private clearRing(): void {
+    this.ring = []
+    this.ringSamples = 0
+    this.turnEnds = []
   }
 
   private beginReconnect(): void {
@@ -1188,9 +1257,18 @@ export class VoiceSession {
       return this.scheduleReconnect()
     }
     if (this.stateValue !== 'reconnecting') return
-    // Replay what was said during the dropout, then carry on.
-    for (const pcm of this.ring) this.stt?.pushAudio(pcm)
+    // Listening again first: a turn the replay ends must find the session ready for it.
     this.dispatch({ type: 'connection_restored' })
+    // Replay what wasn't answered (said during the dropout, or a turn whose answer
+    // the drop took), ending each turn where it ended before.
+    const ends = [...this.turnEnds]
+    for (const { pcm, end } of this.ring) {
+      this.stt?.pushAudio(pcm)
+      while (ends.length > 0 && end >= ends[0]!) {
+        ends.shift()
+        this.stt?.endTurn()
+      }
+    }
   }
 
   // ── Plumbing ─────────────────────────────────────────────────────────────
@@ -1307,6 +1385,9 @@ const OFFER_RE = /\b(?:want me to|should i|shall i|would you like|do you want|if
 export function asksSomething(text: string): boolean {
   return text.includes('?') || OFFER_RE.test(text)
 }
+
+/** What the voice says when "stop" stopped work. */
+export const STOPPED_LINE = 'Stopped.'
 
 /** What the voice says when its brief never reached the task. */
 export const HAND_OFF_FAILED_LINE: Readonly<Record<VoiceHandOffFailure, string>> = {

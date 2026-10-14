@@ -56,6 +56,8 @@ export type VoiceLine = {
   runId?: string
   /** A hand-off the task never took, and why. */
   failed?: VoiceHandOffFailure
+  /** Yours, heard and left unanswered on purpose (a filler, talk not meant for it). */
+  unanswered?: true
 }
 
 /** Runs whose work is kept; the oldest go (their hand-offs keep their briefs). */
@@ -360,6 +362,9 @@ export class VoiceSessionController {
         // What you said; the voice answers it in main (D-44). Only a hand-off reaches the agent.
         this.set({ partial: '', lastTurn: e.text, saying: '', transcript: addLine(this.snap.transcript, e.turnId, 'you', e.text) })
         return
+      case 'unanswered':
+        this.set({ transcript: markUnanswered(this.snap.transcript, e.turnId, e.text) })
+        return
       case 'hand_off':
         this.set({ transcript: addLine(this.snap.transcript, e.handOffId, 'agent', e.brief) })
         void this.routeTurn({ turnId: e.handOffId, text: e.brief, stop: false })
@@ -540,6 +545,16 @@ export function addLine(lines: readonly VoiceLine[], id: string, who: VoiceLine[
   }
   const next = [...lines, { id, who, text: words }]
   return next.length > MAX_TRANSCRIPT_LINES ? next.slice(-MAX_TRANSCRIPT_LINES) : next
+}
+
+/** Your line `id` left unanswered on purpose; with `text`, added first (it was never a turn). */
+export function markUnanswered(lines: readonly VoiceLine[], id: string, text?: string): readonly VoiceLine[] {
+  const withLine = text ? addLine(lines, id, 'you', text) : lines
+  const i = withLine.findIndex((l) => l.id === id && l.who === 'you')
+  if (i < 0) return withLine
+  const next = withLine.slice()
+  next[i] = { ...withLine[i]!, unanswered: true }
+  return next
 }
 
 /** Keep a run's newest work; past MAX_WORKS runs, the one heard from longest ago goes. */

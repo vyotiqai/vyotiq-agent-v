@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { MAX_WORKS, VoiceSessionController, keepWork, type VoiceControllerDeps, type VoiceTurn } from '@renderer/features/voice/voiceSessionController'
 import { MicCaptureError, type OpenMicCapture } from '@renderer/lib/audio/micCapture'
 import type { VoiceEvent, VoiceWork } from '@shared/ipc/schemas/voice'
+import { buildEntries } from '@renderer/features/voice/view/parts'
 
 /** One event kind without its session id (distributes over the union). */
 type Bare<E = VoiceEvent> = E extends VoiceEvent ? Omit<E, 'sessionId'> : never
@@ -277,6 +278,25 @@ describe('VoiceSessionController', () => {
     expect(t.c.snapshot).toMatchObject({ partial: '', lastTurn: 'fix the test' })
     t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Fix the failing test in the parser.' })
     expect(t.turns).toEqual([{ turnId: 'h1', text: 'Fix the failing test in the parser.', stop: false }])
+  })
+
+  it('marks what the voice heard and left unanswered, apart from what it answered', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'unanswered', turnId: 'u1', text: 'Okay.' })
+    t.emit({ kind: 'turn', turnId: 't1', text: 'Mm, the fan.', stop: false })
+    t.emit({ kind: 'unanswered', turnId: 't1' })
+    t.emit({ kind: 'turn', turnId: 't2', text: 'Run the tests.', stop: false })
+    expect(t.c.snapshot.transcript).toEqual([
+      { id: 'u1', who: 'you', text: 'Okay.', unanswered: true },
+      { id: 't1', who: 'you', text: 'Mm, the fan.', unanswered: true },
+      { id: 't2', who: 'you', text: 'Run the tests.' }
+    ])
+    const entries = buildEntries(t.c.snapshot.transcript, {})
+    expect(entries).toEqual([
+      { id: 'u1', who: 'you', text: 'Okay. Mm, the fan.', unanswered: true },
+      { id: 't2', who: 'you', text: 'Run the tests.' }
+    ])
   })
 
   it('keeps the conversation: your turns, the voice’s sentences joined per reply, and work handed off', async () => {

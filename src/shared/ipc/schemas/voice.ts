@@ -362,6 +362,18 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
     stop: z.boolean()
   }),
   /**
+   * Something you said that the voice heard and chose not to answer: a filler,
+   * a bare "okay", talk not meant for it. With `text`, a new line (it was never
+   * a turn); without, the turn `turnId` already on screen. Shown muted, so
+   * "it ignored me" reads differently from "it broke".
+   */
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('unanswered'),
+    turnId: z.string(),
+    text: z.string().optional()
+  }),
+  /**
    * The voice gives the agent work: the renderer sends `brief` to the task
    * like a typed message (it starts the task, or joins the running one
    * without cancelling it) and follows the run.

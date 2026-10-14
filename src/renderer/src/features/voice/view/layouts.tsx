@@ -11,6 +11,7 @@ import {
   ConversationItems,
   HEADLINE,
   Header,
+  Line,
   Notes,
   Result,
   Steps,
@@ -360,10 +361,14 @@ export function SplitLayout(p: LayoutProps) {
                       </span>
                     </li>
                   ) : (
-                    <li key={e.id} className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 py-1.5" data-voice-line={e.who}>
-                      <span className="pt-px text-caption text-tertiary">{i === 0 || s.entries[i - 1]!.who !== e.who ? WHO[e.who] : ''}</span>
-                      <span className={cn('text-sm leading-relaxed', e.who === 'you' ? 'text-fg-strong' : 'text-fg')}>{e.text}</span>
-                    </li>
+                    <Line
+                      key={e.id}
+                      who={e.who}
+                      label={i === 0 || s.entries[i - 1]!.who !== e.who}
+                      unanswered={e.who === 'you' && Boolean(e.unanswered)}
+                    >
+                      {e.text}
+                    </Line>
                   )
                 )}
                 {s.partial ? (

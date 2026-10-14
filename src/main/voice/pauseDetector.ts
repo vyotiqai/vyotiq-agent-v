@@ -19,8 +19,19 @@ const FRAME = 320 // 20 ms
  * 0.75 s cut "Hello. Can you hear me?" into two messages (D-43).
  */
 export const SILENCE_MS: Readonly<Record<TurnPatience, number>> = { quick: 900, normal: 1300, patient: 2000 }
-/** Speech shorter than this is a cough or a click, not a turn. */
-export const MIN_SPEECH_MS = 300
+/**
+ * Voiced time that makes speech. A crisp "Stop." or "Yes." is only 150–250 ms
+ * of voice (its "st" hiss doesn't count, see MAX_VOICED_ZCR): at 300 ms, a
+ * spoken "Stop." while the agent worked was never heard at all, and through
+ * the app's 48 kHz capture it came in under 150 (2026-10-14 live probes).
+ * Measured peaks: typing 20 ms, a cup set down 60, a desk thud 140. Clicks
+ * and hiss are kept out by the crossing rate, not by length; a cough or thud
+ * that gets through comes back empty, as a sound tag or a filler, and those
+ * are never a turn.
+ */
+export const MIN_SPEECH_MS = 120
+/** While the agent's voice plays: its echo leaks into the mic, and a word that cuts in is longer anyway. */
+export const MIN_SPEECH_AGENT_TALKING_MS = 300
 
 /**
  * Quiet after which the turn has probably ended: a whole-turn listener starts
@@ -56,6 +67,7 @@ export class PauseDetector {
   private settled = false
   /** Raise while the agent is talking, so its own voice leaking into the mic isn't speech (§6.4). */
   private threshold = 3
+  private minSpeechMs = MIN_SPEECH_MS
 
   constructor(private patience: TurnPatience = 'normal') {}
 
@@ -66,6 +78,7 @@ export class PauseDetector {
   /** Stricter detection while the agent speaks (echo); normal otherwise. */
   setAgentSpeaking(on: boolean): void {
     this.threshold = on ? 6 : 3
+    this.minSpeechMs = on ? MIN_SPEECH_AGENT_TALKING_MS : MIN_SPEECH_MS
   }
 
   /** Voiced time in the speech so far (a cough stays short; talking keeps growing). */
@@ -112,7 +125,7 @@ export class PauseDetector {
         this.settled = false
         return { kind: 'resumed' }
       }
-      if (!this.inSpeech && this.speechMs >= MIN_SPEECH_MS) {
+      if (!this.inSpeech && this.speechMs >= this.minSpeechMs) {
         this.inSpeech = true
         return { kind: 'speech_start' }
       }

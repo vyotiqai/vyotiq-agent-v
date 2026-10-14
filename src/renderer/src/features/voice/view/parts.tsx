@@ -30,7 +30,7 @@ export const HEADLINE: Readonly<Record<VoiceSessionState, string>> = {
 export const WHO = { you: 'You', voice: 'Agent V', work: 'Task' } as const
 
 export type Entry =
-  | { id: string; who: 'you' | 'voice'; text: string }
+  | { id: string; who: 'you' | 'voice'; text: string; unanswered?: true }
   | {
       id: string
       who: 'work'
@@ -65,8 +65,10 @@ export function buildEntries(transcript: readonly VoiceLine[], works: VoiceSnaps
       continue
     }
     const last = out.at(-1)
-    if (l.who === 'you' && last?.who === 'you') out[out.length - 1] = { ...last, text: `${last.text} ${l.text}` }
-    else out.push({ id: l.id, who: l.who, text: l.text })
+    // One turn split by a pause reads as one; words left unanswered stay apart from answered ones.
+    if (l.who === 'you' && last?.who === 'you' && Boolean(last.unanswered) === Boolean(l.unanswered)) {
+      out[out.length - 1] = { ...last, text: `${last.text} ${l.text}` }
+    } else out.push({ id: l.id, who: l.who, text: l.text, ...(l.unanswered ? { unanswered: true as const } : {}) })
   }
   return out
 }
@@ -268,11 +270,25 @@ export function Notes({
 }
 
 /** One line of the conversation: a fixed label column, then the words, on two hard edges. */
-export function Line({ who, children, label = true }: { who: 'you' | 'voice'; children: ReactNode; label?: boolean }) {
+export function Line({
+  who,
+  children,
+  label = true,
+  unanswered = false
+}: {
+  who: 'you' | 'voice'
+  children: ReactNode
+  label?: boolean
+  /** Heard and left unanswered on purpose: muted, and says so. */
+  unanswered?: boolean
+}) {
   return (
-    <li className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 py-1.5" data-voice-line={who}>
+    <li className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 py-1.5" data-voice-line={who} data-voice-unanswered={unanswered || undefined}>
       <span className="pt-px text-caption text-tertiary">{label ? WHO[who] : ''}</span>
-      <span className={cn('text-sm leading-relaxed', who === 'you' ? 'text-fg-strong' : 'text-fg')}>{children}</span>
+      <span className={cn('text-sm leading-relaxed', unanswered ? 'text-muted' : who === 'you' ? 'text-fg-strong' : 'text-fg')}>
+        {children}
+        {unanswered ? <span className="ml-2 text-caption text-tertiary">Not answered</span> : null}
+      </span>
     </li>
   )
 }
@@ -535,7 +551,7 @@ export function ConversationItems({ entries, partial, now, steps }: { entries: r
         e.who === 'work' ? (
           <HandOff key={e.id} entry={e} now={now} steps={steps} />
         ) : (
-          <Line key={e.id} who={e.who} label={i === 0 || entries[i - 1]!.who !== e.who}>
+          <Line key={e.id} who={e.who} label={i === 0 || entries[i - 1]!.who !== e.who} unanswered={e.who === 'you' && Boolean(e.unanswered)}>
             {e.text}
           </Line>
         )
