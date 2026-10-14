@@ -18,6 +18,12 @@ import {
   voiceModeOwner
 } from '@renderer/features/voice/voiceMode'
 import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
+import {
+  clearComposerAttachments,
+  composerAttachmentKey,
+  getComposerAttachments,
+  setComposerAttachments
+} from '@renderer/lib/hooks/composerAttachmentStore'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot } from '@renderer/features/voice/voiceSessionController'
 
 class FakeController extends VoiceSessionController {
@@ -167,5 +173,21 @@ describe('voice mode on the New task brief', () => {
     expect((onSend.mock.calls[0] as unknown[])[0]).toBe('rename the config loader')
     // Marked as said out loud, so its reply opens with a spoken summary (D-32).
     expect((onSend.mock.calls[0] as unknown[])[3]).toEqual({ voice: true })
+  })
+
+  it('a spoken start takes every attachment with it, PDFs and audio included, before clearing them (B2)', async () => {
+    const key = composerAttachmentKey('/repo', null)!
+    const pdf = { type: 'file_native' as const, name: 'spec.pdf', mime: 'application/pdf', data: 'JVBERi0x' }
+    const clip = { type: 'audio' as const, url: 'data:audio/wav;base64,UklGRg==', mime: 'audio/wav' }
+    setComposerAttachments(key, { images: [], files: [], nativeFiles: [pdf], audio: [clip] })
+    const onSend = renderBrief()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Talk with the agent' }))
+    })
+    void handleVoiceTurn(turn('follow the spec'))
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalled())
+    expect((onSend.mock.calls[0] as unknown[])[3]).toEqual({ voice: true, nativeFiles: [pdf], audio: [clip] })
+    await vi.waitFor(() => expect(getComposerAttachments(key).nativeFiles).toEqual([]))
+    clearComposerAttachments(key)
   })
 })

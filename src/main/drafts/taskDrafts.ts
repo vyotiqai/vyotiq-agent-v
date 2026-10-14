@@ -79,6 +79,8 @@ export function saveTaskDraft(req: TaskDraftSaveRequest, now = new Date()): Prom
       brief: req.brief,
       doneWhen: req.doneWhen,
       ...(hasAttachments ? { attachments: req.attachments } : {}),
+      ...(req.extraRoots?.length ? { extraRoots: req.extraRoots } : {}),
+      ...(req.worktree != null ? { worktree: req.worktree } : {}),
       createdAt: existing?.createdAt ?? at,
       updatedAt: at
     })

@@ -98,6 +98,31 @@ describe('task drafts', () => {
   })
 })
 
+describe('where a draft runs', () => {
+  it('keeps extra folders and the worktree choice, and drops them when a later save clears them', async () => {
+    const extra = join(userData, 'shared-lib')
+    const saved = await saveTaskDraft({ workspacePath: workspace, brief: 'Bump the lib', doneWhen: [], extraRoots: [extra], worktree: true })
+    expect(saved).toMatchObject({ extraRoots: [extra], worktree: true })
+    expect((await listTaskDrafts(workspace))[0]).toMatchObject({ extraRoots: [extra], worktree: true })
+
+    const cleared = await saveTaskDraft({ workspacePath: workspace, id: saved.id, brief: 'Bump the lib', doneWhen: [], extraRoots: [] })
+    expect(cleared.extraRoots).toBeUndefined()
+    expect(cleared.worktree).toBeUndefined()
+    const raw = JSON.parse(readFileSync(draftsFile(), 'utf8')) as unknown
+    expect(JSON.stringify(raw)).not.toContain('extraRoots')
+  })
+
+  it('keeps worktree: false as a choice, not as absent', async () => {
+    const saved = await saveTaskDraft({ workspacePath: workspace, brief: 'Here, not in a worktree', doneWhen: [], worktree: false })
+    expect(saved.worktree).toBe(false)
+  })
+
+  it('refuses more extra folders than a task can take', () => {
+    const roots = Array.from({ length: 64 }, (_, i) => join(userData, `f${i}`))
+    expect(TaskDraftSaveRequestSchema.safeParse({ workspacePath: workspace, brief: 'x', doneWhen: [], extraRoots: roots }).success).toBe(false)
+  })
+})
+
 describe('draft requests', () => {
   it('refuses an empty draft', () => {
     expect(TaskDraftSaveRequestSchema.safeParse({ workspacePath: workspace, brief: '   ', doneWhen: [] }).success).toBe(false)

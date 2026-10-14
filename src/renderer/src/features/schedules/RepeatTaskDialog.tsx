@@ -74,6 +74,7 @@ export function RepeatTaskDialog() {
             workspacePath: task.workspacePath,
             instruction: task.instruction,
             ...(task.doneWhen?.length ? { doneWhen: task.doneWhen } : {}),
+            ...(task.mode ? { mode: task.mode } : {}),
             ...(worktree ? { worktree: true } : {}),
             schedule: result.spec
           }

@@ -39,7 +39,9 @@ import {
   clearComposerAttachmentsForWorkspace,
   composerAttachmentKey,
   flushComposerAttachmentsToDisk,
-  seedComposerAttachmentsFromDisk
+  getComposerAttachments,
+  seedComposerAttachmentsFromDisk,
+  setComposerAttachments
 } from './composerAttachmentStore'
 import { pushToast } from '@renderer/lib/ui/toastStore'
 
@@ -1072,8 +1074,39 @@ export function useWorkspaceManager(options?: {
         }
 
         maybeEvictControllers(workspacePath, openRunIds, assignedId)
+        // Typed into the line while the task was starting: it was kept under
+        // the not-yet-started key, so it moves with the task to its run id —
+        // or it would vanish here and come back on the next New task page.
+        let ui = ctx.ui
+        const hot = getWorkspaceHotUi(workspacePath)
+        const typedWhileStarting = resolveHotComposerDraft(hot, null)
+        if (typedWhileStarting.trim() && !resolveHotComposerDraft(hot, assignedId).trim()) {
+          setWorkspaceHotComposerDraft(workspacePath, assignedId, typedWhileStarting)
+          setWorkspaceHotComposerDraft(workspacePath, null, '')
+          ui = {
+            ...ui,
+            composerDraft: '',
+            composerDraftByRunId: {
+              ...ui.composerDraftByRunId,
+              [draftKeyForRun(null)]: '',
+              [draftKeyForRun(assignedId)]: typedWhileStarting
+            }
+          }
+        }
+        const fromKey = composerAttachmentKey(workspacePath, null)
+        const toKey = composerAttachmentKey(workspacePath, assignedId)
+        if (fromKey && toKey) {
+          const from = getComposerAttachments(fromKey)
+          const to = getComposerAttachments(toKey)
+          const count = (a: typeof from): number => a.images.length + a.files.length + a.nativeFiles.length + a.audio.length
+          if (count(from) > 0 && count(to) === 0) {
+            setComposerAttachments(toKey, from)
+            clearComposerAttachments(fromKey)
+          }
+        }
         const nextCtx: WorkspaceContext = {
           ...ctx,
+          ui,
           activeRunId: assignedId,
           openRunIds
         }

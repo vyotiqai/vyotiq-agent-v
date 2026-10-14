@@ -7,7 +7,8 @@ import { MENU_SURFACE } from '@renderer/lib/ui/menuStyles'
 import { Pie } from '@renderer/lib/ui/Progress'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
-import { BORDER_DIVIDER, DIVIDER_FILL, NUM, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, DIVIDER_FILL, NUM, ROW_HOVER, SECTION_LABEL, SELECTED } from '@renderer/lib/utils/layout'
+import { Icon } from '@renderer/lib/icons'
 import {
   alignContextUsageToModelWindow,
   type ContextToolGroupDetail,
@@ -446,14 +447,23 @@ function ContextMeterPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* A popover anchored to a control opens on the 40px row every pane and popover starts with. */}
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2">
+        <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg">Context</h2>
+        {level !== 'normal' ? (
+          <span className={cn('flex shrink-0 items-center gap-1 text-caption', levelRing[level])}>
+            <Icon name="warningCircle" size={12} />
+            {level === 'danger' ? 'Nearly full' : 'Filling up'}
+          </span>
+        ) : null}
+      </div>
       <header className="shrink-0 p-3">
         <div className="flex items-start gap-3">
           <UsageRing ratio={ratio} size={56} level={level}>
             <span className={levelRing[level]}>{displayPct}%</span>
           </UsageRing>
           <div className="min-w-0 flex-1 pt-0.5">
-            <p className="m-0 text-sm font-medium text-fg">Context</p>
-            <p className="m-0 mt-0.5 text-caption text-secondary">
+            <p className="m-0 text-caption text-secondary">
               Current step {usage.step}
               <span className="text-tertiary"> · </span>
               {formatTokens(usage.window)} model
@@ -559,7 +569,6 @@ function ContextMeterPanel({
                 <RunStat
                   label="Step cache"
                   value={`${hitPct}%`}
-                  tone="text-success"
                   title="Cache hit rate on the latest step"
                 />
               ) : null}
@@ -567,7 +576,6 @@ function ContextMeterPanel({
                 <RunStat
                   label="Run cache"
                   value={`${runHit}%`}
-                  tone="text-success"
                   title="Cache hit rate across all completed steps"
                 />
               ) : null}
@@ -575,7 +583,7 @@ function ContextMeterPanel({
                 <RunStat
                   label="Cache write"
                   value={formatTokens(usage.stepUsage.cacheCreationInputTokens)}
-                  tone="text-warning"
+                  title="Tokens written to the prompt cache this step; providers bill these above the input rate"
                 />
               ) : null}
               {usage.stepUsage.reasoningTokens > 0 ? (
@@ -731,7 +739,7 @@ export function ContextMeter({
           overBudget
             ? cn('bg-danger-soft', levelRing.danger)
             : open
-              ? 'bg-surface text-fg'
+              ? SELECTED
               : 'text-muted hover:bg-surface hover:text-fg'
         )}
         aria-expanded={open}

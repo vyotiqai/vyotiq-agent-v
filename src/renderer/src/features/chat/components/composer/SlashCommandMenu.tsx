@@ -13,6 +13,7 @@ import {
   MENU_SURFACE,
   MenuItemBody
 } from '@renderer/lib/ui'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { BrandMark } from '@renderer/features/marketplace/BrandTile'
 import { clampComposerDropdownPanel } from './composerDropdownLayout'
 import { availabilityCtaLabel } from './slashCommandExecute'
@@ -268,7 +269,7 @@ export function SlashCommandMenu({
       </div>
 
       {/* Pinned outside the scroll region: the footer never covers a row. */}
-      <div className="shrink-0 border-t border-border p-1" data-slash-footer>
+      <div className={cn('shrink-0 border-t p-1', BORDER_DIVIDER)} data-slash-footer>
         {described ? (
           <p
             className="m-0 line-clamp-2 px-2 py-1.5 text-xs text-muted"

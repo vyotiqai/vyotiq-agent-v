@@ -135,44 +135,58 @@ describe('instruction line', () => {
     expect(vi.mocked(props.onSend).mock.calls[0]![3]).toBeUndefined()
   })
 
-  it('is one action while a run is live: Queue empty, Send now with text', async () => {
+  it('is Queue while a run is live — what Enter does — with Send now beside it once there is text', async () => {
     const { props } = renderLine({ running: true, onSend: vi.fn(async () => true) })
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     const row = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-controls]')!
-    // Nothing to send yet: the one action reads Queue and is off.
+    // Nothing to send yet: the action reads Queue and is off, alone.
     const queue = within(row).getByRole('button', { name: 'Queue' })
     expect(queue).toHaveProperty('disabled', true)
-    // One action in the row, not a cluster: it stands in for Queue now.
     expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull()
     const line = screen.getByRole('combobox', { name: 'Instruction' })
     line.textContent = 'Use the other API'
     fireEvent.input(line)
-    // The same button, one reading of the same moment: into the run now.
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Queue' })).toBeNull())
-    fireEvent.click(screen.getByRole('button', { name: 'Send now' }))
+    // Queue stays the primary (Enter); Send now (Shift+Enter) joins it, before it.
+    const now = await screen.findByRole('button', { name: 'Send now' })
+    const queueReady = within(row).getByRole('button', { name: 'Queue' })
+    expect(queueReady).toHaveProperty('disabled', false)
+    expect(now.compareDocumentPosition(queueReady) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(now)
     await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
     expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ steer: true })
   })
 
-  it('puts Stop in the control row before the action while a run is live', () => {
-    const onStop = vi.fn()
-    const { props, rerender } = renderLine({ running: true, onStop, onSend: vi.fn(async () => true) })
-    const row = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-controls]')!
-    const stop = within(row).getByRole('button', { name: 'Stop' })
-    // Stop is the second button of two: it stands directly before the action,
-    // so the row still ends in the one thing that sends.
-    expect(stop.nextElementSibling?.textContent).toContain('Queue')
-    // Still one action, not a cluster: Stop carries no aria-label of its own.
-    const actions = within(row)
-      .getAllByRole('button')
-      .filter((b) => ['Send', 'Queue', 'Send now'].includes(b.getAttribute('aria-label') ?? ''))
-    expect(actions).toHaveLength(1)
-    fireEvent.click(stop)
-    expect(onStop).toHaveBeenCalledTimes(1)
+  it('queues with the mouse while a run is live, as Enter does', async () => {
+    const { props } = renderLine({ running: true, onSend: vi.fn(async () => true) })
+    const line = screen.getByRole('combobox', { name: 'Instruction' })
+    line.textContent = 'Then update the docs'
+    fireEvent.input(line)
+    const queue = await screen.findByRole('button', { name: 'Queue' })
+    await waitFor(() => expect(queue).toHaveProperty('disabled', false))
+    fireEvent.click(queue)
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toBeUndefined()
+  })
 
-    // Idle again, and there is nothing left to stop.
-    rerender(<Composer {...props} running={false} />)
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+  it('makes a new line with Alt+Enter, and sends nothing', () => {
+    const { props } = renderLine({ running: true, onSend: vi.fn(async () => true) })
+    const line = screen.getByRole('combobox', { name: 'Instruction' })
+    line.textContent = 'First line'
+    fireEvent.input(line)
+    fireEvent.keyDown(line, { key: 'Enter', altKey: true })
+    expect(props.onSend).not.toHaveBeenCalled()
+  })
+
+  it('hides Structure while a run is live', () => {
+    renderLine({ running: true, onSend: vi.fn(async () => true) })
+    expect(document.querySelector('[data-composer-structure]')).toBeNull()
+  })
+
+  it('leaves Stop to the run strip above the line: the row is how it runs and what it sends', () => {
+    const onStop = vi.fn()
+    renderLine({ running: true, onStop, onSend: vi.fn(async () => true) })
+    const row = document.querySelector<HTMLElement>('[data-composer-line] [data-composer-controls]')!
+    expect(within(row).queryByRole('button', { name: /Stop/ })).toBeNull()
   })
 
   it('keeps Stop out of the New task brief', () => {
@@ -276,12 +290,34 @@ describe('instruction line', () => {
     const queue = screen.getByRole('list', { name: 'Queued instructions' })
     expect(within(queue).getByText('Queued')).toBeTruthy()
     expect(within(queue).getByText('Also check the docs')).toBeTruthy()
-    fireEvent.click(within(queue).getByRole('button', { name: 'Send queued instruction now' }))
+    // Each row's buttons say which instruction they act on.
+    fireEvent.click(within(queue).getByRole('button', { name: 'Send queued instruction “Also check the docs” now' }))
     expect(onSendFollowUpNow).toHaveBeenCalledWith('f1')
-    fireEvent.click(within(queue).getByRole('button', { name: 'Remove queued instruction' }))
+    fireEvent.click(within(queue).getByRole('button', { name: 'Remove queued instruction “Also check the docs”' }))
     expect(onRemoveFollowUp).toHaveBeenCalledWith('f1')
-    fireEvent.click(within(queue).getByRole('button', { name: 'Edit queued instruction' }))
-    expect(screen.getByRole('textbox', { name: 'Edit queued instruction' })).toBeTruthy()
+    fireEvent.click(within(queue).getByRole('button', { name: 'Edit queued instruction “Also check the docs”' }))
+    expect(screen.getByRole('textbox', { name: 'Queued instruction “Also check the docs”' })).toBeTruthy()
+  })
+
+  it('keeps an edit whose instruction went to the run before it was saved (R3)', async () => {
+    const entry = { id: 'f1', itemId: 'followup-f1', preview: 'Also check the docs', text: 'Also check the docs' }
+    const { props, rerender } = renderLine({
+      running: true,
+      pendingFollowUps: [entry],
+      onEditFollowUp: vi.fn(async () => true)
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^Edit queued instruction/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: /^Queued instruction/ }), {
+      target: { value: 'Also check the docs and the changelog' }
+    })
+    // The turn ended and main applied the original: the editor closes, the edit stays.
+    rerender(<Composer {...props} pendingFollowUps={[]} />)
+    const notice = await screen.findByRole('status')
+    expect(notice.textContent).toContain('Sent before your edit was saved')
+    fireEvent.click(within(notice).getByRole('button', { name: 'Put my edit in the box' }))
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Instruction' }).textContent).toBe('Also check the docs and the changelog')
+    )
   })
 
   it('shows an instruction queued offline as such, with edit and remove but no send now', () => {
@@ -297,9 +333,9 @@ describe('instruction line', () => {
     const queue = screen.getByRole('list', { name: 'Queued instructions' })
     expect(within(queue).getByText('Queued · offline')).toBeTruthy()
     expect(queue.querySelector('[data-follow-up-offline]')).not.toBeNull()
-    expect(within(queue).queryByRole('button', { name: 'Send queued instruction now' })).toBeNull()
-    expect(within(queue).getByRole('button', { name: 'Edit queued instruction' })).toBeTruthy()
-    fireEvent.click(within(queue).getByRole('button', { name: 'Remove queued instruction' }))
+    expect(within(queue).queryByRole('button', { name: /^Send queued instruction/ })).toBeNull()
+    expect(within(queue).getByRole('button', { name: /^Edit queued instruction/ })).toBeTruthy()
+    fireEvent.click(within(queue).getByRole('button', { name: /^Remove queued instruction/ }))
     expect(onRemoveFollowUp).toHaveBeenCalledWith('o1')
   })
 

@@ -40,7 +40,7 @@ export function useOfflineSendQueue(
     files?: AttachedFile[],
     extras?: ComposerSendExtras,
     deliver?: SendHandler,
-    binding?: { runId?: string | null; paneId?: string; workspacePath?: string }
+    binding?: { runId?: string | null; paneId?: string; workspacePath?: string; liveLocalRun?: boolean }
   ) => Promise<boolean>
   clearOfflineQueueForWorkspace: () => void
 } {
@@ -69,10 +69,13 @@ export function useOfflineSendQueue(
       files?: AttachedFile[],
       extras?: ComposerSendExtras,
       deliver?: SendHandler,
-      binding?: { runId?: string | null; paneId?: string; workspacePath?: string }
+      binding?: { runId?: string | null; paneId?: string; workspacePath?: string; liveLocalRun?: boolean }
     ) => {
       const queuePath = binding?.workspacePath ?? workspacePath
-      if (!online && queuePath) {
+      // A live run on a model served from this machine keeps going offline:
+      // what is queued or steered goes to it, as it would online.
+      const reachesRun = Boolean(binding?.liveLocalRun && binding.runId && deliver)
+      if (!online && queuePath && !reachesRun) {
         const queued = enqueueOfflineMessage(queuePath, {
           text,
           images,

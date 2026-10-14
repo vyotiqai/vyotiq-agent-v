@@ -18,7 +18,7 @@ import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
 import { Icon } from '@renderer/lib/icons'
 import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { ActionMenu, Button, IconButton, ImageLightbox, cn, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, ImageLightbox, StatusGlyph, cn, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
 import {
   isCodeEditorTarget,
   isEditableShortcutTarget,
@@ -26,7 +26,7 @@ import {
   matchShortcut,
   shortcutLabel
 } from '@renderer/lib/shortcuts'
-import { COMPOSER_GUTTER, RECORD_MAX } from '@renderer/lib/utils/layout'
+import { COMPOSER_GUTTER, COMPOSER_MAX, RECORD_MAX } from '@renderer/lib/utils/layout'
 import type { InspectorToggle } from '@renderer/features/inspector/inspectorToggle'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
@@ -631,16 +631,19 @@ export function TaskPane(props: TaskPaneProps) {
   const loading = Boolean(props.transcriptLoading) && empty
 
   // A task not started yet is its brief; the composer draws the whole page.
-  if (props.newTask) {
-    return (
-      <div className="relative flex min-h-0 flex-1 flex-col bg-bg" data-chat-stage data-task-pane>
-        {props.composer}
-      </div>
-    )
-  }
+  // Either way the composer keeps one place in this tree, so starting a task
+  // turns its brief into the line in place: an open take, Structure or voice
+  // carry on rather than the box being made again.
+  const newTask = Boolean(props.newTask)
+  const runStrip =
+    !newTask && liveNow && !showGoal ? (
+      <RunStrip label={firstNeed ? 'Needs you' : (activity ?? 'Working')} needs={Boolean(firstNeed)} onStop={props.onStop} />
+    ) : null
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-bg" data-chat-stage data-task-pane>
+      {newTask ? null : (
+      <>
       {findOpen ? (
         <div
           className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs"
@@ -855,7 +858,9 @@ export function TaskPane(props: TaskPaneProps) {
         </div>
         </RecordOpenContext.Provider>
       </RecordActionsContext.Provider>
-      {showGoal && props.goal ? (
+      </>
+      )}
+      {!newTask && showGoal && props.goal ? (
         <GoalRunBanner
           goal={props.goal}
           loop={props.loop ?? null}
@@ -869,8 +874,30 @@ export function TaskPane(props: TaskPaneProps) {
           onStopRun={props.onStop}
         />
       ) : null}
+      {runStrip}
       {props.composer}
-      {lightbox ? <ImageLightbox url={lightbox} label="Attached image" onClose={() => setLightbox(null)} /> : null}
+      {!newTask && lightbox ? <ImageLightbox url={lightbox} label="Attached image" onClose={() => setLightbox(null)} /> : null}
+    </div>
+  )
+}
+
+/**
+ * While a run is live, a strip on the line's column above the box: what it is
+ * doing, and Stop — beside what it stops, not among the box's own controls.
+ * Esc stops it too. A goal's banner, when one is up, has its own Stop.
+ */
+function RunStrip({ label, needs, onStop }: { label: string; needs: boolean; onStop: () => void }) {
+  return (
+    <div className={cn('shrink-0 bg-bg', COMPOSER_GUTTER)} data-run-strip>
+      <div className={cn('mx-auto flex h-8 w-full items-center gap-2 px-4 text-xs', COMPOSER_MAX)} role="status">
+        <span className="flex min-w-0 flex-1 items-center gap-2 pl-3">
+          <StatusGlyph state={needs ? 'needs' : 'running'} />
+          <span className={cn('min-w-0 truncate', needs ? 'text-fg' : 'text-secondary')}>{label}</span>
+        </span>
+        <Button size="xs" variant="ghost" icon="stop" kbd={['Esc']} aria-keyshortcuts="Escape" onClick={onStop}>
+          Stop
+        </Button>
+      </div>
     </div>
   )
 }

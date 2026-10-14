@@ -1,43 +1,45 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
-import type { CompareModelOption } from './compareModels'
 import {
   TASK_DRAFT_CHECK_CHARS_MAX,
   TASK_DRAFT_CHECKS_MAX,
+  type ComposerAttachmentsBucket,
   type McpServerStatus,
-  type ToolApprovalMode,
-  type ToolApprovalSettings,
   type ToolCatalogResult
 } from '@shared/ipc'
 import { relativeTimeAgo } from '@shared/utils/timeFormat'
-import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
-import { Button, IconButton, Keys, Menu, Segmented, cn, type MenuOption } from '@renderer/lib/ui'
+import { extraRootLabel } from '@shared/extraRoots'
+import { IconButton, Menu, Segmented, cn, type MenuOption } from '@renderer/lib/ui'
 import { Icon, type IconName } from '@renderer/lib/icons'
-import { BORDER_DIVIDER, NUM, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, NUM, ROW_HOVER, SECTION_LABEL, SELECTED } from '@renderer/lib/utils/layout'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
+import { draftTitle, requestOpenTaskDraft, useTaskDrafts } from '@renderer/lib/drafts/taskDraftStore'
 import { useAgentContext } from '@renderer/features/chat/components/useAgentContext'
 import { useGitInit } from '@renderer/features/chat/components/useGitInit'
-import { useGitStatus } from '@renderer/features/chat/components/useGitStatus'
-import { workspacePathsEqual } from '@shared/workspacePathMatch'
+import type { GitStatusState } from '@renderer/features/chat/components/useGitStatus'
 import { ruleFileCountLabel, ruleRootFiles } from './ruleSummary'
-import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
+
+/** Everything a brief is, as it moves to another workspace. */
+export type MovedBrief = {
+  text: string
+  checks: string[]
+  extraRoots: string[]
+  worktree: boolean
+  attachments: ComposerAttachmentsBucket
+}
 
 /** Where a new task can be moved to: the open workspaces. */
 export type NewTaskTargets = {
   workspaces: ReadonlyArray<{ path: string; name: string }>
-  /** Start the new task over in another workspace, carrying the brief across. */
-  onMove: (workspacePath: string, brief: string) => void
+  /** Start the new task over in another workspace, carrying the whole brief. False when it stayed. */
+  onMove: (from: string, to: string, brief: MovedBrief) => Promise<boolean>
 }
 
 /** The schema's bounds on the brief's checks — the same Structure's Done when moves within. */
 const MAX_CHECKS = TASK_DRAFT_CHECKS_MAX
 const CHECK_MAX_CHARS = TASK_DRAFT_CHECK_CHARS_MAX
-
-const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
-  off: 'Runs its tools without asking',
-  mutating: 'Asks before edits and commands',
-  all: 'Asks before every tool'
-}
+/** Drafts listed under the box; the navigator lists them all. */
+const DRAFTS_SHOWN = 5
 
 const INDEX_LABEL = { ready: 'Ready', building: 'Building', degraded: 'Degraded', off: 'Off', paused: 'Paused' } as const
 
@@ -45,36 +47,36 @@ export function startChord(): string {
   return window.vyotiq?.platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter'
 }
 
-/** The same chord as keycaps, for the quiet line under the box. */
-export function startChordKeys(): string[] {
-  return window.vyotiq?.platform === 'darwin' ? ['⌘', '↵'] : ['Ctrl', '↵']
+/** The chord as the Start button says it: short, in words a keycap would hold. */
+export function startChordLabel(): string {
+  return window.vyotiq?.platform === 'darwin' ? '⌘↵' : 'Ctrl ↵'
 }
 
 /** Where the facts beside the brief lead: the page where each one is changed. */
 export type NewTaskFactTarget = 'agent' | 'tools' | 'indexing'
 
 /**
- * Starting a task is filling in a brief, not opening a chat. The brief is one
- * box: what to do, the checks the run is judged against, and how it runs (the
- * composer's own control row, which ends in the page's one action, Start task.
- * Where it runs is the header, as icons; under the box, what
- * the agent will see, each fact a way to where you change it. The brief
- * itself is the composer's input, so @ context, attachments and / skills
- * work here as they do on the instruction line.
+ * Starting a task is filling in a brief, not opening a chat. The header says
+ * where it runs, as a sentence: New task in this workspace on this branch,
+ * in this folder or a new worktree. The box is the brief: what to do, what
+ * goes with it (files and folders), the checks it is judged against, and how
+ * it runs, ending in Start. Under it, this workspace's drafts; beside it (or
+ * folded under it in a narrow column), what the agent will see, each fact a
+ * way to where you change it. The brief is the composer's own input, so @
+ * context, attachments and / skills work here as on the instruction line.
  */
 export function NewTaskBrief({
   workspacePath,
   targets,
-  brief,
   input,
   attachments,
+  notice,
   controls,
   banners,
   fileInput,
   menus,
   onDragOver,
   onDrop,
-  approval,
   canStart,
   onChecksChange,
   onStart,
@@ -84,24 +86,27 @@ export function NewTaskBrief({
   checks,
   onChecksEdit,
   clearToken,
-  draft,
+  onSaveDraft,
+  continuingDraftId = null,
+  git,
   worktree = false,
+  worktreeOffered = false,
   onWorktreeChange,
   extraRoots = NO_FOLDERS,
-  onAddFolder,
   onExtraRootsChange,
-  compare,
+  locked = false,
   voice
 }: {
   workspacePath: string | null
-  targets?: NewTaskTargets
-  /** The brief as typed — carried across when the task moves workspace. */
-  brief: string
+  targets?: { workspaces: ReadonlyArray<{ path: string; name: string }>; onMove: (path: string) => void }
   input: ReactNode
   attachments: ReactNode
+  /** A banner that belongs to this box (the model is not ready), above the field. */
+  notice?: ReactNode
   /**
-   * Mode, model · effort, attach and mic — the row every composer ends with.
-   * A dictation take's strip stands in for it while there is one.
+   * Mode, model · effort, permissions, then structure, attach, mic and voice,
+   * ending in Start — the row every composer ends with. A dictation take's
+   * strip stands in for it while there is one.
    */
   controls: ReactNode
   banners: ReactNode
@@ -110,13 +115,11 @@ export function NewTaskBrief({
   /** Files dropped anywhere on the box attach. */
   onDragOver?: (event: DragEvent<HTMLElement>) => void
   onDrop?: (event: DragEvent<HTMLElement>) => void
-  /** How tools ask before they run — said once, beside Start task. */
-  approval?: ToolApprovalSettings | null
   canStart: boolean
   /** The checks as they stand, a half-typed one included — whatever starts the task sends them. */
   onChecksChange: (doneWhen: string[]) => void
   onStart: () => void
-  /** Settings → Agent from the approvals line; Tools and Indexing from their facts. */
+  /** Settings → Agent, Tools and Indexing from the facts. */
   onOpenSettings?: (section: NewTaskFactTarget) => void
   /** Extensions → Rules, from the Rules fact. */
   onOpenRules?: () => void
@@ -125,23 +128,24 @@ export function NewTaskBrief({
   /** The checks added so far — kept per workspace, so leaving New task keeps them. */
   checks: string[]
   onChecksEdit: (next: string[]) => void
-  /** Changes when the page was emptied (a draft saved): drops a half-typed check. */
+  /** Changes when the page was emptied (a draft saved, a task started): drops a half-typed check. */
   clearToken?: number
-  /** Save as draft: put this brief aside. `continuing` when it came from one. */
-  draft?: { onSave: () => void; canSave: boolean; saving: boolean; continuing: boolean }
+  /** Ctrl/Cmd+S anywhere in the box: Save as draft (Update draft when continuing one). */
+  onSaveDraft?: { run: () => void; canSave: boolean }
+  /** The draft this page continues, marked in the drafts list. */
+  continuingDraftId?: string | null
+  /** This workspace's git state, kept current while the page is open. */
+  git: GitStatusState
   /** Start it in a new worktree of this workspace instead of in this folder. */
   worktree?: boolean
+  /** There is a commit to branch a worktree from. */
+  worktreeOffered?: boolean
   onWorktreeChange?: (worktree: boolean) => void
   /** Folders outside the workspace the task may also read and edit (absolute). */
   extraRoots?: readonly string[]
-  /** Add folder…: the OS picker, checked by main. Absent hides the row. */
-  onAddFolder?: () => void
   onExtraRootsChange?: (next: string[]) => void
-  /**
-   * Also run on: a second model for the same brief. Start then makes two
-   * tasks, each in its own worktree, to compare side by side. Absent hides it.
-   */
-  compare?: { options: readonly CompareModelOption[]; value: string | null; onChange: (next: string | null) => void }
+  /** The box is read-only: the task is starting, or a draft is being saved. */
+  locked?: boolean
   /**
    * Voice mode's bar, while it's open here: it takes the brief's place, and
    * the first thing said starts the task (docs/voice-mode.md §13.5).
@@ -149,6 +153,7 @@ export function NewTaskBrief({
   voice?: ReactNode
 }) {
   const [draftCheck, setDraftCheck] = useState('')
+  const newCheckRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (clearToken) setDraftCheck('')
@@ -160,14 +165,23 @@ export function NewTaskBrief({
   const onChecksChangeRef = useRef(onChecksChange)
   onChecksChangeRef.current = onChecksChange
   useEffect(() => {
-    onChecksChangeRef.current(pending && checks.length < MAX_CHECKS ? [...checks, pending] : checks)
+    const room = checks.length < MAX_CHECKS
+    const fresh = pending && !checks.includes(pending)
+    onChecksChangeRef.current(room && fresh ? [...checks, pending] : checks)
   }, [checks, pending])
 
   const addCheck = (): void => {
     const text = draftCheck.trim().slice(0, CHECK_MAX_CHARS)
     if (!text || checks.length >= MAX_CHECKS) return
-    onChecksEdit([...checks, text])
+    // The same check twice is one check.
+    if (!checks.includes(text)) onChecksEdit([...checks, text])
     setDraftCheck('')
+  }
+
+  const removeCheck = (index: number): void => {
+    onChecksEdit(checks.filter((_, i) => i !== index))
+    // The row under the pointer is gone; the field for the next check is where focus goes.
+    requestAnimationFrame(() => newCheckRef.current?.focus())
   }
 
   const onCheckKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
@@ -185,181 +199,171 @@ export function NewTaskBrief({
     }
   }
 
+  // Ctrl/Cmd+S anywhere in the box puts the brief aside, as Save as draft does.
+  const boxRef = useRef<HTMLDivElement>(null)
+  const saveDraftRef = useRef(onSaveDraft)
+  saveDraftRef.current = onSaveDraft
+  const lockedRef = useRef(locked)
+  lockedRef.current = locked
+  useEffect(() => {
+    const box = boxRef.current
+    if (!box) return undefined
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      const save = saveDraftRef.current
+      if (!save || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+      if (event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      if (save.canSave && !lockedRef.current) save.run()
+    }
+    box.addEventListener('keydown', onKey)
+    return () => box.removeEventListener('keydown', onKey)
+  }, [voice])
+
+  const full = checks.length >= MAX_CHECKS
+  const folders =
+    extraRoots.length > 0 ? (
+      <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0" aria-label="Added folders" data-added-folders>
+        {extraRoots.map((root) => (
+          <li
+            key={root}
+            className="inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-md bg-surface pl-2 pr-0.5 text-caption text-fg"
+            title={root}
+          >
+            <Icon name="folder" size={12} className="shrink-0 text-tertiary" />
+            <span className="truncate">{extraRootLabel(root)}</span>
+            <span className="shrink-0 text-tertiary">· can edit</span>
+            <IconButton
+              icon="close"
+              label={`Remove folder ${root}`}
+              size="xs"
+              tone="onSurface"
+              disabled={locked}
+              onClick={() => onExtraRootsChange?.(extraRoots.filter((r) => r !== root))}
+            />
+          </li>
+        ))}
+      </ul>
+    ) : null
+
   return (
     // The pane around it is already the "New task" region.
     <div className="flex min-h-0 flex-1 flex-col bg-bg" data-new-task>
       <header
-        className="@container flex h-10 shrink-0 items-center gap-1 border-b border-border pl-4 pr-2 text-xs text-muted"
+        className="@container flex h-10 shrink-0 items-center gap-1 border-b border-border pl-4 pr-2 text-xs text-tertiary"
         data-task-header
       >
-        <h1 className="mr-2 shrink-0 whitespace-nowrap text-sm font-semibold text-fg-strong">New task</h1>
+        <h1 className="mr-1 shrink-0 whitespace-nowrap text-sm font-semibold text-fg-strong">New task</h1>
         {workspacePath ? (
           <>
-            {/* The header reads as a line: a new task, in this folder, on this
-                branch. The words stay quieter than the two names they hold. */}
-            <span className="shrink-0 text-tertiary">in</span>
-            <span className="flex min-w-0 items-center gap-1">
-              <Icon name="workspace" size={13} className="shrink-0 text-tertiary" />
-              <WorkspaceSelect workspacePath={workspacePath} targets={targets} brief={brief} />
+            {/* One sentence: a new task, in this workspace, on this branch, here or in a
+                worktree. The joining words stay quieter than the names they hold. */}
+            <span className="shrink-0 @max-[560px]:hidden">in</span>
+            <span className="flex min-w-0 items-center">
+              <WorkspaceSelect workspacePath={workspacePath} targets={targets} disabled={locked} />
             </span>
-            <span className="ml-1 flex min-w-0 items-center gap-1">
-              <Icon name="branch" size={13} className="shrink-0 text-tertiary" />
-              <BranchSelect workspacePath={workspacePath} />
-            </span>
+            <BranchSelect workspacePath={workspacePath} git={git} disabled={locked} />
+            {onWorktreeChange && worktreeOffered ? (
+              <WhereItWorks worktree={worktree} onWorktreeChange={onWorktreeChange} disabled={locked} />
+            ) : null}
           </>
         ) : null}
         <span className="flex-1" />
-        {workspacePath && onWorktreeChange ? (
-          <WhereItWorks workspacePath={workspacePath} worktree={worktree} onWorktreeChange={onWorktreeChange} />
-        ) : null}
         {headerActions}
       </header>
 
       {/* The workbench: the brief keeps the record's measure on the left, and
           what the agent will see reads beside it on the right. Under 1100px of
-          column the rail falls under the brief — the field keeps the whole
+          column the rail folds under the brief — the field keeps the whole
           width there, which is what a split pane or an open inspector leaves. */}
       <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto">
         {/* 1180 = the record's 780 measure + the 40px gutter + the 296px rail,
             so the brief is exactly as wide as the steps it becomes. */}
-        <div className="mx-auto min-h-full w-full max-w-[1180px] px-5 pb-16 pt-10 @[720px]:px-8 @[900px]:pt-16 @[1100px]:grid @[1100px]:grid-cols-[minmax(0,1fr)_296px] @[1100px]:items-start @[1100px]:gap-x-10 @[1400px]:pt-24">
-          <div className="mx-auto w-full max-w-[780px]">
-            {banners}
-            {voice ?? (
-              <>
-            <div
-              className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
-              data-brief
-              // The composer's shell: Ctrl+. typed in the brief switches this box's mode.
-              data-composer-shell
-              onDragOver={onDragOver}
-              onDrop={onDrop}
-            >
-              {fileInput}
-              <div className="px-4 pt-3.5">{input}</div>
-              {attachments ? <div className="px-4 pt-2">{attachments}</div> : null}
-              {/* The checks the run is judged against are part of the brief:
-                  the field for the next one is always there, so the first
-                  check is one click into it, not two. */}
-              <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
-                {checks.length > 0 ? (
-                  <div className="flex items-baseline gap-2 pb-0.5 pt-1">
-                    <span className={SECTION_LABEL}>Done when</span>
-                    <span className={cn(NUM, 'text-tertiary')}>{checks.length}</span>
+        <div className="mx-auto min-h-full w-full max-w-[1180px] px-5 pb-16 pt-10 @[720px]:px-8 @[900px]:pt-16 @[1100px]:grid @[1100px]:grid-cols-[minmax(0,1fr)_296px] @[1100px]:items-start @[1100px]:gap-x-10">
+          <div className="mx-auto flex w-full max-w-[780px] flex-col gap-10">
+            <div>
+              {banners}
+              {voice ?? (
+                <div
+                  className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
+                  data-brief
+                  // The composer's shell: Ctrl+. typed in the brief switches this box's mode.
+                  data-composer-shell
+                  aria-busy={locked || undefined}
+                  onDragOver={onDragOver}
+                  onDrop={onDrop}
+                  ref={boxRef}
+                >
+                  {fileInput}
+                  {notice ? <div className="px-4 pt-3">{notice}</div> : null}
+                  <div className="px-4 pt-3.5">{input}</div>
+                  {attachments || folders ? (
+                    <div className="flex flex-col gap-1.5 px-4 pt-2">
+                      {attachments}
+                      {folders}
+                    </div>
+                  ) : null}
+                  {/* The checks the run is judged against are part of the brief: the
+                      field for the next one is always there, so the first check is one
+                      click into it, not two. Numbers are the checks' ids in the record. */}
+                  <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
+                    {checks.length > 0 ? (
+                      <ol className="m-0 list-none p-0" aria-label="Done when">
+                        {checks.map((text, index) => (
+                          <li key={`${index}:${text}`} className="group flex h-7 items-center gap-2.5">
+                            <span className={cn(NUM, 'w-4 shrink-0 text-right text-tertiary')}>{index + 1}</span>
+                            <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
+                              {text}
+                            </span>
+                            <IconButton
+                              icon="close"
+                              label={`Remove “${text}”`}
+                              size="xs"
+                              tone="muted"
+                              disabled={locked}
+                              className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                              onClick={() => removeCheck(index)}
+                            />
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                    <label className="group/check flex h-7 cursor-text items-center gap-2.5">
+                      {/* The field has no box of its own inside the brief's: its + says
+                          where focus is, beside the outline the field draws when it has it. */}
+                      <span className="flex w-4 shrink-0 justify-center">
+                        <Icon name="plus" size={14} className="text-tertiary group-focus-within/check:text-fg" />
+                      </span>
+                      <input
+                        ref={newCheckRef}
+                        value={draftCheck}
+                        maxLength={CHECK_MAX_CHARS}
+                        readOnly={locked}
+                        // At the limit the field stays, so a half-typed check stays in view.
+                        aria-disabled={full || undefined}
+                        onChange={(e) => setDraftCheck(e.target.value)}
+                        onKeyDown={onCheckKeyDown}
+                        placeholder={full ? `${MAX_CHECKS} checks is the limit` : 'Done when… a command passes, a file exists'}
+                        aria-label="New check"
+                        className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
+                      />
+                    </label>
                   </div>
-                ) : null}
-                {checks.length > 0 ? (
-                  <ul className="m-0 list-none p-0" aria-label="Done when">
-                    {checks.map((text, index) => (
-                      // The row number is the check's id in the record (c1, c2…),
-                      // so the brief and the run's ledger read one list.
-                      <li key={`${index}:${text}`} className="group flex h-7 items-center gap-2.5">
-                        <span className={cn(NUM, 'w-4 shrink-0 text-right text-tertiary')}>{index + 1}</span>
-                        <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
-                          {text}
-                        </span>
-                        <IconButton
-                          icon="close"
-                          label={`Remove “${text}”`}
-                          size="xs"
-                          tone="muted"
-                          className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                          onClick={() => onChecksEdit(checks.filter((_, i) => i !== index))}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {checks.length < MAX_CHECKS ? (
-                  <label className="group/check flex h-7 cursor-text items-center gap-2.5">
-                    {/* The field has no box of its own inside the brief's: its + says where focus is.
-                        It sits in the same gutter as the rows' numbers, so both lists share one edge. */}
-                    <span className="flex w-4 shrink-0 justify-center">
-                      <Icon name="plus" size={14} className="text-tertiary group-focus-within/check:text-fg" />
-                    </span>
-                    <input
-                      value={draftCheck}
-                      maxLength={CHECK_MAX_CHARS}
-                      onChange={(e) => setDraftCheck(e.target.value)}
-                      onKeyDown={onCheckKeyDown}
-                      placeholder="Done when… a command passes, a file exists"
-                      aria-label="New check"
-                      className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
-                    />
-                  </label>
-                ) : null}
-              </div>
-              {/* The control row is the box's action edge: how it runs, then
-                  the one word that starts it (Composer's own primary). */}
-              <div className={cn('border-t pb-1 pl-4 pr-3 @container', BORDER_DIVIDER)}>{controls}</div>
+                  {/* The control row is the box's action edge: how it runs, then
+                      the one action that starts it (with the brief's other endings). */}
+                  <div className={cn('border-t pb-1 pl-4 pr-2 @container', BORDER_DIVIDER)}>{controls}</div>
+                </div>
+              )}
+              {menus}
             </div>
-            {menus}
-
-            {/* What is not the run itself sits under the box on one quiet
-                row: scope on the left, its manners and the way aside right. */}
-            <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-              {onAddFolder ? (
-                <AddedFolders
-                  roots={extraRoots}
-                  onAdd={onAddFolder}
-                  onRemove={(root) => onExtraRootsChange?.(extraRoots.filter((r) => r !== root))}
-                />
-              ) : null}
-              <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
-                {/* The keys, so the chord is learnt by looking rather than by
-                    hovering the one button that takes it. */}
-                <span className="hidden items-center gap-1.5 text-xs text-tertiary @[720px]:flex">
-                  <Keys keys={startChordKeys()} />
-                  <span>start</span>
-                </span>
-                {draft ? (
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    disabled={!draft.canSave || draft.saving}
-                    pending={draft.saving}
-                    title={draft.canSave ? undefined : 'Write a brief or a check first'}
-                    onClick={draft.onSave}
-                  >
-                    {draft.continuing ? 'Update draft' : 'Save as draft'}
-                  </Button>
-                ) : null}
-                {workspacePath ? (
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    icon="repeat"
-                    disabled={!brief.trim()}
-                    title={brief.trim() ? 'Run this brief on a schedule, a new task each time' : 'Write a brief first'}
-                    onClick={() =>
-                      void requestRepeatTask({
-                        workspacePath,
-                        title: brief.trim().split('\n')[0]!.slice(0, 120),
-                        instruction: brief.trim(),
-                        ...(checks.length ? { doneWhen: checks } : {}),
-                        worktree
-                      })
-                    }
-                  >
-                    Schedule…
-                  </Button>
-                ) : null}
-                {workspacePath && compare && compare.options.length > 0 ? (
-                  <CompareModels workspacePath={workspacePath} compare={compare} />
-                ) : null}
-                {approval ? <ApprovalNote approval={approval} onOpenSettings={onOpenSettings} /> : null}
-              </div>
-            </div>
-              </>
-            )}
+            {workspacePath ? <DraftsList workspacePath={workspacePath} continuingDraftId={continuingDraftId} /> : null}
           </div>
           {/* The rail: what the agent will see, where you change it. Beside
-              the brief on a wide column; under it on a narrow one, where the
-              field needs the whole width. */}
+              the brief on a wide column; folded under it on a narrow one. */}
           {workspacePath ? (
             <WhatTheAgentSees
               workspacePath={workspacePath}
               worktree={worktree}
+              git={git}
               onOpenSettings={onOpenSettings}
               onOpenRules={onOpenRules}
             />
@@ -373,70 +377,66 @@ export function NewTaskBrief({
 const NO_FOLDERS: readonly string[] = []
 
 /**
- * The folders outside the workspace the task may also work in, as quiet chips
- * on the row under the box, and the way to add one. The workspace stays where
- * the task runs; these are reached by absolute path.
+ * This workspace's saved drafts, newest first, under the box: the other way
+ * into a task. Opening one goes through the app (it asks first when the page
+ * holds unsaved work); the one this page continues is marked.
  */
-function AddedFolders({
-  roots,
-  onAdd,
-  onRemove
-}: {
-  roots: readonly string[]
-  onAdd: () => void
-  onRemove: (root: string) => void
-}) {
+function DraftsList({ workspacePath, continuingDraftId }: { workspacePath: string; continuingDraftId: string | null }) {
+  const all = useTaskDrafts([workspacePath])
+  if (all.length === 0) return null
+  const shown = all.slice(0, DRAFTS_SHOWN)
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1" data-added-folders>
-      {roots.length > 0 ? (
-        <ul className="m-0 flex list-none flex-wrap items-center gap-x-3 gap-y-1 p-0" aria-label="Added folders">
-          {roots.map((root) => (
-            <li key={root} className="group flex min-w-0 items-center gap-1.5 text-xs">
-              <Icon name="folder" size={13} className="shrink-0 text-muted" />
-              <span className="shrink-0 text-fg">{extraRootLabel(root)}</span>
-              <span className="min-w-0 truncate font-mono text-caption text-tertiary" title={root}>
-                {root}
-              </span>
-              <IconButton
-                icon="close"
-                label={`Remove ${root}`}
-                size="xs"
-                tone="muted"
-                className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                onClick={() => onRemove(root)}
-              />
+    <section aria-labelledby="new-task-drafts" data-new-task-drafts>
+      <h2 id="new-task-drafts" className={cn(SECTION_LABEL, 'flex h-7 items-center gap-2')}>
+        Drafts
+        <span className={cn(NUM, 'font-normal tracking-normal')}>{all.length}</span>
+      </h2>
+      <ul className="m-0 list-none p-0">
+        {shown.map(({ draft }) => {
+          const current = draft.id === continuingDraftId
+          return (
+            <li key={draft.id}>
+              <button
+                type="button"
+                aria-current={current ? 'true' : undefined}
+                onClick={() => requestOpenTaskDraft(workspacePath, draft)}
+                className={cn(
+                  '-mx-2 flex h-8 w-[calc(100%+16px)] items-center gap-2.5 rounded-md px-2 text-left text-sm vy-transition focus-visible:vy-focus-ring',
+                  current ? SELECTED : cn('text-fg', ROW_HOVER)
+                )}
+              >
+                <Icon name="note" size={14} className="shrink-0 text-tertiary" />
+                <span className="min-w-0 flex-1 truncate">{draftTitle(draft)}</span>
+                <span className="shrink-0 text-caption text-tertiary">
+                  {current ? 'Open here' : relativeTimeAgo(draft.updatedAt)}
+                </span>
+              </button>
             </li>
-          ))}
-        </ul>
+          )
+        })}
+      </ul>
+      {all.length > shown.length ? (
+        <p className="m-0 mt-1 text-caption text-tertiary">
+          {all.length - shown.length} more in the sidebar
+        </p>
       ) : null}
-      {roots.length < MAX_EXTRA_ROOTS ? (
-        <button
-          type="button"
-          onClick={onAdd}
-          className="flex h-7 items-center gap-2.5 rounded-sm text-xs text-tertiary vy-transition hover:text-fg focus-visible:vy-focus-ring"
-          title="Also let the task read and edit another folder, by absolute path"
-        >
-          <Icon name="folderPlus" size={14} className="shrink-0" />
-          Add folder…
-        </button>
-      ) : null}
-    </div>
+    </section>
   )
 }
 
 function WorkspaceSelect({
   workspacePath,
   targets,
-  brief
+  disabled
 }: {
   workspacePath: string
-  targets?: NewTaskTargets
-  brief: string
+  targets?: { workspaces: ReadonlyArray<{ path: string; name: string }>; onMove: (path: string) => void }
+  disabled: boolean
 }) {
   const name = formatWorkspaceName(workspacePath)
   if (!targets || targets.workspaces.length < 2) {
     return (
-      <span className="px-1.5 text-xs text-fg" title={workspacePath}>
+      <span className="min-w-0 truncate px-1.5 text-xs text-fg" title={workspacePath}>
         {name}
       </span>
     )
@@ -447,11 +447,12 @@ function WorkspaceSelect({
       value={workspacePath}
       options={options}
       onChange={(path) => {
-        if (path !== workspacePath) targets.onMove(path, brief)
+        if (path !== workspacePath) targets.onMove(path)
       }}
       aria-label="Workspace"
       placement="down"
       size="xs"
+      disabled={disabled}
       bare
     />
   )
@@ -462,81 +463,44 @@ const WHERE_ITEMS = [
   { id: 'worktree', label: 'New worktree', icon: 'fork', title: 'Its own branch and folder; merge it back when you are happy' }
 ] as const
 
-/**
- * Where it works, both answers in view: in this folder, or in a new worktree
- * branched from it — only offered when there is a commit to branch from.
- */
-/**
- * "One model" / "Also on {model}": the brief again on a second model. Each copy
- * runs in a worktree of its own, so it is offered only where one can be made —
- * the same test as Where it works.
- */
-function CompareModels({
-  workspacePath,
-  compare
-}: {
-  workspacePath: string
-  compare: { options: readonly CompareModelOption[]; value: string | null; onChange: (next: string | null) => void }
-}) {
-  const git = useGitStatus(workspacePath, 0, true, 0)
-  if (git.result?.kind !== 'ok' || !git.status?.branch || !git.status.hasCommits) return null
-  return (
-    <Menu
-      value={compare.value ?? ''}
-      options={[
-        { value: '', label: 'One model' },
-        ...compare.options.map((o) => ({ value: o.value, label: `Also on ${o.label}`, group: o.group }))
-      ]}
-      onChange={(next) => compare.onChange(next || null)}
-      aria-label="Also run on another model"
-      title="Run the same brief on a second model, each in its own worktree, to compare"
-      icon="columns"
-      size="xs"
-      bare
-      quiet={!compare.value}
-    />
-  )
-}
-
+/** Where it works, both answers in view: this folder, or a new worktree branched from it. */
 function WhereItWorks({
-  workspacePath,
   worktree,
-  onWorktreeChange
+  onWorktreeChange,
+  disabled
 }: {
-  workspacePath: string
   worktree: boolean
   onWorktreeChange: (worktree: boolean) => void
+  disabled: boolean
 }) {
-  const git = useGitStatus(workspacePath, 0, true, 0)
-  if (git.result?.kind !== 'ok' || !git.status?.branch || !git.status.hasCommits) return null
   return (
     <Segmented
       size="xs"
       label="Where it works"
       value={worktree ? 'worktree' : 'here'}
-      onChange={(where) => onWorktreeChange(where === 'worktree')}
+      onChange={(where) => {
+        if (!disabled) onWorktreeChange(where === 'worktree')
+      }}
       items={WHERE_ITEMS}
       // In a narrow column the icons carry it; the words stay its names and tooltips.
-      className="mr-1 shrink-0 @max-[640px]:[&_[data-segmented-label]]:sr-only"
+      className="ml-1 shrink-0 @max-[640px]:[&_[data-segmented-label]]:sr-only"
     />
   )
 }
 
 /** The branch the task starts on: picking another checks it out. */
-function BranchSelect({ workspacePath }: { workspacePath: string }) {
-  const [revision, setRevision] = useState(0)
-  const git = useGitStatus(workspacePath, revision, true, 0)
-  // A branch switched anywhere else — Changes, a merged PR's Clean up — is the one named here.
-  useEffect(() => {
-    const off = window.vyotiq?.onGitStatusChanged?.((payload) => {
-      if (workspacePathsEqual(payload.workspacePath, workspacePath)) setRevision((r) => r + 1)
-    })
-    return () => off?.()
-  }, [workspacePath])
+function BranchSelect({ workspacePath, git, disabled }: { workspacePath: string; git: GitStatusState; disabled: boolean }) {
   const [branches, setBranches] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const { confirm, dialog: confirmDialog } = useConfirm()
   const branch = git.status?.branch ?? null
+
+  // A branch switched anywhere — here, Changes, a merged PR's Clean up — makes
+  // an old checkout error stale.
+  useEffect(() => {
+    setError(null)
+  }, [branch])
 
   useEffect(() => {
     if (!branch || !window.vyotiq?.gitBranches) return undefined
@@ -555,12 +519,13 @@ function BranchSelect({ workspacePath }: { workspacePath: string }) {
     label: name
   }))
   return (
-    <>
+    <span className="flex min-w-0 items-center gap-1">
+      <span className="shrink-0 @max-[560px]:hidden">on</span>
       <Menu
         value={branch}
         options={options}
         onChange={async (name) => {
-          if (name === branch) return
+          if (name === branch || busy) return
           const dirty = (git.status?.fileCount ?? 0) > 0
           if (
             dirty &&
@@ -572,59 +537,32 @@ function BranchSelect({ workspacePath }: { workspacePath: string }) {
             return
           }
           setError(null)
-          void window.vyotiq.gitCheckout(workspacePath, name).then((res) => {
-            if (res.ok) setRevision((r) => r + 1)
+          setBusy(true)
+          try {
+            const res = await window.vyotiq.gitCheckout(workspacePath, name)
+            if (res.ok) git.refresh()
             else setError(res.error)
-          })
+          } finally {
+            setBusy(false)
+          }
         }}
         aria-label="Branch"
         placement="down"
         searchable={options.length > 8}
         searchPlaceholder="Find a branch"
         size="xs"
+        disabled={disabled || busy}
         bare
         mono
       />
       {error ? (
-        <span className="ml-2 min-w-0 truncate text-danger" role="alert" title={error}>
-          {error}
+        <span className="ml-1 flex min-w-0 items-center gap-1 text-danger" role="alert" title={error}>
+          <Icon name="warningCircle" size={13} className="shrink-0" />
+          <span className="min-w-0 truncate">{error}</span>
         </span>
       ) : null}
       {confirmDialog}
-    </>
-  )
-}
-
-/**
- * How tools ask before they run: the one run setting the control row does
- * not carry, set in Settings → Agent. Quiet — it is usually the default.
- */
-function ApprovalNote({
-  approval,
-  onOpenSettings
-}: {
-  approval: ToolApprovalSettings
-  onOpenSettings?: (section: 'agent') => void
-}) {
-  const note = [
-    APPROVAL_NOTE[approval.mode],
-    approval.mode !== 'all' && approval.mcpProtection !== false ? 'MCP tools ask first' : null
-  ]
-    .filter(Boolean)
-    .join(' · ')
-  return (
-    <p className="m-0 ml-auto flex min-w-0 items-center gap-2 text-xs text-muted" data-approval-note>
-      <span className="min-w-0 truncate">{note}</span>
-      {onOpenSettings ? (
-        <button
-          type="button"
-          className="shrink-0 rounded-sm font-medium text-secondary underline-offset-2 vy-transition hover:text-fg hover:underline focus-visible:vy-focus-ring"
-          onClick={() => onOpenSettings('agent')}
-        >
-          Change
-        </button>
-      ) : null}
-    </p>
+    </span>
   )
 }
 
@@ -674,41 +612,67 @@ function useToolsSummary(workspacePath: string): {
 function WhatTheAgentSees({
   workspacePath,
   worktree,
+  git,
   onOpenSettings,
   onOpenRules
 }: {
   workspacePath: string
   worktree: boolean
+  git: GitStatusState
   onOpenSettings?: (section: NewTaskFactTarget) => void
   onOpenRules?: () => void
 }) {
   const { context, failed, reload } = useAgentContext(workspacePath)
   // Read again after an init: a watcher may not carry a `.git` just created.
-  const gitInit = useGitInit(workspacePath, reload)
-  const git = useGitStatus(workspacePath, 0, true, 0)
+  const gitInit = useGitInit(workspacePath, () => {
+    reload()
+    git.refresh()
+  })
   const tools = useToolsSummary(workspacePath)
+  // Folded under the box in a narrow column; the summary line says it all at a glance.
+  const [open, setOpen] = useState(false)
 
   const status = git.status
   // A new worktree starts from the branch's last commit; what is uncommitted here stays here.
   const inWorktree = worktree && Boolean(context?.branch)
-  const branchDetail = status
+  const changed = status ? (status.fileCount > 0 ? `${status.fileCount.toLocaleString()} changed` : 'Clean') : null
+  const treeValue: ReactNode = context
+    ? context.branch
+      ? inWorktree
+        ? 'New worktree'
+        : (changed ?? <span className="font-mono">{context.branch}</span>)
+      : (
+          <span className="flex items-center gap-2">
+            {gitInit.error ? 'Init failed' : 'Not a repository'}
+            <button
+              type="button"
+              className="rounded-sm text-xs font-medium text-muted underline-offset-2 vy-transition hover:text-fg hover:underline focus-visible:vy-focus-ring disabled:vy-disabled-state"
+              disabled={gitInit.busy}
+              aria-busy={gitInit.busy || undefined}
+              title={`Run git init in ${context.workspaceName}`}
+              onClick={() => void gitInit.init()}
+            >
+              Initialize
+            </button>
+          </span>
+        )
+    : null
+  const treeDetail = context?.branch
     ? inWorktree
       ? [
-          `from ${status.branch ?? context?.branch}`,
-          status.fileCount > 0
+          `from ${status?.branch ?? context.branch}`,
+          status && status.fileCount > 0
             ? `${status.fileCount.toLocaleString()} uncommitted ${status.fileCount === 1 ? 'file stays' : 'files stay'} here`
             : null
         ]
           .filter(Boolean)
           .join(' · ')
-      : [
-          status.fileCount > 0 ? `${status.fileCount.toLocaleString()} changed` : 'clean',
-          status.ahead ? `${status.ahead} ahead` : null,
-          status.behind ? `${status.behind} behind` : null
-        ]
-          .filter(Boolean)
-          .join(' · ')
-    : null
+      : status
+        ? [status.ahead ? `${status.ahead} ahead` : null, status.behind ? `${status.behind} behind` : null]
+            .filter(Boolean)
+            .join(' · ') || null
+        : null
+    : (gitInit.error ?? null)
 
   // The prompt is pre-loaded from index.md and state.md, so those count as
   // memory even when the note store is empty.
@@ -720,59 +684,71 @@ function WhatTheAgentSees({
 
   const rules = context?.rules
   const ruleFiles = ruleRootFiles(rules)
+  const ruleCount = ruleFiles.length + (rules?.ruleFileCount ?? 0)
+  const memoryValue = context
+    ? context.memoryNotes > 0
+      ? `${context.memoryNotes} ${context.memoryNotes === 1 ? 'note' : 'notes'}`
+      : memoryFiles.length > 0
+        ? memoryFiles.join(' · ')
+        : 'None'
+    : null
+
+  const summary = [
+    inWorktree ? 'new worktree' : status ? (status.fileCount > 0 ? `${status.fileCount.toLocaleString()} changed` : 'clean') : null,
+    context ? `${ruleCount} ${ruleCount === 1 ? 'rule' : 'rules'}` : null,
+    memoryValue && memoryValue !== 'None' ? memoryValue : null,
+    context ? `index ${INDEX_LABEL[context.codeIndex.state].toLowerCase()}` : null,
+    tools ? `${tools.builtin} tools` : null
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const warn = Boolean(tools?.problem) || (!context?.branch && Boolean(gitInit.error))
 
   return (
     // The rail beside the brief on a wide column, and its own sticky block:
-    // the facts hold still while the brief scrolls. Under 1100px it falls
-    // under the box, where the rows read two to a line.
+    // the facts hold still while the brief scrolls. Under 1100px it folds under
+    // the box to one line, opened in place.
     <aside
       className={cn(
         // Under the box it keeps the brief's 780 measure and centre, so the
         // two share a left edge; beside it, the rail's own column.
-        'mx-auto w-full min-w-0 max-w-[780px] border-t pt-4 @[1100px]:sticky @[1100px]:top-6 @[1100px]:mx-0 @[1100px]:max-w-none @[1100px]:border-t-0 @[1100px]:pt-0',
+        'mx-auto mt-10 w-full min-w-0 max-w-[780px] border-t pt-3 @[1100px]:sticky @[1100px]:top-6 @[1100px]:mx-0 @[1100px]:mt-0 @[1100px]:max-w-none @[1100px]:border-t-0 @[1100px]:pt-0',
         BORDER_DIVIDER
       )}
       aria-label="What the agent will see"
       data-agent-sees
     >
-      <h2 className={SECTION_LABEL}>What the agent will see</h2>
+      <div className="flex min-w-0 items-center gap-3">
+        <h2 className={cn(SECTION_LABEL, 'shrink-0')}>What the agent will see</h2>
+        <span
+          className={cn('min-w-0 flex-1 truncate text-xs @[1100px]:hidden', warn ? 'text-warning' : 'text-muted')}
+          aria-hidden="true"
+        >
+          {open ? '' : summary}
+        </span>
+        <IconButton
+          icon={open ? 'chevronUp' : 'chevron'}
+          label={open ? 'Fold what the agent will see' : 'Show what the agent will see'}
+          size="xs"
+          tone="muted"
+          aria-expanded={open}
+          className="@[1100px]:hidden"
+          onClick={() => setOpen((v) => !v)}
+        />
+      </div>
       {failed ? (
         <p className="mt-3 text-xs text-muted">This workspace’s context could not be read.</p>
       ) : (
-        // Two facts to a line when the ledger is under the box, one when it is
-        // the 296px rail: the rows never wrap mid-value.
-        <ul className="m-0 mt-1 grid list-none grid-cols-1 gap-x-8 p-0 @[560px]:grid-cols-2 @[1100px]:grid-cols-1">
-          <Fact
-            icon="branch"
-            k="Branch"
-            v={
-              context ? (
-                context.branch ? (
-                  inWorktree ? (
-                    'New worktree'
-                  ) : (
-                    <span className="font-mono">{context.branch}</span>
-                  )
-                ) : (
-                  <span className="flex items-center gap-2">
-                    {gitInit.error ? 'Init failed' : 'Not a repository'}
-                    <button
-                      type="button"
-                      className="rounded-sm text-xs font-medium text-muted underline-offset-2 vy-transition hover:text-fg hover:underline focus-visible:vy-focus-ring disabled:vy-disabled-state"
-                      disabled={gitInit.busy}
-                      aria-busy={gitInit.busy || undefined}
-                      title={`Run git init in ${context.workspaceName}`}
-                      onClick={() => void gitInit.init()}
-                    >
-                      Initialize
-                    </button>
-                  </span>
-                )
-              ) : null
-            }
-            d={context?.branch ? branchDetail : (gitInit.error ?? null)}
-            warn={!context?.branch && Boolean(gitInit.error)}
-          />
+        // Two facts to a line when the ledger is open under the box, one when it
+        // is the 296px rail: the rows never wrap mid-value.
+        <ul
+          className={cn(
+            'm-0 mt-1 list-none grid-cols-1 gap-x-8 p-0 @[560px]:grid-cols-2 @[1100px]:grid @[1100px]:grid-cols-1',
+            open ? 'grid' : 'hidden'
+          )}
+          data-agent-facts
+        >
+          <Fact icon={inWorktree ? 'fork' : 'branch'} k="Working tree" v={treeValue} d={treeDetail} warn={!context?.branch && Boolean(gitInit.error)} />
           <Fact
             icon="rules"
             k="Rules"
@@ -791,15 +767,7 @@ function WhatTheAgentSees({
           <Fact
             icon="memory"
             k="Memory"
-            v={
-              context
-                ? context.memoryNotes > 0
-                  ? `${context.memoryNotes} ${context.memoryNotes === 1 ? 'note' : 'notes'}`
-                  : memoryFiles.length > 0
-                    ? memoryFiles.join(' · ')
-                    : 'None'
-                : null
-            }
+            v={memoryValue}
             d={context?.memoryNotes ? (context.memoryNoteNames?.join(', ') ?? null) : null}
             open={onOpenSettings ? { label: 'Settings', run: () => onOpenSettings('agent') } : undefined}
           />
@@ -870,7 +838,7 @@ function Fact({
         </span>
         <span className="mt-px flex min-w-0 items-center gap-1.5 text-sm text-fg">
           {v === null ? (
-            <span className="h-3.5 w-24 rounded-sm bg-surface" aria-label="Loading" />
+            <span className="h-3.5 w-24 rounded-sm bg-surface" role="status" aria-label="Loading" />
           ) : (
             <span className="min-w-0 truncate">{v}</span>
           )}

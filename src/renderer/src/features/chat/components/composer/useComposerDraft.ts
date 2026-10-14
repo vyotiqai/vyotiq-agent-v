@@ -400,7 +400,8 @@ export function useComposerDraft({
           submit()
           return
         }
-      } else if (!e.shiftKey) {
+      } else if (!e.shiftKey && !e.altKey) {
+        // Alt+Enter is the line's new line (Shift+Enter steers while a run is live).
         e.preventDefault()
         submit()
         return
@@ -419,7 +420,11 @@ export function useComposerDraft({
       !e.altKey &&
       !e.ctrlKey &&
       !e.metaKey &&
-      !e.nativeEvent.isComposing
+      !e.nativeEvent.isComposing &&
+      // In a brief of several lines the arrows move the caret; only at its
+      // first (↑) or last (↓) position do they step through earlier briefs.
+      (!text.includes('\n') ||
+        (e.key === 'ArrowUp' ? (getCaretStart?.() ?? 0) === 0 : (getCaretStart?.() ?? text.length) >= text.length))
     ) {
       const next = e.key === 'ArrowUp' ? history.older(text) : history.newer(text)
       if (next !== null) {

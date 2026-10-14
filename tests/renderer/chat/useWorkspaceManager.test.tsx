@@ -16,8 +16,15 @@ import {
 import {
   getWorkspaceHotUi,
   resolveHotComposerDraft,
-  resetWorkspaceHotUiStoreForTests
+  resetWorkspaceHotUiStoreForTests,
+  setWorkspaceHotComposerDraft
 } from '@renderer/lib/hooks/workspaceHotUiStore'
+import {
+  clearComposerAttachments,
+  composerAttachmentKey,
+  getComposerAttachments,
+  setComposerAttachments
+} from '@renderer/lib/hooks/composerAttachmentStore'
 import type { AgentEvent, WorkspacesState } from '@shared/ipc'
 
 type Handler = (event: AgentEvent) => void
@@ -773,6 +780,37 @@ describe('useWorkspaceManager', () => {
     const subscribed = chatUiSubscribe.mock.calls.map((call) => call[0]?.runIds as string[])
     const last = subscribed[subscribed.length - 1] ?? []
     expect(last).toEqual(expect.arrayContaining(['run-child-a', 'run-child-b', 'run-parent']))
+  })
+
+  it('moves what was typed and attached while the task was starting to its run', async () => {
+    let resolveStart: (value: { ok: true; data: { runId: string } }) => void = () => {}
+    const pending = new Promise<{ ok: true; data: { runId: string } }>((r) => {
+      resolveStart = r
+    })
+    chatStart.mockImplementationOnce(() => pending)
+    const { result } = renderHook(() => useWorkspaceManager())
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+    })
+    await act(async () => {
+      void result.current.chatActions?.send('start it')
+    })
+    const fromKey = composerAttachmentKey('/ws-a', null)!
+    const toKey = composerAttachmentKey('/ws-a', 'run-typed')!
+    act(() => {
+      setWorkspaceHotComposerDraft('/ws-a', null, 'and check the docs')
+      setComposerAttachments(fromKey, { images: ['data:image/png;base64,AAAA'], files: [], nativeFiles: [], audio: [] })
+    })
+    await act(async () => {
+      resolveStart({ ok: true, data: { runId: 'run-typed' } })
+      await pending
+    })
+    const hot = getWorkspaceHotUi('/ws-a')
+    expect(resolveHotComposerDraft(hot, 'run-typed')).toBe('and check the docs')
+    expect(resolveHotComposerDraft(hot, null)).toBe('')
+    expect(getComposerAttachments(toKey).images).toEqual(['data:image/png;base64,AAAA'])
+    expect(getComposerAttachments(fromKey).images).toEqual([])
+    clearComposerAttachments(toKey)
   })
 
   it('does not demux buffered events to the wrong workspace before run id mapping', async () => {

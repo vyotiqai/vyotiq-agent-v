@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitStatus, GitStatusResult } from '@shared/ipc'
 import { useGitStatusLimit } from '@renderer/lib/git/gitStatusLimit'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 
 export type GitStatusState = {
   status: GitStatus | null
@@ -113,4 +114,26 @@ export function useGitStatus(
   const refresh = useCallback(() => setManualRevision((value) => value + 1), [])
 
   return { status, result, error, loading, refresh }
+}
+
+/**
+ * `useGitStatus` kept current while mounted: it reads again when main says
+ * this workspace's git state changed (a commit, a checkout, a file edited),
+ * rather than on a timer. For surfaces that show the state the whole time
+ * they are open — New task's facts, its worktree switch, Compare.
+ */
+export function useLiveGitStatus(
+  workspacePath: string | null,
+  enabled = true,
+  deferStartupMs = 0
+): GitStatusState {
+  const [revision, setRevision] = useState(0)
+  useEffect(() => {
+    if (!workspacePath || !enabled) return undefined
+    const off = window.vyotiq?.onGitStatusChanged?.((payload) => {
+      if (workspacePathsEqual(payload.workspacePath, workspacePath)) setRevision((r) => r + 1)
+    })
+    return () => off?.()
+  }, [workspacePath, enabled])
+  return useGitStatus(workspacePath, revision, enabled, deferStartupMs)
 }

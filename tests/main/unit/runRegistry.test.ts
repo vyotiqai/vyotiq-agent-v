@@ -11,6 +11,7 @@ import {
   takeNextReadyFollowUp,
   removeFollowUp,
   updateFollowUp,
+  mergeEditedFollowUp,
   promoteFollowUp,
   hasPendingFollowUps,
   hasReadyFollowUps,
@@ -227,6 +228,37 @@ describe('runRegistry follow-ups', () => {
       'second edited',
       'first'
     ])
+  })
+})
+
+describe('editing a queued follow-up', () => {
+  it('replaces only the text of a message that carries attachments', () => {
+    const image = { type: 'image_url' as const, url: 'data:image/png;base64,AAAA' }
+    const previous = { role: 'user' as const, content: [{ type: 'text' as const, text: 'look at this' }, image] }
+    const merged = mergeEditedFollowUp(previous, { role: 'user', content: 'look at this screenshot' })
+    expect(merged.content).toEqual([{ type: 'text', text: 'look at this screenshot' }, image])
+  })
+
+  it('adds the text in front when the queued message had only attachments', () => {
+    const image = { type: 'image_url' as const, url: 'data:image/png;base64,AAAA' }
+    const merged = mergeEditedFollowUp({ role: 'user', content: [image] }, { role: 'user', content: 'this one' })
+    expect(merged.content).toEqual([{ type: 'text', text: 'this one' }, image])
+  })
+
+  it('takes the edit whole when it is not plain text, or the queued one was', () => {
+    expect(mergeEditedFollowUp({ role: 'user', content: 'a' }, { role: 'user', content: 'b' }).content).toBe('b')
+    const parts = [{ type: 'text' as const, text: 'c' }]
+    expect(mergeEditedFollowUp({ role: 'user', content: 'a' }, { role: 'user', content: parts }).content).toEqual(parts)
+  })
+
+  it('keeps attachments through updateFollowUp', () => {
+    resetActiveRunsForTests()
+    registerRunAbort('edit-keeps', '/ws')
+    const image = { type: 'image_url' as const, url: 'data:image/png;base64,AAAA' }
+    const queued = enqueueFollowUp('edit-keeps', { role: 'user', content: [{ type: 'text', text: 'old' }, image] })
+    if (!queued.ok) throw new Error('not queued')
+    expect(updateFollowUp('edit-keeps', queued.id, { role: 'user', content: 'new' }).ok).toBe(true)
+    expect(peekFollowUps('edit-keeps')[0].message.content).toEqual([{ type: 'text', text: 'new' }, image])
   })
 })
 

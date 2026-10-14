@@ -516,6 +516,23 @@ export function removeFollowUp(
   }
 }
 
+/**
+ * An edit of a queued follow-up. A renderer that rebuilt its queue after a
+ * reload knows only the text, so a text-only edit keeps what the queued
+ * message carried besides its words: attachments, and fields such as
+ * `structuredFrom` or `spoken`.
+ */
+export function mergeEditedFollowUp(previous: ChatMessage, edited: ChatMessage): ChatMessage {
+  if (typeof edited.content !== 'string' || typeof previous.content === 'string') {
+    return { ...previous, ...edited }
+  }
+  const parts = [...previous.content]
+  const textIdx = parts.findIndex((part) => part.type === 'text')
+  if (textIdx >= 0) parts[textIdx] = { type: 'text', text: edited.content }
+  else parts.unshift({ type: 'text', text: edited.content })
+  return { ...previous, ...edited, content: parts }
+}
+
 /** Replace a queued follow-up message before the loop applies it. */
 export function updateFollowUp(
   runId: string,
@@ -531,8 +548,8 @@ export function updateFollowUp(
   }
   const queued = entry.followUps.find((item) => item.id === id)
   if (!queued) return { ok: false, error: 'Follow-up not found' }
-  queued.message = message
-  return { ok: true, preview: followUpPreview(message) }
+  queued.message = mergeEditedFollowUp(queued.message, message)
+  return { ok: true, preview: followUpPreview(queued.message) }
 }
 
 /** Move a queued follow-up to the front and interrupt the live stream. */

@@ -584,6 +584,24 @@ export function composerDocumentPlainText(raw: string): string {
 }
 
 /**
+ * The draft as text another run can read later, with no markers in it: a
+ * scheduled brief runs in a fresh session where nothing resolves a chip, so
+ * a path keeps its whole path (`@src/a.ts`) and the rest read as their label.
+ */
+export function composerDocumentPortableText(raw: string): string {
+  return parseComposerDocument(raw)
+    .map((seg) => {
+      if (seg.type === 'text') return seg.value
+      const m = seg.mention
+      if (m.kind === 'slash') return `/${mentionLabel(m)}`
+      if (m.kind === 'file' || m.kind === 'folder' || m.kind === 'docs' || m.kind === 'rule') return `@${m.path}`
+      if (m.kind === 'url') return m.url
+      return `@${mentionLabel(m)}`
+    })
+    .join('')
+}
+
+/**
  * Detect a slash-command chip in the composer draft for slash-style submit.
  * Returns the first slash chip and the draft with slash chips removed
  * (other @mentions preserved for resolve-on-send).

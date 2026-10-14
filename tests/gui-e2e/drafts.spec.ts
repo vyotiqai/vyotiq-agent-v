@@ -43,7 +43,9 @@ test('a draft is saved, survives a reload, continues on New task and is spent by
   await brief.fill('Tidy the release notes parser')
   await page.getByRole('textbox', { name: 'New check' }).fill('The parser tests pass')
   await page.getByRole('textbox', { name: 'New check' }).press('Enter')
-  await page.getByRole('button', { name: 'Save as draft' }).click()
+  // Save as draft sits behind Start's caret, with Schedule… and Also run on.
+  await page.getByRole('button', { name: 'More ways to start' }).click()
+  await page.getByRole('menuitem', { name: /^Save as draft/ }).click()
 
   await expect(brief).toHaveText('')
   await expect.poll(drafts).toEqual([{ brief: 'Tidy the release notes parser', doneWhen: ['The parser tests pass'] }])
@@ -58,7 +60,9 @@ test('a draft is saved, survives a reload, continues on New task and is spent by
   await row.click()
   await expect(brief).toHaveText('Tidy the release notes parser', { timeout: 20_000 })
   await expect(page.getByRole('list', { name: 'Done when' })).toContainText('The parser tests pass')
-  await expect(page.getByRole('button', { name: 'Update draft' })).toBeVisible()
+  await page.getByRole('button', { name: 'More ways to start' }).click()
+  await expect(page.getByRole('menuitem', { name: /^Update draft/ })).toBeVisible()
+  await page.keyboard.press('Escape')
 
   await brief.press('Control+Enter')
   await expect(page.getByText('E2E fixture response.')).toBeVisible({ timeout: 20_000 })

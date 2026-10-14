@@ -32,12 +32,13 @@ export function ModeSwitch({
   const rootRef = useRef<HTMLDivElement>(null)
   useCycleModeShortcut(rootRef, disabled, (reverse) => onChange(nextMode(mode, reverse)))
   const chord = shortcutLabel('cycleMode')
+  const backTab = window.vyotiq?.platform === 'darwin' ? '⇧Tab' : 'Shift+Tab'
   return (
     <div ref={rootRef} className="flex shrink-0" data-mode-switch>
       <Segmented
         label="Mode"
         value={mode}
-        items={MODES.map((m) => ({ id: m.value, label: m.label, title: `${m.note} (${chord}, or ⇧Tab in an empty box, switches)` }))}
+        items={MODES.map((m) => ({ id: m.value, label: m.label, title: `${m.note} (${chord}, or ${backTab} in an empty box, switches)` }))}
         onChange={onChange}
         disabled={disabled}
       />

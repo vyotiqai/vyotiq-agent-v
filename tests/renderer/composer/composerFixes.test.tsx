@@ -198,16 +198,15 @@ describe('composer fix 1 — settings stay editable while the composer is locked
   })
 })
 
-describe('composer fix 2 — an unreadable attachment blocks Send', () => {
-  it('disables Send and offers the reason to resolve', async () => {
+describe('composer fix 2 — an unreadable attachment says so, and holds nothing back', () => {
+  it('names the file that did not go, keeps Send on, and the notice can be dismissed', async () => {
     window.vyotiq.extractAttachment = vi.fn(async () => ({
       ok: false as const,
       error: 'scan.pdf has no extractable text (it may be a scan)'
     }))
-    const onSend = vi.fn()
+    const onSend = vi.fn(async () => true)
     renderLine({ onSend })
 
-    // Something to send — only the attachment is the reason it is refused.
     instruction().textContent = 'read the attachment'
     fireEvent.input(instruction())
 
@@ -217,18 +216,16 @@ describe('composer fix 2 — an unreadable attachment blocks Send', () => {
     })
     fireEvent.change(docs)
 
-    await waitFor(() =>
-      expect(screen.getByRole('alert').textContent).toContain('no extractable text')
-    )
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('no extractable text')
+    // The skipped file is not in the box; what is there can still go.
     const send = screen.getByRole('button', { name: 'Send' })
-    expect(send.hasAttribute('disabled')).toBe(true)
-    fireEvent.click(send)
-    expect(onSend).not.toHaveBeenCalled()
-    // The reason a disabled button gives is its tip, not a native title.
-    fireEvent.pointerEnter(send.parentElement!)
-    expect((await screen.findByRole('tooltip')).textContent).toBe(
-      'Resolve the attachment issue before starting.'
-    )
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false))
+    // Read once, it can go: no chip to remove was ever the way out.
+    fireEvent.click(within(alert).getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
   })
 })
 

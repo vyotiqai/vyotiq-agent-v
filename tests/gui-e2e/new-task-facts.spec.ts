@@ -36,6 +36,12 @@ async function openNewTask(): Promise<void> {
   await expect(page.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 30_000 })
 }
 
+/** In a column under 1100px the facts fold to one line under the box: open them. */
+async function showFacts(): Promise<void> {
+  const show = launched.window.getByRole('button', { name: 'Show what the agent will see' })
+  if (await show.isVisible().catch(() => false)) await show.click()
+}
+
 test('checks are typed inside the brief’s box, no button first', async () => {
   const page = launched.window
   await openNewTask()
@@ -60,6 +66,7 @@ test('Rules opens Extensions on its Rules tab', async () => {
   const page = launched.window
   await openNewTask()
   const sees = page.getByRole('complementary', { name: 'What the agent will see' })
+  await showFacts()
   await sees.getByRole('button', { name: /^Rules\s*:.*change in Extensions$/ }).click({ timeout: 20_000 })
   await expect(page.getByRole('tab', { name: /^Rules/ })).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 })
 })
@@ -70,6 +77,7 @@ test('Index opens Settings on Indexing, and Tools on Tools', async () => {
 
   await openNewTask()
   const sees = page.getByRole('complementary', { name: 'What the agent will see' })
+  await showFacts()
   await sees.getByRole('button', { name: /^Index\s*:.*change in Settings$/ }).click({ timeout: 20_000 })
   await expect(nav.getByRole('button', { name: 'Indexing' })).toHaveAttribute('aria-current', 'location', { timeout: 20_000 })
   // Settings is one column: the link scrolls it to the section.
@@ -79,6 +87,7 @@ test('Index opens Settings on Indexing, and Tools on Tools', async () => {
   await nav.getByRole('button', { name: 'Back to the task' }).click()
   await expect(page.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 20_000 })
   await expect(sees).toContainText('built-in', { timeout: 20_000 })
+  await showFacts()
   await sees.getByRole('button', { name: /^Tools\s*:.*change in Settings$/ }).click()
   await expect(nav.getByRole('button', { name: 'Tools' })).toHaveAttribute('aria-current', 'location', { timeout: 20_000 })
   await expect(page.locator('[data-settings-anchor="tools"] > h2')).toBeInViewport()

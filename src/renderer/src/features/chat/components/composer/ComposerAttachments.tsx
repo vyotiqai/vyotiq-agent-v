@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { AttachedAudio, AttachedFile, AttachedNativeFile } from '@shared/ipc'
 import { parseOpenableAttachmentPath } from '@shared/utils/linkableWorkspacePath'
-import { FileChip, ImageChip, ImageLightbox } from '@renderer/lib/ui'
+import { FileChip, IconButton, ImageChip, ImageLightbox } from '@renderer/lib/ui'
+import { Icon } from '@renderer/lib/icons'
 import { useRunSession } from '../../RunSessionContext'
 
 export function ComposerAttachments({
@@ -17,7 +18,8 @@ export function ComposerAttachments({
   onRemove,
   onRemoveFile,
   onRemoveNativeFile,
-  onRemoveAudio
+  onRemoveAudio,
+  onDismissNotice
 }: {
   images: string[]
   imageError: string | null
@@ -32,6 +34,8 @@ export function ComposerAttachments({
   onRemoveFile?: (index: number) => void
   onRemoveNativeFile?: (index: number) => void
   onRemoveAudio?: (index: number) => void
+  /** Clear the notice: it says what did not go, and once read it can go. */
+  onDismissNotice?: () => void
 }) {
   const { onOpenWorkspaceFile } = useRunSession()
   const [lightbox, setLightbox] = useState<{ url: string; label: string } | null>(null)
@@ -97,9 +101,13 @@ export function ComposerAttachments({
         </p>
       ) : null}
       {notice ? (
-        <p className="m-0 text-xs text-danger" role="alert">
-          {notice}
-        </p>
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-danger" role="alert">
+          <Icon name="warningCircle" size={13} className="shrink-0" />
+          <span className="min-w-0 flex-1">{notice}</span>
+          {onDismissNotice ? (
+            <IconButton icon="close" label="Dismiss" size="xs" tone="muted" onClick={onDismissNotice} />
+          ) : null}
+        </div>
       ) : null}
       {lightbox ? (
         <ImageLightbox

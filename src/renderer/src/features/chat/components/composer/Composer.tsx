@@ -29,7 +29,8 @@ import { resolveModelContextWindow } from '@shared/domain/modelContextWindows'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
 import { isRetryableTurnFailure } from '@shared/errors'
-import { Alert, Button, IconButton, Textarea, Tooltip, cn, pushToast } from '@renderer/lib/ui'
+import { Alert, Button, IconButton, Textarea, cn, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
+import { Icon } from '@renderer/lib/icons'
 import { COMPOSER_BOX_BLEED, COMPOSER_GUTTER, COMPOSER_MAX } from '@renderer/lib/utils/layout'
 import {
   draftTitle,
@@ -39,11 +40,10 @@ import {
   setBriefExtraRoots,
   setBriefState,
   setBriefWorktree,
-  useBriefState,
-  useNewTaskWorktreeDefault
+  useBriefState
 } from '@renderer/lib/drafts/taskDraftStore'
 import { createBriefHistoryCursor, recordBrief } from '@renderer/lib/drafts/briefHistory'
-import { useGitStatus } from '../useGitStatus'
+import { useLiveGitStatus } from '../useGitStatus'
 import { isSessionDragEvent } from '@renderer/lib/chat/chatPaneLayout'
 import { ComposerMentionInput, type ComposerMentionInputHandle } from './ComposerMentionInput'
 import { ComposerAttachments } from './ComposerAttachments'
@@ -77,13 +77,17 @@ import {
 } from '@renderer/lib/hooks/workspaceHotUiStore'
 import { clearComposerAttachments, composerAttachmentKey } from '@renderer/lib/hooks/composerAttachmentStore'
 import { SlashCommandMenu } from './SlashCommandMenu'
-import { NewTaskBrief, startChord, type NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
+import { NewTaskBrief, startChord, startChordLabel, type NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
+import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
+import { StartSplit } from './StartSplit'
+import { PermissionsControl } from './PermissionsControl'
 import { addTaskFolder } from '@renderer/features/task/taskFolders'
+import { MAX_EXTRA_ROOTS } from '@shared/extraRoots'
 import { useSlashCommands } from './useSlashCommands'
 import { MentionMenu } from './MentionMenu'
 import { useComposerMentions } from './useComposerMentions'
 import { draftHasImageMention, resolveComposerMentions } from './resolveMentions'
-import { mentionMarker, type MentionMenuItem } from './mentionModel'
+import { composerDocumentPortableText, hasComposerContent as hasComposerText, mentionMarker, type MentionMenuItem } from './mentionModel'
 import {
   ADD_COMPOSER_MENTION_EVENT,
   COMPOSER_DRAFT_EVENT,
@@ -119,6 +123,15 @@ function isStructureChord(e: React.KeyboardEvent): boolean {
  * `inline` is Edit and rerun, in a box where the instruction was.
  */
 export type ComposerVariant = 'inline' | 'line' | 'brief'
+
+/** What Send now does, said the same way on the line and on a queued instruction. */
+const SEND_NOW_TITLE = 'Send it into the live run now, instead of when this turn ends'
+
+/** A queued instruction as its buttons name it: short enough to hear, enough to tell rows apart. */
+function followUpName(preview: string): string {
+  const flat = preview.replace(/\s+/g, ' ').trim()
+  return flat.length > 40 ? `${flat.slice(0, 39)}…` : flat
+}
 
 /** The inline editor's placeholder when the caller names none. */
 const INLINE_PLACEHOLDER = 'Edit the instruction…'
@@ -315,7 +328,23 @@ export function Composer({
   cursorRef.current = cursor
   const [editingFollowUpId, setEditingFollowUpId] = useState<string | null>(null)
   const [editingFollowUpText, setEditingFollowUpText] = useState('')
+  /** The queued text the open edit started from, to tell an edit from a glance. */
+  const editingFollowUpOriginalRef = useRef('')
+  /** An edit whose instruction was sent before it was saved: kept, not lost. */
+  const [orphanedEdit, setOrphanedEdit] = useState<string | null>(null)
   const followUpEditRef = useRef<HTMLTextAreaElement>(null)
+
+  // The instruction being edited went to the run (its turn ended) or was
+  // removed: close the editor, keep the edit if it was one, and put focus back
+  // in the box rather than on the page, where Esc would stop the next turn.
+  useEffect(() => {
+    if (editingFollowUpId == null) return
+    if (pendingFollowUps.some((entry) => entry.id === editingFollowUpId)) return
+    setEditingFollowUpId(null)
+    const edited = editingFollowUpText.trim()
+    if (edited && edited !== editingFollowUpOriginalRef.current.trim()) setOrphanedEdit(edited)
+    requestAnimationFrame(() => taRef.current?.focus())
+  }, [pendingFollowUps, editingFollowUpId, editingFollowUpText])
 
   // Entering edit mode moves focus into the textarea so typing works immediately.
   useEffect(() => {
@@ -362,7 +391,7 @@ export function Composer({
     persistKey: attachmentKey
   })
 
-  const { audio, setAudio, audioError, addAudio, removeAudio } = useComposerAudio(attachmentKey)
+  const { audio, setAudio, audioError, setAudioError, addAudio, removeAudio } = useComposerAudio(attachmentKey)
 
   // The paperclip's menu: an image-only picker, and a capture of the Browser tab kept with the run.
   const imageRef = useRef<HTMLInputElement>(null)
@@ -389,10 +418,16 @@ export function Composer({
   // Settings can open the page on New worktree; that only holds where there
   // is a commit to branch from — the same test that shows the switch — so a
   // folder without one still starts here. Asked only while the default is on.
-  const worktreeDefault = useNewTaskWorktreeDefault()
-  const briefGit = useGitStatus(briefWorkspace, 0, variant === 'brief' && worktreeDefault, 0)
-  const worktreeOffered = Boolean(briefGit.status?.branch && briefGit.status.hasCommits)
-  const briefWorktree = Boolean(briefState.worktree) && (!worktreeDefault || worktreeOffered)
+  // One git read for the whole page — its header, the worktree switch, Compare
+  // and the facts — kept current while it is open.
+  const briefGit = useLiveGitStatus(briefWorkspace, variant === 'brief', 0)
+  const worktreeOffered = Boolean(
+    briefGit.result?.kind === 'ok' && briefGit.status?.branch && briefGit.status.hasCommits
+  )
+  // A worktree only where one can be made: once git has answered, a choice
+  // its switch no longer offers (no commits, detached HEAD) is not sent.
+  const briefWorktree = Boolean(briefState.worktree) && (briefGit.result == null || worktreeOffered)
+
   const briefWorktreeRef = useRef(briefWorktree)
   briefWorktreeRef.current = briefWorktree
   // Also run on: a second model for this brief, until it starts or the workspace changes.
@@ -400,6 +435,10 @@ export function Composer({
   const compareKeyRef = useRef(compareKey)
   compareKeyRef.current = compareKey
   useEffect(() => setCompareKey(null), [briefWorkspace])
+  // The model compared with became the one picked: comparing it with itself says nothing.
+  useEffect(() => {
+    if (compareKey && compareKey === modelSelectionKey(provider, model)) setCompareKey(null)
+  }, [compareKey, provider, model])
   // Folders outside the workspace the new task may also work in.
   const briefExtraRoots = briefExtraRootsOf(briefState)
   const briefExtraRootsRef = useRef(briefExtraRoots)
@@ -437,6 +476,10 @@ export function Composer({
     [briefWorkspace, workspacePath, activeRunId]
   )
   const [savingDraft, setSavingDraft] = useState(false)
+  /** New task: the start is on its way (mentions resolving, the task being made). */
+  const [briefStarting, setBriefStarting] = useState(false)
+  /** New task: how many checks Start would send, a half-typed one included. */
+  const [briefCheckCount, setBriefCheckCount] = useState(0)
   /** Bumped after a save empties the page, so a half-typed check goes too. */
   const [briefClearToken, setBriefClearToken] = useState(0)
 
@@ -498,6 +541,8 @@ export function Composer({
   const structuredFromAtSubmitRef = useRef<string | undefined>(undefined)
   /** The draft as of the latest render, for that snapshot. */
   const latestTextRef = useRef('')
+  /** The brief as typed when Start was pressed: what ↑ recalls once the start succeeds. */
+  const submittedBriefRef = useRef('')
   /** Your models, for a command file's `model:` (set once the catalog hook has run). */
   const commandModelChoicesRef = useRef<CommandModelChoices | null>(null)
 
@@ -532,6 +577,7 @@ export function Composer({
           extras = { ...(extras ?? {}), extraRoots: [...briefExtraRootsRef.current] }
         }
         const boundWorkspace = workspacePath
+        if (variant === 'brief') setBriefStarting(true)
         const resolved = await resolveComposerMentions({
           workspacePath: boundWorkspace,
           draft: rawText,
@@ -562,14 +608,24 @@ export function Composer({
           resolved.files.length ? resolved.files : undefined,
           extras
         )
-        // The task exists: the page starts over empty next time.
-        if (sent !== false && variant === 'brief' && boundWorkspace) setBriefState(boundWorkspace, null)
+        // The task exists: the page starts over empty next time — a half-typed
+        // check included, since it went with the start — and the brief joins
+        // the ones ↑ recalls (a start that failed does not).
+        if (sent !== false && variant === 'brief' && boundWorkspace) {
+          setBriefState(boundWorkspace, null)
+          setBriefClearToken((n) => n + 1)
+          const typed = submittedBriefRef.current
+          submittedBriefRef.current = ''
+          if (typed.trim()) recordBrief(typed)
+        }
         if (sent !== false && compareWith) setCompareKey(null)
         if (sent !== false) structureRef.current?.onSent()
         return sent
       } catch (err) {
         setFileError(err instanceof Error ? err.message : 'Send failed')
         return false
+      } finally {
+        if (variant === 'brief') setBriefStarting(false)
       }
     },
     [workspacePath, activeRunId, onSend, setFileError, variant]
@@ -876,12 +932,16 @@ export function Composer({
     if (!workspace || savingDraft) return
     const continuing = briefDraftIdRef.current
     setSavingDraft(true)
+    // The box is read-only until this returns, so what is emptied below is
+    // exactly what was saved.
     const res = await saveTaskDraftFor({
       workspacePath: workspace,
       id: continuing,
       brief: text,
       doneWhen: briefChecksRef.current,
-      attachments: { images, files, nativeFiles, audio }
+      attachments: { images, files, nativeFiles, audio },
+      extraRoots: briefExtraRootsRef.current,
+      worktree: briefWorktreeRef.current
     })
     setSavingDraft(false)
     if (!res.ok) {
@@ -891,6 +951,7 @@ export function Composer({
     setText('')
     if (attachmentKey) clearComposerAttachments(attachmentKey)
     setBriefState(workspace, null)
+    setCompareKey(null)
     setBriefClearToken((n) => n + 1)
     pushToast(continuing ? 'Draft updated' : 'Saved as a draft', { detail: draftTitle(res.data), icon: 'check' })
   }
@@ -917,10 +978,12 @@ export function Composer({
     setAudio,
     setFileError,
     disabled,
-    // The attachment errors too: sendDisabledReason below offers to resolve
-    // them, and a button that promises a fix must actually refuse to send.
+    // An attachment notice (a file skipped, a chip that did not resolve) says
+    // what did not go; it does not hold the rest back. What blocks is work
+    // still under way: a file being read, Structure writing, a start or save
+    // already on its way.
     sendBlocked:
-      extracting || readinessBlocksSend || fileError != null || imageError != null || audioError != null || structureHolding,
+      extracting || readinessBlocksSend || structureHolding || briefStarting || (variant === 'brief' && savingDraft),
     onSend: sendWithMentions,
     slashMenuOpen: slash.open,
     slashActiveCommand: slash.activeCommand,
@@ -945,8 +1008,9 @@ export function Composer({
     onCancelEdit: variant === 'inline' ? onCancelEdit : undefined,
     getCaretStart: () => taRef.current?.getSelectionStart() ?? 0,
     onSubmitted: () => {
+      // The brief joins the history once its start succeeds (sendWithMentions).
       if (briefHistory) {
-        recordBrief(latestTextRef.current)
+        submittedBriefRef.current = latestTextRef.current
         briefHistory.reset()
       }
       structuredFromAtSubmitRef.current = structureRef.current?.structuredFromFor(latestTextRef.current)
@@ -1188,6 +1252,8 @@ export function Composer({
   // Voice mode (docs/voice-mode.md §13): this line's own id, stable across its task getting a run id.
   const voiceOwner = useId()
   const isBrief = variant === 'brief'
+  /** New task's box is read-only while its start or its draft save is on the way. */
+  const briefLocked = isBrief && (briefStarting || savingDraft)
   const voiceOn = (isLine || isBrief) && voice.owner === voiceOwner
   const runningRef = useRef(running)
   runningRef.current = running
@@ -1201,14 +1267,20 @@ export function Composer({
         running: () => false,
         runId: () => null,
         send: async (spoken) => {
-          if (readinessBlocksSend) return false
+          // The same holds as Start: a file still being read, Structure writing.
+          if (readinessBlocksSend || extracting || structure.holding || briefStarting) return false
           const typed = text.trim() ? `${text.trimEnd()}\n\n` : ''
           beginVoiceHandoff(voiceOwner)
+          // Everything attached goes, as with Start: native files and audio ride the extras.
           const sent = await sendWithMentions(
             `${typed}${spoken}`,
             images.length ? images : undefined,
             files.length ? files : undefined,
-            { voice: true }
+            {
+              voice: true,
+              ...(nativeFiles.length ? { nativeFiles } : {}),
+              ...(audio.length ? { audio } : {})
+            }
           )
           if (sent === false) {
             cancelVoiceHandoff(voiceOwner)
@@ -1253,6 +1325,17 @@ export function Composer({
           .join(' · ')
       : null
   const attachFullAll = imagesFull && filesFull && audioFull
+  const approval = chatSettings.toolApproval ?? null
+  // Another folder the task may edit: on New task it joins the brief; on a
+  // started task it is saved on the run (the same as /add-dir).
+  const addFolder =
+    (isBrief && briefWorkspace) || (isLine && workspacePath && activeRunId)
+      ? {
+          onSelect: () => void addBriefFolder(),
+          disabled: isBrief && briefExtraRoots.length >= MAX_EXTRA_ROOTS,
+          disabledReason: `A task can reach up to ${MAX_EXTRA_ROOTS} folders`
+        }
+      : null
   const attachLabel = attachFullAll
     ? 'Attachment limits reached'
     : attachHint
@@ -1272,23 +1355,32 @@ export function Composer({
           ? `Structure — ${structure.eligibility.reason}`
           : `Structure into a brief (${structureChord})`
 
-  const sendDisabledReason = !canSend
-    ? disabled
-      ? hasWorkspace
-        ? 'Starting is unavailable right now.'
-        : 'Open a workspace to start a task'
-      : readinessBlocksSend && readinessIssue
-        ? modelReadinessSendReason(readinessIssue)
-        : extracting
-          ? 'Finish processing the attachment before starting.'
-          : fileError || imageError || audioError
-            ? 'Resolve the attachment issue before starting.'
-            : isInline
-              ? 'Edit the instruction to rerun it'
-              : isBrief
-                ? 'Write a brief or attach a file to start.'
-                : 'Write an instruction or attach a file first.'
-    : null
+  const verb = isBrief ? 'starting' : isInline ? 'rerunning' : 'sending'
+  const sendDisabledReason = takeOpen
+    ? 'Insert or discard the dictation first.'
+    : !canSend
+      ? disabled
+        ? hasWorkspace
+          ? `${isBrief ? 'Starting' : 'Sending'} is unavailable right now.`
+          : 'Open a workspace to start a task.'
+        : readinessBlocksSend && readinessIssue
+          ? modelReadinessSendReason(readinessIssue)
+          : extracting
+            ? `Wait for the attachment to be read before ${verb}.`
+            : structure.phase.kind === 'asking'
+              ? 'Answer the questions above, or skip them.'
+              : structure.holding
+                ? 'Wait for the brief to be written.'
+                : briefStarting
+                  ? 'Starting the task…'
+                  : isBrief && savingDraft
+                    ? 'Saving the draft…'
+                    : isInline
+                      ? 'Edit the instruction to rerun it.'
+                      : isBrief
+                        ? 'Write a brief or attach a file to start.'
+                        : 'Write an instruction or attach a file first.'
+      : null
 
   const slashListId = `slash-command-menu-${variant}-${listIdBase}`
   const mentionListId = `composer-mention-menu-${variant}-${listIdBase}`
@@ -1363,10 +1455,10 @@ export function Composer({
         newlineOnEnter={isBrief}
         ariaLabel={isBrief ? 'Brief' : 'Instruction'}
         value={take.field.value ?? text}
-        readOnly={takeOpen || structure.holding}
+        readOnly={takeOpen || structure.holding || briefLocked}
         highlights={take.field.highlights}
         onChange={(next) => {
-          if (takeOpen || structure.holding) return
+          if (takeOpen || structure.holding || briefLocked) return
           setText(next)
           requestAnimationFrame(syncCursor)
         }}
@@ -1379,6 +1471,28 @@ export function Composer({
           // Writing or asking: the words wait, and so does Send.
           if (structure.holding) {
             if (e.key === 'Enter') e.preventDefault()
+            return
+          }
+          // A dictation take owns the field until its words land: no key sends
+          // what was typed before it (the take's own keys come first, in capture).
+          if (takeOpen) {
+            if (e.key === 'Enter') e.preventDefault()
+            return
+          }
+          // Alt+Enter: a new line on the line, where Shift+Enter steers a live run.
+          if (
+            !isBrief &&
+            e.key === 'Enter' &&
+            e.altKey &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !e.shiftKey &&
+            !e.nativeEvent.isComposing &&
+            !slash.open &&
+            !mentions.open
+          ) {
+            e.preventDefault()
+            taRef.current?.insertText('\n')
             return
           }
           // Undo right after a brief replaced the words: the words come back.
@@ -1449,6 +1563,11 @@ export function Composer({
       onRemoveFile={removeFile}
       onRemoveNativeFile={removeNativeFile}
       onRemoveAudio={removeAudio}
+      onDismissNotice={() => {
+        setImageError(null)
+        setFileError(null)
+        setAudioError(null)
+      }}
     />
   ) : null
 
@@ -1590,6 +1709,15 @@ export function Composer({
               focusInput={focusInput}
               placement={isBrief ? 'down' : 'up'}
             />
+            {(isBrief || isLine) && approval ? (
+              <PermissionsControl
+                approval={approval}
+                onChange={(toolApproval) => onChatSettingsChange({ toolApproval })}
+                onOpenSettings={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('agent') : undefined}
+                placement={isBrief ? 'down' : 'up'}
+                disabled={settingsLocked}
+              />
+            ) : null}
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {opts.context ? (
@@ -1603,7 +1731,8 @@ export function Composer({
                 running={running}
               />
             ) : null}
-            {hasWorkspace ? (
+            {/* Rewriting the brief is for what is about to start, not a run already under way. */}
+            {hasWorkspace && !(isLine && running) ? (
               <IconButton
                 icon="sparkles"
                 label={structureLabel}
@@ -1611,19 +1740,22 @@ export function Composer({
                 tone="muted"
                 disabled={!structureReady}
                 data-composer-structure
-                aria-keyshortcuts="Control+Shift+Enter"
+                aria-keyshortcuts={window.vyotiq?.platform === 'darwin' ? 'Meta+Shift+Enter' : 'Control+Shift+Enter'}
                 onMouseDown={keepFocus}
                 onClick={structure.start}
               />
             ) : null}
             <AttachMenu
               label={attachLabel}
-              disabled={inputLocked || takeOpen || attachFullAll}
+              disabled={inputLocked || takeOpen || briefLocked || (attachFullAll && !addFolder)}
               imagesFull={imagesFull}
+              filesFull={attachFullAll}
               onPickFiles={() => fileRef.current?.click()}
               onPickImage={() => imageRef.current?.click()}
               onMention={mentionFromAttach}
               screenshot={browserScreenshot}
+              addFolder={addFolder}
+              placement={isBrief ? 'down' : 'up'}
             />
             <MicControl
               take={take}
@@ -1640,21 +1772,6 @@ export function Composer({
                 onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
               />
             ) : null}
-            {/* Line only, and only while a run is live: Stop sits next to the one
-                action so the row still ends in it. Esc does the same thing. */}
-            {isLine && running && onStop ? (
-              <Tooltip content="Stop the run (Esc)">
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  icon="stop"
-                  onMouseDown={keepFocus}
-                  onClick={onStop}
-                >
-                  Stop
-                </Button>
-              </Tooltip>
-            ) : null}
             {action}
           </div>
         </div>
@@ -1667,104 +1784,149 @@ export function Composer({
   const sendReady = canSend && !takeOpen && !structure.holding
 
   if (isBrief) {
+    const compareOptions =
+      model && worktreeOffered
+        ? compareModelOptions({
+            provider,
+            model,
+            providers,
+            providerLabel: (id) => providerLabel(id, customProviders),
+            optionsByProvider,
+            seedsByProvider,
+            favoriteModels,
+            recentModels
+          })
+        : []
+    const comparing = compareKey ? compareOptions.find((o) => o.value === compareKey) ?? null : null
+    const canSave =
+      Boolean(briefWorkspace) && !briefLocked && (text.trim().length > 0 || briefCheckCount > 0)
+    const continuing = briefState.draftId != null
+    const schedulable = Boolean(briefWorkspace) && hasComposerText(text)
+    const startItems: ActionMenuItem[] = [
+      {
+        id: 'draft',
+        label: continuing ? 'Update draft' : 'Save as draft',
+        icon: 'note',
+        keys: [window.vyotiq?.platform === 'darwin' ? '⌘' : 'Ctrl', 'S'],
+        disabled: !canSave,
+        disabledReason: savingDraft ? 'Saving…' : 'Write a brief or a check first',
+        onSelect: () => void saveBriefDraft()
+      },
+      {
+        id: 'schedule',
+        label: 'Schedule…',
+        icon: 'repeat',
+        disabled: !schedulable || briefLocked,
+        disabledReason: 'Write a brief first',
+        onSelect: () => {
+          if (!briefWorkspace) return
+          // Plain words a scheduled run can read later: chips carry their paths.
+          const instruction = composerDocumentPortableText(text).trim()
+          const opened = requestRepeatTask({
+            workspacePath: briefWorkspace,
+            title: instruction.split('\n')[0]!.slice(0, 120),
+            instruction,
+            ...(briefChecksRef.current.length ? { doneWhen: [...briefChecksRef.current] } : {}),
+            worktree: briefWorktree,
+            mode: agentMode
+          })
+          if (!opened) pushToast('Scheduling isn’t available in this window.', 'error')
+        }
+      }
+    ]
+    if (compareOptions.length > 0) {
+      startItems.push({
+        id: 'compare-none',
+        label: 'One model',
+        checked: compareKey == null,
+        heading: 'Also run on',
+        separatorBefore: true,
+        onSelect: () => setCompareKey(null)
+      })
+      for (const opt of compareOptions) {
+        startItems.push({
+          id: `compare-${opt.value}`,
+          label: opt.label,
+          detail: opt.group,
+          checked: compareKey === opt.value,
+          onSelect: () => setCompareKey(opt.value)
+        })
+      }
+    }
+    const startTitle = sendReady ? `Start task (${startChord()})` : (sendDisabledReason ?? 'Start task')
     return (
       <NewTaskBrief
         workspacePath={workspacePath ?? null}
         targets={
-          newTaskTargets
+          newTaskTargets && workspacePath
             ? {
                 workspaces: newTaskTargets.workspaces,
-                // The brief goes with the task; nothing is left behind here.
-                onMove: (path, brief) => {
-                  setText('')
-                  newTaskTargets.onMove(path, brief)
-                }
+                // The whole brief goes with the task; the page it leaves empties.
+                onMove: (path) =>
+                  void newTaskTargets.onMove(workspacePath, path, {
+                    text,
+                    checks: [...briefChecksRef.current],
+                    extraRoots: [...briefExtraRootsRef.current],
+                    worktree: briefWorktreeRef.current,
+                    attachments: { images, files, nativeFiles, audio }
+                  })
               }
             : undefined
         }
-        brief={text}
         banners={
           <>
-            {errorAlerts || readiness ? (
-              <div className="mb-4 flex flex-col gap-2">
-                {errorAlerts}
-                {readiness}
-              </div>
-            ) : null}
+            {errorAlerts ? <div className="mb-4 flex flex-col gap-2">{errorAlerts}</div> : null}
             <StructureStrip structure={structure} placement="brief" />
           </>
         }
+        notice={readiness}
         fileInput={fileInput}
         input={field}
         attachments={attachments}
         controls={controls(
-          // The page's one primary, at the end of the brief's own row: the box
-          // ends in the action it takes. Ctrl/Cmd+Enter is wired both places.
-          <Button
-            variant="primary"
-            size="sm"
+          // The page's one primary, at the end of the brief's own row, with the
+          // brief's other endings on its caret. Ctrl/Cmd+Enter is wired both places.
+          <StartSplit
+            chord={startChordLabel()}
+            keyShortcuts={window.vyotiq?.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'}
             disabled={!sendReady}
-            title={sendDisabledReason ?? `Start task (${startChord()})`}
+            pending={briefStarting}
+            title={startTitle}
+            onStart={() => submit()}
             onMouseDown={keepFocus}
-            onClick={() => submit()}
+            items={startItems}
+            menuLabel="More ways to start"
           >
-            Start task
-          </Button>,
+            {briefStarting ? 'Starting…' : comparing ? 'Start 2 tasks' : 'Start task'}
+          </StartSplit>,
           { context: false, takeSendLabel: null }
         )}
         menus={menus}
         onDragOver={onAttachmentDragOver}
         onDrop={onAttachmentDrop}
-        approval={chatSettings.toolApproval ?? null}
         canStart={sendReady}
         onChecksChange={(doneWhen) => {
           briefChecksRef.current = doneWhen
+          setBriefCheckCount(doneWhen.length)
         }}
         checks={briefState.checks}
         onChecksEdit={(next) => {
           if (briefWorkspace) setBriefChecks(briefWorkspace, next)
         }}
         clearToken={briefClearToken}
+        onSaveDraft={briefWorkspace ? { run: () => void saveBriefDraft(), canSave } : undefined}
+        continuingDraftId={briefState.draftId}
+        git={briefGit}
         worktree={briefWorktree}
+        worktreeOffered={worktreeOffered}
         onWorktreeChange={(on) => {
           if (briefWorkspace) setBriefWorktree(briefWorkspace, on)
         }}
         extraRoots={briefExtraRoots}
-        compare={
-          model
-            ? {
-                options: compareModelOptions({
-                  provider,
-                  model,
-                  providers,
-                  providerLabel: (id) => providerLabel(id, customProviders),
-                  optionsByProvider,
-                  seedsByProvider,
-                  favoriteModels,
-                  recentModels
-                }),
-                value: compareKey,
-                onChange: setCompareKey
-              }
-            : undefined
-        }
-        onAddFolder={() => void addBriefFolder()}
         onExtraRootsChange={(next) => {
           if (briefWorkspace) setBriefExtraRoots(briefWorkspace, next)
         }}
-        draft={
-          briefWorkspace
-            ? {
-                onSave: () => void saveBriefDraft(),
-                canSave:
-                  text.trim().length > 0 ||
-                  briefState.checks.length > 0 ||
-                  images.length + files.length + nativeFiles.length + audio.length > 0,
-                saving: savingDraft,
-                continuing: briefState.draftId != null
-              }
-            : undefined
-        }
+        locked={briefLocked}
         onStart={() => submit()}
         voice={
           voiceOn ? (
@@ -1786,45 +1948,43 @@ export function Composer({
 
   if (isLine) {
     const shift = window.vyotiq?.platform === 'darwin' ? '⇧' : 'Shift'
-    // One action, three readings of the same moment — never two buttons to
-    // choose between. Live with something written: it goes into the run now.
-    // Live and empty: it waits for this turn to end. Idle: it sends.
+    // The action says what Enter does: Send while idle, Queue while a run is
+    // live (it goes when this turn ends). With something written during a run,
+    // Send now sits beside it — Shift+Enter, into the run between its steps.
     const steerNow = running && sendReady
-    const lineAction = steerNow ? (
-      <Button
-        size="sm"
-        variant="secondary"
-        kbd={[shift, '↵']}
-        aria-label="Send now"
-        aria-keyshortcuts="Shift+Enter"
-        title="Send it into the live run now, instead of when this turn ends"
-        onMouseDown={keepFocus}
-        onClick={steer}
-      >
-        Send now
-      </Button>
-    ) : (
-      <Button
-        type="submit"
-        size="sm"
-        variant="secondary"
-        kbd={['↵']}
-        aria-label={running ? 'Queue' : 'Send'}
-        aria-keyshortcuts="Enter"
-        title={
-          sendReady
-            ? running
-              ? 'Queue it — it starts when this run ends'
-              : 'Send'
-            : takeOpen
-              ? 'Insert or discard the dictation first'
-              : (sendDisabledReason ?? undefined)
-        }
-        disabled={!sendReady}
-        onMouseDown={keepFocus}
-      >
-        {running ? 'Queue' : 'Send'}
-      </Button>
+    const lineAction = (
+      <>
+        {steerNow ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            kbd={[shift, '↵']}
+            aria-label="Send now"
+            aria-keyshortcuts="Shift+Enter"
+            title={SEND_NOW_TITLE}
+            className="@max-[480px]:hidden"
+            onMouseDown={keepFocus}
+            onClick={steer}
+          >
+            Send now
+          </Button>
+        ) : null}
+        <Button
+          type="submit"
+          size="sm"
+          variant="secondary"
+          kbd={['↵']}
+          aria-label={running ? 'Queue' : 'Send'}
+          aria-keyshortcuts="Enter"
+          title={
+            sendReady ? (running ? 'Queue it — it goes when this turn ends' : 'Send') : (sendDisabledReason ?? undefined)
+          }
+          disabled={!sendReady}
+          onMouseDown={keepFocus}
+        >
+          {running ? 'Queue' : 'Send'}
+        </Button>
+      </>
     )
     return (
       // A box on the record's column, its edges on the brief's and the steps'
@@ -1836,6 +1996,24 @@ export function Composer({
           <div className={cn('mx-auto w-full px-4 pb-4', COMPOSER_MAX)} data-composer-column>
             {errorAlerts ? <div className="flex flex-col gap-2 pb-2">{errorAlerts}</div> : null}
 
+            {orphanedEdit ? (
+              <div className="flex h-8 items-center gap-2 pl-3 pr-2 text-xs" role="status" data-follow-up-orphan>
+                <Icon name="check" size={13} className="shrink-0 text-success" />
+                <span className="min-w-0 flex-1 truncate text-fg">Sent before your edit was saved</span>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => {
+                    setText(text.trim() ? `${text.trimEnd()}\n\n${orphanedEdit}` : orphanedEdit)
+                    setOrphanedEdit(null)
+                    requestAnimationFrame(() => taRef.current?.focus())
+                  }}
+                >
+                  Put my edit in the box
+                </Button>
+                <IconButton icon="close" label="Dismiss" size="xs" tone="muted" onClick={() => setOrphanedEdit(null)} />
+              </div>
+            ) : null}
             {pendingFollowUps.length > 0 ? (
               <ul className="m-0 mb-1.5 list-none p-0" data-follow-up-queue aria-label="Queued instructions">
                 {pendingFollowUps.map((entry) =>
@@ -1850,9 +2028,19 @@ export function Composer({
                           if (e.key === 'Escape') {
                             e.stopPropagation()
                             setEditingFollowUpId(null)
+                            requestAnimationFrame(() => taRef.current?.focus())
+                          } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
+                            // Ctrl/Cmd+Enter saves, as Save does; Enter is a new line.
+                            e.preventDefault()
+                            const trimmed = editingFollowUpText.trim()
+                            if (!trimmed) return
+                            void Promise.resolve(onEditFollowUp ? onEditFollowUp(entry.id, trimmed) : true).then((ok) => {
+                              if (ok) setEditingFollowUpId(null)
+                            })
                           }
                         }}
-                        aria-label="Edit queued instruction"
+                        aria-label={`Queued instruction “${followUpName(entry.preview)}”`}
+                        aria-keyshortcuts="Control+Enter"
                         rows={2}
                       />
                       <Button size="xs" variant="ghost" aria-label="Cancel queued instruction edit" onClick={() => setEditingFollowUpId(null)}>
@@ -1888,8 +2076,9 @@ export function Composer({
                         <Button
                           size="xs"
                           variant="ghost"
-                          aria-label="Edit queued instruction"
+                          aria-label={`Edit queued instruction “${followUpName(entry.preview)}”`}
                           onClick={() => {
+                            editingFollowUpOriginalRef.current = entry.text
                             setEditingFollowUpId(entry.id)
                             setEditingFollowUpText(entry.text)
                           }}
@@ -1901,7 +2090,7 @@ export function Composer({
                         <Button
                           size="xs"
                           variant="ghost"
-                          aria-label="Send queued instruction now"
+                          aria-label={`Send queued instruction “${followUpName(entry.preview)}” now`}
                           title="Interrupt the run and apply it now"
                           onClick={() => onSendFollowUpNow(entry.id)}
                         >
@@ -1911,7 +2100,7 @@ export function Composer({
                       {onRemoveFollowUp ? (
                         <IconButton
                           icon="close"
-                          label="Remove queued instruction"
+                          label={`Remove queued instruction “${followUpName(entry.preview)}”`}
                           size="xs"
                           tone="muted"
                           onClick={() => onRemoveFollowUp(entry.id)}

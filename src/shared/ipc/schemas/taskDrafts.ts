@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { EXTRA_ROOT_MAX_CHARS, MAX_EXTRA_ROOTS } from '../../extraRoots'
 import { ComposerAttachmentsBucketSchema } from './workspace'
 
 /** Drafts kept per workspace; the oldest go past this. */
@@ -9,12 +10,18 @@ export const TASK_DRAFT_BRIEF_MAX = 100_000
 export const TASK_DRAFT_CHECKS_MAX = 20
 export const TASK_DRAFT_CHECK_CHARS_MAX = 500
 
-/** A New task brief put aside: what to do, its checks, what was attached. */
+/** Folders outside the workspace a draft's task may also work in (absolute; main checks them again at start). */
+const DraftExtraRootsSchema = z.array(z.string().min(1).max(EXTRA_ROOT_MAX_CHARS)).max(MAX_EXTRA_ROOTS)
+
+/** A New task brief put aside: what to do, its checks, what was attached, where it runs. */
 export const TaskDraftSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9-]{8,64}$/),
   brief: z.string().max(TASK_DRAFT_BRIEF_MAX),
   doneWhen: z.array(z.string().trim().min(1).max(TASK_DRAFT_CHECK_CHARS_MAX)).max(TASK_DRAFT_CHECKS_MAX),
   attachments: ComposerAttachmentsBucketSchema.optional(),
+  extraRoots: DraftExtraRootsSchema.optional(),
+  /** Start it in a new worktree; absent means the page's default. */
+  worktree: z.boolean().optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1)
 })
@@ -33,7 +40,9 @@ export const TaskDraftSaveRequestSchema = z
     id: TaskDraftSchema.shape.id.optional(),
     brief: TaskDraftSchema.shape.brief,
     doneWhen: TaskDraftSchema.shape.doneWhen,
-    attachments: ComposerAttachmentsBucketSchema.optional()
+    attachments: ComposerAttachmentsBucketSchema.optional(),
+    extraRoots: DraftExtraRootsSchema.optional(),
+    worktree: z.boolean().optional()
   })
   .refine((req) => req.brief.trim().length > 0 || req.doneWhen.length > 0, {
     message: 'An empty brief is not a draft',

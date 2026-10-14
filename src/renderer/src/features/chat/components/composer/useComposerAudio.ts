@@ -85,9 +85,14 @@ export function useComposerAudio(persistKey?: string | null) {
 
   const removeAudio = (index: number): void => {
     setAudio((prev) => prev.filter((_, i) => i !== index))
+    // Room again: the "at most" notice no longer holds.
+    setAudioError(null)
   }
 
-  const clearAudio = (): void => setAudio([])
+  const clearAudio = (): void => {
+    setAudio([])
+    setAudioError(null)
+  }
 
   return { audio, setAudio, audioError, setAudioError, addAudio, removeAudio, clearAudio }
 }

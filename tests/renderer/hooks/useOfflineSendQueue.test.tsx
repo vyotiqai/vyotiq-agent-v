@@ -56,6 +56,51 @@ describe('useOfflineSendQueue', () => {
     expect(result.current.offlineHint).toBe('1 instruction queued — will start when online')
   })
 
+  it('offline, sends to a live run on a local model reach the run, steers included (W5)', async () => {
+    useNetworkStatus.mockReturnValue({ online: false, offlineHint: 'offline' })
+    const onFlush = vi.fn().mockResolvedValue(true)
+    const deliver = vi.fn().mockResolvedValue(true)
+    const { result } = renderHook(() => useOfflineSendQueue(WORKSPACE, onFlush))
+
+    await act(async () => {
+      expect(
+        await result.current.sendWithOfflineQueue('use the other API', undefined, undefined, { steer: true }, deliver, {
+          runId: 'run-local',
+          workspacePath: WORKSPACE,
+          liveLocalRun: true
+        })
+      ).toBe(true)
+    })
+    expect(deliver).toHaveBeenCalledWith('use the other API', undefined, undefined, { steer: true })
+    expect(offlineQueueLength(WORKSPACE)).toBe(0)
+
+    // Not live, or not local: it waits for the connection as before.
+    await act(async () => {
+      await result.current.sendWithOfflineQueue('later', undefined, undefined, undefined, deliver, {
+        runId: 'run-remote',
+        workspacePath: WORKSPACE,
+        liveLocalRun: false
+      })
+    })
+    expect(deliver).toHaveBeenCalledTimes(1)
+    expect(offlineQueueLength(WORKSPACE)).toBe(1)
+  })
+
+  it('a new task is never "a live local run", so offline it still queues (W5)', async () => {
+    useNetworkStatus.mockReturnValue({ online: false, offlineHint: 'offline' })
+    const deliver = vi.fn().mockResolvedValue(true)
+    const { result } = renderHook(() => useOfflineSendQueue(WORKSPACE, vi.fn()))
+    await act(async () => {
+      await result.current.sendWithOfflineQueue('start', undefined, undefined, undefined, deliver, {
+        runId: null,
+        workspacePath: WORKSPACE,
+        liveLocalRun: true
+      })
+    })
+    expect(deliver).not.toHaveBeenCalled()
+    expect(offlineQueueLength(WORKSPACE)).toBe(1)
+  })
+
   it('retains an offline send in memory when persistence fails', async () => {
     useNetworkStatus.mockReturnValue({ online: false, offlineHint: 'offline' })
     const onSend = vi.fn().mockResolvedValue(true)

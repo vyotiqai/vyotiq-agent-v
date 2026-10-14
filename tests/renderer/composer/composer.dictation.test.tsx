@@ -256,6 +256,37 @@ describe('Composer dictation (take)', () => {
     expect(String(onSend.mock.calls[0]![0])).toContain('ship it')
   })
 
+  it('Shift+Enter in the field while a take is open never steers with what was typed before it', async () => {
+    const onSend = vi.fn()
+    render(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running
+        variant="line"
+        hasWorkspace
+        secrets={keyed}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />
+    )
+    field().textContent = 'Use the other API'
+    fireEvent.input(field())
+    await startTake()
+    // The take's own keys leave Shift+Enter alone; the field must not steer under it.
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: 'Enter', shiftKey: true })
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(onSend).not.toHaveBeenCalled()
+    expect(strip()?.dataset.take).toBe('listening')
+  })
+
   it('a failed take keeps its audio and says why; Retry sends it again', async () => {
     const onOpenSettings = vi.fn()
     renderComposer({ slashHandlers: { onOpenSettings } as SlashClientHandlers })

@@ -28,7 +28,7 @@ import {
   Segmented,
   cn
 } from '@renderer/lib/ui'
-import { ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { useCustomProviders } from '@renderer/lib/hooks/customProvidersStore'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
@@ -371,7 +371,7 @@ export function ModelPicker(props: ModelPickerProps) {
               setActiveIndex(e.target.value.trim() ? 0 : -1)
             }}
             onKeyDown={onSearchKeyDown}
-            className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-tertiary"
+            className="min-w-0 flex-1 rounded-sm bg-transparent text-sm text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
           />
           <IconButton
             icon="retry"
@@ -383,10 +383,10 @@ export function ModelPicker(props: ModelPickerProps) {
           />
         </div>
         {browsedWarning ? (
-          <p className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-caption text-muted">{browsedWarning}</p>
+          <p className={cn('m-0 shrink-0 border-b px-3 py-1.5 text-caption text-muted', BORDER_DIVIDER)}>{browsedWarning}</p>
         ) : null}
         <div className="flex h-[300px] min-h-0 shrink">
-          <div className="scroll-thin w-40 shrink-0 space-y-px overflow-y-auto border-r border-border p-1.5">
+          <div className={cn('scroll-thin w-40 shrink-0 space-y-px overflow-y-auto border-r p-1.5', BORDER_DIVIDER)}>
             {providers.map((p) => {
               const on = !query.trim() && p === tab
               const note = noteFor(p)
@@ -454,7 +454,7 @@ export function ModelPicker(props: ModelPickerProps) {
           </div>
         </div>
         {hasFoot ? (
-          <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-3 py-2.5">
+          <div className={cn('flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-t px-3 py-2.5', BORDER_DIVIDER)}>
             {showsEffort ? (
               <span className="inline-flex items-center gap-2">
                 <span className="text-xs text-muted">Effort</span>
@@ -498,7 +498,7 @@ export function ModelPicker(props: ModelPickerProps) {
           </div>
         ) : null}
         {lower && effort ? (
-          <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-2 text-caption text-muted" role="status">
+          <div className={cn('flex shrink-0 items-center gap-2 border-t px-3 py-2 text-caption text-muted', BORDER_DIVIDER)} role="status">
             <span className="min-w-0 flex-1">
               {runSteps} steps at {effort.label} — {lower.label} spends fewer reasoning tokens on each one.
             </span>
@@ -516,7 +516,7 @@ export function ModelPicker(props: ModelPickerProps) {
           </div>
         ) : null}
         {running ? (
-          <p className="m-0 shrink-0 border-t border-border px-3 py-2 text-caption text-tertiary">
+          <p className={cn('m-0 shrink-0 border-t px-3 py-2 text-caption text-tertiary', BORDER_DIVIDER)}>
             Changes apply from your next instruction — this run keeps its settings.
           </p>
         ) : null}
@@ -541,7 +541,7 @@ export function ModelPicker(props: ModelPickerProps) {
         onClick={() => setOpen((v) => !v)}
         className={cn(
           'inline-flex h-7 min-w-0 shrink items-center gap-1.5 rounded-md px-2 text-xs vy-transition focus-visible:vy-focus-ring disabled:vy-disabled-state',
-          open ? 'bg-surface text-fg' : 'text-secondary hover:bg-surface hover:text-fg'
+          open ? SELECTED : 'text-secondary hover:bg-surface hover:text-fg'
         )}
       >
         <span className="min-w-0 truncate">{modelName}</span>

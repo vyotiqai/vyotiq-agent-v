@@ -1,3 +1,5 @@
+import type { AgentInteractionMode } from '@shared/ipc'
+
 /**
  * Open requests for the two schedule dialogs. They come from the palette, the
  * navigator's View menu and a task row's menu; the dialogs that answer them
@@ -10,7 +12,16 @@
  */
 export type RepeatTaskRequest =
   | { workspacePath: string; runId: string; title: string }
-  | { workspacePath: string; runId?: undefined; title: string; instruction: string; doneWhen?: string[]; worktree?: boolean }
+  | {
+      workspacePath: string
+      runId?: undefined
+      title: string
+      instruction: string
+      doneWhen?: string[]
+      worktree?: boolean
+      /** Ask or Agent, as the brief was set: a scheduled Ask brief must not edit. */
+      mode?: AgentInteractionMode
+    }
 
 const listRequests = new Set<() => void>()
 const repeatRequests = new Set<(task: RepeatTaskRequest) => void>()

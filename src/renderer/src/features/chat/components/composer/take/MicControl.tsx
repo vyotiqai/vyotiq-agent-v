@@ -239,11 +239,10 @@ function SetupPanel({ take }: { take: TakeHandle }) {
   const loading = runtime?.phase === 'loading'
   const progress = runtime?.progress ?? null
   return (
-    <div className="p-1">
-      <div className="px-2 pb-1.5 pt-2">
-        <div className="text-sm font-medium text-fg-strong">Dictate with</div>
-        <div className="mt-0.5 text-xs text-muted">Pick one to start. Settings → Voice changes it later.</div>
-      </div>
+    <div>
+      <div className="flex h-10 items-center border-b border-border pl-3 pr-2 text-sm font-medium text-fg-strong">Dictate with</div>
+      <div className="p-1">
+      <div className="px-2 pb-1.5 pt-2 text-xs text-muted">Pick one to start. Settings → Voice changes it later.</div>
       <Choice
         title="This PC"
         badge={<Badge tone="outline">Recommended</Badge>}
@@ -290,6 +289,7 @@ function SetupPanel({ take }: { take: TakeHandle }) {
           Keep typing. The mic opens by itself when the model is ready.
         </div>
       ) : null}
+      </div>
     </div>
   )
 }
@@ -313,11 +313,12 @@ function BlockedPanel({ take }: { take: TakeHandle }) {
         ? { path: 'Privacy & security › Microphone', switches: ['Microphone access', 'Let desktop apps access your microphone'] }
         : null
   return (
-    <div className="p-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-fg-strong">
+    <div>
+      <div className="flex h-10 items-center gap-2 border-b border-border pl-3 pr-2 text-sm font-medium text-fg-strong">
         <Icon name="micSlash" size={16} className="text-warning" />
         {platform === 'darwin' ? 'macOS is blocking the microphone' : platform === 'win32' ? 'Windows is blocking the microphone' : 'The microphone is blocked'}
       </div>
+      <div className="p-3 pt-0">
       {rows ? (
         <div className="mt-3 overflow-hidden rounded-md border border-border bg-sunken">
           <div className={cn('flex h-7 items-center gap-1.5 border-b px-3 text-caption text-tertiary', BORDER_DIVIDER)}>
@@ -345,6 +346,7 @@ function BlockedPanel({ take }: { take: TakeHandle }) {
             Open settings
           </Button>
         ) : null}
+      </div>
       </div>
     </div>
   )

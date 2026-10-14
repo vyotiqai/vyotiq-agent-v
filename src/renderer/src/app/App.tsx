@@ -57,6 +57,7 @@ import { buildRunDeepLink } from '@shared/deepLink'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { normalizeRelPath } from '../features/chat/utils/turnFileDiffs'
 import { useOfflineQueue, useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
+import { providerRunsLocally } from '@renderer/lib/chat/localRun'
 import {
   editOfflineMessage,
   removeOfflineMessage,
@@ -87,6 +88,7 @@ import {
   deleteTaskDraftFor,
   putBriefBack,
   draftTitle,
+  onOpenTaskDraftRequest,
   saveTaskDraftFor,
   setBriefState,
   setNewTaskWorktreeDefault,
@@ -94,6 +96,10 @@ import {
   useTaskDrafts
 } from '@renderer/lib/drafts/taskDraftStore'
 import type { IpcResult, ReopenWritesResult, ResolveWritesResult, TaskDraft } from '@shared/ipc'
+import type { MovedBrief, NewTaskTargets as AppNewTaskTargets } from '@renderer/features/task/NewTaskBrief'
+
+/** How a start in a new worktree went: no worktree; made and started; made, with the brief waiting there. */
+type WorktreeStart = false | 'sent' | 'waiting'
 import { bumpTaskOutcome } from '@renderer/features/task/taskOutcomeStore'
 import { nextViewReturns, type AppView, type ViewReturns } from './viewReturn'
 import type { ScreenRequest } from '../features/screens/ScreenPage'
@@ -1098,13 +1104,15 @@ function App() {
     [view]
   )
 
+  /** Move a New task brief to another workspace (set below, once `confirm` exists). */
+  const moveBriefRef = useRef<(from: string, to: string, brief: MovedBrief) => Promise<boolean>>(async () => false)
   // Where a new task's brief can move: the open workspaces, named as the navigator names them.
-  const newTaskTargets = useMemo(
+  const newTaskTargets = useMemo<AppNewTaskTargets>(
     () => ({
       workspaces: openWorkspaces.map((path) => ({ path, name: formatWorkspaceName(path) })),
-      onMove: onNewSessionInWorkspace
+      onMove: (from, to, brief) => moveBriefRef.current(from, to, brief)
     }),
-    [openWorkspaces, onNewSessionInWorkspace]
+    [openWorkspaces]
   )
 
   /** After a successful add: show Chat, draft if fresh, focus composer. */
@@ -1177,6 +1185,22 @@ function App() {
 
   const { sendWithOfflineQueue } = useOfflineSendQueue(offlineWorkspacePath, flushOfflineEntry)
   const offlineQueue = useOfflineQueue()
+  /**
+   * The run is live on a model served from this machine (local Ollama, a
+   * loopback endpoint): offline, it still answers, so sends reach it instead
+   * of the offline queue.
+   */
+  const liveLocalRun = useCallback(
+    (runId: string | null, path: string): boolean => {
+      if (!runId) return false
+      const ctrl = getRunControllerRef.current(runId, path)
+      if (!ctrl || !(ctrl.running || ctrl.pendingRun) || !ctrl.providerModel) return false
+      const ctx = findByWorkspacePath(contextsForModelRef.current, path)
+      const endpoints = resolveEffectiveSettings(settings, ctx?.settingsOverride)
+      return providerRunsLocally(ctrl.providerModel.provider, endpoints, Boolean(secrets.ollama))
+    },
+    [settings, secrets]
+  )
 
   /**
    * The new, still-empty pane a Home or worktree start just opened in `path`.
@@ -1195,7 +1219,7 @@ function App() {
       files: AttachedFile[] | undefined,
       extras: import('@shared/ipc').ComposerSendExtras,
       pin?: { provider: ProviderIdAny; model: string }
-    ) => Promise<boolean>
+    ) => Promise<WorktreeStart>
   >(async () => false)
   /** Run on two models (startComparisonRef.current, below). */
   const startComparisonRef = useRef<
@@ -1239,6 +1263,10 @@ function App() {
     if (view === 'home' && showSetup && setupSend) setupSendShownRef.current = true
   }, [view, showSetup, setupSend])
 
+  // Read through a ref: a held comparison is replayed right after Set up saves
+  // the choice, before a render could hand the gate the new setting.
+  const onboardingDoneRef = useRef(settings.toolApprovalOnboardingDone)
+  onboardingDoneRef.current = onboardingDoneRef.current || Boolean(settings.toolApprovalOnboardingDone)
   const gateSendWithOnboarding = useCallback(
     async (
       deliver: (
@@ -1254,14 +1282,32 @@ function App() {
       binding: { workspacePath: string; runId: string | null }
     ): Promise<boolean> => {
       if (extras?.compareWith && !binding.runId) {
+        // Held whole until the approval choice is made: two worktree starts
+        // each held on their own would leave only the second one held.
+        if (!onboardingDoneRef.current) {
+          const parent = binding.workspacePath
+          pendingSendRef.current = {
+            text,
+            images,
+            files,
+            extras,
+            workspacePath: parent,
+            runId: null,
+            deliver: (t, i, f, e) => startComparisonRef.current(parent, t, i, f, e ?? extras)
+          }
+          setupSendShownRef.current = false
+          setSetupSend({ workspacePath: parent })
+          setView('home')
+          return false
+        }
         return startComparisonRef.current(binding.workspacePath, text, images, files, extras)
       }
       if (extras?.worktree && !binding.runId) {
-        return startInNewWorktreeRef.current(binding.workspacePath, text, images, files, extras)
+        return (await startInNewWorktreeRef.current(binding.workspacePath, text, images, files, extras)) !== false
       }
       // No approval choice on record: hold the send and ask it on Set up, which
       // sends it once the choice is saved.
-      if (!settings.toolApprovalOnboardingDone) {
+      if (!onboardingDoneRef.current) {
         pendingSendRef.current = {
           text,
           images,
@@ -1278,7 +1324,7 @@ function App() {
       }
       return Boolean(await deliver(text, images, files, extras))
     },
-    [settings.toolApprovalOnboardingDone]
+    []
   )
 
   /** Onboarding gate runs before offline enqueue (deliver is sendWithOfflineQueue). */
@@ -1302,7 +1348,7 @@ function App() {
             sendExtras,
             (t, i, f, e) =>
               getRunControllerRef.current(runId, path)?.send(t, i, f, e) ?? false,
-            { runId, paneId: focused?.paneId, workspacePath: path }
+            { runId, paneId: focused?.paneId, workspacePath: path, liveLocalRun: liveLocalRun(runId, path) }
           ),
         text,
         images,
@@ -1311,7 +1357,7 @@ function App() {
         { workspacePath: path, runId }
       )
     },
-    [activeWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
+    [activeWorkspace, gateSendWithOnboarding, sendWithOfflineQueue, liveLocalRun]
   )
 
   /**
@@ -1375,8 +1421,9 @@ function App() {
     } else if (draftId) {
       void deleteTaskDraftFor(parentPath, draftId)
     }
-    // Either way the brief now lives in the worktree, so the page it came from empties.
-    return true
+    // Either way the brief now lives in the worktree, so the page it came from
+    // empties; what the caller learns is whether the task itself started.
+    return sent ? 'sent' : 'waiting'
   }
 
   /**
@@ -1400,11 +1447,19 @@ function App() {
     if (!first) return false
     // The draft was spent by the first; the second is the same brief on the other model.
     const second = await startInNewWorktreeRef.current(parentPath, text, images, files, { ...rest, worktree: true }, compareWith)
+    const a = picked?.model ?? 'your model'
+    const b = compareWith.model
+    const firstOk = first === 'sent'
+    const secondOk = second === 'sent'
     pushToast(
-      second
-        ? `Started on ${picked?.model ?? 'your model'} and ${compareWith.model}, each in its own worktree. Open them side by side to compare.`
-        : `Started on ${picked?.model ?? 'your model'}; the copy on ${compareWith.model} didn’t start.`,
-      second ? 'info' : 'error'
+      firstOk && secondOk
+        ? `Started on ${a} and ${b}, each in its own worktree. Open them side by side to compare.`
+        : firstOk
+          ? `Started on ${a}; the copy on ${b} didn’t start${second === 'waiting' ? ' and waits in its worktree' : ''}.`
+          : secondOk
+            ? `Started on ${b}; the copy on ${a} didn’t start and waits in its worktree.`
+            : `Neither copy started; ${second === 'waiting' ? 'both briefs wait in their worktrees' : `the brief for ${a} waits in its worktree`}.`,
+      firstOk && secondOk ? 'info' : 'error'
     )
     return true
   }
@@ -1457,6 +1512,45 @@ function App() {
 
   const { confirm, dialog: confirmDialog } = useConfirm()
   const { askRewind, dialog: rewindDialog } = useRewindDialog()
+
+  /**
+   * New task → another workspace: the whole brief goes (text, checks, folders,
+   * the worktree choice, attachments), and the page it left empties. A page
+   * there with unsent work of its own is replaced only once you say so. The
+   * draft being continued stays saved where it was; it is not this page's.
+   */
+  moveBriefRef.current = async (from, to, brief) => {
+    const attachmentCount = (b: { images: unknown[]; files: unknown[]; nativeFiles: unknown[]; audio: unknown[] }): number =>
+      b.images.length + b.files.length + b.nativeFiles.length + b.audio.length
+    const moving = brief.text.trim().length > 0 || brief.checks.length > 0 || attachmentCount(brief.attachments) > 0
+    const toKey = composerAttachmentKey(to, null)
+    if (moving) {
+      const there = briefStateFor(to)
+      const thereText = resolveHotComposerDraft(getWorkspaceHotUi(to), null)
+      const thereAttached = toKey ? attachmentCount(getComposerAttachments(toKey)) : 0
+      if (thereText.trim().length > 0 || there.checks.length > 0 || thereAttached > 0) {
+        const replace = await confirm(
+          'It has an unsent brief of its own. Moving yours replaces it.',
+          { title: `Replace the brief in ${formatWorkspaceName(to)}?`, confirmLabel: 'Replace and move' }
+        )
+        if (!replace) return false
+      }
+      setBriefState(to, {
+        draftId: null,
+        checks: brief.checks,
+        extraRoots: brief.extraRoots,
+        worktree: brief.worktree
+      })
+      if (toKey) setComposerAttachments(toKey, brief.attachments)
+      setComposerDraftForPane(to, null, brief.text)
+      setComposerDraftForPane(from, null, '')
+      setBriefState(from, null)
+      const fromKey = composerAttachmentKey(from, null)
+      if (fromKey) clearComposerAttachments(fromKey)
+    }
+    onNewSessionInWorkspace(to, moving ? brief.text : '')
+    return true
+  }
 
   useEffect(() => {
     const onReload = (event: Event): void => {
@@ -2340,7 +2434,8 @@ function App() {
                   {
                     runId: pane.runId,
                     paneId: pane.paneId,
-                    workspacePath: pane.workspacePath
+                    workspacePath: pane.workspacePath,
+                    liveLocalRun: liveLocalRun(pane.runId, pane.workspacePath)
                   }
                 )
               },
@@ -2493,6 +2588,7 @@ function App() {
       gateSendWithOnboarding,
       openRunInWorkspace,
       sendWithOfflineQueue,
+      liveLocalRun,
       modelsRefreshNonce,
       onDismissChatBanner,
       onMessageListScrollForPane,
@@ -2898,6 +2994,7 @@ function App() {
       })
       // Said on Set up itself: the window's settings banner is not on screen there.
       if (!res.ok) return res.error
+      onboardingDoneRef.current = true
       if (pendingSendRef.current) {
         // Taken before the view changes, so leaving Set up can't drop it first.
         const sent = flushPendingSend()
@@ -2929,7 +3026,13 @@ function App() {
   const openTaskDraft = useCallback(
     async (path: string, draft: TaskDraft): Promise<void> => {
       const current = briefStateFor(path)
-      if (current.draftId !== draft.id) {
+      // The draft New task is already continuing: show the page as it is.
+      // Loading the saved copy over it would throw away the edits made since.
+      if (current.draftId === draft.id) {
+        onNewSessionInWorkspace(path, '')
+        return
+      }
+      {
         const text = resolveHotComposerDraft(getWorkspaceHotUi(path), null)
         const key = composerAttachmentKey(path, null)
         const attached = key ? getComposerAttachments(key) : null
@@ -2946,7 +3049,12 @@ function App() {
           if (!replace) return
         }
       }
-      setBriefState(path, { ...briefStateFor(path), draftId: draft.id, checks: draft.doneWhen })
+      setBriefState(path, {
+        draftId: draft.id,
+        checks: draft.doneWhen,
+        worktree: draft.worktree ?? briefStateFor(path).worktree,
+        extraRoots: draft.extraRoots ?? []
+      })
       setComposerDraftForPane(path, null, draft.brief)
       const key = composerAttachmentKey(path, null)
       if (key) {
@@ -2979,12 +3087,17 @@ function App() {
             workspacePath: path,
             brief: draft.brief,
             doneWhen: draft.doneWhen,
-            ...(draft.attachments ? { attachments: draft.attachments } : {})
+            ...(draft.attachments ? { attachments: draft.attachments } : {}),
+            ...(draft.extraRoots ? { extraRoots: draft.extraRoots } : {}),
+            ...(draft.worktree != null ? { worktree: draft.worktree } : {})
           })
         }
       }
     })
   }, [])
+
+  // New task's own drafts list opens them through the same confirm.
+  useEffect(() => onOpenTaskDraftRequest((path, draft) => void openTaskDraft(path, draft)), [openTaskDraft])
 
   const draftActions = useMemo(
     () => ({

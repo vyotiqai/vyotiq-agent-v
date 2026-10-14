@@ -453,7 +453,7 @@ describe('Composer', () => {
     })
   })
 
-  it('keeps the line editable while a run is in progress, with Stop beside one Queue action', () => {
+  it('keeps the line editable while a run is in progress, with one Queue action (Stop is the run strip’s)', () => {
     const onStop = vi.fn()
     const composerProps = {
       provider: 'ollama' as const,
@@ -473,13 +473,9 @@ describe('Composer', () => {
     expect(screen.queryByRole('button', { name: /^Send$/i })).toBeNull()
     // The row ends in one action while a run is live: Queue, off until there is text.
     expect(screen.getByRole('button', { name: /^Queue$/i })).toHaveProperty('disabled', true)
-    // Stop is a real button in the row, not Escape-only: wired onStop, live run.
-    const stop = screen.getByRole('button', { name: /^Stop$/i })
-    // It stands directly before the action, so the row still ends in the one
-    // thing that sends.
-    expect(stop.nextElementSibling?.textContent).toContain('Queue')
-    fireEvent.click(stop)
-    expect(onStop).toHaveBeenCalledTimes(1)
+    // Stop lives on the run strip above the line (TaskPane), beside what it stops.
+    expect(screen.queryByRole('button', { name: /Stop/i })).toBeNull()
+    expect(onStop).not.toHaveBeenCalled()
 
     // Not live: the one action reads Send, and there is nothing left to stop.
     rerender(<Composer {...composerProps} running={false} />)
@@ -617,18 +613,18 @@ describe('Composer', () => {
     )
 
     expect(screen.getByText('Steer left')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Edit queued instruction$/i }))
-    const editor = screen.getByRole('textbox', { name: /^Edit queued instruction$/i })
+    fireEvent.click(screen.getByRole('button', { name: /^Edit queued instruction/i }))
+    const editor = screen.getByRole('textbox', { name: /^Queued instruction/i })
     fireEvent.change(editor, { target: { value: 'Steer right' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save queued instruction edit$/i }))
     await waitFor(() => {
       expect(onEditFollowUp).toHaveBeenCalledWith('fu-1', 'Steer right')
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /^Send queued instruction now$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Send queued instruction .* now$/i }))
     expect(onSendFollowUpNow).toHaveBeenCalledWith('fu-1')
 
-    fireEvent.click(screen.getByRole('button', { name: /^Remove queued instruction$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Remove queued instruction/i }))
     expect(onRemoveFollowUp).toHaveBeenCalledWith('fu-1')
   })
 
@@ -652,12 +648,12 @@ describe('Composer', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Edit queued instruction$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Edit queued instruction/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Save queued instruction edit$/i }))
     await waitFor(() => {
       expect(onEditFollowUp).toHaveBeenCalledWith('fu-1', 'Steer left')
     })
-    expect(screen.getByRole('textbox', { name: /^Edit queued instruction$/i })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: /^Queued instruction/i })).toBeTruthy()
   })
 
   it('does not show reconnecting status below the composer while running with network_wait', () => {

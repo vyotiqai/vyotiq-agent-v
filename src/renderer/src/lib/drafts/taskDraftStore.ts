@@ -113,6 +113,8 @@ export async function saveTaskDraftFor(req: {
   brief: string
   doneWhen: string[]
   attachments?: ComposerAttachmentsBucket
+  extraRoots?: string[]
+  worktree?: boolean
 }): Promise<IpcResult<TaskDraft>> {
   const save = window.vyotiq?.saveTaskDraft
   if (!save) return { ok: false, error: 'Drafts are unavailable in this window.' }
@@ -121,7 +123,9 @@ export async function saveTaskDraftFor(req: {
     ...(req.id ? { id: req.id } : {}),
     brief: req.brief,
     doneWhen: req.doneWhen,
-    ...(req.attachments ? { attachments: req.attachments } : {})
+    ...(req.attachments ? { attachments: req.attachments } : {}),
+    ...(req.extraRoots?.length ? { extraRoots: req.extraRoots } : {}),
+    ...(req.worktree != null ? { worktree: req.worktree } : {})
   })
   if (res.ok) {
     setDrafts(req.workspacePath, [res.data, ...taskDraftsFor(req.workspacePath).filter((d) => d.id !== res.data.id)])
@@ -135,6 +139,27 @@ export async function deleteTaskDraftFor(workspacePath: string, id: string): Pro
   const res = await remove(workspacePath, id)
   if (res.ok) setDrafts(workspacePath, taskDraftsFor(workspacePath).filter((d) => d.id !== id))
   return res
+}
+
+/**
+ * Open a draft on New task, from anywhere that lists drafts. The app shell
+ * answers it (App.tsx), asking first when the page holds unsaved work.
+ */
+type OpenDraftHandler = (workspacePath: string, draft: TaskDraft) => void
+const openDraftHandlers = new Set<OpenDraftHandler>()
+
+export function onOpenTaskDraftRequest(open: OpenDraftHandler): () => void {
+  openDraftHandlers.add(open)
+  return () => {
+    openDraftHandlers.delete(open)
+  }
+}
+
+/** False when nothing is mounted to open it. */
+export function requestOpenTaskDraft(workspacePath: string, draft: TaskDraft): boolean {
+  if (openDraftHandlers.size === 0) return false
+  for (const open of openDraftHandlers) open(workspacePath, draft)
+  return true
 }
 
 /**

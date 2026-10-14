@@ -14,6 +14,7 @@ import {
   MENU_SURFACE,
   MenuItemBody
 } from '@renderer/lib/ui'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { clampComposerDropdownPanel } from './composerDropdownLayout'
 import type { MentionMenuItem, MentionMenuView } from './mentionModel'
 import { buildMentionRootSections } from './mentionPresentation'
@@ -424,7 +425,7 @@ export function MentionMenu({
       </div>
 
       {/* Pinned outside the scroll region: the footer never covers a row. */}
-      <div className="shrink-0 border-t border-border p-1" data-mention-footer>
+      <div className={cn('shrink-0 border-t p-1', BORDER_DIVIDER)} data-mention-footer>
         {active && subject ? (
           <p
             className="m-0 flex items-center gap-1.5 px-2 py-1.5 text-xs"

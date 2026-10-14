@@ -118,25 +118,40 @@ export function AttachMenu({
   label,
   disabled,
   imagesFull,
+  filesFull = false,
   onPickFiles,
   onPickImage,
   onMention,
-  screenshot
+  screenshot,
+  addFolder = null,
+  placement = 'up'
 }: {
   /** The trigger's name — it carries the per-kind room left once something is full. */
   label: string
   disabled: boolean
   imagesFull: boolean
+  /** Every kind of attachment is at its limit. */
+  filesFull?: boolean
   onPickFiles: () => void
   onPickImage: () => void
   /** Type `@` at the caret, so the mention menu opens as it does for a typed one. */
   onMention?: () => void
   screenshot: BrowserScreenshotAttach | null
+  /** Let the task edit a folder outside the workspace (OS picker, checked by main). */
+  addFolder?: { onSelect: () => void; disabled: boolean; disabledReason: string } | null
+  placement?: 'up' | 'down'
 }) {
   const [open, setOpen] = useState(false)
   const imagesFullReason = `You can attach up to ${MAX_IMAGES} images`
   const items: ActionMenuItem[] = [
-    { id: 'files', label: 'Files…', icon: 'file', onSelect: onPickFiles },
+    {
+      id: 'files',
+      label: 'Files…',
+      icon: 'file',
+      disabled: filesFull,
+      disabledReason: 'Attachment limits reached',
+      onSelect: onPickFiles
+    },
     {
       id: 'image',
       label: 'Image…',
@@ -160,6 +175,17 @@ export function AttachMenu({
       onSelect: screenshot.take
     })
   }
+  if (addFolder) {
+    items.push({
+      id: 'folder',
+      label: 'Let it edit another folder…',
+      icon: 'folderPlus',
+      separatorBefore: true,
+      disabled: addFolder.disabled,
+      disabledReason: addFolder.disabledReason,
+      onSelect: addFolder.onSelect
+    })
+  }
   if (onMention) {
     items.push({ id: 'mention', label: 'Mention a file', icon: 'at', keys: ['@'], separatorBefore: true, onSelect: onMention })
   }
@@ -168,7 +194,7 @@ export function AttachMenu({
     <ActionMenu
       open={open}
       onOpenChange={setOpen}
-      placement="up"
+      placement={placement}
       align="end"
       aria-label="Attach"
       items={items}

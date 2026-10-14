@@ -15,7 +15,9 @@ import App from '@renderer/app/App'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
 
 type ShellProps = { children: ReactNode; loading?: boolean; firstRun?: object | null; onOpenChat?: () => void; onOpenHome?: () => void }
-type ChatProps = { onSend: (text: string) => Promise<boolean | void> | boolean | void }
+type ChatProps = {
+  onSend: (text: string, images?: string[], files?: unknown[], extras?: object) => Promise<boolean | void> | boolean | void
+}
 const seen = vi.hoisted(() => ({ shell: null as unknown, chat: null as unknown }))
 
 vi.mock('@renderer/app/AppShell', () => ({
@@ -233,6 +235,35 @@ describe('App → Set up', () => {
     expect(await screen.findByTestId('chat', {}, { timeout: 5000 })).toBeTruthy()
     await waitFor(() => expect(chatStart).toHaveBeenCalled(), { timeout: 5000 })
     expect(JSON.stringify(chatStart.mock.calls[0])).toContain('Fix the flaky test')
+  })
+
+  it('a two-model start made before the choice is held whole, then starts once Start saves it', async () => {
+    install({ openPaths: [WS], runs: 2, settings: { navigationMode: 'sidebar' } })
+    const createTaskWorktree = vi.fn(async () => ({ ok: false as const, error: 'no git here' }))
+    ;(window.vyotiq as unknown as { createTaskWorktree: typeof createTaskWorktree }).createTaskWorktree = createTaskWorktree
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
+    act(() => shell().onOpenChat?.())
+    expect(await screen.findByTestId('chat')).toBeTruthy()
+
+    let held: boolean | void = true
+    await act(async () => {
+      held = await chatView().onSend('Fix the flaky test', undefined, undefined, {
+        compareWith: { provider: 'ollama', model: 'llama3' }
+      })
+    })
+    // Neither copy has started or made a worktree: the whole comparison waits on Set up.
+    expect(held).toBe(false)
+    expect(createTaskWorktree).not.toHaveBeenCalled()
+    expect(chatStart).not.toHaveBeenCalled()
+    const send = (await screen.findByRole('button', { name: /Send your instruction/ })) as HTMLButtonElement
+    await waitFor(() => expect(send.disabled).toBe(false), { timeout: 5000 })
+
+    fireEvent.click(screen.getByRole('radio', { name: /^Nothing/ }))
+    fireEvent.click(send)
+    await waitFor(() => expect(createTaskWorktree).toHaveBeenCalled(), { timeout: 5000 })
+    expect(JSON.stringify(createTaskWorktree.mock.calls[0])).toContain('Fix the flaky test')
   })
 
   it('going back to the task without choosing lets the held send go', async () => {
