@@ -14,6 +14,15 @@ export function dedupeToolCalls(calls: ToolCall[]): ToolCall[] {
 }
 
 /**
+ * Per-stream component for tool-call ids a provider synthesizes itself.
+ * Stream counters restart every step, so a bare `call_0` / `gemini_0` repeats
+ * across the run and hydrate pairs a later result onto an earlier call.
+ */
+export function syntheticToolCallIdTag(): string {
+  return randomUUID().replace(/-/g, '').slice(0, 8)
+}
+
+/**
  * Providers sometimes emit empty tool-call ids (DeepSeek OpenAI-compat). Fill
  * stable ids before persist/execute so chrome, messages, and tool results link.
  */

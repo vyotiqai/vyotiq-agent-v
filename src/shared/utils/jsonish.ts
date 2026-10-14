@@ -35,22 +35,29 @@ export function completeJsonPrefix(text: string): string | null {
   return null
 }
 
-function endsAfterCompleteValue(text: string): boolean {
+function endsAfterCompleteValue(text: string, numberTerminated: boolean): boolean {
   let i = text.length - 1
   while (i >= 0 && /\s/.test(text[i]!)) i--
   if (i < 0) return false
   const ch = text[i]!
   if (ch === '}' || ch === ']' || ch === '"') return true
-  if (/[0-9]/.test(ch)) return true
+  // A trailing bare number is never known to be whole: `"timeoutMs":12` may be
+  // a cut `120000`, and closing it runs the call with the wrong value. Only a
+  // caller that saw the `,` / `:` after it (trimDanglingJsonTail) may close it.
+  if (/[0-9]/.test(ch)) return numberTerminated
   const slice = text.slice(Math.max(0, i - 4), i + 1)
   return /(?:^|[^a-zA-Z])(?:true|false|null)$/.test(slice)
 }
 
 /**
  * Append missing `]` / `}` when containers are still open and the walk ended
- * after a complete value (not inside a string, not after `:` / `,`).
+ * after a complete value (not inside a string, not after `:` / `,`, not after
+ * a bare number unless `numberTerminated` says a separator followed it).
  */
-export function closeUnterminatedJson(text: string): string | null {
+export function closeUnterminatedJson(
+  text: string,
+  opts?: { numberTerminated?: boolean }
+): string | null {
   const first = text[0]
   if (first !== '{' && first !== '[') return null
 
@@ -80,7 +87,7 @@ export function closeUnterminatedJson(text: string): string | null {
   }
 
   if (inString || stack.length === 0) return null
-  if (!endsAfterCompleteValue(text)) return null
+  if (!endsAfterCompleteValue(text, opts?.numberTerminated === true)) return null
 
   let closed = text
   for (let i = stack.length - 1; i >= 0; i--) {
@@ -146,7 +153,8 @@ export function trimDanglingJsonTail(text: string): string | null {
     if (!match) continue
     const prefix = text.slice(0, match.index).replace(/\s+$/, '')
     if (!prefix) continue
-    const closed = closeUnterminatedJson(prefix)
+    // The stub's own `,` / `:` terminated any number the prefix ends on.
+    const closed = closeUnterminatedJson(prefix, { numberTerminated: true })
     if (!closed) continue
     try {
       const parsed: unknown = JSON.parse(closed)

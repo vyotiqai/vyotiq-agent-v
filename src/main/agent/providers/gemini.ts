@@ -14,7 +14,7 @@ import type {
 import { billedCostFromUsage } from './usageFields'
 import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
-import { logProviderFailure, providerFetchFailureChunk } from './log'
+import { logProviderFailure, providerFetchFailureChunk, providerHttpFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
 import { formatProviderHttpError, scrubProviderErrorText } from './httpErrors'
 import { streamGeminiInteractions } from './geminiInteractions'
@@ -368,8 +368,7 @@ export const geminiProvider: LlmProvider = {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      logProviderFailure('gemini', 'http', { status: res.status })
-      yield { type: 'error', error: formatProviderHttpError(res.status, text, 'gemini'), errorCode: 'PROVIDER_HTTP', httpStatus: res.status }
+      yield providerHttpFailureChunk('gemini', res.status, text)
       return
     }
 
@@ -400,15 +399,20 @@ export async function* consumeGeminiStream(
 
   for await (const event of iterateSseJson(res, req.signal, drops)) {
     if (event.error) {
-      const errObj = event.error as { message?: string } | string
+      const errObj = event.error as { message?: string; code?: unknown } | string
       const raw =
         typeof errObj === 'string' ? errObj : (errObj.message ?? 'Gemini stream error')
       const message = scrubProviderErrorText(raw)
-      logProviderFailure(logAs, 'stream', {})
+      // In-band errors carry the HTTP status in `code`; it lets the retry
+      // layer tell a transient 503 from a permanent 400.
+      const code = typeof errObj === 'string' ? undefined : errObj.code
+      const httpStatus = typeof code === 'number' && code >= 400 && code < 600 ? code : undefined
+      logProviderFailure(logAs, 'stream', { status: httpStatus, message })
       yield {
         type: 'error',
         error: message,
-        errorCode: 'PROVIDER_STREAM'
+        errorCode: 'PROVIDER_HTTP',
+        ...(httpStatus !== undefined ? { httpStatus } : {})
       }
       return
     }

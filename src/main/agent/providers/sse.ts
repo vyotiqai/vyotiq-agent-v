@@ -170,16 +170,21 @@ export async function* iterateSseData(
         break
       }
 
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n')
-      buffer = parts.pop() ?? ''
+      const appended = decoder.decode(value, { stream: true })
+      // Only the new text can hold a newline. Re-splitting the whole partial
+      // line on every read made one long frame quadratic (8 MB in 16 KB reads
+      // took 1.7 s); now each byte is split once, when its line completes.
+      const lastNewline = appended.lastIndexOf('\n')
+      const completed = lastNewline === -1 ? '' : buffer + appended.slice(0, lastNewline)
+      buffer = lastNewline === -1 ? buffer + appended : appended.slice(lastNewline + 1)
       // A provider that never sends a newline would grow this tail without
       // bound; complete lines are processed below (and frame-capped by bytes).
       if (buffer.length > maxLineChars) {
         throw new SseFrameTooLargeError(maxLineChars, 'line')
       }
+      if (lastNewline === -1) continue
 
-      for (const raw of parts) {
+      for (const raw of completed.split('\n')) {
         const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
         if (line === '') {
           const data = flush()

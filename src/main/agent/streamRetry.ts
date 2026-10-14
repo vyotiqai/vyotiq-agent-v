@@ -25,9 +25,6 @@ export const STREAM_RETRY_MAX_MS = 8000
 export const STREAM_HTTP_RETRY_BASE_MS = 2000
 export const STREAM_HTTP_RETRY_MAX_MS = 30_000
 
-/** @deprecated Use streamRetryBackoffMs(attempt) — kept for tests that import a scalar. */
-export const STREAM_RETRY_BACKOFF_MS = STREAM_RETRY_BASE_MS
-
 export { isRetriableNetworkError, isRetriableProviderMessage, RetriableStreamError }
 
 /**
@@ -155,6 +152,9 @@ export function shouldRetryStreamErrorChunk(
   // no retry can succeed. Fail fast regardless of error code (audit M2).
   if (isLocalEndpointDownMessage(message)) return false
   if (errorCode === 'CIRCUIT_OPEN') return false
+  // The request itself cannot be built (bad header value, bad URL, refused
+  // redirect): every retry rebuilds the same request.
+  if (errorCode === 'PROVIDER_REQUEST') return false
   if (errorCode === 'PROVIDER_NETWORK') {
     // The fetch layer already retried connect failures to exhaustion inside
     // this attempt (5 × ~30s connect budget). Stream-level retries continue
@@ -187,22 +187,20 @@ export function shouldRetryThrownStreamError(err: unknown, _attempt?: number): b
   return !isAbortError(err) && isRetriableStreamFailure(err)
 }
 
+/** Full jitter over capped exponential backoff for attempt N (1-based). */
+function jitteredExponentialMs(baseMs: number, maxMs: number, attempt: number): number {
+  const capped = Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1))
+  return Math.round(capped / 2 + Math.random() * (capped / 2))
+}
+
 /** Full jitter over exponential backoff for attempt N (1-based). */
 export function streamRetryBackoffMs(attempt: number): number {
-  const capped = Math.min(
-    STREAM_RETRY_MAX_MS,
-    STREAM_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1)
-  )
-  return Math.round(capped / 2 + Math.random() * (capped / 2))
+  return jitteredExponentialMs(STREAM_RETRY_BASE_MS, STREAM_RETRY_MAX_MS, attempt)
 }
 
 /** Slow-curve variant for transient HTTP waits: base 2s, cap 30s. */
 export function streamHttpRetryBackoffMs(attempt: number): number {
-  const capped = Math.min(
-    STREAM_HTTP_RETRY_MAX_MS,
-    STREAM_HTTP_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1)
-  )
-  return Math.round(capped / 2 + Math.random() * (capped / 2))
+  return jitteredExponentialMs(STREAM_HTTP_RETRY_BASE_MS, STREAM_HTTP_RETRY_MAX_MS, attempt)
 }
 
 /** Pick the backoff curve from the failure class: transient HTTP waits wait longer. */
