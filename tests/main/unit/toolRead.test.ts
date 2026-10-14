@@ -94,7 +94,8 @@ describe('toolRead', () => {
   })
 
   it('reads files larger than the former 512 KiB full-read cap', async () => {
-    const body = 'x'.repeat(512 * 1024 + 80)
+    // Real lines: one line this long is now cut at READ_MAX_LINE_CHARS.
+    const body = `${'x'.repeat(399)}\n`.repeat(1500)
     writeFileSync(join(root, 'over-old-cap.txt'), body, 'utf8')
     expect(await toolRead(root, 'over-old-cap.txt')).toBe(body)
   })

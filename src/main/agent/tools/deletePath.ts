@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, realpathSync, rmSync, statSync } from 'fs'
-import { resolve } from 'path'
+import { existsSync, lstatSync, readdirSync, realpathSync, rmSync, statSync } from 'fs'
+import { basename, dirname, join, resolve } from 'path'
+import { assertInsideWorkspace } from '../../../shared/utils/workspacePath'
 import { resolveInsideWorkspace, assertResolvedInsideWorkspace } from '../../workspace/safePath'
 import {
   withExclusiveWorkspaceMutation,
@@ -7,10 +8,36 @@ import {
 } from '@main/workspace/mutationQueue'
 import { missingPathHint } from './read'
 
+/**
+ * The link itself when `pathArg` names a symlink or junction, else null.
+ *
+ * `resolveInsideWorkspace` realpaths, so deleting through it removed the link's
+ * TARGET: `delete node_modules/@s/pkg` wiped the workspace package the link
+ * points at. The link's parent must still resolve inside the workspace.
+ */
+export function workspaceLinkPath(workspaceRoot: string, pathArg: string): string | null {
+  const lexical = assertInsideWorkspace(workspaceRoot, pathArg.trim())
+  let isLink = false
+  try {
+    isLink = lstatSync(lexical).isSymbolicLink()
+  } catch {
+    return null
+  }
+  if (!isLink) return null
+  return join(resolveInsideWorkspace(workspaceRoot, dirname(lexical)), basename(lexical))
+}
+
 /** Delete a file, or a directory when the caller opts into recursion. */
 export function toolDelete(workspaceRoot: string, pathArg: string, recursive = false): string {
   const target = (pathArg ?? '').trim()
   if (!target) throw new Error('delete requires a non-empty path')
+
+  // A link is removed as a link — never followed, never recursed into.
+  const link = workspaceLinkPath(workspaceRoot, target)
+  if (link) {
+    rmSync(link, { force: false })
+    return `Deleted link ${target} (its target was left untouched)`
+  }
 
   const resolved = resolveInsideWorkspace(workspaceRoot, target)
   // resolved is realpath-resolved inside resolveInsideWorkspace; compare

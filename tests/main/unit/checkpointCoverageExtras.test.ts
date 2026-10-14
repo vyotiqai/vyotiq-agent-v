@@ -104,7 +104,7 @@ describe('mcpCheckpoint known paths', () => {
         'filesystem',
         'write_file',
         { path: 'f.txt', content: 'after' },
-        { runDir }
+        { workspace, runDir }
       )
       writeFileSync(join(workspace, 'f.txt'), 'after\n', 'utf8')
       const meta = finalizeWriteCheckpoint(runDir)
@@ -129,7 +129,7 @@ describe('mcpCheckpoint known paths', () => {
         'fs',
         'move_file',
         { source: 'src.txt', destination: 'dst.txt' },
-        { runDir }
+        { workspace, runDir }
       )
       // Priors are snapshotted before the MCP server runs; perform the move the
       // way the server would, or finalize drops `dst.txt` as an entry for a file
@@ -160,7 +160,7 @@ describe('mcpCheckpoint known paths', () => {
         'filesystem',
         'edit_file',
         { path: 'f.txt', edits: [], dryRun: true },
-        { runDir }
+        { workspace, runDir }
       )
       expect(finalizeWriteCheckpoint(runDir)).toBeNull()
     } finally {

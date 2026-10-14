@@ -6,7 +6,7 @@ import { resolveInsideWorkspace } from '@main/workspace/safePath'
 import { assertInsideWorkspace } from '../../../shared/workspacePath'
 import { scrubPath } from '../../../shared/utils/scrub'
 import { abortError } from '../../../shared/errors'
-import { agentCommandEnv, killProcessTree } from './terminal'
+import { agentCommandEnv, killProcessTree, TERMINAL_MAX_OUTPUT } from './terminal'
 import { sandboxHeaderLines, sandboxHintLines, wrappedSpawnOptions, type SandboxLaunch, type WrappedCommand } from '../sandbox/wrap'
 
 const DIAG_TIMEOUT_MS = 120_000
@@ -18,6 +18,18 @@ const DIAG_TIMEOUT_MS = 120_000
 const KILL_SETTLE_MS = 5_000
 /** Per-stream capture cap (kept tail) so a chatty command cannot grow memory unboundedly. */
 export const MAX_STREAM_BYTES = 262_144
+
+/**
+ * Bound what reaches the model to the terminal/MCP cap. Capture keeps 256KB so
+ * the parsers see whole output; the tool result keeps the head (command,
+ * header, first diagnostics) and the tail (the runner's summary).
+ */
+export function capToolOutput(text: string, max = TERMINAL_MAX_OUTPUT): string {
+  if (text.length <= max) return text
+  const tail = Math.floor(max / 4)
+  const head = max - tail
+  return `${text.slice(0, head)}\n…[${text.length - max} chars truncated — narrow the command for the rest]…\n${text.slice(-tail)}`
+}
 
 export type DiagnosticsKind = 'typecheck' | 'lint'
 
@@ -598,7 +610,7 @@ export async function toolDiagnosticsAsync(
     if (signal.aborted) throw abortError()
 
     const combined = [stdout, stderr].filter(Boolean).join('\n').trim()
-    const output = combined || '(no output)'
+    const output = capToolOutput(combined || '(no output)')
     const parsed = parseDiagnosticLines(combined).map((d) => ({
       ...d,
       file: relativizeDiagnosticFile(workspace, d.file)
@@ -648,7 +660,7 @@ export async function toolDiagnosticsAsync(
             `${d.file}:${d.line}:${d.col}: ${d.severity ?? 'error'}: ${d.message}`
         )
       ]
-      return { ok: true, content: lines.join('\n') }
+      return { ok: true, content: capToolOutput(lines.join('\n')) }
     }
 
     return { ok: true, content: [`command: ${command}`, ...sandboxHeaderLines(sandbox), '', output].join('\n') }

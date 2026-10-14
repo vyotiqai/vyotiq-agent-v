@@ -105,9 +105,9 @@ export function isScopeSharedInlineInstance(status: {
  * refused by the same `assertInlineInstanceUnscopedToolAllowed` call, so naming
  * it in the catalog only buys a wasted turn on the refusal.
  *
- * MCP tools and agent-built tools take that guard too, but they are named
- * dynamically (a server or a user's own module), so they are not reachable
- * from a builtin set; the dispatch guard stays their only line of defence.
+ * MCP tools take that guard too and are dropped by name below. Agent-built
+ * tools are named by a user's own module, so the dispatch guard stays their
+ * only line of defence.
  *
  * `diagnostics` and `run_tests` deliberately stay: both read the tree, write
  * nothing, and are how such a child checks its own work (see tools/index.ts).
@@ -246,7 +246,10 @@ export function filterToolDefsForMode<T extends { name: string }>(
     filtered = filtered.filter((t) => !INLINE_OMIT_BUILTIN.has(t.name))
   }
   if (opts?.pathScopeShared) {
-    filtered = filtered.filter((t) => !SCOPE_SHARED_OMIT_BUILTIN.has(t.name))
+    // MCP tools too: the same dispatch guard refuses every one of them.
+    filtered = filtered.filter(
+      (t) => !SCOPE_SHARED_OMIT_BUILTIN.has(t.name) && !parseMcpToolName(t.name)
+    )
   }
   const allowlist = opts?.toolAllowlist
   if (allowlist) {

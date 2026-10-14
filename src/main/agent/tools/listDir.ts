@@ -3,9 +3,9 @@ import { join } from 'path'
 import { resolveInsideWorkspace } from '../../workspace/safePath'
 import { gitignoreMatcherForDir } from './gitignore'
 import { IGNORED_DIRS } from './walk'
-import { missingDirectoryHint } from './read'
+import { LIST_DIR_CAP, missingDirectoryHint } from './read'
 
-export const LIST_DIR_CAP = 200
+export { LIST_DIR_CAP }
 const NESTED_SUGGEST_CAP = 8
 const NESTED_DIR_VISIT_CAP = 2000
 

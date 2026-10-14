@@ -23,8 +23,9 @@ import {
   terminalCommandOf
 } from '../../shared/utils/commandAllow'
 import { isMcpServerToolName } from '../../shared/mcpApps'
-import { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from './schemas/tools'
-import { isApprovalExemptTool } from './tools/classify'
+import { canonicalizeAgentToolName } from './schemas/tools'
+import { parseToolCallArgs } from './tools/callArgs'
+import { BUILTIN_TOOL_NAME_SET, isApprovalExemptTool } from './tools/classify'
 import { agentBuiltToolAllowKey } from './agentTools/loader'
 import { resolveAgentToolsDir } from './agentTools/paths'
 import { ASK_SAFE_BUILTIN } from './tools/modePolicy'
@@ -194,22 +195,12 @@ export function cancelPendingApprovals(runId: string, invokeId?: number): void {
  * runs for a name nothing else claims — which is exactly the agent-built case.
  */
 async function agentBuiltAllowKeyFor(name: string): Promise<string | undefined> {
-  if (BUILTIN_NAME_SET.has(name) || isMcpServerToolName(name)) return undefined
+  if (BUILTIN_TOOL_NAME_SET.has(name) || isMcpServerToolName(name)) return undefined
   try {
     return (await agentBuiltToolAllowKey(await resolveAgentToolsDir(), name)) ?? undefined
   } catch {
     // A tool we cannot identify is not one we can grant a standing allow to;
     // falling through leaves it gated under its bare name.
-    return undefined
-  }
-}
-
-function parseArgs(argsJson: string | undefined): Record<string, unknown> | undefined {
-  if (!argsJson) return undefined
-  try {
-    const parsed: unknown = JSON.parse(argsJson)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined
-  } catch {
     return undefined
   }
 }
@@ -233,17 +224,8 @@ export function isToolGated(
   const allowNames = allowKey ? [allowKey] : [canonical, name]
   if (allowNames.some((entry) => sessionAllowlist.has(entry))) return false
   if (allowNames.some((entry) => workspaceAllowlist.includes(entry))) return false
-  let args: Record<string, unknown> | undefined
-  if (argsJson) {
-    try {
-      const parsed: unknown = JSON.parse(argsJson)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        args = parsed as Record<string, unknown>
-      }
-    } catch {
-      args = undefined
-    }
-  }
+  // The arguments execution will run with, not the raw JSON (see parseToolCallArgs).
+  const args = parseToolCallArgs(canonical, argsJson)
   if (canonical === 'terminal') {
     const command = terminalCommandOf(args)
     // Polling a session reads the output of a command already let through; it
@@ -278,23 +260,10 @@ export function isToolGated(
 }
 
 /** High-risk tools that stay gated in autonomous mode unless workspace-allowlisted. */
-const BUILTIN_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES)
-
 export function isAutonomousHighRiskTool(name: string, argsJson?: string): boolean {
   const canonical = canonicalizeAgentToolName(name)
   if (canonical === 'lsp') {
-    let action: unknown
-    if (argsJson) {
-      try {
-        const parsed: unknown = JSON.parse(argsJson)
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          action = (parsed as Record<string, unknown>).action
-        }
-      } catch {
-        action = undefined
-      }
-    }
-    return action === 'rename'
+    return parseToolCallArgs(canonical, argsJson).action === 'rename'
   }
   if (canonical === 'github_issue') {
     // Listing and reading change nothing; creating posts on GitHub under the account.
@@ -357,7 +326,7 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
     // answers for them.
     canonical === 'screen_snip' ||
     canonical.startsWith('mcp__') ||
-    !(BUILTIN_TOOL_NAMES as readonly string[]).includes(canonical)
+    !BUILTIN_TOOL_NAME_SET.has(canonical)
   )
 }
 
@@ -390,8 +359,8 @@ export function guardedCommand(
   guard: CommandGuard
 ): DangerousCommand | null {
   if (name !== 'terminal' && name !== 'run_tests') return null
-  const args = parseArgs(argsJson)
-  const command = typeof args?.command === 'string' ? args.command : ''
+  const args = parseToolCallArgs(name, argsJson)
+  const command = typeof args.command === 'string' ? args.command : ''
   if (!command.trim()) return null
   const lib = guard.platform === 'win32' ? path.win32 : path.posix
   const workingDirectory =
@@ -426,8 +395,12 @@ const responseExtras = new Map<
 const FOLDER_ALLOW_TOOLS = ['edit', 'str_replace'] as const
 
 /** A path the call names, workspace-relative with forward slashes; null when it is outside or absent. */
-function workspaceRelPath(argsJson: string, workspaceRoot: string | undefined): string | null {
-  const raw = parseArgs(argsJson)?.path
+function workspaceRelPath(
+  toolName: string,
+  argsJson: string,
+  workspaceRoot: string | undefined
+): string | null {
+  const raw = parseToolCallArgs(toolName, argsJson).path
   if (typeof raw !== 'string' || !raw.trim()) return null
   let rel = raw.trim()
   if (path.isAbsolute(rel)) {
@@ -442,7 +415,7 @@ function workspaceRelPath(argsJson: string, workspaceRoot: string | undefined): 
 /** The top folder an edit sits in (`src` for `src/lib/a.ts`), or null for a file at the root. */
 export function editAllowFolder(toolName: string, argsJson: string, workspaceRoot: string | undefined): string | null {
   if (!(FOLDER_ALLOW_TOOLS as readonly string[]).includes(toolName)) return null
-  const rel = workspaceRelPath(argsJson, workspaceRoot)
+  const rel = workspaceRelPath(toolName, argsJson, workspaceRoot)
   const slash = rel?.indexOf('/') ?? -1
   if (!rel || slash <= 0) return null
   const folder = rel.slice(0, slash)
@@ -725,7 +698,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         try {
           permission = options.permissions.evaluate(
             name,
-            parseArgs(call.arguments),
+            parseToolCallArgs(name, call.arguments),
             activeSkills.size > 0 ? { skills: [...activeSkills.values()] } : undefined
           )
         } catch {
@@ -757,7 +730,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         try {
           permission = options.permissions.evaluate(
             name,
-            parseArgs(call.arguments),
+            parseToolCallArgs(name, call.arguments),
             activeSkills.size > 0 ? { skills: [...activeSkills.values()] } : undefined
           )
         } catch (err) {
@@ -834,7 +807,8 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
       // The terminal's "Always allow" is scoped to the command, computed here —
       // from the full arguments, not the card's truncated preview.
       // A call the guard or an ask rule held is never remembered: no "Always allow".
-      const terminalCommand = name === 'terminal' && !held ? terminalCommandOf(parseArgs(call.arguments)) : null
+      const args = parseToolCallArgs(name, call.arguments)
+      const terminalCommand = name === 'terminal' && !held ? terminalCommandOf(args) : null
       const alwaysAllowCommand = terminalCommand ? commandAllowPrefix(terminalCommand) : null
       const alwaysAllowProgram = terminalCommand ? commandAllowProgram(terminalCommand) : null
       const changePreview = buildApprovalChangePreview(name, call.arguments, options.commandGuard?.workspaceRoot)
@@ -855,16 +829,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         timeoutMs: approvalTimeoutMs(),
         mutating: isNetworkBrowseTool(name)
           ? false
-          : !isApprovalExemptTool(name, (() => {
-              try {
-                const parsed: unknown = JSON.parse(call.arguments || '{}')
-                return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-                  ? (parsed as Record<string, unknown>)
-                  : undefined
-              } catch {
-                return undefined
-              }
-            })())
+          : !isApprovalExemptTool(name, args)
       }
 
       const decision = await ask(request).catch((err: unknown) => {
@@ -956,7 +921,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         }
         case 'once': {
           if (extras?.editedCommand && name === 'terminal' && extras.editedCommand !== terminalCommand) {
-            const args = parseArgs(call.arguments) ?? {}
+            const args = parseToolCallArgs(name, call.arguments)
             return {
               allowed: true,
               grant: { by: 'you', scope: 'once' },

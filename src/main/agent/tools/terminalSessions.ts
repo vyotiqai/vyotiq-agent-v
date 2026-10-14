@@ -726,6 +726,7 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
   }
 
   const deadline = Date.now() + Math.max(0, opts.blockUntilMs)
+  let steered = false
   while (Date.now() < deadline) {
     if (opts.signal.aborted) {
       // Hard cancel kills the child so it cannot leak past the run; a soft
@@ -740,6 +741,8 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
         session.finishedAt ??= Date.now()
         session.status = 'aborted'
         notifySessionWaiters(session)
+      } else {
+        steered = true
       }
       break
     }
@@ -753,7 +756,8 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
   }
 
   if (session.running && opts.blockUntilMs > 0 && session.status === 'running') {
-    if (opts.killOnTimeout) {
+    // A soft steer ended the wait early; that is not the wait expiring.
+    if (opts.killOnTimeout && !steered) {
       // Foreground wait expired: hard-kill so the process cannot leak past the
       // run, and surface it as a failure the tool layer can flag.
       if (session.child.pid) killProcessTree(session.child.pid, 'poll-timeout-kill')

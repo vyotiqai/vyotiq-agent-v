@@ -475,8 +475,12 @@ export class InvokeWriteCheckpoint {
   private readonly runDir: string
   private readonly workspaceRoot: string
   private readonly files = new Map<string, CheckpointFileEntry>()
-  /** Rel-paths with an in-flight async snapshot so first-path-wins stays racy-safe. */
-  private readonly pendingRels = new Set<string>()
+  /**
+   * In-flight async snapshots by rel-path so first-path-wins stays racy-safe.
+   * A second caller awaits the first snapshot: returning at once let it write
+   * before the copy ran, and the "prior" captured its own edit (Undo kept it).
+   */
+  private readonly pendingRels = new Map<string, Promise<void>>()
   private finalized = false
   /** See {@link otherWriteCount}. */
   private otherWrites = 0
@@ -583,17 +587,21 @@ export class InvokeWriteCheckpoint {
     // checkpoint entry.
     if (!opts?.recursiveDir && !looksLikeWorkspacePath(rel)) return
     if (opts?.nonEditTool) this.noteOtherWrite(rel)
-    if (this.files.has(rel) || this.pendingRels.has(rel)) return
-    this.pendingRels.add(rel)
+    if (this.files.has(rel)) return
+    const pending = this.pendingRels.get(rel)
+    if (pending) {
+      await pending
+      return
+    }
     const filesBefore = this.files.size
-    try {
-      await this.snapshotPrior(resolved, rel, kind, opts)
-    } finally {
+    const snapshot = this.snapshotPrior(resolved, rel, kind, opts).finally(async () => {
       this.pendingRels.delete(rel)
       // The write this protects has not happened yet, so `rel` is not hashed
       // here — hashing it would stamp the pre-write content as the agent's.
       if (this.files.size > filesBefore) await this.persistIncremental(rel)
-    }
+    })
+    this.pendingRels.set(rel, snapshot.catch(() => undefined))
+    await snapshot
   }
 
   private async snapshotPrior(
@@ -715,7 +723,8 @@ export class InvokeWriteCheckpoint {
     if (!looksLikeWorkspacePath(rel)) return
     this.noteOtherWrite(rel)
     if (this.files.has(rel) || this.pendingRels.has(rel)) return
-    this.pendingRels.add(rel)
+    let release!: () => void
+    this.pendingRels.set(rel, new Promise<void>((resolve) => (release = resolve)))
     const filesBefore = this.files.size
     try {
       if (kind === 'created') {
@@ -751,6 +760,7 @@ export class InvokeWriteCheckpoint {
       })
     } finally {
       this.pendingRels.delete(rel)
+      release()
       if (this.files.size > filesBefore) await this.persistIncremental()
     }
   }

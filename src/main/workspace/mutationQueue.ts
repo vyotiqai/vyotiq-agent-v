@@ -1,4 +1,7 @@
+import { realpathSync } from 'fs'
+import { relative } from 'path'
 import { canonicalizeWorkspacePath } from '../../shared/utils/workspacePath'
+import { resolveInsideWorkspace } from './safePath'
 
 const IDLE: Promise<void> = Promise.resolve()
 
@@ -14,12 +17,38 @@ function mutationKey(workspacePath: string): string {
   return process.platform === 'win32' ? canonical.toLowerCase() : canonical
 }
 
-function pathKey(relPath: string): string {
-  const normalized = relPath.replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+$/, '').trim()
-  if (!normalized || normalized === '.') {
-    throw new Error('withWorkspaceMutation requires a relative file path')
-  }
+/**
+ * Same-file key for a workspace-relative path: `/` separators, `.`/`..`/`//`
+ * collapsed, case-folded on Windows. The step's parallel grouping
+ * (classify.ts) and the lock below share it so the two cannot disagree.
+ *
+ * A rooted path returns undefined: without the workspace it cannot be matched
+ * with a relative spelling of the same file, so grouping runs it alone.
+ */
+export function mutationPathKey(relPath: string): string | undefined {
+  const trimmed = relPath.trim()
+  if (!trimmed || /^(?:[\\/]|[a-zA-Z]:)/.test(trimmed)) return undefined
+  const normalized = canonicalizeWorkspacePath(trimmed.replace(/\\/g, '/'))
+  if (!normalized || normalized === '.') return undefined
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+/**
+ * Lock key: the path as `resolveInsideWorkspace` sees it, relative to the real
+ * root, so `a.txt` and `<root>/a.txt` share one queue. Falls back to the
+ * spelling when the path cannot be resolved — the operation reports that.
+ */
+function pathKey(workspacePath: string, relPath: string): string {
+  let rel = relPath
+  try {
+    const real = resolveInsideWorkspace(workspacePath, relPath)
+    rel = relative(realpathSync(canonicalizeWorkspacePath(workspacePath)), real)
+  } catch {
+    // Missing root or an escaping path: key on the spelling.
+  }
+  const key = mutationPathKey(rel)
+  if (!key) throw new Error('withWorkspaceMutation requires a relative file path')
+  return key
 }
 
 function workspaceState(workspacePath: string): { key: string; state: WorkspaceMutationState } {
@@ -74,7 +103,7 @@ export function withWorkspaceMutation<T>(
   relPath: string,
   operation: () => T | Promise<T>
 ): Promise<T> {
-  const relKey = pathKey(relPath)
+  const relKey = pathKey(workspacePath, relPath)
   const { key, state } = workspaceState(workspacePath)
   const previous = joinWaits([state.exclusive, state.paths.get(relKey) ?? IDLE])
   return chainMutation(
