@@ -146,6 +146,41 @@ test('Esc closes a dialog over the voice view, and Space presses a focused butto
     .toEqual(['start', 'end'])
 })
 
+test('after End the conversation stays on screen until Close', async () => {
+  const { window } = launched
+  await openBrief()
+  // `window` here is the page; inside evaluate the page's own window is `globalThis`.
+  type Page = Window & { __voiceSid?: string }
+  await window.evaluate(() => {
+    const w = globalThis as unknown as Page
+    w.__micDelayMs = 0
+    w.vyotiq.onVoiceEvent((e) => {
+      w.__voiceSid = e.sessionId
+    })
+  })
+  await startVoice()
+  const view = window.locator('[data-voice-view]')
+  await expect(view).toHaveAttribute('data-voice-view', 'listening', { timeout: 15_000 })
+  // Main says a line (a hand-off the task never took): the conversation has something in it.
+  await expect.poll(() => window.evaluate(() => Boolean((globalThis as unknown as Page).__voiceSid))).toBe(true)
+  await window.evaluate(() => {
+    const w = globalThis as unknown as Page
+    return w.vyotiq.voiceHandOffFailed({ sessionId: w.__voiceSid!, handOffId: 'e2e-h1', reason: 'no_task' })
+  })
+  await expect(window.locator('[data-voice-line="voice"]').first()).toBeVisible({ timeout: 15_000 })
+  const said = await window.locator('[data-voice-line="voice"]').first().textContent()
+
+  await view.locator('[data-voice-end]').first().click()
+  await expect(view).toHaveCount(0)
+  const ended = window.locator('[data-voice-ended]')
+  await expect(ended).toBeVisible()
+  await expect(ended.locator('[data-voice-line="voice"]').first()).toHaveText(said ?? '')
+  await expect(ended.getByRole('button', { name: 'Mute' })).toHaveCount(0)
+  await ended.getByRole('button', { name: 'Close' }).click()
+  await expect(ended).toHaveCount(0)
+  await expect(window.locator('[data-voice-button="off"]').first()).toBeAttached()
+})
+
 test('End while the mic is still opening leaves no mic running', async () => {
   const { window } = launched
   await openBrief()

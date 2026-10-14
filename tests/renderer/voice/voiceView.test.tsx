@@ -90,6 +90,75 @@ describe('the voice view (D-48)', () => {
     expect(fake.calls).toContain('stop')
   })
 
+  it('after End the conversation stays on screen as it stood, until Close', async () => {
+    render(<VoiceView />)
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() =>
+      fake.update({
+        transcript: [
+          { id: 't1', who: 'you', text: 'Fix the test.' },
+          { id: 'h1', who: 'agent', text: 'Fix the failing test.', runId: 'r1' },
+          { id: 'v1', who: 'voice', text: 'Done, it passes.' }
+        ],
+        works: { r1: work({ state: 'done', endedAt: 61_000, stepCount: 6, result: 'All 14 tests pass.' }) }
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'End' }))
+    await vi.waitFor(() => expect(view()).toBeNull())
+    expect(fake.calls).toContain('stop')
+    const ended = document.querySelector('[data-voice-ended]')!
+    expect([...ended.querySelectorAll('[data-voice-line]')].map((li) => li.getAttribute('data-voice-line'))).toEqual(['you', 'agent', 'voice'])
+    expect(ended.querySelector('[data-voice-result]')!.textContent).toContain('All 14 tests pass.')
+    // Nothing live: no Mute, no End.
+    expect(screen.queryByRole('button', { name: 'Mute' })).toBeNull()
+    expect(document.querySelector('[data-voice-ended-unfinished]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(document.querySelector('[data-voice-ended]')).toBeNull()
+  })
+
+  it('the kept conversation: Esc closes it, talking again replaces it, unfinished work is not shown as live', async () => {
+    render(<VoiceView />)
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() =>
+      fake.update({
+        state: 'working',
+        transcript: [{ id: 'h1', who: 'agent', text: 'Run the suite.', runId: 'r1' }],
+        works: { r1: work({ steps: [{ id: 's1', tool: 'bash', summary: 'pnpm test', state: 'running' }], stepCount: 1 }) }
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'End' }))
+    await vi.waitFor(() => expect(document.querySelector('[data-voice-ended]')).not.toBeNull())
+    // Its steps froze when the session stopped following: not shown as running.
+    expect(document.querySelector('[data-voice-step]')).toBeNull()
+    expect(document.querySelector('[data-voice-ended-unfinished]')!.textContent).toBe('Work still going when you ended carries on in its task.')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(document.querySelector('[data-voice-ended]')).toBeNull()
+
+    // Ended again, then voice mode starts: the new session's view replaces it.
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() => fake.update({ transcript: [{ id: 't1', who: 'you', text: 'Hello.' }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'End' }))
+    await vi.waitFor(() => expect(document.querySelector('[data-voice-ended]')).not.toBeNull())
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    expect(document.querySelector('[data-voice-ended]')).toBeNull()
+    expect(view()).not.toBeNull()
+  })
+
+  it('nothing is kept when nothing was said, or when it ends from the pill with the view closed', async () => {
+    render(<VoiceView />)
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'End' }))
+    await vi.waitFor(() => expect(view()).toBeNull())
+    expect(document.querySelector('[data-voice-ended]')).toBeNull()
+
+    await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
+    act(() => fake.update({ transcript: [{ id: 't1', who: 'you', text: 'Hello.' }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show the task' }))
+    fireEvent.click(screen.getByRole('button', { name: 'End voice mode' }))
+    await vi.waitFor(() => expect(pill()).toBeNull())
+    expect(document.querySelector('[data-voice-ended]')).toBeNull()
+  })
+
   it('shows the conversation: what you said, what it said, and work it handed to the agent', async () => {
     render(<VoiceView />)
     await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))

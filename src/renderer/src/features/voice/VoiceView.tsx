@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { VOICE_STATE_LABEL, type VoiceSessionState } from '@shared/voiceSession'
-import { IconButton } from '@renderer/lib/ui'
+import type { VoiceWork } from '@shared/ipc/schemas/voice'
+import { Icon } from '@renderer/lib/icons'
+import { Button, IconButton, cn } from '@renderer/lib/ui'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
 import { hasOpenFloatingLayer } from '@renderer/lib/hooks/floatingLayers'
 import { playEarcon } from './earcons'
 import { VoiceOrb } from './VoiceOrb'
-import { DOUBLE_ESC_MS, firstTipSeen, markFirstTipSeen } from './VoiceBar'
-import { endVoiceMode, setVoiceEscArmed, setVoiceViewOpen, useVoiceMode, voiceController } from './voiceMode'
+import { DOUBLE_ESC_MS, firstTipSeen, formatTime, markFirstTipSeen } from './VoiceBar'
+import {
+  dismissEndedVoice,
+  endVoiceMode,
+  setVoiceEscArmed,
+  setVoiceViewOpen,
+  useVoiceMode,
+  voiceController,
+  type EndedVoiceConversation
+} from './voiceMode'
 import { ConversationLayout, OrbLayout, SplitLayout, type LayoutProps } from './view/layouts'
+import { ConversationItems, buildEntries } from './view/parts'
 
 /*
   The voice view (docs/voice-mode.md §25, D-48): a spoken conversation over
@@ -19,6 +31,7 @@ import { ConversationLayout, OrbLayout, SplitLayout, type LayoutProps } from './
 
   It lives in the app shell, not in a composer, so it outlives the line that
   started it: switch tasks or go Home and the conversation stays on screen.
+  After End it stays too, as it stood, until you close it or talk again.
 */
 
 /**
@@ -180,13 +193,64 @@ function MiniPill() {
   )
 }
 
+/**
+ * The conversation after End, as it stood, until you close it or start
+ * voice mode again. Work still going carries on in its task; its steps froze
+ * when the session stopped following it, so they aren't shown as live.
+ */
+function EndedView({ ended }: { ended: EndedVoiceConversation }) {
+  const works = useMemo(() => {
+    const finished: Record<string, VoiceWork> = {}
+    for (const [id, w] of Object.entries(ended.works)) if (w.state !== 'running' && w.state !== 'needs') finished[id] = w
+    return finished
+  }, [ended.works])
+  const entries = useMemo(() => buildEntries(ended.transcript, works), [ended.transcript, works])
+  const unfinished = Object.keys(works).length < Object.keys(ended.works).length
+
+  // Esc closes it, as the view's own Esc would have ended the session. Capture phase, so it never also stops the run.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || escapeBelongsToALayer() || isEditableShortcutTarget(e.target)) return
+      e.preventDefault()
+      e.stopPropagation()
+      dismissEndedVoice()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
+
+  return (
+    <section className="absolute inset-0 z-sticky flex min-h-0 flex-col bg-bg" aria-label="Voice conversation" data-voice-ended>
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2">
+        <Icon name="waveform" size={14} className="text-muted" />
+        <h2 className="m-0 text-sm text-fg-strong">Voice</h2>
+        <span className="font-mono text-caption text-tertiary tnum">{`Ended · ${formatTime(ended.endedAt - (ended.startedAt ?? ended.endedAt))}`}</span>
+        <span className="flex-1" />
+        <Button size="xs" variant="ghost" icon="close" onClick={dismissEndedVoice} data-voice-ended-close>
+          Close
+        </Button>
+      </div>
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <ol className="m-0 mx-auto flex w-full max-w-[720px] list-none flex-col px-6 pb-4 pt-6" aria-label="Conversation" data-voice-transcript>
+          <ConversationItems entries={entries} partial="" now={ended.endedAt} />
+        </ol>
+      </div>
+      {unfinished ? (
+        <div className={cn('flex h-10 shrink-0 items-center border-t px-4 text-caption text-tertiary', BORDER_DIVIDER)} data-voice-ended-unfinished>
+          Work still going when you ended carries on in its task.
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 /** Mounted once in the app shell, over the main pane. */
 export function VoiceView({ onOpenVoiceSettings }: { onOpenVoiceSettings?: () => void }) {
-  const { owner, viewOpen, bars } = useVoiceMode()
+  const { owner, viewOpen, bars, ended } = useVoiceMode()
   return (
     <>
       <VoiceSessionEffects />
-      {owner === null ? null : viewOpen ? (
+      {owner === null ? (ended ? <EndedView ended={ended} /> : null) : viewOpen ? (
         <FullView onOpenVoiceSettings={onOpenVoiceSettings} />
       ) : bars === 0 ? (
         <MiniPill />

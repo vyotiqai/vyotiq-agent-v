@@ -29,12 +29,22 @@ type ModeState = {
   escArmed: boolean
   /** Voice bars on screen (the owning line's composer); without one, the view's pill stands in. */
   bars: number
+  /** The conversation of the session that just ended, kept on screen until closed or a new one starts. */
+  ended: EndedVoiceConversation | null
+}
+
+/** What the voice view keeps showing after End: the conversation as it stood. */
+export type EndedVoiceConversation = {
+  transcript: VoiceSnapshot['transcript']
+  works: VoiceSnapshot['works']
+  startedAt: number | null
+  endedAt: number
 }
 
 /** How long a brief's handoff waits for the new task's line to appear. */
 export const HANDOFF_MS = 10_000
 
-const IDLE_MODE: ModeState = { owner: null, settings: DEFAULT_VOICE_SETTINGS, startedAt: null, workspacePath: null, viewOpen: true, escArmed: false, bars: 0 }
+const IDLE_MODE: ModeState = { owner: null, settings: DEFAULT_VOICE_SETTINGS, startedAt: null, workspacePath: null, viewOpen: true, escArmed: false, bars: 0, ended: null }
 let mode: ModeState = IDLE_MODE
 /** The brief that just started a task by voice, waiting for its line. */
 let handoff: { from: string; until: number } | null = null
@@ -122,12 +132,22 @@ export async function handleVoiceStop(): Promise<void> {
   if (t?.running()) await t.stop()
 }
 
+/**
+ * The conversation to keep on screen once the session ends: only when the
+ * view was open (ending from the pill or the bar leaves you where you are),
+ * something was said, and captions are on (off, the words were never shown).
+ */
+function endedConversation(snapshot: VoiceSnapshot): EndedVoiceConversation | null {
+  if (!mode.owner || !mode.viewOpen || !mode.settings.captions || snapshot.transcript.length === 0) return null
+  return { transcript: snapshot.transcript, works: snapshot.works, startedAt: mode.startedAt, endedAt: Date.now() }
+}
+
 function ensureController(): VoiceSessionController {
   if (controller) return controller
   controller = new VoiceSessionController({ onTurn: handleVoiceTurn, onStopAgent: handleVoiceStop })
   offController = controller.subscribe(() => {
     // A session that ended on its own (window lost the mic, error then End) frees the line.
-    if (controller?.snapshot.state === 'off' && mode.owner && !controller.active) emit({ owner: null })
+    if (controller?.snapshot.state === 'off' && mode.owner && !controller.active) emit({ owner: null, ended: endedConversation(controller.snapshot) })
     for (const l of listeners) l()
   })
   return controller
@@ -141,7 +161,7 @@ export async function startVoiceMode(owner: string, opts: { workspacePath?: stri
   // A read-aloud still playing would talk over the conversation.
   stopSpeech()
   // A new session opens on the voice view (D-48).
-  emit({ owner, startedAt: Date.now(), workspacePath: opts.workspacePath ?? null, viewOpen: true, escArmed: false })
+  emit({ owner, startedAt: Date.now(), workspacePath: opts.workspacePath ?? null, viewOpen: true, escArmed: false, ended: null })
   await c.start({
     workspacePath: opts.workspacePath ?? undefined,
     deviceId: getDictationState().settings.deviceId || undefined
@@ -151,7 +171,9 @@ export async function startVoiceMode(owner: string, opts: { workspacePath?: stri
 export async function endVoiceMode(): Promise<void> {
   const c = controller
   handoff = null
-  emit({ owner: null, startedAt: null, workspacePath: null, escArmed: false })
+  // Read before stopping: stop clears the conversation.
+  const ended = c ? endedConversation(c.snapshot) : null
+  emit({ owner: null, startedAt: null, workspacePath: null, escArmed: false, ended })
   target = null
   await c?.stop()
 }
@@ -172,6 +194,11 @@ export function cancelVoiceHandoff(from: string): void {
 /** Open or close the voice view over the task pane (D-48). */
 export function setVoiceViewOpen(open: boolean): void {
   if (mode.viewOpen !== open) emit({ viewOpen: open })
+}
+
+/** Close the conversation kept on screen after End. */
+export function dismissEndedVoice(): void {
+  if (mode.ended) emit({ ended: null })
 }
 
 export function setVoiceEscArmed(armed: boolean): void {
@@ -309,7 +336,8 @@ function read(): ModeView {
     view.workspacePath !== mode.workspacePath ||
     view.viewOpen !== mode.viewOpen ||
     view.escArmed !== mode.escArmed ||
-    view.bars !== mode.bars
+    view.bars !== mode.bars ||
+    view.ended !== mode.ended
   ) {
     view = { ...mode, snapshot }
   }
