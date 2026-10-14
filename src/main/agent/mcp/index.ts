@@ -11,12 +11,16 @@ import {
   McpError,
   ToolListChangedNotificationSchema,
   type ElicitRequest,
-  type ElicitResult
+  type ElicitResult,
+  type Prompt,
+  type Resource,
+  type Tool
 } from '@modelcontextprotocol/sdk/types.js'
 import { randomUUID } from 'crypto'
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { pathToFileURL } from 'url'
 import { basename } from 'path'
+import Ajv from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
 import type { ValidateFunction } from 'ajv'
 import type { McpServer } from '../../../shared/ipc'
@@ -54,7 +58,8 @@ import { invalidateSlashCommandsCache } from '../slashCommands/listCache'
 import {
   beginMcpOAuthCallback,
   cancelMcpOAuthCallback,
-  createMcpOAuthProvider
+  createMcpOAuthProvider,
+  MCP_OAUTH_CALLBACK_TIMEOUT_MS
 } from './oauth'
 import {
   mcpOAuthCallbackListenOpts,
@@ -82,7 +87,10 @@ import {
   type GoogleMcpAccess,
   type McpAuthScope
 } from '../../../shared/mcpApps'
-import { resolveEffectiveMcpServers } from '../../marketplace/resolve'
+import {
+  resolveEffectiveMcpServers,
+  resolveMcpServersForSessionMap
+} from '../../marketplace/resolve'
 import { sanitizeMcpManifestEnv } from '../../marketplace/sanitizeMcpEnv'
 import {
   gitMcpNotARepoMessage,
@@ -384,13 +392,76 @@ function capMcpText(text: string): string {
   return `${text.slice(0, MCP_CONTENT_CAP)}\n[MCP output truncated: showing ${MCP_CONTENT_CAP} of ${text.length} chars]`
 }
 
-const ajv2020 = new Ajv2020({ allErrors: true, strict: false })
+/** Most entries one resources/prompts listing returns, across servers. */
+export const MCP_LIST_ENTRY_CAP = 100
+/** Per-entry description cap in those listings. */
+const MCP_LIST_DESCRIPTION_CAP = 200
+/** Pages followed for one list call — a server that keeps handing out cursors must not spin forever. */
+const MCP_LIST_MAX_PAGES = 50
+
+/**
+ * Every page of a paginated MCP list. `tools/list`, `resources/list` and
+ * `prompts/list` all page with `nextCursor`; reading only the first page
+ * silently dropped whatever a server put after it.
+ */
+async function collectMcpPages<T>(
+  fetchPage: (cursor: string | undefined) => Promise<{ items: T[] | undefined; nextCursor?: string }>
+): Promise<T[]> {
+  const out: T[] = []
+  const seen = new Set<string>()
+  let cursor: string | undefined
+  for (let page = 0; page < MCP_LIST_MAX_PAGES; page++) {
+    const { items, nextCursor } = await fetchPage(cursor)
+    out.push(...(items ?? []))
+    if (!nextCursor || seen.has(nextCursor)) break
+    seen.add(nextCursor)
+    cursor = nextCursor
+  }
+  return out
+}
+
+function capListDescription(description: string | undefined): string | undefined {
+  if (!description) return undefined
+  const neutral = neutralizeUntrustedBody(description)
+  return neutral.length > MCP_LIST_DESCRIPTION_CAP
+    ? `${neutral.slice(0, MCP_LIST_DESCRIPTION_CAP)}…`
+    : neutral
+}
+
+function isMcpMethodNotFound(err: unknown): boolean {
+  return err instanceof McpError && err.code === ErrorCode.MethodNotFound
+}
+
+type McpArgValidator = { validate: ValidateFunction; ajv: Ajv | Ajv2020 }
+
+/**
+ * Created on first use and dropped with the validator cache. Ajv keeps every
+ * schema it has compiled in an internal Map, so one long-lived instance grew
+ * by a schema per called tool on every reconnect.
+ */
+let ajvDraft07: Ajv | null = null
+let ajvDraft2020: Ajv2020 | null = null
+
+/**
+ * The dialect a server declared. The TypeScript MCP SDK emits draft-07
+ * (`"$schema": "http://json-schema.org/draft-07/schema#"`), which Ajv2020
+ * cannot even resolve — compile threw and validation failed open for every
+ * tool those servers expose.
+ */
+function ajvForSchema(schema: Record<string, unknown>): Ajv | Ajv2020 {
+  const dialect = typeof schema.$schema === 'string' ? schema.$schema : ''
+  if (/draft-0[4-7]/.test(dialect)) {
+    return (ajvDraft07 ??= new Ajv({ allErrors: true, strict: false }))
+  }
+  return (ajvDraft2020 ??= new Ajv2020({ allErrors: true, strict: false }))
+}
+
 /**
  * Compiled per server/tool inputSchema; cleared when a server re-lists tools.
  * Keyed by the prefixed `mcp__server__tool` name — a bare key let two servers
  * that both expose, say, `search` validate against each other's schema.
  */
-const mcpArgValidatorCache = new Map<string, ValidateFunction | null>()
+const mcpArgValidatorCache = new Map<string, McpArgValidator | null>()
 
 /**
  * Defense-in-depth: validate tool arguments against the server-declared
@@ -405,23 +476,28 @@ function validateMcpToolArgs(
   inputSchema: unknown
 ): string | null {
   if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) return null
-  let validate = mcpArgValidatorCache.get(toolName)
-  if (validate === undefined) {
+  let validator = mcpArgValidatorCache.get(toolName)
+  if (validator === undefined) {
+    const schema = inputSchema as Record<string, unknown>
+    const ajv = ajvForSchema(schema)
+    // The instance fixes the dialect, so the root `$schema` has nothing left to say.
+    const { $schema: _dialect, ...body } = schema
     try {
-      validate = ajv2020.compile(inputSchema)
+      validator = { validate: ajv.compile(body), ajv }
     } catch (err) {
       logger.warn('MCP inputSchema failed to compile; skipping arg validation', {
         scope: 'mcp',
         correlationId: toolName,
         err
       })
-      validate = null
+      validator = null
     }
-    mcpArgValidatorCache.set(toolName, validate)
+    mcpArgValidatorCache.set(toolName, validator)
   }
-  if (!validate) return null
+  if (!validator) return null
+  const { validate, ajv } = validator
   if (validate(args)) return null
-  const detail = ajv2020.errorsText(validate.errors?.slice(0, 5))
+  const detail = ajv.errorsText(validate.errors?.slice(0, 5))
   return `Invalid arguments for MCP tool "${toolName}": ${detail}`
 }
 
@@ -429,42 +505,61 @@ function wrapMcpPayload(body: string, origin: string): string {
   return wrapUntrustedContent(body, { source: 'mcp', origin })
 }
 
-async function probeResourcesAndPrompts(client: Client): Promise<{
+function listAllResources(client: Client, signal?: AbortSignal): Promise<Resource[]> {
+  return collectMcpPages(async (cursor) => {
+    const listed = await client.listResources(cursor ? { cursor } : undefined, { signal })
+    return { items: listed.resources, nextCursor: listed.nextCursor }
+  })
+}
+
+function listAllPrompts(client: Client, signal?: AbortSignal): Promise<Prompt[]> {
+  return collectMcpPages(async (cursor) => {
+    const listed = await client.listPrompts(cursor ? { cursor } : undefined, { signal })
+    return { items: listed.prompts, nextCursor: listed.nextCursor }
+  })
+}
+
+function resourceSummary(resource: Resource): McpResourceSummary {
+  return {
+    uri: resource.uri,
+    name: resource.name,
+    description: capListDescription(resource.description),
+    mimeType: resource.mimeType
+  }
+}
+
+function promptSummary(prompt: Prompt): McpPromptSummary {
+  return {
+    name: prompt.name,
+    description: capListDescription(prompt.description),
+    arguments: prompt.arguments
+  }
+}
+
+async function probeResourcesAndPrompts(
+  client: Client,
+  signal?: AbortSignal
+): Promise<{
   resources: McpResourceSummary[]
   prompts: McpPromptSummary[]
 }> {
-  const resources: McpResourceSummary[] = []
-  const prompts: McpPromptSummary[] = []
+  let resources: McpResourceSummary[] = []
+  let prompts: McpPromptSummary[] = []
   const caps = client.getServerCapabilities()
   if (caps?.resources) {
     try {
-      const listed = await client.listResources()
-      for (const resource of listed.resources ?? []) {
-        resources.push({
-          uri: resource.uri,
-          name: resource.name,
-          description: resource.description
-            ? neutralizeUntrustedBody(resource.description)
-            : undefined,
-          mimeType: resource.mimeType
-        })
-      }
+      resources = (await listAllResources(client, signal))
+        .slice(0, MCP_LIST_ENTRY_CAP)
+        .map(resourceSummary)
     } catch {
       // Server may advertise resources but fail list — ignore on connect.
     }
   }
   if (caps?.prompts) {
     try {
-      const listed = await client.listPrompts()
-      for (const prompt of listed.prompts ?? []) {
-        prompts.push({
-          name: prompt.name,
-          description: prompt.description
-            ? neutralizeUntrustedBody(prompt.description)
-            : undefined,
-          arguments: prompt.arguments
-        })
-      }
+      prompts = (await listAllPrompts(client, signal))
+        .slice(0, MCP_LIST_ENTRY_CAP)
+        .map(promptSummary)
     } catch {
       // Server may advertise prompts but fail list — ignore on connect.
     }
@@ -474,12 +569,10 @@ async function probeResourcesAndPrompts(client: Client): Promise<{
 
 function resolveTargetServerIds(
   serverId: string | undefined,
-  enabledIds?: ReadonlySet<string>,
-  workspacePath?: string | null
+  enabledIds?: ReadonlySet<string>
 ): string[] {
-  const keys = [...sessions.keys()].sort()
   const ids = new Set<string>()
-  for (const key of keys) {
+  for (const key of sessions.keys()) {
     const parsed = parseMcpStdioSessionKey(key)
     ids.add(parsed?.serverId ?? key)
   }
@@ -650,6 +743,11 @@ function formatResourceContents(
   return capMcpText(joined)
 }
 
+/** Decoded size of a base64 payload, without decoding it. */
+function base64Bytes(data: string): number {
+  return Math.floor((data.replace(/=+$/, '').length * 3) / 4)
+}
+
 function formatPromptMessages(
   messages: Array<{ role?: string; content?: { type?: string; text?: string } | string }>
 ): string {
@@ -672,10 +770,24 @@ const mcpReadOnlyHints = new Map<string, boolean>()
 /** Full MCP tool name → definition (kept in sync with `sessions`). */
 const toolsByName = new Map<string, ToolDefinition>()
 
+/**
+ * Bumped whenever a session connects or closes or its tool list changes. A
+ * per-step catalog cache keyed on config alone never saw a server that came
+ * up (or went away) without a settings change.
+ */
+let mcpSessionGeneration = 0
+
+export function getMcpSessionGeneration(): number {
+  return mcpSessionGeneration
+}
+
 function rebuildToolsByNameIndex(): void {
+  mcpSessionGeneration++
   toolsByName.clear()
   // Stale validators must not outlive the schema that compiled them.
   mcpArgValidatorCache.clear()
+  ajvDraft07 = null
+  ajvDraft2020 = null
   for (const session of sessions.values()) {
     for (const tool of session.tools) {
       toolsByName.set(tool.name, tool)
@@ -686,11 +798,11 @@ function rebuildToolsByNameIndex(): void {
 /** A server's tool list as catalog entries: prefixed names, untrusted text neutralized. */
 function catalogToolsFor(
   server: McpServer,
-  listed: Awaited<ReturnType<Client['listTools']>>
+  listed: Tool[]
 ): { tools: ToolDefinition[]; skippedToolNames: string[] } {
   const tools: ToolDefinition[] = []
   const skippedToolNames: string[] = []
-  for (const t of listed.tools ?? []) {
+  for (const t of listed) {
     const fullName = mcpToolName(server.id, t.name)
     if (!isSupportedMcpToolName(fullName)) {
       skippedToolNames.push(t.name)
@@ -731,7 +843,10 @@ export async function refreshMcpSessionTools(key: string, server: McpServer, cli
     do {
       state.again = false
       if (sessions.get(key)?.client !== client) return
-      const { tools } = catalogToolsFor(server, await client.listTools())
+      const { tools } = catalogToolsFor(
+        server,
+        await listAllTools(client, AbortSignal.timeout(mcpConnectTimeoutMs()))
+      )
       const session = sessions.get(key)
       // Replaced or closed while listing: that session's tools are someone else's now.
       if (session?.client !== client) return
@@ -739,6 +854,8 @@ export async function refreshMcpSessionTools(key: string, server: McpServer, cli
       for (const tool of session.tools) if (!kept.has(tool.name)) mcpReadOnlyHints.delete(tool.name)
       session.tools = tools
       rebuildToolsByNameIndex()
+      // MCP tools feed /mcp slash availability.
+      invalidateSlashCommandsCache()
       logger.info('MCP tools changed', { scope: 'mcp', serverId: server.id, count: tools.length })
     } while (state.again)
   } catch (err) {
@@ -927,6 +1044,13 @@ let syncChain: Promise<void> = Promise.resolve()
 /** Fingerprint of the last successfully synced payload — skip syncChain when unchanged. */
 let lastSyncedServersFp: string | null = null
 let lastSyncInflight: Promise<void> | null = null
+/**
+ * Count of fingerprint invalidations. A sync records its fingerprint only if
+ * none happened while it ran: a session that dies mid-sync is not something
+ * that sync rebuilt, and recording over it left the server dead until the
+ * config changed.
+ */
+let syncInvalidations = 0
 
 /** Per-call cap for MCP tool invocations; the SDK default of 60s is too low. */
 const MCP_INVOKE_TIMEOUT_MS = 120_000
@@ -944,6 +1068,7 @@ const MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS = 600_000
  */
 function invalidateSyncFingerprint(): void {
   lastSyncedServersFp = ''
+  syncInvalidations++
 }
 
 /**
@@ -1351,7 +1476,7 @@ export async function retryFailedMcpServers(servers: McpServer[]): Promise<McpSe
  * workspace, so a workspace change is a new connection, not a notification.
  */
 function createMcpClient(workspacePath?: string | null): Client {
-  const client = new Client({ name: 'vyotiq', version: '1.0.0' }, {
+  const client: Client = new Client({ name: 'vyotiq', version: '1.0.0' }, {
     capabilities: {
       roots: { listChanged: false },
       // Forms, and links: a link is shown in full and opened only on the
@@ -1737,6 +1862,34 @@ async function connectRemoteWithOAuth(
 }
 
 /**
+ * An interactive sign-in waits on the user in a browser. It gets the callback
+ * server's own window plus room for the token exchange and the reconnect —
+ * the 120s budget closed that server while users were still on the consent page.
+ */
+const MCP_OAUTH_EXCHANGE_MARGIN_MS = 30_000
+
+let connectTimeoutOverrideMs: number | null = null
+
+/** Test helper — shrink the non-interactive connect budget. */
+export function setMcpConnectTimeoutForTests(ms: number | null): void {
+  connectTimeoutOverrideMs = ms
+}
+
+/**
+ * Whole-connect budget: handshake, `tools/list` and the resource/prompt
+ * probes. Those three used to run after it on the SDK's per-request default,
+ * so a server that stalled on `tools/list` held a sync for minutes more.
+ */
+export function mcpConnectTimeoutMs(opts?: { interactiveOAuth?: boolean }): number {
+  if (opts?.interactiveOAuth) return MCP_OAUTH_CALLBACK_TIMEOUT_MS + MCP_OAUTH_EXCHANGE_MARGIN_MS
+  return connectTimeoutOverrideMs ?? MCP_CONNECT_TIMEOUT_MS
+}
+
+function mcpConnectTimedOut(serverId: string, timeoutMs: number): Error {
+  return new Error(`MCP connect timed out after ${Math.round(timeoutMs / 1000)}s (${serverId})`)
+}
+
+/**
  * Attempts allowed when the failure says the request never reached the server.
  *
  * A remote MCP connect used to be one shot through the runtime's 10s connect
@@ -1751,18 +1904,14 @@ async function connectWithTransientRetry(
   server: McpServer,
   pending: Set<PendingMcpConnection>,
   connectAbort: AbortSignal,
+  timeoutMs: number,
   workspacePath?: string | null,
   opts?: { interactiveOAuth?: boolean }
 ): Promise<{ client: Client; transport: Transport }> {
   const deadline = new Promise<never>((_, reject) => {
     connectAbort.addEventListener(
       'abort',
-      () =>
-        reject(
-          new Error(
-            `MCP connect timed out after ${MCP_CONNECT_TIMEOUT_MS / 1000}s (${server.id})`
-          )
-        ),
+      () => reject(mcpConnectTimedOut(server.id, timeoutMs)),
       { once: true }
     )
   })
@@ -1809,6 +1958,42 @@ async function connectWithTransientRetry(
   throw lastError ?? new Error('MCP connection failed')
 }
 
+/**
+ * Every tool a server offers. A server with only resources or prompts answers
+ * `tools/list` with -32601; that is "no tools", not a failed connect — treating
+ * it as one meant such a server could never connect.
+ */
+async function listAllTools(client: Client, signal?: AbortSignal): Promise<Tool[]> {
+  try {
+    return await collectMcpPages(async (cursor) => {
+      const listed = await client.listTools(cursor ? { cursor } : undefined, { signal })
+      return { items: listed.tools, nextCursor: listed.nextCursor }
+    })
+  } catch (err) {
+    if (isMcpMethodNotFound(err)) return []
+    throw err
+  }
+}
+
+/**
+ * Should a just-connected session be dropped? Compared against the view sync
+ * connects from — the session map, with workspace Force on/off applied. The
+ * global list alone disabled a server forced on for an open workspace, so it
+ * connected and was closed on every sync. Servers absent from both lists
+ * (explicit connectMcpServer / unit fixtures) keep their session.
+ */
+function connectedServerNoLongerWanted(
+  server: McpServer,
+  workspacePath?: string | null
+): boolean {
+  const desired = resolveMcpServersForSessionMap().find((s) => s.id === server.id)
+  if (desired) {
+    return mcpServerConfigKey(desired, workspacePath) !== mcpServerConfigKey(server, workspacePath)
+  }
+  // Known, but enabled for no open workspace: disabled mid-connect.
+  return resolveEffectiveMcpServers().some((s) => s.id === server.id)
+}
+
 export async function connectMcpServer(
   server: McpServer,
   workspacePath?: string | null,
@@ -1823,7 +2008,8 @@ export async function connectMcpServer(
   }
 
   const attempt = (async () => {
-    const connectAbort = AbortSignal.timeout(MCP_CONNECT_TIMEOUT_MS)
+    const timeoutMs = mcpConnectTimeoutMs(opts)
+    const connectAbort = AbortSignal.timeout(timeoutMs)
     const pending = new Set<PendingMcpConnection>()
     let connected: { client: Client; transport: Transport }
     try {
@@ -1831,6 +2017,7 @@ export async function connectMcpServer(
         server,
         pending,
         connectAbort,
+        timeoutMs,
         workspacePath,
         opts
       )
@@ -1841,34 +2028,30 @@ export async function connectMcpServer(
       throw err
     }
 
-    // Another concurrent path may have won while we were connecting.
-    if (sessions.has(key)) {
-      try {
-        await connected.client.close()
-      } catch {
-        // ignore
-      }
-      return
-    }
-
     const { client, transport } = connected
-    const { tools, skippedToolNames } = catalogToolsFor(server, await client.listTools())
-    const { resources, prompts } = await probeResourcesAndPrompts(client)
-    // If the server is still in the effective settings map, drop the session when
-    // it was disabled or reconfigured mid-connect. Servers not in the map (explicit
-    // connectMcpServer / unit fixtures) keep the just-established session.
-    const desired = resolveEffectiveMcpServers().find((s) => s.id === server.id)
-    if (
-      desired &&
-      (!desired.enabled ||
-        mcpServerConfigKey(desired, workspacePath) !== mcpServerConfigKey(server, workspacePath))
-    ) {
-      try {
-        await client.close()
-      } catch {
-        // ignore
+    let tools: ToolDefinition[]
+    let skippedToolNames: string[]
+    let resources: McpResourceSummary[]
+    let prompts: McpPromptSummary[]
+    try {
+      // Another concurrent path may have won while we were connecting.
+      if (sessions.has(key)) {
+        await closePendingConnection(connected)
+        return
       }
-      return
+      // Listing runs under the same deadline as the handshake.
+      ;({ tools, skippedToolNames } = catalogToolsFor(server, await listAllTools(client, connectAbort)))
+      ;({ resources, prompts } = await probeResourcesAndPrompts(client, connectAbort))
+      // Dropped when it was disabled or reconfigured mid-connect.
+      if (connectedServerNoLongerWanted(server, workspacePath)) {
+        await closePendingConnection(connected)
+        return
+      }
+    } catch (err) {
+      // Past the handshake nothing else owns this client: close it, or a
+      // stdio child outlives the failed connect (one more per retry).
+      await closePendingConnection(connected)
+      throw connectAbort.aborted ? mcpConnectTimedOut(server.id, timeoutMs) : err
     }
     sessions.set(key, { client, transport, tools, resources, prompts })
     clientSessions.set(client, { key, serverId: server.id, serverName: server.name || server.id })
@@ -1958,8 +2141,11 @@ export async function startMcpOAuth(serverId: string, opts?: StartMcpOAuthOpts):
   if (opts) await persistMcpOAuthConnectOpts(id, opts)
   clearMcpOAuthState(id)
   await disconnectMcpServer(id)
-  const servers = resolveEffectiveMcpServers()
-  const server = servers.find((s) => s.id === id)
+  // Session-map view first: a server forced on for an open workspace is
+  // enabled there even when the global flag is off.
+  const server =
+    resolveMcpServersForSessionMap().find((s) => s.id === id) ??
+    resolveEffectiveMcpServers().find((s) => s.id === id)
   if (!server) throw new Error(`MCP server not found: ${id}`)
   if ((server.transport ?? 'stdio') === 'stdio') {
     throw new Error('OAuth is only supported for HTTP/SSE MCP servers')
@@ -1988,10 +2174,13 @@ export async function disconnectMcpServer(serverId: string): Promise<void> {
  * one-shot retry gates on a non-empty error, so clearing it left the server
  * disconnected with no explanation and no retry. Routine teardowns (disabled,
  * reconfigured, uninstalled) still clear it, because there is no failure.
+ *
+ * `fromSync` marks a teardown the running sync makes on its way to the config
+ * it is about to record, so it does not count as an invalidation.
  */
 async function disconnectMcpSessionByKey(
   sessionKey: string,
-  opts?: { keepError?: boolean }
+  opts?: { keepError?: boolean; fromSync?: boolean }
 ): Promise<void> {
   const session = sessions.get(sessionKey)
   if (!session) return
@@ -2017,7 +2206,39 @@ async function disconnectMcpSessionByKey(
   }
   // The server list is unchanged, so sync would skip this key on fingerprint
   // alone and never rebuild what we just removed.
-  invalidateSyncFingerprint()
+  if (!opts?.fromSync) invalidateSyncFingerprint()
+}
+
+/** A session this server should have, and the workspace it is bound to (null for global remote). */
+type SessionTarget = { key: string; workspacePath: string | null }
+
+/**
+ * The sessions an enabled server should hold: one per warm stdio workspace,
+ * one for a this-workspace remote whose bound workspace is open (none while it
+ * is closed), otherwise one global session.
+ */
+function desiredSessionTargets(
+  server: McpServer,
+  stdioWorkspaces: string[],
+  openWorkspaces: string[]
+): SessionTarget[] {
+  if (isStdioTransport(server.transport)) {
+    return stdioWorkspaces.map((wp) => ({ key: sessionMapKey(server, wp), workspacePath: wp }))
+  }
+  if (isThisWorkspaceMcpAuth(server)) {
+    // Auth scoping is unchanged: a this-workspace token stays keyed to the
+    // workspace it is bound to, which is always a listed workspace.
+    const wp = remoteSyncWorkspacePath(server, openWorkspaces)
+    return wp ? [{ key: sessionMapKey(server, wp), workspacePath: wp }] : []
+  }
+  return [{ key: server.id, workspacePath: null }]
+}
+
+/** A failed session sync would retry: no session and a non-quiet error on record. */
+function hasRetriableFailure(server: McpServer, key: string): boolean {
+  if (sessions.has(key)) return false
+  const err = connectErrors.get(key) ?? connectErrors.get(server.id)
+  return Boolean(err) && !quietMcpConnectSkip(err)
 }
 
 export async function syncMcpServers(
@@ -2033,41 +2254,20 @@ export async function syncMcpServers(
     ? openWorkspaces
     : collectWarmStdioWorkspaces()
   if (opts?.forceRetryFailures) {
+    let retrying = false
     for (const server of servers) {
       if (!server.enabled) continue
-      const keysToCheck = isStdioTransport(server.transport)
-        ? openWorkspaces.map((wp) => sessionMapKey(server, wp))
-        : isThisWorkspaceMcpAuth(server)
-          ? [sessionMapKey(server, remoteSyncWorkspacePath(server, openWorkspaces))]
-          : [server.id]
-      for (const key of keysToCheck) {
-        if (sessions.has(key)) continue
-        if (!connectErrors.has(key) && !connectErrors.has(server.id)) continue
-        const err = connectErrors.get(key) ?? connectErrors.get(server.id)
-        if (quietMcpConnectSkip(err)) continue
+      // An explicit Retry reaches every open workspace, warm or not.
+      for (const { key } of desiredSessionTargets(server, openWorkspaces, openWorkspaces)) {
+        if (!hasRetriableFailure(server, key)) continue
+        retrying = true
         resetCircuit(circuitKeyMcpConnect(key))
         resetCircuit(circuitKeyMcpConnect(server.id))
         connectConfigByKey.delete(key)
         connectConfigByKey.delete(server.id)
       }
     }
-    if (
-      servers.some((s) => {
-        if (!s.enabled) return false
-        const keys = isStdioTransport(s.transport)
-          ? stdioWorkspaces.map((wp) => sessionMapKey(s, wp))
-          : isThisWorkspaceMcpAuth(s)
-            ? [sessionMapKey(s, remoteSyncWorkspacePath(s, stdioWorkspaces))]
-            : [s.id]
-        return keys.some((key) => {
-          if (sessions.has(key)) return false
-          const err = connectErrors.get(key) ?? connectErrors.get(s.id)
-          return Boolean(err) && !quietMcpConnectSkip(err)
-        })
-      })
-    ) {
-      lastSyncedServersFp = ''
-    }
+    if (retrying) lastSyncedServersFp = ''
   }
   const fpParts: string[] = [`warm=${stdioWorkspaces.sort().join(',')}`]
   for (const s of servers) {
@@ -2075,16 +2275,16 @@ export async function syncMcpServers(
       fpParts.push(`${s.id}:0`)
       continue
     }
-    if (isStdioTransport(s.transport)) {
-      for (const wp of stdioWorkspaces) {
-        fpParts.push(`${s.id}@${wp}:1:${mcpServerConfigKey(s, wp)}`)
-      }
-    } else if (isThisWorkspaceMcpAuth(s)) {
-      const wp = remoteSyncWorkspacePath(s, openWorkspaces)
-      if (wp) fpParts.push(`${s.id}@${wp}:1:${mcpServerConfigKey(s, wp)}`)
-      else fpParts.push(`${s.id}:bound-closed`)
-    } else {
-      fpParts.push(`${s.id}:1:${mcpServerConfigKey(s)}`)
+    const targets = desiredSessionTargets(s, stdioWorkspaces, openWorkspaces)
+    if (targets.length === 0 && !isStdioTransport(s.transport)) {
+      fpParts.push(`${s.id}:bound-closed`)
+    }
+    for (const { workspacePath } of targets) {
+      fpParts.push(
+        workspacePath
+          ? `${s.id}@${workspacePath}:1:${mcpServerConfigKey(s, workspacePath)}`
+          : `${s.id}:1:${mcpServerConfigKey(s)}`
+      )
     }
   }
   const fp = fpParts.sort().join('|')
@@ -2092,9 +2292,11 @@ export async function syncMcpServers(
     if (lastSyncInflight) await lastSyncInflight
     return
   }
-  const run = syncChain.then(() =>
-    syncMcpServersUnlocked(servers, stdioWorkspaces, openWorkspaces)
-  )
+  let invalidationsAtStart = -1
+  const run = syncChain.then(() => {
+    invalidationsAtStart = syncInvalidations
+    return syncMcpServersUnlocked(servers, stdioWorkspaces, openWorkspaces)
+  })
   // Keep the chain alive even when a sync rejects so later callers still queue.
   syncChain = run.then(
     () => undefined,
@@ -2102,11 +2304,27 @@ export async function syncMcpServers(
   )
   lastSyncInflight = run.then(
     () => {
-      lastSyncedServersFp = fp
+      if (syncInvalidations === invalidationsAtStart) lastSyncedServersFp = fp
     },
     () => undefined
   )
   await run
+}
+
+/** Connects in flight at once during a sync. Each stdio server is a process spawn. */
+const MCP_SYNC_CONCURRENCY = 6
+
+/**
+ * Servers with a static OAuth client bind the one fixed loopback port while
+ * they connect, so two of them at once would collide with EADDRINUSE.
+ */
+function usesFixedOAuthPort(server: McpServer): boolean {
+  if (isStdioTransport(server.transport)) return false
+  try {
+    return resolveMcpOAuthStaticClient(server) != null
+  } catch {
+    return false
+  }
 }
 
 async function syncMcpServersUnlocked(
@@ -2145,27 +2363,21 @@ async function syncMcpServersUnlocked(
 
   const enabled = migratedServers.filter((s) => s.enabled)
   const enabledIds = new Set(enabled.map((s) => s.id))
-  const neededKeys = new Set<string>()
-  for (const server of enabled) {
-    if (isStdioTransport(server.transport)) {
-      // Only the warm set. A session left over for an idle workspace is torn
-      // down here rather than kept alive at one process per open folder.
-      for (const wp of stdioWorkspaces) neededKeys.add(sessionMapKey(server, wp))
-    } else if (isThisWorkspaceMcpAuth(server)) {
-      // Auth scoping is unchanged: a this-workspace token stays keyed to the
-      // workspace it is bound to, which is always a listed workspace.
-      const wp = remoteSyncWorkspacePath(server, openWorkspaces)
-      if (wp) neededKeys.add(sessionMapKey(server, wp))
-    } else {
-      neededKeys.add(server.id)
-    }
-  }
+  // Stdio: only the warm set. A session left over for an idle workspace is torn
+  // down here rather than kept alive at one process per open folder.
+  const targets = enabled.flatMap((server) =>
+    desiredSessionTargets(server, stdioWorkspaces, openWorkspaces).map((target) => ({
+      server,
+      ...target
+    }))
+  )
+  const neededKeys = new Set(targets.map((t) => t.key))
 
   for (const key of [...sessions.keys()]) {
     const parsed = parseMcpStdioSessionKey(key)
     const serverId = parsed?.serverId ?? key
     if (!enabledIds.has(serverId) || !neededKeys.has(key)) {
-      await disconnectMcpSessionByKey(key)
+      await disconnectMcpSessionByKey(key, { fromSync: true })
     }
   }
 
@@ -2174,7 +2386,7 @@ async function syncMcpServersUnlocked(
     const configKey = mcpServerConfigKey(server, workspacePath)
     const connectedKey = sessionConfigKeys.get(key)
     if (sessions.has(key) && connectedKey !== configKey) {
-      await disconnectMcpSessionByKey(key)
+      await disconnectMcpSessionByKey(key, { fromSync: true })
       resetCircuit(circuitKeyMcpConnect(key))
       resetCircuit(circuitKeyMcpConnect(server.id))
       connectConfigByKey.delete(key)
@@ -2241,18 +2453,22 @@ async function syncMcpServersUnlocked(
     }
   }
 
-  for (const server of enabled) {
-    if (isStdioTransport(server.transport)) {
-      for (const wp of stdioWorkspaces) {
-        await syncOne(server, wp)
-      }
-    } else if (isThisWorkspaceMcpAuth(server)) {
-      const wp = remoteSyncWorkspacePath(server, openWorkspaces)
-      if (wp) await syncOne(server, wp)
-    } else {
-      await syncOne(server, null)
+  // Sessions are independent, so connect them side by side: serially, one
+  // slow `npx` server held every run step that awaited this sync for the sum
+  // of all connects. Fixed-port OAuth servers share one lane.
+  const oauthLane = targets.filter((t) => usesFixedOAuthPort(t.server))
+  const queue = targets.filter((t) => !usesFixedOAuthPort(t.server))
+  const worker = async (): Promise<void> => {
+    for (let next = queue.shift(); next; next = queue.shift()) {
+      await syncOne(next.server, next.workspacePath)
     }
   }
+  await Promise.all([
+    ...Array.from({ length: Math.min(MCP_SYNC_CONCURRENCY, queue.length) }, worker),
+    (async () => {
+      for (const t of oauthLane) await syncOne(t.server, t.workspacePath)
+    })()
+  ])
   // MCP tools/status feed /mcp slash availability — bust the 5s list cache.
   invalidateSlashCommandsCache()
 }
@@ -2284,30 +2500,22 @@ export async function listMcpResources(
   // left cold. The caller gates on `enabledIds` before this, and the connect
   // re-checks both, so nothing starts that the run may not use.
   if (serverId?.trim()) await ensureMcpSessionConnected(serverId, workspacePath)
-  const targetIds = resolveTargetServerIds(serverId, enabledIds, workspacePath)
+  const targetIds = resolveTargetServerIds(serverId, enabledIds)
   const out: McpResourceEntry[] = []
   for (const id of targetIds) {
+    if (out.length >= MCP_LIST_ENTRY_CAP) break
     const resolved = resolveSessionForServer(id, workspacePath)
     if (!resolved) continue
     const session = resolved.session
+    let listed: McpResourceSummary[]
     try {
-      const listed = await session.client.listResources(undefined, { signal })
-      for (const resource of listed.resources ?? []) {
-        out.push({
-          serverId: id,
-          uri: resource.uri,
-          name: resource.name,
-          description: resource.description
-            ? neutralizeUntrustedBody(resource.description)
-            : undefined,
-          mimeType: resource.mimeType
-        })
-      }
+      listed = (await listAllResources(session.client, signal)).map(resourceSummary)
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) throw err
-      for (const resource of session.resources ?? []) {
-        out.push({ serverId: id, ...resource })
-      }
+      listed = session.resources ?? []
+    }
+    for (const resource of listed.slice(0, MCP_LIST_ENTRY_CAP - out.length)) {
+      out.push({ serverId: id, ...resource })
     }
   }
   return out
@@ -2372,29 +2580,22 @@ export async function listMcpPrompts(
   // As in listMcpResources: a named server is meant to be reachable, so a
   // deliberately cold workspace connects on this first read.
   if (serverId?.trim()) await ensureMcpSessionConnected(serverId, workspacePath)
-  const targetIds = resolveTargetServerIds(serverId, enabledIds, workspacePath)
+  const targetIds = resolveTargetServerIds(serverId, enabledIds)
   const out: McpPromptEntry[] = []
   for (const id of targetIds) {
+    if (out.length >= MCP_LIST_ENTRY_CAP) break
     const resolved = resolveSessionForServer(id, workspacePath)
     if (!resolved) continue
     const session = resolved.session
+    let listed: McpPromptSummary[]
     try {
-      const listed = await session.client.listPrompts(undefined, { signal })
-      for (const prompt of listed.prompts ?? []) {
-        out.push({
-          serverId: id,
-          name: prompt.name,
-          description: prompt.description
-            ? neutralizeUntrustedBody(prompt.description)
-            : undefined,
-          arguments: prompt.arguments
-        })
-      }
+      listed = (await listAllPrompts(session.client, signal)).map(promptSummary)
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) throw err
-      for (const prompt of session.prompts ?? []) {
-        out.push({ serverId: id, ...prompt })
-      }
+      listed = session.prompts ?? []
+    }
+    for (const prompt of listed.slice(0, MCP_LIST_ENTRY_CAP - out.length)) {
+      out.push({ serverId: id, ...prompt })
     }
   }
   return out
@@ -2488,7 +2689,22 @@ export function mcpResultContent(
       notes.push(`[Image saved under run ${stored.image.artifact} (${dims}${stored.bytes} bytes)]`)
       continue
     }
-    // Audio and resources keep their JSON shape, with base64 bodies elided.
+    // An embedded resource nests its body under `resource`, out of reach of
+    // the elision below: its text is the content, and a blob is summarized.
+    if (block.type === 'resource' && block.resource && typeof block.resource === 'object') {
+      const resource = block.resource as { uri?: unknown; text?: unknown; blob?: unknown; mimeType?: unknown }
+      if (typeof resource.text === 'string') {
+        texts.push(resource.text)
+        continue
+      }
+      if (typeof resource.blob === 'string') {
+        const uri = typeof resource.uri === 'string' ? resource.uri : 'unknown'
+        const mime = typeof resource.mimeType === 'string' ? resource.mimeType : 'unknown'
+        texts.push(`[resource uri=${uri} mime=${mime} bytes=${base64Bytes(resource.blob)}]`)
+        continue
+      }
+    }
+    // Audio and the rest keep their JSON shape, with base64 bodies elided.
     const { data, blob, ...rest } = block as { data?: unknown; blob?: unknown }
     texts.push(
       JSON.stringify({

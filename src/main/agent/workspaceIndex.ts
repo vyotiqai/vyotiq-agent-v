@@ -285,6 +285,8 @@ export function disposeWorkspaceIndexes(
     ac.abort()
     abortControllers.delete(key)
   }
+  // The embedding pass holds this store; stop it before the store closes.
+  abortDenseWarm(workspaceRoot)
   disposeCodeIndexWorkspace(workspaceRoot)
 }
 

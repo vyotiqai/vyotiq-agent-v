@@ -7,6 +7,7 @@ import {
   selectMcpToolDefs
 } from '@main/agent/context/mcpToolLoading'
 import { estimateToolDefTokens } from '@main/agent/context/toolsBudget'
+import { formatMcpToolInvocation } from '@shared/slashCommands'
 
 function tool(name: string, description = 'does a thing'): ToolDefinition {
   return { name, description, parameters: { type: 'object', properties: {} } }
@@ -86,6 +87,13 @@ describe('mcpToolNamesMentionedIn', () => {
         'Use the MCP tool `search` from server `notion`. Call mcp__notion__search, not mcp__github__list_prs, and never mcp__notion__search twice.'
       )
     ).toEqual(['mcp__notion__search', 'mcp__github__list_prs'])
+  })
+
+  it('reads the tool a real /mcp message names', () => {
+    // formatMcpToolInvocation carries bare names, never the full mcp__ name.
+    const message = formatMcpToolInvocation('notion', 'search', 'Search pages', 'find the roadmap')
+    expect(message).not.toContain('mcp__')
+    expect(mcpToolNamesMentionedIn(message)).toEqual(['mcp__notion__search'])
   })
 
   it('ignores prose with no tool names', () => {

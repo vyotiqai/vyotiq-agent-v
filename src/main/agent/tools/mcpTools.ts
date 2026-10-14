@@ -3,6 +3,7 @@ import { canonicalizeAgentToolName } from '../schemas/tools'
 import { isOptionalBuiltinName } from '../context/toolsBudget'
 import {
   listMcpToolDefinitions,
+  MCP_LIST_ENTRY_CAP,
   getMcpReadOnlyHint,
   listMcpResources,
   readMcpResource,
@@ -57,6 +58,14 @@ function reachableMcpTools(context: ToolExecutionContext): ReturnType<typeof lis
     if (policy && !isMcpToolPermitted(parsed.toolName, policy)) return false
     return true
   })
+}
+
+/** Tells the model a listing stopped at the cap, and how to see the rest. */
+function listCapNote(count: number): string {
+  return count >= MCP_LIST_ENTRY_CAP
+    ? `
+(showing the first ${MCP_LIST_ENTRY_CAP}; pass serverId to narrow)`
+    : ''
 }
 
 function formatMcpResourceLines(entries: Awaited<ReturnType<typeof listMcpResources>>): string {
@@ -441,7 +450,7 @@ export const mcpHandlers = {
     return toolOk(
       'mcp_list_resources',
       `${entries.length} resources`,
-      formatMcpResourceLines(entries)
+      formatMcpResourceLines(entries) + listCapNote(entries.length)
     )
   },
   mcp_read_resource: async (workspace, args, signal, context) => {
@@ -481,7 +490,11 @@ export const mcpHandlers = {
         : 'No MCP prompts connected.'
       return toolOk('mcp_list_prompts', serverId || 'none', none)
     }
-    return toolOk('mcp_list_prompts', `${entries.length} prompts`, formatMcpPromptLines(entries))
+    return toolOk(
+      'mcp_list_prompts',
+      `${entries.length} prompts`,
+      formatMcpPromptLines(entries) + listCapNote(entries.length)
+    )
   },
   mcp_get_prompt: async (workspace, args, signal, context) => {
     throwIfAborted(signal)

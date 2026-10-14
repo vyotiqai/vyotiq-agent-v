@@ -1,10 +1,14 @@
-import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'fs'
 import { dirname, join, relative } from 'path'
-import type { MarketplaceInstallSource, MarketplaceOverrides } from '../../../shared/ipc'
+import type {
+  MarketplaceInstallSource,
+  MarketplaceOverrides,
+  VyotiqPluginManifest
+} from '../../../shared/ipc'
 import { VyotiqPluginManifestSchema } from '../../../shared/ipc'
 import { effectiveMarketplaceEnabled } from '../../../shared/domain/marketplaceEnablement'
 import { parseSkillFrontmatter } from './parse'
-import { isSkillMdFilename, resolveSkillMdPath } from './paths'
+import { isSkillMdFilename, LEGACY_SKILL_MD, resolveSkillMdPath, SKILL_MD } from './paths'
 import { loadLocalSkills } from './local'
 import { loadBundledCatalog } from '../../marketplace/catalog'
 import { readMarketplaceIndex } from '../../marketplace/indexStore'
@@ -36,29 +40,80 @@ export type LoadedSkill = {
   installSource?: MarketplaceInstallSource
 }
 
-function loadSkillFromDir(skillDir: string): {
+/**
+ * Parsed marketplace/plugin files keyed by path, with the stat they were read
+ * at. The run loop rebuilds the skills and plugin-rules sections every step,
+ * and re-reading every SKILL.md, plugin manifest and rule file each time cost
+ * ~11ms of synchronous I/O per step for the bundled set alone. A stat is a
+ * fraction of that; the parse is reused until mtime or size moves, so the
+ * sections come out byte-identical to a fresh read.
+ */
+const parsedFileCache = new Map<string, { mtimeMs: number; size: number; value: unknown }>()
+
+/** `parse` of the file's text, or undefined when there is no such file. */
+function readParsedFile<T>(path: string, parse: (text: string) => T): T | undefined {
+  let st
+  try {
+    st = statSync(path, { throwIfNoEntry: false })
+  } catch {
+    st = undefined
+  }
+  if (!st?.isFile()) {
+    parsedFileCache.delete(path)
+    return undefined
+  }
+  const hit = parsedFileCache.get(path)
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.value as T
+  const value = parse(readFileSync(path, 'utf8'))
+  parsedFileCache.set(path, { mtimeMs: st.mtimeMs, size: st.size, value })
+  return value
+}
+
+type ParsedSkillFile = {
   name: string
   description: string
   body: string
-  skillPath: string
   modelInvocable: boolean
   allowedTools?: string
-} | null {
-  const skillPath = resolveSkillMdPath(skillDir)
-  if (!skillPath) return null
+}
+
+function parseSkillFile(text: string): ParsedSkillFile | null {
   try {
-    const parsed = parseSkillFrontmatter(readFileSync(skillPath, 'utf8'))
+    const parsed = parseSkillFrontmatter(text)
     return {
       name: parsed.name,
       description: parsed.description,
       body: parsed.body,
-      skillPath,
       modelInvocable: parsed['disable-model-invocation'] !== true,
       ...(parsed['allowed-tools'] ? { allowedTools: parsed['allowed-tools'] } : {})
     }
   } catch {
     return null
   }
+}
+
+function parsePluginManifest(text: string): VyotiqPluginManifest | null {
+  try {
+    return VyotiqPluginManifestSchema.parse(JSON.parse(text))
+  } catch {
+    return null
+  }
+}
+
+function loadSkillFromDir(skillDir: string): (ParsedSkillFile & { skillPath: string }) | null {
+  // Canonical first, then legacy — the order resolveSkillMdPath uses. An
+  // unparseable canonical file does not fall through to the legacy one.
+  for (const skillPath of [join(skillDir, SKILL_MD), join(skillDir, LEGACY_SKILL_MD)]) {
+    let parsed: ParsedSkillFile | null | undefined
+    try {
+      parsed = readParsedFile(skillPath, parseSkillFile)
+    } catch {
+      return null
+    }
+    if (parsed === undefined) continue
+    return parsed ? { ...parsed, skillPath } : null
+  }
+  return null
 }
 
 /** Resolve a plugin-listed skill path to a skill directory (or the file's parent). */
@@ -148,11 +203,9 @@ export function loadEnabledSkills(
     }
     const root = resolveInstalledPackageRoot(item.packagePath)
     const manifestPath = join(root, 'vyotiq.plugin.json')
-    if (!existsSync(manifestPath)) continue
     try {
-      const plugin = VyotiqPluginManifestSchema.parse(
-        JSON.parse(readFileSync(manifestPath, 'utf8'))
-      )
+      const plugin = readParsedFile(manifestPath, parsePluginManifest)
+      if (!plugin) continue
       for (const rel of plugin.skills) {
         const skillDir = resolvePluginSkillDir(root, rel)
         if (!skillDir) continue
@@ -225,6 +278,18 @@ export function buildSkillsSection(skills: LoadedSkill[], maxChars = 12_000): st
   return wrapPromptSection('available_skills', blocks.join('').trim())
 }
 
+/**
+ * Binary formats a skill folder can hold but the Skill tool cannot usefully
+ * hand the model. Bundled packages ship their `SKILL.md.docx` sources next to
+ * the generated SKILL.md; listed, the model loaded ~200K chars of zip bytes.
+ */
+const BINARY_SKILL_FILE_RE =
+  /\.(docx|xlsx|pptx|pdf|zip|gz|tgz|7z|png|jpe?g|gif|webp|ico|bmp|ttf|otf|woff2?|exe|dll|so|dylib|bin|wasm|node)$/i
+
+export function isBinarySkillFileName(name: string): boolean {
+  return BINARY_SKILL_FILE_RE.test(name)
+}
+
 /** List shallow relative files under a skill root (for Skill tool discovery). */
 export function listSkillBundledFiles(skillRoot: string, cap = 40): string[] {
   const out: string[] = []
@@ -251,7 +316,7 @@ export function listSkillBundledFiles(skillRoot: string, cap = 40): string[] {
       const rel = prefix ? `${prefix}/${name}` : name
       if (st.isDirectory()) {
         walk(abs, rel, depth + 1)
-      } else if (!isSkillMdFilename(name) || prefix) {
+      } else if ((!isSkillMdFilename(name) || prefix) && !isBinarySkillFileName(name)) {
         out.push(rel.replace(/\\/g, '/'))
       }
     }
@@ -368,11 +433,9 @@ export function listEnabledPluginRules(
     }
     const root = resolveInstalledPackageRoot(item.packagePath)
     const manifestPath = join(root, 'vyotiq.plugin.json')
-    if (!existsSync(manifestPath)) continue
     try {
-      const plugin = VyotiqPluginManifestSchema.parse(
-        JSON.parse(readFileSync(manifestPath, 'utf8'))
-      )
+      const plugin = readParsedFile(manifestPath, parsePluginManifest)
+      if (!plugin) continue
       for (const rel of plugin.rules) {
         const relNorm = rel.replace(/\\/g, '/')
         let absPath: string
@@ -381,10 +444,9 @@ export function listEnabledPluginRules(
         } catch {
           continue
         }
-        if (!existsSync(absPath)) continue
-        let text = ''
+        let text: string | undefined
         try {
-          text = readFileSync(absPath, 'utf8').trim()
+          text = readParsedFile(absPath, (raw) => raw.trim())
         } catch {
           continue
         }

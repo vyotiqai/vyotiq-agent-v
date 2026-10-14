@@ -33,7 +33,8 @@ import {
 import type { McpOAuthStaticClient } from './oauthStaticClient'
 import { logger } from '../../../shared/logger'
 
-const CALLBACK_TIMEOUT_MS = 5 * 60_000
+/** How long the loopback callback waits for the browser redirect. */
+export const MCP_OAUTH_CALLBACK_TIMEOUT_MS = 5 * 60_000
 
 type PendingAuth = {
   resolve: (code: string) => void
@@ -153,7 +154,7 @@ export async function beginMcpOAuthCallback(
 
   const timer = setTimeout(() => {
     cancelMcpOAuthCallback(serverId, new Error('OAuth callback timed out'))
-  }, CALLBACK_TIMEOUT_MS)
+  }, MCP_OAUTH_CALLBACK_TIMEOUT_MS)
 
   const pending: PendingAuth = {
     resolve: (code) => settleCode?.(code),
