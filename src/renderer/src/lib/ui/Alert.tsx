@@ -45,10 +45,16 @@ export function Alert({
   onDismiss,
   dismissLabel = 'Dismiss',
   actions,
+  flush = false,
   className = ''
 }: {
   children: ReactNode
   variant?: 'danger' | 'info'
+  /**
+   * Inside a box that is already outlined (the brief, the line): no outline of
+   * its own — a row of that box, set off by the divider its container draws.
+   */
+  flush?: boolean
   onDismiss?: () => void
   dismissLabel?: string
   /** Buttons after the text; they wrap under it when the row is narrow. */
@@ -66,8 +72,8 @@ export function Alert({
   return (
     <div
       className={cn(
-        'flex items-start gap-2 rounded-md px-2.5 py-1.5 text-sm [overflow-wrap:anywhere]',
-        danger ? 'bg-danger-soft text-danger' : 'border border-border text-secondary',
+        'flex items-start gap-2 px-2.5 py-1.5 text-sm [overflow-wrap:anywhere]',
+        danger ? 'rounded-md bg-danger-soft text-danger' : flush ? 'text-secondary' : 'rounded-md border border-border text-secondary',
         className
       )}
       role={danger ? 'alert' : 'status'}

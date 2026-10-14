@@ -6,7 +6,8 @@ export function ModelReadinessBanner({
   busy = false,
   onRecheck,
   onAddKey,
-  primary = true
+  primary = true,
+  flush = false
 }: {
   issue: ModelReadinessIssue
   busy?: boolean
@@ -17,6 +18,8 @@ export function ModelReadinessBanner({
    * False on a surface with its own primary, such as the brief's Start task.
    */
   primary?: boolean
+  /** A row of an outlined box (the brief, the line), not a box inside it. */
+  flush?: boolean
 }) {
   const lead = primary ? 'primary' : 'secondary'
   const title =
@@ -60,7 +63,7 @@ export function ModelReadinessBanner({
     )
 
   return (
-    <Alert variant="info" actions={actions}>
+    <Alert variant="info" actions={actions} flush={flush}>
       <div className="text-sm font-medium text-fg-strong">{title}</div>
       <div className="mt-0.5 text-xs text-secondary">{body}</div>
     </Alert>

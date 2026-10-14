@@ -13,6 +13,8 @@ import { isTypeaheadKey, useTypeahead } from '../a11y/useTypeahead'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { cn } from './cn'
 import { Keys } from './Kbd'
+import { RadioMark } from './RadioList'
+import { BORDER_DIVIDER } from '../utils/layout'
 import {
   MENU_ROW,
   MENU_ROW_ACTIVE,
@@ -33,6 +35,11 @@ export type ActionMenuItem = {
    * glyph when true, and exposes role/aria-checked. Omit for plain actions.
    */
   checked?: boolean
+  /**
+   * With `checked`: one of a set where exactly one is on (a mode, a level) —
+   * a radio mark and role="menuitemradio", not a check.
+   */
+  radio?: boolean
   /** Draw a rule above this item — to set apart an action from a list of choices. */
   separatorBefore?: boolean
   /** A caption above this item naming the run of items it starts ("Recent"). */
@@ -59,6 +66,8 @@ export function ActionMenu({
   onOpenChange,
   placement = 'up',
   align = 'start',
+  title,
+  footnote,
   'aria-label': ariaLabel
 }: {
   trigger: (props: {
@@ -73,6 +82,10 @@ export function ActionMenu({
   onOpenChange: (open: boolean) => void
   placement?: 'up' | 'down'
   align?: 'start' | 'end'
+  /** The popover's 40px header row: what the whole menu decides ("Before it uses a tool"). */
+  title?: string
+  /** A quiet line under the items: where the choice applies, what it leaves alone. */
+  footnote?: string
   'aria-label'?: string
 }) {
   const menuId = useId()
@@ -106,12 +119,13 @@ export function ActionMenu({
 
   useEffect(() => {
     if (!open || activeIndex < 0) return
-    const el = listRef.current?.children[activeIndex] as HTMLElement | undefined
+    const item = items[activeIndex]
+    const el = item ? listRef.current?.querySelector<HTMLElement>(`[id="${menuId}-item-${item.id}"]`) : null
     el?.scrollIntoView?.({
       block: 'nearest',
       behavior: prefersReducedMotion() ? 'auto' : 'smooth'
     })
-  }, [activeIndex, open])
+  }, [activeIndex, open, items, menuId])
 
   const onListKeyDown = (e: ReactKeyboardEvent): void => {
     // Printable characters jump to the matching row first — before arrows,
@@ -177,6 +191,13 @@ export function ActionMenu({
         }}
         onKeyDown={onListKeyDown}
       >
+        {title ? (
+          <li role="none" className={cn('-mx-1 -mt-1 mb-1 flex h-10 items-center border-b pl-3 pr-2', BORDER_DIVIDER)}>
+            <span role="presentation" className="text-sm font-medium text-fg-strong">
+              {title}
+            </span>
+          </li>
+        ) : null}
         {items.map((item, index) => (
           <li key={item.id} role="none">
             {item.separatorBefore ? <div role="separator" className={MENU_SEPARATOR} /> : null}
@@ -191,7 +212,7 @@ export function ActionMenu({
             <button
               type="button"
               id={`${menuId}-item-${item.id}`}
-              role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
+              role={item.checked != null ? (item.radio ? 'menuitemradio' : 'menuitemcheckbox') : 'menuitem'}
               aria-checked={item.checked != null ? item.checked : undefined}
               aria-disabled={item.disabled || undefined}
               aria-describedby={
@@ -217,7 +238,11 @@ export function ActionMenu({
                 if (!item.keepOpen) close(true)
               }}
             >
-              {item.checked != null ? (
+              {item.checked != null && item.radio ? (
+                <span className="inline-grid w-[15px] shrink-0 place-items-center">
+                  <RadioMark on={item.checked} />
+                </span>
+              ) : item.checked != null ? (
                 item.checked ? (
                   <Icon name="check" size={15} className="shrink-0 text-accent" />
                 ) : (
@@ -253,6 +278,11 @@ export function ActionMenu({
             ) : null}
           </li>
         ))}
+        {footnote ? (
+          <li role="none" className={cn('-mx-1 -mb-1 mt-1 border-t px-3 py-2 text-caption text-tertiary', BORDER_DIVIDER)}>
+            {footnote}
+          </li>
+        ) : null}
       </ul>
     ) : null
 

@@ -118,8 +118,8 @@ export function useGitStatus(
 
 /**
  * `useGitStatus` kept current while mounted: it reads again when main says
- * this workspace's git state changed (a commit, a checkout, a file edited),
- * rather than on a timer. For surfaces that show the state the whole time
+ * this workspace's git state changed (a commit, a checkout, a run settling),
+ * and when the window is come back to, rather than on a timer. For surfaces that show the state the whole time
  * they are open — New task's facts, its worktree switch, Compare.
  */
 export function useLiveGitStatus(
@@ -133,7 +133,19 @@ export function useLiveGitStatus(
     const off = window.vyotiq?.onGitStatusChanged?.((payload) => {
       if (workspacePathsEqual(payload.workspacePath, workspacePath)) setRevision((r) => r + 1)
     })
-    return () => off?.()
+    // Main says so after git actions and runs; an edit made in another app
+    // says nothing. Coming back to the window reads it again — once, on
+    // return, never on a timer, and never while the window is hidden.
+    const onReturn = (): void => {
+      if (document.visibilityState === 'visible') setRevision((r) => r + 1)
+    }
+    window.addEventListener('focus', onReturn)
+    document.addEventListener('visibilitychange', onReturn)
+    return () => {
+      off?.()
+      window.removeEventListener('focus', onReturn)
+      document.removeEventListener('visibilitychange', onReturn)
+    }
   }, [workspacePath, enabled])
   return useGitStatus(workspacePath, revision, enabled, deferStartupMs)
 }

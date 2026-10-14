@@ -505,17 +505,21 @@ test.describe('New task folders, help, palette and Usage', () => {
     if (launched) await closeApp(launched)
   })
 
-  test('New task: Add folder… is offered, and /add-dir <path> adds the folder row', async () => {
+  test('New task: adding a folder is offered, and /add-dir <path> adds the folder row', async () => {
     const page = launched.window
     const newTask = page.locator('[data-new-task]')
     await expect(newTask).toBeVisible({ timeout: 30_000 })
-    await expect(newTask.getByRole('button', { name: 'Add folder…' })).toBeVisible()
+    // Offered from Attach, beside the files: "Let it edit another folder…".
+    await newTask.getByRole('button', { name: /^Attach files/ }).click()
+    await expect(page.getByRole('menuitem', { name: /Let it edit another folder/ })).toBeVisible()
+    await page.keyboard.press('Escape')
     const brief = page.getByRole('combobox', { name: 'Brief' })
     await brief.fill(`/add-dir ${extra}`)
     await brief.press(`${MOD}+Enter`)
     const folders = newTask.getByRole('list', { name: 'Added folders' })
     await expect(folders).toBeVisible({ timeout: 20_000 })
-    await expect(folders).toContainText(extra)
+    // A chip named for the folder, with its whole path as the title.
+    await expect(folders.locator(`[title="${extra}"]`)).toBeVisible()
     // The command is spent, not sent as a task: still on New task, brief emptied.
     await expect(newTask).toBeVisible()
     await expect(brief).not.toContainText('/add-dir')

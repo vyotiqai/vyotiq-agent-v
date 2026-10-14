@@ -87,7 +87,8 @@ export function ComposerAttachments({
           {audio.map((clip, i) => (
             <FileChip
               key={`audio-${i}`}
-              name={clip.mime || 'audio'}
+              // Clips carry no file name: a number tells two of the same kind apart.
+              name={audio.length > 1 ? `${clip.mime || 'audio'} (${i + 1})` : clip.mime || 'audio'}
               chars={Math.ceil((clip.url.length * 3) / 4)}
               disabled={attachLocked}
               onRemove={onRemoveAudio ? () => onRemoveAudio(i) : undefined}

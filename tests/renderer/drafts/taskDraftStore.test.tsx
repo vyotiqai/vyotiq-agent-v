@@ -7,6 +7,7 @@ import type { TaskDraft } from '@shared/ipc'
 import {
   briefStateFor,
   deleteTaskDraftFor,
+  draftTitle,
   putBriefBack,
   refreshTaskDrafts,
   resetTaskDraftStoreForTests,
@@ -140,5 +141,25 @@ describe('task draft store', () => {
     expect(briefStateFor('/wt2').extraRoots).toEqual(['/srv/api'])
     putBriefBack('/wt3', {})
     expect(briefStateFor('/wt3')).toEqual({ draftId: null, checks: [], worktree: false })
+  })
+})
+
+describe('drafts, second audit', () => {
+  afterEach(() => resetTaskDraftStoreForTests())
+
+  it('titles a draft as its brief reads, chips and all, never by their markers', async () => {
+    const { mentionMarker } = await import('@renderer/features/chat/components/composer/mentionModel')
+    const brief = `${mentionMarker({ kind: 'file', path: 'src/app/updater.ts' })} fails on Windows`
+    const title = draftTitle({ brief, doneWhen: [] })
+    expect(title).not.toMatch(/[\uFFF9\uFFFA]/)
+    expect(title).toContain('updater.ts fails on Windows')
+  })
+
+  it('puts a brief back in a task worktree to start there, not in a worktree of it', () => {
+    setNewTaskWorktreeDefault(true)
+    putBriefBack('/wt', { checks: ['Tests pass'], worktree: false })
+    expect(briefStateFor('/wt').worktree).toBe(false)
+    expect(briefStateFor('/wt').checks).toEqual(['Tests pass'])
+    setNewTaskWorktreeDefault(false)
   })
 })

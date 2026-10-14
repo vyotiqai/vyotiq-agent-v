@@ -1,4 +1,4 @@
-import type { AgentInteractionMode } from '@shared/ipc'
+import type { AgentInteractionMode, ModelRef } from '@shared/ipc'
 
 /**
  * Open requests for the two schedule dialogs. They come from the palette, the
@@ -21,6 +21,12 @@ export type RepeatTaskRequest =
       worktree?: boolean
       /** Ask or Agent, as the brief was set: a scheduled Ask brief must not edit. */
       mode?: AgentInteractionMode
+      /** The model the brief was set to start on; the dialog starts from it. */
+      model?: ModelRef | null
+      /** The folder can branch a new worktree each run (a git repository with a commit). */
+      canWorktree?: boolean
+      /** What the brief holds that a scheduled run does not take ("2 attachments"), said in the dialog. */
+      leftBehind?: string[]
     }
 
 const listRequests = new Set<() => void>()

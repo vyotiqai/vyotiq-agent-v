@@ -14,6 +14,10 @@ import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcr
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { unreachableServiceInTurn } from '@shared/utils/unreachableService'
 import { isRetryableTurnFailure } from '@shared/errors'
+import { formatElapsed } from '@shared/utils/timeFormat'
+import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
+import { turnCost } from '@renderer/features/chat/utils/messageFooterStats'
+import { costLabel } from './record/Receipt'
 import { MAX_EXTRA_ROOTS, extraRootLabel } from '@shared/extraRoots'
 import { Icon } from '@renderer/lib/icons'
 import { requestRepeatTask } from '@renderer/features/schedules/scheduleRequests'
@@ -635,9 +639,28 @@ export function TaskPane(props: TaskPaneProps) {
   // turns its brief into the line in place: an open take, Structure or voice
   // carry on rather than the box being made again.
   const newTask = Boolean(props.newTask)
+  // The strip's meta: where the plan is, how long this turn has run, what it has cost.
+  const turnStartedAt = useMemo(() => {
+    for (let i = liveItems.length - 1; i >= 0; i -= 1) {
+      const item = liveItems[i]!
+      if (item.kind === 'message' && item.role === 'user') return item.at ?? null
+    }
+    return null
+  }, [liveItems])
+  const latestUsage = turnUsage && turnUsage.length > 0 ? turnUsage[turnUsage.length - 1]! : null
+  const latestCost = latestUsage ? turnCost(latestUsage) : null
+  const planStep =
+    todosData && todosData.total > 0 ? `Step ${Math.min(todosData.done + 1, todosData.total)} of ${todosData.total}` : null
   const runStrip =
     !newTask && liveNow && !showGoal ? (
-      <RunStrip label={firstNeed ? 'Needs you' : (activity ?? 'Working')} needs={Boolean(firstNeed)} onStop={props.onStop} />
+      <RunStrip
+        label={firstNeed ? 'Needs you' : (activity ?? 'Working')}
+        needs={Boolean(firstNeed)}
+        step={planStep}
+        since={turnStartedAt}
+        cost={latestCost && latestCost.cost > 0 ? costLabel(latestCost) : null}
+        onStop={props.onStop}
+      />
     ) : null
 
   return (
@@ -886,13 +909,42 @@ export function TaskPane(props: TaskPaneProps) {
  * doing, and Stop — beside what it stops, not among the box's own controls.
  * Esc stops it too. A goal's banner, when one is up, has its own Stop.
  */
-function RunStrip({ label, needs, onStop }: { label: string; needs: boolean; onStop: () => void }) {
+function RunStrip({
+  label,
+  needs,
+  step,
+  since,
+  cost,
+  onStop
+}: {
+  label: string
+  needs: boolean
+  /** "Step 3 of 7" while the run keeps a plan. */
+  step: string | null
+  /** When this turn's instruction went in (ISO): the strip counts up from it. */
+  since: string | null
+  /** This turn's cost so far, as the receipt will say it. */
+  cost: string | null
+  onStop: () => void
+}) {
+  const now = useSharedNow(since != null)
+  const start = since ? Date.parse(since) : NaN
+  const elapsed = Number.isFinite(start) && now - start >= 1000 ? formatElapsed(now - start) : null
+  const meta = [step, elapsed, cost].filter((part): part is string => Boolean(part))
   return (
     <div className={cn('shrink-0 bg-bg', COMPOSER_GUTTER)} data-run-strip>
-      <div className={cn('mx-auto flex h-8 w-full items-center gap-2 px-4 text-xs', COMPOSER_MAX)} role="status">
+      <div className={cn('mx-auto flex h-8 w-full items-center gap-2 px-4 text-xs', COMPOSER_MAX)}>
         <span className="flex min-w-0 flex-1 items-center gap-2 pl-3">
           <StatusGlyph state={needs ? 'needs' : 'running'} />
-          <span className={cn('min-w-0 truncate', needs ? 'text-fg' : 'text-secondary')}>{label}</span>
+          {/* The live region is the state only: the ticking meta beside it is not re-read each second. */}
+          <span className="shrink-0 text-fg" role="status">
+            {label}
+          </span>
+          {meta.length > 0 ? (
+            <span className="tnum min-w-0 truncate text-tertiary" aria-hidden="true" data-run-strip-meta>
+              {meta.join(' · ')}
+            </span>
+          ) : null}
         </span>
         <Button size="xs" variant="ghost" icon="stop" kbd={['Esc']} aria-keyshortcuts="Escape" onClick={onStop}>
           Stop

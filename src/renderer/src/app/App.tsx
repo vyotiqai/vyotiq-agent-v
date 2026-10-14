@@ -70,7 +70,7 @@ import {
   getComposerAttachments,
   setComposerAttachments
 } from '@renderer/lib/hooks/composerAttachmentStore'
-import { getWorkspaceHotUi, resolveHotComposerDraft } from '@renderer/lib/hooks/workspaceHotUiStore'
+import { getWorkspaceHotUi, resolveHotComposerDraft, setWorkspaceHotComposerDraft } from '@renderer/lib/hooks/workspaceHotUiStore'
 import { mergeLiveInstanceRuns } from './mergeLiveInstanceRuns'
 import type { SlashClientHandlers } from '../features/chat/components/composer/slashCommandExecute'
 import { formatLoopStatusLine, loopUsageMessage, parseLoopCommand } from '@shared/goalRuntime'
@@ -1183,7 +1183,9 @@ function App() {
     [offlineWorkspacePath]
   )
 
-  const { sendWithOfflineQueue } = useOfflineSendQueue(offlineWorkspacePath, flushOfflineEntry)
+  const { sendWithOfflineQueue, online: networkOnline } = useOfflineSendQueue(offlineWorkspacePath, flushOfflineEntry)
+  const networkOnlineRef = useRef(networkOnline)
+  networkOnlineRef.current = networkOnline
   const offlineQueue = useOfflineQueue()
   /**
    * The run is live on a model served from this machine (local Ollama, a
@@ -1237,7 +1239,30 @@ function App() {
     pendingSendRef.current = null
     if (!pending) return false
     const { deliver, text, images, files, extras, workspacePath, runId } = pending
-    const ok = Boolean(await deliver(text, images, files, extras))
+    // A held new task's words went back into its composer when it was held.
+    // They are this send now: take them out before it goes, or the run id it
+    // gets moves them into the new task's line as if typed while starting.
+    const attKeyNew = runId == null ? composerAttachmentKey(workspacePath, null) : null
+    const heldText = runId == null ? resolveHotComposerDraft(getWorkspaceHotUi(workspacePath), null) : ''
+    const heldAttachments = attKeyNew ? getComposerAttachments(attKeyNew) : null
+    if (runId == null) {
+      setComposerDraftForPane(workspacePath, null, '')
+      // The hot store too: it is what the run id's arrival reads, and the
+      // workspace's saved copy may already read '' while it still holds the words.
+      setWorkspaceHotComposerDraft(workspacePath, null, '')
+      if (attKeyNew) clearComposerAttachments(attKeyNew)
+    }
+    let ok = false
+    try {
+      ok = Boolean(await deliver(text, images, files, extras))
+    } catch {
+      ok = false
+    }
+    if (!ok && runId == null) {
+      // Not sent: the brief is back where it was written, as it was.
+      if (heldText) setComposerDraftForPane(workspacePath, null, heldText)
+      if (attKeyNew && heldAttachments) setComposerAttachments(attKeyNew, heldAttachments)
+    }
     if (ok) {
       setComposerDraftForPane(workspacePath, runId, '')
       const attKey = composerAttachmentKey(workspacePath, runId)
@@ -1408,7 +1433,7 @@ function App() {
     if (!sent) {
       setComposerDraftForPane(path, null, text)
       // Its checks and its added folders too: the brief was all of them.
-      putBriefBack(path, { checks: rest.doneWhen, extraRoots: rest.extraRoots })
+      putBriefBack(path, { checks: rest.doneWhen, extraRoots: rest.extraRoots, worktree: false })
       const key = composerAttachmentKey(path, null)
       if (key) {
         setComposerAttachments(key, {
@@ -1418,7 +1443,8 @@ function App() {
           audio: rest.audio ?? []
         })
       }
-    } else if (draftId) {
+    } else if (draftId && networkOnlineRef.current) {
+      // Offline, the start only queued: the draft stays until a task spends it.
       void deleteTaskDraftFor(parentPath, draftId)
     }
     // Either way the brief now lives in the worktree, so the page it came from
@@ -1522,13 +1548,22 @@ function App() {
   moveBriefRef.current = async (from, to, brief) => {
     const attachmentCount = (b: { images: unknown[]; files: unknown[]; nativeFiles: unknown[]; audio: unknown[] }): number =>
       b.images.length + b.files.length + b.nativeFiles.length + b.audio.length
-    const moving = brief.text.trim().length > 0 || brief.checks.length > 0 || attachmentCount(brief.attachments) > 0
+    const moving =
+      brief.text.trim().length > 0 ||
+      brief.checks.length > 0 ||
+      brief.extraRoots.length > 0 ||
+      attachmentCount(brief.attachments) > 0
     const toKey = composerAttachmentKey(to, null)
     if (moving) {
       const there = briefStateFor(to)
       const thereText = resolveHotComposerDraft(getWorkspaceHotUi(to), null)
       const thereAttached = toKey ? attachmentCount(getComposerAttachments(toKey)) : 0
-      if (thereText.trim().length > 0 || there.checks.length > 0 || thereAttached > 0) {
+      if (
+        thereText.trim().length > 0 ||
+        there.checks.length > 0 ||
+        (there.extraRoots?.length ?? 0) > 0 ||
+        thereAttached > 0
+      ) {
         const replace = await confirm(
           'It has an unsent brief of its own. Moving yours replaces it.',
           { title: `Replace the brief in ${formatWorkspaceName(to)}?`, confirmLabel: 'Replace and move' }
@@ -3039,6 +3074,7 @@ function App() {
         const unsaved =
           text.trim().length > 0 ||
           current.checks.length > 0 ||
+          (current.extraRoots?.length ?? 0) > 0 ||
           (attached != null &&
             attached.images.length + attached.files.length + attached.nativeFiles.length + attached.audio.length > 0)
         if (unsaved) {

@@ -12,7 +12,12 @@ import type { ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { DEFAULT_SETTINGS, emptySecretStatus, type Settings, type WorkspacesState } from '@shared/ipc'
 import App from '@renderer/app/App'
-import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
+import {
+  getWorkspaceHotUi,
+  resetWorkspaceHotUiStoreForTests,
+  resolveHotComposerDraft,
+  setWorkspaceHotComposerDraft
+} from '@renderer/lib/hooks/workspaceHotUiStore'
 
 type ShellProps = { children: ReactNode; loading?: boolean; firstRun?: object | null; onOpenChat?: () => void; onOpenHome?: () => void }
 type ChatProps = {
@@ -264,6 +269,29 @@ describe('App → Set up', () => {
     fireEvent.click(send)
     await waitFor(() => expect(createTaskWorktree).toHaveBeenCalled(), { timeout: 5000 })
     expect(JSON.stringify(createTaskWorktree.mock.calls[0])).toContain('Fix the flaky test')
+  })
+
+  it('a held new task, sent once Start saves the choice, leaves its words out of the new task’s line', async () => {
+    install({ openPaths: [WS], runs: 2, settings: { navigationMode: 'sidebar' } })
+    chatStart.mockReset()
+    chatStart.mockResolvedValue({ ok: true as const, data: { runId: 'run-held', invokeId: 1 } })
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
+    act(() => shell().onOpenChat?.())
+    expect(await screen.findByTestId('chat')).toBeTruthy()
+    await act(async () => {
+      await chatView().onSend('Fix the flaky test')
+    })
+    // Held: the composer puts the words back where they were written (the new task's key).
+    act(() => setWorkspaceHotComposerDraft(WS, null, 'Fix the flaky test'))
+    const send = (await screen.findByRole('button', { name: /Send your instruction/ })) as HTMLButtonElement
+    await waitFor(() => expect(send.disabled).toBe(false), { timeout: 5000 })
+    fireEvent.click(screen.getByRole('radio', { name: /^Nothing/ }))
+    fireEvent.click(send)
+    await waitFor(() => expect(chatStart).toHaveBeenCalled(), { timeout: 5000 })
+    await waitFor(() => expect(resolveHotComposerDraft(getWorkspaceHotUi(WS), null)).toBe(''))
+    // The run that started is the brief: its line is empty, not holding the brief a second time.
+    expect(resolveHotComposerDraft(getWorkspaceHotUi(WS), 'run-held')).toBe('')
   })
 
   it('going back to the task without choosing lets the held send go', async () => {

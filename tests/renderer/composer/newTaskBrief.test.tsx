@@ -510,7 +510,11 @@ describe('New task brief', () => {
     const { props } = renderBrief({ slashHandlers: { onOpenSettings } })
     fireEvent.click(screen.getByRole('button', { name: 'Permissions: Asks before edits' }))
     let menu = await screen.findByRole('menu', { name: 'Permissions' })
-    fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: /^Doesn’t ask/ }))
+    // One of three, always one on: radios under the menu's own header row.
+    expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(3)
+    expect(within(menu).getByRole('menuitemradio', { name: /^Asks before edits/ }).getAttribute('aria-checked')).toBe('true')
+    expect(menu.textContent).toMatch(/^Before it uses a tool/)
+    fireEvent.click(within(menu).getByRole('menuitemradio', { name: /^Doesn’t ask/ }))
     expect(props.onChatSettingsChange).toHaveBeenCalledWith({
       toolApproval: { ...chatSettings.toolApproval, mode: 'off' }
     })
@@ -840,6 +844,108 @@ describe('New task brief: audit fixes, guarded', () => {
     gitStatusReturning({ branch: 'next', fileCount: 0 })
     fireChanged()
     await waitFor(() => expect(screen.queryByText(/would be overwritten/)).toBeNull())
+  })
+})
+
+describe('New task brief: second audit', () => {
+  const twoModels = (): void => {
+    window.vyotiq.listModels = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        models: [
+          { id: 'qwen2.5', inputModalities: ['text'], outputModalities: ['text'], supportsTools: true, supportsVision: false },
+          { id: 'llama3.3', inputModalities: ['text'], outputModalities: ['text'], supportsTools: true, supportsVision: false }
+        ],
+        warning: null
+      }
+    })) as unknown as typeof window.vyotiq.listModels
+  }
+
+  it('starts one task when the compared model is no longer offered, as its label says', async () => {
+    twoModels()
+    const fireChanged = captureGitStatusChanged()
+    gitStatusReturning({ branch: 'main', fileCount: 0 })
+    const { props } = renderBrief()
+    await screen.findByRole('radiogroup', { name: 'Where it works' })
+    const menu = await openStartMenu()
+    fireEvent.click(await within(menu).findByRole('menuitemcheckbox', { name: /^llama3\.3/ }))
+    await screen.findByRole('button', { name: 'Start 2 tasks' })
+    // The repository loses its last commit's branch: no worktree can be made, so no comparison.
+    window.vyotiq.gitStatus = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        kind: 'ok',
+        status: { branch: 'main', files: [], truncated: false, fileCount: 0, added: 0, removed: 0, hasRemote: false, hasCommits: false }
+      }
+    })) as unknown as typeof window.vyotiq.gitStatus
+    fireChanged()
+    await screen.findByRole('button', { name: 'Start task' })
+    typeBrief('One copy only')
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]?.compareWith).toBeUndefined()
+  })
+
+  it('takes no Structure, dictation or voice while a draft save is out', async () => {
+    let finish: (value: unknown) => void = () => {}
+    window.vyotiq.saveTaskDraft = vi.fn(
+      () => new Promise((resolve) => (finish = resolve))
+    ) as unknown as typeof window.vyotiq.saveTaskDraft
+    renderBrief()
+    typeBrief('Write the migration and its rollback for the billing table')
+    const brief = screen.getByRole('combobox', { name: 'Brief' })
+    const menu = await openStartMenu()
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^Save as draft/ }))
+    await waitFor(() => expect(brief.getAttribute('aria-readonly')).toBe('true'))
+    const structure = screen.getByRole('button', { name: /^Structure/ }) as HTMLButtonElement
+    expect(structure.disabled).toBe(true)
+    const mic = document.querySelector<HTMLButtonElement>('[data-take-mic]')!
+    expect(mic.disabled || mic.getAttribute('aria-disabled') === 'true').toBe(true)
+    const voice = screen.getByRole('button', { name: /^Voice mode|^Talk with the agent/ }) as HTMLButtonElement
+    expect(voice.disabled || voice.getAttribute('aria-disabled') === 'true').toBe(true)
+    // A check typed now is not added to a brief on its way out.
+    const check = screen.getByRole('textbox', { name: 'New check' })
+    fireEvent.change(check, { target: { value: 'Late check' } })
+    fireEvent.keyDown(check, { key: 'Enter' })
+    expect(screen.queryByRole('list', { name: 'Done when' })).toBeNull()
+    await act(async () => {
+      finish({ ok: true, data: { id: 'd0000000-0000-4000-8000-000000000031', brief: 'x', doneWhen: [], createdAt: 'x', updatedAt: 'x' } })
+    })
+  })
+
+  it('schedules on the picked model, says what stays behind, and offers the worktree where one can be made', async () => {
+    const { onRepeatTaskRequest } = await import('@renderer/features/schedules/scheduleRequests')
+    const asked = vi.fn()
+    const off = onRepeatTaskRequest(asked)
+    setComposerAttachments(composerAttachmentKey('/ws/app', null)!, {
+      images: ['data:image/png;base64,AAAA'],
+      files: [],
+      nativeFiles: [],
+      audio: []
+    })
+    setBriefState('/ws/app', { draftId: null, checks: [], worktree: false, extraRoots: ['/ws/shared'] })
+    renderBrief()
+    await screen.findByRole('radiogroup', { name: 'Where it works' })
+    typeBrief('Nightly: bump the lockfile')
+    const menu = await openStartMenu()
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^Schedule/ }))
+    const req = asked.mock.calls[0]![0]
+    expect(req.model).toEqual({ provider: 'ollama', model: 'qwen2.5' })
+    expect(req.canWorktree).toBe(true)
+    expect(req.leftBehind).toEqual(['1 attachment', '1 added folder'])
+    off()
+  })
+
+  it('reads git status again when the window is come back to (an edit made in another app)', async () => {
+    gitStatusReturning({ branch: 'main', fileCount: 2 })
+    renderBrief()
+    const rail = screen.getByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(rail.textContent).toContain('2 changed'))
+    gitStatusReturning({ branch: 'main', fileCount: 3 })
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    await waitFor(() => expect(rail.textContent).toContain('3 changed'))
   })
 })
 

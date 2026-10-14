@@ -504,3 +504,38 @@ describe('Scheduled runs in the navigator and the palette', () => {
     expect(await screen.findByRole('dialog', { name: 'Scheduled tasks' })).toBeTruthy()
   })
 })
+
+describe('Schedule task from New task: model, worktree and what stays behind', () => {
+  it('starts on the brief’s model, offers the worktree, says what is not scheduled, and saves the model', async () => {
+    const api = stubApi([])
+    render(<RepeatTaskDialog />)
+    act(
+      () =>
+        void requestRepeatTask({
+          workspacePath: WS,
+          title: 'Bump the lockfile',
+          instruction: 'Bump the lockfile',
+          mode: 'agent',
+          model: { provider: 'openai', model: 'gpt-test' },
+          canWorktree: true,
+          leftBehind: ['1 attachment', '1 added folder']
+        })
+    )
+    const dialog = screen.getByRole('dialog', { name: 'Schedule task' })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Model: model' }).textContent).toContain('gpt-test'))
+    expect(within(dialog).getByRole('checkbox', { name: 'Run each time in a new worktree' })).toBeTruthy()
+    expect(dialog.querySelector('[data-schedule-left-behind]')?.textContent).toBe(
+      'Each run starts from the brief and its checks. Not scheduled: 1 attachment, 1 added folder.'
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule' }))
+    await waitFor(() => expect(api.createSchedule).toHaveBeenCalled())
+    expect(api.createSchedule).toHaveBeenCalledWith({
+      workspacePath: WS,
+      instruction: 'Bump the lockfile',
+      mode: 'agent',
+      provider: 'openai',
+      model: 'gpt-test',
+      schedule: { kind: 'daily', time: '09:00' }
+    })
+  })
+})

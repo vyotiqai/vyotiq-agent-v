@@ -46,7 +46,7 @@ test('the brief keeps its column width with the inspector open beside it', async
 
   const column = await window.locator('[data-new-task]').boundingBox()
   const field = await brief.boundingBox()
-  const sees = await window.getByText('What the agent will see').boundingBox()
+  const sees = await window.locator('[data-agent-sees]').boundingBox()
   expect(column && field && sees).toBeTruthy()
   // The field spans most of the column, and the aside sits under it, not over it.
   expect(field!.width).toBeGreaterThan(column!.width * 0.6)

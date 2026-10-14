@@ -59,7 +59,7 @@ export function StartSplit({
     </button>
   )
   return (
-    <div className="inline-flex shrink-0 items-stretch" data-start-split>
+    <div className="ml-1 inline-flex shrink-0 items-stretch" data-start-split>
       {blocked && !pending ? (
         <Tooltip content={title}>
           <span className="inline-flex cursor-not-allowed">{main}</span>

@@ -185,6 +185,11 @@ export function NewTaskBrief({
   }
 
   const onCheckKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    // Read-only while the brief starts or saves: no check is added to a brief on its way.
+    if (locked && event.key === 'Enter') {
+      event.preventDefault()
+      return
+    }
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       if (canStart) onStart()
@@ -211,7 +216,8 @@ export function NewTaskBrief({
     const onKey = (event: globalThis.KeyboardEvent): void => {
       const save = saveDraftRef.current
       if (!save || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
-      if (event.key.toLowerCase() !== 's') return
+      // By the key's place, not its letter, so a non-Latin layout saves too.
+      if (event.code !== 'KeyS' && event.key.toLowerCase() !== 's') return
       event.preventDefault()
       if (save.canSave && !lockedRef.current) save.run()
     }
@@ -226,7 +232,7 @@ export function NewTaskBrief({
         {extraRoots.map((root) => (
           <li
             key={root}
-            className="inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-md bg-surface pl-2 pr-0.5 text-caption text-fg"
+            className="inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-md bg-surface pl-2 pr-0.5 text-xs text-fg"
             title={root}
           >
             <Icon name="folder" size={12} className="shrink-0 text-tertiary" />
@@ -294,7 +300,7 @@ export function NewTaskBrief({
                   ref={boxRef}
                 >
                   {fileInput}
-                  {notice ? <div className="px-4 pt-3">{notice}</div> : null}
+                  {notice ? <div className={cn('border-b px-1.5 py-1', BORDER_DIVIDER)}>{notice}</div> : null}
                   <div className="px-4 pt-3.5">{input}</div>
                   {attachments || folders ? (
                     <div className="flex flex-col gap-1.5 px-4 pt-2">
@@ -309,7 +315,10 @@ export function NewTaskBrief({
                     {checks.length > 0 ? (
                       <ol className="m-0 list-none p-0" aria-label="Done when">
                         {checks.map((text, index) => (
-                          <li key={`${index}:${text}`} className="group flex h-7 items-center gap-2.5">
+                          <li
+                            key={`${index}:${text}`}
+                            className={cn('group -mx-1 flex h-7 items-center gap-2.5 rounded-md px-1', ROW_HOVER)}
+                          >
                             <span className={cn(NUM, 'w-4 shrink-0 text-right text-tertiary')}>{index + 1}</span>
                             <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
                               {text}
@@ -482,6 +491,8 @@ function WhereItWorks({
         if (!disabled) onWorktreeChange(where === 'worktree')
       }}
       items={WHERE_ITEMS}
+      // Shown as unavailable while the brief starts or saves, not just inert.
+      disabled={disabled}
       // In a narrow column the icons carry it; the words stay its names and tooltips.
       className="ml-1 shrink-0 @max-[640px]:[&_[data-segmented-label]]:sr-only"
     />
@@ -706,8 +717,10 @@ function WhatTheAgentSees({
 
   return (
     // The rail beside the brief on a wide column, and its own sticky block:
-    // the facts hold still while the brief scrolls. Under 1100px it folds under
-    // the box to one line, opened in place.
+    // the facts hold still while the brief scrolls. Under 1100px of column it
+    // reads under the box, two facts to a line; only a narrow column (under
+    // 640px: a split pane, an open inspector) folds it to one line, the whole
+    // line its own toggle.
     <aside
       className={cn(
         // Under the box it keeps the brief's 780 measure and centre, so the
@@ -718,24 +731,24 @@ function WhatTheAgentSees({
       aria-label="What the agent will see"
       data-agent-sees
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <h2 className={cn(SECTION_LABEL, 'shrink-0')}>What the agent will see</h2>
-        <span
-          className={cn('min-w-0 flex-1 truncate text-xs @[1100px]:hidden', warn ? 'text-warning' : 'text-muted')}
-          aria-hidden="true"
-        >
+      <h2 className={cn(SECTION_LABEL, '@max-[640px]:hidden')}>What the agent will see</h2>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={open ? 'Fold what the agent will see' : 'Show what the agent will see'}
+        className={cn(
+          '-mx-1 flex h-7 w-[calc(100%+0.5rem)] min-w-0 items-center gap-3 rounded-md px-1 text-left vy-transition focus-visible:vy-focus-ring @[640px]:hidden',
+          ROW_HOVER
+        )}
+        onClick={() => setOpen((v) => !v)}
+        data-agent-sees-toggle
+      >
+        <span className={cn(SECTION_LABEL, 'shrink-0')}>What the agent will see</span>
+        <span className={cn('min-w-0 flex-1 truncate text-xs', warn ? 'text-warning' : 'text-muted')}>
           {open ? '' : summary}
         </span>
-        <IconButton
-          icon={open ? 'chevronUp' : 'chevron'}
-          label={open ? 'Fold what the agent will see' : 'Show what the agent will see'}
-          size="xs"
-          tone="muted"
-          aria-expanded={open}
-          className="@[1100px]:hidden"
-          onClick={() => setOpen((v) => !v)}
-        />
-      </div>
+        <Icon name={open ? 'chevronUp' : 'chevron'} size={14} className="shrink-0 text-muted" />
+      </button>
       {failed ? (
         <p className="mt-3 text-xs text-muted">This workspace’s context could not be read.</p>
       ) : (
@@ -743,7 +756,7 @@ function WhatTheAgentSees({
         // is the 296px rail: the rows never wrap mid-value.
         <ul
           className={cn(
-            'm-0 mt-1 list-none grid-cols-1 gap-x-8 p-0 @[560px]:grid-cols-2 @[1100px]:grid @[1100px]:grid-cols-1',
+            'm-0 mt-1 list-none grid-cols-1 gap-x-8 p-0 @[640px]:grid @[640px]:grid-cols-2 @[1100px]:grid-cols-1',
             open ? 'grid' : 'hidden'
           )}
           data-agent-facts
@@ -848,7 +861,7 @@ function Fact({
           <span className="mt-px block min-w-0 truncate text-caption">
             {/* The comma is heard, not seen: a link's name reads "Index: Ready, …". */}
             <span className="sr-only">, </span>
-            <span className={warn ? 'text-warning' : 'text-muted'}>{d}</span>
+            <span className={warn ? 'text-warning' : 'text-tertiary'}>{d}</span>
           </span>
         ) : null}
       </span>

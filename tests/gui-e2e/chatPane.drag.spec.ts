@@ -275,7 +275,8 @@ test('Ctrl/Cmd+\\ splits the focused pane into an empty draft beside it', async 
   // A draft pane offers no split (its header has no run to split beside), and
   // the shortcut refuses it (two drafts would share one composer): toast,
   // count unchanged. This is viewport-independent, unlike a capacity-limited split.
-  await expect(draft.getByRole('button', { name: /More/ })).toHaveCount(0)
+  // The header's More menu, that is — the brief's Start caret is "More ways to start".
+  await expect(draft.locator('[data-task-header]').getByRole('button', { name: /More/ })).toHaveCount(0)
   await window.keyboard.press('ControlOrMeta+Backslash')
   await expect(window.getByText('Give this task an instruction first.')).toBeVisible({
     timeout: 10_000

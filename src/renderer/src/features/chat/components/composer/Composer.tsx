@@ -29,9 +29,9 @@ import { resolveModelContextWindow } from '@shared/domain/modelContextWindows'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
 import { isRetryableTurnFailure } from '@shared/errors'
-import { Alert, Button, IconButton, Textarea, cn, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
+import { Alert, Button, IconButton, Keys, Textarea, cn, pushToast, type ActionMenuItem } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
-import { COMPOSER_BOX_BLEED, COMPOSER_GUTTER, COMPOSER_MAX } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, COMPOSER_BOX_BLEED, COMPOSER_GUTTER, COMPOSER_MAX } from '@renderer/lib/utils/layout'
 import {
   draftTitle,
   saveTaskDraftFor,
@@ -432,8 +432,12 @@ export function Composer({
   briefWorktreeRef.current = briefWorktree
   // Also run on: a second model for this brief, until it starts or the workspace changes.
   const [compareKey, setCompareKey] = useState<string | null>(null)
-  const compareKeyRef = useRef(compareKey)
-  compareKeyRef.current = compareKey
+  /**
+   * What Start sends: the compared model only while the menu still offers it.
+   * A key kept after its option left (no worktree here any more, the model's
+   * key removed) would start two tasks under a label that says one.
+   */
+  const compareKeyRef = useRef<string | null>(null)
   useEffect(() => setCompareKey(null), [briefWorkspace])
   // The model compared with became the one picked: comparing it with itself says nothing.
   useEffect(() => {
@@ -1086,7 +1090,9 @@ export function Composer({
     text,
     setText,
     secrets,
-    disabled: Boolean(disabled) || dictationWaits,
+    // New task's box is read-only while its start or its draft save is out:
+    // a take must not write words the save is about to clear.
+    disabled: Boolean(disabled) || dictationWaits || (variant === 'brief' && (briefStarting || savingDraft)),
     getCaret: getDictationCaret,
     setCaret: setDictationCaret,
     isShortcutTarget: isDictationTarget,
@@ -1268,7 +1274,7 @@ export function Composer({
         runId: () => null,
         send: async (spoken) => {
           // The same holds as Start: a file still being read, Structure writing.
-          if (readinessBlocksSend || extracting || structure.holding || briefStarting) return false
+          if (readinessBlocksSend || extracting || structure.holding || briefStarting || savingDraft) return false
           const typed = text.trim() ? `${text.trimEnd()}\n\n` : ''
           beginVoiceHandoff(voiceOwner)
           // Everything attached goes, as with Start: native files and audio ride the extras.
@@ -1345,7 +1351,12 @@ export function Composer({
   // Structure: the draft written up as a brief. Says why when it can't.
   const structureChord = window.vyotiq?.platform === 'darwin' ? '⌘⇧↵' : 'Ctrl+Shift+Enter'
   const structureReady =
-    !inputLocked && !takeOpen && !structure.holding && structure.eligibility.ok && Boolean(hasWorkspace)
+    !inputLocked &&
+    !takeOpen &&
+    !briefLocked &&
+    !structure.holding &&
+    structure.eligibility.ok &&
+    Boolean(hasWorkspace)
   const structureLabel =
     structure.phase.kind === 'asking'
       ? 'Answer the questions above, or skip them'
@@ -1465,7 +1476,7 @@ export function Composer({
         onKeyDown={(e) => {
           if (isStructureChord(e)) {
             e.preventDefault()
-            if (!takeOpen && !slash.open && !mentions.open) structure.start()
+            if (!takeOpen && !briefLocked && !slash.open && !mentions.open) structure.start()
             return
           }
           // Writing or asking: the words wait, and so does Send.
@@ -1578,6 +1589,8 @@ export function Composer({
         busy={catalogLoading}
         // On the brief, Start task is the page's one primary.
         primary={!isBrief}
+        // It is a row of the box it sits in, not a box inside that box.
+        flush
         onRecheck={() => {
           void refreshCatalog({ forceRefresh: true, provider })
         }}
@@ -1759,7 +1772,7 @@ export function Composer({
             />
             <MicControl
               take={take}
-              disabled={inputLocked || dictationWaits}
+              disabled={inputLocked || dictationWaits || briefLocked}
               waitingReason={dictationWaits ? 'Voice mode is using the microphone' : undefined}
             />
             {(isLine || isBrief) && workspacePath ? (
@@ -1767,7 +1780,7 @@ export function Composer({
                 owner={voiceOwner}
                 workspacePath={workspacePath}
                 // A dictation take owns the mic and the field until it's inserted or discarded.
-                disabled={inputLocked || takeOpen}
+                disabled={inputLocked || takeOpen || briefLocked}
                 placement={isBrief ? 'down' : 'up'}
                 onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
               />
@@ -1798,10 +1811,18 @@ export function Composer({
           })
         : []
     const comparing = compareKey ? compareOptions.find((o) => o.value === compareKey) ?? null : null
+    compareKeyRef.current = comparing ? comparing.value : null
     const canSave =
       Boolean(briefWorkspace) && !briefLocked && (text.trim().length > 0 || briefCheckCount > 0)
     const continuing = briefState.draftId != null
     const schedulable = Boolean(briefWorkspace) && hasComposerText(text)
+    const busyReason = briefStarting ? 'Starting the task…' : savingDraft ? 'Saving the draft…' : null
+    // What a scheduled run does not take from the brief, said in the dialog.
+    const attachedCount = images.length + files.length + nativeFiles.length + audio.length
+    const leftBehind = [
+      attachedCount ? `${attachedCount} ${attachedCount === 1 ? 'attachment' : 'attachments'}` : null,
+      briefExtraRoots.length ? `${briefExtraRoots.length} added ${briefExtraRoots.length === 1 ? 'folder' : 'folders'}` : null
+    ].filter((part): part is string => part != null)
     const startItems: ActionMenuItem[] = [
       {
         id: 'draft',
@@ -1809,7 +1830,7 @@ export function Composer({
         icon: 'note',
         keys: [window.vyotiq?.platform === 'darwin' ? '⌘' : 'Ctrl', 'S'],
         disabled: !canSave,
-        disabledReason: savingDraft ? 'Saving…' : 'Write a brief or a check first',
+        disabledReason: busyReason ?? 'Write a brief or a check first',
         onSelect: () => void saveBriefDraft()
       },
       {
@@ -1817,7 +1838,7 @@ export function Composer({
         label: 'Schedule…',
         icon: 'repeat',
         disabled: !schedulable || briefLocked,
-        disabledReason: 'Write a brief first',
+        disabledReason: busyReason ?? 'Write a brief first',
         onSelect: () => {
           if (!briefWorkspace) return
           // Plain words a scheduled run can read later: chips carry their paths.
@@ -1828,7 +1849,10 @@ export function Composer({
             instruction,
             ...(briefChecksRef.current.length ? { doneWhen: [...briefChecksRef.current] } : {}),
             worktree: briefWorktree,
-            mode: agentMode
+            canWorktree: worktreeOffered,
+            mode: agentMode,
+            ...(provider && model ? { model: { provider, model } } : {}),
+            ...(leftBehind.length ? { leftBehind } : {})
           })
           if (!opened) pushToast('Scheduling isn’t available in this window.', 'error')
         }
@@ -1838,9 +1862,11 @@ export function Composer({
       startItems.push({
         id: 'compare-none',
         label: 'One model',
-        checked: compareKey == null,
-        heading: 'Also run on',
+        checked: comparing == null,
+        heading: 'Also run on · each in its own new worktree',
         separatorBefore: true,
+        disabled: briefLocked,
+        disabledReason: busyReason ?? undefined,
         onSelect: () => setCompareKey(null)
       })
       for (const opt of compareOptions) {
@@ -1848,7 +1874,9 @@ export function Composer({
           id: `compare-${opt.value}`,
           label: opt.label,
           detail: opt.group,
-          checked: compareKey === opt.value,
+          checked: comparing?.value === opt.value,
+          disabled: briefLocked,
+          disabledReason: busyReason ?? undefined,
           onSelect: () => setCompareKey(opt.value)
         })
       }
@@ -1886,7 +1914,14 @@ export function Composer({
         controls={controls(
           // The page's one primary, at the end of the brief's own row, with the
           // brief's other endings on its caret. Ctrl/Cmd+Enter is wired both places.
-          <StartSplit
+          <>
+            {briefStarting ? (
+              // Said where the eye is while the box waits: nothing typed now would go.
+              <span className="mr-1 truncate text-caption text-tertiary @max-[480px]:hidden" role="status">
+                Read-only until the task exists
+              </span>
+            ) : null}
+            <StartSplit
             chord={startChordLabel()}
             keyShortcuts={window.vyotiq?.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'}
             disabled={!sendReady}
@@ -1898,7 +1933,8 @@ export function Composer({
             menuLabel="More ways to start"
           >
             {briefStarting ? 'Starting…' : comparing ? 'Start 2 tasks' : 'Start task'}
-          </StartSplit>,
+            </StartSplit>
+          </>,
           { context: false, takeSendLabel: null }
         )}
         menus={menus}
@@ -2040,7 +2076,7 @@ export function Composer({
                           }
                         }}
                         aria-label={`Queued instruction “${followUpName(entry.preview)}”`}
-                        aria-keyshortcuts="Control+Enter"
+                        aria-keyshortcuts={window.vyotiq?.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'}
                         rows={2}
                       />
                       <Button size="xs" variant="ghost" aria-label="Cancel queued instruction edit" onClick={() => setEditingFollowUpId(null)}>
@@ -2068,7 +2104,10 @@ export function Composer({
                       data-follow-up-offline={entry.offline ? '' : undefined}
                     >
                       {/* Offline: kept here, starts when the connection is back — the words say so. */}
-                      <span className="shrink-0 text-tertiary">{entry.offline ? 'Queued · offline' : 'Queued'}</span>
+                      <span className="flex shrink-0 items-center gap-1.5 text-tertiary">
+                        <Icon name="clock" size={12} className="shrink-0" />
+                        {entry.offline ? 'Queued · offline' : 'Queued'}
+                      </span>
                       <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
                         {entry.preview}
                       </span>
@@ -2128,7 +2167,7 @@ export function Composer({
                 <form
                   onSubmit={submit}
                   className={cn(
-                    'rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong',
+                    'group/line rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong',
                     COMPOSER_BOX_BLEED
                   )}
                   data-composer-shell
@@ -2136,8 +2175,19 @@ export function Composer({
                   onDrop={onAttachmentDrop}
                 >
                   {fileInput}
-                  {readiness ? <div className="px-3 pt-3">{readiness}</div> : null}
-                  <div className="px-3 pt-2.5">{field}</div>
+                  {readiness ? <div className={cn('border-b px-0.5 py-1', BORDER_DIVIDER)}>{readiness}</div> : null}
+                  <div className="flex items-start gap-3 px-3 pt-2.5">
+                    <div className="min-w-0 flex-1">{field}</div>
+                    {/* Enter queues or sends here, so the new line's key is said where it's typed. */}
+                    <span
+                      aria-hidden="true"
+                      className="mt-0.5 hidden shrink-0 items-center gap-1 text-caption text-tertiary group-focus-within/line:inline-flex"
+                      data-line-newline-hint
+                    >
+                      <Keys keys={[window.vyotiq?.platform === 'darwin' ? '⌥' : 'Alt', '↵']} />
+                      new line
+                    </span>
+                  </div>
                   {attachments ? <div className="px-3 pt-2">{attachments}</div> : null}
                   <div className="pb-1 pl-3 pr-2 @container">
                     {controls(lineAction, { context: true, takeSendLabel: running ? 'Queue' : 'Send' })}
@@ -2194,7 +2244,7 @@ export function Composer({
         onDrop={onAttachmentDrop}
       >
         {fileInput}
-        {readiness ? <div className="px-3 pt-3">{readiness}</div> : null}
+        {readiness ? <div className={cn('border-b px-0.5 py-1', BORDER_DIVIDER)}>{readiness}</div> : null}
         <div className="px-3 pt-2.5">{field}</div>
         {attachments ? <div className="px-3 pt-2">{attachments}</div> : null}
         {/* The line is hidden while an edit is open: the context reading and Compact come here. */}

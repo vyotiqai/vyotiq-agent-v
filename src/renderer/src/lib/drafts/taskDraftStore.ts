@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type { ComposerAttachmentsBucket, IpcResult, TaskDraft } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { taskTitleFromGoal } from '@shared/utils/taskTitle'
+import { composerDocumentPlainText } from '@renderer/features/chat/components/composer/mentionModel'
 
 /**
  * New task drafts, per workspace, as main keeps them (drafts.json under the
@@ -12,9 +13,13 @@ import { taskTitleFromGoal } from '@shared/utils/taskTitle'
  * (`useBriefState`), so opening a draft is only a matter of setting them.
  */
 
-/** What a draft is called: its brief's first line, or its first check when the brief is empty. */
+/**
+ * What a draft is called: its brief's first line, or its first check when the
+ * brief is empty. Chips read as they look (`@updater.ts`), not as the markers
+ * the composer stores them in.
+ */
 export function draftTitle(draft: Pick<TaskDraft, 'brief' | 'doneWhen'>): string {
-  return taskTitleFromGoal(draft.brief) || draft.doneWhen[0] || 'Untitled draft'
+  return taskTitleFromGoal(composerDocumentPlainText(draft.brief)) || draft.doneWhen[0] || 'Untitled draft'
 }
 
 type Listener = () => void
@@ -248,15 +253,20 @@ export function setBriefExtraRoots(workspacePath: string, extraRoots: string[]):
  * failed or waits on a choice) put back on that workspace's New task page:
  * its checks and its added folders, beside whatever the page already holds.
  */
-export function putBriefBack(workspacePath: string, brief: { checks?: string[]; extraRoots?: string[] }): void {
+export function putBriefBack(
+  workspacePath: string,
+  brief: { checks?: string[]; extraRoots?: string[]; worktree?: boolean }
+): void {
   const checks = brief.checks ?? []
   const roots = brief.extraRoots ?? []
-  if (checks.length === 0 && roots.length === 0) return
+  if (checks.length === 0 && roots.length === 0 && brief.worktree == null) return
   const current = briefStateFor(workspacePath)
   setBriefState(workspacePath, {
     ...current,
     ...(checks.length > 0 ? { checks: [...checks] } : {}),
-    ...(roots.length > 0 ? { extraRoots: [...roots] } : {})
+    ...(roots.length > 0 ? { extraRoots: [...roots] } : {}),
+    // A brief waiting in a task worktree starts there, not in a worktree of it.
+    ...(brief.worktree != null ? { worktree: brief.worktree } : {})
   })
 }
 

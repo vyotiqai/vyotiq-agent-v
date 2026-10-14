@@ -148,6 +148,25 @@ describe('App → moving a New task brief to another workspace', () => {
     expect(getComposerAttachments(composerAttachmentKey(A, null)).images).toEqual([])
   })
 
+  it('moves a brief that is only an added folder, and asks before replacing one that is', async () => {
+    render(<App />)
+    const t = await targets()
+    const foldersOnly: MovedBrief = { ...brief(''), checks: [], attachments: { images: [], files: [], nativeFiles: [], audio: [] } }
+    let moved = false
+    await act(async () => {
+      moved = await t.onMove(A, B, foldersOnly)
+    })
+    expect(moved).toBe(true)
+    expect(briefStateFor(B).extraRoots).toEqual(['/shared/lib'])
+    expect(briefStateFor(A).extraRoots ?? []).toEqual([])
+    // Back the other way: B's brief is that folder, so it asks first.
+    act(() => {
+      void t.onMove(A, B, brief('Other'))
+    })
+    expect((await screen.findByRole('dialog', {}, { timeout: 5000 })).textContent).toContain('Replace the brief in ws-b?')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  })
+
   it('asks before replacing an unsent brief there, and keeps it on Cancel', async () => {
     render(<App />)
     const t = await targets()

@@ -116,7 +116,7 @@ test('empty new chat shows the agent context card', async () => {
 
   // Every reading is labelled, and the workspace name is NOT repeated here —
   // the header above already carries it.
-  for (const label of ['Branch', 'Rules', 'Memory', 'Index', 'Tools']) {
+  for (const label of ['Working tree', 'Rules', 'Memory', 'Index', 'Tools']) {
     // Each reading's key is the label above its value: "Rules:", "Index:".
     await expect(card.getByText(new RegExp('^' + label + ':'))).toBeVisible()
   }

@@ -165,3 +165,51 @@ describe('ActionMenu activedescendant and typeahead', () => {
     expect(onSelect).toHaveBeenCalledWith('other')
   })
 })
+
+describe('ActionMenu: a radio set with a header row and a footnote', () => {
+  function Modes({ onPick }: { onPick: (id: string) => void }): JSX.Element {
+    const [open, setOpen] = useState(true)
+    const [on, setOn] = useState('b')
+    const items: ActionMenuItem[] = ['a', 'b', 'c'].map((id) => ({
+      id,
+      label: `Mode ${id}`,
+      checked: on === id,
+      radio: true,
+      onSelect: () => {
+        setOn(id)
+        onPick(id)
+      }
+    }))
+    return (
+      <ActionMenu
+        aria-label="Modes"
+        title="Before it uses a tool"
+        footnote="Applies to every workspace"
+        open={open}
+        onOpenChange={setOpen}
+        placement="down"
+        items={items}
+        trigger={(props) => (
+          <button ref={props.ref} type="button" onClick={props.onClick}>
+            Modes
+          </button>
+        )}
+      />
+    )
+  }
+
+  it('marks one of the set with role menuitemradio, under its header, over its footnote', async () => {
+    const onPick = vi.fn()
+    render(<Modes onPick={onPick} />)
+    const menu = await screen.findByRole('menu', { name: 'Modes' })
+    const radios = screen.getAllByRole('menuitemradio')
+    expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
+    expect(screen.queryAllByRole('menuitemcheckbox')).toHaveLength(0)
+    expect(menu.textContent).toMatch(/^Before it uses a tool/)
+    expect(menu.textContent).toMatch(/Applies to every workspace$/)
+    // The header and footnote are not choosable: the keys walk the three modes only.
+    fireEvent.keyDown(menu, { key: 'End' })
+    fireEvent.keyDown(menu, { key: 'Enter' })
+    expect(onPick).toHaveBeenCalledWith('c')
+  })
+})

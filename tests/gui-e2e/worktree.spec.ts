@@ -61,12 +61,14 @@ test('a task in a new worktree: started there, merged into main, then removed', 
 
   // Put aside and continued: the draft is the parent's, and starting spends it there.
   await brief.fill('Add backpressure to the chat stream')
-  await page.getByRole('button', { name: 'Save as draft' }).click()
+  // Save as draft sits behind Start's caret.
+  await page.getByRole('button', { name: 'More ways to start' }).click()
+  await page.getByRole('menuitem', { name: /^Save as draft/ }).click()
   await expect(brief).toHaveText('')
   await page.locator('[data-nav-section="drafts"]').getByRole('button', { name: 'Add backpressure to the chat stream' }).click()
   await expect(brief).toHaveText('Add backpressure to the chat stream', { timeout: 20_000 })
-  await expect(newTaskHeader.getByRole('radio', { name: 'This folder' })).toHaveAttribute('aria-checked', 'true')
-  await newTaskHeader.getByRole('radio', { name: 'New worktree' }).click()
+  // The draft kept where it was to work: a new worktree, as picked before saving.
+  await expect(newTaskHeader.getByRole('radio', { name: 'New worktree' })).toHaveAttribute('aria-checked', 'true')
   await brief.press('Control+Enter')
   await expect(page.getByText('E2E fixture response.')).toBeVisible({ timeout: 30_000 })
 

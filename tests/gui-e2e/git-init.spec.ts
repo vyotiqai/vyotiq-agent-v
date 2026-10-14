@@ -105,7 +105,9 @@ test('a new task’s aside initializes a repository on click', async () => {
     .poll(() => branchOnDisk(stripWorkspace), { timeout: 15_000 })
     .not.toBeNull()
   const branch = branchOnDisk(stripWorkspace)!
-  await expect(card).toContainText(branch, { timeout: 15_000 })
+  // The branch is said where the task starts, in the header's sentence; the aside reads the tree.
+  await expect(window.locator('[data-task-header]')).toContainText(branch, { timeout: 15_000 })
+  await expect(card).toContainText('Clean')
   await expect(card).not.toContainText('Not a repository')
   await expect(card.getByRole('button', { name: 'Initialize' })).toHaveCount(0)
 })

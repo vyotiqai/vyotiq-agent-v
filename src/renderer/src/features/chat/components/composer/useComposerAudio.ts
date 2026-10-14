@@ -61,26 +61,34 @@ export function useComposerAudio(persistKey?: string | null) {
       return
     }
     const next: AttachedAudio[] = []
+    // Every file that didn't go, said together: a later file that did go must
+    // not wipe the notice for an earlier one that didn't.
+    const skipped: string[] = []
+    if (picked.length > room) skipped.push(`At most ${MAX_AUDIO_FILES} audio files`)
     for (const file of picked.slice(0, room)) {
       if (!isAudioFile(file)) {
-        setAudioError(`Unsupported audio type: ${file.name}`)
+        skipped.push(`Unsupported audio type: ${file.name}`)
         continue
       }
       if (file.size > MAX_AUDIO_BYTES) {
-        setAudioError(`${file.name} exceeds ${Math.round(MAX_AUDIO_BYTES / (1024 * 1024))} MB`)
+        skipped.push(`${file.name} exceeds ${Math.round(MAX_AUDIO_BYTES / (1024 * 1024))} MB`)
         continue
       }
-      const url = await readAsDataUrl(file)
+      let url: string
+      try {
+        url = await readAsDataUrl(file)
+      } catch {
+        skipped.push(`Couldn’t read ${file.name}`)
+        continue
+      }
       next.push({
         type: 'audio',
         url,
         mime: file.type || 'audio/mpeg'
       })
     }
-    if (next.length) {
-      setAudio((prev) => [...prev, ...next].slice(0, MAX_AUDIO_FILES))
-      setAudioError(null)
-    }
+    if (next.length) setAudio((prev) => [...prev, ...next].slice(0, MAX_AUDIO_FILES))
+    setAudioError(skipped.length ? skipped.join(' · ') : null)
   }
 
   const removeAudio = (index: number): void => {

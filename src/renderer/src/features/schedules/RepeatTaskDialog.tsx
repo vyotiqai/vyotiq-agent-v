@@ -37,9 +37,11 @@ export function RepeatTaskDialog() {
         setWorktree(false)
         setError(null)
         setSaving(false)
-        // A brief from New task has no record to read: it runs on the default model.
+        // A brief from New task has no record to read: it starts on the model the
+        // brief was set to, which can be changed here like a task's.
         if (next.runId === undefined) {
           setWorktree(next.worktree === true)
+          setModel(next.model ?? null)
           return
         }
         const read = window.vyotiq?.scheduleSource
@@ -76,6 +78,7 @@ export function RepeatTaskDialog() {
             ...(task.doneWhen?.length ? { doneWhen: task.doneWhen } : {}),
             ...(task.mode ? { mode: task.mode } : {}),
             ...(worktree ? { worktree: true } : {}),
+            ...(model ? { provider: model.provider, model: model.model } : {}),
             schedule: result.spec
           }
         : {
@@ -129,14 +132,19 @@ export function RepeatTaskDialog() {
           {task?.title}
         </p>
         <ScheduleFields draft={draft} onChange={setDraft} />
-        {source ? (
+        {task && (source || task.runId === undefined) ? (
           <ScheduleRunFields
             model={model}
             onModelChange={setModel}
             worktree={worktree}
             onWorktreeChange={setWorktree}
-            showWorktree={source.canWorktree}
+            showWorktree={source ? source.canWorktree : task.runId === undefined && task.canWorktree === true}
           />
+        ) : null}
+        {task && task.runId === undefined && task.leftBehind?.length ? (
+          <p className="m-0 text-xs text-muted" data-schedule-left-behind>
+            Each run starts from the brief and its checks. Not scheduled: {task.leftBehind.join(', ')}.
+          </p>
         ) : null}
         {error ? (
           <p role="alert" className="m-0 text-xs text-danger">

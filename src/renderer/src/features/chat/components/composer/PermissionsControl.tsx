@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ToolApprovalMode, ToolApprovalSettings } from '@shared/ipc'
+import { DEFAULT_TOOL_APPROVAL, type ToolApprovalMode, type ToolApprovalSettings } from '@shared/ipc'
 import { ActionMenu, cn, type ActionMenuItem } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
@@ -12,7 +12,7 @@ export const APPROVAL_LABEL: Record<ToolApprovalMode, string> = {
 }
 
 const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
-  off: 'Runs every tool without asking',
+  off: 'Runs tools without asking',
   mutating: 'Reads freely; you approve edits and commands',
   all: 'You approve every tool it uses'
 }
@@ -20,7 +20,7 @@ const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
 const MODES: ToolApprovalMode[] = ['off', 'mutating', 'all']
 
 /** The default every new install starts from; anything else reads in ink. */
-const DEFAULT_MODE: ToolApprovalMode = 'mutating'
+const DEFAULT_MODE: ToolApprovalMode = DEFAULT_TOOL_APPROVAL.mode
 
 /**
  * How tools ask before they run, in the control row beside the model: the
@@ -44,17 +44,20 @@ export function PermissionsControl({
   const [open, setOpen] = useState(false)
   const mode = approval.mode
   const mcpAsks = approval.mcpProtection !== false
-  const items: ActionMenuItem[] = MODES.map((m, i) => ({
+  const items: ActionMenuItem[] = MODES.map((m) => ({
     id: `mode-${m}`,
     label: APPROVAL_LABEL[m],
     detail: APPROVAL_NOTE[m],
     checked: m === mode,
-    ...(i === 0 ? { heading: 'Before it uses a tool' } : {}),
+    // One of three, always one on: a radio set, not three checkboxes.
+    radio: true,
     onSelect: () => onChange({ ...approval, mode: m })
   }))
   items.push({
     id: 'mcp',
     label: 'MCP tools ask first',
+    // Said where it matters: with Doesn't ask, this is the one ask left.
+    detail: mode === 'off' ? 'Even when it doesn’t ask' : undefined,
     checked: mode === 'all' || mcpAsks,
     separatorBefore: true,
     keepOpen: true,
@@ -72,6 +75,7 @@ export function PermissionsControl({
       onOpenChange={setOpen}
       placement={placement}
       aria-label="Permissions"
+      title="Before it uses a tool"
       items={items}
       trigger={(t) => (
         <button
@@ -91,6 +95,7 @@ export function PermissionsControl({
         >
           <Icon name="shield" size={13} className="shrink-0" />
           <span className="truncate @max-[560px]:sr-only">{APPROVAL_LABEL[mode]}</span>
+          <Icon name="chevron" size={12} className="shrink-0 text-tertiary @max-[560px]:hidden" />
         </button>
       )}
     />
