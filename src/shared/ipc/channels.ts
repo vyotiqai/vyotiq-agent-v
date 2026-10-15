@@ -101,6 +101,21 @@ export const IPC = {
   voiceAudioOut: 'voice:audio-out',
   voiceSpeakEnd: 'voice:speak-end',
   voiceStart: 'voice:start',
+  /**
+   * The voice mini window (§26.5), one direction per channel: the main window
+   * opens it (invoke) and sends its state and level (send); main pushes them
+   * on to the mini window; the mini window sends clicks, its size and "show
+   * the app" (send); main pushes the clicks on to the main window.
+   */
+  voiceMiniOpen: 'voice:mini-open',
+  voiceMiniPushState: 'voice:mini-push-state',
+  voiceMiniPushLevel: 'voice:mini-push-level',
+  voiceMiniState: 'voice:mini-state',
+  voiceMiniLevel: 'voice:mini-level',
+  voiceMiniSendCommand: 'voice:mini-send-command',
+  voiceMiniCommand: 'voice:mini-command',
+  voiceMiniResize: 'voice:mini-resize',
+  voiceMiniShowApp: 'voice:mini-show-app',
   voiceStop: 'voice:stop',
   voiceAudio: 'voice:audio',
   voicePtt: 'voice:ptt',

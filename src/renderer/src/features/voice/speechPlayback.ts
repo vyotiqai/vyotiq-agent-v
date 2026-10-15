@@ -25,6 +25,32 @@ let mainDone = false
 let player: VoicePlayer | null = null
 let unsubscribe: (() => void) | null = null
 let createContext: (() => PlayerAudioContext) | undefined
+/** Where speech plays (an audio output id; '' the default), applied to the player's context. */
+let sinkId = ''
+let liveContext: PlayerAudioContext | null = null
+
+function applySink(ctx: PlayerAudioContext, id: string): void {
+  const sinkable = ctx as PlayerAudioContext & { setSinkId?: (id: string) => Promise<void> }
+  void sinkable.setSinkId?.(id)?.catch(() => void sinkable.setSinkId?.('')?.catch(() => undefined))
+}
+
+/** Every context the player makes, on the chosen output. */
+function makeContext(): PlayerAudioContext {
+  const ctx = createContext ? createContext() : new AudioContext({ sampleRate: 24000 })
+  liveContext = ctx
+  if (sinkId) applySink(ctx, sinkId)
+  return ctx
+}
+
+/**
+ * Play speech on this output from now on ('' the system default): voice
+ * mode's samples play where its voice will. Applies to what is playing too.
+ */
+export function setSpeechOutput(deviceId: string): void {
+  if (deviceId === sinkId) return
+  sinkId = deviceId
+  if (liveContext) applySink(liveContext, deviceId)
+}
 
 function set(next: Partial<SpeechState>): void {
   state = { ...state, ...next }
@@ -41,7 +67,7 @@ function finishIfDrained(): void {
 function ensureWired(): VoicePlayer {
   if (!player) {
     player = new VoicePlayer({
-      createContext,
+      createContext: makeContext,
       onIdle: finishIfDrained,
       onContextStart: () => set({ phase: 'playing' })
     })
@@ -144,9 +170,26 @@ export function useSpeech(owner: string): {
   }
 }
 
+/** Resolves once `owner` is no longer the one speaking (it finished, failed, or something else took over). */
+export function whenSpeechDone(owner: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (state.owner !== owner) {
+      resolve()
+      return
+    }
+    const off = subscribe(() => {
+      if (state.owner === owner) return
+      off()
+      resolve()
+    })
+  })
+}
+
 /** Tests only: reset module state, optionally with a fake audio context. */
 export function resetSpeechForTests(factory?: () => PlayerAudioContext): void {
   createContext = factory
+  sinkId = ''
+  liveContext = null
   unsubscribe?.()
   unsubscribe = null
   void player?.close()

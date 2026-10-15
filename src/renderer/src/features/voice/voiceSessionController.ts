@@ -43,6 +43,12 @@ export type VoiceSnapshot = {
   transcript: readonly VoiceLine[]
   /** The work of each run a hand-off went to, by run id (§25): steps, result, what it waits on. */
   works: Readonly<Record<string, VoiceWork>>
+  /**
+   * The reply you talked over (or stopped): its transcript line, which holds
+   * exactly the words that had played. The view shows it dimmed, ending in a
+   * dash, until the next reply. Null otherwise.
+   */
+  cutLineId: string | null
 }
 
 /**
@@ -69,6 +75,12 @@ export const CURRENT_WORK_BRIEF = 'the task’s current work'
 /** What the view says when the microphone goes away mid-session (unplugged, or taken by another app). */
 export const MIC_LOST_DETAIL = 'The microphone stopped: unplugged, or taken by another app.'
 
+/**
+ * A hold through mute that nothing was heard in is muted again after this
+ * long, unless a turn started (it is then muted again once answered).
+ */
+export const PTT_REMUTE_MS = 1500
+
 /** Lines kept on screen; older ones scroll away (the task record keeps the work). */
 export const MAX_TRANSCRIPT_LINES = 60
 
@@ -92,7 +104,8 @@ export const IDLE_VOICE: VoiceSnapshot = {
   deviceLabel: '',
   cues: 0,
   transcript: [],
-  works: {}
+  works: {},
+  cutLineId: null
 }
 
 export type VoiceTurn = { turnId: string; text: string; stop: boolean }
@@ -156,9 +169,16 @@ export class VoiceSessionController {
   private replies = new Set<string>()
   /** Replies whose audio started and hasn't drained. */
   private sounding = new Set<string>()
+  /**
+   * The transcript's last line when each reply was said. Its caption waits for
+   * its audio, but the hand-off it announced ("On it.") lands at once: the
+   * reply goes back above it, in the order you heard them.
+   */
+  private saidAfter = new Map<string, string | null>()
   /** Each sentence's caption waits for its own audio to start playing. */
   private readonly captions = new CaptionPacer({
-    reveal: (contextId, text) => this.set({ saying: text, transcript: addLine(this.snap.transcript, contextId, 'voice', text) }),
+    reveal: (contextId, text) =>
+      this.set({ saying: text, transcript: addLine(this.snap.transcript, contextId, 'voice', text, this.saidAfter.get(contextId)) }),
     sounding: (contextId) => this.player?.sounding(contextId) ?? false
   })
   /**
@@ -180,6 +200,18 @@ export class VoiceSessionController {
   private task: { runId: string | null; workspacePath?: string } | null = null
   /** Hand-offs on their way to the task: their own follow names the run. */
   private handingOff = 0
+  /** Where its voice plays (an audio output's id; '' the default), applied to each audio context made. */
+  private sinkId = ''
+  /** The audio context the player was given, so the output can be switched while it plays. */
+  private audioCtx: PlayerAudioContext | null = null
+  /** The mic stays open but nothing is sent: a voice sample is playing, and the mic must not hear it. */
+  private micHeld = false
+  /** The device the mic was opened on, for a switch that fails (the old one stays). */
+  private deviceId: string | undefined
+  /** Hold-to-talk unmuted a muted session: muted again once it is back to listening. */
+  private pttUnmuted: 'held' | 'released' | null = null
+  /** After a hold that nothing was heard in, the session never leaves listening: muted again after this. */
+  private pttRemuteTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly deps: VoiceControllerDeps) {}
 
@@ -197,8 +229,22 @@ export class VoiceSessionController {
   }
 
   private set(next: Partial<VoiceSnapshot>): void {
+    const was = this.snap.state
     this.snap = { ...this.snap, ...next }
+    // A hold that talked through mute: once its turn is answered (back into listening), muted again.
+    if (this.pttUnmuted === 'released' && was !== 'listening' && this.snap.state === 'listening' && this.sessionId) {
+      this.remuteAfterHold()
+      return
+    }
     for (const l of this.listeners) l()
+  }
+
+  private remuteAfterHold(): void {
+    if (this.pttRemuteTimer) clearTimeout(this.pttRemuteTimer)
+    this.pttRemuteTimer = null
+    if (this.pttUnmuted !== 'released') return
+    this.pttUnmuted = null
+    this.setMuted(true)
   }
 
   get active(): boolean {
@@ -233,6 +279,7 @@ export class VoiceSessionController {
       if (delayMs !== null) this.captions.audio(chunk.utteranceId, chunk.piece, delayMs)
     })
     // Open the mic first: a blocked mic should fail before anything is billed.
+    this.deviceId = opts.deviceId || undefined
     try {
       const capture = await (this.deps.openCapture ?? openMicCapture)({
         deviceId: opts.deviceId || undefined,
@@ -329,9 +376,10 @@ export class VoiceSessionController {
   }
 
   private onSamples(pcm: Int16Array): void {
-    this.level = this.snap.muted ? 0 : levelFromRms(rmsOfInt16(pcm))
+    const deaf = this.snap.muted || this.micHeld
+    this.level = deaf ? 0 : levelFromRms(rmsOfInt16(pcm))
     const id = this.sessionId
-    if (!id || this.snap.muted) return
+    if (!id || deaf) return
     void this.bridge().voiceAudio({ sessionId: id, pcm })
   }
 
@@ -373,15 +421,20 @@ export class VoiceSessionController {
         void this.deps.onStopAgent?.()
         return
       case 'say':
+        // A new reply: the one you talked over stops being "cut" on screen.
+        if (this.snap.cutLineId && this.snap.cutLineId !== e.contextId) this.set({ cutLineId: null })
+        if (!this.saidAfter.has(e.contextId)) this.saidAfter.set(e.contextId, this.snap.transcript.at(-1)?.id ?? null)
         this.replies.add(e.contextId)
         this.captions.say(e.contextId, e.text, e.audible)
         return
       case 'flush':
+        this.saidAfter.delete(e.contextId)
         this.replies.delete(e.contextId)
         this.sounding.delete(e.contextId)
         this.captions.drop(e.contextId)
         this.player?.cancel(e.contextId)
-        this.set({ saying: '' })
+        // Its line holds the words that had played: that's where it was cut.
+        this.set({ saying: '', cutLineId: this.snap.transcript.some((l) => l.id === e.contextId) ? e.contextId : this.snap.cutLineId })
         return
       case 'duck':
         this.player?.duck(e.on)
@@ -439,10 +492,18 @@ export class VoiceSessionController {
     }
   }
 
+  /** An audio context on the chosen output; kept, so a switch reaches the one playing. */
+  private makeAudioContext = (): PlayerAudioContext => {
+    const ctx = this.deps.createAudioContext ? this.deps.createAudioContext() : new AudioContext({ sampleRate: 24000 })
+    this.audioCtx = ctx
+    if (this.sinkId) applySink(ctx, this.sinkId)
+    return ctx
+  }
+
   private ensurePlayer(): VoicePlayer {
     if (!this.player) {
       this.player = new VoicePlayer({
-        createContext: this.deps.createAudioContext,
+        createContext: this.makeAudioContext,
         onContextStart: (contextId) => {
           this.sounding.add(contextId)
           const id = this.sessionId
@@ -450,6 +511,7 @@ export class VoiceSessionController {
         },
         onContextDrained: (contextId) => {
           this.captions.drained(contextId)
+          this.saidAfter.delete(contextId)
           this.replies.delete(contextId)
           if (!this.sounding.delete(contextId)) return
           const id = this.sessionId
@@ -488,15 +550,102 @@ export class VoiceSessionController {
     return this.sessionId
   }
 
+  /**
+   * Where its voice plays: an audio output's device id ('' the system
+   * default). Applies to the reply playing now and every one after.
+   */
+  setOutput(deviceId: string): void {
+    this.sinkId = deviceId
+    if (this.audioCtx) applySink(this.audioCtx, deviceId)
+  }
+
+  /**
+   * Listen on another microphone without ending the session: the new one
+   * opens first, then the old one closes, so nothing is missed between them.
+   * False when the new one couldn't be opened (the old one keeps listening).
+   */
+  async switchMic(deviceId: string): Promise<boolean> {
+    if (!this.capture || !this.sessionId) {
+      this.deviceId = deviceId || undefined
+      return true
+    }
+    const seq = this.startSeq
+    try {
+      const next = await (this.deps.openCapture ?? openMicCapture)({
+        deviceId: deviceId || undefined,
+        onSamples: (pcm) => this.onSamples(pcm),
+        onEnded: () => void this.micLost()
+      })
+      // Ended (or restarted) while the new mic opened: it isn't ours to keep.
+      if (seq !== this.startSeq || !this.sessionId) {
+        next.stop()
+        return false
+      }
+      const old = this.capture
+      this.capture = next
+      this.deviceId = deviceId || undefined
+      old?.stop()
+      this.set({ deviceLabel: next.deviceLabel })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** The mic keeps running but sends nothing (a voice sample is playing); the mute state you set is untouched. */
+  holdMic(held: boolean): void {
+    this.micHeld = held
+    if (held) this.level = 0
+  }
+
   setMuted(muted: boolean): void {
     if (!this.sessionId) return
+    // Muting or unmuting by hand ends a hold's temporary unmute.
+    if (this.pttUnmuted === 'released') {
+      this.pttUnmuted = null
+      if (this.pttRemuteTimer) clearTimeout(this.pttRemuteTimer)
+      this.pttRemuteTimer = null
+    }
     this.level = 0
     this.set({ muted })
     void this.bridge().voiceMute({ sessionId: this.sessionId, muted })
   }
 
+  /** The mic id the session listens on ('' or undefined: the system default). */
+  get micDeviceId(): string | undefined {
+    return this.deviceId
+  }
+
+  /**
+   * Hold to talk (Space, the orb, the mini window). Held while it speaks, it
+   * stops speaking at once rather than waiting for the barge-in to be heard.
+   * Held while muted, it talks anyway: unmuted for the hold, muted again once
+   * the turn is answered.
+   */
   ptt(down: boolean): void {
-    if (this.sessionId) void this.bridge().voicePtt({ sessionId: this.sessionId, down })
+    const id = this.sessionId
+    if (!id) return
+    if (down) {
+      if (this.snap.state === 'speaking') this.interrupt()
+      if (this.snap.muted) {
+        this.pttUnmuted = 'held'
+        this.setMuted(false)
+      }
+    }
+    void this.bridge().voicePtt({ sessionId: id, down })
+    if (!down && this.pttUnmuted === 'held') {
+      this.pttUnmuted = 'released'
+      // Nothing was heard: no turn will come back to listening, so the mute comes back on its own.
+      if (this.pttRemuteTimer) clearTimeout(this.pttRemuteTimer)
+      this.pttRemuteTimer = setTimeout(() => {
+        this.pttRemuteTimer = null
+        if (this.snap.state === 'listening') this.remuteAfterHold()
+      }, PTT_REMUTE_MS)
+    }
+    if (down && this.pttRemuteTimer) {
+      clearTimeout(this.pttRemuteTimer)
+      this.pttRemuteTimer = null
+    }
   }
 
   async stop(): Promise<void> {
@@ -513,6 +662,10 @@ export class VoiceSessionController {
     this.capture?.stop()
     this.capture = null
     this.level = 0
+    this.micHeld = false
+    this.pttUnmuted = null
+    if (this.pttRemuteTimer) clearTimeout(this.pttRemuteTimer)
+    this.pttRemuteTimer = null
   }
 
   private teardown(): void {
@@ -523,18 +676,35 @@ export class VoiceSessionController {
     this.offAudio = null
     this.replies.clear()
     this.sounding.clear()
+    this.saidAfter.clear()
     this.captions.clear()
     this.followed = null
     this.wantFollow = null
     this.taskSent = undefined
     const player = this.player
     this.player = null
+    this.audioCtx = null
     void player?.close()
   }
 }
 
-/** A new line, or more words for the line already open under this id (a reply arrives a sentence at a time). */
-export function addLine(lines: readonly VoiceLine[], id: string, who: VoiceLine['who'], text: string): readonly VoiceLine[] {
+/** `setSinkId` is Chromium's (Electron has it); a fake context or an older engine without it plays on the default. */
+function applySink(ctx: PlayerAudioContext, deviceId: string): void {
+  const sinkable = ctx as PlayerAudioContext & { setSinkId?: (id: string) => Promise<void> }
+  void sinkable.setSinkId?.(deviceId)?.catch(() => {
+    // An unplugged output: play on the default rather than not at all.
+    void sinkable.setSinkId?.('')?.catch(() => undefined)
+  })
+}
+
+/**
+ * A new line, or more words for the line already open under this id (a reply
+ * arrives a sentence at a time). `after`: the line that was last when the
+ * reply was said (null: none yet). A new line goes straight after it when
+ * only hand-offs came since, since those land the moment it is said and the
+ * caption only once its audio plays; after anything else it goes last.
+ */
+export function addLine(lines: readonly VoiceLine[], id: string, who: VoiceLine['who'], text: string, after?: string | null): readonly VoiceLine[] {
   const words = text.trim()
   if (!words) return lines
   const i = lines.findIndex((l) => l.id === id)
@@ -543,7 +713,14 @@ export function addLine(lines: readonly VoiceLine[], id: string, who: VoiceLine[
     next[i] = { ...lines[i]!, text: `${lines[i]!.text} ${words}` }
     return next
   }
-  const next = [...lines, { id, who, text: words }]
+  const line: VoiceLine = { id, who, text: words }
+  let at = lines.length
+  if (after !== undefined) {
+    const anchor = after === null ? -1 : lines.findIndex((l) => l.id === after)
+    // Its anchor scrolled away, or something you said came since: last, as it was heard.
+    if ((after === null || anchor >= 0) && lines.slice(anchor + 1).every((l) => l.who === 'agent')) at = anchor + 1
+  }
+  const next = [...lines.slice(0, at), line, ...lines.slice(at)]
   return next.length > MAX_TRANSCRIPT_LINES ? next.slice(-MAX_TRANSCRIPT_LINES) : next
 }
 

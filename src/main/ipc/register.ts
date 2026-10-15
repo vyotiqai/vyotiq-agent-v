@@ -589,6 +589,7 @@ import { registerExtensionsIpc } from './handlers/extensions'
 import { registerSecretsIpc } from './handlers/secrets'
 import { registerPromptIpc } from './handlers/prompt'
 import { registerVoiceConversationsIpc } from './handlers/voiceConversations'
+import { registerVoiceMiniIpc } from './handlers/voiceMini'
 
 const dictationTranscriptions = new Map<string, AbortController>()
 
@@ -4804,4 +4805,5 @@ export function registerIpc(): void {
   registerSecretsIpc()
   registerPromptIpc()
   registerVoiceConversationsIpc()
+  registerVoiceMiniIpc()
 }

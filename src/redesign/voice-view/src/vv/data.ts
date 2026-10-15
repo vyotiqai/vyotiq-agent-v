@@ -19,12 +19,14 @@ export type Work = {
   steps: Step[]
   /** The agent's answer, in its words (the voice says the short form). */
   result?: string
-  /** What it is blocked on. */
-  ask?: { kind: 'approval'; what: string; command: string } | { kind: 'question'; prompt: string; options: string[] }
+  /** What it is blocked on. `risky`: the command guard's danger, never answered by voice or a click here. */
+  ask?: { kind: 'approval'; what: string; command: string; risky?: boolean; always?: boolean } | { kind: 'question'; prompt: string; options: string[] }
+  /** The task never took the hand-off, and why (the voice had said "On it."). */
+  notSent?: string
 }
 
 export type Entry =
-  | { id: string; who: 'you'; text: string }
+  | { id: string; who: 'you'; text: string; /** Heard and left unanswered on purpose (a filler, talk not meant for it). */ unanswered?: boolean }
   | { id: string; who: 'voice'; text: string }
   | { id: string; who: 'work'; work: Work }
 
@@ -39,7 +41,16 @@ export type Scene = {
   partial?: string
   /** What the voice is saying now (speaking). */
   saying?: string
+  /** A reply you talked over: it stopped here, and fades back above your words. */
+  cut?: string
   problem?: { message: string; detail?: string; fix?: string }
+  /** A problem the session survived: a lost turn, or the speaking voice gone (replies stay on screen). */
+  trouble?: { message: string; detail?: string; fix?: string }
+  /** Esc pressed once: a second press ends the session. */
+  escArmed?: boolean
+  /** The listener is a fallback for a missing key. */
+  fellBackFrom?: string
+  reconnectAttempt?: number
   muted?: boolean
 }
 
@@ -54,6 +65,13 @@ export type SceneId =
   | 'error'
   | 'muted'
   | 'long'
+  | 'connecting'
+  | 'reconnecting'
+  | 'trouble'
+  | 'risky'
+  | 'question'
+  | 'failed'
+  | 'esc'
 
 export const SCENES: { id: SceneId; label: string }[] = [
   { id: 'listening', label: 'Listening' },
@@ -65,7 +83,14 @@ export const SCENES: { id: SceneId; label: string }[] = [
   { id: 'needs', label: 'Needs you' },
   { id: 'error', label: 'Error' },
   { id: 'muted', label: 'Muted' },
-  { id: 'long', label: 'Long' }
+  { id: 'long', label: 'Long' },
+  { id: 'connecting', label: 'Connecting' },
+  { id: 'reconnecting', label: 'Reconnecting' },
+  { id: 'trouble', label: 'Trouble' },
+  { id: 'risky', label: 'Risky' },
+  { id: 'question', label: 'Question' },
+  { id: 'failed', label: 'Failed' },
+  { id: 'esc', label: 'Esc once' }
 ]
 
 const TASK = 'Find why the settings test fails on Windows'
@@ -172,6 +197,88 @@ export function scene(id: SceneId): Scene {
         entries: [ask1, ask1b, ack1, { id: 'w1', who: 'work', work: working }],
         muted: true
       }
+    case 'connecting':
+      return { state: 'connecting', time: '0:00', entries: [] }
+    case 'reconnecting':
+      return { state: 'reconnecting', time: '0:48', entries: [ask1, ask1b, ack1], reconnectAttempt: 2, fellBackFrom: 'Deepgram' }
+    case 'trouble':
+      return {
+        state: 'listening',
+        time: '0:52',
+        entries: [
+          ask1,
+          ask1b,
+          ack1,
+          { id: 'w1', who: 'work', work: { ...working, state: 'failed', steps: [], elapsed: '0 s', notSent: 'Not sent: the task wasn’t ready to take it' } },
+          { id: 'v2', who: 'voice', text: 'It didn’t go through: the task wasn’t ready. Ask again in a moment.' },
+          { id: 'u2', who: 'you', text: 'Hmm.', unanswered: true }
+        ],
+        trouble: { message: 'The speaking provider is out of credit. Replies are on screen.', detail: 'ElevenLabs (402)', fix: 'Voice settings' }
+      }
+    case 'risky':
+      return {
+        state: 'waiting_on_you',
+        time: '1:31',
+        task: { title: TASK, state: 'needs' },
+        entries: [
+          ask1,
+          ask1b,
+          ack1,
+          {
+            id: 'w1',
+            who: 'work',
+            work: {
+              ...working,
+              state: 'needs',
+              steps: steps.slice(0, 4).concat({ id: 's5', tool: 'Wants to run', summary: 'rm -rf build', state: 'running' }),
+              ask: { kind: 'approval', what: 'delete the build folder', command: 'rm -rf build', risky: true }
+            }
+          },
+          { id: 'v2', who: 'voice', text: 'It wants to delete the build folder, which could be risky. Approve or deny it on screen.' }
+        ]
+      }
+    case 'question':
+      return {
+        state: 'waiting_on_you',
+        time: '1:40',
+        task: { title: TASK, state: 'needs' },
+        entries: [
+          ask1,
+          ask1b,
+          ack1,
+          {
+            id: 'w1',
+            who: 'work',
+            work: { ...working, state: 'needs', steps: steps.slice(0, 5), ask: { kind: 'question', prompt: 'Which branch should it commit to?', options: ['main', 'fix/settings-path'] } }
+          },
+          { id: 'v2', who: 'voice', text: 'Which branch should it commit to: main, or a new fix branch?' }
+        ]
+      }
+    case 'failed':
+      return {
+        state: 'listening',
+        time: '2:20',
+        task: { title: TASK, state: 'failed' },
+        entries: [
+          ask1,
+          ask1b,
+          ack1,
+          {
+            id: 'w1',
+            who: 'work',
+            work: {
+              ...working,
+              state: 'failed',
+              elapsed: '58 s',
+              steps: steps.slice(0, 3).map((s) => ({ ...s, state: s.id === 's3' ? ('failed' as const) : ('done' as const) })),
+              result: 'The test runner could not start: vitest is not installed in this worktree (pnpm install was never run).'
+            }
+          },
+          { id: 'v2', who: 'voice', text: 'It stopped: the test runner isn’t installed in that worktree. Want it to run pnpm install first?' }
+        ]
+      }
+    case 'esc':
+      return { state: 'listening', time: '3:05', entries: [ask1, ask1b, ack1], escArmed: true }
     case 'long':
       return {
         state: 'listening',

@@ -241,6 +241,7 @@ import type {
   VoiceConversationSummary,
   VoiceConversationsListRequest
 } from './ipc/schemas/voiceConversations'
+import type { VoiceMiniCommand, VoiceMiniLevel, VoiceMiniState } from './ipc/schemas/voiceMini'
 import type { GoogleAdcStatus, ProxyStatus } from './domain/network'
 
 /** Host OS from preload `process.platform`. */
@@ -547,6 +548,23 @@ export interface VyotiqApi {
   onVoiceSpeakEnd: (handler: (end: VoiceSpeakEnd) => void) => () => void
   /** Open a live voice session for this window (one at a time). */
   voiceStart: (payload: VoiceStartRequest) => Promise<IpcResult<VoiceStartResult>>
+  /** Main window: open or close the voice mini window (§26.5). */
+  voiceMiniOpen?: (payload: { open: boolean }) => Promise<IpcResult<boolean>>
+  /** Main window: the session as the mini window should draw it. */
+  voiceMiniPush?: (state: VoiceMiniState) => void
+  /** Main window: the orb's and the mic's level, ~20 a second while the mini window is open. */
+  voiceMiniPushLevel?: (level: VoiceMiniLevel) => void
+  /** Main window: a click in the mini window. */
+  onVoiceMiniCommand?: (handler: (command: VoiceMiniCommand) => void) => () => void
+  /** Mini window: the mirrored session. */
+  onVoiceMiniState?: (handler: (state: VoiceMiniState) => void) => () => void
+  onVoiceMiniLevel?: (handler: (level: VoiceMiniLevel) => void) => () => void
+  /** Mini window: ask the session in the main window to do something. */
+  voiceMiniCommand?: (command: VoiceMiniCommand) => void
+  /** Mini window: grow to the card, or back to the pill. */
+  voiceMiniResize?: (payload: { open: boolean }) => void
+  /** Mini window: bring the main window forward. */
+  voiceMiniShowApp?: () => void
   voiceStop: (payload: VoiceSessionRequest) => Promise<IpcResult<boolean>>
   /** One chunk of 16 kHz mono mic audio. */
   voiceAudio: (payload: VoiceAudioIn) => Promise<IpcResult<boolean>>

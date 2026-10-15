@@ -27,11 +27,32 @@ export const VoiceViewLayoutSchema = z.enum(VOICE_VIEW_LAYOUTS)
 export type VoiceViewLayout = z.infer<typeof VoiceViewLayoutSchema>
 
 /**
- * The orb's look in the voice view. Nine are WebGL motion graphics from the
- * design canvas, `liquid` is the first live orb, and `simple` is the drawn
- * orb, which uses no GPU (and is what any look falls back to without WebGL).
+ * Where voice mode lives while you talk (2026-10-15 redesign, docs/voice-mode.md §26):
+ * - `inline`: in the task's thread; the composer becomes the voice control, no orb.
+ * - `companion`: a column docked right of the task.
+ * - `takeover`: the whole window (sidebar included), in one of `viewLayout`'s layouts.
+ * - `capsule`: a pill above the composer on any view, opening into a card.
+ * - `mini`: its own small always-on-top window over other apps.
  */
-export const VOICE_ORB_LOOKS = ['glow', 'pearl', 'aura', 'wire', 'cloud', 'bubble', 'halftone', 'plasma', 'contour', 'liquid', 'simple'] as const
+export const VOICE_PLACEMENTS = ['inline', 'companion', 'takeover', 'capsule', 'mini'] as const
+export const VoicePlacementSchema = z.enum(VOICE_PLACEMENTS)
+export type VoicePlacement = z.infer<typeof VoicePlacementSchema>
+
+/** How voice mode looks in any placement: the app's own flat planes, or light gathered around the orb with glass controls. */
+export const VOICE_STYLES = ['quiet', 'ambient'] as const
+export const VoiceStyleSchema = z.enum(VOICE_STYLES)
+export type VoiceStyle = z.infer<typeof VoiceStyleSchema>
+
+/** The Companion column's width, px: dragged like the inspector, kept within these. */
+export const VOICE_COMPANION_WIDTH = { min: 360, max: 720, default: 460 } as const
+
+/**
+ * The orb's look in the voice view. `sphere` is the redesign's liquid sphere
+ * (the default), nine are WebGL motion graphics from the design canvas,
+ * `liquid` is the first live orb, and `simple` is the drawn orb, which uses
+ * no GPU (and is what any look falls back to without WebGL).
+ */
+export const VOICE_ORB_LOOKS = ['sphere', 'glow', 'pearl', 'aura', 'wire', 'cloud', 'bubble', 'halftone', 'plasma', 'contour', 'liquid', 'simple'] as const
 export const VoiceOrbLookSchema = z.enum(VOICE_ORB_LOOKS)
 export type VoiceOrbLook = z.infer<typeof VoiceOrbLookSchema>
 
@@ -76,8 +97,12 @@ export const VoiceSettingsSchema = z.object({
   /** Kept for old files only: talking over the agent now never cancels its work (D-46). */
   interruptMode: VoiceInterruptModeSchema.default('steer'),
   responder: VoiceResponderSchema.default(DEFAULT_VOICE_RESPONDER),
-  /** Short spoken cues while tools run; off leaves only a sound. */
-  speakProgress: z.boolean().default(true),
+  /**
+   * Short spoken cues while tools run; off leaves only a sound. Off by
+   * default since the 2026-10-15 redesign: the voice speaks milestones only
+   * (it started, it needs you, it's done).
+   */
+  speakProgress: z.boolean().default(false),
   /** No automatic turn ends; hold to talk. */
   pushToTalkOnly: z.boolean().default(false),
   endOfTurnPatience: VoiceEndOfTurnPatienceSchema.default('normal'),
@@ -85,8 +110,14 @@ export const VoiceSettingsSchema = z.object({
   approveByVoice: z.boolean().default(true),
   captions: z.boolean().default(true),
   earcons: z.boolean().default(true),
+  /** Where voice mode lives (§26); `viewLayout` is the Takeover's layout. */
+  placement: VoicePlacementSchema.default('takeover'),
+  style: VoiceStyleSchema.default('quiet'),
   viewLayout: VoiceViewLayoutSchema.default('conversation'),
-  orbLook: VoiceOrbLookSchema.default('glow')
+  orbLook: VoiceOrbLookSchema.default('sphere'),
+  /** Where its voice plays: an audio output's device id; empty is the system default. */
+  outputDeviceId: z.string().max(400).default(''),
+  companionWidth: z.number().int().min(VOICE_COMPANION_WIDTH.min).max(VOICE_COMPANION_WIDTH.max).default(VOICE_COMPANION_WIDTH.default)
 })
 export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>
 
@@ -99,14 +130,18 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   language: 'en',
   interruptMode: 'steer',
   responder: DEFAULT_VOICE_RESPONDER,
-  speakProgress: true,
+  speakProgress: false,
   pushToTalkOnly: false,
   endOfTurnPatience: 'normal',
   approveByVoice: true,
   captions: true,
   earcons: true,
+  placement: 'takeover',
+  style: 'quiet',
   viewLayout: 'conversation',
-  orbLook: 'glow'
+  orbLook: 'sphere',
+  outputDeviceId: '',
+  companionWidth: VOICE_COMPANION_WIDTH.default
 }
 
 // ── Keys ────────────────────────────────────────────────────────────────────

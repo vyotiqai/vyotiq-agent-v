@@ -1,37 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { VOICE_STATE_LABEL, type VoiceSessionState } from '@shared/voiceSession'
-import type { VoiceWork } from '@shared/ipc/schemas/voice'
-import { Icon } from '@renderer/lib/icons'
-import { Button, IconButton, cn } from '@renderer/lib/ui'
-import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import type { VoiceOptionInfo, VoiceSettings } from '@shared/ipc/schemas/voice'
 import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
 import { hasOpenFloatingLayer } from '@renderer/lib/hooks/floatingLayers'
+import { useDictationState } from '@renderer/features/chat/components/composer/take/dictationStore'
 import { playEarcon } from './earcons'
-import { VoiceOrb } from './VoiceOrb'
-import { DOUBLE_ESC_MS, firstTipSeen, formatTime, markFirstTipSeen } from './VoiceBar'
+import { DOUBLE_ESC_MS, markFirstTipSeen } from './VoiceBar'
+import { setSpeechOutput, speakText, stopSpeech, whenSpeechDone } from './speechPlayback'
 import {
   dismissEndedVoice,
   endVoiceMode,
+  patchVoiceSettings,
   setVoiceEscArmed,
   setVoiceViewOpen,
+  startVoiceMode,
+  stopVoiceTarget,
+  switchVoiceMic,
+  talkAgain,
   useVoiceMode,
   voiceController,
   type EndedVoiceConversation
 } from './voiceMode'
-import { ConversationLayout, OrbLayout, SplitLayout, type LayoutProps } from './view/layouts'
-import { ConversationItems, buildEntries } from './view/parts'
+import { IDLE_VOICE, type VoiceSnapshot } from './voiceSessionController'
+import { requestVoiceConversations } from './history/voiceHistoryRequests'
+import { DevicePickerContext, StageContext, VoicePickerContext, speakerFor, type DevicePickerDeps, type StageApi, type VoicePickerDeps } from './stage/kit'
+import { Capsule, Companion, Inline, Summary, Takeover } from './stage/placements'
+import { MiniWindowBridge } from './mini/miniBridge'
 
 /*
-  The voice view (docs/voice-mode.md §25, D-48): a spoken conversation over
-  the task pane. An orb that moves with your voice and its voice, what's
-  happening in a word, the conversation so far with each hand-off's live
-  steps and result, and Mute and End at the bottom. Its layout and the orb's
-  look are settings (Settings › Voice mode; view/layouts.tsx). The task's
-  record is one click away ("Show the task").
+  Voice mode on screen (docs/voice-mode.md §26, the 2026-10-15 redesign).
+  Where it lives is a setting (Settings › Voice mode › Placement, or the
+  Layout tab in the view itself):
+
+    Inline     over the task pane: the voice thread, the composer as the voice control.
+    Companion  a column docked right of the task.
+    Takeover   the whole window under the title bar, sidebar included.
+    Capsule    a pill at the bottom of the pane that grows into a card.
+    Mini       its own always-on-top window (mini/), mirroring this one.
 
   It lives in the app shell, not in a composer, so it outlives the line that
-  started it: switch tasks or go Home and the conversation stays on screen.
-  After End it stays too, as it stood, until you close it or talk again.
+  started it. "Show the task" closes it to the composer's voice bar, or the
+  capsule's pill where no bar is on screen. End always leaves a summary.
+
+  The shell mounts three slots: `VoiceView` in the main pane (Inline,
+  Capsule, the summary, the mini window's bridge), `VoiceTakeoverLayer` over
+  the navigator and the pane, and `VoiceCompanionColumn` beside the pane.
 */
 
 /**
@@ -43,6 +55,14 @@ export function VoiceSessionEffects() {
   const { owner, snapshot: v, settings } = useVoiceMode()
   const controller = voiceController()
   const live = owner !== null
+  const { settings: dictation } = useDictationState()
+
+  // One mic for voice and dictation: a pick made anywhere (Settings › Dictation, the view's Devices tab) is the one it listens on.
+  const listening = live && v.state !== 'connecting' && v.state !== 'error' && v.state !== 'off'
+  useEffect(() => {
+    if (!listening) return
+    if ((controller.micDeviceId ?? '') !== (dictation.deviceId ?? '')) void controller.switchMic(dictation.deviceId)
+  }, [listening, dictation.deviceId, controller])
 
   // A sound when the session opens and when it ends.
   const wasLive = useRef(false)
@@ -139,122 +159,221 @@ export function spaceActivates(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(SPACE_CONTROLS) !== null
 }
 
-/** An open menu, popover or modal dialog: Escape closes that first. */
+/** An open menu, popover, modal dialog, or the view's own settings popover or history drawer: Escape closes that first. */
 export function escapeBelongsToALayer(): boolean {
   return (
     hasOpenFloatingLayer() ||
-    document.querySelector('[aria-expanded="true"][aria-haspopup], dialog[open], [aria-modal="true"]') !== null
+    document.querySelector('[aria-expanded="true"][aria-haspopup], dialog[open], [aria-modal="true"], [data-voice-pop], [data-voice-drawer]') !== null
   )
 }
 
-function FullView({ onOpenVoiceSettings }: { onOpenVoiceSettings?: () => void }) {
+// ── The session, as the placements read it ─────────────────────────────────
+
+/** The placement showing in this window right now, or null. */
+export type VoiceSurface = 'inline' | 'companion' | 'takeover' | 'capsule' | 'mini' | 'summary' | null
+
+export function voiceSurface(m: { owner: string | null; ended: EndedVoiceConversation | null; viewOpen: boolean; bars: number; settings: Pick<VoiceSettings, 'placement'> }): VoiceSurface {
+  if (m.owner === null) return m.ended ? 'summary' : null
+  const p = m.settings.placement
+  if (p === 'mini' || p === 'capsule') return p
+  if (m.viewOpen) return p
+  // "Show the task": the composer's voice bar stands in; with none on screen (Home, another task), the capsule's pill.
+  return m.bars === 0 ? 'capsule' : null
+}
+
+function useMainStage(onOpenVoiceSettings?: () => void): StageApi {
   const { snapshot: v, settings, startedAt, escArmed, owner, workspacePath } = useVoiceMode()
   const controller = voiceController()
-  const [firstTip] = useState(() => !firstTipSeen())
+  // Stable: the orb, the meter and the ribbon restart their frame loops when these change.
   const level = useMemo(() => () => controller.orbLevel(), [controller])
-  const props: LayoutProps = { v, settings, startedAt, escArmed, firstTip, owner, workspacePath, level, onOpenVoiceSettings }
-  return (
-    <>
-      {/* State changes are announced; the words are not (they change too fast to be useful read out). */}
-      <span className="sr-only" role="status" aria-live="polite">
-        {VOICE_STATE_LABEL[v.state]}
-      </span>
-      {settings.viewLayout === 'orb' ? (
-        <OrbLayout {...props} />
-      ) : settings.viewLayout === 'split' ? (
-        <SplitLayout {...props} />
-      ) : (
-        <ConversationLayout {...props} />
-      )}
-    </>
+  const micLevel = useMemo(() => () => controller.micLevel(), [controller])
+  return useMemo<StageApi>(
+    () => ({
+      v,
+      settings,
+      startedAt,
+      escArmed,
+      level,
+      micLevel,
+      mute: (muted) => controller.setMuted(muted),
+      hold: (down) => controller.ptt(down),
+      stopSpeaking: () => controller.interrupt(),
+      stopTask: () => void stopVoiceTarget(),
+      end: () => void endVoiceMode(),
+      retry: owner ? () => void startVoiceMode(owner, { workspacePath }) : undefined,
+      showTask: () => setVoiceViewOpen(false),
+      openView: () => setVoiceViewOpen(true),
+      // Settings open in the app's pane: a placement over it (Takeover, Inline) steps aside so they are seen.
+      openVoiceSettings: onOpenVoiceSettings
+        ? () => {
+            if (settings.placement === 'takeover' || settings.placement === 'inline') setVoiceViewOpen(false)
+            onOpenVoiceSettings()
+          }
+        : undefined,
+      openMicSettings: () => void window.vyotiq.dictationOpenMicSettings?.(),
+      patchSettings: (patch) => {
+        // A placement picked from the view shows at once.
+        if (patch.placement) setVoiceViewOpen(true)
+        void patchVoiceSettings(patch)
+      },
+      respondApproval: (requestId, decision, runId) => Promise.resolve(window.vyotiq.respondToolApproval?.(requestId, decision, runId)),
+      respondQuestion: (requestId, questionId, value, runId) =>
+        Promise.resolve(window.vyotiq.respondAgentQuestion?.(requestId, [{ questionId, values: [value] }], runId)),
+      pickers: true
+    }),
+    [v, settings, startedAt, escArmed, level, micLevel, controller, owner, workspacePath, onOpenVoiceSettings]
   )
 }
 
-/** What's happening, in a word or two, in the pill. */
-const PILL_HEADLINE: Readonly<Record<VoiceSessionState, string>> = { ...VOICE_STATE_LABEL, hearing: 'Listening', working: 'Working on it', waiting_on_you: 'Needs you' }
+const SAMPLE_OWNER = 'voice-sample'
+const SAMPLE_LINE = 'Hi, I’m ready when you are. Tell me what you want done.'
 
-/** With the view closed and no voice bar on screen (Home, another task): a small pill keeps it in reach. */
-function MiniPill() {
-  const { snapshot: v } = useVoiceMode()
+/** The voice and device pickers' reach into this window: voices over IPC, the mic in this renderer. */
+function PickerProviders({ v, settings, children }: { v: VoiceSnapshot; settings: VoiceSettings; children: ReactNode }) {
   const controller = voiceController()
-  const level = (): number => controller.orbLevel()
+  const { settings: dictation } = useDictationState()
+  const provider = speakerFor(v, settings, null)
+  const voice = useMemo<VoicePickerDeps>(
+    () => ({
+      provider,
+      listVoices: async (p, model) => {
+        const res = await window.vyotiq.voiceListVoices?.({ provider: p, model })
+        return res?.ok ? (res.data as VoiceOptionInfo[]) : null
+      },
+      playSample: async (p, voiceId, speed) => {
+        // Where its voice will play.
+        setSpeechOutput(settings.outputDeviceId)
+        // The mic must not hear the sample, or it would answer it: held for the sample's length.
+        controller.holdMic(true)
+        try {
+          await speakText(SAMPLE_OWNER, { text: SAMPLE_LINE, kind: 'plain', provider: p, voiceId, speed })
+          await whenSpeechDone(SAMPLE_OWNER)
+        } finally {
+          controller.holdMic(false)
+        }
+      },
+      stopSample: () => {
+        stopSpeech()
+        controller.holdMic(false)
+      }
+    }),
+    [provider, controller, settings.outputDeviceId]
+  )
+  const devices = useMemo<DevicePickerDeps>(() => ({ micId: dictation.deviceId, switchMic: switchVoiceMic }), [dictation.deviceId])
   return (
-    <div
-      className="vy-menu absolute bottom-4 right-4 z-sticky flex h-10 items-center gap-2 pl-3 pr-2"
-      role="group"
-      aria-label="Voice mode"
-      data-voice-pill={v.state}
-    >
-      <VoiceOrb state={v.state} level={level} size={20} />
-      <span className="text-sm text-fg">{PILL_HEADLINE[v.state]}</span>
-      <IconButton icon="expand" label="Open the voice view" size="sm" onClick={() => setVoiceViewOpen(true)} />
-      <IconButton icon="close" label="End voice mode" size="sm" onClick={() => void endVoiceMode()} />
-    </div>
+    <VoicePickerContext.Provider value={voice}>
+      <DevicePickerContext.Provider value={devices}>{children}</DevicePickerContext.Provider>
+    </VoicePickerContext.Provider>
   )
 }
 
-/**
- * The conversation after End, as it stood, until you close it or start
- * voice mode again. Work still going carries on in its task; its steps froze
- * when the session stopped following it, so they aren't shown as live.
- */
-function EndedView({ ended }: { ended: EndedVoiceConversation }) {
-  const works = useMemo(() => {
-    const finished: Record<string, VoiceWork> = {}
-    for (const [id, w] of Object.entries(ended.works)) if (w.state !== 'running' && w.state !== 'needs') finished[id] = w
-    return finished
-  }, [ended.works])
-  const entries = useMemo(() => buildEntries(ended.transcript, works), [ended.transcript, works])
-  const unfinished = Object.keys(works).length < Object.keys(ended.works).length
-
-  // Esc closes it, as the view's own Esc would have ended the session. Capture phase, so it never also stops the run.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || escapeBelongsToALayer() || isEditableShortcutTarget(e.target)) return
-      e.preventDefault()
-      e.stopPropagation()
-      dismissEndedVoice()
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [])
-
+function LiveStage({ onOpenVoiceSettings, children }: { onOpenVoiceSettings?: () => void; children: ReactNode }) {
+  const api = useMainStage(onOpenVoiceSettings)
   return (
-    <section className="absolute inset-0 z-sticky flex min-h-0 flex-col bg-bg" aria-label="Voice conversation" data-voice-ended>
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2">
-        <Icon name="waveform" size={14} className="text-muted" />
-        <h2 className="m-0 text-sm text-fg-strong">Voice</h2>
-        <span className="font-mono text-caption text-tertiary tnum">{`Ended · ${formatTime(ended.endedAt - (ended.startedAt ?? ended.endedAt))}`}</span>
-        <span className="flex-1" />
-        <Button size="xs" variant="ghost" icon="close" onClick={dismissEndedVoice} data-voice-ended-close>
-          Close
-        </Button>
-      </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <ol className="m-0 mx-auto flex w-full max-w-[720px] list-none flex-col px-6 pb-4 pt-6" aria-label="Conversation" data-voice-transcript>
-          <ConversationItems entries={entries} partial="" now={ended.endedAt} />
-        </ol>
-      </div>
-      {unfinished ? (
-        <div className={cn('flex h-10 shrink-0 items-center border-t px-4 text-caption text-tertiary', BORDER_DIVIDER)} data-voice-ended-unfinished>
-          Work still going when you ended carries on in its task.
-        </div>
-      ) : null}
-    </section>
+    <StageContext.Provider value={api}>
+      <PickerProviders v={api.v} settings={api.settings}>
+        {children}
+      </PickerProviders>
+    </StageContext.Provider>
   )
 }
 
-/** Mounted once in the app shell, over the main pane. */
-export function VoiceView({ onOpenVoiceSettings }: { onOpenVoiceSettings?: () => void }) {
-  const { owner, viewOpen, bars, ended } = useVoiceMode()
+const noop = (): void => {}
+
+/** The ended session as a still stage: the summary and its conversation read from it. */
+function EndedStage({ ended, settings, children }: { ended: EndedVoiceConversation; settings: VoiceSettings; children: ReactNode }) {
+  const api = useMemo<StageApi>(
+    () => ({
+      v: { ...IDLE_VOICE, transcript: ended.transcript, works: ended.works },
+      settings,
+      startedAt: ended.startedAt,
+      escArmed: false,
+      level: () => 0,
+      micLevel: () => 0,
+      mute: noop,
+      hold: noop,
+      stopSpeaking: noop,
+      stopTask: noop,
+      end: noop,
+      patchSettings: (patch) => void patchVoiceSettings(patch),
+      respondApproval: () => Promise.resolve(undefined),
+      respondQuestion: () => Promise.resolve(undefined),
+      pickers: false
+    }),
+    [ended, settings]
+  )
+  return <StageContext.Provider value={api}>{children}</StageContext.Provider>
+}
+
+/** The main pane's slot: Inline, the capsule, the summary, and the mini window's bridge. Mounted once. */
+export function VoiceView({
+  onOpenVoiceSettings,
+  onOpenTask
+}: {
+  onOpenVoiceSettings?: () => void
+  /** Open a task the session handed work to (the summary's rows). */
+  onOpenTask?: (workspacePath: string, runId: string) => void
+}) {
+  const mode = useVoiceMode()
+  const surface = voiceSurface(mode)
   return (
     <>
       <VoiceSessionEffects />
-      {owner === null ? (ended ? <EndedView ended={ended} /> : null) : viewOpen ? (
-        <FullView onOpenVoiceSettings={onOpenVoiceSettings} />
-      ) : bars === 0 ? (
-        <MiniPill />
+      {surface === 'summary' && mode.ended ? (
+        <EndedStage ended={mode.ended} settings={mode.settings}>
+          <Summary
+            endedAt={mode.ended.endedAt}
+            workspacePath={mode.ended.workspacePath}
+            onClose={dismissEndedVoice}
+            onOpenTask={
+              onOpenTask
+                ? (workspacePath, runId) => {
+                    // Open task closes the summary (2026-10-15 decision); the conversation stays in All voice conversations.
+                    dismissEndedVoice()
+                    onOpenTask(workspacePath, runId)
+                  }
+                : undefined
+            }
+            onTalkAgain={talkAgain}
+            onAllConversations={() => {
+              if (mode.ended?.workspacePath && requestVoiceConversations(mode.ended.workspacePath)) dismissEndedVoice()
+            }}
+          />
+        </EndedStage>
+      ) : surface === 'inline' || surface === 'capsule' || surface === 'mini' ? (
+        <LiveStage onOpenVoiceSettings={onOpenVoiceSettings}>
+          {surface === 'inline' ? (
+            <Inline />
+          ) : surface === 'capsule' ? (
+            <Capsule />
+          ) : (
+            // Without its window, the composer's bar is the control (it shows with the mini window); with no bar on screen, the capsule.
+            <MiniWindowBridge fallback={mode.bars === 0 ? <Capsule /> : null} />
+          )}
+        </LiveStage>
       ) : null}
     </>
+  )
+}
+
+/** Over the navigator and the main pane, under the title bar: Takeover. */
+export function VoiceTakeoverLayer({ onOpenVoiceSettings }: { onOpenVoiceSettings?: () => void }) {
+  const mode = useVoiceMode()
+  if (voiceSurface(mode) !== 'takeover') return null
+  return (
+    <LiveStage onOpenVoiceSettings={onOpenVoiceSettings}>
+      <Takeover />
+    </LiveStage>
+  )
+}
+
+/** Beside the main pane: Companion. */
+export function VoiceCompanionColumn({ onOpenVoiceSettings }: { onOpenVoiceSettings?: () => void }) {
+  const mode = useVoiceMode()
+  if (voiceSurface(mode) !== 'companion') return null
+  return (
+    <LiveStage onOpenVoiceSettings={onOpenVoiceSettings}>
+      <Companion />
+    </LiveStage>
   )
 }

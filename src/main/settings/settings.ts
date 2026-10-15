@@ -535,6 +535,21 @@ function migrateRemovedDictationEngine(value: unknown): unknown {
   return dictation
 }
 
+/**
+ * v9, the 2026-10-15 voice redesign (docs/voice-mode.md §26): the voice
+ * speaks milestones only, and the orb is the liquid sphere. Saving any voice
+ * setting wrote the whole object, so the old defaults sit in most files:
+ * only those exact values are rewritten (spoken progress on, the Glow orb).
+ * Progress or Glow picked after the v9 stamp is a choice and survives.
+ */
+function migrateVoiceRedesignDefaults(value: unknown): unknown {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return value
+  const voice = { ...(value as Record<string, unknown>) }
+  if (voice.speakProgress === true) voice.speakProgress = false
+  if (voice.orbLook === 'glow') voice.orbLook = 'sphere'
+  return voice
+}
+
 function migrateBlankVoiceLanguage(value: unknown): unknown {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return value
   const voice = value as Record<string, unknown>
@@ -595,6 +610,7 @@ function migratePersistedSettingsDefaults(raw: Record<string, unknown>): {
   // English is the default now (D-47); a "detect" picked after the v8 stamp
   // is a user choice and survives.
   if (rawVersion < 8) next.voice = migrateBlankVoiceLanguage(next.voice)
+  if (rawVersion < 9) next.voice = migrateVoiceRedesignDefaults(next.voice)
   return { data: next, persist: true }
 }
 

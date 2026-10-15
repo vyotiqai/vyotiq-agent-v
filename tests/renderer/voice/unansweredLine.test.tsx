@@ -1,19 +1,42 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
-import { ConversationItems, buildEntries } from '@renderer/features/voice/view/parts'
-import { markUnanswered, type VoiceLine } from '@renderer/features/voice/voiceSessionController'
+import { DEFAULT_VOICE_SETTINGS } from '@shared/ipc/schemas/voice'
+import { HistoryList, StageContext, type StageApi } from '@renderer/features/voice/stage/kit'
+import { IDLE_VOICE, markUnanswered, type VoiceLine } from '@renderer/features/voice/voiceSessionController'
 
 afterEach(cleanup)
 
+const noop = (): void => {}
+
+function stage(transcript: readonly VoiceLine[]): StageApi {
+  return {
+    v: { ...IDLE_VOICE, transcript },
+    settings: DEFAULT_VOICE_SETTINGS,
+    startedAt: null,
+    escArmed: false,
+    level: () => 0,
+    micLevel: () => 0,
+    mute: noop,
+    hold: noop,
+    stopSpeaking: noop,
+    stopTask: noop,
+    end: noop,
+    patchSettings: noop,
+    respondApproval: async () => undefined,
+    respondQuestion: async () => undefined,
+    pickers: false
+  }
+}
+
 describe('words the voice left unanswered', () => {
-  it('show muted and say so; answered ones do not', () => {
+  it('show muted and say so in the conversation; answered ones do not', () => {
     let lines: readonly VoiceLine[] = [{ id: 't1', who: 'you', text: 'Run the tests.' }]
     lines = markUnanswered(lines, 'u1', 'Um.')
     const { container } = render(
-      <ul>
-        <ConversationItems entries={buildEntries(lines, {})} partial="" now={0} />
-      </ul>
+      <StageContext.Provider value={stage(lines)}>
+        <HistoryList />
+      </StageContext.Provider>
     )
     const marked = container.querySelectorAll('[data-voice-unanswered]')
     expect(marked).toHaveLength(1)

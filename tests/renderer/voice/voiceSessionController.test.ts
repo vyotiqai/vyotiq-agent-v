@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MAX_WORKS, VoiceSessionController, keepWork, type VoiceControllerDeps, type VoiceTurn } from '@renderer/features/voice/voiceSessionController'
+import { MAX_WORKS, PTT_REMUTE_MS, VoiceSessionController, addLine, keepWork, type VoiceControllerDeps, type VoiceTurn } from '@renderer/features/voice/voiceSessionController'
 import { MicCaptureError, type OpenMicCapture } from '@renderer/lib/audio/micCapture'
 import type { VoiceEvent, VoiceWork } from '@shared/ipc/schemas/voice'
 import { buildEntries } from '@renderer/features/voice/view/parts'
@@ -96,6 +96,30 @@ describe('the task the voice is on', () => {
     expect(t.bridge.voiceTask).toHaveBeenCalledTimes(1)
     t.c.setTask('run-2')
     expect(t.bridge.voiceTask).toHaveBeenLastCalledWith({ sessionId: 's1', runId: 'run-2' })
+  })
+})
+
+describe('the order lines are read in', () => {
+  it('“On it.” reads above the hand-off it announced, though its caption waits for its audio (2026-10-15 screenshot)', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'turn', turnId: 't1', text: 'Analyze the code base', stop: false })
+    // Main says the acknowledgement, then hands off, in the same instant.
+    t.emit({ kind: 'say', contextId: 'c1', text: 'On it.', audible: true })
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Analyze the code base: give an overview.' })
+    t.audio('c1', 0)
+    await vi.waitFor(() => expect(t.c.snapshot.transcript.map((l) => l.id)).toEqual(['t1', 'c1', 'h1']))
+  })
+
+  it('a reply whose audio comes after something you said goes last, as it was heard', () => {
+    const lines = addLine(addLine([], 't1', 'you', 'Hello.'), 't2', 'you', 'Are you there?')
+    expect(addLine(lines, 'c1', 'voice', 'Hi.', 't1').map((l) => l.id)).toEqual(['t1', 't2', 'c1'])
+    // Said before anything was on screen, with only a hand-off since: first.
+    expect(addLine(addLine([], 'h1', 'agent', 'Do it.'), 'c1', 'voice', 'On it.', null).map((l) => l.id)).toEqual(['c1', 'h1'])
+    // Its anchor scrolled away: last.
+    expect(addLine(addLine([], 'h1', 'agent', 'Do it.'), 'c1', 'voice', 'On it.', 'gone').map((l) => l.id)).toEqual(['h1', 'c1'])
+    // More words for a line already there stay in place.
+    expect(addLine(addLine([], 'c1', 'voice', 'On it.'), 'c1', 'voice', 'Starting now.', null)[0]!.text).toBe('On it. Starting now.')
   })
 })
 
@@ -505,5 +529,173 @@ describe('VoiceSessionController', () => {
     t.sources[0]!.onended?.()
     t.end('c1')
     expect(t.bridge.voicePlayback).toHaveBeenCalledWith({ sessionId: 's1', contextId: 'c1', phase: 'drained' })
+  })
+})
+
+describe('the 2026-10-15 redesign’s controls (§26)', () => {
+  it('a reply you talked over is marked cut where its line stood, until the next reply', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'turn', turnId: 't1', text: 'Is it done?', stop: false })
+    t.emit({ kind: 'say', contextId: 'c1', text: 'Yes, all fourteen pass.', audible: false })
+    await vi.waitFor(() => expect(t.c.snapshot.transcript.map((l) => l.id)).toEqual(['t1', 'c1']))
+    t.emit({ kind: 'flush', contextId: 'c1' })
+    expect(t.c.snapshot.cutLineId).toBe('c1')
+    // A flush for a reply that never reached the screen marks nothing.
+    t.emit({ kind: 'flush', contextId: 'never-shown' })
+    expect(t.c.snapshot.cutLineId).toBe('c1')
+    t.emit({ kind: 'say', contextId: 'c2', text: 'Okay.', audible: false })
+    expect(t.c.snapshot.cutLineId).toBeNull()
+  })
+
+  it('switches the microphone without ending the session: the new one opens before the old one closes', async () => {
+    const t = setup()
+    await t.c.start({ deviceId: 'd1' })
+    const order: string[] = []
+    t.stopCapture.mockImplementation(() => order.push('old stopped'))
+    ;(t.openCapture as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      order.push('new opened')
+      return { deviceLabel: 'Headset', deviceId: 'd2', stop: vi.fn() }
+    })
+    await expect(t.c.switchMic('d2')).resolves.toBe(true)
+    expect(order).toEqual(['new opened', 'old stopped'])
+    expect(t.c.snapshot.deviceLabel).toBe('Headset')
+    expect(t.c.active).toBe(true)
+    // A device that won't open leaves the old one listening.
+    ;(t.openCapture as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      throw new MicCaptureError('no_device', 'gone')
+    })
+    await expect(t.c.switchMic('d3')).resolves.toBe(false)
+    expect(t.c.snapshot.deviceLabel).toBe('Headset')
+  })
+
+  it('plays its voice on the chosen output, including the reply already playing', async () => {
+    const sinks: string[] = []
+    const t = setup(undefined, {
+      createAudioContext: () =>
+        ({
+          currentTime: 0,
+          state: 'running',
+          destination: {},
+          createBuffer: (_c: number, length: number, rate: number) => ({ duration: length / rate, getChannelData: () => new Float32Array(length) }),
+          createBufferSource: () => ({ buffer: null, onended: null, connect: vi.fn(), start: vi.fn(), stop: vi.fn() }),
+          createGain: () => ({ gain: { value: 1, setTargetAtTime: vi.fn() }, connect: vi.fn() }),
+          createAnalyser: () => ({ fftSize: 0, connect: vi.fn(), getFloatTimeDomainData: vi.fn() }),
+          close: vi.fn(async () => {}),
+          setSinkId: vi.fn(async (id: string) => {
+            sinks.push(id)
+          })
+        }) as never
+    })
+    t.c.setOutput('headset')
+    await t.c.start()
+    t.emit({ kind: 'say', contextId: 'c1', text: 'Hello.', audible: true })
+    t.audio('c1', 0)
+    expect(sinks).toEqual(['headset'])
+    t.c.setOutput('')
+    expect(sinks).toEqual(['headset', ''])
+  })
+
+  it('holds the mic while a voice sample plays: nothing is sent, and mute is untouched', async () => {
+    const t = setup()
+    await t.c.start()
+    t.samples(new Int16Array(160).fill(2000))
+    expect(t.bridge.voiceAudio).toHaveBeenCalledTimes(1)
+    t.c.holdMic(true)
+    t.samples(new Int16Array(160).fill(2000))
+    expect(t.bridge.voiceAudio).toHaveBeenCalledTimes(1)
+    expect(t.c.micLevel()).toBe(0)
+    expect(t.c.snapshot.muted).toBe(false)
+    t.c.holdMic(false)
+    t.samples(new Int16Array(160).fill(2000))
+    expect(t.bridge.voiceAudio).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('hold to talk (audit 2026-10-15, I1–I2)', () => {
+  it('held while muted it talks anyway, and is muted again once the turn is answered', async () => {
+    const t = setup()
+    await t.c.start()
+    t.c.setMuted(true)
+    t.bridge.voiceMute.mockClear()
+    t.c.ptt(true)
+    expect(t.c.snapshot.muted).toBe(false)
+    expect(t.bridge.voiceMute).toHaveBeenCalledWith({ sessionId: 's1', muted: false })
+    // Audio goes while held.
+    t.samples(new Int16Array(160).fill(2000))
+    expect(t.bridge.voiceAudio).toHaveBeenCalled()
+    t.c.ptt(false)
+    expect(t.bridge.voicePtt).toHaveBeenLastCalledWith({ sessionId: 's1', down: false })
+    // Still unmuted while it thinks and answers.
+    t.emit({ kind: 'state', state: 'thinking' })
+    t.emit({ kind: 'state', state: 'speaking' })
+    expect(t.c.snapshot.muted).toBe(false)
+    // Back to listening: muted again, as you left it.
+    t.emit({ kind: 'state', state: 'listening' })
+    expect(t.c.snapshot.muted).toBe(true)
+    expect(t.bridge.voiceMute).toHaveBeenLastCalledWith({ sessionId: 's1', muted: true })
+  })
+
+  it('unmuting by hand after a hold keeps it unmuted', async () => {
+    const t = setup()
+    await t.c.start()
+    t.c.setMuted(true)
+    t.c.ptt(true)
+    t.c.ptt(false)
+    t.c.setMuted(false)
+    t.emit({ kind: 'state', state: 'listening' })
+    expect(t.c.snapshot.muted).toBe(false)
+  })
+
+  it('held while it speaks, it stops speaking at once', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'state', state: 'speaking' })
+    t.c.ptt(true)
+    expect(t.bridge.voiceInterrupt).toHaveBeenCalledWith({ sessionId: 's1' })
+    expect(t.bridge.voicePtt).toHaveBeenCalledWith({ sessionId: 's1', down: true })
+  })
+})
+
+describe('a hold through mute that nothing was heard in', () => {
+  it('is muted again shortly after, and a word arriving first does not mute it early', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      await t.c.start()
+      t.emit({ kind: 'state', state: 'listening' })
+      t.c.setMuted(true)
+      t.emit({ kind: 'state', state: 'paused' })
+      t.c.ptt(true)
+      // Main unmutes: listening again.
+      t.emit({ kind: 'state', state: 'listening' })
+      t.c.ptt(false)
+      // A stray partial while still listening is not the turn's answer.
+      t.emit({ kind: 'partial', text: 'um' })
+      expect(t.c.snapshot.muted).toBe(false)
+      vi.advanceTimersByTime(PTT_REMUTE_MS + 10)
+      expect(t.c.snapshot.muted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('waits for the answer when a turn did start', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      await t.c.start()
+      t.c.setMuted(true)
+      t.c.ptt(true)
+      t.emit({ kind: 'state', state: 'hearing' })
+      t.c.ptt(false)
+      t.emit({ kind: 'state', state: 'thinking' })
+      vi.advanceTimersByTime(PTT_REMUTE_MS + 10)
+      expect(t.c.snapshot.muted).toBe(false)
+      t.emit({ kind: 'state', state: 'listening' })
+      expect(t.c.snapshot.muted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

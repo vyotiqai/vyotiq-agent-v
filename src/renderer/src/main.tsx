@@ -7,6 +7,24 @@ import { initRendererSentry } from './logging/sentry'
 import { installRendererErrorHandlers, reportUncaughtRendererError } from './logging/handlers'
 import './styles.css'
 
+/**
+ * The voice mini window (docs/voice-mode.md §26.5) loads this same bundle
+ * with `#voice-mini`: it draws a mirror of the main window's session and
+ * nothing else, so it skips the app's boot (logging, telemetry, settings are
+ * the main window's, and their handlers refuse any other window anyway).
+ */
+async function bootVoiceMini(): Promise<void> {
+  const { MiniVoiceApp } = await import('./features/voice/mini/MiniVoiceApp')
+  document.title = 'Agent V voice'
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <MiniVoiceApp />
+      </ErrorBoundary>
+    </StrictMode>
+  )
+}
+
 async function boot(): Promise<void> {
   try {
     await initRendererLogging()
@@ -43,4 +61,5 @@ async function boot(): Promise<void> {
   )
 }
 
-void boot()
+if (window.location.hash === '#voice-mini') void bootVoiceMini()
+else void boot()

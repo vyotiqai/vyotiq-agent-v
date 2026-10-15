@@ -198,6 +198,22 @@ export async function listMicDevices(): Promise<Array<{ deviceId: string; label:
   }
 }
 
+/** The audio outputs, for voice mode's output picker. Same rules as `listMicDevices`: empty id is the system default. */
+export async function listSpeakerDevices(): Promise<Array<{ deviceId: string; label: string }>> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return []
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices()
+    return all
+      .filter((d) => d.kind === 'audiooutput' && d.deviceId && d.deviceId !== 'communications')
+      .map((d, i) => ({
+        deviceId: d.deviceId === 'default' ? '' : d.deviceId,
+        label: d.deviceId === 'default' ? 'System default' : d.label || `Speaker ${i + 1}`
+      }))
+  } catch {
+    return []
+  }
+}
+
 /** Int16 samples as base64 — the IPC wire format for `pcm16k`. */
 export function int16ToBase64(pcm: Int16Array): string {
   const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)

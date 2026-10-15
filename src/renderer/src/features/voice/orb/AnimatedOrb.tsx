@@ -4,6 +4,7 @@ import { VoiceOrb } from '../VoiceOrb'
 import { LiquidOrb } from './LiquidOrb'
 import { SHADER_LOOKS } from './orbLooks'
 import { ShaderOrb } from './ShaderOrb'
+import { SphereOrb } from './SphereOrb'
 
 /*
   The voice orb in the look chosen in Settings › Voice mode (§25). Below
@@ -14,6 +15,7 @@ import { ShaderOrb } from './ShaderOrb'
 export const MIN_ANIMATED_SIZE = 40
 
 export const ORB_LOOK_OPTIONS: readonly { value: VoiceOrbLook; label: string; description: string }[] = [
+  { value: 'sphere', label: 'Sphere', description: 'A glossy sphere of liquid light that swells and ripples with the voice' },
   ...(Object.keys(SHADER_LOOKS) as (keyof typeof SHADER_LOOKS)[]).map((id) => ({
     value: id,
     label: SHADER_LOOKS[id].label,
@@ -37,5 +39,6 @@ export function AnimatedOrb({
 }) {
   if (look === 'simple' || size < MIN_ANIMATED_SIZE) return <VoiceOrb state={state} size={size} level={level} />
   if (look === 'liquid') return <LiquidOrb state={state} size={size} level={level} />
+  if (look === 'sphere') return <SphereOrb state={state} size={size} level={level} />
   return <ShaderOrb look={look} state={state} size={size} level={level} />
 }

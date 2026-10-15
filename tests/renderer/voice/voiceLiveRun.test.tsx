@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { VoiceView } from '@renderer/features/voice/VoiceView'
+import { VoiceTakeoverLayer, VoiceView } from '@renderer/features/voice/VoiceView'
 import { handleVoiceTurn, resetVoiceModeForTests, setVoiceTarget, startVoiceMode, voiceController } from '@renderer/features/voice/voiceMode'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot } from '@renderer/features/voice/voiceSessionController'
 import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
@@ -172,7 +172,12 @@ describe('answering from the view', () => {
     ;(window as unknown as { vyotiq: Record<string, unknown> }).vyotiq.respondToolApproval = respond
     const fake = new FakeController()
     await resetVoiceModeForTests(fake)
-    render(<VoiceView />)
+    render(
+      <>
+        <VoiceView />
+        <VoiceTakeoverLayer />
+      </>
+    )
     await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
     const transcript = [{ id: 'h1', who: 'agent' as const, text: 'Tidy the branch.', runId: 'r1' }]
     act(() => fake.update({ state: 'waiting_on_you', transcript, works: { r1: needs('a1') } }))
@@ -189,7 +194,12 @@ describe('answering from the view', () => {
     ;(window as unknown as { vyotiq: Record<string, unknown> }).vyotiq.respondToolApproval = respond
     const fake = new FakeController()
     await resetVoiceModeForTests(fake)
-    render(<VoiceView />)
+    render(
+      <>
+        <VoiceView />
+        <VoiceTakeoverLayer />
+      </>
+    )
     await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
     act(() => fake.update({ state: 'waiting_on_you', transcript: [{ id: 'h1', who: 'agent', text: 'x', runId: 'r1' }], works: { r1: needs('a1') } }))
     fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
@@ -201,13 +211,18 @@ describe('answering from the view', () => {
     ;(window as unknown as { vyotiq: Record<string, unknown> }).vyotiq.respondToolApproval = respond
     const fake = new FakeController()
     await resetVoiceModeForTests(fake)
-    render(<VoiceView />)
+    render(
+      <>
+        <VoiceView />
+        <VoiceTakeoverLayer />
+      </>
+    )
     await act(() => startVoiceMode('line-1', { workspacePath: '/repo' }))
     const transcript = [{ id: 'h1', who: 'agent' as const, text: 'x', runId: 'r1' }]
     act(() => fake.update({ state: 'waiting_on_you', transcript, works: { r1: needs('a1') } }))
     expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull()
     act(() => fake.update({ works: { r1: needs('a2', { always: true }) } }))
-    expect(document.querySelector('[data-voice-subline]')!.textContent).toBe('Allow it to run git stash? Say yes, no, or always allow')
+    expect(document.querySelector('[data-voice-subline]')!.textContent).toBe('Say yes, no, or always allow, or use the buttons')
     fireEvent.click(screen.getByRole('button', { name: 'Always allow' }))
     expect(respond).toHaveBeenCalledWith('a2', 'always', 'r1')
     act(() => fake.update({ works: { r1: needs('a3', { always: true, risky: true }) } }))

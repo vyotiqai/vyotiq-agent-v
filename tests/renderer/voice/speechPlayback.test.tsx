@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReadAloudButton } from '@renderer/features/voice/ReadAloudButton'
-import { resetSpeechForTests, speakText, stopSpeech } from '@renderer/features/voice/speechPlayback'
+import { resetSpeechForTests, setSpeechOutput, speakText, stopSpeech, whenSpeechDone } from '@renderer/features/voice/speechPlayback'
 import type { PlayerAudioContext } from '@renderer/features/voice/voicePlayer'
 import type { VoiceAudioOut, VoiceSpeakEnd } from '@shared/ipc/schemas/voice'
 
@@ -121,5 +121,22 @@ describe('Read aloud', () => {
     await waitFor(() => expect(voiceSpeak).toHaveBeenCalledTimes(2))
     expect(voiceStopSpeaking).toHaveBeenCalledWith({ utteranceId: 'u1' })
     expect(screen.getAllByRole('button', { name: 'Read aloud' })).toHaveLength(1)
+  })
+})
+
+describe('where speech plays (voice mode’s samples, audit I11)', () => {
+  it('plays on the chosen output, including what is playing; whenSpeechDone resolves when it ends', async () => {
+    const sinks: string[] = []
+    resetSpeechForTests(() => ({ ...fakeContext(), setSinkId: async (id: string) => void sinks.push(id) }) as unknown as PlayerAudioContext)
+    setSpeechOutput('headset')
+    await speakText('voice-sample', { text: 'Hi.', kind: 'plain' })
+    const done = whenSpeechDone('voice-sample')
+    act(() => audioHandler!(chunk('u1')))
+    expect(sinks).toEqual(['headset'])
+    setSpeechOutput('')
+    expect(sinks).toEqual(['headset', ''])
+    act(() => endHandler!({ utteranceId: 'u1' }))
+    act(() => sources.forEach((src) => src.onended?.()))
+    await expect(done).resolves.toBeUndefined()
   })
 })

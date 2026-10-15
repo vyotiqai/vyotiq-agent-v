@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { sttEntry, ttsEntry } from '@shared/voice'
 import { VOICE_STATE_LABEL } from '@shared/voiceSession'
 import { Icon } from '@renderer/lib/icons'
@@ -6,7 +6,7 @@ import { Button, cn } from '@renderer/lib/ui'
 import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { VoiceOrb } from './VoiceOrb'
 import { speakingProblem, turnProblem, voiceProblem, type VoiceProblem } from './voiceCopy'
-import { endVoiceMode, registerVoiceBar, setVoiceTarget, setVoiceViewOpen, startVoiceMode, useVoiceMode, voiceController } from './voiceMode'
+import { endVoiceMode, registerVoiceBar, setVoiceTarget, setVoiceViewOpen, startVoiceMode, useVoiceMode, voiceBarShown, voiceController } from './voiceMode'
 import type { VoiceSnapshot } from './voiceSessionController'
 import type { VoiceRunTarget } from './turnRouting'
 
@@ -137,7 +137,8 @@ export function VoiceBar({
   ]
     .filter(Boolean)
     .join(' ')
-  const level = (): number => controller.orbLevel()
+  // Stable: the orb restarts its frame loop whenever this changes, and the clock re-renders every second.
+  const level = useMemo(() => () => controller.orbLevel(), [controller])
 
   // Caption: your words while you talk; the agent's while it speaks; else what's happening.
   // Captions off hides the words only; the agent still speaks (A-09).
@@ -158,6 +159,9 @@ export function VoiceBar({
             : VOICE_STATE_LABEL[v.state]}
       </span>
     )
+
+  // A placement is the control right now (§26): the bar keeps its line registered and draws nothing.
+  if (!voiceBarShown({ viewOpen, settings })) return null
 
   const hint = escArmed
     ? 'Press Esc again to end voice mode'

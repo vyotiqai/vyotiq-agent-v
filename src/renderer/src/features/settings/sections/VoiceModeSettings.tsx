@@ -10,7 +10,9 @@ import {
   type VoiceKeyStatus,
   type VoiceOpenRouterCredit,
   type VoiceOrbLook,
+  type VoicePlacement,
   type VoiceSettings,
+  type VoiceStyle,
   type VoiceViewLayout
 } from '@shared/ipc/schemas/voice'
 import type { VoiceSessionState } from '@shared/voiceSession'
@@ -42,6 +44,7 @@ import { Icon } from '@renderer/lib/icons'
 import { Button, IconButton, Input, Menu, cn, selectTriggerClass } from '@renderer/lib/ui'
 import { speakText, stopSpeech, useSpeech } from '@renderer/features/voice/speechPlayback'
 import { AnimatedOrb, ORB_LOOK_OPTIONS } from '@renderer/features/voice/orb/AnimatedOrb'
+import { listSpeakerDevices } from '@renderer/lib/audio/micCapture'
 import type { VoiceOptionInfo } from '@shared/ipc/schemas/voice'
 import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
@@ -65,16 +68,83 @@ const SPEED_OPTIONS: readonly SettingsOption<string>[] = [
 ]
 
 
+export const PLACEMENT_OPTIONS: readonly SettingsOption<VoicePlacement>[] = [
+  { value: 'inline', label: 'Inline' },
+  { value: 'companion', label: 'Companion' },
+  { value: 'takeover', label: 'Takeover' },
+  { value: 'capsule', label: 'Capsule' },
+  { value: 'mini', label: 'Mini window' }
+]
+
+export const PLACEMENT_HINT: Record<VoicePlacement, string> = {
+  inline: 'In the task’s thread: the composer becomes the voice control, with a glow behind it.',
+  companion: 'A column beside the task, with the orb, the words and the task’s last steps.',
+  takeover: 'The whole window, sidebar included, in the layout below.',
+  capsule: 'A small pill above the composer on any view; it opens into a card.',
+  mini: 'Its own small window that stays on top of other apps, so you can talk from your editor.'
+}
+
+const STYLE_OPTIONS: readonly SettingsOption<VoiceStyle>[] = [
+  { value: 'quiet', label: 'Quiet' },
+  { value: 'ambient', label: 'Ambient' }
+]
+
+const STYLE_HINT: Record<VoiceStyle, string> = {
+  quiet: 'The app’s own planes and lines; the orb is the one thing that moves.',
+  ambient: 'Light gathers around the orb on a darkened field, with glass controls.'
+}
+
 const LAYOUT_OPTIONS: readonly SettingsOption<VoiceViewLayout>[] = [
-  { value: 'conversation', label: 'Conversation' },
+  { value: 'conversation', label: 'Words' },
   { value: 'orb', label: 'Orb' },
   { value: 'split', label: 'Split' }
 ]
 
 const LAYOUT_HINT: Record<VoiceViewLayout, string> = {
-  conversation: 'The conversation fills the view; the orb sits in the bar under it.',
-  orb: 'A large orb with what’s happening now under it; the conversation opens beside it.',
-  split: 'The conversation on the left, the task’s steps and result on the right.'
+  conversation: 'What was just said fills the view, the orb above it.',
+  orb: 'A large orb with what was just said under it.',
+  split: 'The orb and the words on the left, the task’s steps and result on the right.'
+}
+
+/**
+ * Where its voice plays. Labels appear once the mic has been allowed (the
+ * same rule as the mic list), so the list is read again when it opens.
+ */
+function OutputField({ value, locked, changed, onChange }: { value: string; locked: boolean; changed: boolean; onChange: (id: string) => void }) {
+  const [devices, setDevices] = useState<Array<{ deviceId: string; label: string }>>([])
+  useEffect(() => {
+    let live = true
+    const read = (): void => {
+      void listSpeakerDevices().then((d) => {
+        if (live) setDevices(d)
+      })
+    }
+    read()
+    navigator.mediaDevices?.addEventListener?.('devicechange', read)
+    return () => {
+      live = false
+      navigator.mediaDevices?.removeEventListener?.('devicechange', read)
+    }
+  }, [])
+  const options: SettingsOption<string>[] = [
+    { value: '', label: 'System default' },
+    ...devices.filter((d) => d.deviceId).map((d) => ({ value: d.deviceId, label: d.label }))
+  ]
+  // A device unplugged since it was picked: keep it listed, so the setting is never silently another one.
+  if (value && !options.some((o) => o.value === value)) options.push({ value, label: 'A device that isn’t connected' })
+  return (
+    <SelectField
+      id="voice-output"
+      title="Speaks through"
+      hint="Where its voice plays. The microphone is the one Dictation uses."
+      value={value}
+      options={options}
+      width={260}
+      disabled={locked}
+      changed={changed}
+      onChange={onChange}
+    />
+  )
 }
 
 /** The states the preview walks through, so a look is judged moving, not still. */
@@ -828,17 +898,41 @@ export function VoiceModeSettings({
         </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup title="Voice view" description="How the voice view looks while you talk. Both change live.">
-        <SegmentedField
-          id="voice-layout"
-          title="Layout"
-          hint={LAYOUT_HINT[voice.viewLayout]}
-          value={voice.viewLayout}
-          options={LAYOUT_OPTIONS}
+      <SettingsGroup title="Voice view" description="Where voice mode lives and how it looks while you talk. All of it changes live, and from the view itself.">
+        <SelectField
+          id="voice-placement"
+          title="Placement"
+          hint={PLACEMENT_HINT[voice.placement]}
+          value={voice.placement}
+          options={PLACEMENT_OPTIONS}
+          width={200}
           disabled={locked}
-          {...form.nestedDefaultMark('voice', 'viewLayout')}
-          onChange={(viewLayout) => patch({ viewLayout })}
+          {...form.nestedDefaultMark('voice', 'placement')}
+          onChange={(placement) => patch({ placement })}
         />
+        {voice.placement === 'takeover' ? (
+          <SegmentedField
+            id="voice-layout"
+            title="Takeover layout"
+            hint={LAYOUT_HINT[voice.viewLayout]}
+            value={voice.viewLayout}
+            options={LAYOUT_OPTIONS}
+            disabled={locked}
+            {...form.nestedDefaultMark('voice', 'viewLayout')}
+            onChange={(viewLayout) => patch({ viewLayout })}
+          />
+        ) : null}
+        <SegmentedField
+          id="voice-style"
+          title="Style"
+          hint={STYLE_HINT[voice.style]}
+          value={voice.style}
+          options={STYLE_OPTIONS}
+          disabled={locked}
+          {...form.nestedDefaultMark('voice', 'style')}
+          onChange={(style) => patch({ style })}
+        />
+        <OutputField value={voice.outputDeviceId} locked={locked} changed={voice.outputDeviceId !== ''} onChange={(outputDeviceId) => patch({ outputDeviceId })} />
         <SelectField
           id="voice-orb"
           title="Orb"
@@ -867,7 +961,7 @@ export function VoiceModeSettings({
         <SwitchField
           id="voice-progress"
           title="Spoken progress"
-          hint="A few words when a slow step starts, like “Running the tests.” Off plays a soft sound instead."
+          hint="A few words when a slow step starts, like “Running the tests.” Off (the default), it speaks only when it starts, needs you, or is done, and a slow step plays a soft sound."
           checked={voice.speakProgress}
           disabled={locked}
           {...form.nestedDefaultMark('voice', 'speakProgress')}

@@ -6,7 +6,8 @@ import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { requireActivePath } from './helpers/seedWorkspace'
 
 /*
-  Voice mode in the real app (docs/voice-mode.md §24.8): the real mic
+  Voice mode in the real app (docs/voice-mode.md §24.8, §26 for the
+  redesigned view: Takeover by default, a summary after End): the real mic
   capture, IPC and session in main, with the scripted listener and speaker
   (`VYOTIQ_E2E_FIXTURE=1`). The microphone is an oscillator; its opening can
   be held back, to End voice mode while it's still opening.
@@ -146,7 +147,7 @@ test('Esc closes a dialog over the voice view, and Space presses a focused butto
     .toEqual(['start', 'end'])
 })
 
-test('after End the conversation stays on screen until Close', async () => {
+test('after End the summary stays on screen, with the conversation one click away, until Close', async () => {
   const { window } = launched
   await openBrief()
   // `window` here is the page; inside evaluate the page's own window is `globalThis`.
@@ -167,15 +168,22 @@ test('after End the conversation stays on screen until Close', async () => {
     const w = globalThis as unknown as Page
     return w.vyotiq.voiceHandOffFailed({ sessionId: w.__voiceSid!, handOffId: 'e2e-h1', reason: 'no_task' })
   })
-  await expect(window.locator('[data-voice-line="voice"]').first()).toBeVisible({ timeout: 15_000 })
-  const said = await window.locator('[data-voice-line="voice"]').first().textContent()
+  // Its reply is the live caption under the orb.
+  const caption = window.locator('[data-voice-caption="voice"]').first()
+  await expect(caption).toBeVisible({ timeout: 15_000 })
+  // Read once it has finished saying it (while it speaks, the caption also carries a screen-reader copy).
+  await expect(view).not.toHaveAttribute('data-voice-view', 'speaking', { timeout: 30_000 })
+  const said = (await caption.textContent()) ?? ''
 
   await view.locator('[data-voice-end]').first().click()
   await expect(view).toHaveCount(0)
+  // End always leaves the summary; nothing was handed to a task.
   const ended = window.locator('[data-voice-ended]')
   await expect(ended).toBeVisible()
-  await expect(ended.locator('[data-voice-line="voice"]').first()).toHaveText(said ?? '')
+  await expect(ended.locator('[data-voice-summary-title]')).toHaveText('Nothing handed over')
   await expect(ended.getByRole('button', { name: 'Mute' })).toHaveCount(0)
+  await ended.getByRole('button', { name: 'Conversation', exact: true }).click()
+  await expect(ended.locator('[data-voice-line="voice"]').first()).toContainText(said.replace(/\s+/g, ' ').trim().slice(0, 20))
   await ended.getByRole('button', { name: 'Close' }).click()
   await expect(ended).toHaveCount(0)
   await expect(window.locator('[data-voice-button="off"]').first()).toBeAttached()
@@ -215,4 +223,111 @@ test('a microphone that goes away mid-session says so, and Try again brings it b
   await expect(view).toHaveAttribute('data-voice-view', 'listening', { timeout: 15_000 })
   await view.locator('[data-voice-end]').first().click()
   await expect(view).toHaveCount(0)
+})
+
+test('every placement shows the session, and the mini window mirrors it and sends its clicks back (§26)', async () => {
+  const { window, app } = launched
+  await openBrief()
+  // Inside evaluate the page's own window is `globalThis` (`window` here is the Page).
+  await window.evaluate(() => {
+    ;(globalThis as unknown as Window).__micDelayMs = 0
+  })
+  const place = (voice: Record<string, unknown>) =>
+    window.evaluate(async (patch) => {
+      const w = globalThis as unknown as Window
+      const cur = await w.vyotiq.getSettings()
+      if (!cur.ok) return false
+      return (await w.vyotiq.setSettings({ voice: { ...cur.data.voice, ...patch } })).ok
+    }, voice)
+  const placement = window.locator('[data-voice-placement]')
+
+  await startVoice()
+  await expect(window.locator('[data-voice-view]').first()).toHaveAttribute('data-voice-view', 'listening', { timeout: 15_000 })
+  await expect(placement.first()).toHaveAttribute('data-voice-placement', 'takeover')
+
+  expect(await place({ placement: 'inline' })).toBe(true)
+  await expect(placement.first()).toHaveAttribute('data-voice-placement', 'inline')
+  await expect(window.locator('[data-voice-composer]')).toHaveAttribute('data-voice-composer', 'listening')
+
+  expect(await place({ placement: 'companion' })).toBe(true)
+  await expect(placement.first()).toHaveAttribute('data-voice-placement', 'companion')
+  // The drag handle is a hairline (zero width, lit on hover), so it's attached rather than "visible".
+  await expect(window.getByRole('separator', { name: 'Resize voice' })).toBeAttached()
+  await expect(window.getByRole('complementary', { name: 'Voice mode' })).toBeVisible()
+
+  expect(await place({ placement: 'capsule' })).toBe(true)
+  await expect(window.locator('[data-voice-capsule]')).toHaveAttribute('data-voice-capsule', 'pill')
+  await window.locator('[data-voice-capsule-open]').click()
+  await expect(window.locator('[data-voice-capsule]')).toHaveAttribute('data-voice-capsule', 'card')
+
+  // The mini window: its own window, drawing the main window's session.
+  const opened = app.waitForEvent('window', { timeout: 15_000 })
+  expect(await place({ placement: 'mini' })).toBe(true)
+  const mini = await opened
+  expect(mini.url()).toContain('#voice-mini')
+  await expect(mini.locator('[data-voice-mini]')).toHaveAttribute('data-voice-mini', 'pill', { timeout: 15_000 })
+  // The pill's row is also the open card's top row: its headline is the one to read either way.
+  const miniHeadline = mini.locator('[data-voice-mini-row] [data-voice-headline]')
+  await expect(miniHeadline).toHaveText('Listening')
+  // Nothing of it over the app: the composer's voice bar is the control there.
+  await expect(placement).toHaveCount(0)
+  await expect(window.locator('[data-voice-bar]')).toBeVisible()
+  // A click in the mini window reaches the session, and comes back as its state.
+  await mini.locator('[data-voice-mini-row]').getByRole('button', { name: 'Mute' }).click()
+  await expect(window.locator('[data-voice-bar]')).toHaveAttribute('data-voice-open', 'paused')
+  await expect(miniHeadline).toHaveText('Muted')
+  await mini.locator('[data-voice-mini-row]').getByRole('button', { name: 'Mute' }).click()
+  await expect(miniHeadline).toHaveText('Listening')
+
+  // Another placement closes it.
+  const closed = mini.waitForEvent('close', { timeout: 15_000 })
+  expect(await place({ placement: 'takeover' })).toBe(true)
+  await closed
+  await expect(placement.first()).toHaveAttribute('data-voice-placement', 'takeover')
+  await window.locator('[data-voice-end]').first().click()
+  await expect(window.locator('[data-voice-view]')).toHaveCount(0)
+})
+
+test('hold to talk works while muted and mutes again; the app under the Takeover is inert; Voice settings steps it aside (audit 2026-10-15)', async () => {
+  const { window } = launched
+  await openBrief()
+  await window.evaluate(() => {
+    ;(globalThis as unknown as Window).__micDelayMs = 0
+  })
+  const place = (voice: Record<string, unknown>) =>
+    window.evaluate(async (patch) => {
+      const w = globalThis as unknown as Window
+      const cur = await w.vyotiq.getSettings()
+      if (!cur.ok) return false
+      return (await w.vyotiq.setSettings({ voice: { ...cur.data.voice, ...patch } })).ok
+    }, voice)
+  expect(await place({ placement: 'takeover' })).toBe(true)
+  await startVoice()
+  const view = window.locator('[data-voice-view]').first()
+  await expect(view).toHaveAttribute('data-voice-view', 'listening', { timeout: 15_000 })
+
+  // What the Takeover covers can't be reached with Tab: inert while it shows.
+  await expect(window.locator('main#main-content')).toHaveAttribute('inert', '')
+
+  // Muted, Space held still talks; let go and it is muted again once it listens.
+  await window.locator('body').click({ position: { x: 2, y: 200 } })
+  await window.keyboard.press('m')
+  await expect(view).toHaveAttribute('data-voice-view', 'paused')
+  await window.keyboard.down(' ')
+  await expect(view).not.toHaveAttribute('data-voice-view', 'paused')
+  await window.keyboard.up(' ')
+  await expect(view).toHaveAttribute('data-voice-view', 'paused', { timeout: 15_000 })
+  await window.keyboard.press('m')
+  await expect(view).toHaveAttribute('data-voice-view', 'listening')
+
+  // Voice settings from the Takeover: it steps aside and Settings is seen.
+  await window.locator('[data-voice-engines]').first().click()
+  await expect(window.locator('[data-voice-placement="takeover"]')).toHaveCount(0)
+  await expect(window.locator('main#main-content')).not.toHaveAttribute('inert', '')
+  await expect(window.locator('[data-settings-field="voice-placement"]').first()).toBeAttached({ timeout: 15_000 })
+  // The pill standing in brings the Takeover back.
+  await window.locator('[data-voice-capsule-open]').click()
+  await expect(window.locator('[data-voice-placement="takeover"]')).toHaveCount(1)
+  await window.locator('[data-voice-end]').first().click()
+  await expect(window.locator('[data-voice-view]')).toHaveCount(0)
 })

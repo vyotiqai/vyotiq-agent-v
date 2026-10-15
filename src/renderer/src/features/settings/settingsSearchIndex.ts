@@ -560,15 +560,33 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
 
   // Voice
   {
+    id: 'voice-placement',
+    title: 'Placement',
+    keywords: ['voice mode','voice','view','placement','where','inline','companion','takeover','full screen','capsule','pill','mini window','always on top','floating'],
+    section: 'voice'
+  },
+  {
     id: 'voice-layout',
-    title: 'Layout',
-    keywords: ['voice mode','voice','view','layout','conversation','orb','split','transcript','steps'],
+    title: 'Takeover layout',
+    keywords: ['voice mode','voice','view','layout','words','conversation','orb','split','transcript','steps'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-style',
+    title: 'Style',
+    keywords: ['voice mode','voice','view','style','quiet','ambient','glow','glass','look'],
+    section: 'voice'
+  },
+  {
+    id: 'voice-output',
+    title: 'Speaks through',
+    keywords: ['voice mode','voice','output','speaker','speakers','headphones','headset','audio device','sound'],
     section: 'voice'
   },
   {
     id: 'voice-orb',
     title: 'Orb',
-    keywords: ['voice mode','voice','orb','animation','look','style','glow','pearl','aura','wire','cloud','bubble','halftone','plasma','contour','liquid','simple'],
+    keywords: ['voice mode','voice','orb','animation','look','sphere','glow','pearl','aura','wire','cloud','bubble','halftone','plasma','contour','liquid','simple'],
     section: 'voice'
   },
   {

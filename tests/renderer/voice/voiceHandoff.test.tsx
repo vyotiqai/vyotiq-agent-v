@@ -15,6 +15,7 @@ import {
   registerVoiceLine,
   resetVoiceModeForTests,
   setVoiceTarget,
+  setVoiceViewOpen,
   startVoiceMode,
   voiceModeOwner
 } from '@renderer/features/voice/voiceMode'
@@ -217,6 +218,9 @@ describe('voice mode on the New task brief', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Talk with the agent' }))
     })
+    // The voice view opens over it (§26); put away, the bar is in the brief's place.
+    expect(document.querySelector('[data-voice-bar]')).toBeNull()
+    act(() => setVoiceViewOpen(false))
     expect(document.querySelector('[data-voice-bar]')).toBeTruthy()
     expect(document.querySelector('[data-brief]')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Start task' })).toBeNull()

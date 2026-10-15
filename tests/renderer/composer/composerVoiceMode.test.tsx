@@ -7,7 +7,7 @@ import { Composer } from '@renderer/features/chat/components/composer'
 import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
 import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
-import { resetVoiceModeForTests, startVoiceMode } from '@renderer/features/voice/voiceMode'
+import { resetVoiceModeForTests, setVoiceViewOpen, startVoiceMode, voiceModeOwner } from '@renderer/features/voice/voiceMode'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot } from '@renderer/features/voice/voiceSessionController'
 
 class FakeController extends VoiceSessionController {
@@ -83,8 +83,11 @@ describe('voice mode on the instruction line', () => {
     await act(async () => {
       fireEvent.click(button)
     })
-    expect(document.querySelector('[data-voice-bar]')).toBeTruthy()
     expect(document.querySelector('[data-composer-shell]')).toBeNull()
+    // The voice view is the control while it's open (§26); put away, the bar takes the box's place.
+    expect(document.querySelector('[data-voice-bar]')).toBeNull()
+    act(() => setVoiceViewOpen(false))
+    expect(document.querySelector('[data-voice-bar]')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'End' }))
     await vi.waitFor(() => expect(document.querySelector('[data-composer-shell]')).toBeTruthy())
   })
@@ -137,7 +140,8 @@ describe('voice mode on the instruction line', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Talk with the agent' }))
     })
-    await vi.waitFor(() => expect(document.querySelector('[data-voice-bar]')).toBeTruthy())
+    await vi.waitFor(() => expect(voiceModeOwner()).not.toBeNull())
+    expect(document.querySelector('[data-composer-shell]')).toBeNull()
     expect(screen.queryByRole('dialog', { name: 'Talk with' })).toBeNull()
   })
 

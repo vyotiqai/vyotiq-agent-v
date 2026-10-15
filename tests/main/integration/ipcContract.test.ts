@@ -38,6 +38,14 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onAccessibilitySupportChanged'
     | 'updateWorkspaceUiStateSync'
     | 'respondWorkspaceEditorFlush'
+    | 'onVoiceMiniCommand'
+    | 'onVoiceMiniState'
+    | 'onVoiceMiniLevel'
+    | 'voiceMiniPush'
+    | 'voiceMiniPushLevel'
+    | 'voiceMiniCommand'
+    | 'voiceMiniResize'
+    | 'voiceMiniShowApp'
   >,
   string
 > = {
@@ -190,6 +198,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   voiceHandOffFailed: IPC.voiceHandOffFailed,
   voiceConversationsList: IPC.voiceConversationsList,
   voiceConversationRead: IPC.voiceConversationRead,
+  voiceMiniOpen: IPC.voiceMiniOpen,
   listRuns: IPC.listRuns,
   listOlderRuns: IPC.listOlderRuns,
   loadRun: IPC.loadRun,
@@ -385,8 +394,16 @@ const EVENT_CHANNELS = new Set<string>([
 /** Preload push subscriptions — shared with the channel-parity suite. */
 const PUSH_CHANNELS = SHARED_PUSH_CHANNELS
 
-const VYOTIQ_SYNC_SEND_MAP: Record<'updateWorkspaceUiStateSync', string> = {
-  updateWorkspaceUiStateSync: IPC.workspacesUpdateUiStateSync
+const VYOTIQ_SYNC_SEND_MAP: Record<
+  'updateWorkspaceUiStateSync' | 'voiceMiniPush' | 'voiceMiniPushLevel' | 'voiceMiniCommand' | 'voiceMiniResize' | 'voiceMiniShowApp',
+  string
+> = {
+  updateWorkspaceUiStateSync: IPC.workspacesUpdateUiStateSync,
+  voiceMiniPush: IPC.voiceMiniPushState,
+  voiceMiniPushLevel: IPC.voiceMiniPushLevel,
+  voiceMiniCommand: IPC.voiceMiniSendCommand,
+  voiceMiniResize: IPC.voiceMiniResize,
+  voiceMiniShowApp: IPC.voiceMiniShowApp
 }
 
 const VYOTIQ_PUSH_MAP: Record<
@@ -414,7 +431,10 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onScheduleWorktreeOpen'
   | 'onAppearanceCustomCssChanged'
   | 'onAccessibilitySupportChanged'
-  | 'onGitStatusChanged',
+  | 'onGitStatusChanged'
+  | 'onVoiceMiniCommand'
+  | 'onVoiceMiniState'
+  | 'onVoiceMiniLevel',
   string
 > = {
   onChatEvent: IPC.chatEvent,
@@ -435,6 +455,9 @@ const VYOTIQ_PUSH_MAP: Record<
   onVoiceAudioOut: IPC.voiceAudioOut,
   onVoiceSpeakEnd: IPC.voiceSpeakEnd,
   onVoiceEvent: IPC.voiceEvent,
+  onVoiceMiniCommand: IPC.voiceMiniCommand,
+  onVoiceMiniState: IPC.voiceMiniState,
+  onVoiceMiniLevel: IPC.voiceMiniLevel,
   onGithubAuthStatus: IPC.githubAuthStatusEvent,
   onSkillsChanged: IPC.skillsChanged,
   onNotificationsChanged: IPC.notificationsChanged,

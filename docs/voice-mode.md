@@ -2008,12 +2008,41 @@ model matters as much: see A-32.
 
 Voice mode opens a view over the task pane (D-48). It always has:
 
-- a 40px header: Voice, the time, which models hear and speak, and **Show the task**;
-- the orb, and what's happening in a word with one line under it;
+- a 40px header: Voice and the time on the left edge; on the right, one
+  engine token (a cloud, or a lock when audio stays on this PC, and the
+  provider's name, once when one provider both hears and speaks; the full
+  "Hears with … · speaks with …", where audio goes and any key fallback are
+  its tooltip and accessible name, and a fallback turns its glyph to a
+  warning), the layout's own toggle, and **Show the task**;
+- the orb, and what's happening in a word with one line under it. The
+  headline fades in on each change; the line moves (`vy-text-live`) while
+  something is in progress;
 - the conversation: You, Agent V, and Task for each hand-off, with your words
   appearing as you say them where the listener streams;
-- a footer: any problem or hint, Mute, Stop speaking while it speaks, Stop the
-  task while it works, and End.
+- a footer: any problem, or else the keys as keycaps (M Mute, Esc Esc End,
+  Esc Stop speaking while it speaks, Space Hold to talk with push-to-talk);
+  Mute with a four-bar meter of your mic level (drawn per frame from
+  `micLevel()`, flat while muted, still under reduced motion), Stop speaking
+  while it speaks, Stop the task while it works, and End.
+
+**Each fact once (2026-10-15 redesign).** The line under the headline never
+repeats what the view already shows. The brief is the hand-off's line (or,
+under the orb, one work head: its glyph, the brief, and its time on the
+right edge). While the run's steps and question are on screen, the line says
+how far it has got ("6 steps · 1 min 14 s", "Getting started") or how to
+answer ("Say yes or no, or use the buttons"); it names the running step only
+where the steps are out of view (the orb layout while words are shown). The
+split layout's task pane says how the run ended in its header, not again over
+the result. Captions off hides the words in every layout, never the work.
+
+**The order lines are read in.** A reply's caption waits for its audio
+(A-71), but the hand-off it announces lands at once, so "On it." used to read
+under "Doing …". The controller notes the transcript's last line when each
+reply is said; its caption goes straight after that line when only hand-offs
+came since, and last otherwise (`addLine`'s `after`).
+
+**After End**, the kept conversation's header offers **All voice
+conversations**, which opens this workspace's saved copies (§24.8).
 
 Closed, the task's voice bar offers **Voice view**; with no bar on screen, a
 small pill does. Esc stops speaking, Esc twice ends, M mutes, Space held is
@@ -2071,3 +2100,113 @@ redacted before they were spoken (D-10). The task voice mode is on goes too
 (A-75): your messages in it and the agent's written answers, redacted, never
 tool output. PRIVACY.md §7 and the site's voice page say so.
 
+
+## 26. Placements, styles and the summary (2026-10-15 redesign)
+
+Ajay's picks of 2026-10-15 (three mockup rounds and an audit, in
+`src/redesign/voice-view` and `docs/voice-redesign-audit-2026-10-15.md`),
+wired into the app. Code: `features/voice/stage/` (the model, the shared
+pieces and the placements), `features/voice/VoiceView.tsx` (the shell's three
+slots), `features/voice/mini/` and `main/app/voiceMiniWindow.ts`.
+
+### 26.1 Where it lives
+
+Settings › Voice mode › Placement, or the Layout tab in the view itself
+(`voice.placement`):
+
+| Placement | Where | Mounted by |
+| --- | --- | --- |
+| Inline | Over the task pane: the voice thread (your words, its replies, each hand-off's work in place), the composer as the voice control, a glow behind it. No orb. | `VoiceView` in the main pane |
+| Companion | A column right of the pane, dragged to width (`voice.companionWidth`, 360–720px) | `VoiceCompanionColumn` beside `<main>` |
+| Takeover (default) | The whole window under the title bar, sidebar included, in `voice.viewLayout`: Words, Orb or Split | `VoiceTakeoverLayer` over the shell's row |
+| Capsule | A pill at the bottom of the pane on any view; it grows into a card (Answer opens it when the task needs you) | `VoiceView` |
+| Mini window | Its own always-on-top window (§26.5) | `MiniWindowBridge` in `VoiceView` |
+
+"Show the task" (or Companion's shrink) puts the placement away; the
+composer's voice bar is the control then, or, with no bar on screen, the
+capsule's pill. While a placement is open the bar draws nothing but keeps its
+line registered (`voiceBarShown`). The capsule and the mini window are the
+control in their placements, so the bar hides for the capsule and shows for
+the mini window.
+
+### 26.2 Style
+
+`voice.style`: Quiet (the app's planes and hairlines) or Ambient (a pool of
+the accent behind the orb, a fine grain under the content, controls on
+glass). Plain classes in `styles.css` (`vy-voice-ambient`, `vy-voice-glass`,
+`vy-voice-glass-pane`, `vy-voice-grain`…), token mixes only. A surface that
+covers is a prop on `Field`/`Float` (`cover`, `shape`), never an appended
+`absolute`/`rounded-full` (CLAUDE.md §3: the real app showed the Takeover in
+the flow beside the pane before this).
+
+### 26.3 What every placement shows
+
+The orb (`orbLook`, the liquid **Sphere** by default: a lit sphere that
+swells and splashes with the voice level, rings across it while it speaks, a
+halo breathing out; drawn orb under 40px or without WebGL); what's happening
+in a word and one line that never repeats the strip; the current exchange as
+captions (your newest turn, its newest reply, spoken word by word, paced from
+the reply's start at the voice's speed; the player has no word times); the
+task's strip (brief, time, the last three steps while it runs, the question
+with its buttons, why it wasn't sent, the outcome); and the dock (Mute with
+your level, the one stop that applies, one settings popover, the history
+drawer, End). The dock fades after 3 s without movement, never with focus in
+it, muted, stopped, waiting on you, a popover open or Esc armed.
+
+Talking to it: click the orb to mute, press and hold it to talk (the
+controller's push-to-talk); Space held does the same anywhere, M mutes, Esc
+stops it speaking, Esc twice ends. A hold while it speaks stops it at once;
+a hold while muted talks anyway and mutes again once the turn is answered
+(or 1.5 s after a hold nothing was heard in). Esc pressed once is said in the
+keys' line, or under the headline where no keys show. Takeover, Inline and
+the summary make what they cover inert and take focus; Voice settings opened
+from a covering placement steps it aside so Settings is seen. A reply you talk over or stop is cut where
+it was: main's flush marks its transcript line (`cutLineId`), which holds the
+words that had played, shown dimmed with a dash until the next reply.
+
+### 26.4 Voice, devices and layout, mid-session
+
+One popover (Voice · Devices · Layout). Voice: the speaking provider's voices
+(`voice:voices`), a sample per row (`voice:speak`; listening is held while it
+plays, `holdMic`), speeds outside the provider's range disabled. Devices: the
+mic (switched live with `switchMic`: the new one opens before the old one
+closes; it is dictation's mic too, one setting) and the output
+(`voice.outputDeviceId`, applied with `AudioContext.setSinkId` to the reply
+playing and every one after). Layout: placement, the Takeover layout, style.
+Every pick is saved to settings.
+
+### 26.5 The mini window
+
+A frameless, always-on-top `BrowserWindow` (`#voice-mini` of the same
+renderer bundle, the same sandboxed preload). It **mirrors** the main
+window's session (2026-10-15 decision): the mic, the player and the
+controller stay in the main window, which pushes its snapshot, settings and
+`<html>` data attributes (skin, theme) on every change and the orb level ~20
+times a second; the mini window sends its clicks back. One direction per
+channel (`voice:mini-*`); every other IPC handler refuses the window
+(`senderOk`), and the mini channels accept only their one sender
+(`senderIsVoiceMini` or the main window). At rest it is a 380×48 pill; it
+opens to 380×600 while the pointer rests on it (300 ms), focus is in it, a
+popover is open, or the task needs you, growing down from its top row, which
+never moves. Its page says `ready` once it listens, and main replays the last
+state (the first push can land before the page subscribed). Closed from the
+OS, the main window shows the session itself again (the capsule). Only the
+Layout tab is offered there: voices and devices belong to the main window.
+
+### 26.6 Defaults and settings format 9
+
+New installs: placement Takeover, style Quiet, orb Sphere, spoken progress
+**off** (the voice speaks milestones: it started, it needs you, it's done).
+Saving any voice setting wrote the whole object, so format 9 rewrites only
+the exact old defaults already in files (`speakProgress: true`, `orbLook:
+'glow'`); anything else, and either picked after the v9 stamp, stays.
+
+### 26.7 After End
+
+End always leaves a summary, whatever the placement, when anything was said:
+"2 tasks done · 1 still going", one row per run the session handed work to
+(its outcome's first line, its time, "Still going in its task" for a run that
+hadn't ended), and two buttons: Talk again (on the line you last used) and
+Conversation (what was said). A row opens its task and closes the summary.
+All voice conversations is in its header; Esc goes back from the conversation,
+then closes.

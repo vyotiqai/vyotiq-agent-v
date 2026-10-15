@@ -45,6 +45,7 @@ import {
   DatabaseIcon,
   DotsThreeIcon,
   DotsThreeVerticalIcon,
+  DotsSixVerticalIcon,
   DownloadSimpleIcon,
   EyeIcon,
   FileIcon,
@@ -233,6 +234,8 @@ const ICONS = {
   command: CommandIcon,
   minus: MinusIcon,
   moreV: DotsThreeVerticalIcon,
+  /** A drag handle (the voice mini window's grip). */
+  grip: DotsSixVerticalIcon,
   chevronUp: CaretUpIcon,
   chevronLeft: CaretLeftIcon,
   arrowLeft: ArrowLeftIcon,

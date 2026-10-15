@@ -15,6 +15,9 @@ import {
   VoiceAudioOutSchema,
   VoiceEventSchema,
   VoiceSpeakEndSchema,
+  VoiceMiniCommandSchema,
+  VoiceMiniLevelSchema,
+  VoiceMiniStateSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
   ToolCatalogResultSchema,
@@ -315,6 +318,42 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.voiceEvent, listener)
     }
   },
+  voiceMiniOpen: (payload) => ipcRenderer.invoke(IPC.voiceMiniOpen, payload),
+  voiceMiniPush: (state) => ipcRenderer.send(IPC.voiceMiniPushState, state),
+  voiceMiniPushLevel: (level) => ipcRenderer.send(IPC.voiceMiniPushLevel, level),
+  onVoiceMiniCommand: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceMiniCommandSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceMiniCommand, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceMiniCommand, listener)
+    }
+  },
+  onVoiceMiniState: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceMiniStateSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceMiniState, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceMiniState, listener)
+    }
+  },
+  onVoiceMiniLevel: (handler) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void => {
+      const parsed = VoiceMiniLevelSchema.safeParse(payload)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.voiceMiniLevel, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.voiceMiniLevel, listener)
+    }
+  },
+  voiceMiniCommand: (command) => ipcRenderer.send(IPC.voiceMiniSendCommand, command),
+  voiceMiniResize: (payload) => ipcRenderer.send(IPC.voiceMiniResize, payload),
+  voiceMiniShowApp: () => ipcRenderer.send(IPC.voiceMiniShowApp),
   onVoiceAudioOut: (handler) => {
     const listener = (_: IpcRendererEvent, payload: unknown): void => {
       const parsed = VoiceAudioOutSchema.safeParse(payload)

@@ -10,7 +10,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from '@shared/ipc/schemas/voice'
-import { getDictationState } from '@renderer/features/chat/components/composer/take/dictationStore'
+import { getDictationState, patchDictationSettings } from '@renderer/features/chat/components/composer/take/dictationStore'
 import { routeVoiceTurn, type VoiceRunTarget } from './turnRouting'
 import { stopSpeech } from './speechPlayback'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot, type VoiceTurn, type VoiceTurnResult } from './voiceSessionController'
@@ -23,7 +23,11 @@ type ModeState = {
   startedAt: number | null
   /** The task's workspace the session opened with, for "Try again" from the view. */
   workspacePath: string | null
-  /** The voice view covers the task pane (D-48); closed, the composer's bar (or a small pill) stands in. */
+  /**
+   * The placement is showing (D-48, §26). Closed ("Show the task", or the
+   * capsule folded to its pill), the composer's bar or the capsule's pill
+   * stands in.
+   */
   viewOpen: boolean
   /** Esc was pressed once: a second press within two seconds ends voice mode. */
   escArmed: boolean
@@ -33,12 +37,14 @@ type ModeState = {
   ended: EndedVoiceConversation | null
 }
 
-/** What the voice view keeps showing after End: the conversation as it stood. */
+/** What End leaves on screen (§26.7): the summary of the session, the conversation as it stood one click away. */
 export type EndedVoiceConversation = {
   transcript: VoiceSnapshot['transcript']
   works: VoiceSnapshot['works']
   startedAt: number | null
   endedAt: number
+  /** Where its saved copy lives (`voice/*.jsonl` of this workspace), for "All voice conversations". */
+  workspacePath: string | null
 }
 
 /** How long a brief's handoff waits for the new task's line to appear. */
@@ -61,6 +67,10 @@ const lineBorn = new Map<string, number>()
 const ownerBars = new Map<string, number>()
 
 function emit(next: Partial<ModeState>): void {
+  // A new output reaches the reply playing now, not only the next session.
+  if (next.settings && next.settings.outputDeviceId !== mode.settings.outputDeviceId) controller?.setOutput(next.settings.outputDeviceId)
+  // A placement picked anywhere (the view's Layout tab, Settings) shows at once, even if the old one was put away.
+  if (next.settings && next.settings.placement !== mode.settings.placement && mode.owner && next.viewOpen === undefined) next = { ...next, viewOpen: true }
   mode = { ...mode, ...next }
   for (const l of listeners) l()
   // A session that ended, or moved to a line with a run, settles hand-offs waiting on one.
@@ -133,13 +143,14 @@ export async function handleVoiceStop(): Promise<void> {
 }
 
 /**
- * The conversation to keep on screen once the session ends: only when the
- * view was open (ending from the pill or the bar leaves you where you are),
- * something was said, and captions are on (off, the words were never shown).
+ * What to show once the session ends: the summary, always (2026-10-15
+ * decision), whatever placement it was in, as long as anything happened.
+ * Captions off, the summary still lists the work; its conversation link
+ * then shows only the hand-offs.
  */
 function endedConversation(snapshot: VoiceSnapshot): EndedVoiceConversation | null {
-  if (!mode.owner || !mode.viewOpen || !mode.settings.captions || snapshot.transcript.length === 0) return null
-  return { transcript: snapshot.transcript, works: snapshot.works, startedAt: mode.startedAt, endedAt: Date.now() }
+  if (!mode.owner || snapshot.transcript.length === 0) return null
+  return { transcript: snapshot.transcript, works: snapshot.works, startedAt: mode.startedAt, endedAt: Date.now(), workspacePath: mode.workspacePath }
 }
 
 function ensureController(): VoiceSessionController {
@@ -162,6 +173,7 @@ export async function startVoiceMode(owner: string, opts: { workspacePath?: stri
   stopSpeech()
   // A new session opens on the voice view (D-48).
   emit({ owner, startedAt: Date.now(), workspacePath: opts.workspacePath ?? null, viewOpen: true, escArmed: false, ended: null })
+  c.setOutput(mode.settings.outputDeviceId)
   await c.start({
     workspacePath: opts.workspacePath ?? undefined,
     deviceId: getDictationState().settings.deviceId || undefined
@@ -196,9 +208,57 @@ export function setVoiceViewOpen(open: boolean): void {
   if (mode.viewOpen !== open) emit({ viewOpen: open })
 }
 
+/**
+ * Whether the composer's voice bar shows (§26): where the placement has
+ * been put away ("Show the task"), and with the mini window (the app keeps
+ * a control of its own). Not with the capsule, which is the control there,
+ * nor while a placement is open over or beside the task. Hidden, the bar
+ * still registers its line (the session's owner and send).
+ */
+export function voiceBarShown(m: { viewOpen: boolean; settings: Pick<VoiceSettings, 'placement'> }): boolean {
+  if (m.settings.placement === 'mini') return true
+  if (m.settings.placement === 'capsule') return false
+  return !m.viewOpen
+}
+
 /** Close the conversation kept on screen after End. */
 export function dismissEndedVoice(): void {
   if (mode.ended) emit({ ended: null })
+}
+
+/**
+ * Change voice settings from the view (placement, layout, style, voice,
+ * speed, output): shown at once, then saved; main's echo settles it.
+ */
+export async function patchVoiceSettings(patch: Partial<VoiceSettings>): Promise<boolean> {
+  const next = { ...mode.settings, ...patch }
+  emit({ settings: next })
+  const res = await window.vyotiq?.setSettings?.({ voice: next })
+  if (res?.ok && res.data.voice) emit({ settings: { ...DEFAULT_VOICE_SETTINGS, ...res.data.voice } })
+  return res?.ok === true
+}
+
+/**
+ * Listen on another microphone mid-session. It is the one dictation uses
+ * too (one mic, 2026-10-15 decision), so the pick is saved there. False when
+ * the device couldn't be opened; the old one keeps listening.
+ */
+export async function switchVoiceMic(deviceId: string): Promise<boolean> {
+  const ok = await ensureController().switchMic(deviceId)
+  if (ok) await patchDictationSettings({ deviceId })
+  return ok
+}
+
+/**
+ * Talk again from the summary: on the line you last used, as the shortcut
+ * does (that line knows its task and workspace). False when no task line is
+ * on screen to start it on (Home); the summary then stays.
+ */
+export function talkAgain(): boolean {
+  if (!voiceShortcutTarget()) return false
+  emit({ ended: null })
+  window.dispatchEvent(new CustomEvent('vyotiq:command', { detail: { id: 'voiceMode' } }))
+  return true
 }
 
 export function setVoiceEscArmed(armed: boolean): void {

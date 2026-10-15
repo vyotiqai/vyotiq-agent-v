@@ -51,7 +51,7 @@ import { buildNavigatorSections, type NavRow, type NavSection } from './navigato
 import type { WaitingTask } from './navigator/NotificationsRow'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 import { useNavigatorView } from './navigator/useNavigatorView'
-import { VoiceView } from '@renderer/features/voice/VoiceView'
+import { VoiceCompanionColumn, VoiceTakeoverLayer, VoiceView } from '@renderer/features/voice/VoiceView'
 
 export type ShellView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage' | 'screen'
 
@@ -712,8 +712,11 @@ function AppShellInner(props: AppShellProps) {
           <NavigatorSlotContext.Provider value={lendsNavigatorColumn ? navigatorSlot : null}>
             {children}
           </NavigatorSlotContext.Provider>
-          <VoiceView onOpenVoiceSettings={onOpenSettingsSection ? () => onOpenSettingsSection('voice') : undefined} />
+          <VoiceView onOpenVoiceSettings={onOpenSettingsSection ? () => onOpenSettingsSection('voice') : undefined} onOpenTask={openTask} />
         </main>
+        {/* Voice mode's Companion docks beside the pane; its Takeover covers the navigator and the pane, under the title bar (§26). */}
+        <VoiceCompanionColumn onOpenVoiceSettings={onOpenSettingsSection ? () => onOpenSettingsSection('voice') : undefined} />
+        <VoiceTakeoverLayer onOpenVoiceSettings={onOpenSettingsSection ? () => onOpenSettingsSection('voice') : undefined} />
 
         {drawerOpen && !isDesktop ? (
           <div

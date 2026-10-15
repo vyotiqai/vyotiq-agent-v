@@ -635,7 +635,7 @@ export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
 }
 
 /** Current persisted settings format. Bump with a matching load-time rewrite. */
-export const SETTINGS_FORMAT_VERSION = 8
+export const SETTINGS_FORMAT_VERSION = 9
 
 /**
  * One user-defined OpenAI-compatible provider entry. `id` is a dynamic
