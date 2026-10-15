@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { Alert, Button, FileChip, IconButton, ImageChip, cn } from '@renderer/lib/ui'
-import { ERROR_TEXT, FOLLOW_UPS, SAMPLE_FILE, SAMPLE_IMAGE } from './data'
+import { Alert, Button, FileChip, IconButton, ImageChip, ImageLightbox, cn } from '@renderer/lib/ui'
+import { useActions } from './actions'
+import { ERROR_TEXT, SAMPLE_FILE, SAMPLE_IMAGE } from './data'
 import { STRUCTURE_ICON, keepFocus } from './controls'
+import { useGlass } from './store'
 
 // ── Dictation take ───────────────────────────────────────────────────────
 
@@ -35,9 +37,9 @@ const PILL_LEAD = '-mr-1 flex w-9 shrink-0 items-center justify-center'
 /** Where a row sits: the app's box, or B's pill. */
 export type Edge = 'box' | 'pill'
 
-function Act({ children, kbd, primary = false }: { children: ReactNode; kbd?: string[]; primary?: boolean }) {
+function Act({ children, kbd, primary = false, onClick }: { children: ReactNode; kbd?: string[]; primary?: boolean; onClick: () => void }) {
   return (
-    <Button size="xs" variant={primary ? 'secondary' : 'ghost'} kbd={kbd} onMouseDown={keepFocus}>
+    <Button size="xs" variant={primary ? 'secondary' : 'ghost'} kbd={kbd} onMouseDown={keepFocus} onClick={onClick}>
       {children}
     </Button>
   )
@@ -77,6 +79,7 @@ function useElapsed(live: boolean, startMs: number): number {
 export function TakeListening({ sendLabel, className, edge = 'box' }: { sendLabel: string | null; className?: string; edge?: Edge }) {
   const levels = useLevels(true)
   const ms = useElapsed(true, 7000)
+  const { discardTake, sendTake, insertTake } = useActions()
   return (
     <div
       role="status"
@@ -103,9 +106,15 @@ export function TakeListening({ sendLabel, className, edge = 'box' }: { sendLabe
         This PC
       </span>
       <span className="flex-1" />
-      <Act kbd={['Esc']}>Discard</Act>
-      {sendLabel ? <Act kbd={['Ctrl', '↵']}>{sendLabel}</Act> : null}
-      <Act kbd={['↵']} primary>
+      <Act kbd={['Esc']} onClick={discardTake}>
+        Discard
+      </Act>
+      {sendLabel ? (
+        <Act kbd={['Ctrl', '↵']} onClick={sendTake}>
+          {sendLabel}
+        </Act>
+      ) : null}
+      <Act kbd={['↵']} primary onClick={insertTake}>
         Insert
       </Act>
     </div>
@@ -114,6 +123,7 @@ export function TakeListening({ sendLabel, className, edge = 'box' }: { sendLabe
 
 /** What a take leaves behind: a slim row above the controls, which stay. */
 export function TakeInserted({ words, edge = 'box' }: { words: number; edge?: Edge }) {
+  const { undoTake } = useActions()
   return (
     <div
       role="status"
@@ -129,7 +139,9 @@ export function TakeInserted({ words, edge = 'box' }: { words: number; edge?: Ed
         <span className="font-mono tnum">{words}</span> {words === 1 ? 'word' : 'words'} inserted
       </span>
       <span className="flex-1" />
-      <Act kbd={['Ctrl', 'Z']}>Undo</Act>
+      <Act kbd={['Ctrl', 'Z']} onClick={undoTake}>
+        Undo
+      </Act>
     </div>
   )
 }
@@ -159,6 +171,7 @@ function StructureGlyph({ pill, children }: { pill: boolean; children: ReactNode
 }
 
 export function StructureWorking({ placement = 'line' }: { placement?: Placement }) {
+  const { cancelStructure } = useActions()
   return (
     <div className="@container" data-structure-open data-structure-working>
       <StructureRow placement={placement}>
@@ -167,7 +180,7 @@ export function StructureWorking({ placement = 'line' }: { placement?: Placement
         </StructureGlyph>
         <span className="min-w-0 truncate text-muted">Writing a brief from your instruction…</span>
         <span className="flex-1" />
-        <Button size="xs" variant="ghost" kbd={['Esc']} onMouseDown={keepFocus}>
+        <Button size="xs" variant="ghost" kbd={['Esc']} onMouseDown={keepFocus} onClick={cancelStructure}>
           Cancel
         </Button>
       </StructureRow>
@@ -176,6 +189,7 @@ export function StructureWorking({ placement = 'line' }: { placement?: Placement
 }
 
 export function StructureDone({ placement = 'line' }: { placement?: Placement }) {
+  const { undoStructure, retryStructure, hideStructure } = useActions()
   return (
     <div className="@container" data-structure-done>
       <StructureRow placement={placement}>
@@ -185,13 +199,13 @@ export function StructureDone({ placement = 'line' }: { placement?: Placement })
         <span className="shrink-0 text-fg">Structured</span>
         <span className="min-w-0 truncate text-muted">change brief</span>
         <span className="flex-1" />
-        <Button size="xs" variant="ghost" kbd={['Ctrl', 'Z']} onMouseDown={keepFocus}>
+        <Button size="xs" variant="ghost" kbd={['Ctrl', 'Z']} onMouseDown={keepFocus} onClick={undoStructure}>
           Undo
         </Button>
-        <Button size="xs" variant="ghost" onMouseDown={keepFocus}>
+        <Button size="xs" variant="ghost" onMouseDown={keepFocus} onClick={retryStructure}>
           Try again
         </Button>
-        <IconButton icon="close" label="Hide" size="xs" tone="muted" />
+        <IconButton icon="close" label="Hide" size="xs" tone="muted" onMouseDown={keepFocus} onClick={hideStructure} />
       </StructureRow>
     </div>
   )
@@ -201,9 +215,11 @@ export function StructureDone({ placement = 'line' }: { placement?: Placement })
 
 /** Queued instructions, above the box while a run is live. */
 export function FollowUpQueue({ className, edge = 'box' }: { className?: string; edge?: Edge }) {
+  const { queue } = useGlass()
+  const { editQueued, sendQueuedNow, removeQueued } = useActions()
   return (
     <ul className={cn('m-0 list-none p-0', className)} data-follow-up-queue aria-label="Queued instructions">
-      {FOLLOW_UPS.map((entry) => (
+      {queue.map((entry) => (
         <li
           key={entry.id}
           className={cn('flex h-8 items-center gap-2 text-xs', edge === 'pill' ? PILL_ROW_BARE : 'pl-3 pr-2')}
@@ -213,15 +229,21 @@ export function FollowUpQueue({ className, edge = 'box' }: { className?: string;
           <span className="min-w-0 flex-1 truncate text-secondary" title={entry.preview}>
             {entry.preview}
           </span>
-          <Button size="xs" variant="ghost" aria-label="Edit queued instruction">
+          <Button size="xs" variant="ghost" aria-label="Edit queued instruction" onClick={() => editQueued(entry.id)}>
             Edit
           </Button>
           {entry.offline ? null : (
-            <Button size="xs" variant="ghost" aria-label="Send queued instruction now" title="Interrupt the run and apply it now">
+            <Button
+              size="xs"
+              variant="ghost"
+              aria-label="Send queued instruction now"
+              title="Interrupt the run and apply it now"
+              onClick={() => sendQueuedNow(entry.id)}
+            >
               Send now
             </Button>
           )}
-          <IconButton icon="close" label="Remove queued instruction" size="xs" tone="muted" />
+          <IconButton icon="close" label="Remove queued instruction" size="xs" tone="muted" onClick={() => removeQueued(entry.id)} />
         </li>
       ))}
     </ul>
@@ -236,6 +258,7 @@ export function FollowUpQueue({ className, edge = 'box' }: { className?: string;
  * the words on the text edge — instead of a box with its own radius.
  */
 export function ErrorAlert({ className, edge = 'box' }: { className?: string; edge?: Edge }) {
+  const { retry, dismissError } = useActions()
   if (edge === 'pill') {
     return (
       <div role="alert" className={cn('flex min-h-8 min-w-0 items-center gap-2 py-1 text-xs', PILL_ROW, className)}>
@@ -243,18 +266,20 @@ export function ErrorAlert({ className, edge = 'box' }: { className?: string; ed
           <Icon name="warningCircle" size={14} className="text-danger" />
         </Lead>
         <span className="min-w-0 flex-1 text-fg [overflow-wrap:anywhere]">{ERROR_TEXT}</span>
-        <Button size="xs" variant="secondary" onMouseDown={keepFocus}>
+        <Button size="xs" variant="secondary" onMouseDown={keepFocus} onClick={retry}>
           Retry
         </Button>
-        <IconButton icon="close" label="Dismiss" size="xs" tone="muted" />
+        <IconButton icon="close" label="Dismiss" size="xs" tone="muted" onMouseDown={keepFocus} onClick={dismissError} />
       </div>
     )
   }
   return (
-    <Alert onDismiss={() => undefined} className={className}>
+    <Alert onDismiss={dismissError} className={className}>
       <div className="flex items-start justify-between gap-2">
         <span className="min-w-0 [overflow-wrap:anywhere]">{ERROR_TEXT}</span>
-        <Button size="xs">Retry</Button>
+        <Button size="xs" onClick={retry}>
+          Retry
+        </Button>
       </div>
     </Alert>
   )
@@ -265,6 +290,7 @@ export function ErrorAlert({ className, edge = 'box' }: { className?: string; ed
  * In B it is the pill's first row, on the pill's edges, with no box of its own.
  */
 export function ReadinessBanner({ primary, className, edge = 'box' }: { primary: boolean; className?: string; edge?: Edge }) {
+  const { addKey } = useActions()
   if (edge === 'pill') {
     return (
       <div role="status" className={cn('flex min-w-0 items-center gap-2 pt-3.5', PILL_ROW, className)}>
@@ -275,7 +301,7 @@ export function ReadinessBanner({ primary, className, edge = 'box' }: { primary:
           <div className="text-sm font-medium text-fg-strong">Add an API key for Anthropic</div>
           <div className="text-xs text-muted">Keys stay encrypted on this device.</div>
         </div>
-        <Button size="sm" variant={primary ? 'primary' : 'secondary'}>
+        <Button size="sm" variant={primary ? 'primary' : 'secondary'} onClick={addKey}>
           Add API key
         </Button>
       </div>
@@ -286,7 +312,7 @@ export function ReadinessBanner({ primary, className, edge = 'box' }: { primary:
       variant="info"
       className={className}
       actions={
-        <Button size="sm" variant={primary ? 'primary' : 'secondary'}>
+        <Button size="sm" variant={primary ? 'primary' : 'secondary'} onClick={addKey}>
           Add API key
         </Button>
       }
@@ -301,12 +327,18 @@ export function ReadinessBanner({ primary, className, edge = 'box' }: { primary:
 
 /** ComposerAttachments: image chips, then file chips. */
 export function Attachments() {
+  const { attached } = useGlass()
+  const { removeAttachment } = useActions()
+  const [lightbox, setLightbox] = useState(false)
   return (
     <div className="flex w-full min-w-0 flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <ImageChip url={SAMPLE_IMAGE} label="Image 1" onClick={() => undefined} onRemove={() => undefined} />
-        <FileChip name={SAMPLE_FILE.name} chars={SAMPLE_FILE.chars} onRemove={() => undefined} />
+        {attached.image ? (
+          <ImageChip url={SAMPLE_IMAGE} label="Image 1" onClick={() => setLightbox(true)} onRemove={() => removeAttachment('image')} />
+        ) : null}
+        {attached.file ? <FileChip name={SAMPLE_FILE.name} chars={SAMPLE_FILE.chars} onRemove={() => removeAttachment('file')} /> : null}
       </div>
+      {lightbox ? <ImageLightbox url={SAMPLE_IMAGE} label="Image 1" onClose={() => setLightbox(false)} /> : null}
     </div>
   )
 }

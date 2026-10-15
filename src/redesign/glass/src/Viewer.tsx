@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ActionsProvider } from './glass/actions'
 import { AnatomyComposer } from './glass/A'
 import { ShapeComposer } from './glass/B'
 import { useLiquidLens, useReducedTransparency } from './glass/liquid'
 import { SCENES, type SceneId } from './glass/scenes'
-import { GlassProvider } from './glass/store'
+import { GlassProvider, useGlass } from './glass/store'
 
 /*
   The mockup viewer — scaffolding, not part of the design, so it uses
@@ -38,23 +39,42 @@ function read(): { v: View; m: Material; scene: SceneId; bare: boolean; preview:
   return { v, m, scene, bare: p.get('bare') === '1', preview: p.get('rt') !== '1' }
 }
 
+/**
+ * Where the composer sits, by the surface it is on now: the brief at the top,
+ * the line at the bottom. Start task turns the one into the other.
+ */
+function Stage({ variant }: { variant: 'a' | 'b' }) {
+  const { scene } = useGlass()
+  const top = scene.surface === 'brief'
+  return (
+    <>
+      <div className={top ? 'gx-scrim-top pointer-events-none absolute inset-0' : 'gx-scrim-bottom pointer-events-none absolute inset-0'} />
+      <div className={top ? 'relative flex min-h-0 flex-1 flex-col' : 'relative flex min-h-0 flex-1 flex-col justify-end'}>
+        {variant === 'a' ? <AnatomyComposer /> : <ShapeComposer />}
+      </div>
+    </>
+  )
+}
+
 /** One glass frame: the backdrop, a scrim where the composer sits, the composer. */
 function Frame({
   variant,
   sceneId,
   material,
-  preview
+  preview,
+  nonce = 0
 }: {
   variant: 'a' | 'b'
   sceneId: SceneId
   material: Material
   preview: boolean
+  /** Bumped when the scene is picked again: the frame starts over from it. */
+  nonce?: number
 }) {
   const [layer, setLayer] = useState<HTMLDivElement | null>(null)
   const reduce = useReducedTransparency()
   useLiquidLens(layer, material === 'liquid' && (preview || !reduce))
   const entry = SCENES.find((s) => s.id === sceneId) ?? SCENES[0]!
-  const top = entry.scene.surface === 'brief'
   return (
     <div
       ref={setLayer}
@@ -71,11 +91,10 @@ function Frame({
         .join(' ')}
       style={{ width: W, height: HGT, transform: 'translateZ(0)' }}
     >
-      <div className={top ? 'gx-scrim-top pointer-events-none absolute inset-0' : 'gx-scrim-bottom pointer-events-none absolute inset-0'} />
-      <GlassProvider key={`${variant}-${sceneId}-${material}`} scene={entry.scene} layer={layer}>
-        <div className={top ? 'relative flex min-h-0 flex-1 flex-col' : 'relative flex min-h-0 flex-1 flex-col justify-end'}>
-          {variant === 'a' ? <AnatomyComposer /> : <ShapeComposer />}
-        </div>
+      <GlassProvider key={`${variant}-${sceneId}-${material}-${nonce}`} scene={entry.scene} layer={layer}>
+        <ActionsProvider>
+          <Stage variant={variant} />
+        </ActionsProvider>
       </GlassProvider>
     </div>
   )
@@ -88,6 +107,7 @@ export function Viewer() {
   const [preview, setPreview] = useState(init.preview)
   const reduce = useReducedTransparency()
   const [scene, setScene] = useState<SceneId>(init.scene)
+  const [nonce, setNonce] = useState(0)
   const stage = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(1)
   const frames = view === 'both' ? 2 : 1
@@ -153,7 +173,10 @@ export function Viewer() {
                 key={s.id}
                 type="button"
                 aria-pressed={s.id === scene}
-                onClick={() => setScene(s.id)}
+                onClick={() => {
+                  setScene(s.id)
+                  setNonce((n) => n + 1)
+                }}
                 className={`h-7 rounded-md px-2 text-left text-xs focus-visible:vy-focus-ring ${s.id === scene ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100'}`}
               >
                 {s.label}
@@ -197,7 +220,7 @@ export function Viewer() {
               <span className="shrink-0 whitespace-nowrap text-caption text-neutral-500">Transparency effects are off on this PC</span>
             </>
           ) : null}
-          <span className="ml-auto shrink-0 whitespace-nowrap pl-3 text-caption text-neutral-500">Click any control: its popover opens as in the app.</span>
+          <span className="ml-auto shrink-0 whitespace-nowrap pl-3 text-caption text-neutral-500">Every control works: click, type, @, / and the app’s keys. Pick a scene again to reset it.</span>
         </div>
         <div ref={stage} className="relative min-h-0 flex-1 overflow-hidden">
           <div
@@ -207,13 +230,13 @@ export function Viewer() {
             {view !== 'b' ? (
               <figure className="m-0 flex flex-col gap-2">
                 <figcaption className="text-xs text-neutral-400">A · Your anatomy</figcaption>
-                <Frame variant="a" sceneId={scene} material={material} preview={preview} />
+                <Frame variant="a" sceneId={scene} material={material} preview={preview} nonce={nonce} />
               </figure>
             ) : null}
             {view !== 'a' ? (
               <figure className="m-0 flex flex-col gap-2">
                 <figcaption className="text-xs text-neutral-400">B · Reference shape</figcaption>
-                <Frame variant="b" sceneId={scene} material={material} preview={preview} />
+                <Frame variant="b" sceneId={scene} material={material} preview={preview} nonce={nonce} />
               </figure>
             ) : null}
           </div>

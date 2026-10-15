@@ -13,6 +13,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import type { AgentInteractionMode } from '@shared/ipc'
+import type { MentionMenuView } from '../../../../renderer/src/features/chat/components/composer/mentionModel'
 import { BRIEF_CHECKS, DEFAULT_EFFORT, FOLLOW_UPS, type Segment } from './data'
 import { hasContent } from './scenes'
 
@@ -40,8 +41,11 @@ export type Scene = {
 
 export type QueueEntry = { id: string; preview: string; offline: boolean }
 
-/** What the words before the caret ask for: `@query` anywhere, `/query` at the start. */
-export type Trigger = { kind: 'mention' | 'slash'; query: string; raw: string }
+/**
+ * What the words before the caret ask for: `@query` anywhere, `/query` at the
+ * start. `start` is where the token begins: the same token, edited, keeps it.
+ */
+export type Trigger = { kind: 'mention' | 'slash'; query: string; raw: string; start: number }
 
 /** Which sample attachments are on the composer. */
 export type Attached = { image: boolean; file: boolean }
@@ -56,6 +60,12 @@ type Glass = {
   patch: (next: Partial<Scene>) => void
   /** The field's generation: it remounts on each one, with the scene's words. */
   rev: number
+  /**
+   * Whether that field takes focus as it mounts (a click redrew it), and where
+   * the caret goes: after this segment (a chip just picked), or at the end.
+   */
+  focusOnDraw: boolean
+  caretOnDraw: number | null
   mode: AgentInteractionMode
   setMode: (mode: AgentInteractionMode) => void
   effortAt: number
@@ -75,14 +85,21 @@ type Glass = {
   trigger: Trigger | null
   /** The @ or / menu follows the words: it opens on a trigger, and a closed one stays closed until the trigger changes. */
   setTrigger: (next: Trigger | null) => void
-  /** The highlighted row of the open @ or / menu. */
+  /** The highlighted row of the open @ or / menu, by its place on screen. */
   menuActive: number
   setMenuActive: (i: number) => void
+  /** The @ menu's list: the root, or one it browses into (Files and folders, Docs…). */
+  mentionView: MentionMenuView
+  setMentionView: (view: MentionMenuView) => void
+  /** Files and folders' "Show N more" was taken. */
+  mentionMore: boolean
+  setMentionMore: (more: boolean) => void
   toggle: (pop: Pop) => void
   close: () => void
-  /** The live field, and whether the next one to mount should take focus. */
+  /** The live field. */
   fieldRef: MutableRefObject<HTMLDivElement | null>
-  wantsFocus: MutableRefObject<boolean>
+  /** Set before a patch: the next field's caret goes after this segment. */
+  caretAfter: MutableRefObject<number | null>
   /** Structure at work: its timer, and the words it replaced (for Undo and Try again). */
   structureMemo: MutableRefObject<{ timer: number | null; before: Segment[] | null }>
   /** The frame the popovers portal into, and its scale on screen. */
@@ -136,7 +153,12 @@ export function GlassProvider({
   children: ReactNode
 }) {
   const [scene, setScene] = useState<Scene>(initial)
-  const [rev, setRev] = useState(0)
+  // A scene that opens on the @ or / menu has the field focused, the caret after the trigger, so typing filters it.
+  const [draw, setDraw] = useState<{ rev: number; focus: boolean; caret: number | null }>(() => ({
+    rev: 0,
+    focus: initial.pop === 'mention' || initial.pop === 'slash',
+    caret: null
+  }))
   const [mode, setMode] = useState<AgentInteractionMode>('agent')
   const [effortAt, setEffortAt] = useState(DEFAULT_EFFORT)
   const [modelAt, setModelAt] = useState(0)
@@ -145,11 +167,21 @@ export function GlassProvider({
   const [attached, setAttached] = useState<Attached>({ image: initial.attachments, file: initial.attachments })
   const [queue, setQueue] = useState<QueueEntry[]>(() => (initial.followUps ? FOLLOW_UPS : []))
   const [checks, setChecks] = useState<string[]>(BRIEF_CHECKS)
-  const [trigger, setTriggerState] = useState<Trigger | null>(null)
+  // A scene that opens on the @ or / menu opens on its trigger, typed at the end of the words.
+  const [trigger, setTriggerState] = useState<Trigger | null>(() => {
+    if (initial.pop !== 'mention' && initial.pop !== 'slash') return null
+    const at = initial.segments.reduce((n, s) => n + (s.type === 'text' ? s.value.length : 0), 0) - 1
+    return initial.pop === 'mention' ? { kind: 'mention', query: '', raw: '@', start: at } : { kind: 'slash', query: '', raw: '/', start: at }
+  })
+  const triggerRef = useRef(trigger)
   const [menuActive, setMenuActive] = useState(0)
+  const [mentionView, setMentionViewState] = useState<MentionMenuView>('root')
+  const [mentionMore, setMentionMore] = useState(false)
   const dismissed = useRef<string | null>(null)
   const fieldRef = useRef<HTMLDivElement | null>(null)
-  const wantsFocus = useRef(false)
+  const caretAfter = useRef<number | null>(null)
+  const layerRef = useRef(layer)
+  layerRef.current = layer
   const structureMemo = useRef<{ timer: number | null; before: Segment[] | null }>({ timer: null, before: null })
   useEffect(() => {
     const memo = structureMemo.current
@@ -175,9 +207,14 @@ export function GlassProvider({
         // The take's tinted words are now plain words, so the take is over.
         if (cur.take === 'inserted' && !('take' in next)) merged = { ...merged, take: null }
       }
-      setRev((r) => r + 1)
       setTyped(hasContent({ ...merged, attachments: false }))
-      wantsFocus.current = true
+      // The redrawn field takes focus back, unless focus has gone somewhere else
+      // meanwhile (Structure's brief lands after a beat; the other frame).
+      const at = document.activeElement
+      const focus = !at || at === document.body || Boolean(layerRef.current?.contains(at))
+      const caret = caretAfter.current
+      caretAfter.current = null
+      setDraw((d) => ({ rev: d.rev + 1, focus, caret }))
     }
     if ('attachments' in next) setAttached({ image: Boolean(next.attachments), file: Boolean(next.attachments) })
     sceneRef.current = merged
@@ -185,6 +222,14 @@ export function GlassProvider({
   }, [])
 
   const setTrigger = useCallback((next: Trigger | null) => {
+    // useComposerMentions: a new token starts at the root, open again; editing the same
+    // one keeps the list it browsed into, and keeps a closed menu closed.
+    const same = Boolean(next && triggerRef.current && next.kind === triggerRef.current.kind && next.start === triggerRef.current.start)
+    if (!same) {
+      setMentionViewState('root')
+      setMentionMore(false)
+    }
+    triggerRef.current = next
     setTriggerState(next)
     setMenuActive(0)
     if (!next) {
@@ -192,15 +237,20 @@ export function GlassProvider({
       setPop((cur) => (cur === 'mention' || cur === 'slash' ? null : cur))
       return
     }
-    if (dismissed.current === `${next.kind}:${next.raw}`) return
+    if (dismissed.current === `${next.kind}:${next.start}`) return
     setPop(next.kind)
+  }, [])
+
+  const setMentionView = useCallback((view: MentionMenuView) => {
+    setMentionViewState(view)
+    setMenuActive(0)
   }, [])
 
   const toggle = useCallback((next: Pop) => setPop((cur) => (cur === next ? null : next)), [])
   const close = useCallback(() => {
     setPop((cur) => {
       // Closing the @ or / menu by hand keeps it closed until the words change.
-      if ((cur === 'mention' || cur === 'slash') && trigger) dismissed.current = `${trigger.kind}:${trigger.raw}`
+      if ((cur === 'mention' || cur === 'slash') && trigger) dismissed.current = `${trigger.kind}:${trigger.start}`
       return null
     })
   }, [trigger])
@@ -209,7 +259,9 @@ export function GlassProvider({
     () => ({
       scene,
       patch,
-      rev,
+      rev: draw.rev,
+      focusOnDraw: draw.focus,
+      caretOnDraw: draw.caret,
       mode,
       setMode,
       effortAt,
@@ -229,14 +281,39 @@ export function GlassProvider({
       setTrigger,
       menuActive,
       setMenuActive,
+      mentionView,
+      setMentionView,
+      mentionMore,
+      setMentionMore,
       toggle,
       close,
       fieldRef,
-      wantsFocus,
+      caretAfter,
       structureMemo,
       layer
     }),
-    [scene, patch, rev, mode, effortAt, modelAt, pop, filled, attached, queue, checks, trigger, setTrigger, menuActive, toggle, close, layer]
+    [
+      scene,
+      patch,
+      draw,
+      mode,
+      effortAt,
+      modelAt,
+      pop,
+      filled,
+      attached,
+      queue,
+      checks,
+      trigger,
+      setTrigger,
+      menuActive,
+      mentionView,
+      setMentionView,
+      mentionMore,
+      toggle,
+      close,
+      layer
+    ]
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
@@ -312,10 +389,11 @@ const FOCUSABLE = '[role="menuitem"], input, button:not([disabled]), [tabindex="
  * `start` puts its left on the anchor's left, `end` its right on the
  * anchor's right, `anchor` tracks the anchor's width between min and max.
  *
- * Focus is the app's too: opened from a focused trigger, the panel takes
- * focus (a menu its first row, a dialog its first field); Esc, a pick or
- * focus leaving it hands focus back to the trigger. The @ and / menus are
- * driven from the field and never take it.
+ * Focus is the app's too: `takeFocus` panels take it as they open (the
+ * pickers' first field, the attach menu's first row: useDropdownMenu's
+ * autoFocusFirst, ActionMenu's list); Context details leaves it on the
+ * trigger, and the @ and / menus are driven from the field and never take
+ * it. Esc, a pick or focus leaving the panel hands focus back.
  */
 export function Popover({
   anchor,
@@ -327,7 +405,9 @@ export function Popover({
   children,
   className,
   label,
-  role = 'dialog'
+  role = 'dialog',
+  takeFocus = false,
+  onEscape
 }: {
   anchor: RefObject<HTMLElement | null>
   open: boolean
@@ -339,6 +419,9 @@ export function Popover({
   className?: string
   label: string
   role?: 'dialog' | 'menu' | 'listbox'
+  takeFocus?: boolean
+  /** Esc's first say: true when it handled the key (the @ menu steps back out of a list). */
+  onEscape?: () => boolean
 }) {
   const { layer, close } = useGlass()
   const rect = useAnchorRect(anchor, layer, open)
@@ -354,6 +437,10 @@ export function Popover({
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
+      if (onEscape?.()) {
+        e.preventDefault()
+        return
+      }
       const inside = panel.current?.contains(document.activeElement)
       close()
       if (inside) anchor.current?.focus()
@@ -364,13 +451,10 @@ export function Popover({
       document.removeEventListener('pointerdown', onDown, true)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open, anchor, close])
-  // Opened from a focused trigger: the panel takes focus, as ActionMenu and the pickers do.
+  }, [open, anchor, close, onEscape])
   useEffect(() => {
-    if (!placed) return
-    if (document.activeElement !== anchor.current) return
-    panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus()
-  }, [placed, anchor])
+    if (placed && takeFocus) panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus()
+  }, [placed, takeFocus])
   if (!open || !layer || !rect) return null
   const w =
     width ??

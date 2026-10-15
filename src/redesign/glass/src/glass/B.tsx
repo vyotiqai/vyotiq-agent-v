@@ -2,8 +2,8 @@ import { useState, type ReactNode } from 'react'
 import { Button, IconButton, Tooltip, cn } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { BORDER_DIVIDER, NUM, SECTION_LABEL } from '@renderer/lib/utils/layout'
-import { BRIEF_CHECKS } from './data'
-import { BriefFoot, useField } from './A'
+import { useActions } from './actions'
+import { BriefFoot, onCheckKey, useField } from './A'
 import { AttachMenu, ContextMeter, MicControl, ModeSwitch, ModelPicker, StructureButton, keepFocus } from './controls'
 import { INSERTED_WORDS } from './scenes'
 import { useGlass } from './store'
@@ -42,12 +42,12 @@ import {
   - An empty pill is the reference: `+` (attach), the placeholder, the mic.
   - Once there is something to send, the right cap swaps the mic for a round
     ↑ (Send, Queue while a run is live, Rerun while editing; Shift+Enter is
-    Send now) and Structure (✦) appears beside it. Dictation keeps its
+    Send now) and Structure (a list with checks) appears beside it. Dictation keeps its
     shortcut, and the mic returns when the field empties.
   - Mode, model · effort and the context reading sit on a rail under the
     pill that shows only while you are working: the composer has focus,
-    holds something to send, a run is live, or one of the rail's popovers is
-    open. It keeps its space while hidden, so the pill never jumps.
+    holds something to send, a run is live, or a popover is open. Hidden, it
+    folds away and the pill settles to the bottom.
   - The tools are the pill's focal points, at the `default` tone, as the
     reference's white glyphs are. A live take's strip stands in for the
     rail, the mic already being in the pill.
@@ -64,7 +64,7 @@ const TEXT = INSET + 28 + 8
 const GUTTER = { marginLeft: 2 * (INSET + 14) - TEXT, width: 2 * (TEXT - INSET - 14) }
 
 /** The round control outside the pill, on its centreline. */
-function OutsideCircle({ icon, label }: { icon: 'stop' | 'close'; label: string }) {
+function OutsideCircle({ icon, label, onClick }: { icon: 'stop' | 'close'; label: string; onClick: () => void }) {
   return (
     <Tooltip content={label}>
       <button
@@ -72,6 +72,7 @@ function OutsideCircle({ icon, label }: { icon: 'stop' | 'close'; label: string 
         aria-label={label}
         data-gx-emerge
         onMouseDown={keepFocus}
+        onClick={onClick}
         className="gx-glass inline-grid shrink-0 place-items-center rounded-full text-secondary vy-transition hover:text-fg-strong focus-visible:vy-focus-ring"
         style={{ width: OUT, height: OUT, marginBottom: (H - OUT) / 2 }}
       >
@@ -108,7 +109,7 @@ function CapRow({ field, action, swap }: { field?: ReactNode; action: ReactNode;
   const { scene, filled } = useGlass()
   // A live take owns the ways out (its strip, in the rail): the pill keeps only the mic, as the app's row does.
   const takeOpen = scene.take === 'listening'
-  const structure = <StructureButton ready={scene.structure !== 'working'} tone="default" />
+  const structure = <StructureButton ready={filled && scene.structure !== 'working'} tone="default" />
   return (
     <div className="flex items-end gap-2" style={{ padding: INSET, minHeight: H }}>
       <AttachMenu withScreenshot={scene.surface !== 'brief'} disabled={takeOpen} align="start" tone="default" glyph="plus" />
@@ -144,7 +145,8 @@ function CapRow({ field, action, swap }: { field?: ReactNode; action: ReactNode;
  */
 function Rail({ context, takeSendLabel, focused }: { context: boolean; takeSendLabel: string | null; focused: boolean }) {
   const { scene, filled, pop } = useGlass()
-  const show = focused || filled || scene.running || pop === 'model' || pop === 'context'
+  // Any popover keeps it up: the rail's own, and the pill's, which open from where the pill sits with it.
+  const show = focused || filled || scene.running || pop !== null
   if (scene.take === 'listening') {
     return (
       <div className="mt-1.5 @container">
@@ -161,9 +163,10 @@ function Rail({ context, takeSendLabel, focused }: { context: boolean; takeSendL
       inert={!show}
       data-shown={show || undefined}
     >
-      <div className="min-h-0 overflow-hidden">
+      {/* The container the rail's width is read from: a query never sees its own element. */}
+      <div className="min-h-0 overflow-hidden @container">
         <div
-          className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pb-0.5 pt-1.5 @container @max-[480px]:[&_span:has(>kbd)]:hidden"
+          className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pb-0.5 pt-1.5 @max-[480px]:[&_span:has(>kbd)]:hidden"
           style={{ paddingLeft: TEXT, paddingRight: INSET }}
           data-composer-controls
           data-gx-rail
@@ -198,18 +201,26 @@ function useFocusWithin(): [boolean, { onFocus: () => void; onBlur: (e: React.Fo
 }
 
 export function ShapeComposer() {
-  const { scene } = useGlass()
+  const { scene, attached, queue, checks } = useGlass()
+  const actions = useActions()
   const { field, menus } = useField()
   const [focused, focusProps] = useFocusWithin()
-  const ready = !scene.readiness && scene.take !== 'listening' && scene.structure !== 'working'
+  const { canSend } = actions
+  const attachments = attached.image || attached.file
 
   if (scene.surface === 'brief') {
     return (
-      <div className="mx-auto w-full max-w-[780px] px-5 pt-16" data-gx-clear-shell {...focusProps}>
+      // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- delegates the field's and controls' own keys
+      <div
+        className="mx-auto w-full max-w-[780px] px-5 pt-16"
+        data-gx-clear-shell
+        {...focusProps}
+        onKeyDown={actions.onKeyDown}
+      >
         {scene.structure === 'working' ? <StructureWorking placement="pill" /> : null}
         <div className={PILL} data-brief data-composer-shell data-gx-field>
           <div style={{ paddingLeft: TEXT, paddingRight: INSET, paddingTop: INSET }}>{field}</div>
-          {scene.attachments ? (
+          {attachments ? (
             <div className="pt-2" style={{ paddingLeft: TEXT, paddingRight: INSET }}>
               <Attachments />
             </div>
@@ -218,10 +229,10 @@ export function ShapeComposer() {
           <div className={cn('mt-3 border-t pb-1 pt-1', BORDER_DIVIDER)} style={{ paddingRight: INSET }} data-done-when>
             <div className="flex items-baseline gap-2 pb-0.5 pt-1" style={{ paddingLeft: TEXT }}>
               <span className={SECTION_LABEL}>Done when</span>
-              <span className={cn(NUM, 'text-tertiary')}>{BRIEF_CHECKS.length}</span>
+              <span className={cn(NUM, 'text-tertiary')}>{checks.length}</span>
             </div>
             <ul className="m-0 list-none p-0" aria-label="Done when">
-              {BRIEF_CHECKS.map((text, index) => (
+              {checks.map((text, index) => (
                 <li key={text} className="group flex h-7 items-center">
                   <span className={cn(NUM, 'shrink-0 text-center text-tertiary')} style={GUTTER}>
                     {index + 1}
@@ -235,6 +246,7 @@ export function ShapeComposer() {
                     size="xs"
                     tone="muted"
                     className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                    onClick={() => actions.removeCheck(text)}
                   />
                 </li>
               ))}
@@ -246,6 +258,7 @@ export function ShapeComposer() {
               <input
                 placeholder="Done when… a command passes, a file exists"
                 aria-label="New check"
+                onKeyDown={onCheckKey(actions.addCheck)}
                 className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
               />
             </label>
@@ -254,7 +267,7 @@ export function ShapeComposer() {
             <CapRow
               swap={false}
               action={
-                <Button variant="primary" size="sm" disabled={!ready} title="Start task (Ctrl+Enter)" onMouseDown={keepFocus}>
+                <Button variant="primary" size="sm" disabled={!canSend} title="Start task (Ctrl+Enter)" onMouseDown={keepFocus} onClick={actions.startTask}>
                   Start task
                 </Button>
               }
@@ -270,20 +283,31 @@ export function ShapeComposer() {
 
   const inline = scene.surface === 'inline'
   const outside =
-    inline ? <OutsideCircle icon="close" label="Cancel edit (Esc)" /> : scene.running ? <OutsideCircle icon="stop" label="Stop the run (Esc)" /> : null
+    inline ? (
+      <OutsideCircle icon="close" label="Cancel edit (Esc)" onClick={actions.cancelEdit} />
+    ) : scene.running ? (
+      <OutsideCircle icon="stop" label="Stop the run (Esc)" onClick={actions.stop} />
+    ) : null
   const action = inline ? (
-    <SendCircle label="Rerun" tip="Rerun with the edited instruction (Enter)" keys="Enter" ready={ready} />
+    <SendCircle label="Rerun" tip="Rerun with the edited instruction (Enter)" keys="Enter" ready={canSend} />
   ) : scene.running ? (
-    <SendCircle label="Queue" tip="Queue it — it starts when this run ends (Enter) · Send now: Shift+Enter" keys="Enter Shift+Enter" ready={ready} />
+    <SendCircle label="Queue" tip="Queue it — it starts when this run ends (Enter) · Send now: Shift+Enter" keys="Enter Shift+Enter" ready={canSend} />
   ) : (
-    <SendCircle label="Send" tip="Send (Enter)" keys="Enter" ready={ready} />
+    <SendCircle label="Send" tip="Send (Enter)" keys="Enter" ready={canSend} />
   )
 
   return (
     <div className="shrink-0" data-composer-line>
-      <div className="mx-auto w-full max-w-[780px] px-4 pb-4" data-composer-column data-gx-clear-shell {...focusProps}>
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- delegates the field's and controls' own keys */}
+      <div
+        className="mx-auto w-full max-w-[780px] px-4 pb-4"
+        data-composer-column
+        data-gx-clear-shell
+        {...focusProps}
+        onKeyDown={actions.onKeyDown}
+      >
         {scene.error ? <ErrorAlert edge="pill" className="mb-1" /> : null}
-        {scene.followUps ? <FollowUpQueue className="mb-1.5" edge="pill" /> : null}
+        {queue.length ? <FollowUpQueue className="mb-1.5" edge="pill" /> : null}
         {scene.structure === 'working' ? (
           <StructureWorking placement="pill" />
         ) : scene.structure === 'done' ? (
@@ -291,9 +315,18 @@ export function ShapeComposer() {
         ) : null}
         {scene.take === 'inserted' ? <TakeInserted words={INSERTED_WORDS.split(' ').length} edge="pill" /> : null}
         <div className="grid items-end gap-x-2" style={{ gridTemplateColumns: outside ? `minmax(0,1fr) ${OUT}px` : 'minmax(0,1fr)' }}>
-          <form className={PILL} data-composer-shell data-gx-field onSubmit={(e) => e.preventDefault()}>
+          <form
+            className={PILL}
+            data-composer-shell
+            data-gx-field
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (inline) actions.rerun()
+              else actions.submit()
+            }}
+          >
             {scene.readiness ? <ReadinessBanner primary edge="pill" /> : null}
-            {scene.attachments ? (
+            {attachments ? (
               <div className="pt-3" style={{ paddingLeft: TEXT, paddingRight: INSET }}>
                 <Attachments />
               </div>

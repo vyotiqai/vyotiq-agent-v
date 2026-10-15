@@ -1,9 +1,9 @@
-import { useRef, type ReactNode } from 'react'
+import { useCallback, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { Button, IconButton, Keys, cn } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { BORDER_DIVIDER, NUM, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { resolveLinePlaceholder } from '../../../../renderer/src/features/chat/components/composer/composerPlaceholder'
-import { BRIEF_CHECKS } from './data'
+import { useActions } from './actions'
 import { AttachMenu, ContextMeter, LineAction, MicControl, ModeSwitch, ModelPicker, StopButton, StructureButton, keepFocus } from './controls'
 import { Field } from './field'
 import { MentionMenu, SlashMenu } from './menus'
@@ -69,9 +69,26 @@ function Controls({ action, context, takeSendLabel }: { action: ReactNode; conte
   )
 }
 
+/** The New check input: Enter adds what it holds to Done when (and stays out of the composer's keys). */
+export function onCheckKey(add: (text: string) => boolean) {
+  return (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (add(e.currentTarget.value)) e.currentTarget.value = ''
+  }
+}
+
 export function useField() {
-  const { scene, mode, setTyped } = useGlass()
+  const { scene, mode, rev, focusOnDraw, caretOnDraw, fieldRef } = useGlass()
+  const actions = useActions()
   const anchor = useRef<HTMLDivElement>(null)
+  const setInput = useCallback(
+    (el: HTMLDivElement | null) => {
+      fieldRef.current = el
+    },
+    [fieldRef]
+  )
   const placeholder =
     scene.surface === 'brief'
       ? mode === 'ask'
@@ -82,7 +99,13 @@ export function useField() {
         : resolveLinePlaceholder({ hasWorkspace: true, running: scene.running, agentMode: mode, outcome: scene.error ? 'failed' : null })
   const field = (
     <Field
+      // Each redraw (a pick, Send, a take, Structure) is a new field holding the scene's words.
+      key={rev}
       anchorRef={anchor}
+      inputRef={setInput}
+      focusOnMount={focusOnDraw}
+      caretAfter={caretOnDraw}
+      onEdit={actions.onEdit}
       segments={scene.segments}
       placeholder={placeholder}
       size={scene.surface === 'brief' ? 'brief' : 'sm'}
@@ -90,30 +113,32 @@ export function useField() {
       live={scene.take === 'listening' ? LIVE_WORDS : null}
       inserted={scene.take === 'inserted' ? INSERTED_WORDS : null}
       readOnly={scene.structure === 'working'}
-      onTypedChange={setTyped}
     />
   )
   const menus = (
     <>
-      <SlashMenu anchor={anchor} />
-      <MentionMenu anchor={anchor} />
+      <SlashMenu anchor={anchor} onPick={actions.pickSlash} />
+      <MentionMenu anchor={anchor} onPick={actions.pickMention} />
     </>
   )
   return { field, menus }
 }
 
 export function AnatomyComposer() {
-  const { scene, filled } = useGlass()
+  const { scene, filled, attached, queue, checks } = useGlass()
+  const actions = useActions()
   const { field, menus } = useField()
-  const ready = !scene.readiness && scene.take !== 'listening' && scene.structure !== 'working'
+  const { ready, canSend } = actions
+  const attachments = attached.image || attached.file
 
   if (scene.surface === 'brief') {
     return (
-      <div className="mx-auto w-full max-w-[780px] px-5 pt-16">
+      // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- delegates the field's and controls' own keys
+      <div className="mx-auto w-full max-w-[780px] px-5 pt-16" onKeyDown={actions.onKeyDown}>
         {scene.structure === 'working' ? <StructureWorking placement="brief" /> : null}
         <div className={BOX} data-brief data-composer-shell data-gx-field>
           <div className="px-4 pt-3.5">{field}</div>
-          {scene.attachments ? (
+          {attachments ? (
             <div className="px-4 pt-2">
               <Attachments />
             </div>
@@ -121,10 +146,10 @@ export function AnatomyComposer() {
           <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
             <div className="flex items-baseline gap-2 pb-0.5 pt-1">
               <span className={SECTION_LABEL}>Done when</span>
-              <span className={cn(NUM, 'text-tertiary')}>{BRIEF_CHECKS.length}</span>
+              <span className={cn(NUM, 'text-tertiary')}>{checks.length}</span>
             </div>
             <ul className="m-0 list-none p-0" aria-label="Done when">
-              {BRIEF_CHECKS.map((text, index) => (
+              {checks.map((text, index) => (
                 <li key={text} className="group flex h-7 items-center gap-2.5">
                   <span className={cn(NUM, 'w-4 shrink-0 text-right text-tertiary')}>{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
@@ -136,6 +161,7 @@ export function AnatomyComposer() {
                     size="xs"
                     tone="muted"
                     className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                    onClick={() => actions.removeCheck(text)}
                   />
                 </li>
               ))}
@@ -147,6 +173,7 @@ export function AnatomyComposer() {
               <input
                 placeholder="Done when… a command passes, a file exists"
                 aria-label="New check"
+                onKeyDown={onCheckKey(actions.addCheck)}
                 className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
               />
             </label>
@@ -156,7 +183,7 @@ export function AnatomyComposer() {
               context={false}
               takeSendLabel={null}
               action={
-                <Button variant="primary" size="sm" disabled={!ready} title="Start task (Ctrl+Enter)" onMouseDown={keepFocus}>
+                <Button variant="primary" size="sm" disabled={!canSend} title="Start task (Ctrl+Enter)" onMouseDown={keepFocus} onClick={actions.startTask}>
                   Start task
                 </Button>
               }
@@ -172,8 +199,17 @@ export function AnatomyComposer() {
   if (scene.surface === 'inline') {
     return (
       <div className="mx-auto w-full max-w-[780px] px-4 pb-4">
-        <div className="flex w-full flex-col gap-2" data-composer-inline>
-          <form className={cn(BOX, BLEED)} data-composer-shell data-gx-field onSubmit={(e) => e.preventDefault()}>
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- delegates the field's and controls' own keys */}
+        <div className="flex w-full flex-col gap-2" data-composer-inline onKeyDown={actions.onKeyDown}>
+          <form
+            className={cn(BOX, BLEED)}
+            data-composer-shell
+            data-gx-field
+            onSubmit={(e) => {
+              e.preventDefault()
+              actions.rerun()
+            }}
+          >
             <div className="px-3 pt-2.5">{field}</div>
             <div className="pb-1 pl-3 pr-2 @container">
               <Controls
@@ -181,7 +217,7 @@ export function AnatomyComposer() {
                 takeSendLabel="Rerun"
                 action={
                   <>
-                    <Button size="sm" variant="ghost" kbd={['Esc']} aria-label="Cancel edit" onMouseDown={keepFocus}>
+                    <Button size="sm" variant="ghost" kbd={['Esc']} aria-label="Cancel edit" onMouseDown={keepFocus} onClick={actions.cancelEdit}>
                       Cancel
                     </Button>
                     <Button
@@ -191,7 +227,7 @@ export function AnatomyComposer() {
                       kbd={['↵']}
                       aria-label="Rerun"
                       title="Rerun with the edited instruction"
-                      disabled={!ready}
+                      disabled={!canSend}
                       onMouseDown={keepFocus}
                     >
                       Rerun
@@ -210,22 +246,31 @@ export function AnatomyComposer() {
   return (
     <div className="shrink-0" data-composer-line>
       <div className="pr-2" data-composer-gutter>
-        <div className="mx-auto w-full max-w-[780px] px-4 pb-4" data-composer-column>
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- delegates the field's and controls' own keys */}
+        <div className="mx-auto w-full max-w-[780px] px-4 pb-4" data-composer-column onKeyDown={actions.onKeyDown}>
           {scene.error ? (
             <div className="flex flex-col gap-2 pb-2">
               <ErrorAlert />
             </div>
           ) : null}
-          {scene.followUps ? <FollowUpQueue className="mb-1.5" /> : null}
+          {queue.length ? <FollowUpQueue className="mb-1.5" /> : null}
           {scene.structure === 'working' ? <StructureWorking /> : scene.structure === 'done' ? <StructureDone /> : null}
-          <form className={cn(BOX, BLEED)} data-composer-shell data-gx-field onSubmit={(e) => e.preventDefault()}>
+          <form
+            className={cn(BOX, BLEED)}
+            data-composer-shell
+            data-gx-field
+            onSubmit={(e) => {
+              e.preventDefault()
+              actions.submit()
+            }}
+          >
             {scene.readiness ? (
               <div className="px-3 pt-3">
                 <ReadinessBanner primary />
               </div>
             ) : null}
             <div className="px-3 pt-2.5">{field}</div>
-            {scene.attachments ? (
+            {attachments ? (
               <div className="px-3 pt-2">
                 <Attachments />
               </div>

@@ -28,15 +28,67 @@ helpers, imported:
 | "N steps at High — Medium spends…" | `shouldSuggestLowerThinkingEffort`, `nextLowerThinkingEffort` |
 | Speed labels | `SERVICE_TIER_LABELS` / `_DESCRIPTIONS` |
 | Prices and context sizes | `resolveModelPrice`, `formatTokens` |
-| The @ menu's rows and groups | `buildRootMentionItems`, `buildMentionRootSections` |
+| The @ menu's rows, groups and lists | `buildRootMentionItems`, `buildMentionRootSections`, `buildFileMentionItems`, `buildDocsMentionItems`, `buildRuleMentionItems`, `buildCommitMentionItems`, `buildChatMentionItems` |
 | The / menu's rows, groups and footer | `BUILTIN_COMMANDS`, `buildSlashDisplayList`, `slashRow*`, `slashAcceptHint`, `slashFooterText` |
 | Chip glyphs, file icons | `slashKindIcon`, `fileIconUrl`, `FileTypeIcon` |
+| The image preview | `ImageLightbox` |
 | Dictation choices | `DICTATION_LOCAL_CATALOG` |
 
 The `lib/ui` primitives are the real ones: Button, IconButton, Segmented,
 Keys, Pie, Alert, Badge, FileChip, ImageChip, MenuItemBody and the `MENU_*`
 classes. So are the provider logos. Only the data is sample data: one task on
 Claude Opus 5 at High, 42 steps in, 12% of its context used.
+
+## Everything in the composer works
+
+A scene is where the composer starts, not a picture of it. Every control
+does what the app's does, against the mockup's own state (`glass/actions.tsx`
+over `glass/store.tsx`). Pick a scene again to start it over.
+
+- **The field** is a real contentEditable. Paste is plain text. Typing `@`
+  (after a space or at the start) or `/` (as the whole line) opens its menu,
+  filtered by what follows. The arrows move the highlight, and Enter, Tab or
+  a click takes the row as a chip, with the caret after it. Esc closes the
+  menu, and it stays closed until a new `@` or `/`. In the @ menu a Browse
+  row opens its list (Files and folders with "Show N more", Docs, Rules,
+  Commits, Past tasks); the chevron or Esc goes back.
+- **Send** starts a run and empties the field. A live run stays live until
+  **Stop** (or Esc). While it is live, Enter **queues** (the row above the
+  box has Edit, Send now and Remove) and Shift+Enter is **Send now**. Send,
+  Start task and Rerun are off until there is something to send: words, a
+  chip or an attachment.
+- **Attach**: Files… and Image… / Screenshot add the sample chips (the image
+  opens in the app's lightbox; × removes either). Mention a file types the
+  `@`.
+- **Dictation**: the mic (or Ctrl+M) opens a take. Insert (Enter, Ctrl+M or the
+  live mic), Discard (Esc) and Send (Ctrl+Enter) work. An inserted take shows
+  Undo (Ctrl+Z), which takes back only its words. Without dictation set up,
+  the mic opens Dictate with, and Install or Use starts the take.
+- **Structure** (its button or Ctrl+Shift+Enter) locks the field and writes a
+  sample brief after 1.8s. Cancel (Esc) leaves your words. Once done, Undo
+  (Ctrl+Z) restores them, Try again rewrites, and × hides the row and keeps
+  the brief.
+- **Mode**: the switch, Ctrl+. and ⇧Tab in an empty box.
+- **Model and effort**: the search filters, the arrows and Enter (or a click)
+  pick a model, which the trigger then names. Effort, Speed and the stars
+  work, and so does "Use Med".
+- **The brief**: Enter is a new line and Ctrl+Enter starts the task, which
+  turns the brief into the line with the run live. Done when's input adds a
+  check on Enter, and × removes one.
+- **Edit and rerun**: Rerun (Enter) starts the run on the line. Cancel (Esc)
+  goes back to the line.
+- **The error** has Retry and Dismiss. The missing-key banner's Add API key
+  clears it.
+- **Popovers** follow their trigger as the composer moves (B's rail
+  unfolding, the field growing). Focus follows the app: the model picker,
+  Dictate with and the attach menu take focus as they open, the arrows walk
+  the attach menu, and Esc or a pick hands focus back.
+
+What does nothing, on purpose: controls that open another part of the app
+(Add folder…, Save as draft, Schedule…, the approval note's Change, Add a
+provider…, Refresh the catalog, Compact history, Dictate with's Add key,
+which closes the panel), and the other providers' tabs. The sample has
+models for Anthropic only.
 
 ## The glass layer (`src/styles.css`)
 
@@ -161,7 +213,7 @@ get "as clean and minimal as the image". Each reverses part of the
   refresh glyph read like `/loop`'s repeat.
 - **Mode, model · effort and context sit on a rail under the pill that shows
   only while you are working**: the composer has focus, holds something to
-  send, a run is live, or one of the rail's popovers is open. Hidden, it
+  send, a run is live, or any popover is open. Hidden, it
   folds away (`grid-rows` 0fr ↔ 1fr, 200ms, none under reduced motion) and
   the pill settles to the bottom; it rises 36px when the rail returns.
   Folded, the rail is `inert`, so its controls leave the tab order. *Reverses

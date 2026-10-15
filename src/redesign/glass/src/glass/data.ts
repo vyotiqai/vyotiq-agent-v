@@ -6,7 +6,16 @@ import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import { BUILTIN_COMMANDS } from '../../../../main/agent/slashCommands/builtins'
 import { buildModes, type ThinkingModeOption } from '../../../../renderer/src/features/chat/components/composer/ThinkingControls'
 import { effortFootNote, effortNotes } from '../../../../renderer/src/features/chat/components/composer/effortCost'
-import { buildRootMentionItems, type MentionMenuItem } from '../../../../renderer/src/features/chat/components/composer/mentionModel'
+import {
+  buildChatMentionItems,
+  buildCommitMentionItems,
+  buildDocsMentionItems,
+  buildFileMentionItems,
+  buildRootMentionItems,
+  buildRuleMentionItems,
+  type MentionMenuItem,
+  type MentionMenuView
+} from '../../../../renderer/src/features/chat/components/composer/mentionModel'
 import { buildSlashDisplayList } from '../../../../renderer/src/features/chat/components/composer/useSlashCommands'
 
 /*
@@ -124,13 +133,74 @@ export function formatPct(n: number, total: number): string {
 
 // ── @ and / ──────────────────────────────────────────────────────────────
 
-/** The @ menu with nothing typed yet, from the app's own builder. */
-export const MENTION_ITEMS: MentionMenuItem[] = buildRootMentionItems({
-  query: '',
-  recentFiles: ['src/renderer/src/features/chat/components/composer/Composer.tsx', 'src/renderer/src/styles.css'],
-  matchingFiles: ['README.md'],
-  branchName: BRANCH
-})
+/** A sample workspace: what the @ menu's search and its lists find, through the app's own builders. */
+const RECENT_FILES = ['src/renderer/src/features/chat/components/composer/Composer.tsx', 'src/renderer/src/styles.css']
+const WORKSPACE_FILES = [
+  'README.md',
+  'src/renderer/src/features/chat/components/composer/Composer.tsx',
+  'src/renderer/src/features/chat/components/composer/ModelPicker.tsx',
+  'src/renderer/src/features/chat/components/composer/ContextMeter.tsx',
+  'src/renderer/src/features/chat/components/composer/AttachMenu.tsx',
+  'src/renderer/src/styles.css',
+  'src/renderer/src/lib/ui/Button.tsx',
+  'docs/composer.md',
+  'package.json'
+]
+const WORKSPACE_FOLDERS = ['src/renderer/src/features/chat/components/composer', 'src/renderer/src/lib/ui', 'docs']
+/** Files and folders shows this many, then "Show N more". */
+const FILES_SHOWN = 6
+
+const has = (query: string, ...texts: string[]): boolean => {
+  const q = query.trim().toLowerCase()
+  return !q || texts.some((t) => t.toLowerCase().includes(q))
+}
+
+/** The @ menu's rows for a query, in its root list or one it browsed into. */
+export function mentionItems(view: MentionMenuView, query: string, more: boolean): MentionMenuItem[] {
+  switch (view) {
+    case 'root':
+      return buildRootMentionItems({
+        query,
+        recentFiles: RECENT_FILES,
+        matchingFiles: WORKSPACE_FILES.filter((p) => has(query, p)),
+        matchingFolders: WORKSPACE_FOLDERS.filter((p) => has(query, p)),
+        branchName: BRANCH
+      })
+    case 'files': {
+      // Main pages files and ranks folders apart; the builder merges the two.
+      const files = WORKSPACE_FILES.filter((p) => has(query, p))
+      const shown = more ? files.length : Math.min(FILES_SHOWN, files.length)
+      return buildFileMentionItems(files.slice(0, shown), files.length, shown, {
+        paths: WORKSPACE_FOLDERS.filter((p) => has(query, p)),
+        query
+      })
+    }
+    case 'docs':
+      return buildDocsMentionItems(['README.md', 'docs/composer.md', 'docs/voice-mode.md'].filter((p) => has(query, p)))
+    case 'rules':
+      return buildRuleMentionItems(
+        [
+          { path: 'AGENTS.md', alwaysApply: true },
+          { path: '.cursor/rules/ui.mdc', description: 'Tokens, icons and focus rings', alwaysApply: false }
+        ].filter((r) => has(query, r.path, r.description ?? ''))
+      )
+    case 'commits':
+      return buildCommitMentionItems(
+        [
+          { sha: '73b7a8e7c1', shortSha: '73b7a8e', subject: 'fix(agent): keep run storage consistent', author: 'you', relativeDate: '2 hours ago' },
+          { sha: 'e007926a44', shortSha: 'e007926', subject: 'fix(mcp): read every page', author: 'you', relativeDate: 'yesterday' },
+          { sha: '471350f0b2', shortSha: '471350f', subject: 'fix(context): keep folds honest', author: 'you', relativeDate: '2 days ago' }
+        ].filter((c) => has(query, c.subject, c.shortSha))
+      )
+    case 'chats':
+      return buildChatMentionItems(
+        [
+          { runId: 'r1', goal: 'Restyle the instruction line in dark glass', updatedAt: new Date(Date.now() - 3_600_000).toISOString() },
+          { runId: 'r2', goal: 'Port the dictation take to Moonshine', updatedAt: new Date(Date.now() - 86_400_000).toISOString() }
+        ].filter((r) => has(query, r.goal))
+      )
+  }
+}
 
 const SKILL: SlashCommandDescriptor = {
   id: 'skill:design-level-up',
@@ -143,8 +213,8 @@ const SKILL: SlashCommandDescriptor = {
   availability: 'ready'
 } as SlashCommandDescriptor
 
-/** What `/` lists before anything is typed, from the app's own display builder. */
-export const SLASH_COMMANDS: SlashCommandDescriptor[] = buildSlashDisplayList('', [SKILL, ...BUILTIN_COMMANDS])
+/** What `/` lists for a query, from the app's own display builder. */
+export const slashCommands = (query: string): SlashCommandDescriptor[] => buildSlashDisplayList(query, [SKILL, ...BUILTIN_COMMANDS])
 
 // ── What is attached, typed or queued ────────────────────────────────────
 

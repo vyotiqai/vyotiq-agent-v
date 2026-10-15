@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AgentInteractionMode } from '@shared/ipc'
 import { SERVICE_TIER_DESCRIPTIONS, SERVICE_TIER_LABELS } from '@shared/domain/serviceTier'
 import { DICTATION_LOCAL_CATALOG } from '@shared/dictation'
@@ -31,7 +31,6 @@ import {
   EFFORT_FOOT,
   EFFORT_MODES,
   EFFORT_NOTES,
-  MODEL_LABEL,
   MODEL_ROWS,
   PROVIDER,
   PROVIDERS,
@@ -41,6 +40,7 @@ import {
   usagePct,
   usageRatio
 } from './data'
+import { useActions } from './actions'
 import { Popover, useGlass } from './store'
 
 /**
@@ -82,12 +82,30 @@ export function ModeSwitch() {
 
 /** ModelPicker's trigger and its "Model and effort" popover. */
 export function ModelPicker({ className }: { className?: string }) {
-  const { pop, toggle, effortAt, setEffortAt, scene } = useGlass()
+  const { pop, toggle, close, effortAt, setEffortAt, modelAt, setModelAt, scene } = useGlass()
   const ref = useRef<HTMLButtonElement>(null)
   const open = pop === 'model'
   const effort = EFFORT_MODES[effortAt]
+  const model = MODEL_ROWS[modelAt] ?? MODEL_ROWS[0]!
   const [tier, setTier] = useState<'default' | 'priority'>('default')
   const [active, setActive] = useState(-1)
+  const [query, setQuery] = useState('')
+  const [favorites, setFavorites] = useState(() => new Set(MODEL_ROWS.filter((m) => m.favorite).map((m) => m.id)))
+  // The search narrows the list by id or name, as the app's does across every provider.
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return MODEL_ROWS.map((row, index) => ({ row, index })).filter(
+      ({ row }) => !q || row.id.includes(q) || row.label.toLowerCase().includes(q)
+    )
+  }, [query])
+  /** A pick closes the popover and hands focus back to the trigger. */
+  const pick = (index: number): void => {
+    setModelAt(index)
+    setQuery('')
+    setActive(-1)
+    close()
+    ref.current?.focus()
+  }
   const listId = useId()
   const note = EFFORT_NOTES[effortAt]
   // A long run at high effort is offered one step down, never moved there.
@@ -112,8 +130,8 @@ export function ModelPicker({ className }: { className?: string }) {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Model: ${MODEL_LABEL}${effort ? `, ${effort.label} effort` : ''}`}
-        title={`${providerName(PROVIDER)} · ${MODEL_LABEL} · thinks · sees images · uses tools`}
+        aria-label={`Model: ${model.label}${effort ? `, ${effort.label} effort` : ''}`}
+        title={`${providerName(PROVIDER)} · ${model.label} · ${model.can.join(' · ')}`}
         data-model-picker
         onMouseDown={keepFocus}
         onClick={() => toggle('model')}
@@ -123,11 +141,11 @@ export function ModelPicker({ className }: { className?: string }) {
           className
         )}
       >
-        <span className="min-w-0 truncate">{MODEL_LABEL}</span>
+        <span className="min-w-0 truncate">{model.label}</span>
         {effort ? <span className="shrink-0 text-tertiary">· {effort.short}</span> : null}
         <Icon name="chevron" size={10} className="shrink-0 text-tertiary" />
       </button>
-      <Popover anchor={ref} open={open} align="start" width={520} label="Model and effort">
+      <Popover anchor={ref} open={open} align="start" width={520} label="Model and effort" takeFocus>
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2">
           <Icon name="search" size={14} className="shrink-0 text-muted" />
           <input
@@ -136,6 +154,22 @@ export function ModelPicker({ className }: { className?: string }) {
             aria-expanded="true"
             aria-controls={listId}
             aria-autocomplete="list"
+            aria-activedescendant={active >= 0 && rows[active] ? `${listId}-${rows[active].row.id}` : undefined}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setActive(e.target.value ? 0 : -1)
+            }}
+            onKeyDown={(e) => {
+              // The arrows walk the models from the search; Enter takes one.
+              if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && rows.length) {
+                e.preventDefault()
+                setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length)
+              } else if (e.key === 'Enter' && rows[active]) {
+                e.preventDefault()
+                pick(rows[active].index)
+              }
+            }}
             placeholder="Search every provider"
             className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-tertiary"
           />
@@ -175,15 +209,24 @@ export function ModelPicker({ className }: { className?: string }) {
               <span className="w-12 text-right">$/M in</span>
             </div>
             <div id={listId} role="listbox" aria-label="Models">
-              {MODEL_ROWS.map((row, i) => {
-                const selected = i === 0
+              {rows.length ? null : <p className="m-0 px-2 py-1.5 text-xs text-tertiary">No models match</p>}
+              {rows.map(({ row, index }, i) => {
+                const selected = index === modelAt
+                const favorite = favorites.has(row.id)
                 return (
                   <div
                     key={row.id}
+                    id={`${listId}-${row.id}`}
                     role="option"
                     aria-selected={selected}
                     tabIndex={-1}
                     onMouseEnter={() => setActive(i)}
+                    onClick={() => pick(index)}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      pick(index)
+                    }}
                     className={cn(MENU_ROW, 'group', i === active ? MENU_ROW_ACTIVE : MENU_ROW_IDLE, selected ? MENU_ROW_SELECTED : MENU_ROW_TEXT)}
                   >
                     <span
@@ -195,14 +238,23 @@ export function ModelPicker({ className }: { className?: string }) {
                     {selected ? <Icon name="check" size={12} className="shrink-0 text-fg-strong" /> : null}
                     <button
                       type="button"
-                      aria-label={row.favorite ? `Remove ${row.id} from favourites` : `Add ${row.id} to favourites`}
-                      aria-pressed={row.favorite}
+                      aria-label={favorite ? `Remove ${row.id} from favourites` : `Add ${row.id} to favourites`}
+                      aria-pressed={favorite}
+                      onClick={(e) => {
+                        // A star is not a pick.
+                        e.stopPropagation()
+                        setFavorites((cur) => {
+                          const next = new Set(cur)
+                          if (!next.delete(row.id)) next.add(row.id)
+                          return next
+                        })
+                      }}
                       className={cn(
                         'inline-grid size-5 shrink-0 place-items-center rounded text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring',
-                        row.favorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+                        favorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
                       )}
                     >
-                      <Icon name="star" size={12} weight={row.favorite ? 'fill' : 'regular'} />
+                      <Icon name="star" size={12} weight={favorite ? 'fill' : 'regular'} />
                     </button>
                     <span className="w-10 shrink-0 text-right font-mono text-caption text-muted tnum">{formatTokens(row.contextWindow)}</span>
                     <span className="w-12 shrink-0 text-right font-mono text-caption text-muted tnum">{row.price}</span>
@@ -451,8 +503,9 @@ export function ContextMeter({ className }: { className?: string }) {
 
 // ── Structure ────────────────────────────────────────────────────────────
 
-/** The sparkles: write the draft up as a brief. */
+/** Structure (STRUCTURE_ICON): write the draft up as a brief. */
 export function StructureButton({ ready, tone = 'muted' }: { ready: boolean; tone?: ToolTone }) {
+  const { structure } = useActions()
   return (
     <IconButton
       icon={STRUCTURE_ICON}
@@ -463,13 +516,14 @@ export function StructureButton({ ready, tone = 'muted' }: { ready: boolean; ton
       data-composer-structure
       aria-keyshortcuts="Control+Shift+Enter"
       onMouseDown={keepFocus}
+      onClick={structure}
     />
   )
 }
 
 // ── Attach ───────────────────────────────────────────────────────────────
 
-/** AttachMenu: the paperclip and its four rows. */
+/** AttachMenu: its trigger (the app's paperclip, B's `+`) and its rows. */
 export function AttachMenu({
   withScreenshot,
   disabled = false,
@@ -486,6 +540,7 @@ export function AttachMenu({
   align?: 'start' | 'end'
 }) {
   const { pop, toggle } = useGlass()
+  const { attachPick } = useActions()
   const ref = useRef<HTMLButtonElement>(null)
   const open = pop === 'attach'
   const [active, setActive] = useState(0)
@@ -521,6 +576,12 @@ export function AttachMenu({
                 role="menuitem"
                 className={cn(MENU_ROW, MENU_ROW_TEXT, i === active ? MENU_ROW_ACTIVE : MENU_ROW_IDLE)}
                 onMouseEnter={() => setActive(i)}
+                onFocus={() => setActive(i)}
+                onClick={() => {
+                  attachPick(row.id)
+                  // A pick hands focus back: "Mention a file" to the field (it types the @), the rest to the trigger.
+                  if (row.id !== 'mention') ref.current?.focus()
+                }}
               >
                 <Icon name={row.icon} size={15} className="text-muted" />
                 {row.label}
@@ -551,7 +612,7 @@ function AttachPopover({
   children: ReactNode
 }) {
   return (
-    <Popover anchor={anchor} open={open} align={align} width={252} label="Attach" role="menu">
+    <Popover anchor={anchor} open={open} align={align} width={252} label="Attach" role="menu" takeFocus>
       {children}
     </Popover>
   )
@@ -561,7 +622,8 @@ function AttachPopover({
 
 /** MicControl: idle, live (filled, pressed) or set up; "Dictate with" opens from it. */
 export function MicControl({ tone = 'muted' }: { tone?: ToolTone }) {
-  const { pop, toggle, scene } = useGlass()
+  const { pop, toggle, close, scene } = useGlass()
+  const { startTake, insertTake, chooseDictation } = useActions()
   const ref = useRef<HTMLButtonElement>(null)
   const chord = shortcutLabel('dictation')
   const live = scene.take === 'listening'
@@ -570,7 +632,7 @@ export function MicControl({ tone = 'muted' }: { tone?: ToolTone }) {
   return (
     <>
       {live ? (
-        <IconButton ref={ref} icon="mic" weight="fill" label={`Insert (${chord})`} size="md" active data-take-mic="live" onMouseDown={keepFocus} />
+        <IconButton ref={ref} icon="mic" weight="fill" label={`Insert (${chord})`} size="md" active data-take-mic="live" onMouseDown={keepFocus} onClick={insertTake} />
       ) : scene.micReady ? (
         <IconButton
           ref={ref}
@@ -581,6 +643,7 @@ export function MicControl({ tone = 'muted' }: { tone?: ToolTone }) {
           tone={tone}
           data-take-mic="idle"
           onMouseDown={keepFocus}
+          onClick={startTake}
         />
       ) : (
         <IconButton
@@ -597,7 +660,7 @@ export function MicControl({ tone = 'muted' }: { tone?: ToolTone }) {
           onClick={() => toggle('mic')}
         />
       )}
-      <Popover anchor={ref} open={open} align="end" width={380} label="Dictate with">
+      <Popover anchor={ref} open={open} align="end" width={380} label="Dictate with" takeFocus>
         <div className="p-1">
           <div className="px-2 pb-1.5 pt-2">
             <div className="text-sm font-medium text-fg-strong">Dictate with</div>
@@ -608,7 +671,7 @@ export function MicControl({ tone = 'muted' }: { tone?: ToolTone }) {
             badge={<Badge tone="outline">Recommended</Badge>}
             detail={`${model.label} · ${model.approxDownloadLabel.replace('~', '')} · ${model.language} · audio never leaves this PC`}
             action={
-              <Button size="xs" variant="secondary">
+              <Button size="xs" variant="secondary" onClick={chooseDictation}>
                 Install
               </Button>
             }
@@ -617,7 +680,7 @@ export function MicControl({ tone = 'muted' }: { tone?: ToolTone }) {
             title="OpenAI"
             detail="Uses your OpenAI key · any language"
             action={
-              <Button size="xs" variant="secondary">
+              <Button size="xs" variant="secondary" onClick={chooseDictation}>
                 Use
               </Button>
             }
@@ -626,7 +689,15 @@ export function MicControl({ tone = 'muted' }: { tone?: ToolTone }) {
             title="OpenRouter"
             detail={<span className="text-tertiary">No OpenRouter key yet</span>}
             action={
-              <Button size="xs" variant="ghost">
+              <Button
+                size="xs"
+                variant="ghost"
+                title="Opens Settings → Keys in the app"
+                onClick={() => {
+                  close()
+                  ref.current?.focus()
+                }}
+              >
                 Add key
               </Button>
             }
@@ -658,9 +729,10 @@ function Choice({ title, badge, detail, action }: { title: string; badge?: React
 
 /** Line only, while a run is live: Stop beside the action. Esc does the same. */
 export function StopButton() {
+  const { stop } = useActions()
   return (
     <Tooltip content="Stop the run (Esc)">
-      <Button size="xs" variant="ghost" icon="stop" onMouseDown={keepFocus}>
+      <Button size="xs" variant="ghost" icon="stop" onMouseDown={keepFocus} onClick={stop}>
         Stop
       </Button>
     </Tooltip>
@@ -669,6 +741,7 @@ export function StopButton() {
 
 /** The line's one action: Send, Queue while live, Send now when live with text. */
 export function LineAction({ running, hasText, ready }: { running: boolean; hasText: boolean; ready: boolean }) {
+  const { sendNow } = useActions()
   if (running && hasText && ready) {
     return (
       <Button
@@ -679,6 +752,7 @@ export function LineAction({ running, hasText, ready }: { running: boolean; hasT
         aria-keyshortcuts="Shift+Enter"
         title="Send it into the live run now, instead of when this turn ends"
         onMouseDown={keepFocus}
+        onClick={sendNow}
       >
         Send now
       </Button>

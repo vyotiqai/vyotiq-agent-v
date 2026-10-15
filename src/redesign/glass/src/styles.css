@@ -331,10 +331,14 @@ body,
     }
   }
 
-  /* More contrast asked for: a firmer rim all round. */
+  /*
+    More contrast asked for: a firmer rim all round, focused or not, in either
+    material (`.gx` lifts it past the Liquid and focus-within rims above).
+  */
   @media (prefers-contrast: more) {
-    .gx-glass::before,
-    .gx-pop::before {
+    .gx .gx-glass::before,
+    .gx .gx-pop::before,
+    .gx .gx-glass[data-gx-field]:focus-within::before {
       background: var(--gx-rim-focus);
     }
   }
@@ -357,7 +361,14 @@ body,
 
   /* A glass control gives under a press and springs back. */
   .gx-liquid button.gx-glass {
-    transition: transform 380ms var(--gx-spring);
+    /* vy-transition's colour fade stays; only the transform springs. */
+    transition:
+      background-color var(--vy-duration) var(--vy-ease),
+      border-color var(--vy-duration) var(--vy-ease),
+      color var(--vy-duration) var(--vy-ease),
+      opacity var(--vy-duration) var(--vy-ease),
+      box-shadow var(--vy-duration) var(--vy-ease),
+      transform 380ms var(--gx-spring);
   }
 
   .gx-liquid button.gx-glass:active {
