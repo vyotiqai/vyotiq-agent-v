@@ -140,4 +140,32 @@ describe('loadMessagesWindowAsync (bounded transcript hydration)', () => {
     expect(window.hasEarlier).toBe(false)
     expect(window.earlierCursor).toBeNull()
   })
+  it('counts the runs above the window the way the record splits them', async () => {
+    const runDir = resolveRunDir(workspacePath, runId)
+    const rows = [
+      { role: 'user', content: 'one' },
+      { role: 'assistant', content: 'a' },
+      { role: 'user', content: 'keep going', synthetic: true },
+      { role: 'assistant', content: 'a2' },
+      { role: 'user', content: 'two' },
+      { role: 'user', content: 'also this', midTurn: true },
+      { role: 'assistant', content: 'b1' },
+      { role: 'assistant', content: 'b2' },
+      { role: 'user', content: 'three' },
+      { role: 'assistant', content: 'c' }
+    ]
+    writeFileSync(join(runDir, 'messages.jsonl'), `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`)
+    // A synthetic nudge and a word said mid-run start no run: 'one' and 'two' do.
+    expect((await loadMessagesWindowAsync(workspacePath, runId, { limit: 3 })).runsBefore).toBe(2)
+    expect((await loadMessagesWindowAsync(workspacePath, runId, { limit: 2 })).runsBefore).toBe(2)
+    expect((await loadMessagesWindowAsync(workspacePath, runId, { limit: 1 })).runsBefore).toBe(3)
+    expect((await loadMessagesWindowAsync(workspacePath, runId, { limit: 50 })).runsBefore).toBe(0)
+  })
+
+  it('counts work before the first instruction as a run of its own', async () => {
+    const runDir = resolveRunDir(workspacePath, runId)
+    const rows = [{ role: 'assistant', content: 'resumed' }, { role: 'user', content: 'next' }, { role: 'assistant', content: 'ok' }]
+    writeFileSync(join(runDir, 'messages.jsonl'), `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`)
+    expect((await loadMessagesWindowAsync(workspacePath, runId, { limit: 1 })).runsBefore).toBe(2)
+  })
 })

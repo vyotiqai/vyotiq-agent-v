@@ -1360,6 +1360,8 @@ export type ChatStreamState = {
   transcriptHasEarlier: boolean
   /** Opaque cursor for runs:load-earlier — byte-offset window of the first loaded message. */
   transcriptEarlierCursor: string | null
+  /** Runs that start above the loaded window (main counts them), for run numbers. */
+  transcriptRunsBefore: number
   /** A runs:load-earlier fetch is in flight. */
   transcriptLoadingEarlier: boolean
   /** Turn summary disclosure — survives transcript remounts like tool/group expand state. */
@@ -1414,13 +1416,13 @@ export type ChatStreamController = ChatStreamState & {
   loadTranscript: (
     loaded: ChatMessage[],
     events?: PersistedEvent[],
-    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null; runsBefore?: number }
   ) => void
   /** Load messages without canceling an active/background run (restore / tab select). */
   hydrateTranscript: (
     loaded: ChatMessage[],
     events?: PersistedEvent[],
-    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null; runsBefore?: number }
   ) => void
   /** Fetch the next earlier transcript window (runs:load-earlier) and merge it into the UI. */
   loadEarlierMessages: () => Promise<boolean>
@@ -2178,6 +2180,7 @@ export function createChatStreamController(
     transcriptLoading: false,
     transcriptHasEarlier: false,
     transcriptEarlierCursor: null,
+    transcriptRunsBefore: 0,
     transcriptLoadingEarlier: false,
     collapsedTurnIndices: [...(initialExpansions?.collapsedTurns ?? [])],
     writeCheckpoint: null,
@@ -2498,6 +2501,7 @@ export function createChatStreamController(
       runStartedAt: stillActive ? state.runStartedAt ?? Date.now() : null,
       transcriptHasEarlier: read.data.hasEarlier,
       transcriptEarlierCursor: read.data.earlierCursor,
+      transcriptRunsBefore: read.data.runsBefore ?? 0,
       ...(read.eventsLoadError ? { error: read.eventsLoadError } : {})
     })
     catchUpSnapshot = catchUpSnapshotOf(read.events)
@@ -2606,7 +2610,8 @@ export function createChatStreamController(
     patch({
       messages: messagesForNextTurn(res.data.messages),
       transcriptHasEarlier: res.data.hasEarlier,
-      transcriptEarlierCursor: res.data.earlierCursor
+      transcriptEarlierCursor: res.data.earlierCursor,
+      transcriptRunsBefore: res.data.runsBefore ?? 0
     })
   }
 
@@ -4308,7 +4313,8 @@ export function createChatStreamController(
       runStartedAt: null,
       runTerminalTick: state.runTerminalTick + 1,
       transcriptHasEarlier: read.data.hasEarlier,
-      transcriptEarlierCursor: read.data.earlierCursor
+      transcriptEarlierCursor: read.data.earlierCursor,
+      transcriptRunsBefore: read.data.runsBefore ?? 0
     })
     onTerminal?.()
     return true
@@ -4443,7 +4449,7 @@ export function createChatStreamController(
   const applyTranscriptUi = (
     loaded: ChatMessage[],
     events?: PersistedEvent[],
-    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null; runsBefore?: number }
   ): void => {
     const kept = messagesForNextTurn(loaded)
     const rows = events ?? []
@@ -4467,7 +4473,8 @@ export function createChatStreamController(
       ...hydrated,
       items: applyPersistedExpansions(hydrated.items),
       transcriptHasEarlier: transcriptWindow?.hasEarlier ?? false,
-      transcriptEarlierCursor: transcriptWindow?.earlierCursor ?? null
+      transcriptEarlierCursor: transcriptWindow?.earlierCursor ?? null,
+      transcriptRunsBefore: transcriptWindow?.runsBefore ?? 0
     })
   }
 
@@ -4475,7 +4482,7 @@ export function createChatStreamController(
   const loadTranscript = (
     loaded: ChatMessage[],
     events?: PersistedEvent[],
-    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null; runsBefore?: number }
   ): void => {
     const id = runId
     if (id) {
@@ -4507,7 +4514,7 @@ export function createChatStreamController(
   const hydrateTranscript = (
     loaded: ChatMessage[],
     events?: PersistedEvent[],
-    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null; runsBefore?: number }
   ): void => {
     if (disposed) return
     // Never clobber an in-flight live stream with a lagging disk snapshot.
@@ -4551,7 +4558,8 @@ export function createChatStreamController(
         // Stale cursor (transcript rewritten) — re-anchor to current bounds.
         patch({
           transcriptHasEarlier: data.hasEarlier,
-          transcriptEarlierCursor: data.earlierCursor
+          transcriptEarlierCursor: data.earlierCursor,
+          transcriptRunsBefore: data.runsBefore ?? 0
         })
         return false
       }
@@ -4564,7 +4572,8 @@ export function createChatStreamController(
       if (fresh.length === 0) {
         patch({
           transcriptHasEarlier: data.hasEarlier,
-          transcriptEarlierCursor: data.earlierCursor
+          transcriptEarlierCursor: data.earlierCursor,
+          transcriptRunsBefore: data.runsBefore ?? 0
         })
         return false
       }
@@ -4577,7 +4586,8 @@ export function createChatStreamController(
       if (disposed || closedRuns.has(id)) return false
       applyTranscriptUi(merged, events, {
         hasEarlier: data.hasEarlier,
-        earlierCursor: data.earlierCursor
+        earlierCursor: data.earlierCursor,
+        runsBefore: data.runsBefore
       })
       return true
     } finally {
@@ -4701,7 +4711,8 @@ export function createChatStreamController(
       error: read.eventsLoadError,
       pendingFollowUps: refreshedPending,
       transcriptHasEarlier: read.data.hasEarlier,
-      transcriptEarlierCursor: read.data.earlierCursor
+      transcriptEarlierCursor: read.data.earlierCursor,
+      transcriptRunsBefore: read.data.runsBefore ?? 0
     })
   }
 
@@ -5264,6 +5275,9 @@ export function createChatStreamController(
     },
     get transcriptEarlierCursor() {
       return state.transcriptEarlierCursor
+    },
+    get transcriptRunsBefore() {
+      return state.transcriptRunsBefore
     },
     get transcriptLoadingEarlier() {
       return state.transcriptLoadingEarlier

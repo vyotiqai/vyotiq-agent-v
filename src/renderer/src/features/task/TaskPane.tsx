@@ -104,6 +104,8 @@ export type TaskPaneProps = {
   run: RunSummary | null
   transcriptLoading?: boolean
   transcriptHasEarlier?: boolean
+  /** Runs above the loaded window, so run numbers count from the task's first. */
+  transcriptRunsBefore?: number
   transcriptLoadingEarlier?: boolean
   onLoadEarlier?: () => void | Promise<void>
   restoreScrollTop?: number
@@ -280,12 +282,27 @@ export function TaskPane(props: TaskPaneProps) {
       showThinking: showReasoning,
       liveTodos: deferred.todos?.items ?? null,
       liveTodosUpdatedAt: deferred.todos?.updatedAt ?? null,
-      instances
+      instances,
+      runsBefore: props.transcriptRunsBefore ?? 0
     }),
-    [deferred, showReasoning, instances]
+    [deferred, showReasoning, instances, props.transcriptRunsBefore]
   )
   const model = useMemo(() => buildRecordModel(items, options), [items, options])
   const last = model.runs[model.runs.length - 1] ?? null
+
+  // A transcript window that opens partway through a run has no instruction
+  // for it, and History listed it as a bare "Run 1". Read back until that
+  // run's instruction is in, a few pages at most; past that the button stays.
+  const headless = model.runs.length > 0 && model.runs[0]!.turns === 0
+  const { transcriptHasEarlier, transcriptLoadingEarlier, onLoadEarlier } = props
+  const headlessLoads = useRef({ runId, count: 0 })
+  useEffect(() => {
+    if (headlessLoads.current.runId !== runId) headlessLoads.current = { runId, count: 0 }
+    if (!headless || !transcriptHasEarlier || transcriptLoadingEarlier || !onLoadEarlier) return
+    if (headlessLoads.current.count >= 3) return
+    headlessLoads.current.count += 1
+    void onLoadEarlier()
+  }, [runId, headless, transcriptHasEarlier, transcriptLoadingEarlier, onLoadEarlier])
 
   // checks.json changes only when create_plan or check_done_when finishes (or
   // a rewind drops one): re-read it then, never on a timer.
@@ -694,7 +711,9 @@ export function TaskPane(props: TaskPaneProps) {
             }}
             placeholder="Find in record"
             aria-label="Find in record"
-            className="min-w-0 flex-1 rounded-sm bg-transparent text-sm text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
+            // Sized for a word or two, so the count and the arrows sit beside what
+            // you typed instead of a pane width away from it.
+            className="w-72 min-w-0 shrink rounded-sm bg-transparent text-sm text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
           />
           {findQuery.trim() ? (
             <span className="shrink-0 font-mono text-caption text-muted tnum" role="status">
@@ -719,6 +738,7 @@ export function TaskPane(props: TaskPaneProps) {
             disabled={findCount === 0}
             onClick={() => setFindIndex((i) => i + 1)}
           />
+          <span className="flex-1" />
           <IconButton icon="close" label="Close find (Esc)" size="sm" tone="muted" onClick={closeFind} />
         </div>
       ) : null}

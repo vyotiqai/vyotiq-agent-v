@@ -32,8 +32,10 @@ import './reply.css'
 */
 
 // A single `$` stays text: prices and shell variables are everywhere in an agent's prose (see math.tsx).
+// A single `~` does too: agents write it for "about" (`~2.5 hours`, `~30 runs`), and two in one
+// paragraph struck out everything between them. `~~text~~` still strikes through.
 const remarkPlugins: NonNullable<Parameters<typeof ReactMarkdown>[0]['remarkPlugins']> = [
-  remarkGfm,
+  [remarkGfm, { singleTilde: false }],
   [remarkMath, { singleDollarTextMath: false }]
 ]
 const rehypePlugins: NonNullable<Parameters<typeof ReactMarkdown>[0]['rehypePlugins']> = [

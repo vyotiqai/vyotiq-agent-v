@@ -52,6 +52,7 @@ describe('the block still being written', () => {
     ['a glob opens nothing', 'glob src/**/*.ts and more', 'glob src/**/*.ts and more'],
     ['multiplication opens nothing', 'multiply a*b and', 'multiply a*b and'],
     ['a spaced ~~ opens nothing', 'x ~~ y', 'x ~~ y'],
+    ['a single ~ is "about", not strikethrough', 'took ~2.5 hours and', 'took ~2.5 hours and'],
     ['intraword underscores open nothing', 'call snake_case_na', 'call snake_case_na'],
     ['an open code span is left as code and closed', 'Use `arr[0', 'Use `arr[0`'],
     ['a bare opener waits', 'are **', 'are '],
@@ -129,6 +130,13 @@ describe('ReplyMarkdown', () => {
     render(<ReplyMarkdown text="See [the check](src/auth/session.ts#L58)." onOpenWorkspaceFile={open} />)
     fireEvent.click(screen.getByRole('button', { name: 'the check' }))
     expect(open).toHaveBeenCalledWith('src/auth/session.ts', { line: 58 })
+  })
+
+  it('reads a single ~ as "about" and strikes through only ~~', () => {
+    const { container } = render(<ReplyMarkdown text="hold ~2.5 hours of CPU and ~30 runs, ~~not this~~" />)
+    const struck = Array.from(container.querySelectorAll('del')).map((d) => d.textContent)
+    expect(struck).toEqual(['not this'])
+    expect(container.textContent).toContain('~2.5 hours of CPU and ~30 runs')
   })
 
   it('never nests a path chip inside a link', () => {

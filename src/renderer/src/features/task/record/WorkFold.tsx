@@ -73,7 +73,9 @@ export function WorkFold({
           <Icon
             name={open ? 'chevron' : 'chevronRight'}
             size={11}
-            className={cn('-ml-0.5 shrink-0 text-tertiary', open ? '' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')}
+            // Always drawn: on an answered run this line is the only way into the work,
+            // and a chevron that appeared on hover hid that it opens at all.
+            className="-ml-0.5 shrink-0 text-tertiary"
           />
         </button>
       </div>
@@ -111,8 +113,16 @@ function PhaseLabel({ phase, ms, waitedMs }: { phase: WorkPhase; ms: number | nu
       )
     case 'stopped':
       return (
+        // The receipt below leads with Stopped: the line says how long it ran,
+        // and keeps the word for a screen reader, which hears no glyph.
         <span className="shrink-0 text-fg">
-          {took ? `Stopped after ${took}` : 'Stopped'}
+          {took ? (
+            <>
+              <span className="sr-only">Stopped · </span>Ran for {took}
+            </>
+          ) : (
+            'Stopped'
+          )}
           {waited ? ' · ' : null}
           {waited}
         </span>

@@ -94,7 +94,8 @@ export const HIGHLIGHT_CACHE_MAX_ENTRIES = 200
 
 const highlightCache = new Map<string, string>()
 
-const remarkPlugins = [remarkGfm]
+// A single `~` is "about" (`~2.5 hours`), not strikethrough; `~~text~~` still strikes through.
+const remarkPlugins: import('react-markdown').Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
 const rehypePlugins: import('react-markdown').Options['rehypePlugins'] = [
   [rehypeSanitize, markdownSanitizeSchema]
 ]

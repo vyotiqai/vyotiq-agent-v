@@ -51,7 +51,8 @@ export async function taskExtraRootsAsync(runDir: string): Promise<string[]> {
  */
 export type TaskFileAction = 'created' | 'modified' | 'deleted'
 
-export type TaskFileStat = { path: string; action: TaskFileAction; add?: number; del?: number }
+/** `dir`: a folder now, not a file: a command made it (mkdir), so it has no diff to review. */
+export type TaskFileStat = { path: string; action: TaskFileAction; add?: number; del?: number; dir?: true }
 
 export type TaskFileDiffReason = 'binary_or_large' | 'not_in_task' | 'unrestorable'
 
@@ -267,6 +268,7 @@ async function statFor(
   const existsNow = afterSt !== null
   // Created, then deleted again: the task left nothing behind here.
   if (written.firstAction === 'created' && !existsNow) return null
+  if (afterSt?.isDirectory() && !beforeSt?.isFile()) return { path: written.path, action: netAction(written, existsNow), dir: true }
   const entry: TaskFileStat = { path: written.path, action: netAction(written, existsNow) }
   const before = written.firstAction === 'created' ? '' : await readStatedText(beforePath, beforeSt, false)
   if (before === null) return entry

@@ -37,8 +37,10 @@ import {
   FirstRuleGrantContext,
   NowLine,
   RecordActionsContext,
+  StoppedAtContext,
   WorkList,
   counted,
+  endsWhole,
   plainLine,
   workIsLive
 } from './record/WorkItems'
@@ -542,6 +544,13 @@ function RunBody({
     [state, tools]
   )
   const stopped = useMemo(() => (state === 'stopped' ? stoppedDetail(run, tools) : undefined), [state, run, tools])
+  // Its last words, when Stop cut them off mid-sentence.
+  const stoppedAt = useMemo(() => {
+    if (state !== 'stopped') return null
+    const work = [...run.setup, ...run.steps.flatMap((s) => [...s.work, ...s.between]), ...run.after]
+    const tail = work[work.length - 1]
+    return tail && (tail.kind === 'note' || tail.kind === 'thought') && !endsWhole(tail.text) ? tail.id : null
+  }, [state, run])
   const runShowsError = useMemo(
     () => [...run.setup, ...run.steps.flatMap((step) => step.work), ...run.after].some((w) => w.kind === 'error'),
     [run]
@@ -551,6 +560,7 @@ function RunBody({
     <ViewEraContext.Provider value={isLast}>
     <FirstRuleGrantContext.Provider value={firstRuleGrant}>
     <BrokeAtContext.Provider value={brokeAt}>
+    <StoppedAtContext.Provider value={stoppedAt}>
     <EditMarksContext.Provider value={marks}>
       {(run.text || run.command || run.images.length > 0) && !(props.omitFirstBrief && run.n === 1) ? (
         <Brief
@@ -660,6 +670,7 @@ function RunBody({
         }
       />
     </EditMarksContext.Provider>
+    </StoppedAtContext.Provider>
     </BrokeAtContext.Provider>
     </FirstRuleGrantContext.Provider>
     </ViewEraContext.Provider>
@@ -692,6 +703,8 @@ function HistoryRun({
   // first line follows, quieter, without the colon that led into a list.
   const askedLine = run.text.split('\n').find((l) => l.trim())
   const asked = askedLine != null ? plainLine(askedLine) : run.command ? `/${run.command}` : ''
+  // Its instruction is above the loaded history: say so rather than leave the row blank.
+  const headless = run.turns === 0 && !asked
   // A spoken summary before the model turned to tools is for the ear, not the record.
   const answerLine = run.result ? stripSpokenBlock(run.result.text) : undefined
   const answerHead = answerLine != null ? answerHeadline(answerLine) : undefined
@@ -717,6 +730,8 @@ function HistoryRun({
           </span>
         ) : (
           <span className="min-w-0 flex-1 truncate text-sm">
+            {headless ? <span className="text-tertiary">Instruction in earlier history</span> : null}
+            {headless && answer ? <span className="text-tertiary"> · </span> : null}
             {asked ? <span className="text-secondary">{asked}</span> : null}
             {asked && answer ? <span className="text-tertiary"> · </span> : null}
             {answer ? <span className={asked ? 'text-tertiary' : 'text-secondary'}>{answer}</span> : null}

@@ -186,7 +186,7 @@ export function ReceiptLine({
             ) : null}
             {copyable && readAloudId ? <ReadAloudButton text={summary!} owner={readAloudId} /> : null}
             {copyable ? (
-              <IconButton icon="copy" label="Copy the summary" size="sm" tone="muted" onClick={() => copySummary(summary!)} />
+              <IconButton icon="copy" label="Copy the answer" size="sm" tone="muted" onClick={() => copySummary(summary!)} />
             ) : null}
           </span>
         ) : null}
@@ -199,7 +199,7 @@ export function ReceiptLine({
 function copySummary(text: string): void {
   // A voice answer's spoken summary is for the ear; the copy is the written answer.
   void copyText(stripSpokenBlock(text).trim()).then((ok) => {
-    if (ok) pushToast('Summary copied', { icon: 'copy' })
-    else pushToast('Could not copy the summary.', 'error')
+    if (ok) pushToast('Answer copied', { icon: 'copy' })
+    else pushToast('Could not copy the answer.', 'error')
   })
 }

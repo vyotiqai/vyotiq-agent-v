@@ -1027,7 +1027,7 @@ describe('ChangesPanel', () => {
     expect(await screen.findByText('No changes yet')).toBeTruthy()
     rerender(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} runId="run-1" running={false} />)
     expect(await screen.findByText('Nothing changed')).toBeTruthy()
-    expect(screen.getByText('This task finished without changing a file.')).toBeTruthy()
+    expect(screen.getByText('This task changed no files.')).toBeTruthy()
   })
 
   it('lists every changed file on Show all, past the first 200', async () => {

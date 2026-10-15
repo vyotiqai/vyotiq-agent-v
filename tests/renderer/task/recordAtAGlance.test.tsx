@@ -270,15 +270,15 @@ describe('the result', () => {
   it('can be copied as text from the receipt', async () => {
     copyText.mockClear()
     show([user('Fix it', 0), tool('read', { path: 'a.ts' }, 'contents', 1), said('## Fixed\n\nThe retry awaits now.', 4)])
-    fireEvent.click(screen.getByRole('button', { name: 'Copy the summary' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the answer' }))
     await waitFor(() => expect(copyText).toHaveBeenCalledWith('## Fixed\n\nThe retry awaits now.'))
   })
 
   it('offers no copy while the run is live, or when it has no result', () => {
     show([user('Fix it', 0), tool('read', { path: 'a.ts' }, 'contents', 1)], { running: true })
-    expect(screen.queryByRole('button', { name: 'Copy the summary' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy the answer' })).toBeNull()
     cleanup()
     show([user('Fix it', 0), tool('read', { path: 'a.ts' }, 'contents', 1)], { running: false, stopped: true })
-    expect(screen.queryByRole('button', { name: 'Copy the summary' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy the answer' })).toBeNull()
   })
 })

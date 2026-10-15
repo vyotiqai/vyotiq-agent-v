@@ -123,7 +123,7 @@ describe('a settled run’s work', () => {
 
   it('stays open when the run ended without an answer', () => {
     const { container, getByRole } = show(noPlanRun(false), { running: false, stopped: true })
-    expect(getByRole('button', { name: /^Stopped after/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(getByRole('button', { name: /^Stopped.*Ran for/ }).getAttribute('aria-expanded')).toBe('true')
     expect(container.textContent).toContain('WORK_NOTE')
   })
 

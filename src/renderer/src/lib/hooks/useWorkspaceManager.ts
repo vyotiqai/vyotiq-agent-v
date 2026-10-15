@@ -1361,7 +1361,8 @@ export function useWorkspaceManager(options?: {
         if (!stillCurrent()) return true
         ctrl.hydrateTranscript(res.data.messages, events, {
           hasEarlier: res.data.hasEarlier,
-          earlierCursor: res.data.earlierCursor
+          earlierCursor: res.data.earlierCursor,
+          runsBefore: res.data.runsBefore
         })
         bump()
         if (
@@ -2691,6 +2692,7 @@ export function useWorkspaceManager(options?: {
         pendingRun: activeController.pendingRun,
         transcriptLoading: activeController.transcriptLoading,
         transcriptHasEarlier: activeController.transcriptHasEarlier,
+        transcriptRunsBefore: activeController.transcriptRunsBefore,
         transcriptLoadingEarlier: activeController.transcriptLoadingEarlier,
         writeCheckpoint: activeController.writeCheckpoint,
         pendingFollowUps: activeController.pendingFollowUps,
@@ -2727,6 +2729,7 @@ export function useWorkspaceManager(options?: {
         pendingRun: false,
         transcriptLoading: false,
         transcriptHasEarlier: false,
+        transcriptRunsBefore: 0,
         transcriptLoadingEarlier: false,
         writeCheckpoint: null as ChatStreamController['writeCheckpoint'],
         pendingFollowUps: [] as ChatStreamController['pendingFollowUps'],
@@ -2849,6 +2852,7 @@ export function useWorkspaceManager(options?: {
         pendingRun: ctrl.pendingRun,
         transcriptLoading: ctrl.transcriptLoading,
         transcriptHasEarlier: ctrl.transcriptHasEarlier,
+        transcriptRunsBefore: ctrl.transcriptRunsBefore,
         transcriptLoadingEarlier: ctrl.transcriptLoadingEarlier,
         writeCheckpoint: ctrl.writeCheckpoint,
         pendingFollowUps: ctrl.pendingFollowUps,

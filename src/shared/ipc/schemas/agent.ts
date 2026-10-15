@@ -1853,7 +1853,9 @@ export const TaskFileStatSchema = z.object({
   path: z.string(),
   action: TaskFileActionSchema,
   add: z.number().int().nonnegative().optional(),
-  del: z.number().int().nonnegative().optional()
+  del: z.number().int().nonnegative().optional(),
+  /** A folder now (a command made it): listed nowhere, it has nothing to review. */
+  dir: z.literal(true).optional()
 })
 export type TaskFileStat = z.infer<typeof TaskFileStatSchema>
 
@@ -2246,7 +2248,9 @@ export const LoadRunResultSchema = z.object({
   inlineInstance: z.literal(true).optional(),
   error: z.string().optional(),
   hasEarlier: z.boolean(),
-  earlierCursor: z.string().nullable()
+  earlierCursor: z.string().nullable(),
+  /** Runs that start above the window, so the record numbers runs from the task's first. */
+  runsBefore: z.number().int().min(0).default(0)
 })
 export type LoadRunResult = z.infer<typeof LoadRunResultSchema>
 
@@ -2261,7 +2265,9 @@ export type LoadEarlierMessagesRequest = z.infer<typeof LoadEarlierMessagesReque
 export const LoadEarlierMessagesResultSchema = z.object({
   messages: z.array(ChatMessageSchema),
   hasEarlier: z.boolean(),
-  earlierCursor: z.string().nullable()
+  earlierCursor: z.string().nullable(),
+  /** Runs that start above the window, so the record numbers runs from the task's first. */
+  runsBefore: z.number().int().min(0).default(0)
 })
 export type LoadEarlierMessagesResult = z.infer<typeof LoadEarlierMessagesResultSchema>
 

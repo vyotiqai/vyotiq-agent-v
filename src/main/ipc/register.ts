@@ -3022,6 +3022,7 @@ export function registerIpc(): void {
           messages: window.messages.map(toolMessageForIpc),
           hasEarlier: window.hasEarlier,
           earlierCursor: window.earlierCursor,
+          runsBefore: window.runsBefore,
           pendingFollowUps: loadFollowUpPreviews(runDir),
           ...(status
             ? {
@@ -3052,7 +3053,8 @@ export function registerIpc(): void {
         return ok({
           messages: window.messages.map(toolMessageForIpc),
           hasEarlier: window.hasEarlier,
-          earlierCursor: window.earlierCursor
+          earlierCursor: window.earlierCursor,
+          runsBefore: window.runsBefore
         })
       } catch (err) {
         return failFrom(err, IPC.loadEarlierMessages)

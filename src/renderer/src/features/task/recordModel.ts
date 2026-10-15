@@ -1022,6 +1022,12 @@ function editSummary(tools: ToolItem[]): RecordStep['edits'] {
 export type BuildOptions = {
   /** The task is live (a run is in flight). */
   running: boolean
+  /**
+   * Runs that start above the loaded transcript window, so run numbers count
+   * from the task's first run. A window that opens partway through a run
+   * continues the last of them and takes its number.
+   */
+  runsBefore?: number
   /** The latest run ended in an error. */
   failed?: boolean
   /** The latest run was stopped (cancelled or interrupted) rather than finishing. */
@@ -1050,8 +1056,15 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
     if (item.kind === 'question' && item.question.toolCallId) questionGated.add(item.question.toolCallId)
   }
 
+  let base: number | null = null
+  const numberOf = (continues: boolean): number => {
+    const before = options.runsBefore ?? 0
+    base ??= continues ? Math.max(0, before - 1) : before
+    return runs.length + 1 + base
+  }
+
   const ensure = (id: string): RunBuilder => {
-    if (!b) b = startRun(runs.length + 1, null, id, null, 0)
+    if (!b) b = startRun(numberOf(true), null, id, null, 0)
     return b
   }
 
@@ -1072,9 +1085,9 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
       } else if (prior) {
         const finished = finishRun(prior, options, false)
         runs.push(finished)
-        b = startRun(runs.length + 1, item, item.id, finished.endedAt, turn)
+        b = startRun(numberOf(false), item, item.id, finished.endedAt, turn)
       } else {
-        b = startRun(runs.length + 1, item, item.id, null, Math.max(turn, 0))
+        b = startRun(numberOf(item.midTurn === true), item, item.id, null, Math.max(turn, 0))
       }
       continue
     }

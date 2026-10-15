@@ -298,6 +298,9 @@ function balanceInline(text: string): string {
     const canClose = ch === '_' ? right && (!left || isPunct(next)) : right
     // At the very end, what follows is unknown: a run there can only close.
     if (i + len === t.length) canOpen = false
+    // Only `~~` strikes through (singleTilde is off): `~2.5 hours` opens nothing,
+    // though a lone `~` still finishes half a closer (`~~gone~`).
+    if (ch === '~' && len === 1) canOpen = false
     let rest = len
     while (canClose && rest > 0) {
       const k = stack.map((o) => o.ch).lastIndexOf(ch)

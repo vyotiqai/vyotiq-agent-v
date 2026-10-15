@@ -2421,6 +2421,7 @@ function App() {
           activeRunId={pane.runId}
           transcriptLoading={snap.transcriptLoading}
           transcriptHasEarlier={snap.transcriptHasEarlier}
+          transcriptRunsBefore={snap.transcriptRunsBefore}
           transcriptLoadingEarlier={snap.transcriptLoadingEarlier}
           onLoadEarlierMessages={() => {
             void paneCtrl?.loadEarlierMessages()

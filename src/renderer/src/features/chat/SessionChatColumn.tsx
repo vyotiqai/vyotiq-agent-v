@@ -69,6 +69,7 @@ export function SessionChatColumn({
   activeRunId,
   transcriptLoading,
   transcriptHasEarlier,
+  transcriptRunsBefore,
   transcriptLoadingEarlier,
   onLoadEarlierMessages,
   onProviderModel,
@@ -153,6 +154,8 @@ export function SessionChatColumn({
   activeRunId: string | null
   transcriptLoading?: boolean
   transcriptHasEarlier?: boolean
+  /** Runs above the loaded window, so the record numbers runs from the task's first. */
+  transcriptRunsBefore?: number
   transcriptLoadingEarlier?: boolean
   onLoadEarlierMessages?: () => void | Promise<void>
   onProviderModel: (provider: ProviderIdAny, model: string) => void
@@ -521,6 +524,7 @@ export function SessionChatColumn({
             run={run}
             transcriptLoading={transcriptLoading}
             transcriptHasEarlier={transcriptHasEarlier}
+            transcriptRunsBefore={transcriptRunsBefore}
             transcriptLoadingEarlier={transcriptLoadingEarlier}
             onLoadEarlier={onLoadEarlierMessages}
             restoreScrollTop={restoreScrollTop}

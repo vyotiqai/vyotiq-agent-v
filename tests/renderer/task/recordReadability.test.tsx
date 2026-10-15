@@ -7,7 +7,7 @@ import type { UiItem } from '@shared/transcript'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
 import { buildRecordModel, type BuildOptions, type WorkItem } from '@renderer/features/task/recordModel'
 import { TaskRecord } from '@renderer/features/task/TaskRecord'
-import { WorkList, isBareIntent, outcomeLine, plainLine, plainProse, targetOf, thoughtLine } from '@renderer/features/task/record/WorkItems'
+import { LinkedText, WorkList, endsWhole, isBareIntent, outcomeLine, plainLine, plainProse, targetOf, thoughtLine } from '@renderer/features/task/record/WorkItems'
 import { BriefText } from '@renderer/features/task/record/Brief'
 import { TerminalBody } from '@renderer/features/chat/toolUi/bodies/TerminalBody'
 import { RunSessionProvider } from '@renderer/features/chat/RunSessionContext'
@@ -58,6 +58,14 @@ describe('a thought line', () => {
 
   it('keeps the last line when nothing else is said', () => {
     expect(thoughtLine('Let me look.')).toBe('Let me look.')
+  })
+
+  it('closes a code span the cut lands in, so no lone tick shows', () => {
+    const line = thoughtLine(
+      'The replySpeaker.ts diff shows the A-20 fix: when a reply arrives whole, with no text_delta events at all and a spoken block at its head, previously `pnpm vitest run tests/renderer/task --reporter dot` was used instead'
+    )
+    expect(line.endsWith('…')).toBe(true)
+    expect((line.match(/`/g) ?? []).length % 2).toBe(0)
   })
 
   it('never shows fenced code as the line', () => {
@@ -120,6 +128,34 @@ describe('a title made from markdown', () => {
     expect(row.textContent).not.toContain('**')
     const time = [...row.querySelectorAll('span')].find((s) => s.textContent === '1h 9m 23s')
     expect(time?.classList.contains('whitespace-nowrap')).toBe(true)
+  })
+
+  it('says where a run is whose instruction is above the loaded history, not a bare "Run 1"', () => {
+    const items: UiItem[] = [
+      { kind: 'message', id: 'a0', role: 'assistant', content: 'Verified all checks.', at: '2026-10-01T08:00:00.000Z' },
+      { kind: 'message', id: 'user-2', role: 'user', content: 'Next', at: '2026-10-01T08:10:00.000Z' },
+      { kind: 'message', id: 'a2', role: 'assistant', content: 'Done.', at: '2026-10-01T08:11:00.000Z' }
+    ]
+    const options: BuildOptions = { running: false }
+    const { container } = render(<TaskRecord model={buildRecordModel(items, options)} options={options} messageCount={items.length} />)
+    const row = container.querySelector('[data-history-run="1"]') as HTMLElement
+    expect(row.textContent).toContain('Instruction in earlier history · Verified all checks.')
+  })
+})
+
+describe('words that are not markdown', () => {
+  it('opens a web address in an error, without the stop that ends the sentence', () => {
+    const { container } = render(<LinkedText text="To increase, visit https://openrouter.ai/settings/credits." />)
+    const link = container.querySelector('a')!
+    expect(link.getAttribute('href')).toBe('https://openrouter.ai/settings/credits')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(container.textContent).toBe('To increase, visit https://openrouter.ai/settings/credits.')
+  })
+
+  it('tells words Stop cut off from a finished sentence', () => {
+    expect(endsWhole('These might be dedup')).toBe(false)
+    expect(endsWhole('The log stopped at 252 bytes.')).toBe(true)
+    expect(endsWhole('Run `pnpm test`')).toBe(true)
   })
 })
 

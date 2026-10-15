@@ -226,6 +226,10 @@ function FileBlock({
   const diff = useFileDiff(file.path, source.lines, seen && open ? source.fetchDiff : undefined, source.binary)
   const { name, dir } = splitPath(root ? relativeToExtraRoot(file.path, root) : file.path)
   const trailing = actions ? 'shrink-0 pr-3 group-focus-within:hidden group-hover:hidden' : 'shrink-0 pr-3'
+  // Nothing to show as a diff (a binary, a file too large, one a command
+  // changed with no copy kept): the reason sits on the row, not in a body
+  // under it. Ten screenshots used to push every real diff off the screen.
+  const flat = seen && open && diff.state === 'none' && !slot && Boolean(source.fetchDiff)
 
   return (
     <li ref={ref} className={cn('border-b', BORDER_DIVIDER)} data-change-file={file.path}>
@@ -238,17 +242,21 @@ function FileBlock({
       >
         <button
           type="button"
-          aria-expanded={open}
+          aria-expanded={flat ? undefined : open}
           aria-current={on || undefined}
           aria-label={`${file.path}, ${STATUS_WORD[file.status].toLowerCase()}`}
           title={file.path}
           className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 pr-2 text-left focus-visible:vy-focus-ring"
           onClick={() => {
             onSelect(file.path)
-            setOpen((value) => !value)
+            if (!flat) setOpen((value) => !value)
           }}
         >
-          <Icon name={open ? 'chevron' : 'chevronRight'} size={11} className="shrink-0 text-tertiary" />
+          {flat ? (
+            <span aria-hidden className="w-[11px] shrink-0" />
+          ) : (
+            <Icon name={open ? 'chevron' : 'chevronRight'} size={11} className="shrink-0 text-tertiary" />
+          )}
           <span
             className={cn('w-3 shrink-0 font-mono text-caption font-semibold', STATUS_TONE[file.status])}
             title={STATUS_WORD[file.status]}
@@ -266,7 +274,11 @@ function FileBlock({
           </span>
           <span className="min-w-0 flex-1 truncate text-caption text-tertiary">{dir}</span>
         </button>
-        {file.note ? (
+        {flat && diff.state === 'none' && !file.note ? (
+          <span className={cn(trailing, 'max-w-[45%] truncate text-caption text-tertiary')} title={diff.message} data-change-flat>
+            {diff.message === 'Binary or too large to diff' ? 'Binary or large' : diff.message}
+          </span>
+        ) : file.note ? (
           <span className={cn(trailing, 'text-caption', file.noteTone === 'warning' ? 'text-warning' : 'text-tertiary')}>
             {file.note}
           </span>
@@ -277,7 +289,7 @@ function FileBlock({
           <span className="hidden shrink-0 items-center gap-1 pr-2 group-focus-within:flex group-hover:flex">{actions}</span>
         ) : null}
       </div>
-      {open ? (
+      {open && !flat ? (
         <>
           {slot}
           <div

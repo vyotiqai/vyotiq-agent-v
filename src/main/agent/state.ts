@@ -664,6 +664,11 @@ export interface MessagesWindow {
   messages: ChatMessage[]
   hasEarlier: boolean
   earlierCursor: string | null
+  /**
+   * The record's runs that start above the window, so its run numbers count
+   * from the task's first run and not from the window's.
+   */
+  runsBefore: number
 }
 
 interface TranscriptSource {
@@ -764,6 +769,100 @@ function parseMessageWindow(window: MessageWindow): ParsedWindowMessage[] {
   return out
 }
 
+/** What a stretch of transcript adds to the record's run count. */
+interface RunTally {
+  runs: number
+  /** Whether the stretch opens on an instruction, or on a run already under way. */
+  first: 'run' | 'continues' | null
+}
+
+const USER_ROLE = Buffer.from('"role":"user"')
+
+/**
+ * The record starts a run at each instruction: a user message that is neither
+ * loop-injected (`synthetic`) nor said while a run worked (`midTurn`). Lines are
+ * compact JSON, so only lines holding `"role":"user"` are parsed.
+ */
+function tallyLine(tally: RunTally, line: Buffer): void {
+  if (line.length === 0) return
+  if (!line.includes(USER_ROLE)) {
+    tally.first ??= 'continues'
+    return
+  }
+  let message: { role?: unknown; synthetic?: unknown; midTurn?: unknown }
+  try {
+    message = JSON.parse(line.toString('utf8')) as typeof message
+  } catch {
+    return
+  }
+  if (message.role !== 'user') {
+    tally.first ??= 'continues'
+    return
+  }
+  if (message.synthetic) return
+  if (message.midTurn === true) {
+    tally.first ??= 'continues'
+    return
+  }
+  tally.runs += 1
+  tally.first ??= 'run'
+}
+
+async function tallyRunStarts(path: string, end: number): Promise<RunTally> {
+  const tally: RunTally = { runs: 0, first: null }
+  if (end <= 0) return tally
+  const handle = await open(path, 'r')
+  try {
+    const chunk = Buffer.alloc(1024 * 1024)
+    let carry = Buffer.alloc(0)
+    let pos = 0
+    while (pos < end) {
+      const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, end - pos), pos)
+      if (bytesRead <= 0) break
+      pos += bytesRead
+      const buf = carry.length > 0 ? Buffer.concat([carry, chunk.subarray(0, bytesRead)]) : chunk.subarray(0, bytesRead)
+      let lineStart = 0
+      for (let newline = buf.indexOf(0x0a); newline !== -1; newline = buf.indexOf(0x0a, lineStart)) {
+        tallyLine(tally, buf.subarray(lineStart, newline))
+        lineStart = newline + 1
+      }
+      carry = Buffer.from(buf.subarray(lineStart))
+    }
+    tallyLine(tally, carry)
+  } finally {
+    await handle.close()
+  }
+  return tally
+}
+
+// Archives never change once rotated out, so each is read once.
+const archiveRunTallies = new Map<string, { size: number; tally: RunTally }>()
+
+/** Runs that start before `offset` in `sources[index]`, counted as the record counts them. */
+async function countRunsBefore(sources: TranscriptSource[], index: number, offset: number): Promise<number> {
+  let runs = 0
+  let first: RunTally['first'] = null
+  for (let i = 0; i <= index; i++) {
+    const source = sources[i]
+    const whole = i < index
+    const cached = whole ? archiveRunTallies.get(source.path) : undefined
+    let tally: RunTally
+    if (cached && cached.size === source.size) {
+      tally = cached.tally
+    } else {
+      tally = await tallyRunStarts(source.path, whole ? source.size : offset)
+      if (whole) {
+        if (archiveRunTallies.size >= 256) archiveRunTallies.clear()
+        archiveRunTallies.set(source.path, { size: source.size, tally })
+      }
+    }
+    runs += tally.runs
+    first ??= tally.first
+  }
+  // Messages before the first instruction make a run of their own in the record.
+  return runs + (first === 'continues' ? 1 : 0)
+}
+
 function parseWindowCursor(cursor: string): { index: number; offset: number } | null {
   const separator = cursor.indexOf(':')
   if (separator <= 0) return null
@@ -795,7 +894,7 @@ export async function loadMessagesWindowAsync(
   if (opts?.cursor) {
     const parsedCursor = parseWindowCursor(opts.cursor)
     if (!parsedCursor || parsedCursor.index >= sources.length) {
-      return { messages: [], hasEarlier: false, earlierCursor: null }
+      return { messages: [], hasEarlier: false, earlierCursor: null, runsBefore: 0 }
     }
     startIndex = parsedCursor.index
     startEndOffset = parsedCursor.offset
@@ -819,10 +918,20 @@ export async function loadMessagesWindowAsync(
     firstOffset = take[0].offset
   }
   const hasEarlier = firstIndex > 0 || firstOffset > 0
+  let runsBefore = 0
+  if (hasEarlier) {
+    try {
+      runsBefore = await countRunsBefore(sources, firstIndex, firstOffset)
+    } catch (err) {
+      // Numbers then count from the window, as they did before main counted.
+      logger.warn('Could not count the runs above the transcript window', { scope: 'state', err })
+    }
+  }
   return {
     messages,
     hasEarlier,
-    earlierCursor: hasEarlier ? `${firstIndex}:${firstOffset}` : null
+    earlierCursor: hasEarlier ? `${firstIndex}:${firstOffset}` : null,
+    runsBefore
   }
 }
 

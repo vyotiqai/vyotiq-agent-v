@@ -65,6 +65,17 @@ type ToolItem = Extract<UiItem, { kind: 'tool' }>
  */
 export const BrokeAtContext = createContext<string | null>(null)
 
+/**
+ * The id of a stopped run's last words when Stop cut them mid-sentence
+ * ("These might be dedup"): they say so, or they read as a typo.
+ */
+export const StoppedAtContext = createContext<string | null>(null)
+
+/** Words that end where a sentence does, not where Stop cut them. */
+export function endsWhole(text: string): boolean {
+  return /[.!?…:;)\]"'`*]$/.test(text.trim())
+}
+
 /** Each settled file's Kept or Undone, by workspace-relative path, for the edits in the steps. */
 export const EditMarksContext = createContext<ReadonlyMap<string, 'kept' | 'undone'>>(new Map())
 
@@ -431,6 +442,36 @@ export function sameWork(a: WorkItem, b: WorkItem): boolean {
 
 export const WorkItemView = memo(WorkItemViewImpl, (prev, next) => sameWork(prev.item, next.item))
 
+/** A web address in plain text, without the stop or bracket the sentence ends it with. */
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]]/g
+
+/**
+ * Plain text whose web addresses open — an error's "visit https://…/credits"
+ * is the way out of it. Underlined, so it reads as a link without the hue.
+ */
+export function LinkedText({ text }: { text: string }) {
+  const parts: ReactNode[] = []
+  let at = 0
+  for (const m of text.matchAll(URL_IN_TEXT)) {
+    if (m.index > at) parts.push(text.slice(at, m.index))
+    parts.push(
+      <a
+        key={m.index}
+        href={m[0]}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="rounded-sm underline underline-offset-2 focus-visible:vy-focus-ring"
+      >
+        {m[0]}
+      </a>
+    )
+    at = m.index + m[0].length
+  }
+  if (parts.length === 0) return <>{text}</>
+  if (at < text.length) parts.push(text.slice(at))
+  return <>{parts}</>
+}
+
 /**
  * A turn's failure, with Retry on the latest one and a way to put it away.
  * When that one could not reach something it needed, it also offers to have
@@ -458,7 +499,9 @@ function ErrorItem({ id, message, code }: { id: string; message: string; code?: 
     // Wraps when the pane is narrow: the actions then keep the right edge.
     <div role="alert" className="flex flex-wrap items-start gap-x-2 gap-y-1 text-xs text-danger" title={code || undefined}>
       <Icon name="xCircle" size={14} className="mt-px shrink-0" />
-      <p className="min-w-0 grow basis-48 [overflow-wrap:anywhere]">{message}</p>
+      <p className="min-w-0 grow basis-48 [overflow-wrap:anywhere]">
+        <LinkedText text={message} />
+      </p>
       <div className="-my-1 ml-auto flex max-w-full shrink-0 flex-wrap items-center gap-1">
         {canRetry ? (
           <Button size="xs" onClick={onRetry}>
@@ -497,6 +540,7 @@ function ErrorItem({ id, message, code }: { id: string; message: string; code?: 
 }
 
 function WorkItemViewImpl({ item }: { item: WorkItem }) {
+  const cutByStop = useContext(StoppedAtContext) === item.id
   switch (item.kind) {
     case 'explore':
       return <ExploreItem tools={item.tools} />
@@ -531,17 +575,17 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
         />
       )
     case 'note':
-      return item.item.cutOff ? (
+      return item.item.cutOff || cutByStop ? (
         <div>
           <RecordProse text={stripSpokenBlock(item.text)} streaming={Boolean(item.item.streaming)} tone="secondary" />
           {/* Quiet: the run recovered on its own; this only explains the fragment. */}
-          <p className="mt-0.5 text-caption text-tertiary">Cut off at the output limit</p>
+          <p className="mt-0.5 text-caption text-tertiary">{item.item.cutOff ? 'Cut off at the output limit' : 'Cut off when the run stopped'}</p>
         </div>
       ) : (
         <RecordProse text={stripSpokenBlock(item.text)} streaming={Boolean(item.item.streaming)} tone="secondary" />
       )
     case 'thought':
-      return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought id={item.id} text={item.text} />
+      return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought id={item.id} text={item.text} cut={cutByStop} />
     case 'error':
       return <ErrorItem id={item.id} message={item.message} code={item.code} />
     case 'compaction':
@@ -1766,7 +1810,10 @@ export function thoughtLine(text: string, max = THOUGHT_LINE_MAX): string {
   if (line.length <= max) return line
   const cut = line.slice(0, max)
   const space = cut.lastIndexOf(' ')
-  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s.,;:!?…—–-]+$/, '')}…`
+  const head = (space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s.,;:!?…—–-]+$/, '')
+  // A cut inside a `code` span closes it: an unpaired tick showed as a literal "`".
+  const ticks = head.match(/`/g)?.length ?? 0
+  return `${head}${ticks % 2 === 1 ? '`' : ''}…`
 }
 
 /**
@@ -1776,12 +1823,14 @@ export function thoughtLine(text: string, max = THOUGHT_LINE_MAX): string {
 const QUIET_CODE = 'font-mono text-caption'
 
 /** Reasoning, settled: one line of where it ended up, the rest on request. */
-function Thought({ id, text }: { id: string; text: string }) {
+function Thought({ id, text, cut = false }: { id: string; text: string; cut?: boolean }) {
   const [userOpen, setOpen] = useState(false)
   // Find in record opens a thought that holds a match.
   const forced = useContext(RecordOpenContext).has(thoughtOpenKey(id))
   const open = userOpen || forced
-  const line = thoughtLine(text)
+  // Cut off by Stop, it trails off rather than ending on half a word.
+  const whole = thoughtLine(text)
+  const line = cut && !whole.endsWith('…') ? `${whole}…` : whole
   return (
     <div data-record-thought>
       <button

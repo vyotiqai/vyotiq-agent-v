@@ -86,6 +86,13 @@ describe('taskFileStats', () => {
     expect(await pendingReviewSummary(runDir, workspace)).toEqual({ files: 2, add: 2, del: 0 })
   })
 
+  it('marks a path that is a folder now, so Changes lists no folder as a file', async () => {
+    await turn(() => run('edit', { path: 'tiles.d', contents: 'x\n' }))
+    rmSync(join(workspace, 'tiles.d'))
+    mkdirSync(join(workspace, 'tiles.d'))
+    expect(await taskFileStats(runDir, workspace)).toEqual([{ path: 'tiles.d', action: 'created', dir: true }])
+  })
+
   it('keeps kept files, and nets out what was undone', async () => {
     // Keeping every file stamps the checkpoint `undone` too; it must still count.
     const kept = await turn(() => run('str_replace', { path: 'swap.ts', old_string: 'prepare()', new_string: 'ready()' }))

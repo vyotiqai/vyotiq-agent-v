@@ -326,7 +326,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   sourceItemsRef.current = sourceItems
   const changeData = readChangeData(changeCacheRef, sourceSignature, sourceItemsRef.current)
   const { sessionToolAgentFiles, sessionAgentDiffs, sessionEditTotals: editTotals } = changeData
-  const sessionAgentFiles = useMemo(
+  const sessionAgentFilesAll = useMemo(
     () => mergeCheckpointChangedFiles(sessionToolAgentFiles, writeCheckpointFiles),
     [sessionToolAgentFiles, writeCheckpointFiles]
   )
@@ -358,6 +358,13 @@ export const ChangesPanel = memo(function ChangesPanel({
     }
   }, [active, statsKey, workspacePath, runId, gitRevision, settledWrites, writeFileResolutions])
   const liveStats = taskStats && taskStats.key === statsKey ? taskStats.files : null
+  // A folder a command made (`mkdir .tmp-shots`) is in the write record but is
+  // no file: listed, it read "A .tmp-shots" over "Binary or too large to diff".
+  const sessionAgentFiles = useMemo(
+    () =>
+      liveStats ? sessionAgentFilesAll.filter((f) => !liveStats.get(normalizeRelPath(f.path))?.dir) : sessionAgentFilesAll,
+    [sessionAgentFilesAll, liveStats]
+  )
   const taskExtraRoots = taskStats && taskStats.key === statsKey ? taskStats.extraRoots : undefined
   const [scope, setScope] = useState<ChangeScope>(preferredScope)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -983,7 +990,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         ? chrome.result.detail
         : displayScope === 'agent'
           ? taskFinished
-            ? 'This task finished without changing a file.'
+            ? 'This task changed no files.'
             : 'Edits the agent makes land here as it makes them.'
           : chrome.result?.kind === 'not_repo'
             ? 'Uncommitted changes, commits and PRs need git. Initialise one here — nothing else changes.'
