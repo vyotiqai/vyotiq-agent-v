@@ -17,6 +17,7 @@ import type {
 } from '../../../shared/utils/contextUsage'
 import {
   KEEP_LAST_TOOL_RESULTS,
+  TOOL_RESULT_TRIM_SLACK,
   type AssembleInput,
   type AssembleResult,
   type CompactionRecord
@@ -1021,10 +1022,16 @@ export async function assembleContext(
     input.proactiveThreshold && input.proactiveThreshold > 0
       ? input.proactiveThreshold
       : proactiveCompactThresholdTokens(window)
+  //
+  // With the same slack the loop trims its working set with: without it the
+  // boundary moved one result every step, so each request rewrote history at
+  // that point and missed the cache from there on — on every step the trim was
+  // live (the post-fold regrowth window, and providers whose estimate runs far
+  // above what they bill). Only a request that would still overflow trims to
+  // the bare keep window.
   if (estimated >= wireTrimTrigger) {
-    const trimmed = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS)
-    if (trimmed.some((m, i) => m !== messages[i])) {
-      messages = trimmed
+    const remeasure = async (next: ChatMessage[]): Promise<void> => {
+      messages = next
       layers = await computeLayers(
         zones,
         messages,
@@ -1034,6 +1041,12 @@ export async function assembleContext(
         input.countReasoningReplay
       )
       estimated = totalFromLayers(layers)
+    }
+    const trimmed = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS, TOOL_RESULT_TRIM_SLACK)
+    if (trimmed.some((m, i) => m !== messages[i])) await remeasure(trimmed)
+    if (estimated > window) {
+      const tight = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS)
+      if (tight.some((m, i) => m !== messages[i])) await remeasure(tight)
     }
   }
   perfLog('estimateMessagesTokens', estimateStarted, {

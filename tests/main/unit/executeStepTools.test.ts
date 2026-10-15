@@ -388,6 +388,30 @@ describe('executeStepToolCalls', () => {
     expect(result).toMatchObject({ type: 'tool_result', summary: 'a.ts', ok: false })
   })
 
+  // Hooks guard what runs, so they read the arguments the handler runs with:
+  // a hook blocking on `command` was blind to the `cmd` alias.
+  it('hands PreToolUse hooks the normalized arguments, aliases resolved', async () => {
+    executeTool.mockResolvedValue({ ok: true, summary: 'terminal', content: 'ran' })
+
+    const { ctx } = makeCtx(new AbortController().signal)
+    const seen: Array<Record<string, unknown>> = []
+    ctx.hooks = {
+      preToolUse: async (_name: string, args: Record<string, unknown>) => {
+        seen.push(args)
+        return typeof args.command === 'string' && args.command.includes('rm -rf') ? 'no rm -rf' : null
+      },
+      postToolUse: async () => null
+    } as unknown as TestCtx['hooks']
+    const outcome = await executeStepToolCalls(
+      [{ id: 'c1', name: 'terminal', arguments: '{"cmd":"rm -rf build"}' }],
+      ctx
+    )
+
+    expect(seen[0]?.command).toBe('rm -rf build')
+    expect(executeTool).not.toHaveBeenCalled()
+    expect(outcome.messages[0]?.content).toMatch(/Blocked by a PreToolUse hook: no rm -rf/)
+  })
+
   it('saves who allowed a gated call on its persisted result', async () => {
     executeTool.mockResolvedValue({ ok: true, summary: 'edit', content: 'wrote' })
 

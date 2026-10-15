@@ -340,4 +340,12 @@ describe('verificationNudgeText', () => {
     expect(text).toContain('did not pass')
     expect(text).not.toContain('()')
   })
+
+  it('asks for the whole answer again: what the agent says last is the task’s result', () => {
+    for (const reason of ['never_checked', 'check_failed'] as const) {
+      const text = verificationNudgeText({ wouldFire: true, reason, paths: ['a.ts'] })
+      expect(text).toContain('end with your complete final answer, written in full again')
+      expect(text).toContain("replaces your earlier answer as the task's result")
+    }
+  })
 })

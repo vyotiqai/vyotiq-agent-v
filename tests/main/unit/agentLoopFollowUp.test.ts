@@ -106,6 +106,22 @@ vi.mock('@main/agent/messageAppendQueue', async (importOriginal) => {
   }
 })
 
+const { checkpointAnchors } = vi.hoisted(() => ({
+  /** Anchor index of every write checkpoint the loop opens, in order. */
+  checkpointAnchors: [] as Array<number | undefined>
+}))
+
+vi.mock('@main/agent/checkpoints', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/checkpoints')>()
+  return {
+    ...actual,
+    beginWriteCheckpoint: (...args: Parameters<typeof actual.beginWriteCheckpoint>) => {
+      checkpointAnchors.push(args[2])
+      return actual.beginWriteCheckpoint(...args)
+    }
+  }
+})
+
 import { runAgent } from '@main/agent/loop'
 import {
   enqueueFollowUp,
@@ -130,6 +146,7 @@ describe('runAgent mid-run follow-ups', () => {
     streamChat.mockReset()
     deferredRewrites.on = false
     deferredRewrites.pending = []
+    checkpointAnchors.length = 0
   })
 
   afterEach(() => {
@@ -292,6 +309,44 @@ describe('runAgent mid-run follow-ups', () => {
     ).toBe(true)
   })
 
+  // A retry wait listens to the steer signal too. Its AbortError used to reach
+  // the loop's outer catch as a cancel: the run stopped and the message just
+  // sent with Send now was cleared with it.
+  it('ends a retry wait on Send now and applies the follow-up instead of cancelling', async () => {
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        yield { type: 'error', error: 'Service Unavailable', errorCode: 'PROVIDER_HTTP', httpStatus: 503 }
+        return
+      }
+      yield { type: 'text', text: `reply-${call}` }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+
+    const runId = 'follow-up-during-retry-wait'
+    const events: Array<{ type: string; status?: string }> = []
+    let promoted = false
+    for await (const ev of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'start' }],
+      workspacePath: workspace
+    })) {
+      events.push(ev)
+      if (!promoted && ev.type === 'network_wait') {
+        const queued = enqueueFollowUp(runId, { role: 'user', content: 'do this instead' })
+        if (queued.ok) promoted = promoteFollowUp(runId, queued.id).ok
+      }
+    }
+
+    expect(promoted).toBe(true)
+    expect(events.some((e) => e.type === 'status' && e.status === 'cancelled')).toBe(false)
+    expect(events.some((e) => e.type === 'follow_up_applied')).toBe(true)
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+    const messages = loadMessages(workspace, runId)
+    expect(messages.some((m) => m.role === 'user' && m.content === 'do this instead')).toBe(true)
+  })
+
   it('does not interrupt mid-stream for a passive enqueue', async () => {
     let call = 0
     streamChat.mockImplementation(async function* (
@@ -368,6 +423,10 @@ describe('runAgent mid-run follow-ups', () => {
     expect(call).toBeGreaterThanOrEqual(2)
     const messages = loadMessages(workspace, runId)
     expect(messages.some((m) => m.role === 'user' && m.content === 'one more thing')).toBe(true)
+    // The follow-up is its own turn: its writes go in a checkpoint anchored on
+    // its prompt, so rewinding or editing it takes them back.
+    const followUpIndex = messages.findIndex((m) => m.role === 'user' && m.content === 'one more thing')
+    expect(checkpointAnchors).toEqual([0, followUpIndex])
   })
 
   it('auto-applies multiple passive follow-ups one by one when the turn ends', async () => {

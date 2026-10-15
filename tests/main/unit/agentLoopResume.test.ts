@@ -508,6 +508,33 @@ describe('runAgent session continuation', () => {
     ])
   })
 
+  // A step's saved assistant_message settles its snapshots. Matched by text
+  // alone, a kill during a later tool-only step (an empty assistant row last)
+  // appended the earlier text again after the tool results.
+  it('does not recover a snapshot whose step was already saved', async () => {
+    const runId = 'snapshot-already-saved'
+    const runDir = createRun(workspace, runId, 'crash goal')
+    syncMessages(runDir, [
+      { role: 'user', content: 'explain it' },
+      { role: 'assistant', content: 'Let me look', toolCalls: [{ id: 'c1', name: 'read', arguments: '{"path":"a"}' }] },
+      { role: 'tool', toolCallId: 'c1', toolName: 'read', content: 'body', ok: true },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c2', name: 'read', arguments: '{"path":"b"}' }] }
+    ])
+    appendEvent(runDir, { type: 'stream_snapshot', runId, text: 'Let me look' })
+    appendEvent(runDir, { type: 'assistant_message', runId, content: 'Let me look' })
+    appendEvent(runDir, { type: 'assistant_message', runId, content: '' })
+    await flushEventAppends(runDir)
+    await updateStatus(runDir, { status: 'running', step: 2 }, { sync: true })
+
+    expect(await interruptOrphanRuns([workspace])).toBe(1)
+    await flushMessageAppends(runDir)
+
+    const contents = loadMessages(workspace, runId)
+      .filter((m) => m.role === 'assistant')
+      .map((m) => m.content)
+    expect(contents).toEqual(['Let me look', ''])
+  })
+
   it('puts a recovered answer before the turn that resumes the run', async () => {
     const runId = 'snapshot-resume-order'
     const runDir = createRun(workspace, runId, 'crash goal')

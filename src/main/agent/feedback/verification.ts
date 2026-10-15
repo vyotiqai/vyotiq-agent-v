@@ -142,6 +142,15 @@ export type VerificationGateVerdict = {
 const NUDGE_PATH_SAMPLE = 5
 
 /**
+ * The gate fires after the agent has already answered, and whatever it says
+ * last is the task's result — in the record and in the voice view. Run
+ * 2026-10-14 answered "Verification result: the narrowest possible check is
+ * a direct file read…" and that note took the answer's place.
+ */
+const RESTATE_ANSWER =
+  "Then end with your complete final answer, written in full again with what the check showed: it replaces your earlier answer as the task's result, so a note about the check alone would lose that answer."
+
+/**
  * The one corrective turn an armed gate injects. It asks for a check or an
  * honest statement of what is unverified — never blocks, never repeats: the
  * loop sends it at most once per invoke.
@@ -153,13 +162,15 @@ export function verificationNudgeText(verdict: VerificationGateVerdict): string 
   if (verdict.reason === 'check_failed') {
     return (
       `Verification: the last check after your code changes${named} did not pass. ` +
-      'Fix the failure and run the check again. If the failure is outside this task, say so in your answer and quote the failing output.'
+      'Fix the failure and run the check again. If the failure is outside this task, say so in your answer and quote the failing output. ' +
+      RESTATE_ANSWER
     )
   }
   return (
     `Verification: you changed code${named} and no test, typecheck or lint run has passed since the last change. ` +
     "Before you finish, run the narrowest check that proves it — run_tests, diagnostics, or the project's test command in the terminal. " +
-    'If no check can run here, say in your answer exactly what is unverified and why.'
+    'If no check can run here, say in your answer exactly what is unverified and why. ' +
+    RESTATE_ANSWER
   )
 }
 

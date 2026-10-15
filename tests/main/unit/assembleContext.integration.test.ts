@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { assembleContext } from '@main/agent/context/assemble'
-import { KEEP_LAST_TOOL_RESULTS } from '@main/agent/context/types'
+import { KEEP_LAST_TOOL_RESULTS, TOOL_RESULT_TRIM_SLACK } from '@main/agent/context/types'
 import { shouldTriggerAutoCompact } from '@main/agent/context/estimate'
 import { clearRulesCache } from '@main/agent/context/rules'
 import { clearWorkspaceSnapshotCache } from '@main/agent/context/workspaceSnapshot'
@@ -550,6 +550,43 @@ describe('assembleContext integration', () => {
     expect(
       lowered.messages.filter((m) => contentToText(m.content) === '[cleared]').length
     ).toBeGreaterThan(0)
+  })
+
+  // Trimmed to the bare keep window, the boundary moved a result every step and
+  // each request rewrote history there, missing the cache from that point on.
+  it('moves the wire trim boundary only once the slack is used up', async () => {
+    const results = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        role: 'tool' as const,
+        toolName: 'read_file',
+        toolCallId: `t${i}`,
+        content: `RESULT-${i}: some body text`
+      }))
+    const base = {
+      harness: 'harness',
+      workspacePath: null,
+      goal: 'go',
+      model,
+      toolsJsonEstimate: 50,
+      providerId: 'ollama' as const,
+      // Over the trigger, far under the window: only the trim rule decides.
+      proactiveThreshold: 1
+    }
+    const cleared = (messages: { content: unknown }[]) =>
+      messages.filter((m) => contentToText(m.content as never) === '[cleared]').length
+
+    const within = await assembleContext({
+      ...base,
+      messages: [{ role: 'user' as const, content: 'go' }, ...results(KEEP_LAST_TOOL_RESULTS + TOOL_RESULT_TRIM_SLACK)]
+    })
+    expect(cleared(within.messages)).toBe(0)
+
+    const over = KEEP_LAST_TOOL_RESULTS + TOOL_RESULT_TRIM_SLACK + 1
+    const past = await assembleContext({
+      ...base,
+      messages: [{ role: 'user' as const, content: 'go' }, ...results(over)]
+    })
+    expect(cleared(past.messages)).toBe(over - KEEP_LAST_TOOL_RESULTS)
   })
 
   it('reports the tokens the wire trim reclaimed, not the pre-trim total', async () => {

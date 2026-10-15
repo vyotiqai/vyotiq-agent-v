@@ -138,6 +138,13 @@ describe('hooks', () => {
     expect(allow).toHaveBeenCalledTimes(1)
   }, 30_000)
 
+  it('never stops a task to ask about a workspace file that runs nothing', async () => {
+    writeHooks(join(ws, '.vyotiq', 'hooks.json'), {})
+    const ask = vi.fn(async (_commands: string[], _path: string) => 'allow' as const)
+    expect(await (await loadRunHooks(ws, 'r', ask)).preToolUse('read', {})).toBeNull()
+    expect(ask).not.toHaveBeenCalled()
+  })
+
   it('ignores a file that is not a hooks file', () => {
     const bad = join(ws, 'bad.json')
     writeFileSync(bad, '{"permissions":{}}')

@@ -92,7 +92,8 @@ vi.mock('@main/agent/tools', () => ({
 
 import { runAgent } from '@main/agent/loop'
 import { loadLoopCheckpoint } from '@main/agent/loopCheckpoint'
-import { resetActiveRunsForTests } from '@main/agent/runRegistry'
+import { enqueueFollowUp, resetActiveRunsForTests } from '@main/agent/runRegistry'
+import { loadFollowUps } from '@main/agent/followUpStore'
 
 type CapturedEvent = {
   type: string
@@ -143,12 +144,17 @@ describe('runAgent runaway guards', () => {
     })
 
     const runId = 'runaway-ceiling'
+    let queued = false
     for await (const ev of runAgent({
       runId,
       messages: [{ role: 'user', content: 'do the work' }],
       workspacePath: workspace
     })) {
       events.push(ev as CapturedEvent)
+      // A passive message waits for a turn end this run never reaches.
+      if (!queued && ev.type === 'assistant_message') {
+        queued = enqueueFollowUp(runId, { role: 'user', content: 'and then this' }).ok
+      }
     }
 
     const notice = events.find((e) => e.type === 'token_cost_hint')
@@ -160,6 +166,13 @@ describe('runAgent runaway guards', () => {
     // fires at the top of the next iteration, before any model call.
     expect(turn).toBe(500)
     expect(loadLoopCheckpoint(resolveRunDir(workspace, runId))).toBeNull()
+    // The notice invites a continue, so the queued message waits for it on
+    // disk instead of being dropped at teardown.
+    expect(queued).toBe(true)
+    expect(events.some((e) => e.type === 'follow_up_dropped')).toBe(false)
+    expect(loadFollowUps(resolveRunDir(workspace, runId)).map((f) => f.message.content)).toEqual([
+      'and then this'
+    ])
   }, 180_000)
 
   it('trips the tool-burst guard when a generation re-emits ONE call id', async () => {

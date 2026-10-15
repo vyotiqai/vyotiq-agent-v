@@ -82,6 +82,6 @@ describe('workspace Force-on MCP server', () => {
     await syncMcpServers(sessionServers)
 
     expect(getMcpServerStatus(sessionServers, WS)[0]?.connected).toBe(true)
-    expect(listMcpToolDefinitions(WS).map((t) => t.name)).toEqual(['mcp__echo__echo'])
+    expect(listMcpToolDefinitions().map((t) => t.name)).toEqual(['mcp__echo__echo'])
   }, 60_000)
 })

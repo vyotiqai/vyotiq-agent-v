@@ -1761,6 +1761,14 @@ export async function recoverStreamSnapshotAssistant(
       terminalAfterSnapshot = false
       continue
     }
+    // The step it belonged to was saved (assistant_message) or restarted
+    // (stream_reset). Matching text alone missed it when a later tool-only step
+    // left an empty assistant row last, and the old text was appended again
+    // after the tool results.
+    if (ev.type === 'assistant_message' || ev.type === 'stream_reset') {
+      snapshot = null
+      continue
+    }
     if (
       snapshot &&
       ev.type === 'status' &&

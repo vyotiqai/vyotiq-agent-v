@@ -7,6 +7,7 @@ import { summarizeToolArgs } from '../../shared/toolSummary'
 import { toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import type { ToolCall } from './providers/types'
 import { executeTool, type ToolExecutionContext, type ToolResult } from '@main/agent/tools'
+import { parseToolCallArgs } from './tools/callArgs'
 import { canonicalizeAgentToolName } from './schemas/tools'
 import {
   isParallelBatchClass,
@@ -528,7 +529,9 @@ async function runSingleTool(
       }
     }
 
-    const toolArgs = toolArgsFromCall(call.arguments)
+    // The arguments the handler runs with, aliases resolved: a PreToolUse hook
+    // reading `command` must see a `{cmd}` call too, and so must the tracker.
+    const toolArgs = parseToolCallArgs(call.name, call.arguments)
     if (ctx.hooks) {
       const blocked = await ctx.hooks.preToolUse(call.name, toolArgs, ctx.signal)
       if (blocked) {

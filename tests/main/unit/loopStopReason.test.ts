@@ -583,6 +583,33 @@ describe('runAgent stop-reason classification', () => {
     expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
   })
 
+  // The cap used to count `length` stops only: a reply cut short any other way
+  // (an unmapped finish reason, MALFORMED_FUNCTION_CALL with text) was
+  // continued forever.
+  it.each(['tool_calls', 'unknown', 'error'] as const)(
+    'caps cut-off continues when the stop reason is %s',
+    async (stopReason) => {
+      let call = 0
+      streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+        call += 1
+        yield { type: 'text', text: `partial ${call}` }
+        yield { type: 'done', stopReason }
+      })
+
+      const events = await collect(`stop-cutoff-cap-${stopReason}`, workspace)
+      const incomplete = events.filter((e) => e.type === 'incomplete') as Array<
+        CapturedEvent & { continuing?: boolean }
+      >
+
+      expect(call).toBe(4)
+      expect(incomplete).toHaveLength(4)
+      expect(incomplete.slice(0, 3).every((e) => e.continuing === true)).toBe(true)
+      expect(incomplete[3]?.continuing).toBeUndefined()
+      expect(incomplete[3]?.message).toMatch(/ended unfinished 4 times/i)
+      expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+    }
+  )
+
   it('reports truncation when a provider error arrives after partial text', async () => {
     let call = 0
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {

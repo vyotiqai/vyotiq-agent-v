@@ -642,9 +642,12 @@ export async function loadRunHooks(
       continue
     }
     if (source === 'workspace') {
+      const commands = hookCommands(loaded.file)
+      // Nothing to run (`{"hooks": {}}`): nothing to allow, so never stop the task to ask.
+      if (commands.length === 0) continue
       let decision = workspaceHooksDecision(workspace, loaded.hash)
       if (decision === null && ask) {
-        const answer = await ask(hookCommands(loaded.file), path)
+        const answer = await ask(commands, path)
         if (answer !== 'unavailable') {
           recordWorkspaceHooksDecision(workspace, loaded.hash, answer)
           decision = answer

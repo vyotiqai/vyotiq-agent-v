@@ -353,6 +353,9 @@ const MAX_CONSECUTIVE_TRUNCATIONS = 3
 /** Notice when that cap ends a run. */
 const TRUNCATION_CAP_NOTICE = `The reply was cut off at the output limit ${MAX_CONSECUTIVE_TRUNCATIONS + 1} times in a row, so the run stopped instead of paying for the same step again. Continue to try once more, or pick a model with a larger output limit.`
 
+/** The same cap, for replies the provider ended unfinished without naming the output limit. */
+const CUT_OFF_CAP_NOTICE = `The reply ended unfinished ${MAX_CONSECUTIVE_TRUNCATIONS + 1} times in a row, so the run stopped instead of paying for the same step again. Continue to try once more, or pick another model.`
+
 /**
  * Ceiling on agent steps in one invoke. Each per-step guard (empty responses,
  * repetition, tool bursts, the goal budget) stops its own degenerate shape, but
@@ -2335,6 +2338,14 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     /** Steps in a row that stopped on the output limit. Reset by any other stop. */
     let consecutiveTruncations = 0
     /**
+     * Cut-off replies auto-continued in a row, whatever the stop reason. The
+     * output-limit count above sizes the next request; the cap counts these,
+     * since a reply cut short as `tool_calls`, `error` or an unmapped `unknown`
+     * (Gemini MALFORMED_FUNCTION_CALL with text, `response.incomplete`) never
+     * stops on `length` and was continued without limit.
+     */
+    let consecutiveCutOffContinues = 0
+    /**
      * Consecutive completed steps that only navigated (read-only lookups, no
      * visible answer). Drives the per-step thinking step-down; any substantive
      * step resets it. See adaptiveThinkingEffort in loopPolicy.
@@ -2385,6 +2396,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       yield ev
       yield* flushWriteCheckpoint()
       clearLoopCheckpoint(spendRunDir)
+      // Ended as a finished run ends, so teardown treats it as one (SessionEnd
+      // reads `done`, background terminals stay as a finished turn leaves them).
+      // Queued messages stay on disk for the follow-up this notice invites.
+      yield* dropPendingFollowUps(runId, spendRunDir, 'run_ended', { preserveOnDisk: true })
+      runExitedNormally = true
       yield { type: 'status', runId, invokeId, status: 'done' }
       writeStatus({ status: 'done', error: undefined })
       appendEvent(spendRunDir, { type: 'status', runId, invokeId, status: 'done' })
@@ -2490,6 +2506,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         yield ceilingEv
         yield* flushWriteCheckpoint()
         clearLoopCheckpoint(runDir)
+        // "Continue from there": the queued messages wait for that continue.
+        yield* dropPendingFollowUps(runId, runDir, 'run_ended', { preserveOnDisk: true })
+        runExitedNormally = true
         yield { type: 'status', runId, invokeId, status: 'done' }
         writeStatus({ status: 'done', error: undefined })
         appendEvent(runDir, { type: 'status', runId, invokeId, status: 'done' })
@@ -3202,17 +3221,26 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         waitBeforeRetry: async function* (attempt) {
           // Just moved to another model: nothing to wait out on that one.
           if (modelFallback.takeSkipWait()) return
-          yield* yieldStreamRetryWait(
-            runId,
-            invokeId,
-            step,
-            attempt,
-            streamSignalFor(runId, controller.signal),
-            streamRunDir,
-            lastStreamFailureCode || 'PROVIDER_STREAM',
-            lastStreamFailureMessage,
-            baseUrl
-          )
+          try {
+            yield* yieldStreamRetryWait(
+              runId,
+              invokeId,
+              step,
+              attempt,
+              streamSignalFor(runId, controller.signal),
+              streamRunDir,
+              lastStreamFailureCode || 'PROVIDER_STREAM',
+              lastStreamFailureMessage,
+              baseUrl
+            )
+          } catch (err) {
+            // Send now ends the wait, not the run: the next attempt sees the
+            // steer and hands the step to the follow-up. Thrown on, the
+            // AbortError reached the outer catch as a cancel, and the message
+            // that was just sent was cleared with the run.
+            if (isAbortError(err) && !controller.signal.aborted && stepSoftAbort.signal.aborted) return
+            throw err
+          }
         },
         onRetriableFailure: (err, attempt) => {
           logger.warn('Provider stream disconnected (retrying)', {
@@ -4167,16 +4195,16 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // Only an unbroken run of empty turns is a stuck model; any other outcome
         // clears the budget so a long run never trips the cap on stale counts.
         if (incomplete !== 'empty_response') consecutiveEmptyResponses = 0
-        if (
-          incomplete === 'truncated' &&
-          !controller.signal.aborted &&
-          consecutiveTruncations <= MAX_CONSECUTIVE_TRUNCATIONS
-        ) {
+        const cutOffCapped = incomplete === 'truncated' && consecutiveCutOffContinues >= MAX_CONSECUTIVE_TRUNCATIONS
+        if (incomplete !== 'truncated') consecutiveCutOffContinues = 0
+        if (incomplete === 'truncated' && !controller.signal.aborted && !cutOffCapped) {
+          consecutiveCutOffContinues += 1
           logger.info('Auto-continuing after a cut-off reply', {
             scope: 'agent',
             correlationId: runId,
             step,
-            attempt: Math.max(1, consecutiveTruncations)
+            attempt: consecutiveCutOffContinues,
+            stopReason: stepStopReason ?? 'unset'
           })
           const continueEv: AgentEvent = {
             type: 'incomplete',
@@ -4362,10 +4390,20 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           }
         }
 
-        // Queued follow-ups at turn end auto-apply and continue the run.
+        // Queued follow-ups at turn end auto-apply and continue the run. The
+        // follow-up is a new turn, so its writes get their own checkpoint,
+        // anchored on its prompt as the turn-close path below anchors them:
+        // left in this turn's checkpoint, a rewind or edit of the follow-up
+        // skipped them (the anchor sat below the rewind point).
         if (hasPendingFollowUps(runId)) {
-          if (yield* applyDrainedFollowUps(runId, runDir, messages, 'next')) startedUserTurn()
-          continue
+          yield* flushWriteCheckpoint()
+          const applied = yield* applyDrainedFollowUps(runId, runDir, messages, 'next')
+          checkpointFlushed = false
+          beginWriteCheckpoint(runDir, toolWorkspace, lastUserAnchorIndex(messages, foldedMessages), runExtraRoots)
+          if (applied) {
+            startedUserTurn()
+            continue
+          }
         }
 
         // Done-when checks the agent is about to leave unmarked: one reminder,
@@ -4421,10 +4459,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             invokeId,
             reason: incomplete,
             step,
-            message:
-              incomplete === 'truncated' && consecutiveTruncations > MAX_CONSECUTIVE_TRUNCATIONS
+            message: cutOffCapped
+              ? stepStopReason === 'length'
                 ? TRUNCATION_CAP_NOTICE
-                : INCOMPLETE_MESSAGES[incomplete]
+                : CUT_OFF_CAP_NOTICE
+              : INCOMPLETE_MESSAGES[incomplete]
           }
           logger.warn(
             `Turn ended incomplete: ${incomplete} (textLen=${assistantText.length}; thinkLen=${thinkingText.length})`,
@@ -4587,6 +4626,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // Tool calls are an answer, so this turn was not empty: clear the retry
       // budget here too (the no-tools path clears it after classifying).
       consecutiveEmptyResponses = 0
+      consecutiveCutOffContinues = 0
       // Track navigation chains for the next step's thinking effort. Counted
       // from what this step actually did, which is only knowable now.
       mechanicalStepStreak = isMechanicalStep(
