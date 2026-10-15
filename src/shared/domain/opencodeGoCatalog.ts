@@ -201,24 +201,29 @@ export function normalizeOpenCodeGoModelId(id: string): string {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Endpoints table from https://opencode.ai/docs/go/ (live 2026-09-11). Keep in
+ * Endpoints table from https://opencode.ai/docs/go/ (live 2026-10-15). Keep in
  * sync with the docs table, not with the live `/models` ids: the catalog lists
  * ids before they are routed, and a missed id silently sends the model to the
- * wrong mount where every run fails.
+ * wrong mount where every run fails. Retired ids stay listed so a saved choice
+ * still routes where it did.
  */
 const RESPONSES_MODELS = new Set([
-  'grok-4.5',
+  'grok-4.7',
   'grok-4.6',
+  'grok-4.5',
+  'gpt-6-luna',
   'gpt-5.6-luna',
   'muse-spark-1.2-contributor',
   'muse-spark-1.3-contributor'
 ])
 
 const MESSAGES_MODELS = new Set([
+  'claude-haiku-5-5',
   'minimax-m3',
   'minimax-m2.7',
   'minimax-m2.5',
   'qwen3.8-max',
+  'qwen3.8-flash',
   'qwen3.7-max',
   'qwen3.7-plus',
   'qwen3.6-plus',
@@ -230,7 +235,10 @@ export function opencodeGoTransportFor(modelId: string): OpenCodeTransport {
   const core = normalizeOpenCodeGoModelId(modelId)
   if (RESPONSES_MODELS.has(core)) return 'responses'
   if (MESSAGES_MODELS.has(core)) return 'messages'
-  if (/^minimax-/.test(core) || /^qwen/.test(core)) return 'messages'
+  // A new id in a family the table already routes: every Grok, GPT and Muse
+  // Spark id has been on /responses, every Claude, MiniMax and Qwen id on /messages.
+  if (/^(grok-|gpt-|muse-spark-)/.test(core)) return 'responses'
+  if (/^(claude-|minimax-|qwen)/.test(core)) return 'messages'
   return 'chat'
 }
 

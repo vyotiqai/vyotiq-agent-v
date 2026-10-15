@@ -657,9 +657,18 @@ export function ChatView({
       const panel = CHAT_RIGHT_PANEL_IDS.find((p) => PANEL_SHORTCUT[p] === id)
       if (panel) toggleRightPanel(panel)
     }
+    // The voice's or the agent's open_panel (appActionExecutor): shown, never hidden.
+    const onOpenPanel = (event: Event): void => {
+      const panel = (event as CustomEvent<{ panel?: string }>).detail?.panel
+      if (isChatRightPanelId(panel)) setRightPanel(panel)
+    }
     window.addEventListener('vyotiq:command', onCommand)
-    return () => window.removeEventListener('vyotiq:command', onCommand)
-  }, [toggleInspector, toggleInspectorExpanded, toggleRightPanel])
+    window.addEventListener('vyotiq:open-panel', onOpenPanel)
+    return () => {
+      window.removeEventListener('vyotiq:command', onCommand)
+      window.removeEventListener('vyotiq:open-panel', onOpenPanel)
+    }
+  }, [setRightPanel, toggleInspector, toggleInspectorExpanded, toggleRightPanel])
 
   // Ctrl Shift F / the palette: open Files with its find-in-files box.
   const [findInFilesNonce, setFindInFilesNonce] = useState(0)

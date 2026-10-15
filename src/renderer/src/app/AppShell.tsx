@@ -96,7 +96,8 @@ export type AppShellProps = {
   onReviewTask?: (path: string, runId: string) => void
   /** Open a task in a second pane beside the focused one (palette Shift ↵). */
   onOpenRunBeside?: (path: string, runId: string) => void
-  onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
+  /** False when it couldn't be renamed (the screen says why). */
+  onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void | Promise<boolean | void>
   /** False when it couldn't be deleted (the toast says why). */
   onDeleteRunInWorkspace?: (path: string, runId: string) => void | Promise<boolean | void>
   /** Ask or Agent for the task in the focused pane; false with no task there. */
@@ -509,8 +510,10 @@ function AppShellInner(props: AppShellProps) {
     onToggleArchivedRun: props.onToggleArchivedRun,
     isArchived: (path, runId) => props.archivedRunKeys?.includes(pinnedRunKey(path, runId)) ?? false,
     onDeleteRun: props.onDeleteRunInWorkspace,
+    onRenameRun: props.onRenameRunInWorkspace,
     onSetAgentMode: props.onSetAgentMode,
     updateReady: () => update.status === 'downloaded',
+    updateAvailable: () => update.status === 'available',
     inTaskView: () => view === 'chat'
   }
   useEffect(

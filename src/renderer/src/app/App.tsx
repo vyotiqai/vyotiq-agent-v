@@ -2679,14 +2679,15 @@ function App() {
     path: string,
     runId: string,
     goal: string
-  ): Promise<void> => {
-    if (!window.vyotiq?.renameRun) return
+  ): Promise<boolean> => {
+    if (!window.vyotiq?.renameRun) return false
     const res = await window.vyotiq.renameRun(path, runId, goal)
     if (!res.ok) {
       setSettingsError(res.error)
-      return
+      return false
     }
     refreshWorkspaceRuns(path)
+    return true
   }
 
   const onDeleteRunInWorkspace = async (path: string, runId: string): Promise<boolean> => {
@@ -2850,7 +2851,9 @@ function App() {
   }
 
   paneRunActionsRef.current = {
-    rename: onRenameRunInWorkspace,
+    rename: async (path: string, runId: string, title: string) => {
+      await onRenameRunInWorkspace(path, runId, title)
+    },
     exportRun: onExportRunInWorkspace,
     deleteRun: async (path: string, runId: string) => {
       await onDeleteRunInWorkspace(path, runId)
@@ -3231,8 +3234,7 @@ function App() {
       }
       handleSessionDrop(pane.paneId, 'right', { workspacePath: path, runId })
     },
-    onRenameRunInWorkspace: (path: string, runId: string, goal: string) =>
-      void onRenameRunInWorkspace(path, runId, goal),
+    onRenameRunInWorkspace: (path: string, runId: string, goal: string) => onRenameRunInWorkspace(path, runId, goal),
     onDeleteRunInWorkspace: (path: string, runId: string) => onDeleteRunInWorkspace(path, runId),
     // The voice's or agent's "ask mode" (§24.15): the task in the focused pane.
     onSetAgentMode: (mode: 'ask' | 'agent'): boolean => {

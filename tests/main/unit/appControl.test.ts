@@ -17,7 +17,7 @@ import {
   parseAppActionArgs,
   type AppWindowAction
 } from '@shared/appActions'
-import { findTask, findWorkspace, runAppAction, settleWindowAction, type AppControlDeps } from '@main/appControl/runner'
+import { contextAtHome, findTask, findWorkspace, runAppAction, settleWindowAction, type AppControlDeps } from '@main/appControl/runner'
 import { isApprovalExemptTool } from '@main/agent/tools/classify'
 
 const dirs: string[] = []
@@ -53,7 +53,9 @@ function deps(over: Partial<AppControlDeps> = {}): AppControlDeps & { patches: A
         : [{ runId: 'r3', title: 'Write the release notes', status: 'done' }],
     window: () => wc,
     cancelRun: (id) => id === 'r1',
+    runActive: (id) => id === 'r1',
     startTask: () => ({ ok: true, runId: 'new-run' }),
+    sendToTask: async (_path, runId) => ({ ok: true, queued: runId === 'r1' }),
     patchSettings: async (p) => {
       patches.push(p)
     },
@@ -82,6 +84,14 @@ describe('the catalog', () => {
     expect(parseAppActionArgs('set_theme', { theme: 'dark' })).toEqual({ ok: true, args: { theme: 'dark' } })
     expect(parseAppActionArgs('set_theme', { theme: 'purple' }).ok).toBe(false)
     expect(parseAppActionArgs('set_voice_speed', { speed: 9 }).ok).toBe(false)
+  })
+
+  it('a wrong argument is said in words, and fixed choices are listed for the model (2026-10-15 live check)', () => {
+    // The voice read out "voice_mute: until Invalid option: expected one of…" after guessing a value.
+    expect(parseAppActionArgs('voice_mute', { until: 'I call you' })).toEqual({ ok: false, error: 'I couldn’t do that: until has to be called or unmuted.' })
+    expect(parseAppActionArgs('set_voice_speed', { speed: 9 })).toEqual({ ok: false, error: 'I couldn’t do that: the speed didn’t fit.' })
+    expect(describeAppActions('voice')).toContain('voice_mute {until?: called|unmuted}')
+    expect(describeAppActions('agent')).toContain('set_theme {theme: system|light|dark}')
   })
 
   it('the agent’s call: a destructive one always asks; the rest are like reads', () => {
@@ -125,6 +135,11 @@ describe('running them', () => {
     expect(await runAppAction(d, 'stop_task', { task: 'login' }, voice)).toEqual({ ok: false, message: '“Fix the login page” isn’t running.' })
   })
 
+  it('a title’s own full stop isn’t doubled by the sentence it sits in', async () => {
+    const d = deps({ listTasks: async () => [{ runId: 'r1', title: 'Say hello in one line.', status: 'running' }] })
+    expect((await runAppAction(d, 'stop_task', {}, voice)).message).toBe('Stopped “Say hello in one line”.')
+  })
+
   it('a window action goes to the window with what main found, and comes back in its words', async () => {
     const w = fakeWindow()
     const d = deps({ window: () => w.wc })
@@ -144,6 +159,47 @@ describe('running them', () => {
     })
     expect(start).toHaveBeenCalledWith('C:/work/site', expect.objectContaining({ role: 'user', content: 'Update the changelog' }), w.wc)
     expect(w.sent[0]).toMatchObject({ name: 'open_task', resolved: { workspacePath: 'C:/work/site', runId: 'new-run' } })
+  })
+
+  it('more work for a task: queued on a running one, a stopped one goes again and is opened (§24.16)', async () => {
+    const w = fakeWindow()
+    const send = vi.fn(async (_path: string, runId: string) => ({ ok: true as const, queued: runId === 'r1' }))
+    const d = deps({ window: () => w.wc, sendToTask: send })
+    // The task on screen, running: queued, and nothing to open.
+    expect(await runAppAction(d, 'send_to_task', { message: 'Also run the lint.' }, voice)).toEqual({
+      ok: true,
+      message: 'Added to “Run the tests”; it gets it at its next step.',
+      runId: 'r1'
+    })
+    expect(send).toHaveBeenLastCalledWith('C:/work/api', 'r1', expect.objectContaining({ role: 'user', content: 'Also run the lint.' }), w.wc)
+    expect(w.sent).toEqual([])
+    // Another workspace's finished task: it goes again, and it's shown.
+    expect(await runAppAction(d, 'send_to_task', { task: 'release notes', message: 'Add the voice changes.' }, voice)).toEqual({
+      ok: true,
+      message: '“Write the release notes” is on it.',
+      runId: 'r3'
+    })
+    expect(w.sent[0]).toMatchObject({ name: 'open_task', resolved: { workspacePath: 'C:/work/site', runId: 'r3' } })
+    expect(await runAppAction(deps({ sendToTask: async () => ({ ok: false, error: 'An imported task is read-only. Fork it to continue.' }) }), 'send_to_task', { message: 'Go on.' }, voice)).toEqual({
+      ok: false,
+      message: 'An imported task is read-only. Fork it to continue.'
+    })
+  })
+
+  it('a rename goes to the window with the task found, never while it runs (§24.16)', async () => {
+    const w = fakeWindow(() => ({ ok: true, message: 'Renamed {task} to “Login fix”.' }))
+    const d = deps({ window: () => w.wc })
+    expect(await runAppAction(d, 'rename_task', { title: 'Tests' }, voice)).toEqual({
+      ok: false,
+      message: '“Run the tests” is running; it can be renamed once it stops.'
+    })
+    expect(w.sent).toEqual([])
+    expect(await runAppAction(d, 'rename_task', { task: 'login page', title: 'Login fix' }, voice)).toEqual({
+      ok: true,
+      message: 'Renamed “Fix the login page” to “Login fix”.',
+      runId: 'r2'
+    })
+    expect(w.sent[0]).toMatchObject({ name: 'rename_task', args: { title: 'Login fix' }, resolved: { workspacePath: 'C:/work/api', runId: 'r2' } })
   })
 
   it('a window that never answers fails, not hangs', async () => {
@@ -182,6 +238,29 @@ describe('running them', () => {
     expect((await runAppAction(d, 'open_url', { url: 'file:///C:/Windows/system32/calc.exe' }, at)).ok).toBe(false)
     expect(await runAppAction(d, 'open_url', { url: 'https://example.com/docs' }, at)).toEqual({ ok: true, message: 'Opened example.com.' })
     expect(urls).toEqual(['https://example.com/docs'])
+  })
+
+  it('an agent in a worktree opens files from the worktree, its task found in the workspace', async () => {
+    const tree = mkdtempSync(join(tmpdir(), 'vyotiq-app-tree-'))
+    dirs.push(tree)
+    writeFileSync(join(tree, 'only-here.md'), 'x')
+    const opened: string[] = []
+    const d = deps({
+      openPath: async (p) => {
+        opened.push(p)
+        return ''
+      }
+    })
+    // The loop hands the agent its worktree; the registry knows the workspace the task lives in.
+    const at = contextAtHome({ who: 'agent', runId: 'r1', workspacePath: tree }, 'C:/work/api')
+    expect(at).toMatchObject({ workspacePath: 'C:/work/api', filesRoot: tree })
+    expect((await runAppAction(d, 'open_path', { path: 'only-here.md' }, at)).ok).toBe(true)
+    expect(opened).toEqual([join(tree, 'only-here.md')])
+    // "Stop this task" with no name is the agent's own, found in its workspace.
+    expect(await findTask(d, undefined, at)).toEqual({ runId: 'r1', workspacePath: 'C:/work/api', title: 'Run the tests' })
+    // Not in a worktree: nothing changes.
+    const plain = { who: 'agent' as const, runId: 'r1', workspacePath: 'C:/work/api' }
+    expect(contextAtHome(plain, 'C:/work/api')).toBe(plain)
   })
 
   it('the voice’s own controls are the voice’s', async () => {

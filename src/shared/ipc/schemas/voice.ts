@@ -9,10 +9,6 @@ export const SttProviderIdSchema = z.enum(STT_PROVIDER_IDS)
 export const TtsProviderIdSchema = z.enum(TTS_PROVIDER_IDS)
 export const VoiceKeyVendorSchema = z.enum(VOICE_KEY_VENDORS)
 
-/** What talking over the agent does while it works (docs/voice-mode.md §6.3, D-12). */
-export const VoiceInterruptModeSchema = z.enum(['steer', 'cancel', 'off'])
-export type VoiceInterruptMode = z.infer<typeof VoiceInterruptModeSchema>
-
 /** How long the listener waits before deciding you've finished; each adapter maps it. */
 export const VoiceEndOfTurnPatienceSchema = z.enum(['quick', 'normal', 'patient'])
 export type VoiceEndOfTurnPatience = z.infer<typeof VoiceEndOfTurnPatienceSchema>
@@ -94,8 +90,6 @@ export const VoiceSettingsSchema = z.object({
    * "detect" for the listeners that can (A-15).
    */
   language: z.string().max(8).default('en'),
-  /** Kept for old files only: talking over the agent now never cancels its work (D-46). */
-  interruptMode: VoiceInterruptModeSchema.default('steer'),
   responder: VoiceResponderSchema.default(DEFAULT_VOICE_RESPONDER),
   /**
    * Short spoken cues while tools run; off leaves only a sound. Off by
@@ -128,7 +122,6 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   tts: {},
   speed: 1,
   language: 'en',
-  interruptMode: 'steer',
   responder: DEFAULT_VOICE_RESPONDER,
   speakProgress: false,
   pushToTalkOnly: false,

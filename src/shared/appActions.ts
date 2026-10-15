@@ -14,7 +14,21 @@ import { z } from 'zod'
 
 export const APP_VIEWS = ['home', 'settings', 'usage', 'inbox', 'scheduled', 'extensions', 'docs', 'whats_new', 'shortcuts'] as const
 export const APP_PANELS = ['terminal', 'changes', 'browser', 'files', 'plan', 'pr'] as const
-export const SETTINGS_SECTIONS = ['voice', 'providers', 'agent', 'tools', 'indexing'] as const
+/** Every section Settings has (renderer `SettingsSection`; a test keeps the two the same). */
+export const SETTINGS_SECTIONS = [
+  'general',
+  'appearance',
+  'notifications',
+  'shortcuts',
+  'providers',
+  'agent',
+  'tools',
+  'indexing',
+  'voice',
+  'storage',
+  'diagnostics',
+  'about'
+] as const
 export const VOICE_PLACEMENT_NAMES = ['inline', 'companion', 'takeover', 'capsule', 'mini'] as const
 
 /** A task, by its run id or words from its title; empty is the task on screen. */
@@ -35,8 +49,10 @@ export const APP_ACTION_ARGS = {
   set_agent_mode: z.object({ mode: z.enum(['ask', 'agent']) }),
   // ── Tasks ───────────────────────────────────────────────────────────────
   start_task: z.object({ brief: z.string().trim().min(1).max(8000), workspace: Workspace }),
+  send_to_task: z.object({ message: z.string().trim().min(1).max(8000), task: Task }),
   stop_task: z.object({ task: Task }),
-  archive_task: z.object({ task: Task }),
+  rename_task: z.object({ title: z.string().trim().min(1).max(200), task: Task }),
+  archive_task: z.object({ task: Task, unarchive: z.boolean().optional() }),
   delete_task: z.object({ task: Task }),
   // ── Settings ────────────────────────────────────────────────────────────
   set_theme: z.object({ theme: z.enum(['system', 'light', 'dark']) }),
@@ -47,6 +63,7 @@ export const APP_ACTION_ARGS = {
   open_path: z.object({ path: z.string().trim().min(1).max(4096) }),
   reveal_path: z.object({ path: z.string().trim().min(1).max(4096) }),
   open_url: z.object({ url: z.string().trim().min(1).max(2000) }),
+  download_update: z.object({}),
   install_update: z.object({}),
   quit_app: z.object({}),
   // ── The voice itself ────────────────────────────────────────────────────
@@ -82,8 +99,13 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   switch_workspace: { summary: 'Switch to an open workspace by its folder name.', runs: 'window' },
   set_agent_mode: { summary: 'Set the task on screen to Ask (read-only answers) or Agent (makes changes).', runs: 'window' },
   start_task: { summary: 'Start a new task with this brief, in a workspace if named, and open it.', runs: 'main' },
+  send_to_task: {
+    summary: 'Give a task in any open workspace more work: queued if it is running, else it starts again with this message. The task on screen if none is named.',
+    runs: 'main'
+  },
   stop_task: { summary: 'Stop a task’s run; the task on screen if none is named.', runs: 'main' },
-  archive_task: { summary: 'Archive a task (out of the list, not deleted), or unarchive it.', runs: 'window' },
+  rename_task: { summary: 'Rename a task (not while it runs); the task on screen if none is named.', runs: 'window' },
+  archive_task: { summary: 'Archive a task (out of the list, not deleted); unarchive true brings it back.', runs: 'window' },
   delete_task: { summary: 'Delete a task (it goes to Recently deleted).', runs: 'window', destructive: true },
   set_theme: { summary: 'Set the app theme: system, light or dark.', runs: 'main' },
   set_skin: { summary: 'Set the app skin: native, default, proof, bench or gild.', runs: 'main' },
@@ -92,6 +114,7 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   open_path: { summary: 'Open a file or folder with the system’s app (a path in the workspace, or absolute). Never a program.', runs: 'main' },
   reveal_path: { summary: 'Show a file or folder in the system file manager.', runs: 'main' },
   open_url: { summary: 'Open a web address (http or https) in the system browser.', runs: 'main' },
+  download_update: { summary: 'Download the update that is out (installing it is a separate step).', runs: 'window' },
   install_update: { summary: 'Install the downloaded update; the app restarts.', runs: 'window', destructive: true },
   quit_app: { summary: 'Quit Agent V.', runs: 'main', destructive: true },
   voice_mute: { summary: 'Stop listening: until called by name ("Agent V") if until is called, else until unmuted.', runs: 'main', voiceOnly: true },
@@ -118,12 +141,25 @@ export function isDestructiveAppControl(args: Record<string, unknown> | undefine
   return isAppActionName(action) && APP_ACTIONS[action].destructive === true
 }
 
-/** Parse an action's arguments; the reason when they don't fit. */
+/** An argument's fixed choices, when it has them (`until: called | unmuted`). */
+function choices(type: z.ZodType): readonly string[] | null {
+  const inner = type instanceof z.ZodOptional ? (type.unwrap() as z.ZodType) : type
+  return inner instanceof z.ZodEnum ? (inner.options as readonly string[]) : null
+}
+
+/**
+ * Parse an action's arguments; the reason when they don't fit, in words the
+ * voice can say (2026-10-15 live check: "voice_mute: until Invalid option:
+ * expected one of…" was read out).
+ */
 export function parseAppActionArgs(name: AppActionName, args: unknown): { ok: true; args: AppActionArgs } | { ok: false; error: string } {
   const parsed = APP_ACTION_ARGS[name].safeParse(args ?? {})
   if (parsed.success) return { ok: true, args: parsed.data as AppActionArgs }
-  const issue = parsed.error.issues[0]
-  return { ok: false, error: `${name}: ${issue?.path.join('.') || 'arguments'} ${issue?.message ?? 'are not valid'}` }
+  const key = String(parsed.error.issues[0]?.path[0] ?? '')
+  const shape = APP_ACTION_ARGS[name].shape as Record<string, z.ZodType>
+  const options = key && shape[key] ? choices(shape[key]) : null
+  if (options) return { ok: false, error: `I couldn’t do that: ${key} has to be ${options.join(' or ')}.` }
+  return { ok: false, error: key ? `I couldn’t do that: the ${key} didn’t fit.` : 'I couldn’t do that: what to do was missing.' }
 }
 
 /** The catalog as the model reads it: one line per action with its arguments. */
@@ -132,7 +168,12 @@ export function describeAppActions(who: 'voice' | 'agent'): string {
     .map((n) => {
       const shape = APP_ACTION_ARGS[n].shape as Record<string, z.ZodType>
       const keys = Object.keys(shape)
-      const args = keys.length ? ` {${keys.map((k) => `${k}${shape[k]!.safeParse(undefined).success ? '?' : ''}`).join(', ')}}` : ''
+      // Fixed choices are listed: told only `until?`, the voice model guessed a value (2026-10-15 live check).
+      const arg = (k: string): string => {
+        const options = choices(shape[k]!)
+        return `${k}${shape[k]!.safeParse(undefined).success ? '?' : ''}${options ? `: ${options.join('|')}` : ''}`
+      }
+      const args = keys.length ? ` {${keys.map(arg).join(', ')}}` : ''
       return `${n}${args}: ${APP_ACTIONS[n].summary}${APP_ACTIONS[n].destructive ? ' Needs the user’s yes first.' : ''}`
     })
     .join('\n')

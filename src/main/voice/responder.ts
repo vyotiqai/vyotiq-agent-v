@@ -17,7 +17,7 @@ import { extractSpokenBlock, stripSpokenBlock } from '../../shared/spokenSummary
 import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import type { ToolDefinition, TokenUsage } from '../agent/providers/types'
 import type { TtsStream } from './providers/types'
-import { SentenceSplitter, fallbackSummary, toSpeakable } from './speechText'
+import { SentenceSplitter, asksToCommitOrPush, confirmsAction, fallbackSummary, toSpeakable } from './speechText'
 import { appActionsFor, describeAppActions } from '../../shared/appActions'
 
 /** One streamed piece of the model's answer. */
@@ -111,7 +111,8 @@ export const RESPONDER_TOOLS: ToolDefinition[] = [
         brief: {
           type: 'string',
           description: 'A complete, self-contained instruction in the user’s terms, with every detail they gave.'
-        }
+        },
+        confirmed: { type: 'boolean', description: 'True only when the brief commits or pushes and the user has just said yes to that.' }
       },
       required: ['brief']
     }
@@ -150,7 +151,9 @@ export const RESPONDER_SYSTEM = [
   'Speak like a calm, friendly colleague: one to three short sentences. No markdown, lists, code, symbols or URLs; never spell out a path.',
   `Things in the app itself, like showing a view, opening, starting, stopping, archiving or deleting tasks in any workspace, changing the theme or other settings, opening a panel, a file, a folder or a web page, setting the agent's mode or model, or changing your own voice, speed or placement, muting or ending: do them with ${APP_TOOL}, never hand them to the agent. Say in a few words what you're doing; if it fails you will hear why.`,
   `An action that needs the user's yes (deleting a task, installing an update, quitting): ask first in one short question, without calling ${APP_TOOL}. Only when their next words clearly say yes, call it with confirmed true.`,
-  `To start a new task in another workspace use ${APP_TOOL} start_task; ${HAND_OFF_TOOL} gives work to the task on screen.`,
+  `Committing or pushing code needs the user's yes too: before a brief that commits or pushes, ask "Commit and push it now?" (or whichever they asked for) without calling ${HAND_OFF_TOOL}; after a clear yes, call it with confirmed true.`,
+  `To start a new task in another workspace use ${APP_TOOL} start_task; ${HAND_OFF_TOOL} gives work to the task on screen; ${APP_TOOL} send_to_task gives work to another task.`,
+  'Talk to the user, never about them: say "you", never "the user", and never say your reasoning ("The user has confirmed, so I will…"). Don’t say you have done something before the result comes back.',
   'With every turn you get the app as it is now: what is on screen, the workspace and its branch, other tasks, a few settings, the date and time, and the project rules and memory notes by name. Answer questions about them from it, briefly; never read it out unasked.',
   'You cannot see or change the project yourself. The agent can: it reads and edits files, runs commands and tests, and uses the browser.',
   `When the user wants anything done or checked in the project, call ${HAND_OFF_TOOL} with a complete brief, and in the same reply say in a few words that it is on it. Always say something out loud, even when you hand work off.`,
@@ -198,6 +201,8 @@ export const FALLBACK_LINE = 'I’ll pass that to the agent.'
 export const EMPTY_LINE = 'Sorry, I lost that. Could you say it again?'
 /** Said once when the model hasn't started answering a turn by STILL_THINKING_MS: you know it heard you. */
 export const STILL_THINKING_LINE = 'One moment.'
+/** A commit or push asked for without the user's yes to it (§24.16). */
+export const NEEDS_YES_LINE = 'That commits or pushes code. Should I go ahead?'
 /** Its first words usually come in 1–2.5 s; past this, the silence needs filling. */
 export const STILL_THINKING_MS = 4000
 
@@ -274,6 +279,8 @@ export class VoiceResponder {
   private pendingReport = false
   /** Your words from an answer cut off before it said anything: they start your next turn. */
   private carried = ''
+  /** A commit or push asked for while the voice model was out, waiting for your yes (§24.16). */
+  private heldCommit = ''
   private carriedIds: string[] = []
   /** What the voice said between turns (a hand-off that never went), until it joins the conversation. */
   private notes = ''
@@ -360,10 +367,16 @@ export class VoiceResponder {
     if (!chat) {
       // No voice model: the turn is the brief, as before D-44.
       this.remember({ role: 'user', content: userText })
-      this.deps.handOff(userText)
+      const brief = this.fallbackBrief(userText)
+      if (brief === null) {
+        this.deps.done({ audible: this.speakLine(NEEDS_YES_LINE), handedOff: false })
+        return
+      }
+      this.deps.handOff(brief)
       this.deps.done({ audible: false, handedOff: true })
       return
     }
+    this.heldCommit = ''
     this.start(chat, 'turn', userText, RESPONDER_TOOLS, undefined, opts?.waitMs, turnIds)
   }
 
@@ -496,6 +509,15 @@ export class VoiceResponder {
   handOffFailed(line: string): boolean {
     this.notes = `${this.notes} ${line} (Nothing was handed to the agent.)`.trim()
     return this.speakLine(line)
+  }
+
+  /**
+   * Called by name after being muted until called: noted before the next turn,
+   * or the voice still believes it is muted and says so (2026-10-15 live check:
+   * "The mute was set a moment ago, so I shouldn't be replying right now").
+   */
+  woken(): void {
+    this.notes = `${this.notes} (The user called me by name: I'm listening and answering again.)`.trim()
   }
 
   /** The agent said this out loud (its result): it joins the conversation before your next turn. */
@@ -697,8 +719,14 @@ export class VoiceResponder {
       }
       // The voice model is down: the work still gets done (D-44).
       this.remember({ role: 'user', content: reply.userText })
+      const brief = this.fallbackBrief(reply.userText)
+      if (brief === null) {
+        this.deps.done({ audible: this.speakLine(NEEDS_YES_LINE), handedOff: false, failed: { message: failed } })
+        this.afterReply()
+        return
+      }
       const audible = this.speakLine(FALLBACK_LINE)
-      this.deps.handOff(reply.userText)
+      this.deps.handOff(brief)
       this.deps.done({ audible, handedOff: true, failed: { message: failed } })
       this.afterReply()
       return
@@ -709,6 +737,16 @@ export class VoiceResponder {
   private tool(reply: Reply, name: string, args: string): void {
     if (name === HAND_OFF_TOOL) {
       const brief = parseBrief(args) || reply.userText
+      // A commit or a push goes only after a yes to it (§24.16): the turn this answers must be one.
+      if (asksToCommitOrPush(brief) && !(parseConfirmed(args) && confirmsAction(reply.userText))) {
+        // Said even after its own words: "Committing it now" with nothing sent would be untrue.
+        // Heard even past the three-sentence cap: a question shown only as a caption can't be answered.
+        this.flushSaid(reply)
+        reply.sentences = Math.min(reply.sentences, MAX_SPOKEN_SENTENCES - 2)
+        this.speak(reply, `${NEEDS_YES_LINE} `)
+        this.flushSaid(reply)
+        return
+      }
       reply.handedOff = true
       // Spoken before the work shows as handed over, in the order you hear it.
       this.flushSaid(reply)
@@ -833,6 +871,13 @@ export class VoiceResponder {
   }
 
   private emit(reply: Reply, raw: string): void {
+    // A tool's name written as words (2026-10-15 live check: "stay_quiet." was spoken): never said;
+    // staying quiet that way counts as staying quiet, where that's allowed.
+    const toolWord = TOOL_WORD_RE.exec(raw.trim())
+    if (toolWord) {
+      if (toolWord[1] === QUIET_TOOL && !reply.said && mayStayQuiet(reply.userText)) reply.quiet = true
+      return
+    }
     // A note in brackets cleans to nothing and stays nothing: it was never meant to be said.
     const note = NOTE_RE.test(raw)
     const piece = redactSecretsInText(toSpeakable(raw) || (note ? '' : raw.trim()))
@@ -863,6 +908,20 @@ export class VoiceResponder {
   }
 
   /** One line on its own (the fallback); whether it will be heard. */
+  /**
+   * Without the voice model your words are the brief (D-44), but a commit or
+   * a push still waits for a yes (§24.16): held here, sent on the next turn
+   * only if that turn is one. Null when it is held.
+   */
+  private fallbackBrief(userText: string): string | null {
+    const held = this.heldCommit
+    this.heldCommit = ''
+    if (held && confirmsAction(userText)) return held
+    if (!asksToCommitOrPush(userText)) return userText
+    this.heldCommit = userText
+    return null
+  }
+
   private speakLine(text: string): boolean {
     const contextId = this.deps.newId()
     const stream = this.deps.openTts(contextId)
@@ -930,6 +989,8 @@ const AGENT_PREFIX = 'The agent reported: '
 export const MAX_SPOKEN_SENTENCES = 3
 const SENTENCE_END_RE = /[.!?]["'”’)\]]*$/
 /** Only a note in brackets ("(Noted, staying quiet.)"). */
+/** A reply piece that is only one of the voice's tool names. */
+const TOOL_WORD_RE = /^[`"'(]*(stay_quiet|stop_agent|hand_to_agent|app_action)[`"')]*[.!]?$/
 const NOTE_RE = /^\s*[([][^()[\]]*[)\]][.!?]?\s*$/
 const PAST_HEADER = '(Earlier, in your last voice conversation on this task:)'
 const TASK_HEADER = 'The task on screen so far (oldest first; [You] is the user, [Agent] the coding agent’s answers):'
@@ -956,6 +1017,14 @@ function parseAppCall(args: string): { action: string; args: unknown; confirmed:
     return { action: parsed.action.trim(), args: parsed.args ?? {}, confirmed: parsed.confirmed === true }
   } catch {
     return null
+  }
+}
+
+function parseConfirmed(args: string): boolean {
+  try {
+    return (JSON.parse(args || '{}') as { confirmed?: unknown }).confirmed === true
+  } catch {
+    return false
   }
 }
 

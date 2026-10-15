@@ -3,6 +3,7 @@ import {
   FALLBACK_LINE,
   HAND_OFF_LINE,
   HAND_OFF_TOOL,
+  NEEDS_YES_LINE,
   STOP_LINE,
   STOP_TOOL,
   VoiceResponder,
@@ -329,6 +330,37 @@ describe('the voice that answers (D-44)', () => {
     expect(h.said.map((s) => s.text)).toEqual([FALLBACK_LINE])
     expect(h.handOffs).toEqual(['Update the readme.'])
     expect(h.done[0]).toMatchObject({ handedOff: true, failed: { message: 'OpenRouter (402): Insufficient credits' } })
+  })
+
+  it('without a voice model, a commit or push is held for a yes and sent only after one (§24.16)', () => {
+    const h = responder({ chat: () => null })
+    h.r.respond('Commit and push the changes.')
+    expect(h.handOffs).toEqual([])
+    expect(h.said.map((s) => s.text)).toEqual([NEEDS_YES_LINE])
+    expect(h.done).toEqual([{ audible: true, handedOff: false }])
+    h.r.respond('Yes, go ahead.')
+    expect(h.handOffs).toEqual(['Commit and push the changes.'])
+  })
+
+  it('without a voice model, a held commit is dropped when the next turn is not a yes', () => {
+    const h = responder({ chat: () => null })
+    h.r.respond('Push it.')
+    h.r.respond('No, leave it.')
+    expect(h.handOffs).toEqual(['No, leave it.'])
+    h.r.respond('Yes.')
+    expect(h.handOffs).toEqual(['No, leave it.', 'Yes.'])
+  })
+
+  it('a failed model call holds a commit for a yes instead of handing it over', async () => {
+    const h = responder()
+    h.r.respond('Commit the fix.')
+    await tick()
+    h.model.calls[0]!.push({ type: 'error', message: 'OpenRouter (402): Insufficient credits' })
+    h.model.calls[0]!.end()
+    await vi.waitFor(() => expect(h.done).toHaveLength(1))
+    expect(h.said.map((s) => s.text)).toEqual([NEEDS_YES_LINE])
+    expect(h.handOffs).toEqual([])
+    expect(h.done[0]).toMatchObject({ handedOff: false })
   })
 
   it('with nothing able to speak, the answer still shows as captions and nothing waits on audio', async () => {

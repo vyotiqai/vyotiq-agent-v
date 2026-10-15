@@ -21,17 +21,21 @@ import {
 
 // Endpoints table from https://opencode.ai/docs/go/ — structural routing only.
 const RESPONSES_ENDPOINT_MODELS = [
-  'grok-4.5',
+  'grok-4.7',
   'grok-4.6',
+  'grok-4.5',
+  'gpt-6-luna',
   'gpt-5.6-luna',
   'muse-spark-1.2-contributor',
   'muse-spark-1.3-contributor'
 ]
 const MESSAGES_ENDPOINT_MODELS = [
+  'claude-haiku-5-5',
   'minimax-m3',
   'minimax-m2.7',
   'minimax-m2.5',
   'qwen3.8-max',
+  'qwen3.8-flash',
   'qwen3.7-max',
   'qwen3.7-plus',
   'qwen3.6-plus'
@@ -84,6 +88,10 @@ describe('OpenCode Go (opencode) provider wiring', () => {
 
   it('routes live-catalog-only ids by their documented family', () => {
     expect(opencodeGoTransportFor('qwen3.5-plus')).toBe('messages')
+    // A new id in a routed family follows its family, not the chat default.
+    expect(opencodeGoTransportFor('grok-4.8')).toBe('responses')
+    expect(opencodeGoTransportFor('gpt-6.1-luna')).toBe('responses')
+    expect(opencodeGoTransportFor('claude-sonnet-5-5')).toBe('messages')
     for (const id of ['kimi-k2.5', 'glm-5', 'mimo-v2-pro', 'mimo-v2-omni', 'hy3-preview']) {
       expect(opencodeGoTransportFor(id)).toBe('chat')
       expect(opencodeEndpointFor(id)).toBe('chat')
@@ -110,7 +118,8 @@ describe('OpenCode Go (opencode) provider wiring', () => {
 
   it('exposes thinking with transport-aware API and effort ladders on seeds', () => {
     const models = new Map(seedModelsFor('opencode').map((m) => [m.id, m]))
-    const grok = models.get('grok-4.5')!
+    // The registry drops retired ids (grok-4.5 went by 2026-10-15): use one it lists now.
+    const grok = models.get('grok-4.7')!
     expect(grok.supportsThinking).toBe(true)
     expect(grok.thinkingApi).toBe('responses')
     // The Go responses vocabulary accepts max (unlike OpenAI's own), so the

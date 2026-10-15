@@ -170,8 +170,8 @@ export type VoiceSessionDeps = {
    * and every turn then goes straight to the agent as before.
    */
   responder?: () => ResponderChat | null
-  /** The voice model's token usage, for Usage. */
-  onResponderUsage?: (usage: TokenUsage) => void
+  /** The voice model's token usage, for Usage: charged to the task it was on (W-04), else where it opened. */
+  onResponderUsage?: (usage: TokenUsage, where: { runId: string | null; workspacePath: string | null }) => void
   /** The voice model was slow to answer or said nothing (and was asked again): for the log. */
   onResponderTrouble?: (what: 'timeout' | 'empty', retried: boolean) => void
   /**
@@ -184,6 +184,8 @@ export type VoiceSessionDeps = {
    * branch, other work, settings, the time, rules and memory by headline.
    */
   loadAppContext?: (where: { runId: string | null; workspacePath: string | null; screen: VoiceScreen | null }) => Promise<string>
+  /** Words heard while waiting to be called by name: ignored, or the name that woke it (for the log). */
+  onStandbyHeard?: (what: 'ignored' | 'woken' | 'woken_with_words', chars: number) => void
   /** Run an app action (src/shared/appActions.ts); without it the voice can't act in the app. */
   runAppAction?: (name: string, args: unknown, ctx: AppActionContext) => Promise<AppActionResult>
   /** Speak in another voice, by its name. */
@@ -387,7 +389,7 @@ export class VoiceSession {
       taskContext: () => this.taskContext,
       appContext: () => this.appContext,
       appAction: (call) => this.appAction(call),
-      onUsage: (usage) => this.deps.onResponderUsage?.(usage),
+      onUsage: (usage) => this.deps.onResponderUsage?.(usage, { runId: this.taskRunId ?? this.followedRun, workspacePath: this.taskWorkspace }),
       onTrouble: (what, retried) => this.deps.onResponderTrouble?.(what, retried),
       newId: deps.newId ?? randomUUID,
       now: deps.now ?? Date.now,
@@ -605,12 +607,6 @@ export class VoiceSession {
   }
 
   /**
-   * The window couldn't give a hand-off's brief to the task (none open, or it
-   * refused the message). The voice already said "On it.": it says the work
-   * didn't go, and the session doesn't sit in Thinking waiting for a run that
-   * will never start.
-   */
-  /**
    * An app action the voice called (app_action, §24.15). A destructive one
    * runs only when the voice says the user agreed and the turn it answers is
    * a yes: a model that skips the question can't delete anything.
@@ -647,6 +643,12 @@ export class VoiceSession {
     this.emitEvent({ kind: 'standby', on })
   }
 
+  /**
+   * The window couldn't give a hand-off's brief to the task (none open, or it
+   * refused the message). The voice already said "On it.": it says the work
+   * didn't go, and the session doesn't sit in Thinking waiting for a run that
+   * will never start.
+   */
   handOffFailed(handOffId: string, reason: VoiceHandOffFailure): void {
     if (this.stateValue === 'off') return
     if (this.lastHandOff?.id === handOffId && !this.reply.runActive) {
@@ -1189,12 +1191,14 @@ export class VoiceSession {
     // Waiting to be called by name: anything else is not a turn; the name wakes it.
     if (this.standby) {
       const after = afterWakeName(text)
+      this.deps.onStandbyHeard?.(after === null ? 'ignored' : after ? 'woken_with_words' : 'woken', text.length)
       if (after === null) {
         this.responder.release()
         this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
         return
       }
       this.setStandby(false)
+      this.responder.woken()
       if (!after) {
         this.responder.release()
         if (this.dispatch({ type: 'end_of_turn' })) this.sayLine(WOKEN_LINE)

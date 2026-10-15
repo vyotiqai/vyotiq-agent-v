@@ -399,7 +399,27 @@ export function confirmsAction(utterance: string): boolean {
   return CONFIRM_START.test(norm) && !CONFIRM_NOT.test(norm)
 }
 
-const WAKE_RE = /^(?:(?:hey|hi|okay|ok)[\s,]+)?agent[\s-]*(?:v|vee)\b[\s,.!?]*/i
+/** Words that only describe a commit or a push, not ask for one: "the last commit", "commit message". */
+const GIT_NOUN_BEFORE = new Set(['the', 'a', 'an', 'last', 'latest', 'previous', 'this', 'that', 'each', 'every', 'which', 'my', 'your', 'its', 'first', 'next', 'one'])
+const GIT_NOUN_AFTER = new Set(['message', 'messages', 'history', 'log', 'hash', 'id', 'sha', 'graph', 'list', 'notification', 'notifications'])
+const GIT_VERB_RE = /^(commit|commits|committing|push|pushes|pushing)$/
+
+/**
+ * A brief that asks the agent to commit or push (§24.16): the voice
+ * hands it on only after a spoken yes. "Commit and push the fix" asks;
+ * "what changed in the last commit?" and "fix the push notifications" don't.
+ */
+export function asksToCommitOrPush(brief: string): boolean {
+  const ws = brief.toLowerCase().replace(/[^\p{L}\p{N}\s'-]/gu, ' ').split(/\s+/).filter(Boolean)
+  return ws.some((w, i) => GIT_VERB_RE.test(w) && !GIT_NOUN_BEFORE.has(ws[i - 1] ?? '') && !GIT_NOUN_AFTER.has(ws[i + 1] ?? ''))
+}
+
+/**
+ * "Agent V" as listeners write it: the V is often heard as B, D, E, "the",
+ * "we" or "five" (2026-10-15 live check: the wake sentence came back in a form
+ * the plain "agent v" didn't match, and the voice stayed asleep).
+ */
+const WAKE_RE = /^(?:(?:hey|hi|okay|ok)[\s,]+)?agent[\s.,-]*(?:v|vee|ve|vi|b|be|bee|d|dee|e|the|we|fee|five|5)(?![\p{L}\p{N}])[\s,.!?]*/iu
 
 /**
  * Called by name while waiting to be (voice_mute until called): the words

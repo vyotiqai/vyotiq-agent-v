@@ -4,7 +4,7 @@
  * task or workspace first and sends it resolved; this does what a click or
  * the command palette would, and answers in words the voice can say.
  */
-import type { AppWindowAction } from '@shared/appActions'
+import { APP_PANELS, SETTINGS_SECTIONS, type AppWindowAction } from '@shared/appActions'
 import type { SettingsSection } from '@renderer/features/settings/types'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { runPaletteCommand, type PaletteHandlers } from '@renderer/features/commandPalette/paletteCommands'
@@ -17,9 +17,13 @@ export type WindowActionHandlers = PaletteHandlers & {
   /** Whether the task is archived now, before the toggle. */
   isArchived?: (path: string, runId: string) => boolean
   onDeleteRun?: (path: string, runId: string) => Promise<boolean | void> | void
+  /** False when it couldn't be renamed (the screen says why). */
+  onRenameRun?: (path: string, runId: string, title: string) => Promise<boolean | void> | void
   onSetAgentMode?: (mode: 'ask' | 'agent') => boolean
   /** An update is downloaded and ready to install. */
   updateReady?: () => boolean
+  /** An update is out and not downloaded yet. */
+  updateAvailable?: () => boolean
   /** The task view is showing: panels sit beside a task. */
   inTaskView?: () => boolean
 }
@@ -38,14 +42,8 @@ const VIEW_COMMAND: Readonly<Record<string, { id: string; said: string }>> = {
   shortcuts: { id: 'shortcutsHelp', said: 'Here are the shortcuts.' }
 }
 
-const PANEL_COMMAND: Readonly<Record<string, string>> = {
-  terminal: 'panelTerminal',
-  changes: 'panelChanges',
-  browser: 'panelBrowser',
-  files: 'panelFiles',
-  plan: 'panelPlan',
-  pr: 'panelPr'
-}
+/** The task view opens the panel named in `detail.panel` (ChatView). */
+export const OPEN_PANEL_EVENT = 'vyotiq:open-panel'
 
 export async function executeWindowAction(action: AppWindowAction, h: WindowActionHandlers): Promise<WindowActionOutcome> {
   const a = action.args
@@ -60,16 +58,18 @@ export async function executeWindowAction(action: AppWindowAction, h: WindowActi
       return { ok: true, message: view.said }
     }
     case 'open_settings': {
-      const section = typeof a.section === 'string' ? (a.section as SettingsSection) : null
+      // Typed as Settings' own sections, so a catalog name Settings doesn't have fails the build.
+      const sections: readonly SettingsSection[] = SETTINGS_SECTIONS
+      const section = sections.find((s) => s === a.section) ?? null
       if (section && h.onOpenSettingsSection) h.onOpenSettingsSection(section)
       else h.onOpenSettings()
       return { ok: true, message: 'Settings are open.' }
     }
     case 'open_panel': {
-      const id = PANEL_COMMAND[String(a.panel)]
-      if (!id) return { ok: false, message: 'There’s no such panel.' }
+      if (!(APP_PANELS as readonly string[]).includes(String(a.panel))) return { ok: false, message: 'There’s no such panel.' }
       if (h.inTaskView && !h.inTaskView()) return { ok: false, message: 'Panels sit beside a task; open one first.' }
-      runPaletteCommand(id, h)
+      // Opened, never toggled: the palette's command hides the panel already on screen, and "open the terminal" must not close it.
+      window.dispatchEvent(new CustomEvent(OPEN_PANEL_EVENT, { detail: { panel: String(a.panel) } }))
       return { ok: true, message: `The ${a.panel === 'pr' ? 'pull request' : String(a.panel)} panel is open.` }
     }
     case 'toggle_navigator':
@@ -92,9 +92,12 @@ export async function executeWindowAction(action: AppWindowAction, h: WindowActi
       return { ok: true, message: 'Here it is: {task}.' }
     case 'archive_task': {
       if (!path || !runId || !h.onToggleArchivedRun) return { ok: false, message: 'That task can’t be archived from here.' }
+      // Asked one way, done that way: the window only toggles, so "archive" on an archived task would bring it back.
+      const want = a.unarchive !== true
       const was = h.isArchived?.(path, runId) ?? false
+      if (was === want) return { ok: true, message: want ? '{task} is already archived.' : '{task} isn’t archived.' }
       h.onToggleArchivedRun(path, runId)
-      return { ok: true, message: was ? 'Unarchived {task}.' : 'Archived {task}.' }
+      return { ok: true, message: want ? 'Archived {task}.' : 'Unarchived {task}.' }
     }
     case 'delete_task': {
       if (!path || !runId || !h.onDeleteRun) return { ok: false, message: 'That task can’t be deleted from here.' }
@@ -103,13 +106,24 @@ export async function executeWindowAction(action: AppWindowAction, h: WindowActi
         ? { ok: false, message: 'It couldn’t be deleted; the screen says why.' }
         : { ok: true, message: 'Deleted {task}. It’s in Recently deleted for 30 days.' }
     }
+    case 'rename_task': {
+      const title = typeof a.title === 'string' ? a.title.trim() : ''
+      if (!path || !runId || !title || !h.onRenameRun) return { ok: false, message: 'That task can’t be renamed from here.' }
+      const done = await h.onRenameRun(path, runId, title)
+      return done === false ? { ok: false, message: 'It couldn’t be renamed; the screen says why.' } : { ok: true, message: `Renamed {task} to “${title}”.` }
+    }
     case 'set_agent_mode': {
       const mode = a.mode === 'ask' ? 'ask' : 'agent'
       if (!h.onSetAgentMode?.(mode)) return { ok: false, message: 'No task is on screen to set.' }
       return { ok: true, message: mode === 'ask' ? 'Ask mode: it answers without changing anything.' : 'Agent mode: it can make changes.' }
     }
+    case 'download_update':
+      if (h.updateReady?.()) return { ok: true, message: 'It’s downloaded already; it installs when you say so.' }
+      if (!h.updateAvailable?.()) return { ok: false, message: 'There’s no update to download.' }
+      runPaletteCommand('downloadUpdate', h)
+      return { ok: true, message: 'Downloading the update.' }
     case 'install_update':
-      if (!h.updateReady?.()) return { ok: false, message: 'No update is downloaded yet.' }
+      if (!h.updateReady?.()) return { ok: false, message: h.updateAvailable?.() ? 'The update isn’t downloaded yet.' : 'No update is downloaded yet.' }
       runPaletteCommand('installUpdate', h)
       return { ok: true, message: 'Installing it; the app restarts.' }
     default:

@@ -216,7 +216,9 @@ export async function startVoiceSession(
     logLatency: ({ listener, ...t }) => logger.info('Voice turn latency', { scope: 'voice', provider: listener ?? 'none', ...t }),
     // The voice that answers (D-44): read per turn, so a Settings change applies to the next one.
     responder: makeResponderChat,
-    onResponderUsage: (usage) => void recordResponderUsage(workspacePath, usage),
+    // Charged where the work is: a task moved to its own worktree, or another workspace's, is billed there (W-04).
+    onResponderUsage: (usage, where) =>
+      void recordResponderUsage((where.runId ? getRunWorkspace(where.runId) : undefined) ?? where.workspacePath ?? workspacePath, usage),
     onResponderTrouble: (what, retried) =>
       logger.warn(
         what === 'timeout' ? 'Voice model was slow to answer' : 'Voice model answered with nothing',
@@ -232,6 +234,7 @@ export async function startVoiceSession(
     onResponderFailed: (message) =>
       logger.warn('Voice model failed; the turn went to the agent', { scope: 'voice', code: 'VOICE_REPLY', reason: message.slice(0, 300) }),
     onStayedQuiet: (chars) => logger.info('Voice stayed quiet on a turn', { scope: 'voice', chars }),
+    onStandbyHeard: (what, chars) => logger.info('Voice heard words while waiting to be called', { scope: 'voice', reason: what, chars }),
     onTurnDropped: (reason, chars, stats) =>
       logger.info('Voice heard speech but took no turn', { scope: 'voice', reason, chars, ...stats }),
     warm: () => warmVoiceConnections(currentVoiceSettings()),

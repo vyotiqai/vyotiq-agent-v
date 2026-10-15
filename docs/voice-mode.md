@@ -6,7 +6,7 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated with every change to voice mode on `main`.
 
-> **Status (2026-10-15):** the eighth audit (§24.13) found that a spoken stop could miss the run, and that the voice can act on nothing in the app. Its bug fixes (batch 1, with A-112), the voice's picture of the app (batch 2, §24.14) and control of the app, tasks, agent and system for the voice and the agent (batch 3, §24.15) are done (uncommitted). A streaming listener still needs a Deepgram or AssemblyAI key.
+> **Status (2026-10-15):** the eighth audit (§24.13) found that a spoken stop could miss the run, and that the voice can act on nothing in the app. Its bug fixes (batch 1, with A-112), the voice's picture of the app (batch 2, §24.14) and control of the app, tasks, agent and system for the voice and the agent (batch 3, §24.15) are on `main` (fac745ad). The control gaps left after it (§24.16: rename and send to a task, a spoken yes for commit and push, `interruptMode` removed, voice spend charged to the task's workspace) are done (uncommitted). A streaming listener still needs a Deepgram or AssemblyAI key.
 >
 > **Earlier status (2026-10-14):** on `main`. [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65)
 > merged, then `e2c3985` (dip-then-stop barge-in, mic-on indicator, spoken-only voice replies).
@@ -883,7 +883,7 @@ keys, like `dictation`):
 | `speed` | number | `1.0` | Clamped to the provider's range in the catalog |
 | `language` | ISO-639-1 or `''` | `''` (English) | Each adapter maps it (e.g. Flux `-en` vs `-multi` + hint) |
 | `deviceId` | string | shared with dictation | One mic choice for the app |
-| `interruptMode` | `'steer' \| 'cancel' \| 'off'` | `'steer'` | §6.3 (D-12) |
+| ~~`interruptMode`~~ | | | Removed 2026-10-15 (§24.16): retired by D-46 and read nowhere; an old file's value is dropped when read |
 | `speakProgress` | boolean | `true` | Spoken cues (§8.4); off = earcon only |
 | `pushToTalkOnly` | boolean | `false` | No automatic turns; hold to talk |
 | `endOfTurnPatience` | `'quick' \| 'normal' \| 'patient'` | `'normal'` | Each STT adapter maps this to its own knobs (Flux `eot_threshold`/timeout, AssemblyAI confidence/silence, local pause length) |
@@ -2073,7 +2073,7 @@ agent, which edited the project's theme. Now one catalog of app actions
 | Group | Actions | Runs in |
 | --- | --- | --- |
 | Views and panes | `open_view` (Home, Settings, Usage, Inbox, Scheduled, Extensions, docs, What's new, shortcuts), `open_settings` (at a section), `open_panel` (terminal, changes, browser, files, plan, PR), `toggle_navigator`, `next_needs_you`, `new_task`, `switch_workspace` | the window |
-| Tasks, any open workspace | `open_task`, `start_task` (a brief, a workspace; opened once started), `stop_task`, `archive_task`, `delete_task` | main finds the task by words from its title or its run id; start and stop run in main, the rest in the window |
+| Tasks, any open workspace | `open_task`, `start_task` (a brief, a workspace; opened once started), `send_to_task` and `rename_task` (§24.16), `stop_task`, `archive_task` (`unarchive?`, §24.17), `delete_task` | main finds the task by words from its title or its run id; start and stop run in main, the rest in the window |
 | The agent | `set_agent_mode` (Ask or Agent on the task on screen), `set_model` (from the recent and favourite models) | window, main |
 | Settings | `set_theme`, `set_skin`, `set_tool_approvals` | main |
 | The system | `open_path` (a file or folder, never a program), `reveal_path`, `open_url` (http and https only), `install_update`, `quit_app` | main, window |
@@ -2120,6 +2120,93 @@ action's round trip and timeout, paths and URLs, the voice's controls),
 `app-control.spec.ts` (a run opens Voice settings, sets the light theme, and
 a delete waits on the card) and `voice-brief.spec.ts` (the shortcut on Home
 opens New task and listens; it fails with the new handler off).
+
+### 24.16 Control gaps after batch 3 (2026-10-15)
+
+What the eighth audit asked for (C-01, C-03, W-01, W-04) and batch 3 left out.
+
+| What | Now |
+| --- | --- |
+| No way to give a task that isn't on screen more work: `hand_to_agent` reaches only the task on screen, `start_task` makes a new one | `send_to_task {message, task?}`, any open workspace. A running task gets it queued, as the composer's queue does (`enqueueFollowUp`, the window told with `follow_up_queued`); a stopped one goes again with the message after its saved history (`launchRun`, incremental). Shown once sent, unless it was the task on screen. An imported task refuses, as it does in the window |
+| No rename | `rename_task {title, task?}`, run by the window's own rename so its list refreshes. Refused while the task runs (main's `renameRun` refuses then too), said as "it can be renamed once it stops" |
+| Committing or pushing went to the agent at once: the picks (2026-10-15) list them as needing a yes | A `hand_to_agent` brief that asks to commit or push (`asksToCommitOrPush`: "commit", "push" as verbs, not "the last commit" or "commit message") goes only with `confirmed` and when the turn it answers is a yes (`confirmsAction`). Otherwise the voice says "That commits or pushes code. Should I go ahead?", even after its own words, and nothing goes. The request itself is never its own yes. The same holds without the voice model (none set, or its call failed, so your words are the brief): a commit or push is held, the same line is said, and it goes only if your next turn is a yes; anything else drops it |
+| W-01: `interruptMode` was in the schema and in settings files, read nowhere (D-46 retired it) | Removed from the schema and defaults. An old file's value is dropped when settings are read |
+| W-04: the voice model's spend was charged to the workspace the session opened in | Charged to the task it is on (the run's workspace, else the task's), else where it opened |
+
+**Live check (2026-10-15, 21:07-21:33).** The built app on a throwaway copy
+of the profile (settings, keys, model list; a second workspace `probe-site`),
+Claude Haiku 5.5 through OpenRouter as the voice model, OpenRouter's
+listener and speaker, and a fake mic playing recorded sentences (Windows
+speech). Three runs, 13 then 4 then 4 steps. All of these worked:
+- "Switch the app to the light theme" set it.
+- "Open the voice settings" opened Settings at Voice.
+- "Start a new task in the probe site workspace…" started it there and showed it, and voice followed it.
+- Renaming it was refused while it ran, then done once it had finished.
+- "Tell the probe check task to also say goodbye" sent it again with the message.
+- "Commit and push the changes" was asked about first, and "No, leave it" left it.
+- "Delete the probe check task" was asked about, and "Yes, delete it" deleted it to Recently deleted.
+- "Mute until I call you" put it on standby, and a question in between was ignored.
+- "Agent V, what time is it?" woke it and was answered.
+- "Please end the voice session now" ended it after "Bye for now."
+
+Found and fixed during the check:
+
+| What the run showed | Fix |
+| --- | --- |
+| "Mute until I call you" failed, and the voice read out `voice_mute: until Invalid option: expected one of "called"\|"unmuted"`: the catalog said `until?` without its choices, so the model guessed one | The catalog lists fixed choices (`voice_mute {until?: called\|unmuted}`), and a wrong argument comes back in words ("I couldn't do that: until has to be called or unmuted.") |
+| "The user has confirmed the deletion, so I'll delete…": its reasoning, spoken, about you | The prompt: talk to the user as "you", never say the reasoning, and don't say something is done before the result |
+| "stay_quiet." was spoken: the model wrote the tool's name as words | A reply piece that is only a tool's name is never said; `stay_quiet` written so counts as staying quiet where that's allowed |
+| Woken by name, it answered "The mute was set a moment ago, so I shouldn't be replying right now" | Waking notes it in the voice's memory before the turn ("The user called me by name: I'm listening and answering again.") |
+| Twice the wake sentence, heard in full (25 characters), didn't wake it: the listener wrote "Agent V" in a form the check didn't take. The log doesn't keep the words, so the form seen is unknown | "Agent V" is taken as the listeners write it: V, Vee, B, D, E, "the", "we", "five", joined or apart ("AgentV."). "Agents are…", "The agent…" and "Agent versus…" still aren't a wake. Each standby sentence is logged as ignored or woken, with its length only. Verified on the next run |
+
+Not verified: with a real voice through a physical mic.
+
+Tests: `appControl` (send queued or resumed and shown, refused imported; rename
+refused while running, else sent to the window; wrong arguments in words,
+choices listed), `appActionExecutor` (rename, refused rename),
+`voiceAppAction` (commit held until a yes, a question about the last commit
+not held, spend charged to the task, tool names never said, the wake note,
+the wake name as heard), `voiceResponder` (without the voice model, or after
+its call fails, a commit is held for a yes and dropped on anything else).
+
+### 24.17 Control audit (2026-10-15, late evening)
+
+Each action in the catalog was traced through main's runner and the window's
+executor, and the actions no earlier run had driven were then run live.
+
+Found and fixed:
+
+| What the code did | Now |
+| --- | --- |
+| `open_panel` ran the palette's panel command, a toggle: "open the terminal" with the terminal on screen hid it and said "The terminal panel is open." | The window gets `vyotiq:open-panel`, and the task view shows that panel and never hides it |
+| `archive_task` toggled: "archive it" on an archived task brought it back, and the model had no way to say which it meant | `unarchive?: boolean`. Archive only archives; one already in the asked state says so |
+| An agent task in its own worktree is handed the worktree as its workspace (the loop's `toolWorkspace`), so `app_control` looked for "this task" there and started new tasks there | `contextAtHome`: tasks and workspaces come from the run registry's workspace, and relative file paths still resolve in the worktree (`filesRoot`) |
+| `open_settings` knew 5 of Settings' 12 sections | All 12. The window's copy is typed as Settings' own, and a test keeps the two lists the same |
+| `install_update` existed, but nothing could download an update | `download_update` (not destructive). Installing before the download says so |
+| The commit question went through the three-sentence cap: after three sentences of its own it was only a caption | The question is always spoken |
+| A title's own full stop doubled: `Archived “Say hello in one line.”.` | Dropped inside the quotes |
+
+**Live check (2026-10-15, 22:55-23:02).** The same method as §24.16, in one run of 19 steps. All of these worked, each read from settings or the page after the step:
+- `open_panel` twice: the terminal panel stayed open.
+- `set_skin`: proof.
+- `set_voice_speed`: 1 to 1.25.
+- `set_voice_placement`: capsule.
+- `open_view`: Home.
+- `switch_workspace`: probe-site.
+- `archive_task`, then `unarchive`: the task went into `archivedRuns` and back out.
+- `download_update`: no update, said so.
+- `start_task` with a brief to use `app_control`: the agent set the theme to dark. This is the agent's own tool working end to end.
+- `quit_app`: it asked first, and quit after "Yes, quit it".
+
+Not shown by the run:
+- **Which Settings section opened.** The page check didn't capture it; the unit test covers the call.
+- **The "already archived" answer.** On the second "archive" the voice answered from its own memory without calling the action.
+- **Tool approvals.** They were already off in the profile copy, and the voice said so without calling the action.
+
+Left as is, for a decision:
+- **Risky approvals.** The picks say "a spoken yes". The voice instead says to approve or deny on screen and never settles one itself (`voiceMayAnswer`), which is stricter.
+- **Palette commands without an action:** fork task, open workspace in editor, split pane, close task, find, find in files, show reasoning, add workspace, import task, send feedback. The last three open a dialog that needs the screen.
+- **A running task's model.** `set_model` sets the model for new tasks only.
 
 ## 25. The conversation (2026-10-14 redesign)
 

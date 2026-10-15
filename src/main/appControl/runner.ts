@@ -31,12 +31,25 @@ export type AppActionContext = {
   /** The task on screen (voice) or the agent's own run. */
   runId?: string | null
   workspacePath?: string | null
+  /** Where a relative path is read from, when not the workspace: an agent's worktree. */
+  filesRoot?: string | null
   /** The voice's own controls, when the voice asks. */
   voice?: {
     mute: (untilCalled: boolean) => void
     end: () => void
     setVoice: (name: string) => Promise<AppActionResult>
   }
+}
+
+/**
+ * An agent in its own worktree is handed that folder (the loop's
+ * toolWorkspace), but its task lives in the workspace it was started in
+ * (`home`, the run registry's): tasks and workspaces are found from there,
+ * files still from the worktree it works in.
+ */
+export function contextAtHome(ctx: AppActionContext, home: string | undefined): AppActionContext {
+  if (!home || !ctx.workspacePath || workspacePathsEqual(home, ctx.workspacePath)) return ctx
+  return { ...ctx, workspacePath: home, filesRoot: ctx.workspacePath }
 }
 
 /** A task found from words: its run, its workspace, its title. */
@@ -50,7 +63,16 @@ export type AppControlDeps = {
   listTasks: (workspacePath: string) => Promise<Array<{ runId: string; title: string; status: string }>>
   window: () => WebContents | null
   cancelRun: (runId: string) => boolean
+  /** Running in this app now (a status file can say "running" long after). */
+  runActive: (runId: string) => boolean
   startTask: (workspacePath: string, message: ChatMessage, wc: WebContents) => { ok: true; runId: string } | { ok: false; error: string }
+  /** More work for a task: queued on a running one, else it runs again with the message. */
+  sendToTask: (
+    workspacePath: string,
+    runId: string,
+    message: ChatMessage,
+    wc: WebContents
+  ) => Promise<{ ok: true; queued: boolean } | { ok: false; error: string }>
   patchSettings: (patch: Record<string, unknown>) => Promise<void>
   settings: () => { recentModels?: string[]; favoriteModels?: string[] }
   openPath: (path: string) => Promise<string>
@@ -156,7 +178,8 @@ export async function findTask(deps: AppControlDeps, named: string | undefined, 
 }
 
 function quoted(title: string): string {
-  const t = title.replace(/\s+/g, ' ').trim()
+  // A title's own full stop goes: the sentence it sits in ends with one ("Archived “Say hello.”." in the 2026-10-15 live check).
+  const t = title.replace(/\s+/g, ' ').trim().replace(/[.!?]+$/, '')
   return t ? `“${t.length > 60 ? `${t.slice(0, 59)}…` : t}”` : 'the task'
 }
 
@@ -195,9 +218,13 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
   switch (name) {
     case 'open_task':
     case 'archive_task':
-    case 'delete_task': {
+    case 'delete_task':
+    case 'rename_task': {
       const found = await task()
       if ('error' in found) return { ok: false, message: found.error }
+      if (name === 'rename_task' && deps.runActive(found.runId)) {
+        return { ok: false, message: `${quoted(found.title)} is running; it can be renamed once it stops.` }
+      }
       const r = await toWindow({ workspacePath: found.workspacePath, runId: found.runId })
       return r.ok ? { ...r, message: r.message.replace('{task}', quoted(found.title)), runId: found.runId } : r
     }
@@ -220,6 +247,23 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
       // Shown, like a task you start yourself; it runs either way.
       await sendToWindow(wc, { name: 'open_task', args: { task: started.runId }, resolved: { workspacePath: path, runId: started.runId } })
       return { ok: true, message: `Started it in ${basename(path)}.`, runId: started.runId }
+    }
+    case 'send_to_task': {
+      const found = await task()
+      if ('error' in found) return { ok: false, message: found.error }
+      const wc = window()
+      if (!wc) return { ok: false, message: 'No app window is open.' }
+      const sent = await deps.sendToTask(found.workspacePath, found.runId, { role: 'user', content: String(a.message), at: new Date().toISOString() }, wc)
+      if (!sent.ok) return { ok: false, message: sent.error }
+      // Shown, like a task you send to yourself, unless it was the one on screen already.
+      if (found.runId !== ctx.runId) {
+        await sendToWindow(wc, { name: 'open_task', args: { task: found.runId }, resolved: { workspacePath: found.workspacePath, runId: found.runId } })
+      }
+      return {
+        ok: true,
+        message: sent.queued ? `Added to ${quoted(found.title)}; it gets it at its next step.` : `${quoted(found.title)} is on it.`,
+        runId: found.runId
+      }
     }
     case 'stop_task': {
       const found = await task()
@@ -253,7 +297,7 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
     case 'open_path':
     case 'reveal_path': {
       const raw = String(a.path)
-      const base = ctx.workspacePath ?? deps.activeWorkspace()
+      const base = ctx.filesRoot ?? ctx.workspacePath ?? deps.activeWorkspace()
       const path = isAbsolute(raw) ? raw : base ? resolve(base, raw) : null
       if (!path || !existsSync(path)) return { ok: false, message: `There’s nothing at ${raw}.` }
       if (name === 'reveal_path') {
