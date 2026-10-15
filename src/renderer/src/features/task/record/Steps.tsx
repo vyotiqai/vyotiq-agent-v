@@ -175,7 +175,9 @@ function StepRow({
             onClick={() => setOpen(!expanded)}
             className={cn(
               // The title keeps at least 40% of the row: the counts beside it give way first.
-              'min-w-[40%] flex-1 truncate rounded-sm text-left text-sm after:absolute after:inset-0 after:rounded-lg focus-visible:vy-focus-ring disabled:cursor-default',
+              // Not on a narrow record, where 40% plus the chips and the time
+              // came to more than the row and pushed the time past its edge.
+              'min-w-0 flex-1 @[480px]/record:min-w-[40%] truncate rounded-sm text-left text-sm after:absolute after:inset-0 after:rounded-lg focus-visible:vy-focus-ring disabled:cursor-default',
               live ? 'font-medium text-fg-strong' : quiet || step.superseded ? 'text-muted' : 'text-secondary'
             )}
           >

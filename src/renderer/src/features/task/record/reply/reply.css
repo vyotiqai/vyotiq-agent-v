@@ -228,7 +228,10 @@
   font-size: var(--reply-code);
   line-height: inherit;
   color: var(--reply-code-ink);
-  white-space: nowrap;
+  /* A path keeps to one line while it fits and breaks only when it can't: a
+     no-wrap chip with a deep path ran past the column and scrolled the whole
+     record sideways. */
+  overflow-wrap: anywhere;
   cursor: pointer;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;

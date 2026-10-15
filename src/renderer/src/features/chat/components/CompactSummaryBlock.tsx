@@ -95,7 +95,7 @@ export function CompactSummaryBlock({
           size={14}
           className={cn('shrink-0', failed ? 'text-danger' : 'text-muted')}
         />
-        <span className={cn('shrink-0 font-medium', failed ? 'text-danger' : 'text-fg')}>{title}</span>
+        <span className={cn('min-w-0 truncate font-medium', failed ? 'text-danger' : 'text-fg')}>{title}</span>
         <span className="flex-1" />
         {verify ? (
           <span className={cn('shrink-0 text-caption', verify.className)}>{verify.text}</span>

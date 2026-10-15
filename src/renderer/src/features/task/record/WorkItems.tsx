@@ -167,10 +167,12 @@ function WorkLine({
 }) {
   const body = (
     <>
-      <span className={cn('shrink-0 font-medium', tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-fg')}>
+      {/* On a narrow pane the detail gives way first, then the verb: a verb
+          that never shrank pushed the trailing facts past the row's edge. */}
+      <span className={cn('min-w-0 truncate font-medium', tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-fg')}>
         {verb}
       </span>
-      {detail ? <span className="min-w-0 truncate text-muted">{detail}</span> : null}
+      {detail ? <span className="min-w-0 shrink-[100] truncate text-muted">{detail}</span> : null}
       <span className="flex-1" />
       {trailing}
       {/* The chevron's slot is kept on every line, so trailing facts share one right edge. */}
@@ -457,7 +459,7 @@ function ErrorItem({ id, message, code }: { id: string; message: string; code?: 
     <div role="alert" className="flex flex-wrap items-start gap-x-2 gap-y-1 text-xs text-danger" title={code || undefined}>
       <Icon name="xCircle" size={14} className="mt-px shrink-0" />
       <p className="min-w-0 grow basis-48 [overflow-wrap:anywhere]">{message}</p>
-      <div className="-my-1 ml-auto flex shrink-0 flex-wrap items-center gap-1">
+      <div className="-my-1 ml-auto flex max-w-full shrink-0 flex-wrap items-center gap-1">
         {canRetry ? (
           <Button size="xs" onClick={onRetry}>
             Retry
@@ -675,7 +677,7 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
           data-explore-list
         >
         <div className="tool-expand-inner">
-        <ul className="mt-1 space-y-px border-l border-border pl-3">
+        <ul className="mt-1 space-y-px border-l border-border pl-3 [overflow-wrap:anywhere]">
           {group.nestedTools.map((nested, i) => {
             const t = tools[i]!
             const fail = broke(t)
@@ -1108,11 +1110,11 @@ function ToolLine({ item }: { item: ToolItem }) {
           </>
         }
       />
-      {reason && !open ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
+      {reason && !open ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger [overflow-wrap:anywhere]">{reason}</p> : null}
       {answers.length > 0 ? <YouAnswered answers={answers} /> : null}
       {images.length > 0 ? <ToolImageStrip images={images} className="mt-1" /> : null}
       {open ? (
-        <div className="mt-1 border-l border-border pl-3">
+        <div className="mt-1 border-l border-border pl-3 [overflow-wrap:anywhere]">
           <ToolRowOutput
             tool={tool}
             toolProgress={item.toolProgress}
@@ -1399,7 +1401,7 @@ function SpawnRow({ item }: { item: ToolItem }) {
             </>
           }
         />
-        {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
+        {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger [overflow-wrap:anywhere]">{reason}</p> : null}
       </div>
     )
   }
@@ -1440,7 +1442,7 @@ function SpawnRow({ item }: { item: ToolItem }) {
       {doing ? (
         <p className="m-0 mt-0.5 truncate text-caption text-tertiary">{doing}</p>
       ) : null}
-      {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger">{reason}</p> : null}
+      {reason ? <p className="m-0 mt-0.5 line-clamp-2 text-caption text-danger [overflow-wrap:anywhere]">{reason}</p> : null}
     </div>
   )
 }
@@ -1630,7 +1632,7 @@ function InstanceCallRow({ item }: { item: ToolItem }) {
         <p className={cn('m-0 mt-0.5 line-clamp-2 text-caption', broke ? 'text-danger' : 'text-muted')}>{reason}</p>
       ) : null}
       {open ? (
-        <div className="mt-1 border-l border-border pl-3" data-instance-report>
+        <div className="mt-1 border-l border-border pl-3 [overflow-wrap:anywhere]" data-instance-report>
           {/* The record's prose: its file mentions and [[citations]] open, at a reading measure. */}
           <RecordProse text={reportBody(report)} tone="secondary" />
           {full.loading ? <p className="m-0 mt-1 text-caption text-tertiary">Loading the full report…</p> : null}

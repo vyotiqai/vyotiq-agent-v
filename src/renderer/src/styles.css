@@ -1333,6 +1333,12 @@
 /* Height disclosure — keep content mounted while grid rows animate 0fr ↔ 1fr. */
 .tool-expand {
   display: grid;
+  /* The one column is the container's width, never its content's. The inner
+     box clips only the block axis (below), so with an implicit `auto` column
+     its automatic minimum width was its min-content: one long command line on
+     a no-wrap row widened the disclosure to thousands of pixels and the whole
+     record scrolled sideways under it. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 0fr;
 }
 
@@ -1342,6 +1348,7 @@
 
 .tool-expand-inner {
   min-height: 0;
+  min-width: 0;
   /* Only the animated axis clips. The record's work rows bleed 8px into the
      column's gutter on each side (-mx-2) so their hover fills and card borders
      reach the same edge the WorkFold header above them does, and a box that
