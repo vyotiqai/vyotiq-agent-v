@@ -429,6 +429,10 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
   z.object({ sessionId: z.string(), kind: z.literal('duck'), on: z.boolean() }),
   /** A slow step started and spoken progress is off: a soft sound instead of words (§8.4). */
   z.object({ sessionId: z.string(), kind: z.literal('cue') }),
+  /** Waiting to be called by name ("Agent V"), or listening to everything again (§24.15). */
+  z.object({ sessionId: z.string(), kind: z.literal('standby'), on: z.boolean() }),
+  /** The voice was asked to end voice mode: the window ends it. */
+  z.object({ sessionId: z.string(), kind: z.literal('end_requested') }),
   /** Barge-in: drop this reply's queued audio from the speakers now. */
   z.object({ sessionId: z.string(), kind: z.literal('flush'), contextId: z.string() }),
   z.object({
@@ -456,12 +460,18 @@ export const VoiceFollowRequestSchema = z.object({
 })
 export type VoiceFollowRequest = z.infer<typeof VoiceFollowRequestSchema>
 
+/** What the window shows, for the voice's picture of the app (§24.14). */
+export const VoiceScreenSchema = z.enum(['task', 'new_task', 'home', 'settings', 'marketplace', 'usage', 'screen'])
+export type VoiceScreen = z.infer<typeof VoiceScreenSchema>
+
 /** The task the session is on, running or not (null: none yet): the voice reads its conversation. */
 export const VoiceTaskRequestSchema = z.object({
   sessionId: z.string().min(1).max(100),
   runId: z.string().min(1).max(200).nullable(),
   /** The task's workspace, used only when it is one of the open workspaces. */
-  workspacePath: z.string().min(1).max(4096).optional()
+  workspacePath: z.string().min(1).max(4096).optional(),
+  /** What the window shows. */
+  screen: VoiceScreenSchema.optional()
 })
 export type VoiceTaskRequest = z.infer<typeof VoiceTaskRequestSchema>
 
@@ -473,7 +483,7 @@ export const VoicePlaybackRequestSchema = z.object({
 export type VoicePlaybackRequest = z.infer<typeof VoicePlaybackRequestSchema>
 
 /** Why the window could not give the voice's brief to the task. */
-export const VoiceHandOffFailureSchema = z.enum(['no_task', 'refused', 'error'])
+export const VoiceHandOffFailureSchema = z.enum(['no_task', 'refused', 'error', 'unfollowed'])
 export type VoiceHandOffFailure = z.infer<typeof VoiceHandOffFailureSchema>
 
 export const VoiceHandOffFailedRequestSchema = z.object({

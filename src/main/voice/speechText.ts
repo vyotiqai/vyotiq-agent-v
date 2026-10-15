@@ -79,9 +79,15 @@ export function toSpeakable(markdown: string): string {
     .replace(/(^|[\s(])[*_](\S[^*_]*?)[*_](?=[\s).,!?;:]|$)/g, '$1$2')
     .replace(/~~(.+?)~~/g, '$1')
     .replace(BRACKET_TAG_RE, '')
+    // A sentence in brackets is a note, never speech: "(Noted, staying quiet.)" was read out on 2026-10-15.
+    .replace(/(^|[.!?]["'”’]*\s+)\([^()]*[.!?]\)(?=\s|$)/g, '$1')
+    // Brackets and dashes inside a sentence are pauses when said.
+    .replace(/\s*\(([^()]+)\)/g, ', $1,')
+    .replace(/\s*[—–]\s*|\s+-\s+/g, ', ')
     .replace(EMOJI_RE, '')
     .replace(/[<>{}[\]|#`*]/g, '')
     .replace(/\s+([.,!?;:])/g, '$1')
+    .replace(/^[,\s]+|,+(?=[.,!?;:])/g, '')
     .replace(/([.!?])\.+/g, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim()
@@ -212,7 +218,27 @@ const STOP_PHRASES = new Set([
   'stop that',
   'cancel that',
   'stop stop',
-  'abort'
+  'abort',
+  // 2026-10-15: "Cancel it." went to the voice model, and its stop came 7 s later.
+  'cancel it',
+  'abort it',
+  'kill it',
+  'halt',
+  'stop now',
+  'stop it now',
+  'stop working',
+  'stop everything',
+  'cancel everything',
+  'stop the agent',
+  'stop the task',
+  'stop the work',
+  'stop the run',
+  'cancel the agent',
+  'cancel the task',
+  'cancel the work',
+  'cancel the run',
+  'kill the task',
+  'kill the agent'
 ])
 
 /**
@@ -358,4 +384,29 @@ export function approvalAnswer(utterance: string): 'once' | 'deny' | 'always' | 
   if (NO.has(norm)) return 'deny'
   if (ALWAYS.has(norm)) return 'always'
   return null
+}
+
+const CONFIRM_START = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|confirm|confirmed|absolutely|definitely|go for it|delete it|install it|quit)\b/
+const CONFIRM_NOT = /\b(no|not|don't|dont|wait|stop|cancel|never mind|hold on)\b/
+
+/**
+ * The user's yes to an action the voice asked about (a delete, an install,
+ * quitting): an answer that starts with a yes and takes nothing back.
+ * "Yes, delete it" is a yes; "yes, but not that one" and "no" are not.
+ */
+export function confirmsAction(utterance: string): boolean {
+  const norm = normaliseUtterance(utterance)
+  return CONFIRM_START.test(norm) && !CONFIRM_NOT.test(norm)
+}
+
+const WAKE_RE = /^(?:(?:hey|hi|okay|ok)[\s,]+)?agent[\s-]*(?:v|vee)\b[\s,.!?]*/i
+
+/**
+ * Called by name while waiting to be (voice_mute until called): the words
+ * after "Agent V", '' for the name alone, null when it wasn't called.
+ */
+export function afterWakeName(utterance: string): string | null {
+  const said = utterance.trim()
+  const m = WAKE_RE.exec(said)
+  return m ? said.slice(m[0].length).trim() : null
 }

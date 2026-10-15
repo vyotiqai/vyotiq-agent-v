@@ -1,4 +1,7 @@
 import { ipcMain, BrowserWindow, shell, nativeTheme, dialog, app } from 'electron'
+import { runAppActionInApp, settleWindowAction, setWindowActionChannel } from '../appControl'
+import { setAppActionRunner } from '../appControl/hook'
+import { AppWindowActionResultSchema } from '../../shared/appActions'
 import { release as osRelease } from 'os'
 import { IPC } from '../../shared/channels'
 import { toolMessageForIpc } from '../../shared/utils/toolResultIpc'
@@ -2093,7 +2096,7 @@ export function registerIpc(): void {
       const req = VoiceTaskRequestSchema.parse(raw)
       // Only an open workspace's folder is read; otherwise main's own record of the run decides.
       const workspace = req.workspacePath && isOpenWorkspace(req.workspacePath) ? req.workspacePath : null
-      setVoiceTask(event.sender.id, req.sessionId, req.runId, workspace)
+      setVoiceTask(event.sender.id, req.sessionId, req.runId, workspace, req.screen)
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.voiceTask)
@@ -2108,6 +2111,19 @@ export function registerIpc(): void {
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.voiceInterrupt)
+    }
+  })
+
+  // App actions (§24.15): the window answers the ones it runs; the agent's tool reaches the runner.
+  setWindowActionChannel(IPC.appAction)
+  setAppActionRunner(runAppActionInApp)
+  ipcMain.handle(IPC.appActionResult, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      settleWindowAction(AppWindowActionResultSchema.parse(raw))
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.appActionResult)
     }
   })
 

@@ -126,6 +126,9 @@ export const IPC = {
   voicePlayback: 'voice:playback',
   voiceInterrupt: 'voice:interrupt',
   voiceHandOffFailed: 'voice:hand-off-failed',
+  /** An app action for the window to run (main → window), and its answer (§24.15). */
+  appAction: 'app:action',
+  appActionResult: 'app:action-result',
   /** Kept voice conversations: a workspace's list, and one read back (§24.8). */
   voiceConversationsList: 'voice:conversations',
   voiceConversationRead: 'voice:conversation',

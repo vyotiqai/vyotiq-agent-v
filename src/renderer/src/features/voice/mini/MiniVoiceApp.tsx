@@ -6,7 +6,7 @@ import { IconButton, cn } from '@renderer/lib/ui'
 import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { IDLE_VOICE, type VoiceSnapshot } from '../voiceSessionController'
 import { Dock, MuteButton, PopContext, StageContext, usePop, useStage, type StageApi } from '../stage/kit'
-import { HEADLINE } from '../stage/model'
+import { headline } from '../stage/model'
 import { DOUBLE_ESC_MS } from '../VoiceBar'
 import { escapeBelongsToALayer, spaceActivates } from '../VoiceView'
 import { Card, PillBody } from '../stage/placements'
@@ -197,7 +197,7 @@ function MiniWindow() {
         data-voice-view={api.v.state}
       >
         <span className="sr-only" role="status" aria-live="polite">
-          {HEADLINE[api.v.state]}
+          {headline(api.v)}
         </span>
         <MiniRow />
         {open ? (

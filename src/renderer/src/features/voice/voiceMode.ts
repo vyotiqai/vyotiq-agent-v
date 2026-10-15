@@ -9,7 +9,7 @@
  * it appears, so the conversation carries on there.
  */
 import { useSyncExternalStore } from 'react'
-import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from '@shared/ipc/schemas/voice'
+import { DEFAULT_VOICE_SETTINGS, type VoiceScreen, type VoiceSettings } from '@shared/ipc/schemas/voice'
 import { getDictationState, patchDictationSettings } from '@renderer/features/chat/components/composer/take/dictationStore'
 import { routeVoiceTurn, type VoiceRunTarget } from './turnRouting'
 import { stopSpeech } from './speechPlayback'
@@ -59,6 +59,10 @@ let target: VoiceRunTarget | null = null
 let controller: VoiceSessionController | null = null
 let offController: (() => void) | null = null
 let watching = false
+/** The app's view (App's `view`): with the task's line, what the voice is told is on screen. */
+let appView: Exclude<VoiceScreen, 'task' | 'new_task'> | 'chat' = 'chat'
+/** The task the owning line last reported, so a view change can be re-sent with it. */
+let lastTask: { runId: string | null; workspacePath?: string; brief: boolean } | null = null
 /** Line composers on screen, most recently focused last. */
 const lines: string[] = []
 /** When each line composer mounted: a line that just appeared can take over a session whose line went away. */
@@ -133,7 +137,8 @@ export async function handleVoiceTurn(turn: VoiceTurn): Promise<VoiceTurnResult>
   const routed = await routeVoiceTurn(turn, t)
   if (routed.kind === 'stopped') return null
   if (routed.kind === 'dropped') return turn.stop ? null : { failed: 'refused' }
-  return routed.runId ?? (await waitForRunId())
+  // Sent, but no run to follow (A-112): say so, or the voice waits in Thinking for good.
+  return routed.runId ?? (await waitForRunId()) ?? (mode.owner ? { failed: 'unfollowed' } : null)
 }
 
 /** "Stop it": the voice asked to stop the agent's work on the owning line's task. */
@@ -155,7 +160,7 @@ function endedConversation(snapshot: VoiceSnapshot): EndedVoiceConversation | nu
 
 function ensureController(): VoiceSessionController {
   if (controller) return controller
-  controller = new VoiceSessionController({ onTurn: handleVoiceTurn, onStopAgent: handleVoiceStop })
+  controller = new VoiceSessionController({ onTurn: handleVoiceTurn, onStopAgent: handleVoiceStop, onEndRequested: () => endVoiceMode() })
   offController = controller.subscribe(() => {
     // A session that ended on its own (window lost the mic, error then End) frees the line.
     if (controller?.snapshot.state === 'off' && mode.owner && !controller.active) emit({ owner: null, ended: endedConversation(controller.snapshot) })
@@ -187,6 +192,7 @@ export async function endVoiceMode(): Promise<void> {
   const ended = c ? endedConversation(c.snapshot) : null
   emit({ owner: null, startedAt: null, workspacePath: null, escArmed: false, ended })
   target = null
+  lastTask = null
   await c?.stop()
 }
 
@@ -251,14 +257,12 @@ export async function switchVoiceMic(deviceId: string): Promise<boolean> {
 
 /**
  * Talk again from the summary: on the line you last used, as the shortcut
- * does (that line knows its task and workspace). False when no task line is
- * on screen to start it on (Home); the summary then stays.
+ * does (that line knows its task and workspace). With no task line on screen
+ * (Home, Settings), the app opens New task and it starts there (§24.15).
  */
-export function talkAgain(): boolean {
-  if (!voiceShortcutTarget()) return false
+export function talkAgain(): void {
   emit({ ended: null })
   window.dispatchEvent(new CustomEvent('vyotiq:command', { detail: { id: 'voiceMode' } }))
-  return true
 }
 
 export function setVoiceEscArmed(armed: boolean): void {
@@ -305,7 +309,9 @@ export function setVoiceTarget(owner: string, t: VoiceRunTarget, workspacePath?:
     const c = controller
     const taskRun = t.brief ? null : t.runId()
     queueMicrotask(() => {
-      if (mode.owner === owner && target === t) c.setTask(taskRun, workspacePath ?? undefined)
+      if (mode.owner !== owner || target !== t) return
+      lastTask = { runId: taskRun, ...(workspacePath ? { workspacePath } : {}), brief: Boolean(t.brief) }
+      c.setTask(taskRun, workspacePath ?? undefined, voiceScreen())
     })
   }
   // The brief became the task's line in place: nothing to hand over.
@@ -320,6 +326,19 @@ export function setVoiceTarget(owner: string, t: VoiceRunTarget, workspacePath?:
       if (mode.owner === owner && target === t) c.followRun(runId)
     })
   }
+}
+
+/** What the voice is told is on screen: the app's view, or on the task pane, the task or New task. */
+function voiceScreen(): VoiceScreen {
+  if (appView !== 'chat') return appView
+  return lastTask?.brief ? 'new_task' : 'task'
+}
+
+/** App's view changed (Home, Settings, back to the task): the voice's picture of the screen follows. */
+export function setVoiceAppView(view: Exclude<VoiceScreen, 'task' | 'new_task'> | 'chat'): void {
+  if (appView === view) return
+  appView = view
+  if (controller && mode.owner && lastTask) controller.setTask(lastTask.runId, lastTask.workspacePath, voiceScreen())
 }
 
 export function voiceController(): VoiceSessionController {
@@ -368,6 +387,24 @@ export function noteVoiceLineFocus(key: string): void {
   const i = lines.indexOf(key)
   if (i >= 0) lines.splice(i, 1)
   lines.push(key)
+}
+
+/**
+ * Voice mode asked for where no task line is on screen (Home, Settings,
+ * Usage; §24.15): the app opens New task, and the first line to mount starts
+ * it there. Lapses after HANDOFF_MS.
+ */
+let armedStart: number | null = null
+
+export function armVoiceStart(): void {
+  armedStart = Date.now() + HANDOFF_MS
+}
+
+/** Whether a line that just mounted should start voice mode (once). */
+export function takeArmedVoiceStart(): boolean {
+  const armed = armedStart !== null && Date.now() <= armedStart
+  armedStart = null
+  return armed
 }
 
 /** The line Ctrl+Shift+M should act on: the session's owner, else the last focused line. */
@@ -421,6 +458,9 @@ export async function resetVoiceModeForTests(c?: VoiceSessionController): Promis
   }
   target = null
   handoff = null
+  appView = 'chat'
+  lastTask = null
+  armedStart = null
   for (const w of runIdWaiters.splice(0)) w(null)
   lines.length = 0
   lineBorn.clear()

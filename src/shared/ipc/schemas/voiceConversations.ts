@@ -28,6 +28,7 @@ export const VoiceConversationEntrySchema = z.discriminatedUnion('kind', [
   z.object({ at: At, kind: z.literal('agent'), contextId: Id, text: Text }),
   z.object({ at: At, kind: z.literal('hand_off'), handOffId: Id, brief: Text }),
   z.object({ at: At, kind: z.literal('followed'), runId: Id, handOffId: Id.optional() }),
+  z.object({ at: At, kind: z.literal('task'), runId: Id }),
   z.object({ at: At, kind: z.literal('not_sent'), handOffId: Id, reason: z.string().max(400) }),
   z.object({
     at: At,
@@ -38,8 +39,10 @@ export const VoiceConversationEntrySchema = z.discriminatedUnion('kind', [
     tool: z.string().max(200).optional()
   }),
   z.object({ at: At, kind: z.literal('stop_agent'), by: z.enum(['you', 'voice']) }),
+  z.object({ at: At, kind: z.literal('unanswered'), turnId: Id, text: Text.optional() }),
+  z.object({ at: At, kind: z.literal('app_action'), action: z.string().max(64), ok: z.boolean(), message: Text }),
   z.object({ at: At, kind: z.literal('dropped'), reason: z.enum(['empty', 'echo', 'noise']), chars: z.number().int().min(0) }),
-  z.object({ at: At, kind: z.literal('error'), side: z.string().max(200), code: z.string().max(200) }),
+  z.object({ at: At, kind: z.literal('error'), side: z.string().max(200), code: z.string().max(200), detail: z.string().max(400).optional() }),
   z.object({ at: At, kind: z.literal('end') })
 ])
 export type VoiceConversationEntry = z.infer<typeof VoiceConversationEntrySchema>

@@ -18,6 +18,7 @@ import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import type { ToolDefinition, TokenUsage } from '../agent/providers/types'
 import type { TtsStream } from './providers/types'
 import { SentenceSplitter, fallbackSummary, toSpeakable } from './speechText'
+import { appActionsFor, describeAppActions } from '../../shared/appActions'
 
 /** One streamed piece of the model's answer. */
 export type ResponderChunk =
@@ -78,6 +79,10 @@ export type ResponderDeps = {
    * voice opened on a task knowing nothing of it, and said so.
    */
   taskContext?: () => string
+  /** The app around the task (appContext.ts): screen, workspace, other work, settings, time, rules, memory. */
+  appContext?: () => string
+  /** Do an app action (app_action); without it the tool says it can't. */
+  appAction?: (call: { action: string; args: unknown; confirmed: boolean }) => Promise<AppActionOutcome>
   onUsage?: (usage: TokenUsage) => void
   /** The voice model was slow or said nothing; `retried`: it was asked again. For the log. */
   onTrouble?: (what: 'timeout' | 'empty', retried: boolean) => void
@@ -90,6 +95,7 @@ export type ResponderDeps = {
 export const HAND_OFF_TOOL = 'hand_to_agent'
 export const STOP_TOOL = 'stop_agent'
 export const QUIET_TOOL = 'stay_quiet'
+export const APP_TOOL = 'app_action'
 /** Longer than this, what you said is meant for the voice, whatever the model makes of it. */
 export const QUIET_MAX_WORDS = 5
 
@@ -116,6 +122,22 @@ export const RESPONDER_TOOLS: ToolDefinition[] = [
     parameters: { type: 'object', properties: {} }
   },
   {
+    name: APP_TOOL,
+    description:
+      'Do something in the app itself, not in the project’s code: views, tasks in any workspace, settings, panels, the agent’s mode or model, opening files, folders or web pages, and your own voice. ' +
+      'Actions, with their args:\n' +
+      describeAppActions('voice'),
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: appActionsFor('voice') },
+        args: { type: 'object', description: 'The action’s arguments, as listed.' },
+        confirmed: { type: 'boolean', description: 'True only when the user has just said yes to this action.' }
+      },
+      required: ['action']
+    }
+  },
+  {
     name: QUIET_TOOL,
     description:
       'Say nothing this turn: what was heard is only a sound, a filler or background talk not meant for you. Never when the user asked or told you something; a question or more than a few words always gets an answer.',
@@ -126,6 +148,10 @@ export const RESPONDER_TOOLS: ToolDefinition[] = [
 export const RESPONDER_SYSTEM = [
   'You are the voice of Agent V, a coding agent app. You are talking with the user out loud, hands-free; everything you write is spoken.',
   'Speak like a calm, friendly colleague: one to three short sentences. No markdown, lists, code, symbols or URLs; never spell out a path.',
+  `Things in the app itself, like showing a view, opening, starting, stopping, archiving or deleting tasks in any workspace, changing the theme or other settings, opening a panel, a file, a folder or a web page, setting the agent's mode or model, or changing your own voice, speed or placement, muting or ending: do them with ${APP_TOOL}, never hand them to the agent. Say in a few words what you're doing; if it fails you will hear why.`,
+  `An action that needs the user's yes (deleting a task, installing an update, quitting): ask first in one short question, without calling ${APP_TOOL}. Only when their next words clearly say yes, call it with confirmed true.`,
+  `To start a new task in another workspace use ${APP_TOOL} start_task; ${HAND_OFF_TOOL} gives work to the task on screen.`,
+  'With every turn you get the app as it is now: what is on screen, the workspace and its branch, other tasks, a few settings, the date and time, and the project rules and memory notes by name. Answer questions about them from it, briefly; never read it out unasked.',
   'You cannot see or change the project yourself. The agent can: it reads and edits files, runs commands and tests, and uses the browser.',
   `When the user wants anything done or checked in the project, call ${HAND_OFF_TOOL} with a complete brief, and in the same reply say in a few words that it is on it. Always say something out loud, even when you hand work off.`,
   `If the agent is already working and the user adds to or changes the request, call ${HAND_OFF_TOOL} with just the addition; it joins the current work.`,
@@ -136,8 +162,10 @@ export const RESPONDER_SYSTEM = [
   `When the status says the agent is stopped until the user answers, you cannot answer for them and nothing you hand off reaches it until they do. If they seem to be answering, ask for a plain yes or no, or point to the card on screen; do not call ${HAND_OFF_TOOL} with their answer or say it is on it.`,
   'When the agent finishes, you are given its written answer: tell the user what it did or found in plain speech, and point to the screen for the details.',
   'You are on the task open on the user’s screen. Its conversation so far (what the user asked and what the agent answered) comes with the agent status: it is history you share with the user, so use it and never say you have no record of it.',
-  `When the user says to resume, continue or carry on, call ${HAND_OFF_TOOL} with a brief that continues that task, naming what was left to do.`,
+  `When the user says to resume, continue or carry on, call ${HAND_OFF_TOOL} with a brief that continues that task, naming what was left to do. But if the user stopped that work, or said it was the wrong thing, ask what they want done instead of handing the same work back.`,
   `What you hear is a live transcript of a room: it can catch sounds, background talk or half a sentence. If it is only a sound, a filler or clearly not meant for you, call ${QUIET_TOOL} and say nothing; do not remark on noise.`,
+  `Never write notes to yourself, stage directions or what you heard in quotes: everything you write is said. To say nothing, call ${QUIET_TOOL}.`,
+  'Lines in parentheses from the app (the agent finished, what it reported earlier, your last conversation) are context for you: use them, but never mention them, never say something is attached or "not from you".',
   'If what you heard seems cut off, ask briefly what they meant. Reply in the language the user speaks.'
 ].join('\n')
 
@@ -220,9 +248,22 @@ type Reply = {
   begun: boolean
   /** The turns this answers (yours, joined): marked unanswered on screen if it stays quiet. */
   turnIds: string[]
+  /** Its stop_agent already ran while held: only the words are left to say. */
+  stopped: boolean
+  /** Whole sentences spoken so far; past MAX_SPOKEN_SENTENCES the rest is only shown. */
+  sentences: number
+  /** Words past the cap: shown on screen with the reply, never spoken. */
+  overflow: string
+  /** App actions this reply called (app_action), in order, as they settle. */
+  actions: Array<Promise<AppActionOutcome>>
 }
 
+/** How an app action went, in words the voice can say. */
+export type AppActionOutcome = { ok: boolean; message: string }
+
 export class VoiceResponder {
+  /** Counts disposals: an action that settles after one says nothing. */
+  private generation = 0
   private history: Message[] = []
   private reply: Reply | null = null
   /** The agent's spoken result, a sentence at a time, until it joins the conversation. */
@@ -396,7 +437,11 @@ export class VoiceResponder {
       startTimer: null,
       stillTimer: null,
       begun: false,
-      turnIds
+      turnIds,
+      stopped: false,
+      actions: [],
+      sentences: 0,
+      overflow: ''
     }
     this.reply = reply
     if (waitMs && waitMs > 0) {
@@ -470,6 +515,7 @@ export class VoiceResponder {
   }
 
   dispose(): void {
+    this.generation++
     if (this.reply && !this.reply.finished) this.abort(this.reply, false)
     this.reply = null
     this.carried = ''
@@ -492,6 +538,16 @@ export class VoiceResponder {
     this.carried = ''
     this.carriedIds = []
     this.pendingReport = false
+  }
+
+  /**
+   * The last voice conversation on this task, from before this session: its
+   * memory to start from. Only into an empty conversation, so nothing said in
+   * this session is reordered.
+   */
+  recall(past: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>): void {
+    if (this.history.length > 0 || past.length === 0) return
+    past.forEach((m, i) => this.remember(i === 0 ? { role: m.role, content: `${PAST_HEADER}\n${m.content}` } : { ...m }))
   }
 
   // ── The model call ─────────────────────────────────────────────────────
@@ -589,8 +645,14 @@ export class VoiceResponder {
           reply.begun = true
         }
         if (chunk.type === 'error') errored = true
-        if (this.held) reply.backlog.push(chunk)
-        else this.take(reply, chunk)
+        if (this.held) {
+          // A stop can't wait for a sound to turn out to be words (2026-10-15: 7 s late). Its words still wait.
+          if (chunk.type === 'tool_call' && chunk.name === STOP_TOOL && !reply.stopped) {
+            reply.stopped = true
+            this.deps.stopAgent()
+          }
+          reply.backlog.push(chunk)
+        } else this.take(reply, chunk)
       }
     } catch (err) {
       if (reply.finished) return 'answered'
@@ -658,11 +720,26 @@ export class VoiceResponder {
       return
     }
     if (name === STOP_TOOL) {
-      this.deps.stopAgent()
+      if (!reply.stopped) this.deps.stopAgent()
+      reply.stopped = true
       if (!reply.said) this.speak(reply, `${STOP_LINE} `)
       return
     }
-    if (name === QUIET_TOOL && !refusedQuiet(reply, name)) reply.quiet = true
+    if (name === QUIET_TOOL) {
+      if (!refusedQuiet(reply, name)) reply.quiet = true
+      return
+    }
+    if (name === APP_TOOL) {
+      const call = parseAppCall(args)
+      const run = this.deps.appAction
+      reply.actions.push(
+        !call
+          ? Promise.resolve({ ok: false, message: 'I didn’t catch what to do.' })
+          : run
+            ? run(call).catch((err: unknown) => ({ ok: false, message: err instanceof Error ? err.message : 'It didn’t work.' }))
+            : Promise.resolve({ ok: false, message: 'I can’t do that from here.' })
+      )
+    }
   }
 
   private finish(reply: Reply): void {
@@ -671,8 +748,9 @@ export class VoiceResponder {
     this.flushSaid(reply)
     if (reply.handedOff && !reply.said) this.speak(reply, `${HAND_OFF_LINE} `)
     // Nothing at all, and not by choice: your words never sit unanswered.
-    else if (reply.kind === 'turn' && !reply.said && !reply.quiet) this.speak(reply, `${EMPTY_LINE} `)
+    else if (reply.kind === 'turn' && !reply.said && !reply.quiet && reply.actions.length === 0) this.speak(reply, `${EMPTY_LINE} `)
     this.flushSaid(reply)
+    this.showOverflow(reply)
     reply.stream?.end()
     reply.finished = true
     if (this.reply === reply) this.reply = null
@@ -680,6 +758,7 @@ export class VoiceResponder {
     const said = reply.said.trim()
     const content = reply.handedOff ? `${said} (handed to the agent)`.trim() : said || (reply.quiet ? '(stayed quiet)' : '')
     if (content) this.remember({ role: 'assistant', content })
+    if (reply.actions.length > 0) this.settleActions(reply.actions, Boolean(said))
     this.deps.done({
       audible: Boolean(said) && reply.stream !== null,
       handedOff: reply.handedOff,
@@ -687,6 +766,26 @@ export class VoiceResponder {
       ...(reply.quiet && !said && !reply.handedOff ? { quiet: { chars: reply.userText.length, turnIds: reply.turnIds } } : {})
     })
     this.afterReply()
+  }
+
+  /**
+   * The reply's app actions have run: what happened joins the conversation,
+   * and is said when the reply said nothing, or when one failed (the reply
+   * said it was on it). Never the same words twice.
+   */
+  private settleActions(actions: Array<Promise<AppActionOutcome>>, said: boolean): void {
+    const gen = this.generation
+    void Promise.all(actions).then((results) => {
+      // Ended (or another session took over) while it ran: nothing here to say it to.
+      if (gen !== this.generation) return
+      const failed = results.filter((r) => !r.ok)
+      this.notes = `${this.notes} ${results.map((r) => `(${r.ok ? 'Done' : 'Didn’t happen'}: ${r.message})`).join(' ')}`.trim()
+      const lines = (failed.length > 0 ? failed : said ? [] : results).map((r) => r.message.trim()).filter(Boolean)
+      const line = [...new Set(lines)].join(' ')
+      if (!line) return
+      // The reply is over, so this is a line of its own; its audio moves the session on as any reply's does.
+      this.speakLine(line)
+    })
   }
 
   /** The agent finished while the voice was answering you: now say what it found. */
@@ -734,12 +833,33 @@ export class VoiceResponder {
   }
 
   private emit(reply: Reply, raw: string): void {
-    const piece = redactSecretsInText(toSpeakable(raw) || raw.trim())
+    // A note in brackets cleans to nothing and stays nothing: it was never meant to be said.
+    const note = NOTE_RE.test(raw)
+    const piece = redactSecretsInText(toSpeakable(raw) || (note ? '' : raw.trim()))
+    // A reply that is only a note ("staying quiet") meant to say nothing: as stay_quiet, where that's allowed.
+    if (note && !piece && !reply.said && mayStayQuiet(reply.userText)) reply.quiet = true
     if (!piece || !reply.contextId) return
     reply.said += `${piece} `
+    // Three sentences said; the rest is on screen (2026-10-15: a seven-sentence answer read out).
+    if (reply.sentences >= MAX_SPOKEN_SENTENCES) {
+      reply.overflow += `${piece} `
+      return
+    }
     this.deps.say(reply.contextId, piece, reply.stream !== null)
     reply.stream?.pushText(piece)
     reply.stream?.flush()
+    if (SENTENCE_END_RE.test(piece)) reply.sentences++
+  }
+
+  /**
+   * The words past the cap, as one more caption of the reply. Marked audible
+   * when the reply speaks, so it waits behind the spoken ones and shows once
+   * they have played, in order; it is never sent to the speaking model.
+   */
+  private showOverflow(reply: Reply): void {
+    const rest = reply.overflow.trim()
+    reply.overflow = ''
+    if (rest && reply.contextId) this.deps.say(reply.contextId, rest, reply.stream !== null)
   }
 
   /** One line on its own (the fallback); whether it will be heard. */
@@ -755,11 +875,12 @@ export class VoiceResponder {
 
   // ── Context ────────────────────────────────────────────────────────────
 
-  /** The task so far, then what the agent is doing now. */
+  /** The app, the task so far, then what the agent is doing now. */
   private statusLine(): string {
+    const app = this.deps.appContext?.().trim()
     const task = this.deps.taskContext?.().trim()
     const status = this.agentLine()
-    return task ? `${TASK_HEADER}\n${task}\n\n${status}` : status
+    return [app, task ? `${TASK_HEADER}\n${task}` : '', status].filter(Boolean).join('\n\n')
   }
 
   /** What the agent is doing, from its run's own events (B6): enough to answer "how's it going?". */
@@ -805,6 +926,12 @@ export class VoiceResponder {
 }
 
 const AGENT_PREFIX = 'The agent reported: '
+/** A spoken reply says this many sentences at most; the rest stays on screen. */
+export const MAX_SPOKEN_SENTENCES = 3
+const SENTENCE_END_RE = /[.!?]["'”’)\]]*$/
+/** Only a note in brackets ("(Noted, staying quiet.)"). */
+const NOTE_RE = /^\s*[([][^()[\]]*[)\]][.!?]?\s*$/
+const PAST_HEADER = '(Earlier, in your last voice conversation on this task:)'
 const TASK_HEADER = 'The task on screen so far (oldest first; [You] is the user, [Agent] the coding agent’s answers):'
 const TIMED_OUT = Symbol('timed out')
 
@@ -820,6 +947,16 @@ function refusedQuiet(reply: Reply, name: string): boolean {
 /** Short, and not a question: a sound, a filler or an aside the voice may leave unanswered. */
 export function mayStayQuiet(heard: string): boolean {
   return !heard.includes('?') && heard.trim().split(/\s+/).length <= QUIET_MAX_WORDS
+}
+
+function parseAppCall(args: string): { action: string; args: unknown; confirmed: boolean } | null {
+  try {
+    const parsed = JSON.parse(args || '{}') as { action?: unknown; args?: unknown; confirmed?: unknown }
+    if (typeof parsed.action !== 'string' || !parsed.action.trim()) return null
+    return { action: parsed.action.trim(), args: parsed.args ?? {}, confirmed: parsed.confirmed === true }
+  } catch {
+    return null
+  }
 }
 
 function parseBrief(args: string): string {

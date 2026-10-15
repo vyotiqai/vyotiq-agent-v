@@ -15,13 +15,19 @@ import { makeResponderChat, prepareResponderModel, recordResponderUsage } from '
 import { addRunEventTap } from '../agent/runEventTap'
 import { listPendingToolApprovals, resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
 import { listPendingAgentQuestions, resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
-import { getRunWorkspace } from '../agent/runRegistry'
+import { cancelRun, getRunWorkspace, listActiveRuns } from '../agent/runRegistry'
+import { readWorkspaceRules } from '../agent/context/rules'
+import { memoryNoteDetails } from '../agent/context/memory'
+import { formatAppContext, readGitBranch, ruleHeadline, type AppSnapshot, type AppTaskState } from './appContext'
 import { setVoiceReplyWorkspace } from './voiceReply'
+import { runAppActionInApp, type AppActionResult } from '../appControl'
+import { enqueueSettingsMutation, setSettings } from '../settings/settings'
 import { VoiceConversationLog } from './conversationLog'
+import { lastConversationForRun, pastConversationMessages } from './conversationHistory'
 import { resolveRunDir, userDataRoot, workspaceUsageDir } from '../storage/paths'
 import { loadMessagesWindowAsync, loadStatus } from '../agent/state'
 import { TASK_CONTEXT_MESSAGES, formatTaskContext } from './taskContext'
-import { join } from 'path'
+import { basename, join } from 'path'
 import { notifyBadgeChange } from '../app/badges'
 import {
   chooseModel,
@@ -32,7 +38,7 @@ import {
   ttsEntry,
   type VoiceErrorCode
 } from '../../shared/voice'
-import type { VoiceSettings } from '../../shared/ipc/schemas/voice'
+import type { VoiceScreen, VoiceSettings } from '../../shared/ipc/schemas/voice'
 import type { TtsStream } from './providers/types'
 
 function currentVoiceSettings(): VoiceSettings {
@@ -197,6 +203,12 @@ export async function startVoiceSession(
     tapRun: addRunEventTap,
     watchApprovals: watchToolApprovals,
     resolveApproval: (answer) => resolveToolApproval(answer),
+    // A spoken stop cancels the run here, as chat:cancel does (cancelRun also clears its queued follow-ups).
+    cancelRun: (runId) => {
+      const stopped = cancelRun(runId)
+      if (stopped) logger.info('Chat cancel', { scope: 'voice', correlationId: runId })
+      return stopped
+    },
     watchQuestions: watchAgentQuestions,
     resolveQuestion: (answer) => resolveAgentQuestion(answer),
     pendingAsks: (runId) => ({ approvals: listPendingToolApprovals(runId), questions: listPendingAgentQuestions(runId) }),
@@ -211,12 +223,21 @@ export async function startVoiceSession(
         { scope: 'voice', code: 'VOICE_REPLY', reason: retried ? 'asked again' : 'gave up' }
       ),
     loadTaskContext: (runId, taskWorkspace) => loadVoiceTaskContext(runId, getRunWorkspace(runId) ?? taskWorkspace ?? workspacePath),
+    loadAppContext: ({ runId, workspacePath: taskWorkspace, screen }) =>
+      loadVoiceAppContext(runId, (runId ? getRunWorkspace(runId) : undefined) ?? taskWorkspace ?? workspacePath, screen),
+    loadPastConversation: async (runId, taskWorkspace) => {
+      const past = await lastConversationForRun(voiceLogDir(getRunWorkspace(runId) ?? taskWorkspace ?? workspacePath), runId, session.id)
+      return past ? pastConversationMessages(past.entries) : []
+    },
     onResponderFailed: (message) =>
       logger.warn('Voice model failed; the turn went to the agent', { scope: 'voice', code: 'VOICE_REPLY', reason: message.slice(0, 300) }),
     onStayedQuiet: (chars) => logger.info('Voice stayed quiet on a turn', { scope: 'voice', chars }),
     onTurnDropped: (reason, chars, stats) =>
       logger.info('Voice heard speech but took no turn', { scope: 'voice', reason, chars, ...stats }),
     warm: () => warmVoiceConnections(currentVoiceSettings()),
+    // The app's actions (§24.15): the same runner the agent's app_control uses.
+    runAppAction: (name, args, ctx) => runAppActionInApp(name, args, ctx),
+    setVoiceName: (name) => setVoiceByName(name),
     record: (entry) => log?.add(entry)
   })
   log = openConversationLog(session.id, workspacePath)
@@ -262,9 +283,94 @@ export async function loadVoiceTaskContext(runId: string, workspacePath: string 
   }
 }
 
+/**
+ * "Use the Nova voice": a voice the speaking model lists, by name. Only a
+ * provider whose voices are named (OpenRouter's list) can be picked by
+ * voice; the others' are ids, picked in Settings.
+ */
+async function setVoiceByName(name: string): Promise<AppActionResult> {
+  const settings = currentVoiceSettings()
+  const resolved = resolveTtsProvider(settings.ttsProvider, voiceKeyAvailability())
+  if (!resolved.ok) return { ok: false, message: 'Nothing can speak right now.' }
+  const entry = ttsEntry(resolved.id)
+  const model = chooseModel(entry, settings.tts[entry.id]?.model)
+  const voices = cachedModelVoices(entry.id, model)
+  if (!voices?.length) return { ok: false, message: 'Voices for this speaker are picked in Settings, under Voice.' }
+  const want = name.trim().toLowerCase().replace(/\s*voice$/, '')
+  const voiceId = voices.find((v) => v.toLowerCase() === want) ?? voices.find((v) => v.toLowerCase().includes(want))
+  if (!voiceId) return { ok: false, message: `There’s no voice called ${name}. Some I have: ${voices.slice(0, 5).join(', ')}.` }
+  await enqueueSettingsMutation(() =>
+    setSettings({ voice: { ...settings, tts: { ...settings.tts, [entry.id]: { ...settings.tts[entry.id], voiceId } } } })
+  )
+  return { ok: true, message: `This is ${voiceId}.` }
+}
+
+/** A run's state for the voice: stopped on you when an approval or question waits, else its status. */
+function runState(runId: string, workspacePath: string): { title: string; state: AppTaskState } | null {
+  const status = loadStatus(resolveRunDir(workspacePath, runId))
+  if (!status) return null
+  const waiting = listPendingToolApprovals(runId).length > 0 || listPendingAgentQuestions(runId).length > 0
+  const title = (status.goal ?? '').split('\n')[0]!.trim() || 'Untitled task'
+  return { title, state: status.status === 'running' && waiting ? 'waiting' : status.status }
+}
+
+/**
+ * The app around the task, for the voice (appContext.ts). Each part is read
+ * on its own: one that fails is left out, never the whole picture.
+ */
+export async function loadVoiceAppContext(runId: string | null, workspacePath: string | null, screen: VoiceScreen | null): Promise<string> {
+  const settings = getSettings()
+  const voice = currentVoiceSettings()
+  const snapshot: AppSnapshot = {
+    now: new Date(),
+    ...(screen ? { screen } : {}),
+    workspace: workspacePath ? { name: basename(workspacePath), ...withBranch(workspacePath) } : null,
+    task: null,
+    others: [],
+    settings: {
+      ...(settings.model ? { model: settings.model } : {}),
+      ...(settings.toolApproval?.mode ? { approvals: APPROVAL_WORDS[settings.toolApproval.mode] } : {}),
+      ...(settings.theme ? { theme: settings.theme } : {}),
+      voicePlacement: voice.placement,
+      voiceSpeed: voice.speed
+    },
+    rules: [],
+    memory: []
+  }
+  try {
+    if (runId && workspacePath) snapshot.task = runState(runId, workspacePath)
+    for (const run of listActiveRuns()) {
+      if (run.runId === runId) continue
+      const state = runState(run.runId, run.workspacePath)
+      if (state && (state.state === 'running' || state.state === 'waiting')) {
+        snapshot.others.push({ title: state.title, workspace: basename(run.workspacePath), state: state.state })
+      }
+    }
+  } catch (err) {
+    logger.warn('Voice could not read the tasks', { scope: 'voice', reason: err instanceof Error ? err.message : String(err) })
+  }
+  if (workspacePath) {
+    const [rules, memory] = await Promise.allSettled([readWorkspaceRules(workspacePath), memoryNoteDetails(workspacePath)])
+    if (rules.status === 'fulfilled') snapshot.rules = rules.value.map((r) => ruleHeadline(r.path, r.content))
+    if (memory.status === 'fulfilled') snapshot.memory = memory.value.map((n) => n.title || basename(n.path)).filter(Boolean)
+  }
+  return formatAppContext(snapshot)
+}
+
+const APPROVAL_WORDS: Readonly<Record<'off' | 'mutating' | 'all', string>> = {
+  off: 'off (the agent runs tools without asking)',
+  mutating: 'on for anything that changes things',
+  all: 'on for every tool'
+}
+
+function withBranch(workspacePath: string): { branch?: string } {
+  const branch = readGitBranch(workspacePath)
+  return branch ? { branch } : {}
+}
+
 /** The task this window's session is on, followed or not: its conversation becomes the voice's context. */
-export function setVoiceTask(ownerId: number, sessionId: string, runId: string | null, workspacePath: string | null): void {
-  voiceSessionFor(ownerId, sessionId)?.setTask(runId, workspacePath)
+export function setVoiceTask(ownerId: number, sessionId: string, runId: string | null, workspacePath: string | null, screen?: VoiceScreen): void {
+  voiceSessionFor(ownerId, sessionId)?.setTask(runId, workspacePath, screen)
 }
 
 /**

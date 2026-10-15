@@ -672,6 +672,16 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       icon: 'sparkles'
     })
   },
+  // Acting in the app (§24.15): its row names the action; the body is what happened.
+  app_control: {
+    Body: StatusMessageBody,
+    hasBody: statusMessageHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary || summarizeToolArgs(tool.name, tool.argsPreview),
+      icon: 'command'
+    })
+  },
   switch_mode: {
     Body: StatusMessageBody,
     hasBody: statusMessageHasBody,

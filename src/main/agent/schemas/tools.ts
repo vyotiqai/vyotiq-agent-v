@@ -966,6 +966,24 @@ const switchModeArgs = z
       )
   })
 
+/**
+ * The app's actions (src/shared/appActions.ts, §24.15). Only names here:
+ * `action: "list"` returns the actions and their arguments, so their
+ * schemas cost nothing until the agent needs one.
+ */
+const appControlArgs = z.object({
+  action: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .describe('Action name, or "list".'),
+  args: z
+    .record(z.string(), z.unknown().describe('A value.'))
+    .optional()
+    .describe('Its arguments, as listed.')
+})
+
 const memoryListArgs = z.object({})
 
 const memoryReadArgs = z
@@ -1557,6 +1575,10 @@ export const TOOL_REGISTRY = {
   show_view: {
     description: `Draw a view in the task record while you work, or update it in place by calling again with the same id. Shape: {id,title,subtitle?,blocks}. Blocks: stats{items:[{label,value,hint?,tone?}]}; rows{title?,items:[{title,lead?,meta?,value?,state?,diff?:{add,del},path?}],more?}; table{columns:[{id,label}],rows:[{cells}]}; chart{spec}; checks{items:[{label,state}]}; note{text}; actions{actions:[{label,say|do}]}; form{fields:[{kind:choice|switch|text,id,label,options?}],submit:{label,say:"…{fieldId}…"}} (a question that doesn't wait; the answer is the user's next message); live{source,title?,limit?}, filled from the app's own read and kept current — prefer it to typing those figures; the result says what it shows. Sources: ${VIEW_SOURCE_IDS.join(', ')}. Any item may take say (the user's next message) or do: {action:open|diff,path}, {action:stage|unstage,paths}, {action:commit,sha}, {action:run,command} (user confirms), {action:panel,panel}, {action:link,url}`,
     schema: showViewArgs
+  },
+  app_control: {
+    description: 'Act in the Agent V app, not the workspace: views, panels, tasks in any workspace, settings, opening files or URLs. action "list" gives the actions. Deleting, updating or quitting needs the user’s OK.',
+    schema: appControlArgs
   },
   switch_mode: {
     description:

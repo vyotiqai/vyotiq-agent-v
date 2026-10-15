@@ -708,15 +708,24 @@ describe('after End: the summary (§26.7)', () => {
     }
   })
 
-  it('Talk again with no task line on screen keeps the summary and says what to do', async () => {
-    render(<Shell />)
-    await start()
-    act(() => fake.update(said()))
-    fireEvent.click(screen.getByRole('button', { name: 'End' }))
-    await vi.waitFor(() => expect(document.querySelector('[data-voice-ended]')).not.toBeNull())
-    fireEvent.click(screen.getByRole('button', { name: 'Talk again' }))
-    expect(document.querySelector('[data-voice-ended]')).not.toBeNull()
-    expect(document.querySelector('[data-voice-talk-again-none]')!.textContent).toContain('Open a task or New task first')
+  it('Talk again with no task line on screen still asks for voice mode: the app opens New task for it (§24.15)', async () => {
+    const commands: string[] = []
+    const onCommand = (e: Event): void => {
+      commands.push(String((e as CustomEvent<{ id?: string }>).detail?.id))
+    }
+    window.addEventListener('vyotiq:command', onCommand)
+    try {
+      render(<Shell />)
+      await start()
+      act(() => fake.update(said()))
+      fireEvent.click(screen.getByRole('button', { name: 'End' }))
+      await vi.waitFor(() => expect(document.querySelector('[data-voice-ended]')).not.toBeNull())
+      fireEvent.click(screen.getByRole('button', { name: 'Talk again' }))
+      expect(commands).toEqual(['voiceMode'])
+      expect(document.querySelector('[data-voice-ended]')).toBeNull()
+    } finally {
+      window.removeEventListener('vyotiq:command', onCommand)
+    }
   })
 
   it('talking again replaces it', async () => {

@@ -107,6 +107,7 @@ import type { WorkspaceFileOpenOptions } from '../features/chat/components/Files
 import type { PinnedScreen } from '../features/screens/screensStore'
 import { useNavHistory, type NavLocation } from './useNavHistory'
 import { branchesLostOnDelete, deleteTasksMessage } from './deleteTaskCopy'
+import { setVoiceAppView } from '../features/voice/voiceMode'
 import { setCustomModelPrices } from '@shared/pricing/modelPrices'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
@@ -363,6 +364,8 @@ function App() {
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
   const [view, setView] = useState<AppView>('chat')
+  // The voice is told what is on screen (docs/voice-mode.md §24.14).
+  useEffect(() => setVoiceAppView(view), [view])
   // The pinned view on show, and where closing it goes: the view it was opened from.
   const [screenRequest, setScreenRequest] = useState<ScreenRequest | null>(null)
   const [screenReturn, setScreenReturn] = useState<Exclude<AppView, 'screen'>>('home')
@@ -2686,8 +2689,8 @@ function App() {
     refreshWorkspaceRuns(path)
   }
 
-  const onDeleteRunInWorkspace = async (path: string, runId: string): Promise<void> => {
-    if (!window.vyotiq?.deleteRun) return
+  const onDeleteRunInWorkspace = async (path: string, runId: string): Promise<boolean> => {
+    if (!window.vyotiq?.deleteRun) return false
     const res = await window.vyotiq.deleteRun(path, runId)
     if (!res.ok) {
       // The sidebar is global chrome, so a refusal ("Cancel run first") has to
@@ -2695,7 +2698,7 @@ function App() {
       // focused chat pane — from a sidebar row that reads as nothing happening.
       pushToast(`Could not delete the task: ${res.error}`, 'error')
       setSettingsError(res.error)
-      return
+      return false
     }
     removeOfflineQueueEntriesForRun(path, runId)
     purgeDeletedRunUi(path, runId)
@@ -2727,6 +2730,7 @@ function App() {
         }
       }
     })
+    return true
   }
 
   /**
@@ -2848,7 +2852,9 @@ function App() {
   paneRunActionsRef.current = {
     rename: onRenameRunInWorkspace,
     exportRun: onExportRunInWorkspace,
-    deleteRun: onDeleteRunInWorkspace,
+    deleteRun: async (path: string, runId: string) => {
+      await onDeleteRunInWorkspace(path, runId)
+    },
     fork: onForkRunInWorkspace,
     togglePin: onTogglePinnedRun,
     isPinned: (path, runId) => settings.pinnedRuns.includes(pinnedRunKey(path, runId)),
@@ -3227,7 +3233,14 @@ function App() {
     },
     onRenameRunInWorkspace: (path: string, runId: string, goal: string) =>
       void onRenameRunInWorkspace(path, runId, goal),
-    onDeleteRunInWorkspace: (path: string, runId: string) => void onDeleteRunInWorkspace(path, runId),
+    onDeleteRunInWorkspace: (path: string, runId: string) => onDeleteRunInWorkspace(path, runId),
+    // The voice's or agent's "ask mode" (§24.15): the task in the focused pane.
+    onSetAgentMode: (mode: 'ask' | 'agent'): boolean => {
+      const pane = getFocusedPaneRef.current()
+      if (!pane?.runId || view !== 'chat') return false
+      setAgentMode(mode, { workspacePath: pane.workspacePath, runId: pane.runId })
+      return true
+    },
     onExportRunInWorkspace: (path: string, runId: string) => void onExportRunInWorkspace(path, runId),
     onCopyRunLinkInWorkspace,
     onLoadOlderRuns: (path: string) => void loadOlderWorkspaceRuns(path),

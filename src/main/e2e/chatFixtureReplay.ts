@@ -14,6 +14,8 @@ import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
 import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { createRun, runExists, updateStatus } from '../agent/state'
 import { resolveRunDir } from '../storage/paths'
+import { appActionRunner } from '../appControl/hook'
+import { isDestructiveAppControl } from '../../shared/appActions'
 
 type FixtureFile = {
   events: unknown[]
@@ -44,7 +46,7 @@ function loadFixtureTemplates(): Omit<AgentEvent, 'runId' | 'invokeId'>[] {
     throw new Error(`Fixture ${fixturePath} must contain a non-empty events array`)
   }
   return raw.events.map((event, index) => {
-    if (isFixtureApproval(event)) return event as unknown as Omit<AgentEvent, 'runId' | 'invokeId'>
+    if (isFixtureApproval(event) || isFixtureAppControl(event)) return event as unknown as Omit<AgentEvent, 'runId' | 'invokeId'>
     if (!event || typeof event !== 'object' || Array.isArray(event)) {
       throw new Error(`Fixture event ${index} must be an object`)
     }
@@ -125,6 +127,45 @@ async function* askFixtureApproval(
   yield { type: 'tool_result', ...base, ok: false, content: verdict.reason }
 }
 
+/**
+ * A fixture step that calls `app_control` for real (§24.15): the same runner
+ * the agent's tool uses, so the window really opens the view or main really
+ * writes the setting. A destructive action asks through the real gate first,
+ * as the loop does for every app_control call that deletes, installs or quits.
+ */
+type FixtureAppControl = {
+  type: '__app_control'
+  toolCallId: string
+  /** `{ action, args }`, as the agent would send them. */
+  arguments: string
+}
+
+function isFixtureAppControl(template: unknown): template is FixtureAppControl {
+  return (template as { type?: unknown }).type === '__app_control'
+}
+
+async function* runFixtureAppControl(
+  step: FixtureAppControl,
+  input: { runId: string; invokeId: number; workspacePath: string },
+  gate: () => ToolApprovalGate
+): AsyncGenerator<AgentEvent> {
+  const args = JSON.parse(step.arguments) as { action?: string; args?: unknown }
+  const base = { runId: input.runId, invokeId: input.invokeId, toolCallId: step.toolCallId, name: 'app_control', summary: String(args.action ?? '') }
+  if (isDestructiveAppControl(args as Record<string, unknown>)) {
+    const verdict = await gate().authorize({ id: step.toolCallId, name: 'app_control', arguments: step.arguments })
+    if (!verdict.allowed) {
+      yield { type: 'tool_result', ...base, ok: false, content: verdict.reason }
+      return
+    }
+  }
+  yield { type: 'tool_start', ...base }
+  const run = appActionRunner()
+  const result = run
+    ? await run(String(args.action ?? ''), args.args ?? {}, { who: 'agent', runId: input.runId, workspacePath: input.workspacePath })
+    : { ok: false, message: 'No app control runner.' }
+  yield { type: 'tool_result', ...base, ok: result.ok, content: result.message }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -187,6 +228,10 @@ export async function* replayChatFixture(input: {
       if (isFixtureApproval(template)) {
         gate ??= fixtureApprovalGate(input, signal)
         yield* askFixtureApproval(template, input, gate)
+        continue
+      }
+      if (isFixtureAppControl(template)) {
+        yield* runFixtureAppControl(template, input, () => (gate ??= fixtureApprovalGate(input, signal)))
         continue
       }
       const event = {

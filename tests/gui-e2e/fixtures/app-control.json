@@ -1,0 +1,23 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    { "type": "assistant_message", "content": "Opening Voice settings and switching to the light theme." },
+    {
+      "type": "__app_control",
+      "toolCallId": "app-1",
+      "arguments": "{\"action\":\"open_settings\",\"args\":{\"section\":\"voice\"}}"
+    },
+    {
+      "type": "__app_control",
+      "toolCallId": "app-2",
+      "arguments": "{\"action\":\"set_theme\",\"args\":{\"theme\":\"light\"}}"
+    },
+    {
+      "type": "__app_control",
+      "toolCallId": "app-3",
+      "arguments": "{\"action\":\"delete_task\",\"args\":{}}"
+    },
+    { "type": "assistant_message", "content": "Done." },
+    { "type": "status", "status": "done" }
+  ]
+}

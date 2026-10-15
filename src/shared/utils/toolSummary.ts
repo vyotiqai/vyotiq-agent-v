@@ -121,7 +121,8 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   build_tool: { running: 'Building a tool', done: 'Built a tool' },
   ask_question: { running: 'Asking', done: 'Asked' },
   show_view: { running: 'Drawing a view', done: 'Showed a view' },
-  switch_mode: { running: 'Switching mode', done: 'Switched mode' }
+  switch_mode: { running: 'Switching mode', done: 'Switched mode' },
+  app_control: { running: 'Acting in the app', done: 'Acted in the app' }
 }
 
 export function parseMcpToolDisplay(

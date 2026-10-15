@@ -25,6 +25,7 @@ import {
 import { isMcpServerToolName } from '../../shared/mcpApps'
 import { canonicalizeAgentToolName } from './schemas/tools'
 import { parseToolCallArgs } from './tools/callArgs'
+import { isDestructiveAppControl } from '../../shared/appActions'
 import { BUILTIN_TOOL_NAME_SET, isApprovalExemptTool } from './tools/classify'
 import { agentBuiltToolAllowKey } from './agentTools/loader'
 import { resolveAgentToolsDir } from './agentTools/paths'
@@ -757,9 +758,12 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
       const danger = options.commandGuard ? guardedCommand(name, call.arguments, options.commandGuard) : null
       // What holds the call at the card whatever else says — the command
       // guard, or an ask rule — and how the card and the model hear about it.
+      const appDanger = name === 'app_control' && isDestructiveAppControl(parseToolCallArgs(name, call.arguments))
       const held: { reason: string; log: string; what: 'command' | 'call' } | null = danger
         ? { reason: danger.reason, log: `command-guard:${danger.kind}`, what: 'command' }
-        : permission?.effect === 'ask'
+        : appDanger
+          ? { reason: 'It can’t be undone from the app: it deletes a task, installs an update, or quits', log: 'app-control:destructive', what: 'call' }
+          : permission?.effect === 'ask'
           ? { reason: permission.reason, log: `permission-rule:${permission.source}`, what: 'call' }
           : null
       const gateOpts = { mcpProtection: options.mcpProtection, agentBuiltAllowKey }

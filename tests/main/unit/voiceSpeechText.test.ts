@@ -42,10 +42,25 @@ describe('toSpeakable', () => {
   })
 })
 
+describe('notes, brackets and dashes (2026-10-15 kept conversations)', () => {
+  it('drops a sentence in brackets: a note to itself is never said', () => {
+    expect(toSpeakable('"Fear." (Noted, staying quiet.)')).toBe('"Fear."')
+    expect(toSpeakable('(Noted, staying quiet.)')).toBe('')
+  })
+
+  it('says brackets and dashes inside a sentence as pauses', () => {
+    expect(toSpeakable('Ah, gotcha — you mean this app’s own look.')).toBe('Ah, gotcha, you mean this app’s own look.')
+    expect(toSpeakable('The engine (turn loop, tools) lives in main.')).toBe('The engine, turn loop, tools, lives in main.')
+    expect(toSpeakable('It’s still going – mid-way through.')).toBe('It’s still going, mid-way through.')
+    expect(toSpeakable('A follow-up run.')).toBe('A follow-up run.')
+  })
+})
+
 describe('toSpeakable on a first clause', () => {
   it('never turns a clause into a sentence: "this chat,." made the voice drop its pitch mid-sentence', () => {
     expect(toSpeakable('It found one session, this chat,')).toBe('It found one session, this chat,')
-    expect(toSpeakable('Two checks failed —')).toBe('Two checks failed —')
+    // A dash is said as a pause (2026-10-15 audit): still a clause, never a full stop.
+    expect(toSpeakable('Two checks failed —')).toBe('Two checks failed,')
     expect(toSpeakable('All green')).toBe('All green.')
   })
 })

@@ -120,6 +120,8 @@ import { randomUUID } from 'crypto'
 import { askQuestionThroughRenderer, isAgentQuestionSupersededError } from '../agentQuestion'
 import { parseViewSpec, viewDrops } from '../../../shared/viewSpec'
 import { describeLiveBlocks } from './viewLiveReads'
+import { describeAppActions } from '../../../shared/appActions'
+import { appActionRunner } from '../../appControl/hook'
 import {
   ASK_QUESTION_AUTONOMOUS_SKIP_GUIDANCE,
   ASK_QUESTION_NO_ANSWER_GUIDANCE,
@@ -822,6 +824,15 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
         ? `Already in ${mode} mode.`
         : `Mode switched from ${previous} to ${mode}. Tool gating applies immediately; the visible tool catalog refreshes for subsequent steps.`
     return toolOk('switch_mode', mode, content)
+  },
+  app_control: async (workspace, args, signal, context) => {
+    throwIfAborted(signal)
+    const action = typeof args.action === 'string' ? args.action.trim() : ''
+    if (action === 'list') return toolOk('app_control', 'list', describeAppActions('agent'))
+    const run = appActionRunner()
+    if (!run) return toolFail('app_control', action, 'The app can’t be controlled from this run (no app window).')
+    const result = await run(action, args.args ?? {}, { who: 'agent', runId: context.runId ?? null, workspacePath: workspace })
+    return result.ok ? toolOk('app_control', action, result.message) : toolFail('app_control', action, result.message)
   },
   ...terminalHandlers,
   memory_list: (workspace, _args, signal) => {

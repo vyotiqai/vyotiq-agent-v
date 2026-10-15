@@ -49,6 +49,7 @@ import { finishedBackgroundRuns } from '@renderer/lib/chat/backgroundRuns'
 import type { ChatPane, ChatPaneLayout, PaneDropZone, SessionDragPayload } from '@renderer/lib/chat/chatPaneLayout'
 import {
   applyPaneDrop,
+  bindDraftPane,
   closePane as closePaneInLayout,
   createPaneId,
   focusPane,
@@ -1045,6 +1046,11 @@ export function useWorkspaceManager(options?: {
           }
         }
         registerRunId(assignedId, workspacePath)
+        // The New task pane that started it shows the task now, in any workspace (A-112).
+        if (key === draftKey && paneLayoutRef.current) {
+          const bound = bindDraftPane(paneLayoutRef.current, workspacePath, assignedId)
+          if (bound !== paneLayoutRef.current) commitPaneLayout(bound)
+        }
         // Draft expansion state now belongs to the assigned run bucket.
         if (expansionRunId == null) expansionRunId = assignedId
         const ctx = contextsRef.current[workspacePath]
@@ -1177,7 +1183,7 @@ export function useWorkspaceManager(options?: {
       }
       return controller
     },
-    [bump, maybeEvictControllers, registerRunId, schedulePersistUiState, touchLru]
+    [bump, commitPaneLayout, maybeEvictControllers, registerRunId, schedulePersistUiState, touchLru]
   )
 
   const refreshRuns = useCallback(

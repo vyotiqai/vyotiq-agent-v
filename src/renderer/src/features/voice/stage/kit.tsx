@@ -19,7 +19,7 @@ import { AnimatedOrb } from '../orb/AnimatedOrb'
 import { ProblemText, formatTime, sessionNotes, type ShownProblem } from '../VoiceBar'
 import { EngineToken as EngineTokenBase, HAND_OFF_FAILED, Result, Steps, WHO, buildEntries, elapsed, stepVerb, workGlyph } from '../view/parts'
 import type { VoiceSnapshot } from '../voiceSessionController'
-import { HEADLINE, exchange, hint, latestWork, type WorkEntry } from './model'
+import { exchange, headline, hint, latestWork, type WorkEntry } from './model'
 
 /*
   The redesigned voice view's shared pieces (docs/voice-mode.md §26). Every
@@ -452,7 +452,7 @@ export function StateLine({
     <div className={cn('flex min-w-0 flex-col gap-0.5', align === 'center' ? 'items-center text-center' : 'items-start')}>
       {/* Announced once, by the layer's own status; this is the picture of it. */}
       <p key={v.state} className={cn('m-0 text-fg-strong motion-safe:animate-fade-in', big)} data-voice-headline>
-        {HEADLINE[v.state]}
+        {headline(v)}
       </p>
       <p
         className={cn('m-0 flex max-w-full items-center gap-1.5', size === 'sm' ? 'text-xs' : 'text-sm', live ? 'vy-text-live' : v.state === 'error' ? 'text-danger' : 'text-muted')}

@@ -1,0 +1,118 @@
+/**
+ * The window's side of the app's actions (src/shared/appActions.ts): views,
+ * panes, panels, the navigator, the agent's mode, the update. Main finds the
+ * task or workspace first and sends it resolved; this does what a click or
+ * the command palette would, and answers in words the voice can say.
+ */
+import type { AppWindowAction } from '@shared/appActions'
+import type { SettingsSection } from '@renderer/features/settings/types'
+import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
+import { runPaletteCommand, type PaletteHandlers } from '@renderer/features/commandPalette/paletteCommands'
+
+export type WindowActionHandlers = PaletteHandlers & {
+  onOpenSettingsSection?: (section: SettingsSection) => void
+  onOpenTask: (path: string, runId: string) => void
+  onSwitchWorkspace?: (path: string) => void
+  onToggleArchivedRun?: (path: string, runId: string) => void
+  /** Whether the task is archived now, before the toggle. */
+  isArchived?: (path: string, runId: string) => boolean
+  onDeleteRun?: (path: string, runId: string) => Promise<boolean | void> | void
+  onSetAgentMode?: (mode: 'ask' | 'agent') => boolean
+  /** An update is downloaded and ready to install. */
+  updateReady?: () => boolean
+  /** The task view is showing: panels sit beside a task. */
+  inTaskView?: () => boolean
+}
+
+export type WindowActionOutcome = { ok: boolean; message: string }
+
+const VIEW_COMMAND: Readonly<Record<string, { id: string; said: string }>> = {
+  home: { id: 'goHome', said: 'Here’s Home.' },
+  settings: { id: 'settings', said: 'Settings are open.' },
+  usage: { id: 'goUsage', said: 'Here’s Usage.' },
+  inbox: { id: 'openInbox', said: 'The inbox is open.' },
+  scheduled: { id: 'scheduledTasks', said: 'Here are the scheduled tasks.' },
+  extensions: { id: 'openExtensions', said: 'Extensions are open.' },
+  docs: { id: 'openDocs', said: 'The documentation is open.' },
+  whats_new: { id: 'whatsNew', said: 'Here’s what’s new.' },
+  shortcuts: { id: 'shortcutsHelp', said: 'Here are the shortcuts.' }
+}
+
+const PANEL_COMMAND: Readonly<Record<string, string>> = {
+  terminal: 'panelTerminal',
+  changes: 'panelChanges',
+  browser: 'panelBrowser',
+  files: 'panelFiles',
+  plan: 'panelPlan',
+  pr: 'panelPr'
+}
+
+export async function executeWindowAction(action: AppWindowAction, h: WindowActionHandlers): Promise<WindowActionOutcome> {
+  const a = action.args
+  const path = action.resolved?.workspacePath
+  const runId = action.resolved?.runId
+  switch (action.name) {
+    case 'open_view': {
+      const view = VIEW_COMMAND[String(a.view)]
+      if (!view) return { ok: false, message: 'There’s no such view.' }
+      if (view.id === 'openExtensions' && !h.onOpenExtensions) return { ok: false, message: 'Extensions aren’t available here.' }
+      runPaletteCommand(view.id, h)
+      return { ok: true, message: view.said }
+    }
+    case 'open_settings': {
+      const section = typeof a.section === 'string' ? (a.section as SettingsSection) : null
+      if (section && h.onOpenSettingsSection) h.onOpenSettingsSection(section)
+      else h.onOpenSettings()
+      return { ok: true, message: 'Settings are open.' }
+    }
+    case 'open_panel': {
+      const id = PANEL_COMMAND[String(a.panel)]
+      if (!id) return { ok: false, message: 'There’s no such panel.' }
+      if (h.inTaskView && !h.inTaskView()) return { ok: false, message: 'Panels sit beside a task; open one first.' }
+      runPaletteCommand(id, h)
+      return { ok: true, message: `The ${a.panel === 'pr' ? 'pull request' : String(a.panel)} panel is open.` }
+    }
+    case 'toggle_navigator':
+      h.onToggleNavigator()
+      return { ok: true, message: 'Done.' }
+    case 'next_needs_you':
+      h.onNextNeedsYou()
+      return { ok: true, message: 'Okay.' }
+    case 'new_task':
+      if (path && h.onNewChatInWorkspace) h.onNewChatInWorkspace(path)
+      else h.onNewTask()
+      return { ok: true, message: path ? `New task in ${formatWorkspaceName(path)}. What should it do?` : 'New task. What should it do?' }
+    case 'switch_workspace':
+      if (!path || !h.onSwitchWorkspace) return { ok: false, message: 'That workspace can’t be switched to.' }
+      h.onSwitchWorkspace(path)
+      return { ok: true, message: `You’re in ${formatWorkspaceName(path)} now.` }
+    case 'open_task':
+      if (!path || !runId) return { ok: false, message: 'No task matches that.' }
+      h.onOpenTask(path, runId)
+      return { ok: true, message: 'Here it is: {task}.' }
+    case 'archive_task': {
+      if (!path || !runId || !h.onToggleArchivedRun) return { ok: false, message: 'That task can’t be archived from here.' }
+      const was = h.isArchived?.(path, runId) ?? false
+      h.onToggleArchivedRun(path, runId)
+      return { ok: true, message: was ? 'Unarchived {task}.' : 'Archived {task}.' }
+    }
+    case 'delete_task': {
+      if (!path || !runId || !h.onDeleteRun) return { ok: false, message: 'That task can’t be deleted from here.' }
+      const done = await h.onDeleteRun(path, runId)
+      return done === false
+        ? { ok: false, message: 'It couldn’t be deleted; the screen says why.' }
+        : { ok: true, message: 'Deleted {task}. It’s in Recently deleted for 30 days.' }
+    }
+    case 'set_agent_mode': {
+      const mode = a.mode === 'ask' ? 'ask' : 'agent'
+      if (!h.onSetAgentMode?.(mode)) return { ok: false, message: 'No task is on screen to set.' }
+      return { ok: true, message: mode === 'ask' ? 'Ask mode: it answers without changing anything.' : 'Agent mode: it can make changes.' }
+    }
+    case 'install_update':
+      if (!h.updateReady?.()) return { ok: false, message: 'No update is downloaded yet.' }
+      runPaletteCommand('installUpdate', h)
+      return { ok: true, message: 'Installing it; the app restarts.' }
+    default:
+      return { ok: false, message: `The window can’t do ${action.name}.` }
+  }
+}

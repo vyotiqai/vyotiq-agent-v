@@ -63,6 +63,8 @@ export class FixtureSttSession implements SttSession {
 export async function openFixtureStt(opts: SttOpenOptions): Promise<FixtureSttSession> {
   const session = new FixtureSttSession(opts.emit)
   if (opts.keyterms) session.setKeyterms(opts.keyterms)
+  // The GUI e2e talks through the listener the app last opened: it hears nothing else.
+  if (process.env.VYOTIQ_E2E_FIXTURE === '1') (globalThis as { __vyotiqVoiceFixtureStt?: FixtureSttSession }).__vyotiqVoiceFixtureStt = session
   opts.emit({ kind: 'open' })
   return session
 }

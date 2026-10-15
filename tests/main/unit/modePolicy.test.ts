@@ -450,7 +450,9 @@ describe('modePolicy', () => {
       'edit_notebook',
       // Writing a module that later runs as arbitrary Node is neither a read
       // nor a planning step.
-      'build_tool'
+      'build_tool',
+      // Acts in the app (views, tasks, settings): not a read of the workspace.
+      'app_control'
     ] as const
 
     const classified = [

@@ -166,6 +166,7 @@ const SIDE: Readonly<Record<ConversationRow['kind'], string>> = {
   hand_off: 'work',
   followed: 'work',
   stop_agent: 'stop',
+  app_action: 'stop',
   gap: 'gap'
 }
 
@@ -187,8 +188,9 @@ function Rows({ rows, onOpenTask }: { rows: readonly ConversationRow[]; onOpenTa
           case 'you':
             return (
               <Line key={row.id} row="you" label={label ? WHO.you : ''}>
-                <span className="text-fg-strong [overflow-wrap:anywhere]">{row.text}</span>
+                <span className={cn(row.unanswered ? 'text-muted' : 'text-fg-strong', '[overflow-wrap:anywhere]')}>{row.text}</span>
                 {row.stop ? <span className="ml-2 text-caption text-tertiary">stopped the work</span> : null}
+                {row.unanswered ? <span className="ml-2 text-caption text-tertiary">Not answered</span> : null}
               </Line>
             )
           case 'voice':
@@ -236,6 +238,15 @@ function Rows({ rows, onOpenTask }: { rows: readonly ConversationRow[]; onOpenTa
                 <span className="flex items-center gap-1.5 text-caption text-tertiary">
                   <Icon name="stop" size={12} />
                   {row.by === 'you' ? 'You stopped the work' : `${WHO.voice} stopped the work`}
+                </span>
+              </Line>
+            )
+          case 'app_action':
+            return (
+              <Line key={row.id} row="app_action" label="">
+                <span className={cn('flex items-center gap-1.5 text-caption', row.ok ? 'text-tertiary' : 'text-danger')}>
+                  <Icon name={row.ok ? 'check' : 'warningCircle'} size={12} />
+                  <span className="[overflow-wrap:anywhere]">{row.message}</span>
                 </span>
               </Line>
             )

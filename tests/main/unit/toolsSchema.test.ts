@@ -49,7 +49,7 @@ describe('toolsSchema', () => {
     // 61 + build_tool + check_done_when + screen_snip + github_pr_checks + github_pr_comments
     // + web_fetch + web_search + browser_console + memory_delete + move + message_agent_instance
     // + show_view.
-    expect(names.length).toBe(73)
+    expect(names.length).toBe(74)
     expect(names).toEqual(
       expect.arrayContaining([
         'github_pr_create',
@@ -77,7 +77,7 @@ describe('toolsSchema', () => {
   it('wires a real handler for every built-in tool (no missing/stub handlers)', () => {
     const handlerNames = Object.keys(BUILTIN_HANDLERS).sort()
     expect(handlerNames).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(handlerNames).toHaveLength(73)
+    expect(handlerNames).toHaveLength(74)
     for (const name of BUILTIN_TOOL_NAMES) {
       const handler = BUILTIN_HANDLERS[name as keyof typeof BUILTIN_HANDLERS]
       expect(typeof handler, `${name} handler must be a function`).toBe('function')

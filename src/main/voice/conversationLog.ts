@@ -24,10 +24,18 @@ export type VoiceLogEntry =
   | { kind: 'hand_off'; handOffId: string; brief: string }
   /** The task took the hand-off: this run does the work. */
   | { kind: 'followed'; runId: string; handOffId?: string }
+  /** The task the session is on (opened on it, or moved to it): a later session on it picks this conversation up. */
+  | { kind: 'task'; runId: string }
   | { kind: 'not_sent'; handOffId: string; reason: string }
   /** You answered the agent's approval or question by voice: it never became a message. */
   | { kind: 'answered'; what: 'approval' | 'question'; text: string; decision?: string; tool?: string }
   | { kind: 'stop_agent'; by: 'you' | 'voice' }
+  /**
+   * Heard and left unanswered on purpose: your turn `turnId` (the voice stayed quiet), or
+   * words that were never a turn (`text`: a filler, a bare "okay"). The live view marks them; so does the history.
+   */
+  | { kind: 'unanswered'; turnId: string; text?: string }
+  | { kind: 'app_action'; action: string; ok: boolean; message: string }
   /** Heard, but not a turn: no words, the agent's own echo, or noise. No words kept. */
   | { kind: 'dropped'; reason: 'empty' | 'echo' | 'noise'; chars: number }
   /** `detail`: the provider's reason, one line, redacted; the code alone said "out_of_credit" and not why. */
@@ -103,8 +111,9 @@ export class VoiceConversationLog {
 }
 
 function redactEntry(entry: VoiceLogEntry): VoiceLogEntry {
-  if ('text' in entry) return { ...entry, text: redactSecretsInText(entry.text) }
+  if ('text' in entry && entry.text !== undefined) return { ...entry, text: redactSecretsInText(entry.text) }
   if (entry.kind === 'hand_off') return { ...entry, brief: redactSecretsInText(entry.brief) }
+  if (entry.kind === 'app_action') return { ...entry, message: redactSecretsInText(entry.message) }
   if (entry.kind === 'error' && entry.detail) return { ...entry, detail: redactSecretsInText(entry.detail) }
   return entry
 }

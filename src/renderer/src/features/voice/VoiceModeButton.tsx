@@ -8,7 +8,7 @@ import { matchShortcut } from '@renderer/lib/shortcuts/match'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { STT_AUTO_ORDER, resolveSttProvider, sttEntry, type VoiceKeyAvailability } from '@shared/voice'
 import type { VoiceKeyStatus, VoiceSettings } from '@shared/ipc/schemas/voice'
-import { endVoiceMode, noteVoiceLineFocus, registerVoiceLine, startVoiceMode, useVoiceMode, voiceShortcutTarget } from './voiceMode'
+import { endVoiceMode, noteVoiceLineFocus, registerVoiceLine, startVoiceMode, takeArmedVoiceStart, useVoiceMode, voiceShortcutTarget } from './voiceMode'
 
 const PANEL_WIDTH_PX = 360
 
@@ -86,7 +86,12 @@ export function VoiceModeButton({
   const toggleRef = useRef(toggle)
   toggleRef.current = toggle
 
-  useEffect(() => registerVoiceLine(owner), [owner])
+  useEffect(() => {
+    const unregister = registerVoiceLine(owner)
+    // Asked for from Home or Settings: this New task line is where it starts.
+    if (takeArmedVoiceStart()) toggleRef.current()
+    return unregister
+  }, [owner])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

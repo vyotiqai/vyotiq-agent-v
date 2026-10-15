@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   applyPaneDrop,
+  bindDraftPane,
   closePane,
   createPaneId,
   insertDraftPaneBeside,
@@ -310,5 +311,21 @@ describe('chatPaneLayout', () => {
       expect(parseSessionDragPayload(dtFrom({ [SESSION_DRAG_MIME]: 'null' }))).toBeNull()
       expect(parseSessionDragPayload(dtFrom({ 'text/plain': '"plain"' }))).toBeNull()
     })
+  })
+
+  it('a New task pane takes the run it started, in any workspace, without moving focus (A-112)', () => {
+    const one = singlePaneLayout('C:/home', null)
+    const bound = bindDraftPane(one, 'C:/home', 'run-1')
+    expect(bound.panes[0]).toMatchObject({ workspacePath: 'C:/home', runId: 'run-1' })
+    // Already shown, or no draft pane in that workspace: unchanged.
+    expect(bindDraftPane(bound, 'C:/home', 'run-1')).toBe(bound)
+    expect(bindDraftPane(one, 'C:/work', 'run-1')).toBe(one)
+    // Two drafts: the focused one takes it; focus stays put.
+    const two = insertDraftPaneBeside(one, one.focusedPaneId, 4)!
+    const [left, right] = two.panes.map((p) => p.paneId)
+    const next = bindDraftPane({ ...two, focusedPaneId: left! }, 'C:/home', 'run-2')
+    expect(next.panes.map((p) => p.runId)).toEqual(['run-2', null])
+    expect(next.focusedPaneId).toBe(left)
+    expect(bindDraftPane({ ...two, focusedPaneId: right! }, 'C:/home', 'run-2').panes.map((p) => p.runId)).toEqual([null, 'run-2'])
   })
 })

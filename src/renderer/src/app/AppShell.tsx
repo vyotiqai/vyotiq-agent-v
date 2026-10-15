@@ -52,6 +52,11 @@ import type { WaitingTask } from './navigator/NotificationsRow'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 import { useNavigatorView } from './navigator/useNavigatorView'
 import { VoiceCompanionColumn, VoiceTakeoverLayer, VoiceView } from '@renderer/features/voice/VoiceView'
+import { executeWindowAction, type WindowActionHandlers } from './appActionExecutor'
+import { armVoiceStart, voiceShortcutTarget } from '@renderer/features/voice/voiceMode'
+import { matchShortcut } from '@renderer/lib/shortcuts/match'
+import { pinnedRunKey } from '../features/home/pinnedRuns'
+import type { PaletteHandlers } from '@renderer/features/commandPalette/paletteCommands'
 
 export type ShellView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage' | 'screen'
 
@@ -92,7 +97,10 @@ export type AppShellProps = {
   /** Open a task in a second pane beside the focused one (palette Shift ↵). */
   onOpenRunBeside?: (path: string, runId: string) => void
   onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
-  onDeleteRunInWorkspace?: (path: string, runId: string) => void
+  /** False when it couldn't be deleted (the toast says why). */
+  onDeleteRunInWorkspace?: (path: string, runId: string) => void | Promise<boolean | void>
+  /** Ask or Agent for the task in the focused pane; false with no task there. */
+  onSetAgentMode?: (mode: 'ask' | 'agent') => boolean
   onExportRunInWorkspace?: (path: string, runId: string) => void
   /** Import task…: a task bundle into this workspace, as a new read-only task. */
   onImportTask?: (path: string) => void
@@ -459,6 +467,88 @@ function AppShellInner(props: AppShellProps) {
     [onOpenSettingsSection, onOpenSettings]
   )
 
+  /** What the palette's commands, and the app actions the window runs, act through. */
+  const paletteHandlers = (): PaletteHandlers => ({
+    workspaces: openWorkspaces,
+    activeWorkspacePath: workspacePath,
+    onOpenSettings: props.onOpenSettings,
+    onOpenHome: props.onOpenHome,
+    onOpenUsage: props.onOpenUsage,
+    onNewTask,
+    onToggleNavigator,
+    onNextNeedsYou,
+    onOpenFeedback: props.onOpenFeedback,
+    onStop: props.onChatStop,
+    onCloseChat: props.onCloseChat,
+    onSplitPane: props.onSplitPane,
+    onSwitchWorkspaceByIndex: switchWorkspaceByIndex,
+    onNewChatInWorkspace: props.onNewChatInWorkspace,
+    onFocusInstructionLine: () => {
+      focusComposerMessage()
+    },
+    onOpenSettingsField: openSettingsField,
+    onOpenExtensions: props.onOpenMarketplace,
+    onAddWorkspace: props.onAddWorkspace,
+    onAppearanceChange: props.onAppearanceChange,
+    onImportTask: () => {
+      if (workspacePath) props.onImportTask?.(workspacePath)
+    }
+  })
+  // App actions from the voice or the agent (§24.15): main sends the window's own; the answer goes back.
+  const windowActionHandlers = useRef<WindowActionHandlers | null>(null)
+  windowActionHandlers.current = {
+    ...paletteHandlers(),
+    onOpenSettingsSection,
+    onOpenTask: openTask,
+    onSwitchWorkspace: onSwitchWorkspace
+      ? (path) => {
+          onSwitchWorkspace(path)
+          onOpenChat()
+        }
+      : undefined,
+    onToggleArchivedRun: props.onToggleArchivedRun,
+    isArchived: (path, runId) => props.archivedRunKeys?.includes(pinnedRunKey(path, runId)) ?? false,
+    onDeleteRun: props.onDeleteRunInWorkspace,
+    onSetAgentMode: props.onSetAgentMode,
+    updateReady: () => update.status === 'downloaded',
+    inTaskView: () => view === 'chat'
+  }
+  useEffect(
+    () =>
+      window.vyotiq?.onAppAction?.((action) => {
+        const handlers = windowActionHandlers.current
+        const answer = handlers ? executeWindowAction(action, handlers) : Promise.resolve({ ok: false, message: 'The window isn’t ready.' })
+        void answer
+          .catch((err: unknown) => ({ ok: false, message: err instanceof Error ? err.message.slice(0, 300) : 'It failed.' }))
+          .then((r) => window.vyotiq.appActionResult({ requestId: action.requestId, ok: r.ok, message: r.message.slice(0, 500) }))
+      }),
+    []
+  )
+
+  // Voice mode from anywhere (§24.15): with no task line on screen, open New task and start it there.
+  const onNewTaskRef = useRef(onNewTask)
+  onNewTaskRef.current = onNewTask
+  useEffect(() => {
+    const start = (): void => {
+      armVoiceStart()
+      onNewTaskRef.current()
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (!matchShortcut(e, 'voiceMode') || voiceShortcutTarget() !== null) return
+      e.preventDefault()
+      start()
+    }
+    const onCommand = (e: Event): void => {
+      if ((e as CustomEvent<{ id?: string }>).detail?.id === 'voiceMode' && voiceShortcutTarget() === null) start()
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('vyotiq:command', onCommand)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('vyotiq:command', onCommand)
+    }
+  }, [])
+
   useAppShortcuts({
     onToggleSidebar: onToggleNavigator,
     onOpenSearch: () => setPaletteOpen(true),
@@ -756,34 +846,7 @@ function AppShellInner(props: AppShellProps) {
         onNewTask={(text) => {
           if (newTaskPath && props.onNewTaskWithText) props.onNewTaskWithText(newTaskPath, text)
         }}
-        onRunCommand={(id) =>
-          runPaletteCommand(id, {
-            workspaces: openWorkspaces,
-            activeWorkspacePath: workspacePath,
-            onOpenSettings: props.onOpenSettings,
-            onOpenHome: props.onOpenHome,
-            onOpenUsage: props.onOpenUsage,
-            onNewTask,
-            onToggleNavigator,
-            onNextNeedsYou,
-            onOpenFeedback: props.onOpenFeedback,
-            onStop: props.onChatStop,
-            onCloseChat: props.onCloseChat,
-            onSplitPane: props.onSplitPane,
-            onSwitchWorkspaceByIndex: switchWorkspaceByIndex,
-            onNewChatInWorkspace: props.onNewChatInWorkspace,
-            onFocusInstructionLine: () => {
-              focusComposerMessage()
-            },
-            onOpenSettingsField: openSettingsField,
-            onOpenExtensions: props.onOpenMarketplace,
-            onAddWorkspace: props.onAddWorkspace,
-            onAppearanceChange: props.onAppearanceChange,
-            onImportTask: () => {
-              if (workspacePath) props.onImportTask?.(workspacePath)
-            }
-          })
-        }
+        onRunCommand={(id) => runPaletteCommand(id, paletteHandlers())}
       />
       <WhatsNewModal />
       <ShortcutsHelpDialog

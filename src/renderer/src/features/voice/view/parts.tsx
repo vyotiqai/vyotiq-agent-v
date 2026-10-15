@@ -100,7 +100,8 @@ export function workGlyph(entry: Extract<Entry, { who: 'work' }>): TaskState {
 export const HAND_OFF_FAILED: Readonly<Record<VoiceHandOffFailure, string>> = {
   no_task: 'Not sent: no task was open to take it',
   refused: 'Not sent: the task wasn’t ready to take it',
-  error: 'Not sent: it couldn’t be sent'
+  error: 'Not sent: it couldn’t be sent',
+  unfollowed: 'Sent, but voice couldn’t follow the task'
 }
 
 /**

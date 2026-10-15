@@ -33,6 +33,7 @@ export const PUSH_CHANNEL_NAMES = [
   'voiceMiniState',
   'voiceMiniLevel',
   'voiceMiniCommand',
+  'appAction',
   'githubAuthStatusEvent',
   'skillsChanged',
   'notificationsChanged',

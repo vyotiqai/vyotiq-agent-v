@@ -2,6 +2,7 @@ import { mutationPathKey } from '@main/workspace/mutationQueue'
 import { BUILTIN_TOOL_NAMES } from '../schemas/tools'
 import { readPathArg } from './argAccess'
 import { lspActionFromArgs } from './lsp'
+import { isDestructiveAppControl } from '../../../shared/appActions'
 
 /** Every builtin tool name, for lookups that must not touch disk. */
 export const BUILTIN_TOOL_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES)
@@ -189,5 +190,7 @@ export function isApprovalExemptTool(name: string, args?: Record<string, unknown
   if (name === 'lsp') return lspActionFromArgs(args) !== 'rename'
   // Listing and reading issues change nothing on GitHub; creating one posts under the account.
   if (name === 'github_issue') return args?.action === 'list' || args?.action === 'view'
+  // Acting in the app changes no files; deleting a task, installing an update or quitting always asks (toolApproval).
+  if (name === 'app_control') return !isDestructiveAppControl(args)
   return APPROVAL_EXEMPT_BUILTIN.has(name) || SERIAL_APPROVAL_EXEMPT_BUILTIN.has(name)
 }

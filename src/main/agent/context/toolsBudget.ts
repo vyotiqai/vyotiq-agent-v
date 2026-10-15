@@ -25,7 +25,9 @@ export const OPTIONAL_BUILTIN_NAMES = new Set([
   ...AGENT_TOOLS.map((t) => t.name).filter(
     (name) => name.startsWith('browser_') && !CORE_OPTIONAL_ALWAYS.has(name)
   ),
-  'merge_agent_instance'
+  'merge_agent_instance',
+  // Acting in the app (§24.15): loaded the first time the agent asks for or calls it.
+  'app_control'
 ])
 
 export function isOptionalBuiltinName(name: string): boolean {

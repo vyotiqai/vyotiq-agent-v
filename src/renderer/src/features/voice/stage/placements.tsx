@@ -34,7 +34,7 @@ import {
   useNow,
   useStage
 } from './kit'
-import { HEADLINE, exchange, hint, latestWork, summaryTasks, summaryTitle, type SummaryTask } from './model'
+import { exchange, headline, hint, latestWork, summaryTasks, summaryTitle, type SummaryTask } from './model'
 
 /*
   The five placements (docs/voice-mode.md §26), one structure: orb · what's
@@ -55,7 +55,7 @@ function Announce() {
   const { v } = useStage()
   return (
     <span className="sr-only" role="status" aria-live="polite">
-      {HEADLINE[v.state]}
+      {headline(v)}
     </span>
   )
 }
@@ -137,7 +137,7 @@ function placeholder(api: ReturnType<typeof useStage>, now: number): string {
   if (v.state === 'error') return 'Voice mode stopped'
   // An ellipsis only while something is under way; "Needs you" and "Muted" are states, not progress.
   const ongoing = v.state !== 'waiting_on_you' && v.state !== 'paused'
-  const head = `${HEADLINE[v.state]}${ongoing ? '…' : ''}`
+  const head = `${headline(v)}${ongoing ? '…' : ''}`
   return line ? `${head} · ${line}` : head
 }
 
@@ -463,7 +463,7 @@ export function PillBody({ words = 260, onAnswer }: { words?: number; onAnswer?:
     <>
       <StageOrb size={32} interactive={false} />
       <span className="shrink-0 text-sm text-fg-strong" data-voice-headline>
-        {HEADLINE[v.state]}
+        {headline(v)}
       </span>
       <PillClock />
       {notice ? (
@@ -596,12 +596,11 @@ export function Summary({
   onClose: () => void
   onOpenTask?: (workspacePath: string, runId: string) => void
   /** False when there was no task line to start it on. */
-  onTalkAgain: () => boolean
+  onTalkAgain: () => void
   onAllConversations?: () => void
 }) {
   const { v, startedAt } = useStage()
   const [showing, setShowing] = useState(false)
-  const [noLine, setNoLine] = useState(false)
   const tasks = useMemo(() => summaryTasks(v.transcript, v.works, endedAt), [v.transcript, v.works, endedAt])
   const length = formatDurationShort(endedAt - (startedAt ?? endedAt))
   // Esc closes it (capture, so it never also stops a run).
@@ -657,18 +656,13 @@ export function Summary({
                 </ol>
               ) : null}
               <div className="flex items-center gap-2">
-                <Button size="md" variant="primary" icon="waveform" onClick={() => setNoLine(!onTalkAgain())} data-voice-talk-again>
+                <Button size="md" variant="primary" icon="waveform" onClick={onTalkAgain} data-voice-talk-again>
                   Talk again
                 </Button>
                 <Button size="md" variant="secondary" icon="chat" onClick={() => setShowing(true)} data-voice-summary-conversation>
                   Conversation
                 </Button>
               </div>
-              {noLine ? (
-                <p className="m-0 text-sm text-muted" role="status" data-voice-talk-again-none>
-                  Open a task or New task first: voice mode starts on a task’s composer.
-                </p>
-              ) : null}
             </div>
           )}
         </div>

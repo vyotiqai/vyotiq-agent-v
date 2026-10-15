@@ -6,7 +6,9 @@ design. It is a living document: every decision, change of plan and finished
 step is recorded here as the work goes, and the **Status** and **Decision log**
 sections are updated with every change to voice mode on `main`.
 
-> **Status (2026-10-14):** on `main`. [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65)
+> **Status (2026-10-15):** the eighth audit (§24.13) found that a spoken stop could miss the run, and that the voice can act on nothing in the app. Its bug fixes (batch 1, with A-112), the voice's picture of the app (batch 2, §24.14) and control of the app, tasks, agent and system for the voice and the agent (batch 3, §24.15) are done (uncommitted). A streaming listener still needs a Deepgram or AssemblyAI key.
+>
+> **Earlier status (2026-10-14):** on `main`. [#65](https://github.com/vyotiqai/vyotiq-agent-v/pull/65)
 > merged, then `e2c3985` (dip-then-stop barge-in, mic-on indicator, spoken-only voice replies).
 > Built through Phase 6, approvals and questions by voice, and most of Phase 7. Since then: an
 > OpenRouter listener (D-35). **The first real run failed** (2026-10-14); the audit in §24.5 found why,
@@ -52,6 +54,7 @@ sections are updated with every change to voice mode on `main`.
 23. [Next version (v2 backlog)](#23-next-version-v2-backlog)
 24. [Wiring audit](#24-wiring-audit)
 25. [The conversation (2026-10-14 redesign)](#25-the-conversation-2026-10-14-redesign)
+26. [Placements, styles and the summary (2026-10-15 redesign)](#26-placements-styles-and-the-summary-2026-10-15-redesign)
 
 ---
 
@@ -181,7 +184,14 @@ Playback can't use `<audio src="blob:…">`: the CSP has no `blob:` in
 `URL.createObjectURL`. The player decodes raw PCM into `AudioBuffer`s and
 schedules them, so neither rule needs to change.
 
-### Files (planned)
+### Files (as planned on 2026-10-11)
+
+The build differs from this plan. There is no `agentBridge.ts`: the run tap
+is in `startAgentRun.ts` and the reply is spoken by `voice/replySpeaker.ts`.
+The `<spoken>` parser is `src/shared/spokenSummary.ts`. OpenRouter speech
+is `tts/openaiSpeech.ts`, and there is no `voice/index.ts`. The window's half
+is `voiceSessionController.ts` (mic, player, events), `voiceMode.ts` (the
+owning line and hand-offs) and `VoiceView.tsx` with `stage/` (§26).
 
 ```
 src/shared/voice.ts                         types, constants, provider catalog
@@ -354,8 +364,8 @@ decision (**Q4**). The recommendation:
 
 Steering, not cancelling, is the default because cancelling throws away work
 in progress. Steering is what you'd do if you leaned over a colleague's
-shoulder. The stop-phrase list is short, exact-match on the whole utterance,
-and shown in Settings.
+shoulder. The stop-phrase list is short and exact-match on the whole utterance
+(`STOP_PHRASES` in `voice/speechText.ts`); it isn't shown in Settings.
 
 ### 6.4 Echo: the agent hearing itself
 
@@ -398,9 +408,9 @@ down the same path a typed message takes. No new loop entry point.
 - **No run on the task:** the message starts one. The voice bridge calls the
   same launch path as `chat:start` (`launchRun`), with `source: 'voice'`.
 - **A run is live:** follow-up and promote, as §6.3.
-- The message carries `meta.voice = { sttProvider, durationMs, confidence? }`.
-  The record shows a small mic glyph on the turn. Low-confidence words can be
-  underlined so a mishearing is easy to spot.
+- The message carries `spoken: true` (so only that turn's reply opens with a
+  `<spoken>` block, D-32). The `meta.voice` with provider, duration and
+  confidence planned here was never built.
 
 The renderer's composer flow (`createChatStreamController.send`) has
 offline-queue and onboarding gates. The bridge either goes through it (sending a
@@ -1281,7 +1291,7 @@ Answers go in the decision log (§21) and this list is kept current.
 | Bridge | Fixture STT + fixture TTS + a scripted run: turn → message → speech; barge-in → follow-up promote; stop phrase → cancel; approval by voice | `tests/main/integration/voiceSession.test.ts` |
 | IPC | Every channel in `VYOTIQ_INVOKE_MAP`; schema round-trips | `ipcContract.test.ts`, `tests/shared/ipcSchemas.test.ts` |
 | Renderer | Orb states and labels, voice bar, player scheduling (fake `AudioContext`), Esc precedence, reduced motion | `tests/renderer/voice/*.test.tsx` |
-| End to end | Electron with Chromium's fake mic (`--use-fake-device-for-media-stream` + a WAV), fixture providers under `VYOTIQ_E2E_FIXTURE=1` | `tests/gui-e2e/voice.spec.ts` |
+| End to end | Electron with Chromium's fake mic (`--use-fake-device-for-media-stream` + a WAV), fixture providers under `VYOTIQ_E2E_FIXTURE=1` | `tests/gui-e2e/voice-mode.spec.ts` |
 | Manual | Real keys: latency per leg, echo on speakers (Win/macOS), proxy, airplane-mode mid-turn | Checklist in this doc, filled in per phase |
 
 Gates for every commit: `pnpm typecheck`, `eslint .`, the vitest suite.
@@ -1391,7 +1401,7 @@ with the feature off.
   - [x] PRIVACY.md §7 "Voice mode": every listening and speaking endpoint, what is sent and what isn't, vocabulary hints, redaction, keys, previews; summary bullet. README: dictation bullet corrected (it said no audio ever leaves the app, untrue for cloud dictation) and a Voice mode bullet. **Ajay: the policy's effective date is unchanged; bump it when this ships**
   - [x] Site docs: new "Voice mode" page (Tasks), "What leaves your computer" and keyboard shortcuts updated
   - [x] Per-turn latency log: end of turn → sent → first sentence → first audio, timings only (`logLatency`, scope `voice`)
-  - [ ] GUI end-to-end spec with Chromium's fake mic under `VYOTIQ_E2E_FIXTURE=1` (`tests/gui-e2e/voice.spec.ts`): needs a built Electron app and a display; the cloud workspace installs without Electron's binary. Write it when the branch is next built on a full machine
+  - [ ] GUI end-to-end spec with Chromium's fake mic under `VYOTIQ_E2E_FIXTURE=1` (`tests/gui-e2e/voice-mode.spec.ts`): needs a built Electron app and a display; the cloud workspace installs without Electron's binary. Write it when the branch is next built on a full machine
   - [ ] Silence pause for billing (R-09) and the proxy check for websockets (R-04): need real providers to verify
 
 ---
@@ -1547,7 +1557,7 @@ only for spoken turns (D-32).
 - First run with real keys, mic and speakers (Phase 1 spike): echo on
   speakers, latency per provider (`TurnLatency` is logged), vendor formats.
 - Look across the five skins × light/dark, the narrowest pane and large text.
-- GUI e2e `tests/gui-e2e/voice.spec.ts` with Chromium's fake mic under
+- GUI e2e `tests/gui-e2e/voice-mode.spec.ts` with Chromium's fake mic under
   `VYOTIQ_E2E_FIXTURE=1`.
 - Websockets through a proxy (R-04) and silence-pause billing (R-09).
 - The tray dot and taskbar/dock badge on Windows and macOS (no tray test
@@ -1963,6 +1973,153 @@ Tests: `tests/main/unit/voiceTurnReliability.test.ts`, a `setTask` case in
 Not checked here: a real mic and speaker run (same reason as §24.10).
 
 ---
+
+### 24.13 A stop that missed the run, and a voice that can do nothing in the app (2026-10-15, eighth audit)
+
+A read-only audit first, then fixes Ajay approved. Evidence: the 16 kept
+conversations in `%APPDATA%/vyotiq/workspaces/1d7ca570-…/voice`, the 359 voice
+lines of `vyotiq.log`, and run `ad3bcdc4`'s events. Settings at the time: voice
+model `z-ai/glm-5.3-flash`, OpenRouter listening (`gpt-transcribe`), Eleven v4
+Turbo speaking, the mini window.
+
+| # | Found | Fix |
+| --- | --- | --- |
+| A-103 | **Fixed** The voice said "Stopping it." twice (11:18:23Z, 11:18:52Z) and run `ad3bcdc4` went on: four more steps, no `Chat cancel` in the log until 11:19:31Z. The stop went through the task's composer (`handleVoiceStop`), which dropped it; why its `running()` was false is not known. That Stop can also wait on a `window.confirm` when follow-ups are queued | A spoken stop cancels the followed run in main (`cancelRun`, which also clears its queued follow-ups); the window is asked only when main has no run to stop |
+| A-104 | **Fixed** "Cancel it." at 11:18:16Z was stopped 7 s later: a noise held the voice's answer, and its `stop_agent` call waited in the held backlog | A stop the model calls runs at once; only its words wait for the hold |
+| A-105 | **Fixed** "Cancel it." wasn't a stop phrase, so it went to the voice model | The list takes "cancel it", "stop the agent/task/work/run", "kill it", "halt", "stop everything" and more |
+| A-106 | **Fixed** "Continue." four seconds into a new session handed back the work Ajay had just stopped as the wrong thing: each session started with an empty memory | Each session writes a `task` line; a new one on the same task loads the end of the last kept conversation (`lastConversationForRun`) as the voice's memory. The prompt says not to hand back work the user stopped or called wrong |
+| A-107 | **Fixed** "(Noted, staying quiet.)" was spoken (11:17:39Z) | A sentence in brackets is never said; a reply that is only one counts as staying quiet. The prompt forbids notes and stage directions |
+| A-108 | **Fixed** "There's a piece of context attached to this conversation that isn't from you" (11:35:43Z) | The prompt says the app's bracketed context is never mentioned |
+| A-109 | **Fixed** Seven spoken sentences (04:01Z) and dashes in replies | At most three sentences are said; the rest is the reply's last caption, shown once the spoken ones have played. Dashes and brackets inside a sentence are said as pauses |
+| A-110 | **Fixed** A turn was logged with `firstAudioMs` 25: the last reply's audio starting late was timed as its answer | Only replies opened after the turn time it |
+| A-111 | **Fixed** Saved conversations lost "Not answered", and read back errors without their reason | `unanswered` lines, shown muted with "Not answered" in Voice conversations; an error's `detail` passes the schema |
+
+Measured, 2026-10-15 (37 turns; medians, p90 in brackets): end-of-turn wait
+1.30 s (always: Normal patience), words back 0.56 s (1.01), voice model's first
+sentence 1.73 s (4.01), its audio about 1.0 s after; your last word to the
+first sound 4.60 s (7.95), max 21.5 s. 123 empty and 17 noise uploads against
+117 timed turns overall (297 s of audio).
+
+Not changed here (batches 2 and 3, from Ajay's picks of 2026-10-15): the
+voice's three tools and its context (task transcript and a status line only),
+work going only to the task on screen, voice only from a task line, the voice
+model (Claude Haiku 5.5 is the pick), and a streaming listener (needs a
+Deepgram or AssemblyAI key).
+
+Found while verifying, **fixed** (A-112): a task started from New task, said
+or typed, left its pane on New task when the pane's workspace wasn't the active
+one (a saved layout pins each pane's workspace). Only a sole pane in the active
+workspace took its run id, so the voice never learned the run and sat in
+Thinking. Now the New task pane that started a run takes it the moment its id
+comes back, in any workspace and any layout (`bindDraftPane`), and focus stays
+where it was. A hand-off that went but whose run still isn't learned within
+10 s says so (`unfollowed`: "I passed that on, but I can't follow the task from
+here") instead of leaving the session in Thinking.
+
+Tests: `voiceStopReachesRun`, `voicePastConversation`, `voiceSpokenReply`,
+`voiceSpeechText`, `voiceConversation`, and the GUI e2e
+`tests/gui-e2e/voice-stop.spec.ts`: voice mode on a task whose run waits on an
+approval, "Cancel it.", the run cancelled by the voice session in main (with
+main's cancel unwired the same spec fails: the window's Stop did it instead).
+`tests/gui-e2e/voice-brief.spec.ts`: "Run the tests." said to New task opens
+the task and the voice reaches its approval (before the fix: still on New task,
+voice in Thinking). Units: `chatPaneLayout` (`bindDraftPane`), `voiceHandoff`
+(`unfollowed`).
+
+### 24.14 The voice knows the app (2026-10-15, batch 2)
+
+The voice knew the task on screen and nothing else: "what branch am I on?",
+"is anything else running?" or "what day is it?" went to the agent or were
+guessed. Now every turn carries the app as it is (`src/main/voice/appContext.ts`),
+in the prompt's uncached part (`systemVolatile`), before the task and the
+agent's status:
+
+- the date and time;
+- what is on screen: the task (with its state), New task, Home, Settings,
+  the marketplace, Usage or a screen capture. The window sends it with the
+  task (`voice:task` gained `screen`); `App` reports its view
+  (`setVoiceAppView`);
+- the workspace and its branch, read from `.git/HEAD` (worktrees and detached
+  heads included; no git process);
+- other tasks running or stopped on the user, in any open workspace (up to 6);
+- a few settings: the agent's model, tool approvals, theme, voice placement and
+  speed;
+- the workspace's rules files and the agent's memory notes, by name and
+  headline (up to 8 each), never their contents.
+
+It is read when the session starts, when the task or screen changes, and again
+as you start talking (at most every 5 s), so it is ready by the end of your
+turn. Each part is read on its own: one that fails is left out. One prompt
+line tells the voice it has this and not to read it out unasked.
+
+The voice model's default was already Claude Haiku 5.5
+(`DEFAULT_VOICE_RESPONDER`, `anthropic/claude-haiku-5.5`, listed by
+OpenRouter). A saved pick overrides it: this install's is `z-ai/glm-5.3-flash`,
+so Haiku 5.5 is one choice in Settings → Voice.
+
+Not verified with a live voice model: the GUI e2e runs without a chat key,
+where turns go straight to the agent. Tests: `voiceAppContext` (format, branch,
+headlines, schema, and a session reading it on start, on a task or screen
+change and as you talk, with the turn carrying it), `voiceHandoff` (screen
+with the task, and when the app moves to Settings and back).
+
+### 24.15 The voice and the agent act in the app (2026-10-15, batch 3)
+
+Before this the voice had three tools (hand to the agent, stop, stay quiet)
+and the agent had none for the app: "switch to dark mode" went to the coding
+agent, which edited the project's theme. Now one catalog of app actions
+(`src/shared/appActions.ts`) serves both.
+
+| Group | Actions | Runs in |
+| --- | --- | --- |
+| Views and panes | `open_view` (Home, Settings, Usage, Inbox, Scheduled, Extensions, docs, What's new, shortcuts), `open_settings` (at a section), `open_panel` (terminal, changes, browser, files, plan, PR), `toggle_navigator`, `next_needs_you`, `new_task`, `switch_workspace` | the window |
+| Tasks, any open workspace | `open_task`, `start_task` (a brief, a workspace; opened once started), `stop_task`, `archive_task`, `delete_task` | main finds the task by words from its title or its run id; start and stop run in main, the rest in the window |
+| The agent | `set_agent_mode` (Ask or Agent on the task on screen), `set_model` (from the recent and favourite models) | window, main |
+| Settings | `set_theme`, `set_skin`, `set_tool_approvals` | main |
+| The system | `open_path` (a file or folder, never a program), `reveal_path`, `open_url` (http and https only), `install_update`, `quit_app` | main, window |
+| The voice itself | `voice_mute` (until called by name, or until unmuted), `voice_end`, `set_voice_speed`, `set_voice` (by name, where the speaker's voices are named), `set_voice_placement` | main |
+
+How it runs (`src/main/appControl/`): main checks the arguments, finds what
+was named across every open workspace, and runs main's own actions. A window
+action is sent on `app:action` with what main found and answered on
+`app:action-result` (10 s, else "The window didn't answer"). The window runs
+it through the command palette's own handlers (`appActionExecutor.ts`), so
+an action does exactly what the click or the palette does.
+
+**The voice** has a fourth tool, `app_action`. A reply that says what it's
+doing isn't repeated; a reply that said nothing has the result said, and a
+failure is always said. Destructive actions (`delete_task`, `install_update`,
+`quit_app`) need a yes: the prompt says to ask first, and the session runs one
+only when the model marks it confirmed **and** your last words were a yes that
+takes nothing back ("Yes, delete it", not "yes, but not that one"). A model
+that skips the question gets "That needs your yes first." Muted until called,
+nothing is a turn until "Agent V" ("Hey Agent V, …"); the views say "Standing
+by · Say “Agent V” to talk", and M or unmuting brings it back too. Each action
+is kept in the conversation (`app_action` lines; shown in Voice conversations,
+and part of the next session's memory).
+
+**The agent** has `app_control` in Agent mode, held back like the extra browser tools: only its name is in `<more_builtin_tools>` until the run asks for it or calls it (the built-in tools were already at their budget share). Its schema is two fields;
+`action: "list"` returns the catalog with arguments, so the schemas cost
+nothing until it needs one. The voice's own controls aren't in it. A
+destructive call always stops at the approval card, whatever the approval
+settings say (`app-control:destructive`); the rest pass like reads in
+"mutating" mode.
+
+**Voice mode from anywhere.** On Home, Settings or Usage no task line is on
+screen, so Ctrl+Shift+M, the palette's command and the summary's "Talk again"
+did nothing (the summary said to open a task first). Now they open New task
+and voice mode starts on its brief.
+
+Not verified with a live voice model or microphone: the GUI e2e has no voice
+model key, so the voice's `app_action` is covered by unit tests, and the
+runner, IPC and window path by the agent's `app_control`. Tests:
+`appControl` (catalog, finding tasks and workspaces, main actions, a window
+action's round trip and timeout, paths and URLs, the voice's controls),
+`voiceAppAction` (results said, the yes rule, standby, ending),
+`appActionExecutor`, `voiceView` ("Talk again" from anywhere), and the GUI e2e
+`app-control.spec.ts` (a run opens Voice settings, sets the light theme, and
+a delete waits on the card) and `voice-brief.spec.ts` (the shortcut on Home
+opens New task and listens; it fails with the new handler off).
 
 ## 25. The conversation (2026-10-14 redesign)
 

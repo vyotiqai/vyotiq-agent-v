@@ -27,6 +27,15 @@ export const HEADLINE: Readonly<Record<VoiceSessionState, string>> = {
   error: 'Stopped'
 }
 
+/** Muted until called by name (voice_mute, §24.15): what the headline and its line say. */
+export const STANDBY_HEADLINE = 'Standing by'
+export const STANDBY_HINT = 'Say “Agent V” to talk'
+
+/** The headline, standby included. */
+export function headline(v: Pick<VoiceSnapshot, 'state' | 'standby'>): string {
+  return v.standby && (v.state === 'listening' || v.state === 'hearing') ? STANDBY_HEADLINE : HEADLINE[v.state]
+}
+
 /** The newest hand-off, work and all; every hand-off, captions or not (it's the task's, not speech). */
 export function latestWork(v: Pick<VoiceSnapshot, 'transcript' | 'works'>): WorkEntry | undefined {
   return currentWork(buildEntries(v.transcript, v.works))
@@ -45,10 +54,11 @@ export function hint(v: VoiceSnapshot, settings: Pick<VoiceSettings, 'pushToTalk
       // The headline already says Reconnecting: here, how many tries and that nothing is lost.
       return `Try ${Math.max(1, v.reconnectAttempt)} · what you say is kept`
     case 'listening':
+      if (v.standby) return STANDBY_HINT
       if (settings.pushToTalkOnly) return 'Hold Space to talk'
       return v.transcript.length === 0 ? 'Say what you want done, or ask about the work' : 'Talk any time'
     case 'hearing':
-      return 'Pause when you’re done'
+      return v.standby ? STANDBY_HINT : 'Pause when you’re done'
     case 'thinking':
       return 'Working out an answer'
     case 'working':

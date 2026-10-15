@@ -812,6 +812,7 @@ describe('turn latency (§14)', () => {
     const logged: unknown[] = []
     const taps = new Map<string, (e: AgentEvent) => void>()
     const stt: FixtureSttSession[] = []
+    const opened: string[] = []
     const session = new VoiceSession({
       emit: () => {},
       settings: () => DEFAULT_VOICE_SETTINGS,
@@ -826,7 +827,7 @@ describe('turn latency (§14)', () => {
         }
       }),
       openTts: (contextId) =>
-        openFixtureTts({
+        (opened.push(contextId), openFixtureTts({
           apiKey: '',
           model: '',
           voiceId: '',
@@ -835,7 +836,7 @@ describe('turn latency (§14)', () => {
           signal: new AbortController().signal,
           onAudio: () => {},
           onError: () => {}
-        }),
+        })),
       tapRun: (runId, fn) => {
         taps.set(runId, fn)
         return () => taps.delete(runId)
@@ -853,7 +854,7 @@ describe('turn latency (§14)', () => {
     clock += 900
     taps.get(R)!(delta('<spoken>Done. </spoken>'))
     clock += 150
-    session.playback('ctx', 'started')
+    session.playback(opened.at(-1)!, 'started')
     expect(logged).toEqual([{ listener: 'deepgram', submitMs: 40, firstTextMs: 940, firstAudioMs: 1090 }])
     expect(JSON.stringify(logged)).not.toContain('secret')
     // Only the first audio of a turn is timed.
@@ -869,6 +870,7 @@ describe('whole-turn latency (B10)', () => {
     const dropped: unknown[] = []
     const taps = new Map<string, (e: AgentEvent) => void>()
     const stt: FixtureSttSession[] = []
+    const opened: string[] = []
     const tone = (ms: number) => Int16Array.from({ length: (ms / 1000) * 16000 }, (_, i) => Math.round(Math.sin(i / 3) * 8000))
     const session = new VoiceSession({
       emit: () => {},
@@ -885,7 +887,7 @@ describe('whole-turn latency (B10)', () => {
         }
       }),
       openTts: (contextId) =>
-        openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError: () => {} }),
+        (opened.push(contextId), openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError: () => {} })),
       tapRun: (runId, fn) => {
         taps.set(runId, fn)
         return () => taps.delete(runId)
@@ -912,7 +914,7 @@ describe('whole-turn latency (B10)', () => {
     session.follow(R)
     taps.get(R)!(delta('<spoken>The lint step. </spoken>'))
     clock += 200
-    session.playback('ctx', 'started')
+    session.playback(opened.at(-1)!, 'started')
     expect(logged).toEqual([
       expect.objectContaining({ listener: 'openrouter', waitMs: 1300, sttMs: 0, firstTextMs: 1000, firstAudioMs: 1200, totalMs: 2500 })
     ])
@@ -923,6 +925,7 @@ describe('whole-turn latency (B10)', () => {
     const dropped: unknown[] = []
     const taps = new Map<string, (e: AgentEvent) => void>()
     const stt: FixtureSttSession[] = []
+    const opened: string[] = []
     const session = new VoiceSession({
       emit: () => {},
       settings: () => DEFAULT_VOICE_SETTINGS,
@@ -937,7 +940,7 @@ describe('whole-turn latency (B10)', () => {
         }
       }),
       openTts: (contextId) =>
-        openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError: () => {} }),
+        (opened.push(contextId), openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError: () => {} })),
       tapRun: (runId, fn) => {
         taps.set(runId, fn)
         return () => taps.delete(runId)
@@ -955,7 +958,7 @@ describe('whole-turn latency (B10)', () => {
     emit({ kind: 'end_of_turn', text: 'what failed', listen: { audioMs: 2400, requestMs: 900, earlyUsed: true } })
     session.follow(R)
     taps.get(R)!(delta('<spoken>The lint step. </spoken>'))
-    session.playback('ctx', 'started')
+    session.playback(opened.at(-1)!, 'started')
     expect(logged).toEqual([expect.objectContaining({ audioMs: 2400, requestMs: 900, earlyUsed: true })])
   })
 })

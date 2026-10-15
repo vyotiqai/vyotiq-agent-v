@@ -17,7 +17,8 @@ export type HandOffOutcome =
 export type ConversationRow =
   /** A break of {@link GAP_MS} or more: the time it picked up again. */
   | { kind: 'gap'; id: string; at: string }
-  | { kind: 'you'; id: string; at: string; text: string; stop: boolean }
+  /** `unanswered`: heard and left unanswered on purpose, as the live view marks it. */
+  | { kind: 'you'; id: string; at: string; text: string; stop: boolean; unanswered?: true }
   /** One reply, its sentences joined: the voice you talk to, or the task speaking. */
   | { kind: 'voice' | 'agent'; id: string; at: string; text: string }
   | { kind: 'hand_off'; id: string; at: string; brief: string; outcome: HandOffOutcome }
@@ -25,6 +26,8 @@ export type ConversationRow =
   | { kind: 'followed'; id: string; at: string; runId: string }
   | { kind: 'answered'; id: string; at: string; what: 'approval' | 'question'; text: string; decision?: string; tool?: string }
   | { kind: 'stop_agent'; id: string; at: string; by: 'you' | 'voice' }
+  /** Something the voice did in the app (§24.15), and how it went. */
+  | { kind: 'app_action'; id: string; at: string; action: string; ok: boolean; message: string }
 
 export type ConversationQuiet = {
   dropped: number
@@ -38,6 +41,7 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
   const rows: ConversationRow[] = []
   const quiet: ConversationQuiet = { dropped: 0, errors: [] }
   const handOffs = new Map<string, Extract<ConversationRow, { kind: 'hand_off' }>>()
+  const yours = new Map<string, Extract<ConversationRow, { kind: 'you' }>>()
   let lastAt: number | null = null
   let reply: { row: Extract<ConversationRow, { kind: 'voice' | 'agent' }>; contextId: string } | null = null
   entries.forEach((e, i) => {
@@ -49,9 +53,21 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
       rows.push(row)
     }
     switch (e.kind) {
-      case 'you':
-        push({ kind: 'you', id, at: e.at, text: e.text, stop: e.stop === true })
+      case 'you': {
+        const row: Extract<ConversationRow, { kind: 'you' }> = { kind: 'you', id, at: e.at, text: e.text, stop: e.stop === true }
+        yours.set(e.turnId, row)
+        push(row)
         return
+      }
+      case 'unanswered': {
+        // Words that were never a turn come with their text; a turn it stayed quiet on is marked where it is.
+        if (e.text) push({ kind: 'you', id, at: e.at, text: e.text, stop: false, unanswered: true })
+        else {
+          const row = yours.get(e.turnId)
+          if (row) row.unanswered = true
+        }
+        return
+      }
       case 'voice':
       case 'agent': {
         // A reply's sentences read as one line while nothing falls between them.
@@ -101,6 +117,9 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
       case 'stop_agent':
         push({ kind: 'stop_agent', id, at: e.at, by: e.by })
         return
+      case 'app_action':
+        push({ kind: 'app_action', id, at: e.at, action: e.action, ok: e.ok, message: e.message })
+        return
       case 'dropped':
         quiet.dropped++
         return
@@ -108,6 +127,7 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
         quiet.errors.push({ side: e.side, code: e.code })
         return
       case 'start':
+      case 'task':
       case 'end':
         return
     }

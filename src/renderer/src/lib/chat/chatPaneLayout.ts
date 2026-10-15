@@ -128,6 +128,21 @@ export function paneHasSession(pane: ChatPane, session: ChatPaneSession): boolea
   )
 }
 
+/**
+ * A task a New task pane started got its run id: that pane now shows the
+ * task. The focused draft pane in the workspace if there is one, else the
+ * first; focus does not move. Unchanged when no draft pane is in it. Without
+ * this only a sole pane in the active workspace followed its start, so a pane
+ * pinned to another workspace stayed on New task (A-112).
+ */
+export function bindDraftPane(layout: ChatPaneLayout, workspacePath: string, runId: string): ChatPaneLayout {
+  if (layout.panes.some((p) => p.runId === runId && workspacePathsEqual(p.workspacePath, workspacePath))) return layout
+  const drafts = layout.panes.filter((p) => p.runId === null && workspacePathsEqual(p.workspacePath, workspacePath))
+  const pane = drafts.find((p) => p.paneId === layout.focusedPaneId) ?? drafts[0]
+  if (!pane) return layout
+  return { ...layout, panes: layout.panes.map((p) => (p === pane ? { ...p, runId } : p)) }
+}
+
 export function replacePaneSession(
   layout: ChatPaneLayout,
   paneId: string,

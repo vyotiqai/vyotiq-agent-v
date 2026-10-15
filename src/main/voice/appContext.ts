@@ -1,0 +1,144 @@
+/**
+ * What the voice knows about the app beyond the task (docs/voice-mode.md
+ * §24.14, batch 2): the screen you're on, the workspace and its branch, the
+ * task and the other work across workspaces, a few settings, the date and
+ * time, and the workspace's rules and memory by headline. Read again as you
+ * start talking, and sent in the part of the prompt that isn't cached.
+ *
+ * The voice used to know only the task: "what branch am I on?", "is
+ * anything else running?" and "what's today?" were handed to the agent or
+ * guessed.
+ */
+import { existsSync, readFileSync, statSync } from 'fs'
+import { basename, dirname, isAbsolute, join, resolve } from 'path'
+import { redactSecretsInText } from '../../shared/utils/redactSecrets'
+import type { VoiceScreen } from '../../shared/ipc/schemas/voice'
+
+export type AppTaskState = 'running' | 'waiting' | 'done' | 'error' | 'cancelled'
+
+export type AppSnapshot = {
+  now: Date
+  /** What the window shows; unknown before the window says. */
+  screen?: VoiceScreen
+  workspace: { name: string; branch?: string } | null
+  /** The task on screen, when there is one. */
+  task?: { title: string; state: AppTaskState } | null
+  /** Work going on elsewhere: other tasks running or stopped on you, in any open workspace. */
+  others: Array<{ title: string; workspace: string; state: 'running' | 'waiting' }>
+  settings: {
+    model?: string
+    approvals?: string
+    theme?: string
+    voicePlacement?: string
+    voiceSpeed?: number
+  }
+  /** The workspace's rules files, by name and first heading. */
+  rules: string[]
+  /** The agent's memory notes for the workspace, by title. */
+  memory: string[]
+}
+
+/** Lists are cut here: headlines, not contents. */
+const MAX_OTHERS = 6
+const MAX_HEADLINES = 8
+const TITLE_CHARS = 90
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
+}
+
+const SCREEN_LINE: Readonly<Record<Exclude<VoiceScreen, 'task'>, string>> = {
+  new_task: 'New task, nothing started yet',
+  home: 'Home',
+  settings: 'Settings',
+  marketplace: 'the marketplace',
+  usage: 'Usage',
+  screen: 'a screen capture'
+}
+
+const STATE_WORDS: Readonly<Record<AppTaskState, string>> = {
+  running: 'running',
+  waiting: 'stopped until the user answers',
+  done: 'finished',
+  error: 'stopped with an error',
+  cancelled: 'stopped'
+}
+
+/** "Thursday 15 October 2026, 7:05 pm", in the app's own time zone. */
+export function spokenNow(now: Date): string {
+  const day = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+  return `${day.replace(/,/g, '')}, ${time}`
+}
+
+export function formatAppContext(s: AppSnapshot): string {
+  const lines: string[] = [`(The app right now, ${spokenNow(s.now)}:)`]
+  if (s.screen === 'task' && s.task) lines.push(`On screen: the task “${clip(s.task.title, TITLE_CHARS)}”, ${STATE_WORDS[s.task.state]}.`)
+  else if (s.screen && s.screen !== 'task') lines.push(`On screen: ${SCREEN_LINE[s.screen]}.`)
+  if (s.workspace) lines.push(`Workspace: ${s.workspace.name}${s.workspace.branch ? `, on branch ${s.workspace.branch}` : ''}.`)
+  const others = s.others.slice(0, MAX_OTHERS)
+  if (others.length > 0) {
+    const listed = others.map((o) => `“${clip(o.title, TITLE_CHARS)}” in ${o.workspace} (${o.state === 'waiting' ? 'stopped until the user answers' : 'running'})`)
+    const more = s.others.length - others.length
+    lines.push(`Other tasks: ${listed.join('; ')}${more > 0 ? `; and ${more} more` : ''}.`)
+  } else lines.push('No other tasks are running.')
+  const set = s.settings
+  const settings = [
+    set.model ? `the agent's model is ${set.model}` : '',
+    set.approvals ? `tool approvals are ${set.approvals}` : '',
+    set.theme ? `${set.theme} theme` : '',
+    set.voicePlacement ? `voice shows as ${set.voicePlacement}${set.voiceSpeed && set.voiceSpeed !== 1 ? ` at ${set.voiceSpeed} times speed` : ''}` : ''
+  ].filter(Boolean)
+  if (settings.length > 0) lines.push(`Settings: ${settings.join('; ')}.`)
+  if (s.rules.length > 0) lines.push(`Project rules the agent follows: ${s.rules.slice(0, MAX_HEADLINES).join('; ')}.`)
+  if (s.memory.length > 0) lines.push(`The agent's memory notes here: ${s.memory.slice(0, MAX_HEADLINES).join('; ')}.`)
+  return redactSecretsInText(lines.join('\n'))
+}
+
+/**
+ * The checked-out branch, read from the repository's HEAD without running
+ * git (a spawn costs ~250 ms here). A worktree's `.git` is a file naming its
+ * git dir. Undefined outside a repository or when HEAD can't be read.
+ */
+export function readGitBranch(workspacePath: string): string | undefined {
+  try {
+    let dir = workspacePath
+    // The workspace may be a folder inside the repository.
+    for (let i = 0; i < 12; i++) {
+      const dotGit = join(dir, '.git')
+      if (existsSync(dotGit)) return branchFromDotGit(dotGit)
+      const up = dirname(dir)
+      if (up === dir) return undefined
+      dir = up
+    }
+  } catch {
+    /* unreadable: no branch */
+  }
+  return undefined
+}
+
+function branchFromDotGit(dotGit: string): string | undefined {
+  let gitDir = dotGit
+  if (statSync(dotGit).isFile()) {
+    const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))
+    if (!m) return undefined
+    const target = m[1]!.trim()
+    gitDir = isAbsolute(target) ? target : resolve(dirname(dotGit), target)
+  }
+  const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim()
+  const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head)
+  if (ref) return ref[1]
+  return /^[0-9a-f]{7,}$/i.test(head) ? `none, detached at ${head.slice(0, 7)}` : undefined
+}
+
+/** A rules file as a headline: its name, and its first heading or line when it has one. */
+export function ruleHeadline(path: string, content: string): string {
+  const name = basename(path)
+  for (const raw of content.split('\n')) {
+    const line = raw.replace(/^#+\s*/, '').trim()
+    if (!line || line === '---' || /^[a-z]+:/i.test(line)) continue
+    return `${name} (${clip(line, 60)})`
+  }
+  return name
+}

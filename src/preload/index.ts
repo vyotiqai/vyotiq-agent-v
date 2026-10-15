@@ -1,5 +1,6 @@
 import { clipboard, contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { IPC } from '../shared/channels'
+import { AppWindowActionSchema } from '../shared/appActions'
 import {
   parseRendererChatEvent,
   ToolApprovalRequestSchema,
@@ -302,6 +303,17 @@ const api: VyotiqApi = {
   voicePlayback: (payload) => ipcRenderer.invoke(IPC.voicePlayback, payload),
   voiceInterrupt: (payload) => ipcRenderer.invoke(IPC.voiceInterrupt, payload),
   voiceHandOffFailed: (payload) => ipcRenderer.invoke(IPC.voiceHandOffFailed, payload),
+  onAppAction: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = AppWindowActionSchema.safeParse(raw)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.appAction, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.appAction, listener)
+    }
+  },
+  appActionResult: (payload) => ipcRenderer.invoke(IPC.appActionResult, payload),
   voiceConversationsList: (payload) => ipcRenderer.invoke(IPC.voiceConversationsList, payload),
   voiceConversationRead: (payload) => ipcRenderer.invoke(IPC.voiceConversationRead, payload),
   onVoiceEvent: (handler) => {

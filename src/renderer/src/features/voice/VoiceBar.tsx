@@ -9,6 +9,7 @@ import { speakingProblem, turnProblem, voiceProblem, type VoiceProblem } from '.
 import { endVoiceMode, registerVoiceBar, setVoiceTarget, setVoiceViewOpen, startVoiceMode, useVoiceMode, voiceBarShown, voiceController } from './voiceMode'
 import type { VoiceSnapshot } from './voiceSessionController'
 import type { VoiceRunTarget } from './turnRouting'
+import { STANDBY_HINT } from './stage/model'
 
 /*
   The voice bar (docs/voice-mode.md §13.2): in place of the instruction
@@ -153,7 +154,9 @@ export function VoiceBar({
     ) : (
       <span className="text-muted">
         {v.state === 'listening'
-          ? idleCaption
+          ? v.standby
+            ? STANDBY_HINT
+            : idleCaption
           : v.state === 'reconnecting'
             ? `Reconnecting${v.reconnectAttempt > 1 ? ` (try ${v.reconnectAttempt})` : ''}…`
             : VOICE_STATE_LABEL[v.state]}

@@ -14,6 +14,7 @@ import {
   registerVoiceBar,
   registerVoiceLine,
   resetVoiceModeForTests,
+  setVoiceAppView,
   setVoiceTarget,
   setVoiceViewOpen,
   startVoiceMode,
@@ -272,5 +273,33 @@ describe('a hand-off the task can’t take says why (R3)', () => {
     await startVoiceMode('line-1', { workspacePath: '/repo' })
     setVoiceTarget('line-1', lineTarget('run-1'))
     await expect(handleVoiceTurn(turn('run the tests'))).resolves.toBe('run-1')
+  })
+
+  it('sent, but its run never reached a line: says so instead of waiting in Thinking (A-112)', async () => {
+    vi.useFakeTimers()
+    await startVoiceMode('brief', { workspacePath: '/repo' })
+    setVoiceTarget('brief', briefTarget('brief'))
+    const result = handleVoiceTurn(turn('run the tests'))
+    await vi.advanceTimersByTimeAsync(HANDOFF_MS + 1)
+    await expect(result).resolves.toEqual({ failed: 'unfollowed' })
+  })
+})
+
+describe('the voice is told what is on screen (§24.14)', () => {
+  it('the task or New task with the line, and Home or Settings when the app moves there', async () => {
+    const c = new FakeController()
+    await resetVoiceModeForTests(c)
+    const setTask = vi.spyOn(c, 'setTask')
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    setVoiceTarget('line-1', lineTarget('run-1'), '/repo')
+    await Promise.resolve()
+    expect(setTask).toHaveBeenLastCalledWith('run-1', '/repo', 'task')
+    setVoiceAppView('settings')
+    expect(setTask).toHaveBeenLastCalledWith('run-1', '/repo', 'settings')
+    setVoiceAppView('chat')
+    expect(setTask).toHaveBeenLastCalledWith('run-1', '/repo', 'task')
+    setVoiceTarget('line-1', briefTarget('line-1'), '/repo')
+    await Promise.resolve()
+    expect(setTask).toHaveBeenLastCalledWith(null, '/repo', 'new_task')
   })
 })

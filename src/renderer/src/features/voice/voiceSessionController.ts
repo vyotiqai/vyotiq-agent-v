@@ -5,7 +5,7 @@
  * view renders `snapshot`; nothing here draws anything.
  */
 import { useSyncExternalStore } from 'react'
-import type { VoiceEvent, VoiceHandOffFailure, VoiceWork } from '@shared/ipc/schemas/voice'
+import type { VoiceEvent, VoiceHandOffFailure, VoiceScreen, VoiceWork } from '@shared/ipc/schemas/voice'
 import { parseVoiceIpcCode, type SttProviderId, type TtsProviderId, type VoiceErrorCode } from '@shared/voice'
 import type { VoiceSessionState } from '@shared/voiceSession'
 import { MicCaptureError, openMicCapture, type MicCapture, type OpenMicCapture } from '@renderer/lib/audio/micCapture'
@@ -15,6 +15,8 @@ import { CaptionPacer } from './captionPacer'
 
 export type VoiceSnapshot = {
   state: VoiceSessionState
+  /** Muted until called by name ("Agent V"): listening, but only for that (§24.15). */
+  standby: boolean
   /** Unsettled words of the turn in progress. */
   partial: string
   /** The last turn you finished, until the next one starts. */
@@ -87,8 +89,13 @@ export const MAX_TRANSCRIPT_LINES = 60
 /** A problem the session survived: our code and the provider's reason. */
 export type VoiceProblemEvent = { code: VoiceErrorCode; detail: string }
 
+/** voice_end: how long to wait for the goodbye to start, and the most to wait for it to finish. */
+const END_GRACE_MS = 900
+const END_WAIT_MS = 8000
+
 export const IDLE_VOICE: VoiceSnapshot = {
   state: 'off',
+  standby: false,
   partial: '',
   lastTurn: '',
   saying: '',
@@ -144,6 +151,8 @@ export type VoiceControllerDeps = {
   onTurn: (turn: VoiceTurn) => Promise<VoiceTurnResult> | VoiceTurnResult
   /** The voice was asked to stop the agent's work: press the task's Stop. */
   onStopAgent?: () => Promise<void> | void
+  /** The voice was asked to end voice mode (voice_end). */
+  onEndRequested?: () => Promise<void> | void
   createAudioContext?: () => PlayerAudioContext
 }
 
@@ -196,8 +205,9 @@ export class VoiceSessionController {
   /** A live run to follow once the session's id is known. */
   private wantFollow: string | null = null
   /** The task the session is on, as last told to main (`undefined`: not yet), and the one to tell once it can. */
-  private taskSent: string | null | undefined = undefined
-  private task: { runId: string | null; workspacePath?: string } | null = null
+  /** The task and screen last sent, as a key: the same again isn't sent. */
+  private taskSent: string | undefined = undefined
+  private task: { runId: string | null; workspacePath?: string; screen?: VoiceScreen } | null = null
   /** Hand-offs on their way to the task: their own follow names the run. */
   private handingOff = 0
   /** Where its voice plays (an audio output's id; '' the default), applied to each audio context made. */
@@ -324,16 +334,17 @@ export class VoiceSessionController {
    * so the voice knows what it's about. Voice mode opened on a finished task
    * used to tell you it had no record of it.
    */
-  setTask(runId: string | null, workspacePath?: string): void {
-    this.task = { runId, ...(workspacePath ? { workspacePath } : {}) }
+  setTask(runId: string | null, workspacePath?: string, screen?: VoiceScreen): void {
+    this.task = { runId, ...(workspacePath ? { workspacePath } : {}), ...(screen ? { screen } : {}) }
     if (this.sessionId) this.sendTask()
   }
 
   private sendTask(): void {
     const id = this.sessionId
     const task = this.task
-    if (!id || !task || task.runId === this.taskSent) return
-    this.taskSent = task.runId
+    const key = `${task?.runId ?? ''}|${task?.screen ?? ''}`
+    if (!id || !task || key === this.taskSent) return
+    this.taskSent = key
     void this.bridge().voiceTask?.({ sessionId: id, ...task })
   }
 
@@ -442,6 +453,13 @@ export class VoiceSessionController {
       case 'work':
         this.set({ works: keepWork(this.snap.works, e.work) })
         return
+      case 'standby':
+        this.set({ standby: e.on })
+        return
+      case 'end_requested':
+        // After its last words have played: ending first would cut them off.
+        void this.afterSpeech().then(() => this.deps.onEndRequested?.())
+        return
       case 'cue':
         this.set({ cues: this.snapshot.cues + 1 })
         return
@@ -462,6 +480,24 @@ export class VoiceSessionController {
         return
       }
     }
+  }
+
+  /**
+   * Once the voice has finished talking: its goodbye comes just after the
+   * request to end, so this waits a moment for it to start, then for it to
+   * play out (at most END_WAIT_MS).
+   */
+  private afterSpeech(): Promise<void> {
+    const started = Date.now()
+    return new Promise((resolve) => {
+      const check = (): void => {
+        const quiet = this.sounding.size === 0 && this.snap.state !== 'speaking' && this.snap.state !== 'thinking'
+        const waited = Date.now() - started
+        if ((quiet && waited >= END_GRACE_MS) || waited >= END_WAIT_MS || this.snap.state === 'off') resolve()
+        else setTimeout(check, 100)
+      }
+      check()
+    })
   }
 
   private async routeTurn(turn: VoiceTurn): Promise<void> {

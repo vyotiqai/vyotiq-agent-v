@@ -66,6 +66,19 @@ describe('conversationRows', () => {
     ])
     expect(rows.map((r) => (r.kind === 'voice' ? r.text : ''))).toEqual(['One.', 'Two.'])
   })
+
+  it('marks your turn the voice stayed quiet on, and words that were never a turn (2026-10-15 audit)', () => {
+    const { rows } = conversationRows([
+      { at: at(0), kind: 'task', runId: 'run-1' },
+      { at: at(1), kind: 'you', turnId: 't1', text: 'Good, good, good, good, good, good, good, good.' },
+      { at: at(2), kind: 'unanswered', turnId: 't1' },
+      { at: at(3), kind: 'unanswered', turnId: 'n1', text: 'Okay.' }
+    ])
+    expect(rows).toMatchObject([
+      { kind: 'you', text: 'Good, good, good, good, good, good, good, good.', unanswered: true },
+      { kind: 'you', text: 'Okay.', unanswered: true }
+    ])
+  })
 })
 
 describe('voiceOriginFor', () => {
@@ -133,6 +146,27 @@ describe('VoiceConversationsDialog', () => {
     })
     expect(onOpenTask).toHaveBeenCalledWith('C:/work', 'run-1')
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('shows a turn left unanswered as the live view does: muted, "Not answered"', async () => {
+    read.mockResolvedValue({
+      ok: true,
+      data: {
+        summary: SUMMARY,
+        entries: [
+          { at: at(0), kind: 'you', turnId: 't1', text: 'Good, good, good.' },
+          { at: at(1), kind: 'unanswered', turnId: 't1' }
+        ],
+        skipped: 0
+      } satisfies VoiceConversation
+    })
+    render(<VoiceConversationsDialog />)
+    await act(async () => {
+      requestVoiceConversations('C:/work', SUMMARY.id)
+    })
+    const row = document.querySelector('[data-voice-history-row="you"]') as HTMLElement
+    expect(row.textContent).toContain('Not answered')
+    expect(row.querySelector('.text-muted')?.textContent).toBe('Good, good, good.')
   })
 
   it('says when a conversation is no longer kept', async () => {

@@ -295,6 +295,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   ask_question: 'sparkles',
   show_view: 'grid',
   switch_mode: 'sliders',
+  app_control: 'command',
   Skill: 'sparkles',
   terminal: 'terminal',
   memory_list: 'memory',

@@ -208,6 +208,7 @@ import type {
   ToolSecretName,
   ToolSecretStatus
 } from './ipc'
+import type { AppWindowAction, AppWindowActionResult } from './appActions'
 import type {
   VoiceFollowRequest,
   VoiceTaskRequest,
@@ -581,6 +582,9 @@ export interface VyotiqApi {
   voiceInterrupt: (payload: VoiceSessionRequest) => Promise<IpcResult<boolean>>
   /** The voice's brief never reached the task: the voice says so. */
   voiceHandOffFailed: (payload: VoiceHandOffFailedRequest) => Promise<IpcResult<boolean>>
+  /** Main asks the window to run an app action (a view, a pane, a panel); answered with `appActionResult`. */
+  onAppAction: (handler: (action: AppWindowAction) => void) => () => void
+  appActionResult: (payload: AppWindowActionResult) => Promise<IpcResult<boolean>>
   /** A workspace's kept voice conversations, newest first. */
   voiceConversationsList: (payload: VoiceConversationsListRequest) => Promise<IpcResult<VoiceConversationSummary[]>>
   /** One kept voice conversation, line by line. */
