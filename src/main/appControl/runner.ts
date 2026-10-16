@@ -39,8 +39,8 @@ export type AppActionContext = {
     mute: (untilCalled: boolean) => void
     end: () => void
     setVoice: (name: string) => Promise<AppActionResult>
-    /** Do this once the run's reply has been heard. */
-    afterReply?: (fn: () => void) => void
+    /** Do this once `runId`'s reply has been heard; false when this session doesn't follow that run. */
+    afterReply?: (runId: string, fn: () => void) => boolean
   }
 }
 
@@ -388,9 +388,10 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
     }
     case 'quit_app': {
       // After the answer is said: quitting now would cut it off. In voice mode that is once the reply has played.
+      // Only the session following this run says its reply: a quit typed in another task doesn't wait on a voice elsewhere.
       const voice = voiceOf(deps, ctx)
-      if (voice?.afterReply) voice.afterReply(() => deps.quit())
-      else setTimeout(() => deps.quit(), 1500)
+      const waits = Boolean(ctx.runId && voice?.afterReply?.(ctx.runId, () => deps.quit()))
+      if (!waits) setTimeout(() => deps.quit(), 1500)
       return { ok: true, message: 'Quitting.' }
     }
     case 'voice_mute': {

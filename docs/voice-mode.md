@@ -2672,3 +2672,12 @@ removed; the app has not run since 10:35), so this pass read the code.
 | The catalog kept its own copies of the placements and skins | two literal lists beside `VOICE_PLACEMENTS` and `SkinIdSchema` | It uses them |
 
 Not checked in the running app: these are covered by unit tests only.
+
+### 27.10 Fourth pass: approvals that said what (2026-10-16)
+
+| Found | Evidence | Fixed |
+| --- | --- | --- |
+| A destructive app action's approval didn't say what it was | `summarizeToolArgs('app_control', …)` returned "" for `delete_task`, `quit_app` and `install_update`: the card's summary was empty and the voice asked "can I do that in the app?" | The summary is the action and what it acts on (`delete_task: the login page`); out loud: "can I delete the task “the login page”?", "quit Agent V", "install the update and restart the app" |
+| A quit typed in one task could wait on, or skip the wait for, a voice following another (§27.9's own change) | the voice controls fall back to any live session | Only the session following the asking run waits for its reply; otherwise the 1.5 s wait as before |
+
+Not checked in the running app: unit tests only.

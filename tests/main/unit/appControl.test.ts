@@ -20,6 +20,8 @@ import {
 import { contextAtHome, expandPathVars, findTask, findWorkspace, runAppAction, settleWindowAction, type AppControlDeps } from '@main/appControl/runner'
 import { isApprovalExemptTool } from '@main/agent/tools/classify'
 import { resetSettingsSetForTests, settingsChangedSince } from '@main/appControl/setByAgent'
+import { describeApproval } from '@main/voice/session'
+import { summarizeToolArgs } from '@shared/utils/toolSummary'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -361,10 +363,22 @@ describe('running them', () => {
     expect(await runAppAction(d, 'set_voice_options', { language: 'Hindi' }, voice)).toMatchObject({ ok: false, message: 'I couldn’t do that: the language didn’t fit.' })
   })
 
+  it('a destructive action’s approval says what it would do, on the card and out loud', () => {
+    // Was empty on the card and "can I do that in the app?" out loud, for delete_task, quit_app and install_update.
+    const ask = (a: object): string => describeApproval({ name: 'app_control', summary: summarizeToolArgs('app_control', JSON.stringify(a)) })
+    expect(summarizeToolArgs('app_control', JSON.stringify({ action: 'delete_task', args: { task: 'the login page' } }))).toBe('delete_task: the login page')
+    expect(ask({ action: 'delete_task', args: { task: 'the login page' } })).toBe('delete the task “the login page”')
+    expect(ask({ action: 'delete_task', args: {} })).toBe('delete the task on screen')
+    expect(ask({ action: 'quit_app', args: {} })).toBe('quit Agent V')
+    expect(ask({ action: 'install_update' })).toBe('install the update and restart the app')
+    expect(ask({ action: 'set_theme', args: { theme: 'dark' } })).toBe('set theme dark')
+    expect(ask({})).toBe('do that in the app')
+  })
+
   it('quit in voice mode waits for the spoken reply; without voice it waits 1.5 s', async () => {
     const quit = vi.fn()
     let after: (() => void) | null = null
-    const withVoice = { ...voice, voice: { mute: () => {}, end: () => {}, setVoice: async () => ({ ok: true, message: '' }), afterReply: (fn: () => void) => (after = fn) } }
+    const withVoice = { ...voice, voice: { mute: () => {}, end: () => {}, setVoice: async () => ({ ok: true, message: '' }), afterReply: (runId: string, fn: () => void) => runId === 'r1' && Boolean((after = fn)) } }
     expect(await runAppAction(deps({ quit }), 'quit_app', {}, withVoice)).toEqual({ ok: true, message: 'Quitting.' })
     expect(quit).not.toHaveBeenCalled()
     after!()
@@ -372,7 +386,8 @@ describe('running them', () => {
     vi.useFakeTimers()
     try {
       const quit2 = vi.fn()
-      await runAppAction(deps({ quit: quit2 }), 'quit_app', {}, voice)
+      // A voice that follows another run: not waited on.
+      await runAppAction(deps({ quit: quit2 }), 'quit_app', {}, { ...withVoice, runId: 'r2' })
       vi.advanceTimersByTime(1499)
       expect(quit2).not.toHaveBeenCalled()
       vi.advanceTimersByTime(1)

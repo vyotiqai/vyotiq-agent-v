@@ -205,7 +205,9 @@ describe('the agent reaches voice mode’s own controls', () => {
     t.session.follow(R)
     t.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
     let quit = 0
-    t.session.link.controls.afterReply!(() => quit++)
+    // Not the run it follows: not taken.
+    expect(t.session.link.controls.afterReply!('run-other', () => quit++)).toBe(false)
+    expect(t.session.link.controls.afterReply!(R, () => quit++)).toBe(true)
     t.tap({ type: 'assistant_message', runId: R, content: '<spoken>Quitting now.</spoken>' } as unknown as AgentEvent)
     t.tap({ type: 'status', runId: R, status: 'done' } as AgentEvent)
     const said = t.events.find((e) => e.kind === 'say') as { contextId: string } | undefined
@@ -216,18 +218,21 @@ describe('the agent reaches voice mode’s own controls', () => {
     t.session.playback(said!.contextId, 'drained')
     expect(quit).toBe(1)
 
-    // Nothing to hear: done at once. A reply that never plays: done at the cap.
+    // Its run already over, nothing to hear: done at once. A reply that never plays: done at the cap.
     const u = setup()
     await u.session.start()
+    u.session.follow(R)
+    u.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    u.tap({ type: 'status', runId: R, status: 'done' } as AgentEvent)
     let quitU = 0
-    u.session.link.controls.afterReply!(() => quitU++)
+    u.session.link.controls.afterReply!(R, () => quitU++)
     expect(quitU).toBe(1)
     const w = setup()
     await w.session.start()
     w.session.follow(R)
     w.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
     let quitW = 0
-    w.session.link.controls.afterReply!(() => quitW++)
+    w.session.link.controls.afterReply!(R, () => quitW++)
     w.fire(15_000)
     expect(quitW).toBe(1)
     // Voice mode ended first: still done, once.
@@ -236,7 +241,7 @@ describe('the agent reaches voice mode’s own controls', () => {
     v.session.follow(R)
     v.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
     let quitV = 0
-    v.session.link.controls.afterReply!(() => quitV++)
+    v.session.link.controls.afterReply!(R, () => quitV++)
     await v.session.stop()
     expect(quitV).toBe(1)
   })

@@ -167,6 +167,14 @@ function formatPathTarget(path: string): string {
 
 export function normalizeToolTarget(name: string, args: Record<string, unknown> | null): string {
   if (!args) return ''
+  if (name === 'app_control') {
+    // The action and what it acts on: the approval card and the spoken "can I…?" were empty ("do that in the app") for delete_task.
+    const action = typeof args.action === 'string' ? args.action.trim() : ''
+    if (!action) return ''
+    const inner = args.args && typeof args.args === 'object' ? (args.args as Record<string, unknown>) : {}
+    const on = Object.values(inner).find((v): v is string => typeof v === 'string' && v.trim() !== '')
+    return on ? `${action}: ${truncate(on.trim())}` : action
+  }
   if (name === 'read' || name === 'edit' || name === 'str_replace' || name === 'delete' || name === 'lsp') {
     const path = args.path ?? args.file
     if (typeof path === 'string') return formatPathTarget(path)

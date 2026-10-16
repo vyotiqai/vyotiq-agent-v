@@ -411,7 +411,11 @@ export class VoiceSession {
           else this.emitEvent({ kind: 'end_requested' })
         },
         setVoice: (name) => this.deps.setVoiceName?.(name) ?? Promise.resolve({ ok: false, message: 'Voices can’t be changed from here.' }),
-        afterReply: (fn) => this.whenReplyHeard(fn)
+        afterReply: (runId, fn) => {
+          if (runId !== this.followedRun) return false
+          this.whenReplyHeard(fn)
+          return true
+        }
       },
       screen: this.screen,
       muted: this.standby ? 'until_called' : this.stateValue === 'paused' ? 'until_unmuted' : null
@@ -1528,12 +1532,24 @@ export const HAND_OFF_FAILED_LINE: Readonly<Record<VoiceHandOffFailure, string>>
 }
 
 /** What an approval asks for, in a few spoken words (§7.5). */
+/** An app action asked about out loud ("can I …?"), from its summary (`delete_task: the login page`). */
+function describeAppControl(summary: string): string {
+  const cut = summary.indexOf(': ')
+  const action = (cut >= 0 ? summary.slice(0, cut) : summary).trim()
+  const on = cut >= 0 ? summary.slice(cut + 2).trim() : ''
+  if (action === 'delete_task') return on ? `delete the task “${on}”` : 'delete the task on screen'
+  if (action === 'quit_app') return 'quit Agent V'
+  if (action === 'install_update') return 'install the update and restart the app'
+  if (!action) return 'do that in the app'
+  return `${action.replace(/_/g, ' ')}${on ? ` ${on}` : ''}`
+}
+
 export function describeApproval(req: Pick<ToolApprovalRequest, 'name' | 'summary'>): string {
   const name = req.name.toLowerCase()
   const summary = toSpeakable(req.summary).replace(/[.]+$/, '').slice(0, 120)
   if (name === 'git_commit') return summary ? `commit ${summary}` : 'commit the changes'
   if (name === 'github_pr_create') return 'push the branch and open a pull request'
-  if (name === 'app_control') return summary ? summary.replace(/_/g, ' ') : 'do that in the app'
+  if (name === 'app_control') return describeAppControl(summary)
   if (/terminal|shell|command|bash/.test(name)) return summary ? `run ${summary}` : 'run a command'
   if (/edit|write|patch|create|replace|delete/.test(name)) return summary ? `change ${summary}` : 'change a file'
   if (/fetch|browser|navigate/.test(name)) return summary ? `open ${summary}` : 'open a web page'
