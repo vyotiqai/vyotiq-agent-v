@@ -71,7 +71,8 @@ export function summarizeVoiceLog(id: string, entries: readonly VoiceConversatio
   let endedAt: string | null = null
   const runIds: string[] = []
   const sent: { runId: string; brief: string }[] = []
-  // Hand-offs not yet followed, oldest first: a `followed` without an id takes the latest.
+  // Hand-offs not yet followed. A `followed` without an id is a run that was already working
+  // (voice mode opened on its task), never a hand-off's: every hand-off's carries its id.
   const open = new Map<string, string>()
   for (const e of entries) {
     if (e.kind === 'you') {
@@ -85,7 +86,7 @@ export function summarizeVoiceLog(id: string, entries: readonly VoiceConversatio
       open.delete(e.handOffId)
     } else if (e.kind === 'followed') {
       if (!runIds.includes(e.runId)) runIds.push(e.runId)
-      const id = e.handOffId && open.has(e.handOffId) ? e.handOffId : [...open.keys()].at(-1)
+      const id = e.handOffId && open.has(e.handOffId) ? e.handOffId : null
       sent.push({ runId: e.runId, brief: id ? open.get(id)! : '' })
       if (id) open.delete(id)
     } else if (e.kind === 'end') endedAt = e.at
@@ -113,6 +114,29 @@ export async function readVoiceConversation(dir: string, id: string): Promise<Vo
   return { summary: summarizeVoiceLog(id, entries), entries, skipped }
 }
 
+/**
+ * Summaries already read, by file: a list reads again only a file whose size
+ * or time changed (the one still being written), not up to 200 of them each
+ * time the dialog opens.
+ */
+const summaries = new Map<string, { size: number; mtimeMs: number; summary: VoiceConversationSummary }>()
+/** Past this many, the cache starts over; a few workspaces' worth. */
+const MAX_CACHED_SUMMARIES = 1000
+
+async function summaryOf(dir: string, id: string): Promise<VoiceConversationSummary | null> {
+  const file = fileFor(dir, id)
+  if (!file) return null
+  const info = await lstat(file).catch(() => null)
+  if (!info || !info.isFile()) return null
+  const hit = summaries.get(file)
+  if (hit && hit.size === info.size && hit.mtimeMs === info.mtimeMs) return hit.summary
+  const read = await readVoiceConversation(dir, id)
+  if (!read) return null
+  if (summaries.size >= MAX_CACHED_SUMMARIES) summaries.clear()
+  summaries.set(file, { size: info.size, mtimeMs: info.mtimeMs, summary: read.summary })
+  return read.summary
+}
+
 /** Every kept conversation in `dir`, newest first. A missing folder is none yet. */
 export async function listVoiceConversations(dir: string): Promise<VoiceConversationSummary[]> {
   const names = await readdir(dir).catch(() => [] as string[])
@@ -122,6 +146,6 @@ export async function listVoiceConversations(dir: string): Promise<VoiceConversa
     .filter((id) => VOICE_CONVERSATION_ID_RE.test(id))
     .sort()
     .reverse()
-  const read = await Promise.all(ids.map((id) => readVoiceConversation(dir, id).catch(() => null)))
-  return read.filter((c): c is VoiceConversation => c != null).map((c) => c.summary)
+  const read = await Promise.all(ids.map((id) => summaryOf(dir, id).catch(() => null)))
+  return read.filter((c): c is VoiceConversationSummary => c != null)
 }

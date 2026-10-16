@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, appendFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync, appendFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { VoiceConversationLog } from '@main/voice/conversationLog'
@@ -72,6 +72,22 @@ describe('kept voice conversations, read back (§24.8)', () => {
     expect(list.map((c) => c.firstWords)).toEqual(['second', 'first'])
   })
 
+  it('a list reads again only a conversation that changed (2026-10-16 audit, L10)', async () => {
+    const dir = join(tempDir(), 'voice')
+    const file = await writeSession(dir, 's', '2026-10-14T09:00:00.000Z', (log) => log.add({ kind: 'you', turnId: 't', text: 'alpha' }))
+    // A whole second, which every file system keeps exactly.
+    const at = new Date('2026-10-14T09:00:00.000Z')
+    utimesSync(file, at, at)
+    expect((await listVoiceConversations(dir)).map((c) => c.firstWords)).toEqual(['alpha'])
+    // Same size and time: the summary already read is used, not the file.
+    writeFileSync(file, readFileSync(file, 'utf8').replace('alpha', 'omega'))
+    utimesSync(file, at, at)
+    expect((await listVoiceConversations(dir)).map((c) => c.firstWords)).toEqual(['alpha'])
+    // Written to since: read again.
+    appendFileSync(file, `${JSON.stringify({ at: 'x', kind: 'end' })}\n`)
+    expect((await listVoiceConversations(dir)).map((c) => c.firstWords)).toEqual(['omega'])
+  })
+
   it('a missing folder is no conversations yet', async () => {
     expect(await listVoiceConversations(join(tempDir(), 'nope'))).toEqual([])
   })
@@ -95,19 +111,19 @@ describe('kept voice conversations, read back (§24.8)', () => {
     expect(got!.skipped).toBe(2)
   })
 
-  it('a followed with no hand-off id takes the latest open hand-off; with none it keeps no brief', () => {
+  it('a followed with no hand-off id is a run already working: it takes no hand-off’s brief (2026-10-16 audit, L9)', () => {
     const { entries } = parseVoiceLog(
       [
         { at: 'a', kind: 'hand_off', handOffId: 'h1', brief: 'one' },
-        { at: 'b', kind: 'followed', runId: 'r1' },
-        { at: 'c', kind: 'followed', runId: 'r1' }
+        { at: 'b', kind: 'followed', runId: 'r0' },
+        { at: 'c', kind: 'followed', runId: 'r1', handOffId: 'h1' }
       ]
         .map((l) => JSON.stringify(l))
         .join('\n')
     )
     expect(summarizeVoiceLog('2026-10-14T10-00-00-000Z_x', entries).sent).toEqual([
-      { runId: 'r1', brief: 'one' },
-      { runId: 'r1', brief: '' }
+      { runId: 'r0', brief: '' },
+      { runId: 'r1', brief: 'one' }
     ])
   })
 

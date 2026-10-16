@@ -240,7 +240,8 @@ import {
   setSettings,
   redactSettingsForIpc,
   enqueueSettingsMutation,
-  onSettingsWritten
+  onSettingsWritten,
+  sentKeysOnly
 } from '@main/settings/settings'
 import { syncMcpServers, setMcpStdioWorkspace, getMcpStdioWorkspace } from '@main/agent/mcp'
 import { resolveMcpServersForSessionMap, invalidateMcpResolveCache } from '@main/marketplace'
@@ -1242,6 +1243,9 @@ export function registerIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const partial = SetSettingsRequestSchema.parse(raw)
+      // The schema fills a voice patch out with defaults: keep only what was sent, so a change
+      // made meanwhile elsewhere (the agent's set_voice_*) isn't put back to a stale copy.
+      if (partial.voice) partial.voice = sentKeysOnly(partial.voice, (raw as { voice?: unknown }).voice)
       if (
         partial.customCssPath !== undefined &&
         !customCssPathAllowed(partial.customCssPath, getSettings().customCssPath)

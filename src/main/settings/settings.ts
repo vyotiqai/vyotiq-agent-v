@@ -134,6 +134,17 @@ export function enqueueSettingsMutation<T>(fn: () => T | Promise<T>): Promise<T>
 
 export const REDACTED_VALUE = '[redacted]'
 
+/**
+ * A parsed patch cut back to the keys the caller actually sent. The settings
+ * schema fills a partial object out with its defaults; written as is, those
+ * defaults would undo whatever else had changed them.
+ */
+export function sentKeysOnly<T extends object>(parsed: T, sent: unknown): T {
+  if (!sent || typeof sent !== 'object' || Array.isArray(sent)) return parsed
+  const keys = new Set(Object.keys(sent))
+  return Object.fromEntries(Object.entries(parsed).filter(([k]) => keys.has(k))) as T
+}
+
 function hasMcpSecretValue(value: string): boolean {
   return typeof value === 'string' && value.trim().length > 0 && value !== REDACTED_VALUE
 }
@@ -896,6 +907,12 @@ export function setSettings(
   if (storage !== undefined) {
     storage = { ...prev.storage, ...storage }
   }
+  // Voice options change one at a time from several places (Settings, the voice view, the agent's
+  // set_voice_*): a patch keeps the rest, read here, inside the write.
+  let voice = partial.voice
+  if (voice !== undefined) {
+    voice = { ...prev.voice, ...voice }
+  }
   const merged = {
     ...prev,
     ...partial,
@@ -904,7 +921,8 @@ export function setSettings(
     ...(codeIndex !== undefined ? { codeIndex } : {}),
     ...(dictation !== undefined ? { dictation } : {}),
     ...(notifications !== undefined ? { notifications } : {}),
-    ...(storage !== undefined ? { storage } : {})
+    ...(storage !== undefined ? { storage } : {}),
+    ...(voice !== undefined ? { voice } : {})
   }
   // Gate the incoming patch at the write boundary so a mangled base URL paste
   // can never be persisted (2026-09 settings audit). Already-persisted legacy

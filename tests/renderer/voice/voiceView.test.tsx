@@ -446,20 +446,23 @@ describe('answering from the view', () => {
     expect(respond).toHaveBeenCalledWith('q1', 'once', 'r1')
   })
 
-  it('a risky approval is never a button here: it sends you to the card', async () => {
+  it('a risky approval is answered here once, as a spoken yes may (2026-10-16 audit, M6)', async () => {
+    const respond = vi.fn(async () => ({ ok: true }))
+    bridge().respondToolApproval = respond
     render(<Shell />)
     await start()
     act(() =>
       fake.update({
         state: 'waiting_on_you',
         transcript: [{ id: 'h1', who: 'agent', text: 'Clean up.', runId: 'r1' }],
-        works: { r1: work({ state: 'needs', ask: { kind: 'approval', requestId: 'q1', what: 'run rm -rf build', risky: true } }) }
+        works: { r1: work({ state: 'needs', ask: { kind: 'approval', requestId: 'q1', what: 'run rm -rf build', risky: true, always: true } }) }
       })
     )
-    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Answer on the task' }))
-    // Put away to show the task's card; with no voice bar on screen, the capsule's pill stays in reach.
-    expect(placement()).toBe('capsule')
+    expect(screen.queryByRole('button', { name: 'Answer on the task' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    expect(respond).toHaveBeenCalledWith('q1', 'once', 'r1')
   })
 
   it('a question with a few picks is answered with a click', async () => {

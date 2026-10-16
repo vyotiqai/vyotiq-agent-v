@@ -139,12 +139,21 @@ export function VoiceSessionEffects() {
         controller.ptt(false)
       }
     }
+    // Alt-Tab with Space held: its keyup goes to another window, so let go here.
+    const release = (): void => {
+      if (!pttHeld) return
+      pttHeld = false
+      controller.ptt(false)
+    }
     window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('keyup', onKeyUp, true)
+    window.addEventListener('blur', release)
     return () => {
       if (disarm) clearTimeout(disarm)
+      release()
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)
+      window.removeEventListener('blur', release)
     }
   }, [live, controller])
 

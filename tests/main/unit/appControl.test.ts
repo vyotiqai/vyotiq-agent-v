@@ -343,23 +343,24 @@ describe('running them', () => {
     const settings: Record<string, unknown> = { voice: { placement: 'capsule' } }
     const d = deps({ settings: () => settings })
     expect(await runAppAction(d, 'set_voice_options', { look: 'cloud' }, voice)).toEqual({ ok: true, message: 'Set: the orb is cloud.' })
-    expect(d.patches).toEqual([{ voice: { placement: 'capsule', orbLook: 'cloud' } }])
+    // Only what changed: the rest of voice is kept at the write (2026-10-16 audit, L6).
+    expect(d.patches).toEqual([{ voice: { orbLook: 'cloud' } }])
     expect(await runAppAction(d, 'set_voice_options', { style: 'ambient', captions: false, sounds: false, progress: true, hold_to_talk: true, patience: 'patient', layout: 'orb' }, voice)).toEqual({
       ok: true,
       message:
         'Set: the style is ambient, the layout is orb, it waits longer before you’re done, captions are off, sounds are off, progress is spoken, it listens only while you hold to talk.'
     })
     expect(d.patches[1]).toEqual({
-      voice: { placement: 'capsule', style: 'ambient', viewLayout: 'orb', endOfTurnPatience: 'patient', captions: false, earcons: false, speakProgress: true, pushToTalkOnly: true }
+      voice: { style: 'ambient', viewLayout: 'orb', endOfTurnPatience: 'patient', captions: false, earcons: false, speakProgress: true, pushToTalkOnly: true }
     })
     expect(await runAppAction(d, 'set_voice_options', {}, voice)).toEqual({ ok: false, message: 'I couldn’t do that: no voice option was named.' })
     expect(await runAppAction(d, 'set_voice_options', { look: 'smoke' }, voice)).toMatchObject({ ok: false, message: expect.stringContaining('look has to be sphere or glow') })
     expect(describeAppActions()).toContain('set_voice_options {look?: sphere|glow|pearl|aura|wire|cloud')
     // "Listen in Hindi" had nothing to call; detect is the empty language Settings stores.
     expect(await runAppAction(d, 'set_voice_options', { language: 'HI' }, voice)).toEqual({ ok: true, message: 'Set: it listens for language hi.' })
-    expect(d.patches.at(-1)).toEqual({ voice: { placement: 'capsule', language: 'hi' } })
+    expect(d.patches.at(-1)).toEqual({ voice: { language: 'hi' } })
     expect(await runAppAction(d, 'set_voice_options', { language: 'detect' }, voice)).toEqual({ ok: true, message: 'Set: it detects the language.' })
-    expect(d.patches.at(-1)).toEqual({ voice: { placement: 'capsule', language: '' } })
+    expect(d.patches.at(-1)).toEqual({ voice: { language: '' } })
     expect(await runAppAction(d, 'set_voice_options', { language: 'Hindi' }, voice)).toMatchObject({ ok: false, message: 'I couldn’t do that: the language didn’t fit.' })
   })
 

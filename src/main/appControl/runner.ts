@@ -410,9 +410,9 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
     }
     case 'set_voice_speed':
     case 'set_voice_placement': {
-      const voice = (deps.settings() as { voice?: Record<string, unknown> }).voice ?? {}
+      // Only what changes: the rest of voice is kept at the write, not from a copy read before it.
       const patch = name === 'set_voice_speed' ? { speed: a.speed } : { placement: a.placement }
-      await patchSettings({ voice: { ...voice, ...patch } }, { voice: patch })
+      await patchSettings({ voice: patch })
       if (name === 'set_voice_placement') return { ok: true, message: `Voice shows as ${String(a.placement)} now.` }
       // Saved either way; a model that refuses a speed must not be told it took (2026-10-16: speed 1.15 on Eleven v4).
       return deps.speedIgnored?.()
@@ -433,8 +433,7 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
         ...(o.language !== undefined ? { language: o.language === 'detect' ? '' : o.language } : {})
       }
       if (Object.keys(patch).length === 0) return { ok: false, message: 'I couldn’t do that: no voice option was named.' }
-      const voice = (deps.settings() as { voice?: Record<string, unknown> }).voice ?? {}
-      await patchSettings({ voice: { ...voice, ...patch } }, { voice: patch })
+      await patchSettings({ voice: patch })
       const said = [
         o.look !== undefined && `the orb is ${o.look}`,
         o.style !== undefined && `the style is ${o.style}`,

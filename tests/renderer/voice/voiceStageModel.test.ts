@@ -53,13 +53,13 @@ describe('the line under the headline', () => {
     expect(hint(snap({ transcript: [{ id: 't', who: 'you', text: 'x' }] }), { pushToTalkOnly: true }, undefined, now)).toBe('Hold Space to talk')
   })
 
-  it('waiting on you says how to answer, and a risky ask sends you to the task', () => {
+  it('waiting on you says how to answer, and a risky ask says it can’t easily be undone', () => {
     const at = (ask: VoiceWork['ask']) => {
       const v = snap({ state: 'waiting_on_you', transcript: [{ id: 'h1', who: 'agent', text: 'x', runId: 'r1' }], works: { r1: work({ state: 'needs', ask }) } })
       return hint(v, { pushToTalkOnly: false }, latestWork(v), now)
     }
     expect(at({ kind: 'approval', requestId: 'a', what: 'run x', risky: false })).toBe('Say yes or no, or use the buttons')
-    expect(at({ kind: 'approval', requestId: 'a', what: 'run x', risky: true })).toBe('It could be risky: answer it on the task')
+    expect(at({ kind: 'approval', requestId: 'a', what: 'run x', risky: true })).toBe("It can't easily be undone. Say yes or no, or use the buttons")
     expect(at({ kind: 'question', requestId: 'q', questionId: 'b', prompt: 'Which?', options: ['a', 'b'] })).toBe('Say your answer, or pick one')
   })
 })

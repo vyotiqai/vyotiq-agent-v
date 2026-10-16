@@ -39,7 +39,7 @@ import { DEFAULT_VOICE_SETTINGS } from '../../shared/ipc/schemas/voice'
 import { chooseModel, resolveTtsProvider, ttsEntry } from '../../shared/voice'
 import { voiceKeyAvailability } from '../voice/keys'
 import { speechModelRefusedSpeed } from '../voice/providers/tts/openaiSpeech'
-import { voiceLinkForRun } from './voiceLink'
+import { voiceLinkForRun, voiceSessionFollowing } from './voiceLink'
 import { onSpokenTurnState } from '../voice/voiceReply'
 import { settingsChangedSince } from './setByAgent'
 
@@ -86,8 +86,11 @@ const appDeps: AppControlDeps = {
   quit: () => app.quit()
 }
 
-export function runAppActionInApp(name: string, args: unknown, ctx: AppActionContext): Promise<AppActionResult> {
-  return runAppAction(appDeps, name, args, contextAtHome(ctx, ctx.runId ? getRunWorkspace(ctx.runId) : undefined))
+export async function runAppActionInApp(name: string, args: unknown, ctx: AppActionContext): Promise<AppActionResult> {
+  const result = await runAppAction(appDeps, name, args, contextAtHome(ctx, ctx.runId ? getRunWorkspace(ctx.runId) : undefined))
+  // Said in voice mode: the kept conversation shows what the agent did in the app (§24.8). Looking isn't doing.
+  if (name !== 'app_status') voiceSessionFollowing(ctx.runId)?.noteAction(name, result)
+  return result
 }
 
 /**

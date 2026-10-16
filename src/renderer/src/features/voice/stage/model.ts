@@ -69,7 +69,7 @@ export function hint(v: VoiceSnapshot, settings: Pick<VoiceSettings, 'pushToTalk
       return 'Talk to interrupt'
     case 'waiting_on_you': {
       const ask = work?.state === 'needs' ? work.ask : undefined
-      if (ask?.kind === 'approval') return ask.risky ? 'It could be risky: answer it on the task' : `Say yes${ask.always ? ', no, or always allow' : ' or no'}, or use the buttons`
+      if (ask?.kind === 'approval') return ask.risky ? "It can't easily be undone. Say yes or no, or use the buttons" : `Say yes${ask.always ? ', no, or always allow' : ' or no'}, or use the buttons`
       if (ask?.kind === 'question') return ask.options.length > 0 ? 'Say your answer, or pick one' : 'Say your answer, or answer it on the task'
       return 'It needs an answer: say it, or use the card on screen'
     }

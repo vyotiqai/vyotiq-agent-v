@@ -307,6 +307,8 @@ export class VoiceSession {
   private lastSaid: { contextId: string; text: string; at: number } | null = null
   /** Replies opened to be heard whose audio has not started yet; one that ends unheard must not strand the session. */
   private awaitingAudio = new Set<string>()
+  /** Every speaking stream not yet done, the reply's and one-off lines alike: End cancels them all. */
+  private liveTts = new Set<TtsStream>()
   /** The task the session is on (voice mode opened on it, or the line it moved to). */
   private taskRunId: string | null = null
   /** The task's workspace when the window named it. */
@@ -420,7 +422,12 @@ export class VoiceSession {
         }
       },
       screen: this.screen,
-      muted: this.standby ? 'until_called' : this.stateValue === 'paused' ? 'until_unmuted' : null
+      muted: this.standby ? 'until_called' : this.stateValue === 'paused' ? 'until_unmuted' : null,
+      noteAction: (action, result) => {
+        this.deps.record?.({ kind: 'app_action', action, ok: result.ok, message: result.message })
+        // The agent stopped the work it was doing for you.
+        if (action === 'stop_task' && result.ok && result.runId === this.followedRun) this.deps.record?.({ kind: 'stop_agent', by: 'voice' })
+      }
     }
   }
 
@@ -472,6 +479,7 @@ export class VoiceSession {
 
   private openReplyTts(contextId: string): TtsStream | null {
     if (!this.deps.openTts) return null
+    let opened: TtsStream | null = null
     const stream = this.deps.openTts(
       contextId,
       (code, message) => {
@@ -481,10 +489,15 @@ export class VoiceSession {
         this.emitError('speak', code, message)
       },
       (heard) => {
+        if (opened) this.liveTts.delete(opened)
         if (!heard) this.endedUnheard(contextId)
       }
     )
-    if (stream) this.awaitingAudio.add(contextId)
+    opened = stream
+    if (stream) {
+      this.awaitingAudio.add(contextId)
+      this.liveTts.add(stream)
+    }
     this.timing?.replies.add(contextId)
     return stream
   }
@@ -939,6 +952,9 @@ export class VoiceSession {
     this.stopAck()
     this.lastSaid = null
     this.reply.dispose()
+    // A line still being made ("One moment.", a cue) would keep calling the provider after End.
+    for (const stream of this.liveTts) stream.cancel()
+    this.liveTts.clear()
     this.playing.clear()
     this.awaitingAudio.clear()
     this.ctrl.abort()
@@ -1616,7 +1632,6 @@ export const HAND_OFF_FAILED_LINE: Readonly<Record<VoiceHandOffFailure, string>>
   unfollowed: 'I’m on it, but I can’t speak the answer from here. It’ll be on your screen.'
 }
 
-/** What an approval asks for, in a few spoken words (§7.5). */
 /** An app action asked about out loud ("can I …?"), from its summary (`delete_task: the login page`). */
 function describeAppControl(summary: string): string {
   const cut = summary.indexOf(': ')
@@ -1629,6 +1644,7 @@ function describeAppControl(summary: string): string {
   return `${action.replace(/_/g, ' ')}${on ? ` ${on}` : ''}`
 }
 
+/** What an approval asks for, in a few spoken words (§7.5). */
 export function describeApproval(req: Pick<ToolApprovalRequest, 'name' | 'summary'>): string {
   const name = req.name.toLowerCase()
   const summary = toSpeakable(req.summary).replace(/[.]+$/, '').slice(0, 120)

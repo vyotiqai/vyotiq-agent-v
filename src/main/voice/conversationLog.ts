@@ -17,7 +17,7 @@ import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 
 export type VoiceLogEntry =
   | { kind: 'start'; listener: string; speaker: string | null }
-  /** A turn of yours. `stop`: a stop phrase, which stops the work without the voice model. */
+  /** A turn of yours. `stop`: a stop phrase, which stops the work without sending it to the task. */
   | { kind: 'you'; turnId: string; text: string; stop?: boolean }
   /** Said aloud, one sentence at a time; lines of one `contextId` are one reply. */
   | { kind: 'voice' | 'agent'; contextId: string; text: string }

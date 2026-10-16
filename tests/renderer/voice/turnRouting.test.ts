@@ -46,4 +46,21 @@ describe('routing the voice’s hand-off (D-44, D-46)', () => {
     await expect(routeVoiceTurn(turn('never mind', true), idle)).resolves.toEqual({ kind: 'dropped' })
     expect(idle.calls).toEqual([])
   })
+
+  it('a turn while the run is still starting waits for its id instead of being refused (2026-10-16 audit, M8)', async () => {
+    vi.useFakeTimers()
+    try {
+      let id: string | null = null
+      const t = { ...target(true), runId: () => id }
+      const routed = routeVoiceTurn(turn('and the docs'), t)
+      await vi.advanceTimersByTimeAsync(500)
+      expect(t.calls).toEqual([])
+      id = 'r9'
+      await vi.advanceTimersByTimeAsync(100)
+      await expect(routed).resolves.toEqual({ kind: 'sent', runId: 'r9' })
+      expect(t.calls).toEqual(['send:and the docs:steer'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

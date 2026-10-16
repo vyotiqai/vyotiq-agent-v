@@ -5,13 +5,15 @@
  * startup; app control can't import them (they import the agent).
  */
 import type { VoiceScreen } from '../../shared/ipc/schemas/voice'
-import type { AppActionContext } from './runner'
+import type { AppActionContext, AppActionResult } from './runner'
 
 export type VoiceLinkSession = {
   controls: NonNullable<AppActionContext['voice']>
   /** What the window shows; null before it says. */
   screen: VoiceScreen | null
   muted: 'until_called' | 'until_unmuted' | null
+  /** An app action the run took, kept in the session's conversation (§24.8). */
+  noteAction: (action: string, result: AppActionResult) => void
 }
 
 type VoiceLink = {
@@ -30,4 +32,9 @@ export function setVoiceLink(next: VoiceLink | null): void {
 export function voiceLinkForRun(runId: string | null | undefined): VoiceLinkSession | null {
   if (!link) return null
   return (runId ? link.forRun(runId) : null) ?? link.any()
+}
+
+/** Only the session following this run: what it did belongs in that conversation, not any other. */
+export function voiceSessionFollowing(runId: string | null | undefined): VoiceLinkSession | null {
+  return runId && link ? link.forRun(runId) : null
 }

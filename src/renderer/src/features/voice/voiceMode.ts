@@ -237,9 +237,9 @@ export function dismissEndedVoice(): void {
  * speed, output): shown at once, then saved; main's echo settles it.
  */
 export async function patchVoiceSettings(patch: Partial<VoiceSettings>): Promise<boolean> {
-  const next = { ...mode.settings, ...patch }
-  emit({ settings: next })
-  const res = await window.vyotiq?.setSettings?.({ voice: next })
+  emit({ settings: { ...mode.settings, ...patch } })
+  // Only what changed: main keeps the rest as it is now, not as this copy last saw it.
+  const res = await window.vyotiq?.setSettings?.({ voice: patch as VoiceSettings })
   if (res?.ok && res.data.voice) emit({ settings: { ...DEFAULT_VOICE_SETTINGS, ...res.data.voice } })
   return res?.ok === true
 }

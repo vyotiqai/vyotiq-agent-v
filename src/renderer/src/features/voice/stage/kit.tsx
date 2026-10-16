@@ -662,9 +662,10 @@ export function Captions({ size = 'heading', align = 'center', lines = 3 }: { si
 // ── The task's work ────────────────────────────────────────────────────────
 
 /**
- * What the run is stopped on, answerable here: an ordinary approval (Allow
- * once, Always allow where the card offers it, Deny), a question with picks.
- * A risky approval is never a button here; neither is a free-text question.
+ * What the run is stopped on, answerable here: an approval (Allow once,
+ * Always allow where the card offers it, Deny), a question with picks. A
+ * risky approval is answered here too, as a spoken yes may (D-52), but only
+ * ever once. A free-text question is answered on the task.
  */
 export function AskRow({ work }: { work: VoiceWork }) {
   // One set of buttons per request: a second approval in the same run starts with them live.
@@ -696,23 +697,19 @@ function AskFor({ work }: { work: VoiceWork }) {
       {ask.kind === 'approval' ? (
         <>
           <span className="min-w-0 flex-1 text-sm text-fg-strong">{`Allow it to ${ask.what}?`}</span>
-          {ask.risky ? (
-            onTask
-          ) : (
-            <span className="flex shrink-0 items-center gap-1.5">
-              <Button size="xs" variant="primary" disabled={sent !== null} onClick={() => answer('once', () => api.respondApproval(ask.requestId, 'once', work.runId))}>
-                Allow once
+          <span className="flex shrink-0 items-center gap-1.5">
+            <Button size="xs" variant="primary" disabled={sent !== null} onClick={() => answer('once', () => api.respondApproval(ask.requestId, 'once', work.runId))}>
+              Allow once
+            </Button>
+            {ask.always && !ask.risky ? (
+              <Button size="xs" variant="secondary" disabled={sent !== null} onClick={() => answer('always', () => api.respondApproval(ask.requestId, 'always', work.runId))}>
+                Always allow
               </Button>
-              {ask.always ? (
-                <Button size="xs" variant="secondary" disabled={sent !== null} onClick={() => answer('always', () => api.respondApproval(ask.requestId, 'always', work.runId))}>
-                  Always allow
-                </Button>
-              ) : null}
-              <Button size="xs" variant="secondary" disabled={sent !== null} onClick={() => answer('deny', () => api.respondApproval(ask.requestId, 'deny', work.runId))}>
-                Deny
-              </Button>
-            </span>
-          )}
+            ) : null}
+            <Button size="xs" variant="secondary" disabled={sent !== null} onClick={() => answer('deny', () => api.respondApproval(ask.requestId, 'deny', work.runId))}>
+              Deny
+            </Button>
+          </span>
         </>
       ) : (
         <>

@@ -3,6 +3,7 @@ import { MAX_VOICED_ZCR, MIN_SPEECH_MS, PauseDetector, SILENCE_MS, settleMs, zer
 import { RECONNECT_DELAYS_MS, VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
 import { FixtureSttSession, openFixtureStt } from '@main/voice/providers/fixture'
 import { VoiceError } from '@main/voice/errors'
+import type { VoiceLogEntry } from '@main/voice/conversationLog'
 import type { SttOpenOptions, SttProvider } from '@main/voice/providers/types'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent, type VoiceSettings } from '@shared/ipc/schemas/voice'
 import type { VoiceKeyAvailability } from '@shared/voice'
@@ -89,6 +90,8 @@ type Harness = {
   opens: SttOpenOptions[]
   settings: VoiceSettings
   timers: Array<{ fn: () => void; ms: number }>
+  /** What the session kept in its conversation log. */
+  recorded: VoiceLogEntry[]
   runTimers: () => Promise<void>
 }
 
@@ -101,10 +104,12 @@ function harness(
   const sessions: FixtureSttSession[] = []
   const opens: SttOpenOptions[] = []
   const timers: Array<{ fn: () => void; ms: number }> = []
+  const recorded: VoiceLogEntry[] = []
   const settings: VoiceSettings = { ...DEFAULT_VOICE_SETTINGS, ...over }
   let n = 0
   const deps: VoiceSessionDeps = {
     emit: (e) => events.push(e),
+    record: (e) => recorded.push(e),
     settings: () => settings,
     keys: () => keys,
     readKey: () => 'k',
@@ -138,6 +143,7 @@ function harness(
     opens,
     settings,
     timers,
+    recorded,
     runTimers: async () => {
       const due = timers.splice(0)
       for (const t of due) t.fn()
@@ -452,6 +458,21 @@ describe('VoiceSession: 2026-10-16 audit fixes', () => {
     h.stt().say('um')
     await h.runTimers()
     expect(handOffs(h.events)).toEqual(['Can you'])
+  })
+
+  it('what the agent did in the app is kept in the conversation, and its stop of your task (L1)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.session.follow('run1')
+    h.session.link.noteAction('set_theme', { ok: true, message: 'Dark theme.' })
+    h.session.link.noteAction('stop_task', { ok: true, message: 'Stopped “Fix it”.', runId: 'run1' })
+    h.session.link.noteAction('stop_task', { ok: true, message: 'Stopped “Other”.', runId: 'run2' })
+    expect(h.recorded.filter((e) => e.kind === 'app_action' || e.kind === 'stop_agent')).toEqual([
+      { kind: 'app_action', action: 'set_theme', ok: true, message: 'Dark theme.' },
+      { kind: 'app_action', action: 'stop_task', ok: true, message: 'Stopped “Fix it”.' },
+      { kind: 'stop_agent', by: 'voice' },
+      { kind: 'app_action', action: 'stop_task', ok: true, message: 'Stopped “Other”.' }
+    ])
   })
 
   it('back from a reconnect, it is where it was: working, or speaking (M2)', async () => {

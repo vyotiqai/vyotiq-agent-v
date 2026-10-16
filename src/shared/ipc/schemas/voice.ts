@@ -317,7 +317,7 @@ export const VoiceWorkAskSchema = z.discriminatedUnion('kind', [
     requestId: z.string().max(200),
     /** "run pnpm test", "change src/app.ts": what it wants, in a few words. */
     what: z.string().max(300),
-    /** The command guard stopped it: only a click on the card may answer. */
+    /** It can't easily be undone (a delete, a commit or push, a guarded command): allowed once only. */
     risky: z.boolean(),
     /** The card offers its plain Always allow here (never risky, never an unscoped command). */
     always: z.boolean().optional()
@@ -362,8 +362,8 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
   /** Unsettled words of the turn in progress, for captions. */
   z.object({ sessionId: z.string(), kind: z.literal('partial'), text: z.string() }),
   /**
-   * What you said, one whole turn. The voice answers it (D-44); only a
-   * hand-off reaches the agent. `stop`: the turn was a stop phrase.
+   * What you said, one whole turn. It goes to the task as said and the agent
+   * answers it (D-52). `stop`: the turn was a stop phrase.
    */
   z.object({
     sessionId: z.string(),

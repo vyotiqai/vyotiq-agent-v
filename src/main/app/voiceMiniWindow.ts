@@ -84,7 +84,9 @@ export function openVoiceMiniWindow(): BrowserWindow {
   mini = win
   open = true
   // It belongs to the main window's session: it goes when that window does.
-  getMainWindow()?.once('closed', closeVoiceMiniWindow)
+  // One hook per open, taken off when this one closes, or they pile up on the main window.
+  const owner = getMainWindow()
+  owner?.once('closed', closeVoiceMiniWindow)
 
   // It never opens anything or goes anywhere: no new windows, no navigation.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -99,6 +101,7 @@ export function openVoiceMiniWindow(): BrowserWindow {
     if (lastState && !win.isDestroyed()) win.webContents.send(IPC.voiceMiniState, lastState)
   })
   win.on('closed', () => {
+    if (owner && !owner.isDestroyed()) owner.removeListener('closed', closeVoiceMiniWindow)
     if (mini === win) mini = null
     // Closed from the OS (not by the main window): the main window shows the session itself again.
     if (open) {

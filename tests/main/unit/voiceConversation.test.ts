@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, cueForTool, narratesAboutUser, runFailedLine, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
+import { DETAILS_ON_SCREEN } from '@main/voice/speechText'
 import { HAND_OFF_FAILED_LINE, VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
 import { openFixtureStt, openFixtureTts, type FixtureSttSession, type FixtureTtsStream } from '@main/voice/providers/fixture'
 import { addRunEventTap, tapRunEvent } from '@main/agent/runEventTap'
@@ -147,54 +148,44 @@ describe('ReplySpeaker', () => {
     expect(h.said.join(' ')).toBe('All green. Nothing else changed.')
   })
 
-  it('an answer with no <spoken> block is reported by the voice, not read off a table (B7)', () => {
-    const onResult = vi.fn()
-    const reportResult = vi.fn(() => true)
-    const h = speakerHarness({ onResult, reportResult })
+  it('an answer with no <spoken> block is read as a short summary, never off a table (B7)', () => {
+    const h = speakerHarness()
     h.speaker.beginTurn()
     const table = ['**Sessions**', '| Session | Started |', '| --- | --- |', '| This chat | today |'].join('\n')
     h.speaker.handle(delta(table))
     h.speaker.handle(final(table))
     h.speaker.handle(status('done'))
-    expect(onResult).toHaveBeenCalledWith(table)
-    expect(reportResult).toHaveBeenCalledTimes(1)
-    expect(h.said).toEqual([])
+    expect(h.said.join(' ')).not.toContain('|')
+    expect(h.said.join(' ')).toContain(DETAILS_ON_SCREEN)
   })
 
-  it('the final answer reaches the voice even when it was silenced, and a spoken one is not reported twice (B5)', () => {
-    const onResult = vi.fn()
-    const reportResult = vi.fn(() => true)
-    const h = speakerHarness({ onResult, reportResult })
+  it('a silenced answer is not said when the run ends, and a spoken one is said once (B5)', () => {
+    const h = speakerHarness()
     h.speaker.beginTurn()
     h.speaker.interrupt()
     h.speaker.handle(final('Six sessions ran.'))
     h.speaker.handle(status('done'))
-    expect(onResult).toHaveBeenCalledWith('Six sessions ran.')
-    expect(reportResult).not.toHaveBeenCalled()
-    const spoken = speakerHarness({ onResult, reportResult })
+    expect(h.said).toEqual([])
+    const spoken = speakerHarness()
     spoken.speaker.beginTurn()
     spoken.speaker.handle(delta('<spoken>Done. </spoken> More.'))
     spoken.speaker.handle(final('<spoken>Done. </spoken> More.'))
     spoken.speaker.handle(status('done'))
-    expect(reportResult).not.toHaveBeenCalled()
     expect(spoken.said).toEqual(['Done.'])
   })
 
   it('only the last answer of a run is settled: a check that sends the agent back to work comes first', () => {
-    const onResult = vi.fn()
-    const h = speakerHarness({ onResult })
+    const h = speakerHarness()
     h.speaker.beginTurn()
     h.speaker.handle(final('Done, I think.'))
     h.speaker.handle(toolStart('v', 'run_terminal', 'pnpm test'))
     h.speaker.handle(final('Verified: all tests pass.'))
     h.speaker.handle(status('done'))
-    expect(onResult.mock.calls).toEqual([['Verified: all tests pass.']])
+    expect(h.said).toEqual(['Verified: all tests pass.'])
   })
 
-  it('says one answer per run: the one the verification gate sent back is shown and kept, not said again', () => {
-    const onResult = vi.fn()
-    const reportResult = vi.fn(() => true)
-    const h = speakerHarness({ onResult, reportResult })
+  it('says one answer per run: the one the verification gate sent back is shown, not said again', () => {
+    const h = speakerHarness()
     h.speaker.beginTurn()
     h.speaker.handle(status('running'))
     const first = '<spoken>I renamed the setting. </spoken> Details.'
@@ -208,23 +199,17 @@ describe('ReplySpeaker', () => {
     h.speaker.handle(final(second))
     h.speaker.handle(status('done'))
     expect(h.said).toEqual(['I renamed the setting.'])
-    expect(reportResult).not.toHaveBeenCalled()
-    expect(onResult.mock.calls).toEqual([[second]])
   })
 
-  it('an answer with no <spoken> block, sent back by the gate, is reported once, from the last answer', () => {
-    const onResult = vi.fn()
-    const reportResult = vi.fn(() => true)
-    const h = speakerHarness({ onResult, reportResult })
+  it('an answer with no <spoken> block, sent back by the gate, is summarised once, from the last answer', () => {
+    const h = speakerHarness()
     h.speaker.beginTurn()
     h.speaker.handle(final('Renamed it.'))
     h.speaker.handle(toolStart('v', 'read_file', 'settings.ts'))
     h.speaker.handle(toolResult('v'))
     h.speaker.handle(final('Renamed it; the file reads back as expected.'))
     h.speaker.handle(status('done'))
-    expect(reportResult).toHaveBeenCalledTimes(1)
-    expect(onResult.mock.calls).toEqual([['Renamed it; the file reads back as expected.']])
-    expect(h.said).toEqual([])
+    expect(h.said).toEqual(['Renamed it; the file reads back as expected.'])
   })
 
   it('a follow-up applied mid-run, or the next invoke, is a new turn whose answer is said', () => {
@@ -302,9 +287,8 @@ describe('ReplySpeaker', () => {
     expect(h.speaker.runActive).toBe(false)
   })
 
-  it('says why the run failed, from its error code, and keeps the provider’s words for the voice', () => {
-    const onRunFailed = vi.fn()
-    const h = speakerHarness({ onRunFailed })
+  it('says why the run failed, from its error code', () => {
+    const h = speakerHarness()
     h.speaker.beginTurn()
     h.speaker.handle({
       type: 'error',
@@ -315,18 +299,15 @@ describe('ReplySpeaker', () => {
     h.speaker.handle(status('error'))
     expect(h.said).toEqual([runFailedLine('PROVIDER_BILLING')])
     expect(h.said[0]).toContain('out of credit')
-    expect(onRunFailed).toHaveBeenCalledWith(expect.stringContaining('Prompt tokens limit exceeded'))
   })
 
   it('forgets an earlier invoke’s error once the run starts again', () => {
-    const onRunFailed = vi.fn()
-    const h = speakerHarness({ onRunFailed })
+    const h = speakerHarness()
     h.speaker.beginTurn()
     h.speaker.handle({ type: 'error', runId: R, message: 'boom', code: 'PROVIDER_AUTH' } as AgentEvent)
     h.speaker.handle(status('running'))
     h.speaker.handle(status('error'))
     expect(h.said).toEqual([RUN_FAILED_LINE])
-    expect(onRunFailed).not.toHaveBeenCalled()
   })
 
   it('redacts secrets before they reach the speech vendor', () => {
@@ -425,6 +406,16 @@ describe('VoiceSession conversation', () => {
     const session = new VoiceSession(deps)
     return { session, events, stt: () => stt.at(-1)!, tts, run: (e: AgentEvent) => taps.get(R)?.(e), taps }
   }
+
+  it('End cancels a line still being made, not only the reply (2026-10-16 audit, L8)', async () => {
+    const h = sessionHarness()
+    await h.session.start()
+    ;(h.session as unknown as { sayLine: (text: string) => void }).sayLine('One moment.')
+    const line = h.tts.at(-1)!
+    expect(line.cancelled).toBe(false)
+    await h.session.stop()
+    expect(line.cancelled).toBe(true)
+  })
 
   it('a whole exchange: turn → thinking → speaking → listening', async () => {
     const h = sessionHarness()

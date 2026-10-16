@@ -66,15 +66,6 @@ export type ReplySpeakerDeps = {
   speakProgress: () => boolean
   /** A slow step started and spoken progress is off: the renderer plays a soft sound. */
   quietCue?: () => void
-  /** The run's final answer, spoken or not: the voice keeps it to answer from (B5). */
-  onResult?: (answer: string) => void
-  /** The run failed, with its own message: the voice keeps it, so "why?" has an answer. */
-  onRunFailed?: (message: string) => void
-  /**
-   * The answer had no `<spoken>` block: have the voice say what it found (B7).
-   * False when it can't; a short summary of the answer is read instead.
-   */
-  reportResult?: () => boolean
   newId: () => string
   now: () => number
   setTimer: (fn: () => void, ms: number) => unknown
@@ -162,11 +153,7 @@ export class ReplySpeaker {
         this.active = false
         this.clearCues()
         this.settleAnswer(ev.status === 'done')
-        if (ev.status === 'error') {
-          const err = this.runError
-          if (err) this.deps.onRunFailed?.(err.message)
-          this.speakOnce(runFailedLine(err?.code))
-        }
+        if (ev.status === 'error') this.speakOnce(runFailedLine(this.runError?.code))
         this.runError = null
         this.finishReply()
         this.deps.onRunEnd()
@@ -251,17 +238,14 @@ export class ReplySpeaker {
   }
 
   /**
-   * The run ended: its last answer goes to the voice's memory whether or not
-   * it was heard (B5). One without a `<spoken>` block is said by the voice
-   * (B7), or, without a voice model, as a short summary.
+   * The run ended: its last answer is settled. One without a `<spoken>` block
+   * is said as a short summary (B7); one silenced or failed isn't said.
    */
   private settleAnswer(done: boolean): void {
     const answer = this.answer
     this.answer = null
     if (!answer) return
-    this.deps.onResult?.(answer.text)
     if (answer.spoken || !done || this.quiet) return
-    if (this.deps.reportResult?.()) return
     const summary = fallbackSummary(answer.text)
     if (summary) this.speak(`${summary} `)
   }

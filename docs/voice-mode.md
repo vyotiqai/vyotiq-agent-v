@@ -1221,6 +1221,17 @@ Socket keepalive: ElevenLabs closes idle contexts after 20 s by default. The
 adapter raises `inactivity_timeout` and sends empty-text keepalives while the
 session is open but quiet. Deepgram gets `KeepAlive` while muted.
 
+> **Built vs specced (2026-10-16 audit, M9).** The listener rows hold: the
+> ring buffer keeps 10 s, `RECONNECT_DELAYS_MS` is 250 ms to 4 s over 5 tries,
+> and the buffer is replayed on success (also after a mute mid-reconnect and
+> after a settings change reopens the listener). These are **not built**: a
+> speaking socket reopened with its unsaid sentences resent, and the "Lost the
+> voice connection" line; offline told apart through `networkMonitor`, with a
+> pause and resume of its own; a `network_wait` caption; Deepgram `KeepAlive`
+> while muted. The keepalive while muted is AssemblyAI's only
+> (`assemblyai.ts`). ElevenLabs gets `inactivity_timeout=180` on the URL; no
+> periodic empty-text keepalive is sent after the opening one. Listed in §24.3.
+
 ---
 
 ## 16. Risks
@@ -1545,8 +1556,14 @@ checklist above.
 | Item | Where specced | Why not yet |
 | --- | --- | --- |
 | A dot in the app's own title bar | §13.8 | Replaced by the tray + taskbar indicator (D-34); the top 36px band needs the Electron e2e (repo rule) |
-| Voice-only mode switching, wake word, mini window, multilingual, expressive markup | §23 | v2 backlog |
+| Voice-only mode switching, an always-on wake word that starts voice mode, expressive markup | §23 | v2 backlog |
+| A speaking socket reopened mid-reply, "Lost the voice connection", offline told apart via `networkMonitor` with its own pause and resume, a `network_wait` caption, Deepgram `KeepAlive` while muted | §15 | Not built (2026-10-16 audit, M9); a dropped speaking stream leaves the reply on screen |
 | Voice mode while a dictation take is live in *another* pane | D-34 | The take keeps its keys until it's inserted or discarded; voice can start meanwhile. Rare; guard after real use if needed |
+
+Built since §23 was written: the mini window (`voiceMiniWindow.ts`, §26.5);
+a name said to a session put on standby wakes it (`afterWakeName`); a
+listening language setting, with Devanagari and Gurmukhi kept alongside
+English (D-52).
 
 Closed on 2026-10-13: speaking fallback in the bar (§9.5), dip-then-stop
 barge-in (§6.2, D-33), the tray + taskbar "mic is on" indicator (§13.8,
@@ -2570,7 +2587,9 @@ A spoken yes is enough for everything (2026-10-16 decision). In voice mode a
 commit or a push (`git_commit`, `github_pr_create`, `git commit`/`git push` in
 the terminal) waits for a yes whatever the approval settings say. Risky
 approvals (a delete, a guarded command, a commit or push) take a clear spoken
-yes and are allowed once; never "always".
+yes and are allowed once; never "always". The voice view answers them the same
+way (2026-10-16 audit, M6): **Allow once** and **Deny**, no **Always allow**;
+it used to send you to the task's card, which disagreed with the voice.
 
 ### 27.5 Removed
 

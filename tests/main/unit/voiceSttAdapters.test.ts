@@ -295,6 +295,21 @@ describe('This PC (local)', () => {
     expect(Buffer.from(req.pcm16k, 'base64').length).toBe(6)
   })
 
+  it('one take Whisper fails loses that turn; a missing model ends voice mode (2026-10-16 audit, L4)', async () => {
+    const fails = (err: Error) => vi.fn(async () => Promise.reject(err))
+    for (const [err, retryable] of [
+      [new DictationError('engine_failed', 'Whisper stopped: bad frame'), true],
+      [new DictationError('model_missing', 'Install a Whisper model to dictate on this PC'), false],
+      [new DictationError('engine_failed', 'Whisper could not start on this PC'), false]
+    ] as const) {
+      const { o, events } = opts()
+      const session = await makeLocalStt(fails(err) as never).open(o)
+      session.pushAudio(Int16Array.from([1, 2]))
+      session.endTurn()
+      await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'error', code: 'engine_failed', retryable }))
+    }
+  })
+
   it('drops what came before your speech, keeping a second and a half of lead-in', async () => {
     const transcribe = vi.fn(async () => ({ text: 'hi' }))
     const { o } = opts()

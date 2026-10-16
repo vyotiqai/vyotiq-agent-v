@@ -5,6 +5,7 @@
  * slower replies, but nothing leaves the machine (docs/voice-mode.md §9.3).
  */
 import { transcribeLocalDictation } from '../../../dictation/local'
+import { isDictationError } from '../../../dictation/errors'
 import type { DictationTranscribeResult } from '../../../../shared/ipc'
 import type { SttEvent, SttOpenOptions, SttProvider, SttSession, TurnListenStats } from '../types'
 
@@ -43,12 +44,16 @@ export type TurnUploadOptions = {
   toError: (err: unknown) => Extract<SttEvent, { kind: 'error' }>
 }
 
-const localError = (err: unknown): Extract<SttEvent, { kind: 'error' }> => ({
-  kind: 'error',
-  code: 'engine_failed',
-  message: err instanceof Error ? err.message : String(err),
-  retryable: false
-})
+/**
+ * Only a model that isn't there, or a Whisper that can't start, ends voice
+ * mode. One take Whisper stumbled on loses that turn alone (A-03): it is
+ * "retryable", which a whole-turn listener's session reads as "this turn".
+ */
+const localError = (err: unknown): Extract<SttEvent, { kind: 'error' }> => {
+  const message = err instanceof Error ? err.message : String(err)
+  const fatal = (isDictationError(err) && err.code === 'model_missing') || /could not start|needs audio from the microphone/.test(message)
+  return { kind: 'error', code: 'engine_failed', message, retryable: !fatal }
+}
 
 /** Buffers each turn and transcribes it once the turn ends: This PC, and OpenRouter (no streaming endpoint). */
 export class TurnUploadSttSession implements SttSession {

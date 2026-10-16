@@ -95,9 +95,8 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
         return
       }
       case 'followed': {
-        const target =
-          (e.handOffId ? handOffs.get(e.handOffId) : undefined) ??
-          [...handOffs.values()].reverse().find((h) => h.outcome.kind === 'unknown')
+        // Without an id it's a run that was already working, not any hand-off's (2026-10-16 audit, L9).
+        const target = e.handOffId ? handOffs.get(e.handOffId) : undefined
         if (target && target.outcome.kind === 'unknown') {
           target.outcome = { kind: 'sent', runId: e.runId }
           return

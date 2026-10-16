@@ -163,6 +163,17 @@ describe('VoiceBar', () => {
     expect(fake.calls.length).toBe(before)
   })
 
+  it('Space held while the window loses focus is let go (2026-10-16 audit, M7)', async () => {
+    await act(() => startBar())
+    render(<Bar />)
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' })
+    fireEvent.blur(window)
+    expect(fake.calls.filter((c) => c.startsWith('ptt:'))).toEqual(['ptt:true', 'ptt:false'])
+    // The keyup that finally arrives elsewhere changes nothing more.
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' })
+    expect(fake.calls.filter((c) => c.startsWith('ptt:'))).toEqual(['ptt:true', 'ptt:false'])
+  })
+
   it('a missing key says so in words and offers Voice settings', async () => {
     const open = vi.fn()
     await act(() => startBar())

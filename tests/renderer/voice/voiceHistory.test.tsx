@@ -59,6 +59,18 @@ describe('conversationRows', () => {
     expect(steered).toEqual([expect.objectContaining({ kind: 'followed', runId: 'r9' })])
   })
 
+  it('a run already working, followed while a hand-off waits, isn’t taken for it (2026-10-16 audit, L9)', () => {
+    const { rows } = conversationRows([
+      { at: at(0), kind: 'hand_off', handOffId: 'h1', brief: 'one' },
+      { at: at(1), kind: 'followed', runId: 'r0' },
+      { at: at(2), kind: 'followed', runId: 'r1', handOffId: 'h1' }
+    ])
+    expect(rows).toEqual([
+      expect.objectContaining({ kind: 'hand_off', outcome: { kind: 'sent', runId: 'r1' } }),
+      expect.objectContaining({ kind: 'followed', runId: 'r0' })
+    ])
+  })
+
   it('two replies stay two lines', () => {
     const { rows } = conversationRows([
       { at: at(0), kind: 'voice', contextId: 'c1', text: 'One.' },

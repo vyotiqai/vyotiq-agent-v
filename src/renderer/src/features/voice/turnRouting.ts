@@ -32,7 +32,24 @@ export async function routeVoiceTurn(turn: VoiceTurn, target: VoiceRunTarget): P
     if (running) await target.stop()
     return running ? { kind: 'stopped' } : { kind: 'dropped' }
   }
+  // A run just starting has no id yet, and a follow-up needs one: wait for it rather than refuse.
+  if (running && !target.runId()) await runStarted(target)
   // While it works, the brief joins the current turn (applied between steps), never cancelling it.
-  const ok = await target.send(turn.text, { steer: running })
+  const ok = await target.send(turn.text, { steer: target.running() })
   return ok ? { kind: 'sent', runId: target.runId() } : { kind: 'dropped' }
+}
+
+/** How long a turn waits for a starting run's id before it's sent anyway. */
+export const RUN_START_WAIT_MS = 10_000
+const RUN_START_POLL_MS = 100
+
+function runStarted(target: VoiceRunTarget): Promise<void> {
+  return new Promise((resolve) => {
+    const began = Date.now()
+    const tick = (): void => {
+      if (target.runId() || !target.running() || Date.now() - began >= RUN_START_WAIT_MS) resolve()
+      else setTimeout(tick, RUN_START_POLL_MS)
+    }
+    setTimeout(tick, RUN_START_POLL_MS)
+  })
 }

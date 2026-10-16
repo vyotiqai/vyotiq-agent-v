@@ -269,6 +269,14 @@ export async function startVoiceSession(
   return session.id
 }
 
+/** "Nova", "the Nova voice": the listed voice it names, exactly or in part; none for a name that's only "voice". */
+export function pickVoiceByName(voices: readonly string[], name: string): string | undefined {
+  const want = name.trim().toLowerCase().replace(/\s*voice$/, '').trim()
+  // An empty name would match the first one listed.
+  if (!want) return undefined
+  return voices.find((v) => v.toLowerCase() === want) ?? voices.find((v) => v.toLowerCase().includes(want))
+}
+
 /**
  * "Use the Nova voice": a voice the speaking model lists, by name. Only a
  * provider whose voices are named (OpenRouter's list) can be picked by
@@ -282,12 +290,13 @@ async function setVoiceByName(name: string): Promise<AppActionResult> {
   const model = chooseModel(entry, settings.tts[entry.id]?.model)
   const voices = cachedModelVoices(entry.id, model)
   if (!voices?.length) return { ok: false, message: 'Voices for this speaker are picked in Settings, under Voice.' }
-  const want = name.trim().toLowerCase().replace(/\s*voice$/, '')
-  const voiceId = voices.find((v) => v.toLowerCase() === want) ?? voices.find((v) => v.toLowerCase().includes(want))
+  const voiceId = pickVoiceByName(voices, name)
   if (!voiceId) return { ok: false, message: `There’s no voice called ${name}. Some I have: ${voices.slice(0, 5).join(', ')}.` }
-  await enqueueSettingsMutation(() =>
-    setSettings({ voice: { ...settings, tts: { ...settings.tts, [entry.id]: { ...settings.tts[entry.id], voiceId } } } })
-  )
+  // Read inside the write: a change made meanwhile (speed, a model) is kept.
+  await enqueueSettingsMutation(() => {
+    const now = currentVoiceSettings()
+    return setSettings({ voice: { tts: { ...now.tts, [entry.id]: { ...now.tts[entry.id], voiceId } } } as VoiceSettings })
+  })
   return { ok: true, message: `This is ${voiceId}.` }
 }
 
