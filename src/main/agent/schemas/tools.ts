@@ -1577,7 +1577,7 @@ export const TOOL_REGISTRY = {
     schema: showViewArgs
   },
   app_control: {
-    description: 'Act in the Agent V app, not the workspace: views, panels, tasks in any workspace, settings, opening files or URLs. action "list" gives the actions. Deleting, updating or quitting needs the user’s OK.',
+    description: 'Act in the Agent V app, not the workspace: views, panels, tasks in any workspace, settings, a task’s model, voice mode, opening files or URLs; app_status reads the app as it is now. action "list" gives the actions and their args. Deleting, updating or quitting needs the user’s OK.',
     schema: appControlArgs
   },
   switch_mode: {

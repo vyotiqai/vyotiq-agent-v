@@ -99,7 +99,7 @@ test('Esc closes a dialog over the voice view, and Space presses a focused butto
   const { window } = launched
   await openBrief()
   await window.evaluate(() => {
-    window.__micDelayMs = 0
+    self.__micDelayMs = 0
   })
   await startVoice()
   const view = window.locator('[data-voice-view]')
@@ -180,7 +180,7 @@ test('after End the summary stays on screen, with the conversation one click awa
   // End always leaves the summary; nothing was handed to a task.
   const ended = window.locator('[data-voice-ended]')
   await expect(ended).toBeVisible()
-  await expect(ended.locator('[data-voice-summary-title]')).toHaveText('Nothing handed over')
+  await expect(ended.locator('[data-voice-summary-title]')).toHaveText('No work started')
   await expect(ended.getByRole('button', { name: 'Mute' })).toHaveCount(0)
   await ended.getByRole('button', { name: 'Conversation', exact: true }).click()
   await expect(ended.locator('[data-voice-line="voice"]').first()).toContainText(said.replace(/\s+/g, ' ').trim().slice(0, 20))
@@ -193,7 +193,7 @@ test('End while the mic is still opening leaves no mic running', async () => {
   const { window } = launched
   await openBrief()
   await window.evaluate(() => {
-    window.__micDelayMs = 1500
+    self.__micDelayMs = 1500
   })
   await startVoice()
   const view = window.locator('[data-voice-view]')
@@ -202,7 +202,7 @@ test('End while the mic is still opening leaves no mic running', async () => {
   await expect(view).toHaveCount(0)
   // The mic answers after End: it must be stopped at once, not left capturing behind an "off" view.
   await window.waitForTimeout(2_000)
-  expect(await window.evaluate(() => window.__micLive?.() ?? false)).toBe(false)
+  expect(await window.evaluate(() => self.__micLive?.() ?? false)).toBe(false)
   await expect(window.locator('[data-voice-button="off"]').first()).toBeAttached()
 })
 
@@ -210,12 +210,12 @@ test('a microphone that goes away mid-session says so, and Try again brings it b
   const { window } = launched
   await openBrief()
   await window.evaluate(() => {
-    window.__micDelayMs = 0
+    self.__micDelayMs = 0
   })
   await startVoice()
   const view = window.locator('[data-voice-view]')
   await expect(view).toHaveAttribute('data-voice-view', 'listening', { timeout: 15_000 })
-  await window.evaluate(() => window.__endMic?.())
+  await window.evaluate(() => self.__endMic?.())
   // Not a view that silently vanishes: the reason, and the way back.
   await expect(view).toHaveAttribute('data-voice-view', 'error')
   await expect(view.getByRole('alert')).toContainText('No microphone found.')

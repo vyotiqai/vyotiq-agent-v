@@ -144,11 +144,6 @@ describe('questions in a live session', () => {
         }
       },
       resolveQuestion,
-      responder: () =>
-        async function* () {
-          yield { type: 'text' as const, text: 'It is waiting on your answer.' }
-          yield { type: 'done' as const }
-        },
       setTimer: opts.timers ? (fn) => opts.timers!.push(fn) : () => null,
       clearTimer: () => {},
       newId: () => `id${++n}`
@@ -226,8 +221,8 @@ describe('questions in a live session', () => {
     h.ask(request([single()]))
     h.stt().say('how is it going')
     expect(h.turns()).toHaveLength(1)
-    // The voice answers from its status (it may not answer the card), and its words play out.
-    await vi.waitFor(() => expect(h.said).toContain('It is waiting on your answer.'))
+    // The agent can't answer while it waits: you hear what it waits on, and those words play out.
+    await vi.waitFor(() => expect(h.said.at(-1)).toBe('I still need your answer first. Which database should I use? Postgres, SQLite or MySQL.'))
     const say = h.events.findLast((e) => e.kind === 'say')!
     const contextId = say.kind === 'say' ? say.contextId : ''
     h.session.playback(contextId, 'started')

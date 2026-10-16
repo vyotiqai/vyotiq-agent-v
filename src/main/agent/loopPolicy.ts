@@ -1,4 +1,4 @@
-import type { ChatMessage, ThinkingEffort } from '../../shared/ipc'
+import type { ChatMessage, ModelInfo, ThinkingEffort } from '../../shared/ipc'
 import { isAbortStubText } from '../../shared/toolStubs'
 import { codebaseSearchHitPathsFromResult } from './codeindex/query'
 import { readPathArg } from './tools/argAccess'
@@ -104,6 +104,22 @@ export function emptyResponseRetryEffort(
   const top = EFFORT_LADDER.indexOf(ceiling)
   if (top <= 0) return ceiling
   return EFFORT_LADDER[Math.max(0, top - consecutiveEmpties)] ?? ceiling
+}
+
+/**
+ * Reasoning for a turn said out loud (voice mode is the agent, §27; Ajay's
+ * pick 2026-10-16): off where the model allows it, else the lowest effort it
+ * lists. Measured in the real app that morning: 4.2–8.5 s a step at the
+ * set effort, prompt cached, under 440 tokens out; the voice heard nothing
+ * for 9–16 s.
+ */
+export function spokenTurnThinking(
+  info: Pick<ModelInfo, 'supportsThinking' | 'thinkingCanDisable' | 'supportedThinkingEfforts'> | undefined
+): { enabled: false } | { enabled: true; effort: ThinkingEffort; display: 'omitted' } {
+  if (!info?.supportsThinking || info.thinkingCanDisable !== false) return { enabled: false }
+  const listed = info.supportedThinkingEfforts
+  const lowest = listed?.length ? (EFFORT_LADDER.find((e) => listed.includes(e)) ?? listed[0]!) : 'low'
+  return { enabled: true, effort: lowest, display: 'omitted' }
 }
 
 /** The weaker of two efforts, for combining independent step-down signals. */

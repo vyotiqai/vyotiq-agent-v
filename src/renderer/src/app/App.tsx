@@ -41,6 +41,7 @@ import type {
   ToolApprovalDecision
 } from '@shared/ipc'
 import { defaultModelFor, isProviderConfigured, providerLabel } from '@shared/providers'
+import { ProviderIdSchemaAny } from '@shared/ipc/schemas/providers'
 import {
   resolveEffectiveSettings,
   type ChatSettingsPatch
@@ -3244,6 +3245,15 @@ function App() {
       const pane = getFocusedPaneRef.current()
       if (!pane?.runId || view !== 'chat') return false
       setAgentMode(mode, { workspacePath: pane.workspacePath, runId: pane.runId })
+      return true
+    },
+    // The agent's "use Haiku for this task" (§27): what the task's model menu does.
+    onSetTaskModel: (path: string, runId: string, provider: string, model: string): boolean => {
+      const parsed = ProviderIdSchemaAny.safeParse(provider)
+      const ctrl = parsed.success ? getRunControllerRef.current(runId, path) : null
+      if (!parsed.success || !ctrl) return false
+      ctrl.setProviderModel(parsed.data, model)
+      onProviderModelForWorkspace(path, parsed.data, model)
       return true
     },
     onExportRunInWorkspace: (path: string, runId: string) => void onExportRunInWorkspace(path, runId),

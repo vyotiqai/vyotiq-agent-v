@@ -26,6 +26,7 @@ import { isMcpServerToolName } from '../../shared/mcpApps'
 import { canonicalizeAgentToolName } from './schemas/tools'
 import { parseToolCallArgs } from './tools/callArgs'
 import { isDestructiveAppControl } from '../../shared/appActions'
+import { isVoiceFollowedRun } from '../voice/voiceReply'
 import { BUILTIN_TOOL_NAME_SET, isApprovalExemptTool } from './tools/classify'
 import { agentBuiltToolAllowKey } from './agentTools/loader'
 import { resolveAgentToolsDir } from './agentTools/paths'
@@ -346,6 +347,17 @@ export function commandGuardFor(workspace: string, shell: TerminalShell | undefi
     platform: process.platform,
     syntax: resolved === 'powershell' || resolved === 'cmd' ? 'windows' : 'posix'
   }
+}
+
+/**
+ * A call that commits or pushes code: git_commit (it may push), a pull
+ * request (it pushes the branch), or git commit or push in the terminal.
+ */
+export function commitsOrPushes(name: string, args: Record<string, unknown>): boolean {
+  if (name === 'git_commit' || name === 'github_pr_create') return true
+  if (name !== 'terminal') return false
+  const command = terminalCommandOf(args)
+  return command !== null && /\bgit\b(?:\s+-{1,2}[\w-]+(?:[= ]\S+)?)*\s+(?:commit|push)\b/i.test(command)
 }
 
 /**
@@ -759,10 +771,14 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
       // What holds the call at the card whatever else says — the command
       // guard, or an ask rule — and how the card and the model hear about it.
       const appDanger = name === 'app_control' && isDestructiveAppControl(parseToolCallArgs(name, call.arguments))
+      // In voice mode a commit or a push waits for a spoken yes, whatever the approval settings (§27, 2026-10-16 decision).
+      const voicePublish = isVoiceFollowedRun(options.runId) && commitsOrPushes(name, parseToolCallArgs(name, call.arguments))
       const held: { reason: string; log: string; what: 'command' | 'call' } | null = danger
         ? { reason: danger.reason, log: `command-guard:${danger.kind}`, what: 'command' }
         : appDanger
           ? { reason: 'It can’t be undone from the app: it deletes a task, installs an update, or quits', log: 'app-control:destructive', what: 'call' }
+          : voicePublish
+          ? { reason: 'It commits or pushes code, which waits for a yes in voice mode', log: 'voice:commit-push', what: 'call' }
           : permission?.effect === 'ask'
           ? { reason: permission.reason, log: `permission-rule:${permission.source}`, what: 'call' }
           : null

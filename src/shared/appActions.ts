@@ -1,14 +1,12 @@
 /**
- * What the voice and the agent can do in the app (docs/voice-mode.md §24.15,
- * batch 3): one catalog, used by the voice's `app_action` and the agent's
- * `app_control`. Each action says where it runs (main, or the window, which
- * owns views, panes and panels), what it takes, and whether it is
- * destructive: a destructive action needs the user's yes first, said out
- * loud to the voice or on the agent's approval card.
+ * What the agent can do in the app (docs/voice-mode.md §24.15, §27): one
+ * catalog, used by the agent's `app_control`, typed or talked to. Each action
+ * says where it runs (main, or the window, which owns views, panes and
+ * panels), what it takes, and whether it is destructive: a destructive action
+ * needs the user's yes first, on the approval card or said out loud to it.
  *
- * Before this the voice had three tools (hand to the agent, stop, stay
- * quiet) and the agent had none for the app: "switch to dark mode" went to
- * the coding agent, which edited the project's theme.
+ * Voice mode is the agent too (§27): its own controls (mute, end, speed,
+ * voice, placement) are here for the agent, and work while voice mode is on.
  */
 import { z } from 'zod'
 
@@ -77,10 +75,14 @@ export const APP_ACTION_ARGS = {
   set_skin: z.object({ skin: z.enum(['native', 'default', 'proof', 'bench', 'gild']) }),
   set_tool_approvals: z.object({ mode: z.enum(['off', 'mutating', 'all']) }),
   set_model: z.object({ model: z.string().trim().min(1).max(200) }),
+  set_task_model: z.object({ model: z.string().trim().min(1).max(200), task: Task }),
+  // ── Reading the app ─────────────────────────────────────────────────────
+  app_status: z.object({}),
   // ── The system ──────────────────────────────────────────────────────────
   open_path: z.object({ path: z.string().trim().min(1).max(4096) }),
   reveal_path: z.object({ path: z.string().trim().min(1).max(4096) }),
   open_url: z.object({ url: z.string().trim().min(1).max(2000) }),
+  check_update: z.object({}),
   download_update: z.object({}),
   install_update: z.object({}),
   quit_app: z.object({}),
@@ -102,8 +104,6 @@ export type AppActionDef = {
   runs: 'main' | 'window'
   /** Can't be undone from where it was asked: needs the user's yes first. */
   destructive?: true
-  /** Only the voice has it (its own controls). */
-  voiceOnly?: true
 }
 
 export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
@@ -134,18 +134,27 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   set_theme: { summary: 'Set the app theme: system, light or dark.', runs: 'main' },
   set_skin: { summary: 'Set the app skin: native, default, proof, bench or gild.', runs: 'main' },
   set_tool_approvals: { summary: 'Tool approvals: off, mutating (ask before changes) or all (ask for every tool).', runs: 'main' },
-  set_model: { summary: 'Set the agent’s model for new tasks, from the models used recently or marked favourite.', runs: 'main' },
+  set_model: { summary: 'Set the model new tasks start with, from the models used recently or marked favourite. It does not change a task that exists; set_task_model does.', runs: 'main' },
+  set_task_model: {
+    summary: 'Set the model a task runs on from its next turn (the task on screen if none is named), from the models used recently or marked favourite. A run already working finishes on the model it started with.',
+    runs: 'window'
+  },
+  app_status: {
+    summary: 'Read the app as it is now: the date and time, what is on screen, the workspace and branch, tasks running or waiting in any workspace, the model and other settings, voice mode, and whether an update is out. Read it rather than guess.',
+    runs: 'main'
+  },
   open_path: { summary: 'Open a file or folder with the system’s app (a path in the workspace, or absolute). Never a program.', runs: 'main' },
   reveal_path: { summary: 'Show a file or folder in the system file manager.', runs: 'main' },
   open_url: { summary: 'Open a web address (http or https) in the system browser.', runs: 'main' },
+  check_update: { summary: 'Check now whether an update to Agent V is out.', runs: 'main' },
   download_update: { summary: 'Download the update that is out (installing it is a separate step).', runs: 'window' },
   install_update: { summary: 'Install the downloaded update; the app restarts.', runs: 'window', destructive: true },
   quit_app: { summary: 'Quit Agent V.', runs: 'main', destructive: true },
-  voice_mute: { summary: 'Stop listening: until called by name ("Agent V") if until is called, else until unmuted.', runs: 'main', voiceOnly: true },
-  voice_end: { summary: 'End voice mode.', runs: 'main', voiceOnly: true },
-  set_voice_speed: { summary: 'How fast the voice speaks, 0.5 to 2 (1 is normal).', runs: 'main', voiceOnly: true },
-  set_voice: { summary: 'Speak in another voice, by its name.', runs: 'main', voiceOnly: true },
-  set_voice_placement: { summary: `Where voice mode shows: ${VOICE_PLACEMENT_NAMES.join(', ')}.`, runs: 'main', voiceOnly: true }
+  voice_mute: { summary: 'Voice mode stops listening: until called by name ("Agent V") when until is called or left out, until unmuted when until is unmuted.', runs: 'main' },
+  voice_end: { summary: 'End voice mode, once what you are saying has been heard.', runs: 'main' },
+  set_voice_speed: { summary: 'How fast the voice speaks, 0.5 to 2 (1 is normal).', runs: 'main' },
+  set_voice: { summary: 'Speak in another voice, by its name.', runs: 'main' },
+  set_voice_placement: { summary: `Where voice mode shows: ${VOICE_PLACEMENT_NAMES.join(', ')}.`, runs: 'main' }
 }
 
 export const APP_ACTION_NAMES = Object.keys(APP_ACTIONS) as AppActionName[]
@@ -154,10 +163,6 @@ export function isAppActionName(name: string): name is AppActionName {
   return Object.prototype.hasOwnProperty.call(APP_ACTIONS, name)
 }
 
-/** The actions one side has: the agent never gets the voice's own controls. */
-export function appActionsFor(who: 'voice' | 'agent'): AppActionName[] {
-  return APP_ACTION_NAMES.filter((n) => who === 'voice' || !APP_ACTIONS[n].voiceOnly)
-}
 
 /** An `app_control` call that needs the user's OK whatever the approval settings say. */
 export function isDestructiveAppControl(args: Record<string, unknown> | undefined): boolean {
@@ -187,8 +192,8 @@ export function parseAppActionArgs(name: AppActionName, args: unknown): { ok: tr
 }
 
 /** The catalog as the model reads it: one line per action with its arguments. */
-export function describeAppActions(who: 'voice' | 'agent'): string {
-  return appActionsFor(who)
+export function describeAppActions(): string {
+  return APP_ACTION_NAMES
     .map((n) => {
       const shape = APP_ACTION_ARGS[n].shape as Record<string, z.ZodType>
       const keys = Object.keys(shape)

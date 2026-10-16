@@ -828,10 +828,10 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
   app_control: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const action = typeof args.action === 'string' ? args.action.trim() : ''
-    if (action === 'list') return toolOk('app_control', 'list', describeAppActions('agent'))
+    if (action === 'list') return toolOk('app_control', 'list', describeAppActions())
     const run = appActionRunner()
     if (!run) return toolFail('app_control', action, 'The app can’t be controlled from this run (no app window).')
-    const result = await run(action, args.args ?? {}, { who: 'agent', runId: context.runId ?? null, workspacePath: workspace })
+    const result = await run(action, args.args ?? {}, { runId: context.runId ?? null, workspacePath: workspace })
     return result.ok ? toolOk('app_control', action, result.message) : toolFail('app_control', action, result.message)
   },
   ...terminalHandlers,

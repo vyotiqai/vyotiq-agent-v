@@ -1,69 +1,18 @@
 /**
- * The 2026-10-14 voice audit, from Ajay's kept conversations: the voice knew
- * nothing of the task it opened on, some turns showed on screen and were
- * never answered, and sound tags ("[background noise]") were answered as if
- * spoken.
+ * The 2026-10-14 voice audit, from Ajay's kept conversations: sound tags
+ * ("[background noise]") were answered as if spoken, a bare "okay" kept a
+ * noisy room talking, and a dropped connection lost or replayed turns. Since
+ * §27 the agent answers every turn itself; these are the listening half.
  */
 import { describe, expect, it, vi } from 'vitest'
-import {
-  EMPTY_LINE,
-  FIRST_WORD_MS,
-  QUIET_TOOL,
-  STILL_THINKING_LINE,
-  STILL_THINKING_MS,
-  mayStayQuiet,
-  VoiceResponder,
-  type ResponderChat,
-  type ResponderChunk,
-  type ResponderDeps
-} from '@main/voice/responder'
-import { HOLD_MAX_MS, RECONNECT_DELAYS_MS, STOPPED_LINE, UNFINISHED_WAIT_MS, VoiceSession, asksSomething, type VoiceSessionDeps } from '@main/voice/session'
+import { ACK_MS, RECONNECT_DELAYS_MS, STOPPED_LINE, VoiceSession, asksSomething, type VoiceSessionDeps } from '@main/voice/session'
 import { cleanTranscript, isBackchannel, isOtherScript, soundsUnfinished } from '@main/voice/speechText'
-import { formatTaskContext } from '@main/voice/taskContext'
 import { EchoGuard } from '@main/voice/echoGuard'
 import { MIN_SPEECH_AGENT_TALKING_MS, PauseDetector, SILENCE_MS } from '@main/voice/pauseDetector'
 import { openFixtureStt, type FixtureSttSession } from '@main/voice/providers/fixture'
 import type { SttOpenOptions, TtsStream } from '@main/voice/providers/types'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent, type VoiceSettings } from '@shared/ipc/schemas/voice'
-import type { ChatMessage } from '@shared/ipc'
-
-function fakeModel() {
-  type Call = { status: string; messages: ChatMessage[]; tools: Array<{ name: string }>; signal: AbortSignal; push: (c: ResponderChunk) => void; end: () => void }
-  const calls: Call[] = []
-  const chat: ResponderChat = (req) => {
-    const queue: ResponderChunk[] = []
-    let ended = false
-    let wake: (() => void) | null = null
-    calls.push({
-      status: req.status,
-      messages: req.messages,
-      tools: req.tools as Array<{ name: string }>,
-      signal: req.signal,
-      push: (c) => {
-        queue.push(c)
-        wake?.()
-      },
-      end: () => {
-        ended = true
-        wake?.()
-      }
-    })
-    return (async function* () {
-      for (;;) {
-        if (req.signal.aborted) return
-        const next = queue.shift()
-        if (next) {
-          yield next
-          continue
-        }
-        if (ended) return
-        await new Promise<void>((r) => (wake = r))
-        wake = null
-      }
-    })()
-  }
-  return { chat, calls }
-}
+import type { AgentEvent } from '@shared/ipc'
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
@@ -96,30 +45,6 @@ function silentTts(): TtsStream {
   return { pushText: () => {}, flush: () => {}, end: () => {}, cancel: () => {}, done: () => Promise.resolve() } as unknown as TtsStream
 }
 
-function responder(over: Partial<ResponderDeps> = {}) {
-  const model = fakeModel()
-  const said: string[] = []
-  const done: Array<Parameters<ResponderDeps['done']>[0]> = []
-  const handOffs: string[] = []
-  const t = manualTimers()
-  let n = 0
-  const deps: ResponderDeps = {
-    chat: () => model.chat,
-    openTts: () => silentTts(),
-    say: (_c, text) => said.push(text),
-    handOff: (b) => handOffs.push(b),
-    stopAgent: vi.fn(),
-    done: (r) => done.push(r),
-    agentStatus: () => ({ working: false }),
-    newId: () => `c${++n}`,
-    now: t.now,
-    setTimer: t.setTimer,
-    clearTimer: t.clearTimer,
-    ...over
-  }
-  return { r: new VoiceResponder(deps), model, said, done, handOffs, t }
-}
-
 describe('what the listener heard', () => {
   it('drops sound tags, keeps the words', () => {
     expect(cleanTranscript('[background noise]')).toBe('')
@@ -138,6 +63,13 @@ describe('what the listener heard', () => {
     expect(isOtherScript('123', 'en')).toBe(false)
   })
 
+  it('Hindi and Punjabi are kept alongside English: they are spoken here (2026-10-16 decision)', () => {
+    // Dropped as noise before: "क्या?" at 02:35:00 and 02:50:41 on 2026-10-16 went unanswered.
+    expect(isOtherScript('क्या?', 'en')).toBe(false)
+    expect(isOtherScript('ਕੀ ਹਾਲ ਹੈ', 'en')).toBe(false)
+    expect(isOtherScript('Яндекс', 'en')).toBe(true)
+  })
+
   it('knows a backchannel from a request, and an unfinished phrase from a finished one', () => {
     expect(isBackchannel('Okay.')).toBe(true)
     expect(isBackchannel('Thank you!')).toBe(true)
@@ -152,126 +84,9 @@ describe('what the listener heard', () => {
   })
 })
 
-describe('the task the voice is on', () => {
-  it('reads what you asked and what the agent answered, never its steps', () => {
-    const messages: ChatMessage[] = [
-      { role: 'user', content: 'Analyze the codebase.' },
-      { role: 'assistant', content: 'Looking.', toolCalls: [{ id: 't', name: 'list_dir', arguments: '{}' }] },
-      { role: 'tool', content: 'src/ tests/', toolCallId: 't' },
-      { role: 'assistant', content: '<spoken>Done.</spoken>\nThe codebase has 3 parts.' },
-      { role: 'user', content: 'continue', synthetic: true }
-    ]
-    expect(formatTaskContext(messages)).toBe('[You] Analyze the codebase.\n[Agent] The codebase has 3 parts.')
-  })
-
-  it('names how the task began when its start is out of reach', () => {
-    const text = formatTaskContext([{ role: 'assistant', content: 'Half way.' }], { goal: 'Fix the login bug', earlier: true })
-    expect(text.split('\n')[0]).toBe('(The task began with: Fix the login bug)')
-  })
-
-  it('says how its last run ended', () => {
-    const messages: ChatMessage[] = [{ role: 'user', content: 'Analyze the codebase.' }]
-    expect(formatTaskContext(messages, { ended: { status: 'error', error: 'Prompt tokens limit exceeded' } })).toBe(
-      '[You] Analyze the codebase.\n(Its last run stopped with an error: Prompt tokens limit exceeded)'
-    )
-    expect(formatTaskContext(messages, { ended: { status: 'running' } })).toBe('[You] Analyze the codebase.')
-    expect(formatTaskContext([], { ended: { status: 'done' } })).toBe('')
-  })
-
-  it('goes to the voice model with every turn', async () => {
-    const h = responder({ taskContext: () => '[You] Fix the login bug.\n[Agent] Fixed in auth.ts.' })
-    h.r.respond('Resume the session.')
-    await tick()
-    expect(h.model.calls[0]!.status).toContain('[Agent] Fixed in auth.ts.')
-    expect(h.model.calls[0]!.status).toContain('The agent is idle.')
-  })
-})
-
-describe('every turn gets an answer', () => {
-  it('a model that says nothing is asked again, then the voice says it lost it', async () => {
-    const h = responder()
-    h.r.respond('Resume the session.')
-    await tick()
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.model.calls).toHaveLength(2))
-    h.model.calls[1]!.end()
-    await vi.waitFor(() => expect(h.done).toHaveLength(1))
-    expect(h.said.join(' ')).toContain(EMPTY_LINE.split('.')[0]!)
-    expect(h.handOffs).toEqual([])
-  })
-
-  it('a model that never starts is asked again, then the turn goes to the agent', async () => {
-    const h = responder()
-    h.r.respond('Resume the session.')
-    await tick()
-    h.t.advance(FIRST_WORD_MS)
-    await vi.waitFor(() => expect(h.model.calls).toHaveLength(2))
-    expect(h.model.calls[0]!.signal.aborted).toBe(true)
-    h.t.advance(FIRST_WORD_MS)
-    await vi.waitFor(() => expect(h.done).toHaveLength(1))
-    expect(h.handOffs).toEqual(['Resume the session.'])
-  })
-
-  it('an answer that started is never cut by the first-word wait', async () => {
-    const h = responder()
-    h.r.respond('How is it going?')
-    await tick()
-    h.model.calls[0]!.push({ type: 'text', text: 'Still working on it' })
-    await tick()
-    h.t.advance(FIRST_WORD_MS + 1000)
-    h.model.calls[0]!.push({ type: 'text', text: ', nearly done.' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.done).toHaveLength(1))
-    expect(h.model.calls).toHaveLength(1)
-    expect(h.said.join(' ')).toBe('Still working on it, nearly done.')
-  })
-
-  it('stays quiet when the model says it heard only a sound', async () => {
-    const h = responder()
-    h.r.respond('Mm, the fan.')
-    await tick()
-    expect(h.model.calls[0]!.tools.map((t) => t.name)).toContain(QUIET_TOOL)
-    h.model.calls[0]!.push({ type: 'tool_call', name: QUIET_TOOL, arguments: '{}' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.done).toHaveLength(1))
-    expect(h.said).toEqual([])
-    // The one turn that ends in silence says so, for the log.
-    expect(h.done[0]).toEqual({ audible: false, handedOff: false, quiet: { chars: 'Mm, the fan.'.length, turnIds: [] } })
-  })
-
-  it('never stays quiet on a question or a real request: it is asked again, then says it lost it', async () => {
-    expect(mayStayQuiet('Mm, the fan.')).toBe(true)
-    expect(mayStayQuiet('What did it find?')).toBe(false)
-    expect(mayStayQuiet('Have it look at the login page again')).toBe(false)
-    const h = responder()
-    h.r.respond('What did it find?')
-    await tick()
-    h.model.calls[0]!.push({ type: 'tool_call', name: QUIET_TOOL, arguments: '{}' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.model.calls).toHaveLength(2))
-    h.model.calls[1]!.push({ type: 'text', text: 'It found two failing tests.' })
-    h.model.calls[1]!.end()
-    await vi.waitFor(() => expect(h.done).toHaveLength(1))
-    expect(h.said.join(' ')).toBe('It found two failing tests.')
-  })
-
-  it('waits on "Can you" for the rest, and answers both as one turn', async () => {
-    const h = responder()
-    h.r.respond('Can you', { waitMs: UNFINISHED_WAIT_MS })
-    await tick()
-    expect(h.model.calls).toHaveLength(0)
-    h.r.respond('spawn subagents for the audit?')
-    await tick()
-    expect(h.model.calls).toHaveLength(1)
-    h.t.advance(UNFINISHED_WAIT_MS)
-    await tick()
-    expect(h.model.calls).toHaveLength(1)
-  })
-})
-
 function sessionHarness(over: Partial<VoiceSettings> = {}, deps: Partial<VoiceSessionDeps> = {}) {
-  const model = fakeModel()
   const events: VoiceEvent[] = []
+  let tap: ((ev: AgentEvent) => void) | null = null
   const stt: FixtureSttSession[] = []
   const ends: Array<(heard: boolean) => void> = []
   const t = manualTimers()
@@ -294,7 +109,12 @@ function sessionHarness(over: Partial<VoiceSettings> = {}, deps: Partial<VoiceSe
       if (onEnd) ends.push(onEnd)
       return silentTts()
     },
-    responder: () => model.chat,
+    tapRun: (_runId, fn) => {
+      tap = fn
+      return () => {
+        tap = null
+      }
+    },
     now: t.now,
     setTimer: t.setTimer,
     clearTimer: t.clearTimer,
@@ -302,7 +122,14 @@ function sessionHarness(over: Partial<VoiceSettings> = {}, deps: Partial<VoiceSe
     ...deps
   })
   const turns = () => events.flatMap((e) => (e.kind === 'turn' ? [e.text] : []))
-  return { session, events, model, stt: () => stt.at(-1)!, ends, t, turns }
+  /** The agent answers out loud: its run's spoken block, as the run tap brings it. */
+  const agentSays = (text: string): void => {
+    if (!tap) session.follow('run-1', `h${events.length}`)
+    tap!({ type: 'status', runId: 'run-1', status: 'running' } as AgentEvent)
+    tap!({ type: 'text_delta', runId: 'run-1', text: `<spoken>${text}</spoken>` } as unknown as AgentEvent)
+    tap!({ type: 'assistant_message', runId: 'run-1', content: `<spoken>${text}</spoken>` } as unknown as AgentEvent)
+  }
+  return { session, events, stt: () => stt.at(-1)!, ends, t, turns, agentSays }
 }
 
 describe('the voice in a session', () => {
@@ -312,7 +139,7 @@ describe('the voice in a session', () => {
     h.stt().say('[background noise]')
     await tick()
     expect(h.turns()).toEqual([])
-    expect(h.model.calls).toHaveLength(0)
+    expect(h.events.some((e) => e.kind === 'hand_off')).toBe(false)
     expect(h.session.state).toBe('listening')
     h.stt().say('[clears throat] Run the tests.')
     await tick()
@@ -335,9 +162,8 @@ describe('the voice in a session', () => {
     expect(h.turns()).toEqual([])
     h.stt().say('Run the tests.')
     await tick()
-    h.model.calls[0]!.push({ type: 'text', text: 'Do you want the slow ones too?' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.events.some((e) => e.kind === 'say')).toBe(true))
+    h.agentSays('Do you want the slow ones too?')
+    expect(h.events.some((e) => e.kind === 'say')).toBe(true)
     h.stt().say('Okay.')
     await tick()
     expect(h.turns()).toEqual(['Run the tests.', 'Okay.'])
@@ -351,9 +177,8 @@ describe('the voice in a session', () => {
     await h.session.start()
     h.stt().say('Is the build broken?')
     await tick()
-    h.model.calls[0]!.push({ type: 'text', text: 'Not that I know. I can have it check if you like.' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.events.filter((e) => e.kind === 'say')).toHaveLength(2))
+    h.agentSays('Not that I know. I can check it if you like.')
+    expect(h.events.filter((e) => e.kind === 'say').length).toBeGreaterThan(0)
     h.stt().say('Yes.')
     await tick()
     expect(h.turns()).toEqual(['Is the build broken?', 'Yes.'])
@@ -364,44 +189,14 @@ describe('the voice in a session', () => {
     await h.session.start()
     h.stt().say('Hello, you there?')
     await tick()
-    h.model.calls[0]!.push({ type: 'text', text: 'Yes, I am here.' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.ends).toHaveLength(1))
-    await tick()
     expect(h.session.state).toBe('thinking')
+    // Nothing from the agent yet: the short line opens a speech that never sounds.
+    h.t.advance(ACK_MS)
+    await vi.waitFor(() => expect(h.ends).toHaveLength(1))
     h.ends[0]!(false)
     expect(h.session.state).toBe('listening')
   })
 
-  it('reads the task it is on, and again when you start talking', async () => {
-    const load = vi.fn(async (runId: string) => `[You] task ${runId}`)
-    const h = sessionHarness({}, { loadTaskContext: load })
-    await h.session.start()
-    h.session.setTask('run1', 'C:/ws')
-    expect(load).toHaveBeenCalledWith('run1', 'C:/ws')
-    await tick()
-    h.t.advance(6000)
-    h.stt().say('Resume the session.')
-    await tick()
-    expect(load).toHaveBeenCalledTimes(2)
-    expect(h.model.calls[0]!.status).toContain('[You] task run1')
-  })
-
-  it('a hold under steady noise lets go after HOLD_MAX_MS', async () => {
-    const h = sessionHarness()
-    await h.session.start()
-    h.stt().say('What changed today?')
-    await tick()
-    // A sound while the voice works the answer out: it holds what it would say.
-    ;(h.session as unknown as { onSpeechStart: () => void }).onSpeechStart()
-    h.model.calls[0]!.push({ type: 'text', text: 'Two files changed.' })
-    h.model.calls[0]!.end()
-    await tick()
-    await tick()
-    expect(h.events.some((e) => e.kind === 'say')).toBe(false)
-    h.t.advance(HOLD_MAX_MS)
-    await vi.waitFor(() => expect(h.events.some((e) => e.kind === 'say')).toBe(true))
-  })
 })
 
 describe('the echo check', () => {
@@ -432,59 +227,6 @@ describe("this round's choices (2026-10-14)", () => {
     h.stt().say('Okay.')
     await tick()
     expect(unanswered(h.events)).toEqual([{ sessionId: 'id1', kind: 'unanswered', turnId: expect.any(String), text: 'Okay.' }])
-    // The model stayed quiet: the turn already on screen is marked.
-    h.stt().say('Mm, the fan.')
-    await tick()
-    const turn = h.events.find((e) => e.kind === 'turn')
-    h.model.calls[0]!.push({ type: 'tool_call', name: QUIET_TOOL, arguments: '{}' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(unanswered(h.events)).toHaveLength(2))
-    expect(unanswered(h.events)[1]).toEqual({ sessionId: 'id1', kind: 'unanswered', turnId: turn && 'turnId' in turn ? turn.turnId : '' })
-  })
-
-  it('says "One moment." when the model has not started by STILL_THINKING_MS, once, and never after it has', async () => {
-    const h = responder()
-    h.r.respond('What changed in the build?')
-    await tick()
-    h.t.advance(STILL_THINKING_MS)
-    expect(h.said).toEqual([STILL_THINKING_LINE])
-    h.model.calls[0]!.push({ type: 'text', text: 'Two files changed.' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.done).toHaveLength(1))
-    expect(h.said).toEqual([STILL_THINKING_LINE, 'Two files changed.'])
-    // A quick answer gets no filler.
-    const q = responder()
-    q.r.respond('Hello?')
-    await tick()
-    q.model.calls[0]!.push({ type: 'text', text: 'Hi.' })
-    q.model.calls[0]!.end()
-    await vi.waitFor(() => expect(q.done).toHaveLength(1))
-    q.t.advance(STILL_THINKING_MS)
-    expect(q.said).toEqual(['Hi.'])
-  })
-
-  it('moving to another task starts the voice fresh; the task a hand-off just made does not', async () => {
-    const h = sessionHarness({}, { loadTaskContext: async () => '' })
-    await h.session.start()
-    h.session.setTask(null)
-    h.stt().say('Make the button blue.')
-    await tick()
-    h.model.calls[0]!.push({ type: 'text', text: 'Sure.' })
-    h.model.calls[0]!.end()
-    await vi.waitFor(() => expect(h.events.some((e) => e.kind === 'say')).toBe(true))
-    // New task's brief → its run: same conversation.
-    h.session.setTask('run-a')
-    h.stt().say('Is it done yet?')
-    await tick()
-    expect(h.model.calls[1]!.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
-    h.model.calls[1]!.push({ type: 'text', text: 'Not yet.' })
-    h.model.calls[1]!.end()
-    await vi.waitFor(() => expect(h.events.filter((e) => e.kind === 'say')).toHaveLength(2))
-    // Another task: fresh.
-    h.session.setTask('run-b')
-    h.stt().say('Is it done yet?')
-    await tick()
-    expect(h.model.calls[2]!.messages).toHaveLength(1)
   })
 
   it('"stop" with work running stops it and says so; with nothing running it stays silent', async () => {
@@ -498,7 +240,8 @@ describe("this round's choices (2026-10-14)", () => {
     await tick()
     expect(h.events.some((e) => e.kind === 'stop_agent')).toBe(true)
     expect(h.events.filter((e) => e.kind === 'say').map((e) => ('text' in e ? e.text : ''))).toEqual([STOPPED_LINE])
-    expect(h.model.calls).toHaveLength(0)
+    // "Stop" needs no model and goes to no one: it stops the work.
+    expect(h.events.some((e) => e.kind === 'hand_off')).toBe(false)
   })
 
   function streamingHarness(endTurns: number[], answer = true) {

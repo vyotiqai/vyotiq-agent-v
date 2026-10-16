@@ -123,12 +123,14 @@ function HandOffLine({
         </span>
       }
     >
-      <p className="m-0 whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">
-        <span className="text-fg">Asked </span>
-        {row.brief}
-      </p>
+      {row.brief ? (
+        <p className="m-0 mb-1 whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">
+          <span className="text-fg">Asked </span>
+          {row.brief}
+        </p>
+      ) : null}
       {outcome.kind === 'sent' ? (
-        <div className="mt-1 flex items-center gap-2" data-voice-history-outcome="sent">
+        <div className="flex items-center gap-2" data-voice-history-outcome="sent">
           <span className="text-caption text-tertiary">Sent to the task</span>
           {onOpenTask ? (
             <Button size="xs" variant="ghost" icon="arrowRight" onClick={() => onOpenTask(outcome.runId)}>
@@ -137,12 +139,12 @@ function HandOffLine({
           ) : null}
         </div>
       ) : outcome.kind === 'not_sent' ? (
-        <div className="mt-1 flex items-center gap-1.5 text-caption text-danger" data-voice-history-outcome="not_sent">
+        <div className="flex items-center gap-1.5 text-caption text-danger" data-voice-history-outcome="not_sent">
           <Icon name="warningCircle" size={12} />
           {notSentText(outcome.reason)}
         </div>
       ) : (
-        <div className="mt-1 text-caption text-tertiary" data-voice-history-outcome="unknown">
+        <div className="text-caption text-tertiary" data-voice-history-outcome="unknown">
           The session ended before the task took it
         </div>
       )}

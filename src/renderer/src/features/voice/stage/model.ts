@@ -187,9 +187,9 @@ export function summaryTasks(transcript: readonly VoiceLine[], works: VoiceSnaps
   return out
 }
 
-/** "2 tasks done · 1 still going", or what happened when nothing was handed over. */
+/** "2 tasks done · 1 still going", or what happened when no work started. */
 export function summaryTitle(tasks: readonly SummaryTask[]): string {
-  if (tasks.length === 0) return 'Nothing handed over'
+  if (tasks.length === 0) return 'No work started'
   const done = tasks.filter((t) => t.state === 'done').length
   const going = tasks.filter((t) => t.state === 'running' || t.state === 'needs').length
   const stopped = tasks.length - done - going

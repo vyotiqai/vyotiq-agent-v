@@ -121,17 +121,12 @@ describe('Settings → Voice mode', () => {
     expect(runUpdate).toHaveBeenCalledWith({ voice: expect.objectContaining({ endOfTurnPatience: 'patient' }) })
   })
 
-  it('says who answers out loud, and what happens without its key (D-44); talking over it is no longer a setting', () => {
+  it('has no separate voice model: the agent answers out loud itself (§27); talking over it is no longer a setting', () => {
     const { form } = makeForm()
     render(<VoiceModeSettings form={form} secrets={{ ...emptySecretStatus(), openrouter: true }} />)
-    const row = () => document.querySelector('[data-settings-field="voice-responder"]')!
-    expect(row().textContent).toContain('Answers with')
-    expect(row().textContent).toContain('hands work to the agent')
-    expect(screen.getByRole('button', { name: 'Answers with: model' }).textContent).toContain('anthropic/claude-haiku-5.5')
+    expect(document.querySelector('[data-settings-field="voice-responder"]')).toBeNull()
+    expect(screen.queryByText('Answers with')).toBeNull()
     expect(document.querySelector('[data-settings-field="voice-interrupt"]')).toBeNull()
-    cleanup()
-    render(<VoiceModeSettings form={makeForm().form} secrets={emptySecretStatus()} />)
-    expect(row().textContent).toContain('No OpenRouter key: what you say goes straight to the agent.')
   })
 
   it('lists the provider’s voices and previews the chosen one at the chosen speed', async () => {

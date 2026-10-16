@@ -1,19 +1,16 @@
 /**
- * The voice knows the app, not only the task (batch 2, docs/voice-mode.md
- * §24.14): what is on screen, the workspace and branch, other work, a few
- * settings, the time, and the rules and memory by headline. Before this,
- * "what branch am I on?" or "is anything else running?" went to the agent.
+ * The app as the agent reads it with app_control app_status (docs/voice-mode.md
+ * §24.14, §27): what is on screen, the workspace and branch, other work, a few
+ * settings, voice mode, the update, the time, and the rules and memory by
+ * headline. Without it "is there an update?" was a guess (2026-10-16 02:37).
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { formatAppContext, readGitBranch, ruleHeadline, spokenNow, type AppSnapshot } from '@main/voice/appContext'
-import { RESPONDER_SYSTEM, type ResponderChat, type ResponderChunk } from '@main/voice/responder'
-import { VoiceSession } from '@main/voice/session'
-import { openFixtureStt, type FixtureSttSession } from '@main/voice/providers/fixture'
-import type { SttOpenOptions, TtsStream } from '@main/voice/providers/types'
-import { DEFAULT_VOICE_SETTINGS, VoiceTaskRequestSchema, type VoiceScreen } from '@shared/ipc/schemas/voice'
+import { VOICE_REPLY_TEXT } from '@main/agent/context/userRules'
+import { VoiceTaskRequestSchema } from '@shared/ipc/schemas/voice'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -32,7 +29,7 @@ const base: AppSnapshot = {
   workspace: { name: 'VYOTIQ - AGENT V', branch: 'main' },
   task: { title: 'Fix the voice stop', state: 'waiting' },
   others: [{ title: 'Write the release notes', workspace: 'site', state: 'running' }],
-  settings: { model: 'z-ai/glm-5.3-flash', approvals: 'on for every tool', theme: 'dark', voicePlacement: 'takeover', voiceSpeed: 1.25 },
+  settings: { model: 'z-ai/glm-5.3-flash', approvals: 'on for every tool', theme: 'dark' },
   rules: ['CLAUDE.md (UI design rules)'],
   memory: ['Voice stop reaches the run']
 }
@@ -45,7 +42,7 @@ describe('the app, as the voice reads it', () => {
       'On screen: the task “Fix the voice stop”, stopped until the user answers.',
       'Workspace: VYOTIQ - AGENT V, on branch main.',
       'Other tasks: “Write the release notes” in site (running).',
-      "Settings: the agent's model is z-ai/glm-5.3-flash; tool approvals are on for every tool; dark theme; voice shows as takeover at 1.25 times speed.",
+      "Settings: new tasks start on z-ai/glm-5.3-flash; tool approvals are on for every tool; dark theme.",
       'Project rules the agent follows: CLAUDE.md (UI design rules).',
       "The agent's memory notes here: Voice stop reaches the run."
     ])
@@ -92,70 +89,22 @@ describe('the app, as the voice reads it', () => {
     expect(() => VoiceTaskRequestSchema.parse({ sessionId: 's', runId: null, screen: 'desktop' })).toThrow()
   })
 
-  it('the voice is told it has it, and not to read it out', () => {
-    expect(RESPONDER_SYSTEM).toContain('With every turn you get the app as it is now')
-    expect(RESPONDER_SYSTEM).toContain('never read it out unasked')
-  })
-})
-
-const tick = () => new Promise((r) => setTimeout(r, 0))
-const silentTts = (): TtsStream =>
-  ({ pushText: () => {}, flush: () => {}, end: () => {}, cancel: () => {}, done: () => Promise.resolve() }) as unknown as TtsStream
-
-describe('a session keeps the app fresh', () => {
-  it('reads it on start, with the task and screen, and as you start talking; the voice gets it with your turn', async () => {
-    const asked: Array<{ runId: string | null; workspacePath: string | null; screen: VoiceScreen | null }> = []
-    const statuses: string[] = []
-    const chat: ResponderChat = (req) => {
-      statuses.push(req.status)
-      return (async function* (): AsyncGenerator<ResponderChunk> {
-        yield { type: 'text', text: 'You’re on main.' }
-      })()
-    }
-    const stt: FixtureSttSession[] = []
-    let clock = 0
-    let n = 0
-    const session = new VoiceSession({
-      emit: () => {},
-      settings: () => ({ ...DEFAULT_VOICE_SETTINGS, sttProvider: 'openrouter' }),
-      keys: () => ({ voice: {}, chat: { openrouter: true } }),
-      readKey: () => 'k',
-      sttProvider: (id) => ({
-        id,
-        open: async (o: SttOpenOptions) => {
-          const s = await openFixtureStt(o)
-          stt.push(s)
-          return s
-        }
-      }),
-      openTts: () => silentTts(),
-      responder: () => chat,
-      loadAppContext: async (where) => {
-        asked.push(where)
-        return `(The app right now:)\nOn screen: ${where.screen ?? 'unknown'}; read ${asked.length}.`
-      },
-      setTimer: () => null,
-      clearTimer: () => {},
-      newId: () => `id${++n}`,
-      now: () => clock
+  it('says voice mode, the update and what is queued when there is any, never a guess', () => {
+    const text = formatAppContext({
+      ...base,
+      queued: 2,
+      voice: { placement: 'takeover', speed: 1.25, muted: 'until_called' },
+      update: { status: 'available', version: '1.4.0' }
     })
-    await session.start()
-    expect(asked).toEqual([{ runId: null, workspacePath: null, screen: null }])
-    session.setTask('run-1', 'C:/work', 'task')
-    expect(asked.at(-1)).toEqual({ runId: 'run-1', workspacePath: 'C:/work', screen: 'task' })
-    // Only the screen moved: read again.
-    session.setTask('run-1', 'C:/work', 'settings')
-    expect(asked.at(-1)).toMatchObject({ screen: 'settings' })
-    const reads = asked.length
-    clock += 10_000
-    await tick()
-    // You talk for a moment before the turn ends.
-    stt.at(-1)!.say('What branch am I on?', false)
-    await tick()
-    stt.at(-1)!.endTurn()
-    await tick()
-    // Talking read it once more, and the turn carries it.
-    expect(asked.length).toBe(reads + 1)
-    expect(statuses[0]).toContain(`On screen: settings; read ${reads + 1}.`)
+    expect(text).toContain('2 messages are queued on it, given to it at its next step.')
+    expect(text).toContain('Voice mode is on, shown as takeover at 1.25 times speed, muted until called by name.')
+    expect(text).toContain('Update: one is out and not downloaded (version 1.4.0).')
+    expect(formatAppContext({ ...base, update: { status: 'not-available', version: '1.4.0' } })).toContain('Update: none, this is the newest.')
+    expect(formatAppContext(base)).not.toMatch(/Voice mode|Update:|queued/)
+  })
+
+  it('the agent is told to read it, not guess, on a spoken turn', () => {
+    expect(VOICE_REPLY_TEXT).toContain('read it with app_control app_status instead of guessing')
+    expect(VOICE_REPLY_TEXT).toContain('app_status')
   })
 })

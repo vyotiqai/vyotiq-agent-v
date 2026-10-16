@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import {
   APP_ACTIONS,
-  appActionsFor,
+  APP_ACTION_NAMES,
   describeAppActions,
   isDestructiveAppControl,
   parseAppActionArgs,
@@ -60,6 +60,7 @@ function deps(over: Partial<AppControlDeps> = {}): AppControlDeps & { patches: A
       patches.push(p)
     },
     settings: () => ({ recentModels: ['openrouter::anthropic/claude-haiku-5.5', 'openrouter::z-ai/glm-5.3-flash'] }),
+    status: async () => '(The app right now…)',
     openPath: async () => '',
     revealPath: () => {},
     openExternal: async () => {},
@@ -69,14 +70,16 @@ function deps(over: Partial<AppControlDeps> = {}): AppControlDeps & { patches: A
   } as AppControlDeps & { patches: Array<Record<string, unknown>> }
 }
 
-const voice = { who: 'voice' as const, runId: 'r1', workspacePath: 'C:/work/api' }
+const voice = { runId: 'r1', workspacePath: 'C:/work/api' }
 
 describe('the catalog', () => {
-  it('the agent never gets the voice’s own controls; destructive ones say they need a yes', () => {
-    expect(appActionsFor('agent')).not.toContain('voice_mute')
-    expect(appActionsFor('voice')).toContain('voice_mute')
-    expect(describeAppActions('agent')).toContain('delete_task {task?}: Delete a task (it goes to Recently deleted). Needs the user’s yes first.')
-    expect(describeAppActions('agent')).toContain('start_task {brief, workspace?}')
+  it('the agent has every action, voice mode’s own too (voice mode is the agent, §27); destructive ones say they need a yes', () => {
+    expect(APP_ACTION_NAMES).toContain('voice_mute')
+    expect(APP_ACTION_NAMES).toContain('set_task_model')
+    expect(APP_ACTION_NAMES).toContain('app_status')
+    expect(describeAppActions()).toContain('delete_task {task?}: Delete a task (it goes to Recently deleted). Needs the user’s yes first.')
+    expect(describeAppActions()).toContain('start_task {brief, workspace?}')
+    expect(describeAppActions()).toContain('set_task_model {model, task?}')
     expect(Object.entries(APP_ACTIONS).filter(([, d]) => d.destructive).map(([n]) => n).sort()).toEqual(['delete_task', 'install_update', 'quit_app'])
   })
 
@@ -90,8 +93,8 @@ describe('the catalog', () => {
     // The voice read out "voice_mute: until Invalid option: expected one of…" after guessing a value.
     expect(parseAppActionArgs('voice_mute', { until: 'I call you' })).toEqual({ ok: false, error: 'I couldn’t do that: until has to be called or unmuted.' })
     expect(parseAppActionArgs('set_voice_speed', { speed: 9 })).toEqual({ ok: false, error: 'I couldn’t do that: the speed didn’t fit.' })
-    expect(describeAppActions('voice')).toContain('voice_mute {until?: called|unmuted}')
-    expect(describeAppActions('agent')).toContain('set_theme {theme: system|light|dark}')
+    expect(describeAppActions()).toContain('voice_mute {until?: called|unmuted}')
+    expect(describeAppActions()).toContain('set_theme {theme: system|light|dark}')
   })
 
   it('the agent’s call: a destructive one always asks; the rest are like reads', () => {
@@ -123,7 +126,11 @@ describe('running them', () => {
   it('settings are written in main', async () => {
     const d = deps()
     expect(await runAppAction(d, 'set_theme', { theme: 'light' }, voice)).toEqual({ ok: true, message: 'The theme is light now.' })
-    expect(await runAppAction(d, 'set_model', { model: 'haiku' }, voice)).toEqual({ ok: true, message: 'New tasks use anthropic/claude-haiku-5.5.' })
+    // Said in full: "New tasks use…" was taken to mean the task on screen too (2026-10-16 03:04).
+    expect(await runAppAction(d, 'set_model', { model: 'haiku' }, voice)).toEqual({
+      ok: true,
+      message: 'New tasks start on anthropic/claude-haiku-5.5. Tasks that exist keep their own model.'
+    })
     expect(d.patches).toEqual([{ theme: 'light' }, { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5' }])
     expect((await runAppAction(d, 'set_model', { model: 'gpt nine' }, voice)).ok).toBe(false)
   })
@@ -279,24 +286,82 @@ describe('running them', () => {
       }
     })
     // The loop hands the agent its worktree; the registry knows the workspace the task lives in.
-    const at = contextAtHome({ who: 'agent', runId: 'r1', workspacePath: tree }, 'C:/work/api')
+    const at = contextAtHome({ runId: 'r1', workspacePath: tree }, 'C:/work/api')
     expect(at).toMatchObject({ workspacePath: 'C:/work/api', filesRoot: tree })
     expect((await runAppAction(d, 'open_path', { path: 'only-here.md' }, at)).ok).toBe(true)
     expect(opened).toEqual([join(tree, 'only-here.md')])
     // "Stop this task" with no name is the agent's own, found in its workspace.
     expect(await findTask(d, undefined, at)).toEqual({ runId: 'r1', workspacePath: 'C:/work/api', title: 'Run the tests' })
     // Not in a worktree: nothing changes.
-    const plain = { who: 'agent' as const, runId: 'r1', workspacePath: 'C:/work/api' }
+    const plain = { runId: 'r1', workspacePath: 'C:/work/api' }
     expect(contextAtHome(plain, 'C:/work/api')).toBe(plain)
   })
 
-  it('the voice’s own controls are the voice’s', async () => {
-    const d = deps()
-    expect(await runAppAction(d, 'voice_end', {}, { who: 'agent' })).toEqual({ ok: false, message: 'voice_end is the voice’s own control.' })
+  it('voice mode’s own controls reach the session following the agent’s run, and say so when voice mode is off', async () => {
     const mute = vi.fn()
-    const r = await runAppAction(d, 'voice_mute', { until: 'called' }, { ...voice, voice: { mute, end: () => {}, setVoice: async () => ({ ok: true, message: '' }) } })
-    expect(r.message).toBe('Say “Agent V” when you need me.')
+    const end = vi.fn()
+    const controls = { mute, end, setVoice: async () => ({ ok: true, message: '' }) }
+    const off = deps()
+    expect(await runAppAction(off, 'voice_end', {}, voice)).toEqual({ ok: false, message: 'Voice mode isn’t on.' })
+    const on = deps({ voiceControls: (runId) => (runId === 'r1' ? controls : null) })
+    const r = await runAppAction(on, 'voice_mute', {}, voice)
+    expect(r).toEqual({ ok: true, message: 'Muted until called: saying “Agent V” wakes it.' })
     expect(mute).toHaveBeenCalledWith(true)
-    expect(await runAppAction(d, 'nonsense', {}, voice)).toEqual({ ok: false, message: 'There’s no action called nonsense.' })
+    expect(await runAppAction(on, 'voice_mute', { until: 'unmuted' }, voice)).toEqual({ ok: true, message: 'Muted until unmuted.' })
+    expect(mute).toHaveBeenLastCalledWith(false)
+    expect((await runAppAction(on, 'voice_end', {}, voice)).ok).toBe(true)
+    expect(end).toHaveBeenCalled()
+    expect(await runAppAction(on, 'voice_end', {}, { runId: 'r9', workspacePath: 'C:/work/api' })).toEqual({ ok: false, message: 'Voice mode isn’t on.' })
+    expect(await runAppAction(on, 'nonsense', {}, voice)).toEqual({ ok: false, message: 'There’s no action called nonsense.' })
+  })
+
+  it('a speed the speaking model refuses is saved, and said not to take', async () => {
+    const takes = deps()
+    expect(await runAppAction(takes, 'set_voice_speed', { speed: 1.25 }, voice)).toEqual({ ok: true, message: 'The voice speaks at 1.25 times speed now.' })
+    const refuses = deps({ speedIgnored: () => true })
+    const r = await runAppAction(refuses, 'set_voice_speed', { speed: 1.25 }, voice)
+    expect(r.ok).toBe(false)
+    expect(r.message).toContain('can’t change its speed')
+    expect(refuses.patches).toEqual([{ voice: { speed: 1.25 } }])
+  })
+
+  it('checks for an update when asked, and says where it can’t (2026-10-16 probe: "I don’t have a way to run that check")', async () => {
+    expect(await runAppAction(deps(), 'check_update', {}, voice)).toEqual({ ok: false, message: 'Updates are checked only in the installed app; this is a development build.' })
+    expect(await runAppAction(deps({ checkUpdate: async () => ({ checked: true, version: '1.4.0' }) }), 'check_update', {}, voice)).toEqual({
+      ok: true,
+      message: 'Version 1.4.0 is out; it isn’t downloaded yet.'
+    })
+    expect((await runAppAction(deps({ checkUpdate: async () => ({ checked: true, version: null }) }), 'check_update', {}, voice)).message).toBe('No update: this is the newest version.')
+    expect((await runAppAction(deps({ checkUpdate: async () => ({ checked: true, version: null, error: 'offline' }) }), 'check_update', {}, voice)).ok).toBe(false)
+  })
+
+  it('app_status answers from the app, never a guess', async () => {
+    const status = vi.fn(async () => 'Update: none, this is the newest.')
+    const d = deps({ status })
+    expect(await runAppAction(d, 'app_status', {}, voice)).toEqual({ ok: true, message: 'Update: none, this is the newest.' })
+    expect(status).toHaveBeenCalledWith(voice)
+  })
+
+  it('a task’s own model goes to the window with the task, and a running one says when it applies (2026-10-16 03:04)', async () => {
+    const w = fakeWindow(() => ({ ok: true, message: 'Set.' }))
+    const d = deps({ window: () => w.wc })
+    expect(await runAppAction(d, 'set_task_model', { model: 'haiku' }, voice)).toEqual({
+      ok: true,
+      message: '“Run the tests” runs on anthropic/claude-haiku-5.5 from its next turn; the run working now finishes on the model it started with.',
+      runId: 'r1'
+    })
+    expect(w.sent.at(-1)).toMatchObject({
+      name: 'set_task_model',
+      args: { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5' },
+      resolved: { workspacePath: 'C:/work/api', runId: 'r1' }
+    })
+    expect(await runAppAction(d, 'set_task_model', { model: 'glm', task: 'login' }, voice)).toEqual({
+      ok: true,
+      message: '“Fix the login page” runs on z-ai/glm-5.3-flash.',
+      runId: 'r2'
+    })
+    // Never the global model: that is set_model.
+    expect(d.patches).toEqual([])
+    expect((await runAppAction(d, 'set_task_model', { model: 'gpt nine' }, voice)).ok).toBe(false)
   })
 })

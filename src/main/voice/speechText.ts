@@ -299,15 +299,22 @@ const LATIN_LANGUAGES = new Set([
 ])
 
 /**
- * Letters, but none in the script of the language you set. Only for a
- * Latin-script language: a mixed or Latin transcript always passes.
+ * Scripts kept alongside a Latin-script language: the person also speaks
+ * Hindi and Punjabi (2026-10-16 decision). Dropped as noise before, "क्या?"
+ * at 02:35:00 and 02:50:41 that morning went unanswered.
+ */
+const ALSO_SPOKEN_SCRIPT = /\p{Script=Latin}|\p{Script=Devanagari}|\p{Script=Gurmukhi}/u
+
+/**
+ * Letters, but none in the script of the language you set (nor Devanagari or
+ * Gurmukhi). Only for a Latin-script language: a mixed transcript always passes.
  */
 export function isOtherScript(utterance: string, language: string | undefined): boolean {
   const lang = language?.trim().toLowerCase().split(/[-_]/)[0]
   if (!lang || !LATIN_LANGUAGES.has(lang)) return false
   const letters = utterance.match(/\p{L}/gu)
   if (!letters || letters.length === 0) return false
-  return !letters.some((ch) => /\p{Script=Latin}/u.test(ch))
+  return !letters.some((ch) => ALSO_SPOKEN_SCRIPT.test(ch))
 }
 
 /**
@@ -384,34 +391,6 @@ export function approvalAnswer(utterance: string): 'once' | 'deny' | 'always' | 
   if (NO.has(norm)) return 'deny'
   if (ALWAYS.has(norm)) return 'always'
   return null
-}
-
-const CONFIRM_START = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|confirm|confirmed|absolutely|definitely|go for it|delete it|install it|quit)\b/
-const CONFIRM_NOT = /\b(no|not|don't|dont|wait|stop|cancel|never mind|hold on)\b/
-
-/**
- * The user's yes to an action the voice asked about (a delete, an install,
- * quitting): an answer that starts with a yes and takes nothing back.
- * "Yes, delete it" is a yes; "yes, but not that one" and "no" are not.
- */
-export function confirmsAction(utterance: string): boolean {
-  const norm = normaliseUtterance(utterance)
-  return CONFIRM_START.test(norm) && !CONFIRM_NOT.test(norm)
-}
-
-/** Words that only describe a commit or a push, not ask for one: "the last commit", "commit message". */
-const GIT_NOUN_BEFORE = new Set(['the', 'a', 'an', 'last', 'latest', 'previous', 'this', 'that', 'each', 'every', 'which', 'my', 'your', 'its', 'first', 'next', 'one'])
-const GIT_NOUN_AFTER = new Set(['message', 'messages', 'history', 'log', 'hash', 'id', 'sha', 'graph', 'list', 'notification', 'notifications'])
-const GIT_VERB_RE = /^(commit|commits|committing|push|pushes|pushing)$/
-
-/**
- * A brief that asks the agent to commit or push (§24.16): the voice
- * hands it on only after a spoken yes. "Commit and push the fix" asks;
- * "what changed in the last commit?" and "fix the push notifications" don't.
- */
-export function asksToCommitOrPush(brief: string): boolean {
-  const ws = brief.toLowerCase().replace(/[^\p{L}\p{N}\s'-]/gu, ' ').split(/\s+/).filter(Boolean)
-  return ws.some((w, i) => GIT_VERB_RE.test(w) && !GIT_NOUN_BEFORE.has(ws[i - 1] ?? '') && !GIT_NOUN_AFTER.has(ws[i + 1] ?? ''))
 }
 
 /**

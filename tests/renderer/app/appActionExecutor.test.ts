@@ -238,6 +238,18 @@ describe('executeWindowAction', () => {
     expect((await executeWindowAction(act('download_update'), handlers({ updateReady: () => true }))).ok).toBe(true)
   })
 
+  it('sets a task’s own model through its controller, as its model menu does (§27)', async () => {
+    const set = vi.fn(() => true)
+    const where = { workspacePath: 'C:/work/api', runId: 'r1' }
+    expect(await executeWindowAction(act('set_task_model', { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5' }, where), handlers({ onSetTaskModel: set }))).toEqual({
+      ok: true,
+      message: 'Set.'
+    })
+    expect(set).toHaveBeenCalledWith('C:/work/api', 'r1', 'openrouter', 'anthropic/claude-haiku-5.5')
+    expect((await executeWindowAction(act('set_task_model', { provider: 'openrouter', model: 'x' }, where), handlers({ onSetTaskModel: () => false }))).ok).toBe(false)
+    expect((await executeWindowAction(act('set_task_model', { provider: 'openrouter', model: 'x' }), handlers({ onSetTaskModel: set }))).ok).toBe(false)
+  })
+
   it('new task in the workspace main found', async () => {
     const inWs = vi.fn()
     expect((await executeWindowAction(act('new_task', {}, { workspacePath: 'C:/work/site' }), handlers({ onNewChatInWorkspace: inWs }))).ok).toBe(true)

@@ -428,7 +428,7 @@ function TakeoverSplit() {
       <aside className={cn('flex w-[42%] min-w-[340px] max-w-[560px] shrink-0 flex-col', api.settings.style === 'ambient' ? 'vy-voice-glass-pane' : 'vy-panel')} aria-label="Its task">
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2">
           <StatusGlyph state={entry ? workGlyph(entry) : 'queued'} size={13} />
-          <span className={cn('min-w-0 flex-1 truncate text-sm', entry ? 'text-fg-strong' : 'text-muted')}>{entry ? 'Its task' : 'Nothing handed over yet'}</span>
+          <span className={cn('min-w-0 flex-1 truncate text-sm', entry ? 'text-fg-strong' : 'text-muted')}>{entry ? 'Its task' : 'No work yet'}</span>
           {w && !entry?.failed ? <span className="font-mono text-caption text-tertiary tnum">{`${w.stepCount} step${w.stepCount === 1 ? '' : 's'}`}</span> : null}
         </div>
         {entry ? (

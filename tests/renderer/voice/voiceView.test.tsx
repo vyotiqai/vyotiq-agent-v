@@ -748,7 +748,7 @@ describe('after End: the summary (§26.7)', () => {
       act(() => fake.update({ transcript: [{ id: 't1', who: 'you', text: 'Hello.' }] }))
       fireEvent.click(screen.getByRole('button', { name: 'End' }))
       await vi.waitFor(() => expect(document.querySelector('[data-voice-ended]')).not.toBeNull())
-      expect(document.querySelector('[data-voice-summary-title]')!.textContent).toBe('Nothing handed over')
+      expect(document.querySelector('[data-voice-summary-title]')!.textContent).toBe('No work started')
       fireEvent.click(screen.getByRole('button', { name: 'All voice conversations' }))
       expect(opened).toEqual([['/repo', null]])
       expect(document.querySelector('[data-voice-ended]')).toBeNull()

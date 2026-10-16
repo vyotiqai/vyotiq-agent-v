@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { voiceReplyWanted } from '../voice/voiceReply'
 import type {
   AgentEvent,
   AgentInteractionMode,
@@ -110,6 +111,7 @@ import {
   adaptiveThinkingEffort,
   emptyResponseRetryEffort,
   weakestEffort,
+  spokenTurnThinking,
   isMechanicalStep,
   loopHintForCompactionVerifyFailed,
   loopHintAfterCompaction,
@@ -2146,6 +2148,20 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const autoLoadMcpServerIds = new Set(
         runMcpServers.filter((s) => s.enabled && s.autoLoad === true).map((s) => s.id)
       )
+      // A spoken turn (voice mode is this agent, §27): the app is what is asked
+      // for most, so app_control rides from the first step rather than costing
+      // a step to load. Admission is append-only, like the rest.
+      if (
+        !runStickyToolNames.has('app_control') &&
+        voiceReplyWanted({
+          workspacePath: toolWorkspace,
+          memoryWorkspacePath: isInlineInstance && toolWorkspace !== workspace ? workspace : undefined,
+          inlineInstance: isInlineInstance,
+          messages
+        })
+      ) {
+        runStickyToolNames.add('app_control')
+      }
       // Admission state belongs in the fingerprint, not only in the
       // invalidate hook: a pin that failed to invalidate would otherwise be
       // swallowed by this early return and the agent would be told to wait for
@@ -2647,6 +2663,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const thinkingEnabled =
         settings.thinkingEnabled &&
         catalogThinkingAllowed(settings.model, modelInfo.supportsThinking)
+      // Said out loud: the person is waiting to hear it, so reasoning goes to the lowest the model allows (§27).
+      const spokenTurn = voiceReplyWanted({
+        workspacePath: toolWorkspace,
+        memoryWorkspacePath: isInlineInstance && toolWorkspace !== workspace ? workspace : undefined,
+        inlineInstance: isInlineInstance,
+        messages
+      })
 
       // Whether reasoning replay fields (reasoningState / thinking) are on the
       // wire for this provider. Mirrors the strip decision in
@@ -3282,16 +3305,18 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           // A fallback never continues the task model's server-side chain.
           reasoningState:
             droppedPriorResponseState || !onTaskModel ? undefined : lastReasoningState(messages),
-          thinking: (onTaskModel ? thinkingEnabled : settings.thinkingEnabled && target.thinkingAllowed)
-            ? {
+          thinking: !(onTaskModel ? thinkingEnabled : settings.thinkingEnabled && target.thinkingAllowed)
+            ? { enabled: false }
+            : spokenTurn
+              ? spokenTurnThinking(target.modelInfo)
+              : {
                 enabled: true,
                 effort: weakestEffort(
                   adaptiveThinkingEffort(settings.thinkingEffort, mechanicalStepStreak),
                   emptyResponseRetryEffort(settings.thinkingEffort, consecutiveEmptyResponses)
                 ),
                 display: settings.showThinking ? 'summarized' : 'omitted'
-              }
-            : { enabled: false },
+              },
           serviceTier: resolveServiceTier(settings, target.providerId, target.model),
           promptCacheTtl: settings.longPromptCache ? '1h' : '5m'
         })) {

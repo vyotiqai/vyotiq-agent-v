@@ -638,12 +638,6 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'voice'
   },
   {
-    id: 'voice-responder',
-    title: 'Answers with',
-    keywords: ['voice mode','voice','responder','answers','model','haiku','conversation','talk back','reply'],
-    section: 'voice'
-  },
-  {
     id: 'voice-patience',
     title: 'Turn ending',
     keywords: ['voice mode','voice','turn','pause','end of turn','patience','wait'],

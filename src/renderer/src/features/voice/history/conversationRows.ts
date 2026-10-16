@@ -21,6 +21,7 @@ export type ConversationRow =
   | { kind: 'you'; id: string; at: string; text: string; stop: boolean; unanswered?: true }
   /** One reply, its sentences joined: the voice you talk to, or the task speaking. */
   | { kind: 'voice' | 'agent'; id: string; at: string; text: string }
+  /** `brief` is empty when it was your words as said (voice mode is the agent, §27): the row is only its outcome. */
   | { kind: 'hand_off'; id: string; at: string; brief: string; outcome: HandOffOutcome }
   /** A run took your words with no hand-off before it (added to running work). */
   | { kind: 'followed'; id: string; at: string; runId: string }
@@ -44,6 +45,8 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
   const yours = new Map<string, Extract<ConversationRow, { kind: 'you' }>>()
   let lastAt: number | null = null
   let reply: { row: Extract<ConversationRow, { kind: 'voice' | 'agent' }>; contextId: string } | null = null
+  /** Your words since the last thing that wasn't yours: a hand-off of exactly these isn't shown twice. */
+  let lastWords: string[] = []
   entries.forEach((e, i) => {
     const id = `${i}`
     const at = Date.parse(e.at)
@@ -56,6 +59,7 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
       case 'you': {
         const row: Extract<ConversationRow, { kind: 'you' }> = { kind: 'you', id, at: e.at, text: e.text, stop: e.stop === true }
         yours.set(e.turnId, row)
+        lastWords.push(e.text)
         push(row)
         return
       }
@@ -70,6 +74,7 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
       }
       case 'voice':
       case 'agent': {
+        lastWords = []
         // A reply's sentences read as one line while nothing falls between them.
         const last = rows.at(-1)
         if (reply && last === reply.row && reply.contextId === e.contextId && last.kind === e.kind) {
@@ -82,7 +87,9 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
         return
       }
       case 'hand_off': {
-        const row: Extract<ConversationRow, { kind: 'hand_off' }> = { kind: 'hand_off', id, at: e.at, brief: e.brief, outcome: { kind: 'unknown' } }
+        const asSaid = flat(e.brief) === flat(lastWords.join(' '))
+        lastWords = []
+        const row: Extract<ConversationRow, { kind: 'hand_off' }> = { kind: 'hand_off', id, at: e.at, brief: asSaid ? '' : e.brief, outcome: { kind: 'unknown' } }
         handOffs.set(e.handOffId, row)
         push(row)
         return
@@ -133,6 +140,10 @@ export function conversationRows(entries: readonly VoiceConversationEntry[]): { 
     }
   })
   return { rows, quiet }
+}
+
+function flat(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 /** Why a hand-off didn't go, as the live view says it (§24.8 A-54). */

@@ -1,13 +1,13 @@
 /**
- * What the voice knows about the app beyond the task (docs/voice-mode.md
- * §24.14, batch 2): the screen you're on, the workspace and its branch, the
- * task and the other work across workspaces, a few settings, the date and
- * time, and the workspace's rules and memory by headline. Read again as you
- * start talking, and sent in the part of the prompt that isn't cached.
+ * The app as the agent reads it with `app_control` `app_status`
+ * (docs/voice-mode.md §24.14, §27): the screen, the workspace and its branch,
+ * the task and the other work across workspaces, a few settings, voice mode,
+ * the update, the date and time, and the workspace's rules and memory by
+ * headline.
  *
- * The voice used to know only the task: "what branch am I on?", "is
- * anything else running?" and "what's today?" were handed to the agent or
- * guessed.
+ * Without it "is there an update?" was answered with a guess (2026-10-16
+ * 02:37: "There's an update ready to download", then "There's no update to
+ * download").
  */
 import { existsSync, readFileSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
@@ -25,13 +25,17 @@ export type AppSnapshot = {
   task?: { title: string; state: AppTaskState } | null
   /** Work going on elsewhere: other tasks running or stopped on you, in any open workspace. */
   others: Array<{ title: string; workspace: string; state: 'running' | 'waiting' }>
+  /** Messages queued on the task, sent at its next step. */
+  queued?: number
   settings: {
     model?: string
     approvals?: string
     theme?: string
-    voicePlacement?: string
-    voiceSpeed?: number
   }
+  /** Voice mode, when it is on. */
+  voice?: { placement: string; speed: number; muted?: 'until_called' | 'until_unmuted' } | null
+  /** The app's update, as the updater last knew it. */
+  update?: { status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'; version?: string }
   /** The workspace's rules files, by name and first heading. */
   rules: string[]
   /** The agent's memory notes for the workspace, by title. */
@@ -65,6 +69,16 @@ const STATE_WORDS: Readonly<Record<AppTaskState, string>> = {
   cancelled: 'stopped'
 }
 
+const UPDATE_WORDS: Readonly<Record<NonNullable<AppSnapshot['update']>['status'], string>> = {
+  idle: 'not checked yet this session (check_update checks now)',
+  checking: 'checking now',
+  available: 'one is out and not downloaded',
+  'not-available': 'none, this is the newest',
+  downloading: 'downloading',
+  downloaded: 'downloaded, installs when asked (the app restarts)',
+  error: 'the last check failed'
+}
+
 /** "Thursday 15 October 2026, 7:05 pm", in the app's own time zone. */
 export function spokenNow(now: Date): string {
   const day = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -76,6 +90,7 @@ export function formatAppContext(s: AppSnapshot): string {
   const lines: string[] = [`(The app right now, ${spokenNow(s.now)}:)`]
   if (s.screen === 'task' && s.task) lines.push(`On screen: the task “${clip(s.task.title, TITLE_CHARS)}”, ${STATE_WORDS[s.task.state]}.`)
   else if (s.screen && s.screen !== 'task') lines.push(`On screen: ${SCREEN_LINE[s.screen]}.`)
+  if (s.queued) lines.push(`${s.queued} message${s.queued === 1 ? ' is' : 's are'} queued on it, given to it at its next step.`)
   if (s.workspace) lines.push(`Workspace: ${s.workspace.name}${s.workspace.branch ? `, on branch ${s.workspace.branch}` : ''}.`)
   const others = s.others.slice(0, MAX_OTHERS)
   if (others.length > 0) {
@@ -85,12 +100,16 @@ export function formatAppContext(s: AppSnapshot): string {
   } else lines.push('No other tasks are running.')
   const set = s.settings
   const settings = [
-    set.model ? `the agent's model is ${set.model}` : '',
+    set.model ? `new tasks start on ${set.model}` : '',
     set.approvals ? `tool approvals are ${set.approvals}` : '',
-    set.theme ? `${set.theme} theme` : '',
-    set.voicePlacement ? `voice shows as ${set.voicePlacement}${set.voiceSpeed && set.voiceSpeed !== 1 ? ` at ${set.voiceSpeed} times speed` : ''}` : ''
+    set.theme ? `${set.theme} theme` : ''
   ].filter(Boolean)
   if (settings.length > 0) lines.push(`Settings: ${settings.join('; ')}.`)
+  if (s.voice) {
+    const muted = s.voice.muted === 'until_called' ? ', muted until called by name' : s.voice.muted === 'until_unmuted' ? ', muted' : ''
+    lines.push(`Voice mode is on, shown as ${s.voice.placement}${s.voice.speed !== 1 ? ` at ${s.voice.speed} times speed` : ''}${muted}.`)
+  }
+  if (s.update) lines.push(`Update: ${UPDATE_WORDS[s.update.status]}${s.update.version && s.update.status !== 'not-available' ? ` (version ${s.update.version})` : ''}.`)
   if (s.rules.length > 0) lines.push(`Project rules the agent follows: ${s.rules.slice(0, MAX_HEADLINES).join('; ')}.`)
   if (s.memory.length > 0) lines.push(`The agent's memory notes here: ${s.memory.slice(0, MAX_HEADLINES).join('; ')}.`)
   return redactSecretsInText(lines.join('\n'))

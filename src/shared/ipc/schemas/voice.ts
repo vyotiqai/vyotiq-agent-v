@@ -56,20 +56,6 @@ const ModelId = z.string().max(120)
 const VoiceId = z.string().max(200)
 
 /**
- * Who answers out loud (D-44): a fast chat model that talks with you and
- * hands real work to the agent. Any chat provider the app knows; its key is
- * the provider's own.
- */
-export const VoiceResponderSchema = z.object({
-  provider: z.string().min(1).max(80),
-  model: z.string().min(1).max(200)
-})
-export type VoiceResponder = z.infer<typeof VoiceResponderSchema>
-
-/** Measured fastest-to-useful on 2026-10-14 with tools, and Ajay's pick (D-45). */
-export const DEFAULT_VOICE_RESPONDER: VoiceResponder = { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5' }
-
-/**
  * Per-provider picks live in records keyed by provider id, so switching away
  * and back keeps your model and voice. A key a newer build added and an older
  * one doesn't know is dropped on read, like any unknown settings key.
@@ -90,7 +76,6 @@ export const VoiceSettingsSchema = z.object({
    * "detect" for the listeners that can (A-15).
    */
   language: z.string().max(8).default('en'),
-  responder: VoiceResponderSchema.default(DEFAULT_VOICE_RESPONDER),
   /**
    * Short spoken cues while tools run; off leaves only a sound. Off by
    * default since the 2026-10-15 redesign: the voice speaks milestones only
@@ -100,7 +85,7 @@ export const VoiceSettingsSchema = z.object({
   /** No automatic turn ends; hold to talk. */
   pushToTalkOnly: z.boolean().default(false),
   endOfTurnPatience: VoiceEndOfTurnPatienceSchema.default('normal'),
-  /** Spoken yes/no answers ordinary approvals; risky ones always need a click. */
+  /** Spoken yes/no answers the agent's approvals, risky ones too (once only; §27). */
   approveByVoice: z.boolean().default(true),
   captions: z.boolean().default(true),
   earcons: z.boolean().default(true),
@@ -122,7 +107,6 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   tts: {},
   speed: 1,
   language: 'en',
-  responder: DEFAULT_VOICE_RESPONDER,
   speakProgress: false,
   pushToTalkOnly: false,
   endOfTurnPatience: 'normal',
@@ -402,11 +386,13 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
     text: z.string().optional()
   }),
   /**
-   * The voice gives the agent work: the renderer sends `brief` to the task
-   * like a typed message (it starts the task, or joins the running one
-   * without cancelling it) and follows the run.
+   * Your turn, for the agent (§27): the renderer sends `brief` (your words as
+   * said) to the task like a typed message (it starts the task, or joins the
+   * running one without cancelling it) and follows the run.
    */
   z.object({ sessionId: z.string(), kind: z.literal('hand_off'), handOffId: z.string(), brief: z.string().min(1).max(20_000) }),
+  /** Main follows the run this turn started, without waiting for the window to say which (§27). */
+  z.object({ sessionId: z.string(), kind: z.literal('followed'), handOffId: z.string(), runId: z.string() }),
   /** The voice was asked to stop the agent's work: the renderer presses Stop. */
   z.object({ sessionId: z.string(), kind: z.literal('stop_agent') }),
   z.object({ sessionId: z.string(), kind: z.literal('reconnecting'), attempt: z.number().int() }),

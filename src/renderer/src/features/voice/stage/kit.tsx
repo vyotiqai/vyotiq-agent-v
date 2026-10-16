@@ -1341,7 +1341,7 @@ export function HistoryList() {
   const words = settings.captions
   const rows = useMemo(() => buildEntries(v.transcript, v.works).filter((e) => words || e.who === 'work'), [v.transcript, v.works, words])
   if (rows.length === 0) {
-    return <p className="m-0 px-4 py-6 text-center text-sm text-tertiary">{words ? 'Nothing said yet.' : 'Captions are off: only the work it handed over is listed.'}</p>
+    return <p className="m-0 px-4 py-6 text-center text-sm text-tertiary">{words ? 'Nothing said yet.' : 'Captions are off: only the work is listed.'}</p>
   }
   return (
     <ol className="m-0 flex list-none flex-col px-4 py-3" aria-label="Conversation" data-voice-transcript>

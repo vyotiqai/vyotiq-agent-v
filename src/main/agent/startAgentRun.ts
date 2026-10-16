@@ -61,6 +61,7 @@ import { launchRunFollowUpOrStart } from './launchRunInvoke'
 import { emitGoalUpdate } from './goalEvents'
 import { planGoalRelaunch } from './goalRelaunchPlan'
 import { tapRunEvent } from './runEventTap'
+import { lastTurnWasSpoken, noteSpokenTurnStarted } from '../voice/voiceReply'
 
 /**
  * Per-run relaunch budget + pending delayed-relaunch timers (module scope so
@@ -195,6 +196,8 @@ export function startAgentRunInBackground(input: StartAgentRunInput): Promise<vo
   const { runId, workspacePath, invokeId, wc, controller } = input
   let agentInput = input.agentInput
   const releaseIpcSender = registerRunIpcSender(runId, wc)
+  // A turn said out loud: voice mode follows this run from its start (§27).
+  if (lastTurnWasSpoken(agentInput.newMessages ?? agentInput.messages ?? [])) noteSpokenTurnStarted(runId, workspacePath)
 
   return (async () => {
     let terminalSent = false

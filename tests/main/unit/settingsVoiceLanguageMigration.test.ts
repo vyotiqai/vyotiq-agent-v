@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { DEFAULT_VOICE_RESPONDER } from '@shared/ipc/schemas/voice'
 
 const userData = join(tmpdir(), `vyotiq-voice-language-${process.pid}`)
 const settingsFile = (): string => join(userData, 'settings.json')
@@ -35,10 +34,15 @@ describe('voice language and voice model (v8, D-45, D-47)', () => {
     if (existsSync(userData)) rmSync(userData, { recursive: true, force: true })
   })
 
-  it('a fresh install listens in English and answers with the default voice model', async () => {
+  it('a fresh install listens in English', async () => {
     const settings = await load()
     expect(settings.voice.language).toBe('en')
-    expect(settings.voice.responder).toEqual(DEFAULT_VOICE_RESPONDER)
+  })
+
+  it('a voice model saved before §27 is dropped on read: voice mode is the agent', async () => {
+    writeFileSync(settingsFile(), JSON.stringify({ settingsVersion: 8, voice: { language: 'en', responder: { provider: 'openrouter', model: 'z-ai/glm-5.3-flash' } } }))
+    const settings = await load()
+    expect('responder' in settings.voice).toBe(false)
   })
 
   it('a blank language saved before v8 (the old default, “detect”) becomes English, once', async () => {

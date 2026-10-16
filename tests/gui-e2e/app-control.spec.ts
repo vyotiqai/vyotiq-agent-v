@@ -64,7 +64,7 @@ test('a run opens Voice settings, sets the theme, and a delete waits on the appr
   await expect(window.locator('[data-settings-anchor="voice"]').first()).toBeVisible({ timeout: 20_000 })
   // Main wrote the setting; the window follows it.
   await expect.poll(async () => window.evaluate(async () => {
-    const res = await window.vyotiq.getSettings()
+    const res = await self.vyotiq.getSettings()
     return res.ok ? res.data.theme : null
   }), { timeout: 10_000 }).toBe('light')
 

@@ -161,7 +161,7 @@ async function* runFixtureAppControl(
   yield { type: 'tool_start', ...base }
   const run = appActionRunner()
   const result = run
-    ? await run(String(args.action ?? ''), args.args ?? {}, { who: 'agent', runId: input.runId, workspacePath: input.workspacePath })
+    ? await run(String(args.action ?? ''), args.args ?? {}, { runId: input.runId, workspacePath: input.workspacePath })
     : { ok: false, message: 'No app control runner.' }
   yield { type: 'tool_result', ...base, ok: result.ok, content: result.message }
 }

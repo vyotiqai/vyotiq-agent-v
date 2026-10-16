@@ -44,6 +44,9 @@ export function buildEntries(transcript: readonly VoiceLine[], works: VoiceSnaps
   const out: Entry[] = []
   for (const l of transcript) {
     if (l.who === 'agent') {
+      // Each turn goes to the run as your words, already shown (voice mode is the agent, §27): one work row per
+      // run, on its latest turn, which carries the work. One that didn't go stays, to say why.
+      if (l.runId && lastForRun.get(l.runId) !== l.id && !l.failed) continue
       out.push({
         id: l.id,
         who: 'work',

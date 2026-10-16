@@ -1,18 +1,18 @@
 /**
- * Runs the app's actions (src/shared/appActions.ts) for the voice and the
- * agent. Main's own run here; the window's (views, panes, panels, the
- * update) are sent to the window, which answers. A task or workspace named
- * in words is found here first, across every open workspace.
+ * Runs the app's actions (src/shared/appActions.ts) for the agent, typed or
+ * talked to (voice mode is the agent, §27). Main's own run here; the window's
+ * (views, panes, panels, the update) are sent to the window, which answers.
+ * A task or workspace named in words is found here first, across every open
+ * workspace.
  *
- * Confirmation is the caller's: the voice asks out loud, the agent's call
- * stops at the approval card. This runs what it is given.
+ * Confirmation is the approval card's (read out and answered by voice in
+ * voice mode). This runs what it is given.
  */
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { basename, extname, isAbsolute, resolve } from 'path'
 import type { WebContents } from 'electron'
 import {
-  APP_ACTIONS,
   isAppActionName,
   parseAppActionArgs,
   type AppActionArgs,
@@ -27,13 +27,12 @@ export type AppActionResult = { ok: boolean; message: string; runId?: string }
 
 /** What a run of an action knows about where it was asked. */
 export type AppActionContext = {
-  who: 'voice' | 'agent'
-  /** The task on screen (voice) or the agent's own run. */
+  /** The agent's own run. */
   runId?: string | null
   workspacePath?: string | null
   /** Where a relative path is read from, when not the workspace: an agent's worktree. */
   filesRoot?: string | null
-  /** The voice's own controls, when the voice asks. */
+  /** Voice mode's own controls, when a voice session follows this run (found from `runId` when not given). */
   voice?: {
     mute: (untilCalled: boolean) => void
     end: () => void
@@ -75,6 +74,14 @@ export type AppControlDeps = {
   ) => Promise<{ ok: true; queued: boolean } | { ok: false; error: string }>
   patchSettings: (patch: Record<string, unknown>) => Promise<void>
   settings: () => { recentModels?: string[]; favoriteModels?: string[] }
+  /** The app as it is now, in words (app_status). */
+  status: (ctx: AppActionContext) => Promise<string>
+  /** Voice mode's controls for the session following this run, if one does. */
+  voiceControls?: (runId: string) => AppActionContext['voice'] | null
+  /** The speaking model in use ignores a speed (it refuses one; §24.12). */
+  speedIgnored?: () => boolean
+  /** Check for an update now; `checked` false where the app can't (a development build). */
+  checkUpdate?: () => Promise<{ checked: false } | { checked: true; version: string | null; error?: string }>
   openPath: (path: string) => Promise<string>
   revealPath: (path: string) => void
   openExternal: (url: string) => Promise<void>
@@ -177,6 +184,23 @@ export async function findTask(deps: AppControlDeps, named: string | undefined, 
   return null
 }
 
+const NOT_A_KNOWN_MODEL = 'That model isn’t one used recently or marked favourite; pick it once in the model menu and it can be named after that.'
+
+/** A model named in words, from the ones used recently or marked favourite. */
+function knownModel(deps: AppControlDeps, named: string): { provider: string; model: string } | null {
+  const s = deps.settings()
+  const known = [...new Set([...(s.favoriteModels ?? []), ...(s.recentModels ?? [])])]
+  const want = words(named)
+  const key = known.find((k) => k.split('::')[1] === named) ?? known.find((k) => want.length > 0 && want.every((w) => k.toLowerCase().includes(w)))
+  const [provider, model] = key?.split('::') ?? []
+  return provider && model ? { provider, model } : null
+}
+
+/** Voice mode's controls: given, or the session following this run. */
+function voiceOf(deps: AppControlDeps, ctx: AppActionContext): AppActionContext['voice'] | null {
+  return ctx.voice ?? (ctx.runId ? (deps.voiceControls?.(ctx.runId) ?? null) : null)
+}
+
 function quoted(title: string): string {
   // A title's own full stop goes: the sentence it sits in ends with one ("Archived “Say hello.”." in the 2026-10-15 live check).
   const t = title.replace(/\s+/g, ' ').trim().replace(/[.!?]+$/, '')
@@ -186,8 +210,6 @@ function quoted(title: string): string {
 /** Run one action. Arguments are checked here; the name must be one the caller may use. */
 export async function runAppAction(deps: AppControlDeps, name: string, rawArgs: unknown, ctx: AppActionContext): Promise<AppActionResult> {
   if (!isAppActionName(name)) return { ok: false, message: `There’s no action called ${name}.` }
-  const def = APP_ACTIONS[name]
-  if (def.voiceOnly && ctx.who !== 'voice') return { ok: false, message: `${name} is the voice’s own control.` }
   const parsed = parseAppActionArgs(name, rawArgs)
   if (!parsed.ok) return { ok: false, message: parsed.error }
   try {
@@ -229,6 +251,30 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
       }
       const r = await toWindow({ workspacePath: found.workspacePath, runId: found.runId })
       return r.ok ? { ...r, message: r.message.replace('{task}', quoted(found.title)), runId: found.runId } : r
+    }
+    case 'set_task_model': {
+      const key = knownModel(deps, String(a.model))
+      if (!key) return { ok: false, message: NOT_A_KNOWN_MODEL }
+      const found = await task()
+      if ('error' in found) return { ok: false, message: found.error }
+      const wc = window()
+      if (!wc) return { ok: false, message: 'No app window is open.' }
+      const r = await sendToWindow(wc, {
+        name,
+        args: { provider: key.provider, model: key.model },
+        resolved: { workspacePath: found.workspacePath, runId: found.runId }
+      })
+      if (!r.ok) return r
+      const later = deps.runActive(found.runId) ? ' from its next turn; the run working now finishes on the model it started with' : ''
+      return { ok: true, message: `${quoted(found.title)} runs on ${key.model}${later}.`, runId: found.runId }
+    }
+    case 'app_status':
+      return { ok: true, message: await deps.status(ctx) }
+    case 'check_update': {
+      const r = deps.checkUpdate ? await deps.checkUpdate() : ({ checked: false } as const)
+      if (!r.checked) return { ok: false, message: 'Updates are checked only in the installed app; this is a development build.' }
+      if (r.error) return { ok: false, message: `The update check failed: ${r.error.slice(0, 200)}` }
+      return r.version ? { ok: true, message: `Version ${r.version} is out; it isn’t downloaded yet.` } : { ok: true, message: 'No update: this is the newest version.' }
     }
     case 'new_task':
     case 'switch_workspace': {
@@ -286,15 +332,11 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
       return { ok: true, message: a.mode === 'off' ? 'Tool approvals are off.' : `Tool approvals are on for ${a.mode === 'all' ? 'every tool' : 'changes'}.` }
     }
     case 'set_model': {
-      const s = deps.settings()
-      const known = [...new Set([...(s.favoriteModels ?? []), ...(s.recentModels ?? [])])]
-      const want = words(String(a.model))
-      const key = known.find((k) => k.split('::')[1] === String(a.model)) ?? known.find((k) => want.length > 0 && want.every((w) => k.toLowerCase().includes(w)))
-      if (!key) return { ok: false, message: 'That model isn’t one used recently or marked favourite; pick it in the model menu.' }
-      const [provider, model] = key.split('::')
-      if (!provider || !model) return { ok: false, message: 'That model can’t be read.' }
-      await deps.patchSettings({ provider, model })
-      return { ok: true, message: `New tasks use ${model}.` }
+      const key = knownModel(deps, String(a.model))
+      if (!key) return { ok: false, message: NOT_A_KNOWN_MODEL }
+      await deps.patchSettings({ provider: key.provider, model: key.model })
+      // Said in full: "New tasks use…" was taken to mean the task on screen too (2026-10-16 03:04).
+      return { ok: true, message: `New tasks start on ${key.model}. Tasks that exist keep their own model.` }
     }
     case 'open_path':
     case 'reveal_path': {
@@ -326,25 +368,34 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
       setTimeout(() => deps.quit(), 1500)
       return { ok: true, message: 'Quitting.' }
     case 'voice_mute': {
-      if (!ctx.voice) return { ok: false, message: 'Voice mode isn’t on.' }
+      const voice = voiceOf(deps, ctx)
+      if (!voice) return { ok: false, message: 'Voice mode isn’t on.' }
       const untilCalled = a.until !== 'unmuted'
-      ctx.voice.mute(untilCalled)
-      return { ok: true, message: untilCalled ? 'Say “Agent V” when you need me.' : 'Muted.' }
+      voice.mute(untilCalled)
+      return { ok: true, message: untilCalled ? 'Muted until called: saying “Agent V” wakes it.' : 'Muted until unmuted.' }
     }
-    case 'voice_end':
-      if (!ctx.voice) return { ok: false, message: 'Voice mode isn’t on.' }
-      ctx.voice.end()
-      return { ok: true, message: 'Bye for now.' }
+    case 'voice_end': {
+      const voice = voiceOf(deps, ctx)
+      if (!voice) return { ok: false, message: 'Voice mode isn’t on.' }
+      voice.end()
+      return { ok: true, message: 'Voice mode ends once your reply has been heard.' }
+    }
     case 'set_voice_speed':
     case 'set_voice_placement': {
       const voice = (deps.settings() as { voice?: Record<string, unknown> }).voice ?? {}
       const patch = name === 'set_voice_speed' ? { speed: a.speed } : { placement: a.placement }
       await deps.patchSettings({ voice: { ...voice, ...patch } })
-      return { ok: true, message: name === 'set_voice_speed' ? 'Okay, is this better?' : `Voice shows as ${String(a.placement)} now.` }
+      if (name === 'set_voice_placement') return { ok: true, message: `Voice shows as ${String(a.placement)} now.` }
+      // Saved either way; a model that refuses a speed must not be told it took (2026-10-16: speed 1.15 on Eleven v4).
+      return deps.speedIgnored?.()
+        ? { ok: false, message: `Saved ${String(a.speed)} times, but the speaking model in use can’t change its speed. Another model in Settings, Voice, can.` }
+        : { ok: true, message: `The voice speaks at ${String(a.speed)} times speed now.` }
     }
-    case 'set_voice':
-      if (!ctx.voice) return { ok: false, message: 'Voice mode isn’t on.' }
-      return ctx.voice.setVoice(String(a.voice))
+    case 'set_voice': {
+      const voice = voiceOf(deps, ctx)
+      if (!voice) return { ok: false, message: 'Voice mode isn’t on.' }
+      return voice.setVoice(String(a.voice))
+    }
     default:
       // The window's own: views, panels, the navigator, the agent's mode, the update.
       return toWindow()

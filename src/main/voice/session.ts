@@ -1,8 +1,9 @@
 /**
- * A live voice session (docs/voice-mode.md §5, §6, §15): the mic audio in,
- * a cloud (or local) listener, turn-taking, and the state the voice bar
- * shows. This is the listening half. Phase 5 adds the agent bridge and the
- * spoken reply on top of the same state machine.
+ * A live voice session (docs/voice-mode.md §5, §6, §15, §27): the mic audio
+ * in, a cloud (or local) listener, turn-taking, and the state the voice bar
+ * shows. Voice mode is the agent (§27): each turn goes to the task word for
+ * word, and the agent's own spoken reply is what you hear. Stops, approvals
+ * and the agent's questions are settled here, without a model.
  *
  * Pure orchestration: the listener, keys, settings, clock and the way
  * events leave are all injected, so every behaviour is tested with the
@@ -28,14 +29,11 @@ import { VoiceError, toVoiceError } from './errors'
 import { PauseDetector } from './pauseDetector'
 import type { SttEvent, SttProvider, SttSession, TtsStream, TurnListenStats } from './providers/types'
 import { ReplySpeaker } from './replySpeaker'
-import { VoiceResponder, type AgentStatus, type ResponderChat } from './responder'
-import type { TokenUsage } from '../agent/providers/types'
 import { EchoGuard } from './echoGuard'
 import {
   afterWakeName,
   approvalAnswer,
   cleanTranscript,
-  confirmsAction,
   isBackchannel,
   isNoiseTranscript,
   isOtherScript,
@@ -43,8 +41,8 @@ import {
   soundsUnfinished,
   toSpeakable
 } from './speechText'
-import { APP_ACTIONS, isAppActionName } from '../../shared/appActions'
-import type { AppActionContext, AppActionResult } from '../appControl/runner'
+import type { AppActionResult } from '../appControl/runner'
+import type { VoiceLinkSession } from '../appControl/voiceLink'
 import { answerableByVoice, describeQuestion, questionAnswer } from './questionByVoice'
 import { foldWork, newWorkLog, workAsk, workSnapshot, type WorkLog } from './work'
 import type { VoiceLogEntry } from './conversationLog'
@@ -75,12 +73,18 @@ export const HOLD_GRACE_MS = 6000
 export const HOLD_MAX_MS = 10_000
 /** A bare "okay" or "yes" this soon after a question is an answer, not a backchannel. */
 export const ASKED_WINDOW_MS = 60_000
-/** Talk that stopped mid-thought ("Can you") waits this long for the rest before the voice answers. */
+/** Talk that stopped mid-thought ("Can you") waits this long for the rest before it goes to the agent. */
 export const UNFINISHED_WAIT_MS = 2500
-/** The task's conversation is read again when you start talking, at most this often. */
-export const TASK_CONTEXT_FRESH_MS = 5000
-/** The app is read again when you start talking, at most this often. */
-export const APP_CONTEXT_FRESH_MS = 5000
+/**
+ * Nothing said this long after your turn went to the agent: a short line, so
+ * you know it heard you. With reasoning at its lowest on a spoken turn the
+ * agent's words came 2.3–3.2 s after the turn (real app, 2026-10-16 04:44);
+ * at 2.5 s the line landed half a second before them. A turn that joins work
+ * in progress waits for the step running now.
+ */
+export const ACK_MS = 4000
+/** The short lines, taken in turn: the same words every time is what a machine sounds like. */
+export const ACK_LINES = ['One moment.', 'Just a second.', 'Give me a moment.'] as const
 /** Keep a muted listener's connection alive this often. */
 const KEEPALIVE_MS = 5000
 /** The view's steps refresh at most this often while a run works. */
@@ -165,41 +169,10 @@ export type VoiceSessionDeps = {
   pendingAsks?: (runId: string) => { approvals: ToolApprovalRequest[]; questions: AgentQuestionRequest[] }
   /** Per-turn timings, for tuning (§14). Timings only; never words. */
   logLatency?: (timings: TurnLatency) => void
-  /**
-   * The voice model's call (D-44); null or absent when it can't be used,
-   * and every turn then goes straight to the agent as before.
-   */
-  responder?: () => ResponderChat | null
-  /** The voice model's token usage, for Usage: charged to the task it was on (W-04), else where it opened. */
-  onResponderUsage?: (usage: TokenUsage, where: { runId: string | null; workspacePath: string | null }) => void
-  /** The voice model was slow to answer or said nothing (and was asked again): for the log. */
-  onResponderTrouble?: (what: 'timeout' | 'empty', retried: boolean) => void
-  /**
-   * The task's conversation so far, as the voice reads it (see `taskContext`):
-   * what you asked and what the agent answered. Empty when there's none.
-   */
-  loadTaskContext?: (runId: string, workspacePath: string | null) => Promise<string>
-  /**
-   * The app as the voice sees it (appContext.ts): the screen, workspace and
-   * branch, other work, settings, the time, rules and memory by headline.
-   */
-  loadAppContext?: (where: { runId: string | null; workspacePath: string | null; screen: VoiceScreen | null }) => Promise<string>
   /** Words heard while waiting to be called by name: ignored, or the name that woke it (for the log). */
   onStandbyHeard?: (what: 'ignored' | 'woken' | 'woken_with_words', chars: number) => void
-  /** Run an app action (src/shared/appActions.ts); without it the voice can't act in the app. */
-  runAppAction?: (name: string, args: unknown, ctx: AppActionContext) => Promise<AppActionResult>
-  /** Speak in another voice, by its name. */
+  /** Speak in another voice, by its name (the agent's app_control set_voice). */
   setVoiceName?: (name: string) => Promise<AppActionResult>
-  /**
-   * The last kept voice conversation on this task, from an earlier session, as
-   * the voice model's memory (empty when there is none): "continue" knows what
-   * you said, and what you stopped.
-   */
-  loadPastConversation?: (runId: string, workspacePath: string | null) => Promise<Array<{ role: 'user' | 'assistant'; content: string }>>
-  /** The voice model failed and the turn went to the agent instead: for the log. */
-  onResponderFailed?: (message: string) => void
-  /** The voice model chose to say nothing to a turn (it heard a sound or a filler): for the log, never the words. */
-  onStayedQuiet?: (chars: number) => void
   /** Heard speech that wasn't taken as a turn, and why: for the log, never the words. */
   onTurnDropped?: (reason: 'empty' | 'echo' | 'noise', chars: number, stats: { speechMs?: number; sttMs?: number } & Partial<TurnListenStats>) => void
   /**
@@ -257,14 +230,21 @@ export class VoiceSession {
   private readonly setTimer: (fn: () => void, ms: number) => unknown
   private readonly clearTimer: (handle: unknown) => void
   private readonly reply: ReplySpeaker
-  /** The voice that answers your turns and hands work to the agent (D-44). */
-  private readonly responder: VoiceResponder
-  /** The last brief the agent was given, and when, for the voice's context. */
-  private agentBrief: string | undefined
-  private agentSince: number | undefined
   private recordedStart = false
-  /** What the voice's status said before the latest hand-off, restored if the task never took it. */
-  private lastHandOff: { id: string; brief: string | undefined; since: number | undefined } | null = null
+  /**
+   * Your words that sounded unfinished ("Can you"), waiting UNFINISHED_WAIT_MS
+   * for the rest: more words join them, one stretch of talk is one turn (D-43).
+   */
+  private pendingTurn: { text: string; turnIds: string[]; timer: unknown } | null = null
+  /** Says a short line if nothing has been said by ACK_MS after your turn went. */
+  private ackTimer: unknown = null
+  private ackUses = 0
+  /** The agent ended voice mode (app_control voice_end): it ends once the run's reply has been said. */
+  private endWhenDone = false
+  /** Your turns sent to the task whose run isn't known yet, oldest first. */
+  private unfollowed: string[] = []
+  /** Turns whose run is followed: the window's later word on them changes nothing. */
+  private followedTurns = new Set<string>()
   private untap: (() => void) | null = null
   private followedRun: string | null = null
   /** Replies whose audio has started playing and not yet drained. */
@@ -307,24 +287,14 @@ export class VoiceSession {
   private lastSaid: { contextId: string; text: string; at: number } | null = null
   /** Replies opened to be heard whose audio has not started yet; one that ends unheard must not strand the session. */
   private awaitingAudio = new Set<string>()
-  /** The task's run (its conversation is the voice's context), and that conversation as last read. */
+  /** The task the session is on (voice mode opened on it, or the line it moved to). */
   private taskRunId: string | null = null
-  /** The task's workspace when the window named it; else the run's own, as main knows it. */
+  /** The task's workspace when the window named it. */
   private taskWorkspace: string | null = null
-  private taskContext = ''
-  private taskContextAt = Number.NEGATIVE_INFINITY
-  private taskContextGen = 0
-  /** What the window shows (the window says); the app as last read for the voice. */
+  /** What the window shows (the window says), for the agent's app_status. */
   private screen: VoiceScreen | null = null
-  private appContext = ''
-  private appContextAt = Number.NEGATIVE_INFINITY
-  private appContextGen = 0
   /** Muted until called by name ("Agent V"): it listens, and takes nothing else as a turn. */
   private standby = false
-  /** Your words of the turn being answered: a destructive action needs them to be a yes. */
-  private lastTurnText = ''
-  /** The followed run's progress, from its own events, for the voice's status line (B6). */
-  private progress: RunProgress = emptyProgress()
   /** The followed run's steps and result, for the voice view (§25). */
   private work: WorkLog | null = null
   private workTimer: unknown = null
@@ -339,58 +309,18 @@ export class VoiceSession {
     this.reply = new ReplySpeaker({
       openTts: (contextId) => this.openReplyTts(contextId),
       // Only said with a stream open: audio always follows.
-      say: (contextId, text) => {
-        this.said(contextId, text, 'agent', true)
-        // The agent's own words join the voice's conversation (its result, a cue, a question).
-        this.responder.agentSaid(text)
-      },
+      say: (contextId, text) => this.said(contextId, text, 'agent', true),
       onToolStart: () => this.dispatch({ type: 'tool_start' }),
-      onRunEnd: () => this.dispatch({ type: 'run_done' }),
+      onRunEnd: () => {
+        this.dispatch({ type: 'run_done' })
+        // Asked to end by the agent: its reply has been handed to the speaker; the window ends after it plays.
+        if (this.endWhenDone) {
+          this.endWhenDone = false
+          this.emitEvent({ kind: 'end_requested' })
+        }
+      },
       speakProgress: () => this.deps.settings().speakProgress,
       quietCue: () => this.emitEvent({ kind: 'cue' }),
-      onResult: (answer) => this.responder.agentFinished(answer, this.progress.ended?.outcome ?? 'done'),
-      onRunFailed: (message) => this.responder.agentFailed(message),
-      reportResult: () => this.responder.reportResult(),
-      newId: deps.newId ?? randomUUID,
-      now: deps.now ?? Date.now,
-      setTimer: this.setTimer,
-      clearTimer: this.clearTimer
-    })
-    this.responder = new VoiceResponder({
-      chat: () => deps.responder?.() ?? null,
-      openTts: (contextId) => this.openReplyTts(contextId),
-      say: (contextId, text, audible) => this.said(contextId, text, 'voice', audible),
-      handOff: (brief) => {
-        const handOffId = (this.deps.newId ?? randomUUID)()
-        this.lastHandOff = { id: handOffId, brief: this.agentBrief, since: this.agentSince }
-        this.agentBrief = brief
-        this.agentSince = this.now()
-        this.deps.record?.({ kind: 'hand_off', handOffId, brief })
-        this.emitEvent({ kind: 'hand_off', handOffId, brief })
-      },
-      stopAgent: () => {
-        this.deps.record?.({ kind: 'stop_agent', by: 'voice' })
-        this.stopWork()
-      },
-      done: ({ audible, handedOff, failed, quiet }) => {
-        if (failed) this.deps.onResponderFailed?.(failed.message)
-        if (quiet) {
-          this.deps.onStayedQuiet?.(quiet.chars)
-          // Your words stay on screen, marked: it heard them and chose not to answer.
-          for (const turnId of quiet.turnIds) {
-            this.deps.record?.({ kind: 'unanswered', turnId })
-            this.emitEvent({ kind: 'unanswered', turnId })
-          }
-        }
-        // With audio coming, its playback moves the session on; a hand-off waits for the agent.
-        if (!audible && !handedOff) this.dispatch({ type: 'reply_done', runActive: this.reply.runActive })
-      },
-      agentStatus: () => this.agentStatus(),
-      taskContext: () => this.taskContext,
-      appContext: () => this.appContext,
-      appAction: (call) => this.appAction(call),
-      onUsage: (usage) => this.deps.onResponderUsage?.(usage, { runId: this.taskRunId ?? this.followedRun, workspacePath: this.taskWorkspace }),
-      onTrouble: (what, retried) => this.deps.onResponderTrouble?.(what, retried),
       newId: deps.newId ?? randomUUID,
       now: deps.now ?? Date.now,
       setTimer: this.setTimer,
@@ -400,16 +330,12 @@ export class VoiceSession {
 
   /**
    * The task the session is on (voice mode opened on it, or the line it
-   * moved to), even with nothing running: the voice reads its conversation so
-   * far. Null: no task yet (New task's brief).
+   * moved to), even with nothing running. Null: no task yet (New task's
+   * brief). `screen`: what the window shows, for the agent's app_status.
    */
   setTask(runId: string | null, workspacePath: string | null = null, screen?: VoiceScreen): void {
-    const moved = screen !== undefined && screen !== this.screen
     if (screen !== undefined) this.screen = screen
-    const task = this.taskRunId
     this.enterTask(runId, workspacePath, true)
-    // A new task re-reads the app with it; only the screen changed: read it now.
-    if (moved && task === this.taskRunId) this.refreshAppContext(true)
   }
 
   /** `record`: keep a `task` line (a `followed` line already names the run when it was a follow). */
@@ -417,74 +343,49 @@ export class VoiceSession {
     if (this.stateValue === 'off') return
     if (workspacePath) this.taskWorkspace = workspacePath
     if (runId === this.taskRunId) return
-    // Moved from one task to another (not the new task a hand-off just made): the voice starts fresh.
-    if (this.taskRunId !== null) this.forgetTask()
     this.taskRunId = runId
-    this.taskContext = ''
-    this.taskContextGen++
-    this.refreshTaskContext(true)
-    this.refreshAppContext(true)
-    if (runId) {
-      if (record) this.deps.record?.({ kind: 'task', runId })
-      this.recallPast(runId)
+    if (runId && record) this.deps.record?.({ kind: 'task', runId })
+  }
+
+  /**
+   * What the agent's app_control reaches while this session follows its run
+   * (§27): voice mode's own controls, what the window shows, and whether it
+   * is muted.
+   */
+  get link(): VoiceLinkSession {
+    return {
+      controls: {
+        mute: (untilCalled) => {
+          if (untilCalled) this.setStandby(true)
+          else this.setMuted(true)
+        },
+        // After the run's reply has been said: ending now would cut it off.
+        end: () => {
+          if (this.reply.runActive) this.endWhenDone = true
+          else this.emitEvent({ kind: 'end_requested' })
+        },
+        setVoice: (name) => this.deps.setVoiceName?.(name) ?? Promise.resolve({ ok: false, message: 'Voices can’t be changed from here.' })
+      },
+      screen: this.screen,
+      muted: this.standby ? 'until_called' : this.stateValue === 'paused' ? 'until_unmuted' : null
     }
   }
 
   /**
-   * What the voice said and heard about the last task goes, and with nothing
-   * running, so does the work it last gave the agent: the status names this task's.
+   * Main started a run with your spoken words in this session's workspace:
+   * follow it now, as the oldest turn sent and not yet followed. Whether it
+   * took one.
    */
-  private forgetTask(): void {
-    this.responder.forget()
-    if (this.reply.runActive) return
-    this.agentBrief = undefined
-    this.agentSince = undefined
-    this.lastHandOff = null
+  spokenRunStarted(runId: string): boolean {
+    const handOffId = this.unfollowed[0]
+    if (!handOffId || this.stateValue === 'off') return false
+    this.follow(runId, handOffId)
+    return true
   }
 
-  /** The last conversation on this task, from before this session, as the voice's memory. */
-  private recallPast(runId: string): void {
-    const load = this.deps.loadPastConversation
-    if (!load) return
-    void load(runId, this.taskWorkspace).then(
-      (past) => {
-        if (this.taskRunId === runId && this.stateValue !== 'off') this.responder.recall(past)
-      },
-      () => {}
-    )
-  }
-
-  /** Read the task's conversation again, unless it was read just now (`force`: always). */
-  private refreshTaskContext(force = false): void {
-    const runId = this.taskRunId
-    const load = this.deps.loadTaskContext
-    if (!runId || !load) return
-    const at = this.now()
-    if (!force && at - this.taskContextAt < TASK_CONTEXT_FRESH_MS) return
-    this.taskContextAt = at
-    const gen = ++this.taskContextGen
-    void load(runId, this.taskWorkspace).then(
-      (text) => {
-        if (gen === this.taskContextGen && this.taskRunId === runId) this.taskContext = text
-      },
-      () => {}
-    )
-  }
-
-  /** Read the app again for the voice, unless it was read just now (`force`: always). */
-  private refreshAppContext(force = false): void {
-    const load = this.deps.loadAppContext
-    if (!load || this.stateValue === 'off') return
-    const at = this.now()
-    if (!force && at - this.appContextAt < APP_CONTEXT_FRESH_MS) return
-    this.appContextAt = at
-    const gen = ++this.appContextGen
-    void load({ runId: this.taskRunId, workspacePath: this.taskWorkspace, screen: this.screen }).then(
-      (text) => {
-        if (gen === this.appContextGen) this.appContext = text
-      },
-      () => {}
-    )
+  /** The run this session follows, if any. */
+  get followedRunId(): string | null {
+    return this.followedRun
   }
 
   /** Something is about to be said, by the voice or the agent: captions, echo memory, timing. */
@@ -544,7 +445,7 @@ export class VoiceSession {
   private endedUnheard(contextId: string): void {
     if (!this.awaitingAudio.delete(contextId) || this.stateValue === 'off') return
     this.deps.onUnheard?.()
-    if (this.playing.size > 0 || this.awaitingAudio.size > 0 || this.responder.busy) return
+    if (this.playing.size > 0 || this.awaitingAudio.size > 0) return
     if (this.stateValue === 'thinking') this.dispatch({ type: 'reply_done', runActive: this.reply.runActive })
     else if (this.stateValue === 'speaking') this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
   }
@@ -560,6 +461,14 @@ export class VoiceSession {
     if (this.stateValue === 'off') return
     // Already following it, and nothing new was sent: a new turn would drop a reply mid-sentence.
     if (!handOffId && this.followedRun === runId) return
+    // Main followed this turn's run when it started (`spokenRunStarted`): the window says so again, later.
+    if (handOffId && this.followedTurns.has(handOffId)) return
+    if (handOffId) {
+      this.followedTurns.add(handOffId)
+      this.unfollowed = this.unfollowed.filter((id) => id !== handOffId)
+      // The window learns the run here too, however it learned of it.
+      this.emitEvent({ kind: 'followed', handOffId, runId })
+    }
     this.deps.record?.({ kind: 'followed', runId, ...(handOffId ? { handOffId } : {}) })
     const switched = this.followedRun !== runId
     // The run it follows is the task it's on: its conversation is the voice's context.
@@ -571,16 +480,12 @@ export class VoiceSession {
       this.untap?.()
       this.untap = this.deps.tapRun
         ? this.deps.tapRun(runId, (ev) => {
-            // The run ended: what it answered joins the task's conversation.
-            if (ev.type === 'status' && ev.status !== 'running') this.refreshTaskContext(true)
-            this.progress = trackProgress(this.progress, ev, this.now())
             if (this.work) this.work = foldWork(this.work, ev, this.now())
             this.scheduleWork()
             this.reply.handle(ev)
           })
         : null
       this.followedRun = runId
-      this.progress = emptyProgress()
       this.work = newWorkLog(runId, this.now())
       this.scheduleWork()
     }
@@ -606,36 +511,6 @@ export class VoiceSession {
     return (this.deps.now ?? Date.now)()
   }
 
-  /**
-   * An app action the voice called (app_action, §24.15). A destructive one
-   * runs only when the voice says the user agreed and the turn it answers is
-   * a yes: a model that skips the question can't delete anything.
-   */
-  private async appAction(call: { action: string; args: unknown; confirmed: boolean }): Promise<AppActionResult> {
-    const run = this.deps.runAppAction
-    if (!run || this.stateValue === 'off') return { ok: false, message: 'I can’t do that from here.' }
-    if (!isAppActionName(call.action)) return { ok: false, message: 'I can’t do that from here.' }
-    if (APP_ACTIONS[call.action].destructive && !(call.confirmed && confirmsAction(this.lastTurnText))) {
-      return { ok: false, message: 'That needs your yes first. Should I go ahead?' }
-    }
-    const result = await run(call.action, call.args, {
-      who: 'voice',
-      runId: this.taskRunId ?? this.followedRun,
-      workspacePath: this.taskWorkspace,
-      voice: {
-        mute: (untilCalled) => {
-          if (untilCalled) this.setStandby(true)
-          else this.setMuted(true)
-        },
-        // After its answer is said: the window ends the session.
-        end: () => this.emitEvent({ kind: 'end_requested' }),
-        setVoice: (name) => this.deps.setVoiceName?.(name) ?? Promise.resolve({ ok: false, message: 'Voices can’t be changed from here.' })
-      }
-    })
-    this.deps.record?.({ kind: 'app_action', action: call.action, ok: result.ok, message: result.message })
-    return result
-  }
-
   /** Waiting to be called by name, or not; the window shows it. */
   private setStandby(on: boolean): void {
     if (this.standby === on) return
@@ -644,22 +519,18 @@ export class VoiceSession {
   }
 
   /**
-   * The window couldn't give a hand-off's brief to the task (none open, or it
-   * refused the message). The voice already said "On it.": it says the work
-   * didn't go, and the session doesn't sit in Thinking waiting for a run that
-   * will never start.
+   * The window couldn't give your words to the task (none open, or it
+   * refused the message): said so, and the session doesn't sit in Thinking
+   * waiting for a run that will never start.
    */
   handOffFailed(handOffId: string, reason: VoiceHandOffFailure): void {
     if (this.stateValue === 'off') return
-    if (this.lastHandOff?.id === handOffId && !this.reply.runActive) {
-      // The status line goes back to what the agent is really on.
-      this.agentBrief = this.lastHandOff.brief
-      this.agentSince = this.lastHandOff.since
-    }
-    this.lastHandOff = null
+    // The window lost track of the run, but main follows it already: nothing failed.
+    if (reason === 'unfollowed' && this.followedTurns.has(handOffId)) return
+    this.unfollowed = this.unfollowed.filter((id) => id !== handOffId)
+    this.stopAck()
     this.deps.record?.({ kind: 'not_sent', handOffId, reason })
-    const audible = this.responder.handOffFailed(HAND_OFF_FAILED_LINE[reason])
-    if (!audible) this.dispatch({ type: 'reply_done', runActive: this.reply.runActive })
+    this.sayLine(HAND_OFF_FAILED_LINE[reason])
   }
 
   /**
@@ -684,23 +555,6 @@ export class VoiceSession {
       this.workSent = sent
       this.emitEvent({ kind: 'work', work })
     }, WORK_EMIT_MS)
-  }
-
-  /** What the voice knows of the agent's work when it answers. */
-  private agentStatus(): AgentStatus {
-    const p = this.progress
-    const working = this.reply.runActive
-    return {
-      working,
-      ...(this.agentBrief ? { brief: this.agentBrief } : {}),
-      ...(this.agentSince !== undefined ? { since: this.agentSince } : {}),
-      ...(p.steps ? { steps: p.steps } : {}),
-      ...(working && p.current ? { current: p.current } : {}),
-      ...(working && p.narration ? { narration: p.narration } : {}),
-      ...(working && this.approval ? { waitingOn: `whether it may ${describeApproval(this.approval)}` } : {}),
-      ...(working && !this.approval && this.question ? { waitingOn: describeQuestion(this.question) } : {}),
-      ...(!working && p.ended ? { ended: p.ended } : {})
-    }
   }
 
   /** The renderer's player: a reply's audio started, or everything queued for it played. */
@@ -762,7 +616,6 @@ export class VoiceSession {
         asked: (req) => this.onQuestionAsked(req),
         settled: (requestId) => this.onQuestionSettled(requestId)
       }) ?? null
-    this.refreshAppContext(true)
     try {
       this.warmUp()
       await this.connect()
@@ -931,7 +784,6 @@ export class VoiceSession {
     this.duck = null
     this.overFloor = false
     this.clearHoldGrace()
-    this.progress = emptyProgress()
     this.work = null
     this.workSent = ''
     if (this.workTimer) this.clearTimer(this.workTimer)
@@ -940,19 +792,17 @@ export class VoiceSession {
     this.unwatchQuestions = null
     this.question = null
     this.followedRun = null
-    this.lastHandOff = null
     this.taskRunId = null
     this.taskWorkspace = null
-    this.taskContext = ''
-    this.taskContextGen++
     this.screen = null
     this.standby = false
-    this.lastTurnText = ''
-    this.appContext = ''
-    this.appContextGen++
+    this.endWhenDone = false
+    this.unfollowed = []
+    this.followedTurns.clear()
+    this.dropPendingTurn()
+    this.stopAck()
     this.lastSaid = null
     this.reply.dispose()
-    this.responder.dispose()
     this.playing.clear()
     this.awaitingAudio.clear()
     this.ctrl.abort()
@@ -1031,10 +881,6 @@ export class VoiceSession {
   }
 
   private onSpeechStart(): void {
-    // You may have typed in the task since: read it again while you talk, ready for your turn.
-    this.refreshTaskContext()
-    // The time, the screen and other tasks move on too.
-    this.refreshAppContext()
     const s = this.stateValue
     if (!AGENT_FLOOR_STATES.has(s)) {
       this.dispatch({ type: 'speech_start' })
@@ -1050,9 +896,9 @@ export class VoiceSession {
       this.bargeIn()
       return
     }
-    // Working, or working out an answer, with nothing audible. A breath or a
-    // click must not silence the agent's result (B1) or restart the answer
-    // (B2): hold what the voice would say next, and let the turn decide.
+    // Working with nothing audible. A breath or a click must not silence the
+    // agent's result (B1): nothing is cut; the turn decides. Audio that starts
+    // meanwhile is dipped until it's clear (`playback`).
     if (!this.overFloor) {
       this.holdMaxTimer = this.setTimer(() => {
         this.holdMaxTimer = null
@@ -1060,7 +906,6 @@ export class VoiceSession {
       }, HOLD_MAX_MS)
     }
     this.overFloor = true
-    this.responder.hold()
     this.clearHoldGrace(false)
   }
 
@@ -1073,9 +918,7 @@ export class VoiceSession {
   /** The maybe-turn over the agent's floor resolved (words, a breath, or nothing came): let go. */
   private endOverFloor(): void {
     this.clearHoldGrace()
-    if (!this.overFloor) return
     this.overFloor = false
-    this.responder.release()
   }
 
   /** Cancel the grace after a sound; `all` also the cap on the hold itself (it resolved). */
@@ -1107,8 +950,7 @@ export class VoiceSession {
     if (this.duck) this.endDuck()
     if (!AGENT_FLOOR_STATES.has(this.stateValue)) return
     const flushed = this.reply.interrupt()
-    const voice = this.responder.interrupt()
-    for (const contextId of new Set([...this.playing, ...(flushed ? [flushed] : []), ...(voice ? [voice] : [])])) {
+    for (const contextId of new Set([...this.playing, ...(flushed ? [flushed] : [])])) {
       this.emitEvent({ kind: 'flush', contextId })
     }
     this.playing.clear()
@@ -1164,7 +1006,7 @@ export class VoiceSession {
       (isNoiseTranscript(text) ||
         isOtherScript(text, this.deps.settings().language) ||
         // "Okay." to nothing in particular: answering it is what kept a noisy room talking.
-        (isBackchannel(text) && !this.approval && !this.question && !this.justAsked() && !this.responder.hasCarried))
+        (isBackchannel(text) && !this.approval && !this.question && !this.justAsked() && !this.pendingTurn))
     if (this.duck) {
       if (!text || echo || noise) this.releaseDuck()
       else this.bargeIn()
@@ -1181,11 +1023,8 @@ export class VoiceSession {
         this.deps.record?.({ kind: 'unanswered', turnId, text })
         this.emitEvent({ kind: 'unanswered', turnId, text })
       }
-      // Not words: whatever the voice held while it listened is said now.
       this.endOverFloor()
-      // A cough cut off an answer that hadn't started: answer what you'd said after all.
-      if (this.responder.hasCarried && this.dispatch({ type: 'end_of_turn' })) this.responder.answerCarried()
-      else this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
+      this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
       return
     }
     // Waiting to be called by name: anything else is not a turn; the name wakes it.
@@ -1193,35 +1032,25 @@ export class VoiceSession {
       const after = afterWakeName(text)
       this.deps.onStandbyHeard?.(after === null ? 'ignored' : after ? 'woken_with_words' : 'woken', text.length)
       if (after === null) {
-        this.responder.release()
         this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
         return
       }
       this.setStandby(false)
-      this.responder.woken()
       if (!after) {
-        this.responder.release()
         if (this.dispatch({ type: 'end_of_turn' })) this.sayLine(WOKEN_LINE)
         return
       }
       text = after
     }
-    // Words: `respond` decides what happens to anything held (D-43), so it isn't released here.
     this.overFloor = false
     this.clearHoldGrace()
-    // Words that come back while the agent has the floor are still yours: never
-    // dropped (D-43). An answer not yet begun takes them in; one being spoken stops.
+    // Words that come while the agent has the floor are still yours: never
+    // dropped (D-43). Its voice stops; its work goes on, and gets your words.
     const s = this.stateValue
     if (s === 'waiting_on_you') this.dispatch({ type: 'speech_start' })
-    else if (AGENT_FLOOR_STATES.has(s) && !this.responder.pendingUnspoken) this.bargeIn()
-    if (!AGENT_FLOOR_STATES.has(this.stateValue) && !this.dispatch({ type: 'end_of_turn' })) {
-      this.responder.release()
-      return
-    }
-    if (this.answerApprovalByVoice(text) || this.answerQuestionByVoice(text)) {
-      this.responder.release()
-      return
-    }
+    else if (s === 'speaking') this.bargeIn()
+    if (!AGENT_FLOOR_STATES.has(this.stateValue) && !this.dispatch({ type: 'end_of_turn' })) return
+    if (this.answerApprovalByVoice(text) || this.answerQuestionByVoice(text)) return
     // Your turn: whatever the agent reports next is spoken again (D-46).
     this.reply.resume()
     this.timing = {
@@ -1238,7 +1067,8 @@ export class VoiceSession {
       const working = this.reply.runActive
       if (working) this.deps.record?.({ kind: 'stop_agent', by: 'you' })
       // "Stop" needs no model: the voice goes quiet, and the work stops if there is any.
-      this.responder.interrupt()
+      this.dropPendingTurn()
+      this.stopAck()
       if (!working) {
         this.dispatch({ type: 'reply_done', runActive: false })
         return
@@ -1254,16 +1084,94 @@ export class VoiceSession {
       } else this.dispatch({ type: 'reply_done', runActive: false })
       return
     }
-    this.lastTurnText = text
-    // "Can you…": wait a moment before answering, so the rest of the thought joins this turn.
-    this.responder.respond(text, { turnId, ...(soundsUnfinished(text) ? { waitMs: UNFINISHED_WAIT_MS } : {}) })
+    this.takeTurn(text, turnId)
+  }
+
+  // ── Your turn, to the agent (§27) ──────────────────────────────────────
+
+  /**
+   * Your words go to the agent as you said them: voice mode is the agent, so
+   * nothing rewrites or answers them in between. Words that sound unfinished
+   * ("Can you") wait a moment for the rest, which joins them (D-43).
+   */
+  private takeTurn(text: string, turnId: string): void {
+    const pending = this.pendingTurn
+    if (pending) this.clearTimer(pending.timer)
+    const joined = pending ? `${pending.text} ${text}` : text
+    const turnIds = [...(pending?.turnIds ?? []), turnId]
+    this.pendingTurn = null
+    if (!soundsUnfinished(joined)) {
+      this.sendTurn(joined)
+      return
+    }
+    this.pendingTurn = {
+      text: joined,
+      turnIds,
+      timer: this.setTimer(() => {
+        const waiting = this.pendingTurn
+        this.pendingTurn = null
+        if (waiting && this.stateValue !== 'off') this.sendTurn(waiting.text)
+      }, UNFINISHED_WAIT_MS)
+    }
+  }
+
+  private dropPendingTurn(): void {
+    if (this.pendingTurn) this.clearTimer(this.pendingTurn.timer)
+    this.pendingTurn = null
+  }
+
+  /**
+   * To the task, as a message you said out loud: the agent answers it, and
+   * its spoken reply is what you hear. The view keeps one work row per run,
+   * so your words aren't shown twice.
+   */
+  private sendTurn(text: string): void {
+    const handOffId = (this.deps.newId ?? randomUUID)()
+    this.unfollowed.push(handOffId)
+    this.deps.record?.({ kind: 'hand_off', handOffId, brief: text })
+    this.emitEvent({ kind: 'hand_off', handOffId, brief: text })
+    // Stopped on you: the agent can't answer until you do, so say what it waits on rather than nothing.
+    const waiting = this.waitingLine()
+    if (waiting) this.sayLine(waiting)
+    else this.startAck()
+  }
+
+  /** What the followed run is stopped on, said again; null when it isn't. */
+  private waitingLine(): string | null {
+    if (this.approval) {
+      return this.voiceMayAnswer() ? `I still need your yes or no first: can I ${describeApproval(this.approval)}?` : 'I still need your okay on screen first.'
+    }
+    if (this.question) return `I still need your answer first. ${describeQuestion(this.question)}`
+    return null
+  }
+
+  /** Nothing said by ACK_MS: a short line, once, so you know it heard you. */
+  private startAck(): void {
+    this.stopAck()
+    const sentAt = this.now()
+    this.ackTimer = this.setTimer(() => {
+      this.ackTimer = null
+      if (this.stateValue === 'off' || this.standby) return
+      if ((this.lastSaid?.at ?? Number.NEGATIVE_INFINITY) >= sentAt || this.playing.size > 0) return
+      if (this.approval || this.question) return
+      this.sayLine(ACK_LINES[this.ackUses++ % ACK_LINES.length]!)
+    }, ACK_MS)
+  }
+
+  private stopAck(): void {
+    if (this.ackTimer) this.clearTimer(this.ackTimer)
+    this.ackTimer = null
   }
 
   // ── Approvals by voice (§7.5, B9) ──────────────────────────────────────
 
-  /** Whether a spoken answer may settle this approval (never a risky one). */
-  private voiceMayAnswer(req: ToolApprovalRequest): boolean {
-    return this.deps.settings().approveByVoice && !req.danger && Boolean(this.deps.resolveApproval)
+  /**
+   * Whether a spoken answer may settle approvals. A risky one too (a delete,
+   * a commit or push, a guarded command): a spoken yes is enough (2026-10-16
+   * decision, §27), and a risky one is only ever allowed once.
+   */
+  private voiceMayAnswer(): boolean {
+    return this.deps.settings().approveByVoice && Boolean(this.deps.resolveApproval)
   }
 
   private onApprovalAsked(req: ToolApprovalRequest): void {
@@ -1272,14 +1180,15 @@ export class VoiceSession {
     this.scheduleWork()
     this.dispatch({ type: 'needs_you' })
     const what = describeApproval(req)
+    // The agent asking, in its own voice: voice mode is the agent (§27).
     this.reply.announce(
-      req.danger
-        ? `It wants to ${what}, which could be risky. Approve or deny it on screen.`
-        : this.voiceMayAnswer(req)
-          ? voiceMayAlwaysAllow(req)
-            ? `It wants to ${what}. Say yes, no, or always allow.`
-            : `It wants to ${what}. Say yes or no.`
-          : `It wants to ${what}. Approve or deny it on screen.`
+      !this.voiceMayAnswer()
+        ? `I need your okay to ${what}. It's on your screen.`
+        : req.danger
+          ? `I need your yes to ${what}. It can't easily be undone. Yes or no?`
+          : voiceMayAlwaysAllow(req)
+            ? `Can I ${what}? Say yes, no, or always allow.`
+            : `Can I ${what}? Yes or no?`
     )
   }
 
@@ -1293,7 +1202,7 @@ export class VoiceSession {
   /** A whole-utterance yes/no answers the pending approval instead of becoming a message. */
   private answerApprovalByVoice(text: string): boolean {
     const req = this.approval
-    if (!req || !this.voiceMayAnswer(req)) return false
+    if (!req || !this.voiceMayAnswer()) return false
     const decision = approvalAnswer(text)
     if (!decision) return false
     // "Always" only where the card itself offers it; anything wider is the card's to give.
@@ -1483,55 +1392,6 @@ export class VoiceSession {
   }
 }
 
-/** The followed run's work so far, as the voice tells it (B6). Never the tools' output. */
-export type RunProgress = {
-  running: boolean
-  /** Tool calls started since the run (re)started. */
-  steps: number
-  /** The tool running now, "name: summary". */
-  current?: string
-  currentId?: string
-  /** The agent's last words between steps. */
-  narration?: string
-  ended?: { at: number; outcome: 'done' | 'error' | 'cancelled' }
-}
-
-export function emptyProgress(): RunProgress {
-  return { running: false, steps: 0 }
-}
-
-/** Fold one run event into the progress; pure, so it's tested on its own. */
-export function trackProgress(p: RunProgress, ev: AgentEvent, now: number): RunProgress {
-  switch (ev.type) {
-    case 'status':
-      if (ev.status === 'running') return p.running ? p : { running: true, steps: 0 }
-      return {
-        running: false,
-        steps: p.steps,
-        ...(p.narration ? { narration: p.narration } : {}),
-        ended: { at: now, outcome: ev.status === 'error' ? 'error' : ev.status === 'cancelled' ? 'cancelled' : 'done' }
-      }
-    case 'tool_start': {
-      const summary = (ev.summary ?? '').replace(/\s+/g, ' ').trim().slice(0, 140)
-      return { ...p, steps: p.steps + 1, current: summary ? `${ev.name}: ${summary}` : ev.name, currentId: ev.toolCallId }
-    }
-    case 'tool_result':
-      if (p.currentId !== ev.toolCallId) return p
-      return { ...withoutCurrent(p) }
-    case 'assistant_message': {
-      const words = toSpeakable(ev.content ?? '').slice(0, 240)
-      return words && ev.toolCalls && ev.toolCalls.length > 0 ? { ...p, narration: words } : p
-    }
-    default:
-      return p
-  }
-}
-
-function withoutCurrent(p: RunProgress): RunProgress {
-  const { current: _current, currentId: _id, ...rest } = p
-  return rest
-}
-
 /**
  * Whether "always allow" may be said for this approval: exactly where the
  * card offers its plain Always allow. Never a risky one, never a terminal
@@ -1562,19 +1422,22 @@ export const STOPPED_LINE = 'Stopped.'
 /** Said when called by name with nothing after it. */
 export const WOKEN_LINE = 'Yes?'
 
-/** What the voice says when its brief never reached the task. */
+/** Said when your words never reached the task (the agent's own voice, §27: never "passed on"). */
 export const HAND_OFF_FAILED_LINE: Readonly<Record<VoiceHandOffFailure, string>> = {
-  no_task: 'I couldn’t pass that on: there’s no task open to give it to.',
-  refused: 'I couldn’t pass that on: the task isn’t ready to take it. The screen says why.',
-  error: 'I couldn’t pass that on: something went wrong sending it.',
-  // It went, but the window never learned its run (A-112): nothing will be said about it.
-  unfollowed: 'I passed that on, but I can’t follow the task from here. Open it to see how it goes.'
+  no_task: 'I can’t start on that: there’s no task open. Open one and say it again.',
+  refused: 'That didn’t go through: the task isn’t ready for it yet. The screen says why.',
+  error: 'That didn’t go through: something went wrong sending it.',
+  // It went, but the window never learned its run (A-112): its reply won't be spoken.
+  unfollowed: 'I’m on it, but I can’t speak the answer from here. It’ll be on your screen.'
 }
 
 /** What an approval asks for, in a few spoken words (§7.5). */
 export function describeApproval(req: Pick<ToolApprovalRequest, 'name' | 'summary'>): string {
   const name = req.name.toLowerCase()
   const summary = toSpeakable(req.summary).replace(/[.]+$/, '').slice(0, 120)
+  if (name === 'git_commit') return summary ? `commit ${summary}` : 'commit the changes'
+  if (name === 'github_pr_create') return 'push the branch and open a pull request'
+  if (name === 'app_control') return summary ? summary.replace(/_/g, ' ') : 'do that in the app'
   if (/terminal|shell|command|bash/.test(name)) return summary ? `run ${summary}` : 'run a command'
   if (/edit|write|patch|create|replace|delete/.test(name)) return summary ? `change ${summary}` : 'change a file'
   if (/fetch|browser|navigate/.test(name)) return summary ? `open ${summary}` : 'open a web page'

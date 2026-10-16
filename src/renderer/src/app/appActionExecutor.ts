@@ -27,6 +27,8 @@ export type WindowActionHandlers = PaletteHandlers & {
   /** False when no task tab was open to close. */
   closePane?: () => boolean | void
   onSetAgentMode?: (mode: 'ask' | 'agent') => boolean
+  /** The task's model from its next turn, as its model menu sets it; false when it can't be set. */
+  onSetTaskModel?: (path: string, runId: string, provider: string, model: string) => boolean
   /** An update is downloaded and ready to install. */
   updateReady?: () => boolean
   /** An update is out and not downloaded yet. */
@@ -185,6 +187,14 @@ export async function executeWindowAction(action: AppWindowAction, h: WindowActi
       const mode = a.mode === 'ask' ? 'ask' : 'agent'
       if (!h.onSetAgentMode?.(mode)) return { ok: false, message: 'No task is on screen to set.' }
       return { ok: true, message: mode === 'ask' ? 'Ask mode: it answers without changing anything.' : 'Agent mode: it can make changes.' }
+    }
+    case 'set_task_model': {
+      const provider = typeof a.provider === 'string' ? a.provider : ''
+      const model = typeof a.model === 'string' ? a.model : ''
+      if (!path || !runId || !provider || !model || !h.onSetTaskModel?.(path, runId, provider, model)) {
+        return { ok: false, message: 'That task’s model can’t be set from here.' }
+      }
+      return { ok: true, message: 'Set.' }
     }
     case 'download_update':
       if (h.updateReady?.()) return { ok: true, message: 'It’s downloaded already; it installs when you say so.' }

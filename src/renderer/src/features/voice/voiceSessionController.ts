@@ -418,7 +418,7 @@ export class VoiceSessionController {
         this.set({ partial: e.text })
         return
       case 'turn':
-        // What you said; the voice answers it in main (D-44). Only a hand-off reaches the agent.
+        // What you said; main sends it on to the task as a hand-off, word for word (§27).
         this.set({ partial: '', lastTurn: e.text, saying: '', transcript: addLine(this.snap.transcript, e.turnId, 'you', e.text) })
         return
       case 'unanswered':
@@ -427,6 +427,11 @@ export class VoiceSessionController {
       case 'hand_off':
         this.set({ transcript: addLine(this.snap.transcript, e.handOffId, 'agent', e.brief) })
         void this.routeTurn({ turnId: e.handOffId, text: e.brief, stop: false })
+        return
+      case 'followed':
+        // Main follows the run your turn started: the line carries it, and a "couldn't follow" no longer stands.
+        this.followed = e.runId
+        this.set({ transcript: this.snap.transcript.map((l) => (l.id === e.handOffId ? { ...l, runId: e.runId, failed: undefined } : l)) })
         return
       case 'stop_agent':
         void this.deps.onStopAgent?.()
@@ -521,7 +526,9 @@ export class VoiceSessionController {
       return
     }
     if (result && typeof result === 'object') {
-      // The voice said "On it.": the line says it didn't go, and main has the voice say so.
+      // Main already follows the run this turn started: the window losing track of it is no failure.
+      if (result.failed === 'unfollowed' && this.snap.transcript.some((l) => l.id === turn.turnId && l.runId)) return
+      // The line says it didn't go, and main has the voice say so.
       const failed = result.failed
       this.set({ transcript: this.snap.transcript.map((l) => (l.id === turn.turnId ? { ...l, failed } : l)) })
       void this.bridge().voiceHandOffFailed({ sessionId: id, handOffId: turn.turnId, reason: failed })

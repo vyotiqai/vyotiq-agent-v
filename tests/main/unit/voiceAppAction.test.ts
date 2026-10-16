@@ -1,46 +1,30 @@
 /**
- * The voice acts in the app (batch 3, docs/voice-mode.md §24.15): its
- * app_action tool runs the app's actions, says how it went when the reply
- * didn't, never deletes without a spoken yes, waits to be called by name
- * when asked to, and can end itself.
+ * Voice mode is the agent (docs/voice-mode.md §27): every turn goes to the
+ * task as you said it, nothing answers in between, a short line says it
+ * heard you when the agent hasn't spoken yet, and the agent's app_control
+ * reaches voice mode's own controls (mute until called, end) through the
+ * session following its run.
  */
-import { describe, expect, it, vi } from 'vitest'
-import { APP_TOOL, HAND_OFF_TOOL, NEEDS_YES_LINE, RESPONDER_SYSTEM, RESPONDER_TOOLS, type ResponderChat, type ResponderChunk } from '@main/voice/responder'
-import { VoiceSession } from '@main/voice/session'
+import { describe, expect, it } from 'vitest'
+import { ACK_LINES, ACK_MS, UNFINISHED_WAIT_MS, VoiceSession } from '@main/voice/session'
 import { openFixtureStt, type FixtureSttSession } from '@main/voice/providers/fixture'
 import type { SttOpenOptions, TtsStream } from '@main/voice/providers/types'
-import type { AppActionContext, AppActionResult } from '@main/appControl/runner'
-import { afterWakeName, asksToCommitOrPush, confirmsAction } from '@main/voice/speechText'
+import { afterWakeName } from '@main/voice/speechText'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent } from '@shared/ipc/schemas/voice'
+import type { AgentEvent, ToolApprovalRequest } from '@shared/ipc'
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 const silentTts = (): TtsStream =>
   ({ pushText: () => {}, flush: () => {}, end: () => {}, cancel: () => {}, done: () => Promise.resolve() }) as unknown as TtsStream
 
-type Turn = { text?: string; call?: { action: string; args?: Record<string, unknown>; confirmed?: boolean }; handOff?: { brief: string; confirmed?: boolean } }
+const R = 'run-1'
 
-/** A voice model that answers each turn from a script, keyed by what was said. */
-function setup(
-  script: Record<string, Turn>,
-  run: (name: string, args: unknown, ctx: AppActionContext) => Promise<AppActionResult>,
-  extra: Partial<ConstructorParameters<typeof VoiceSession>[0]> = {}
-) {
-  const heard: string[] = []
-  const histories: Array<Array<{ role: string; content: unknown }>> = []
-  const chat: ResponderChat = (req) => {
-    const said = String(req.messages.at(-1)?.content ?? '')
-    heard.push(said)
-    histories.push(req.messages.map((m) => ({ role: m.role, content: m.content })))
-    const turn = script[said] ?? { text: 'Hmm.' }
-    return (async function* (): AsyncGenerator<ResponderChunk> {
-      if (turn.text) yield { type: 'text', text: turn.text }
-      if (turn.call) yield { type: 'tool_call', name: APP_TOOL, arguments: JSON.stringify(turn.call) }
-      if (turn.handOff) yield { type: 'tool_call', name: HAND_OFF_TOOL, arguments: JSON.stringify(turn.handOff) }
-      yield { type: 'done', usage: { inputTokens: 10, outputTokens: 2 } }
-    })()
-  }
+function setup() {
   const events: VoiceEvent[] = []
   const stt: FixtureSttSession[] = []
+  const timers: Array<{ fn: () => void; ms: number; live: boolean }> = []
+  let tap: ((e: AgentEvent) => void) | null = null
+  let approvals: { asked: (r: ToolApprovalRequest) => void; settled: (id: string, runId: string) => void } | null = null
   let n = 0
   const session = new VoiceSession({
     emit: (e) => events.push(e),
@@ -56,222 +40,175 @@ function setup(
       }
     }),
     openTts: () => silentTts(),
-    responder: () => chat,
-    runAppAction: run,
-    setTimer: (fn, ms) => setTimeout(fn, ms),
-    clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
-    newId: () => `id${++n}`,
-    ...extra
+    tapRun: (_runId, fn) => {
+      tap = fn
+      return () => {
+        tap = null
+      }
+    },
+    watchApprovals: (w) => {
+      approvals = w
+      return () => {
+        approvals = null
+      }
+    },
+    resolveApproval: () => true,
+    setTimer: (fn, ms) => {
+      const t = { fn, ms, live: true }
+      timers.push(t)
+      return t
+    },
+    clearTimer: (h) => {
+      if (h) (h as { live: boolean }).live = false
+    },
+    newId: () => `id${++n}`
   })
   const say = async (text: string): Promise<void> => {
     stt.at(-1)!.say(text)
     for (let i = 0; i < 5; i++) await tick()
   }
+  /** Run the live timers set for this long. */
+  const fire = (ms: number): void => {
+    for (const t of timers.splice(0)) {
+      if (t.live && t.ms === ms) t.fn()
+      else if (t.live) timers.push(t)
+    }
+  }
+  const handOffs = (): string[] => events.flatMap((e) => (e.kind === 'hand_off' ? [e.brief] : []))
   const spoken = (): string[] => events.flatMap((e) => (e.kind === 'say' ? [e.text] : []))
-  return { session, say, spoken, events, heard, histories }
+  return { session, say, fire, handOffs, spoken, events, tap: (e: AgentEvent) => tap?.(e), approvals: () => approvals }
 }
 
-describe('app_action', () => {
-  it('is one of the voice’s tools, and the prompt sends app things to it, not to the agent', () => {
-    expect(RESPONDER_TOOLS.map((t) => t.name)).toContain(APP_TOOL)
-    expect(RESPONDER_SYSTEM).toContain(`do them with ${APP_TOOL}, never hand them to the agent`)
+describe('every turn goes to the agent as you said it', () => {
+  it('your words are the message: nothing rewrites or answers them in between', async () => {
+    const t = setup()
+    await t.session.start()
+    await t.say('Change the theme to dark and use Haiku for this task.')
+    expect(t.handOffs()).toEqual(['Change the theme to dark and use Haiku for this task.'])
+    // Nothing is said by the session itself before the agent speaks.
+    expect(t.spoken()).toEqual([])
   })
 
-  it('runs the action with the task on screen, and says how it went when the reply said nothing', async () => {
-    const run = vi.fn(async () => ({ ok: true, message: 'The theme is dark now.' }))
-    const t = setup({ 'Switch to dark mode.': { call: { action: 'set_theme', args: { theme: 'dark' } } } }, run)
+  it('"Can you" waits a moment for the rest, and both go as one message', async () => {
+    const t = setup()
     await t.session.start()
-    t.session.setTask('run-1', 'C:/work')
-    await t.say('Switch to dark mode.')
-    await vi.waitFor(() => expect(run).toHaveBeenCalled())
-    expect(run).toHaveBeenCalledWith('set_theme', { theme: 'dark' }, expect.objectContaining({ who: 'voice', runId: 'run-1', workspacePath: 'C:/work' }))
-    await vi.waitFor(() => expect(t.spoken()).toEqual(['The theme is dark now.']))
-    expect(t.events.find((e) => e.kind === 'unanswered')).toBeUndefined()
+    await t.say('Can you')
+    expect(t.handOffs()).toEqual([])
+    await t.say('open the terminal?')
+    expect(t.handOffs()).toEqual(['Can you open the terminal?'])
   })
 
-  it('a reply that said it is on it isn’t repeated; a failure is said', async () => {
-    const run = vi.fn(async (name: string) => (name === 'open_view' ? { ok: true, message: 'Here’s Home.' } : { ok: false, message: 'No task matches “billing”.' }))
-    const t = setup(
-      {
-        'Go home.': { text: 'Sure.', call: { action: 'open_view', args: { view: 'home' } } },
-        'Open the billing task.': { text: 'Opening it.', call: { action: 'open_task', args: { task: 'billing' } } }
-      },
-      run
-    )
+  it('"Can you" alone still goes once the wait is over', async () => {
+    const t = setup()
     await t.session.start()
-    await t.say('Go home.')
-    await vi.waitFor(() => expect(t.spoken()).toEqual(['Sure.']))
-    await t.say('Open the billing task.')
-    await vi.waitFor(() => expect(t.spoken()).toEqual(['Sure.', 'Opening it.', 'No task matches “billing”.']))
+    await t.say('Can you')
+    t.fire(UNFINISHED_WAIT_MS)
+    expect(t.handOffs()).toEqual(['Can you'])
   })
 
-  it('its reasoning about "the user" is never said, and the result is (2026-10-16 live check)', async () => {
-    const run = vi.fn(async () => ({ ok: true, message: 'Forked “Say hello”; the copy is open.' }))
-    const t = setup(
-      {
-        'Make a fork of the hello task.': {
-          text: 'The user wants a fork of the hello task. The on-screen task is "Say hello," and the user named "the hello task," which matches it, so I\'ll fork the task on screen.',
-          call: { action: 'fork_task', args: {} }
-        },
-        'What did it change?': { text: 'It now sends the user to the login page when the session ends.' }
-      },
-      run
-    )
+  it('says a short line when nothing has been said by then, and not when the agent spoke first', async () => {
+    const t = setup()
     await t.session.start()
-    await t.say('Make a fork of the hello task.')
-    await vi.waitFor(() => expect(t.spoken()).toEqual(['Forked “Say hello”; the copy is open.']))
-    // What the code does to a user is an answer, not reasoning about you.
-    await t.say('What did it change?')
-    await vi.waitFor(() => expect(t.spoken().at(-1)).toBe('It now sends the user to the login page when the session ends.'))
+    await t.say('What branch am I on?')
+    t.fire(ACK_MS)
+    expect(t.spoken()).toEqual([ACK_LINES[0]])
+
+    const u = setup()
+    await u.session.start()
+    await u.say('What branch am I on?')
+    u.session.follow(R, 'id1')
+    u.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    u.tap({ type: 'text_delta', runId: R, text: '<spoken>You’re on main.</spoken>' } as unknown as AgentEvent)
+    u.tap({ type: 'assistant_message', runId: R, content: '<spoken>You’re on main.</spoken>' } as unknown as AgentEvent)
+    u.fire(ACK_MS)
+    expect(u.spoken()).toEqual(['You’re on main.'])
   })
 
-  it('a sentence naming its own action is never said, and the result is; plain words like "find" still are (2026-10-16 live check)', async () => {
-    const run = vi.fn(async () => ({ ok: true, message: 'Split: there’s room for another task beside it.' }))
-    const t = setup(
-      {
-        'Split the screen.': { text: 'That’s an app action: split_pane runs on the task on screen.', call: { action: 'run_command', args: { command: 'split_pane' } } },
-        'Where is it?': { text: 'I couldn’t find it.' }
-      },
-      run
-    )
+  it('stopped on an approval, words that aren’t the answer hear what it waits on', async () => {
+    const t = setup()
     await t.session.start()
-    await t.say('Split the screen.')
-    await vi.waitFor(() => expect(t.spoken()).toEqual(['Split: there’s room for another task beside it.']))
-    await t.say('Where is it?')
-    await vi.waitFor(() => expect(t.spoken().at(-1)).toBe('I couldn’t find it.'))
-  })
-
-  it('never deletes on its own say-so: only after the user’s yes', async () => {
-    const run = vi.fn(async () => ({ ok: true, message: 'Deleted it.' }))
-    const t = setup(
-      {
-        // A model that skips the question: refused.
-        'Delete the login task.': { call: { action: 'delete_task', args: { task: 'login' }, confirmed: true } },
-        'Yes, delete it.': { call: { action: 'delete_task', args: { task: 'login' }, confirmed: true } }
-      },
-      run
-    )
-    await t.session.start()
-    await t.say('Delete the login task.')
-    await vi.waitFor(() => expect(t.spoken()).toEqual(['That needs your yes first. Should I go ahead?']))
-    expect(run).not.toHaveBeenCalled()
-    await t.say('Yes, delete it.')
-    await vi.waitFor(() => expect(run).toHaveBeenCalledWith('delete_task', { task: 'login' }, expect.anything()))
-  })
-
-  it('never commits or pushes on its own say-so: the brief goes only after a yes to it (§24.16)', async () => {
-    const run = vi.fn(async () => ({ ok: true, message: '' }))
-    const t = setup(
-      {
-        // Straight to the agent, no question asked: held, and the question is asked instead.
-        'Commit and push the fix.': { text: 'Committing it now.', handOff: { brief: 'Commit the fix and push it to main.', confirmed: true } },
-        'Yes, push it.': { handOff: { brief: 'Commit the fix and push it to main.', confirmed: true } },
-        // Not a commit: no question.
-        'What changed in the last commit?': { handOff: { brief: 'Summarise what changed in the last commit.' } }
-      },
-      run
-    )
-    const handOffs = (): string[] => t.events.flatMap((e) => (e.kind === 'hand_off' ? [e.brief] : []))
-    await t.session.start()
-    await t.say('Commit and push the fix.')
-    await vi.waitFor(() => expect(t.spoken().join(' ')).toContain(NEEDS_YES_LINE))
-    expect(handOffs()).toEqual([])
-    await t.say('Yes, push it.')
-    await vi.waitFor(() => expect(handOffs()).toEqual(['Commit the fix and push it to main.']))
-    await t.say('What changed in the last commit?')
-    await vi.waitFor(() => expect(handOffs()).toHaveLength(2))
-    expect(RESPONDER_SYSTEM).toContain('Committing or pushing code needs the user')
-  })
-
-  it('the commit question is heard even after three sentences of its own (the cap would caption it)', async () => {
-    // What the speaking model was given: words past the cap are only a caption, never sent to it.
-    const voiced: string[] = []
-    const recording = { pushText: (s: string) => voiced.push(s.trim()), flush: () => {}, end: () => {}, cancel: () => {}, done: () => Promise.resolve() }
-    const t = setup(
-      { 'Push it all.': { text: 'Okay. I see three changes. They look ready. ', handOff: { brief: 'Commit everything and push it.', confirmed: true } } },
-      vi.fn(async () => ({ ok: true, message: '' })),
-      { openTts: () => recording as unknown as ReturnType<NonNullable<ConstructorParameters<typeof VoiceSession>[0]['openTts']>> }
-    )
-    await t.session.start()
-    await t.say('Push it all.')
-    await vi.waitFor(() => expect(voiced.join(' ')).toContain('Should I go ahead?'))
-    expect(voiced).toEqual(['Okay.', 'I see three changes.', 'They look ready.', ...NEEDS_YES_LINE.split(/(?<=\.) /)])
-  })
-
-  it('the voice model’s spend is charged to the task it is on, not where the session opened (W-04)', async () => {
-    const usage = vi.fn()
-    const t = setup({ 'Hello.': { text: 'Hi.' } }, vi.fn(), { onResponderUsage: usage })
-    await t.session.start()
-    t.session.setTask('run-9', 'C:/work/site')
-    await t.say('Hello.')
-    await vi.waitFor(() => expect(usage).toHaveBeenCalled())
-    expect(usage).toHaveBeenCalledWith(expect.objectContaining({ inputTokens: 10 }), { runId: 'run-9', workspacePath: 'C:/work/site' })
-  })
-
-  it('muted until called: nothing is a turn until "Agent V", then what follows is', async () => {
-    const t = setup(
-      {
-        'Mute until I call you.': { text: 'Okay.', call: { action: 'voice_mute', args: { until: 'called' } } },
-        'what time is it?': { text: 'Seven.' }
-      },
-      async (_name, _args, ctx) => {
-        ctx.voice?.mute(true)
-        return { ok: true, message: 'Say “Agent V” when you need me.' }
-      }
-    )
-    await t.session.start()
-    await t.say('Mute until I call you.')
-    await vi.waitFor(() => expect(t.events).toContainEqual(expect.objectContaining({ kind: 'standby', on: true })))
-    await t.say('Can you pass the salt?')
-    await new Promise((r) => setTimeout(r, 50))
-    expect(t.heard).toEqual(['Mute until I call you.'])
-    await t.say('Agent V, what time is it?')
-    await vi.waitFor(() => expect(t.heard.at(-1)).toBe('what time is it?'))
-    expect(t.events).toContainEqual(expect.objectContaining({ kind: 'standby', on: false }))
-    // Answered, not "I'm muted": the voice is told it was called (2026-10-15 live check).
-    await vi.waitFor(() => expect(t.spoken()).toContain('Seven.'))
-    expect(t.histories.at(-1)!.some((m) => m.role === 'assistant' && String(m.content).includes('called me by name'))).toBe(true)
-  })
-
-  it('a tool name written as words is never said (2026-10-15 live check: "stay_quiet." was spoken)', async () => {
-    const t = setup({ 'Hmm, okay then.': { text: 'stay_quiet.' }, 'Open home.': { text: '`app_action`' } }, vi.fn())
-    await t.session.start()
-    await t.say('Hmm, okay then.')
-    await t.say('Open home.')
-    await new Promise((r) => setTimeout(r, 100))
-    expect(t.spoken().join(' ')).not.toMatch(/stay_quiet|app_action/)
-  })
-
-  it('"end voice mode" asks the window to end it', async () => {
-    const t = setup({ 'That’s all, bye.': { call: { action: 'voice_end' } } }, async (_n, _a, ctx) => {
-      ctx.voice?.end()
-      return { ok: true, message: 'Bye for now.' }
-    })
-    await t.session.start()
-    await t.say('That’s all, bye.')
-    await vi.waitFor(() => expect(t.spoken()).toEqual(['Bye for now.']))
-    expect(t.events).toContainEqual(expect.objectContaining({ kind: 'end_requested' }))
+    t.session.follow(R)
+    t.approvals()!.asked({ requestId: 'a1', runId: R, toolCallId: 't1', name: 'terminal', summary: 'pnpm test', argsPreview: '', timeoutMs: 0, mutating: true, alwaysAllowCommand: 'pnpm test' } as ToolApprovalRequest)
+    await t.say('How long will it take?')
+    expect(t.handOffs()).toEqual(['How long will it take?'])
+    expect(t.spoken().at(-1)).toBe('I still need your yes or no first: can I run pnpm test?')
   })
 })
 
-describe('what counts as a yes, and as being called', () => {
-  it('a yes that takes nothing back', () => {
-    for (const yes of ['Yes.', 'Yeah, go ahead.', 'Sure, delete it.', 'Do it.']) expect(confirmsAction(yes)).toBe(true)
-    for (const no of ['No.', 'Yes, but not that one.', 'Wait.', 'Delete the login task.']) expect(confirmsAction(no)).toBe(false)
+describe('the run your turn started is followed from main (2026-10-16 02:41:42)', () => {
+  it('follows it as main starts it, tells the window, and the window’s later word changes nothing', async () => {
+    const t = setup()
+    await t.session.start()
+    await t.say('Research the fastest voice models.')
+    const handOff = t.events.find((e) => e.kind === 'hand_off') as { handOffId: string }
+    expect(t.session.spokenRunStarted('run-new')).toBe(true)
+    expect(t.session.followedRunId).toBe('run-new')
+    expect(t.events).toContainEqual(expect.objectContaining({ kind: 'followed', handOffId: handOff.handOffId, runId: 'run-new' }))
+    // The window took 17 s to learn the run, then said it couldn't follow: no failure is said.
+    const saidBefore = t.spoken().length
+    t.session.handOffFailed(handOff.handOffId, 'unfollowed')
+    expect(t.spoken()).toHaveLength(saidBefore)
+    // And its own follow, late, doesn't start the turn again.
+    const followedBefore = t.events.filter((e) => e.kind === 'followed').length
+    t.session.follow('run-new', handOff.handOffId)
+    expect(t.events.filter((e) => e.kind === 'followed')).toHaveLength(followedBefore)
+    // Nothing waiting: a run started some other way isn't taken.
+    expect(t.session.spokenRunStarted('run-other')).toBe(false)
   })
 
-  it('a brief that asks for a commit or a push, not one that only mentions them', () => {
-    expect(asksToCommitOrPush('Commit and push the fix.')).toBe(true)
-    expect(asksToCommitOrPush('push it to main')).toBe(true)
-    expect(asksToCommitOrPush('Stage the files and commit them.')).toBe(true)
-    expect(asksToCommitOrPush('What changed in the last commit?')).toBe(false)
-    expect(asksToCommitOrPush('Write a better commit message generator.')).toBe(false)
-    expect(asksToCommitOrPush('Fix the push notifications.')).toBe(false)
-    expect(asksToCommitOrPush('Run the tests.')).toBe(false)
-    // The request itself is never its own yes.
-    expect(confirmsAction('Commit and push the fix.')).toBe(false)
+  it('a turn the task refused is still said to have failed', async () => {
+    const t = setup()
+    await t.session.start()
+    await t.say('Run the tests.')
+    const handOff = t.events.find((e) => e.kind === 'hand_off') as { handOffId: string }
+    t.session.handOffFailed(handOff.handOffId, 'refused')
+    expect(t.spoken().at(-1)).toBe('That didn’t go through: the task isn’t ready for it yet. The screen says why.')
+    expect(t.session.spokenRunStarted('run-x')).toBe(false)
+  })
+})
+
+describe('the agent reaches voice mode’s own controls', () => {
+  it('mute until called: nothing is a turn until "Agent V", then what follows is', async () => {
+    const t = setup()
+    await t.session.start()
+    t.session.link.controls.mute(true)
+    expect(t.events).toContainEqual(expect.objectContaining({ kind: 'standby', on: true }))
+    expect(t.session.link.muted).toBe('until_called')
+    await t.say('Can you pass the salt?')
+    expect(t.handOffs()).toEqual([])
+    await t.say('Agent V, what time is it?')
+    expect(t.handOffs()).toEqual(['what time is it?'])
+    expect(t.events).toContainEqual(expect.objectContaining({ kind: 'standby', on: false }))
+    expect(t.session.link.muted).toBeNull()
   })
 
+  it('end waits for the run’s reply: the window is asked once the run is over', async () => {
+    const t = setup()
+    await t.session.start()
+    t.session.follow(R)
+    t.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    t.session.link.controls.end()
+    expect(t.events.some((e) => e.kind === 'end_requested')).toBe(false)
+    t.tap({ type: 'status', runId: R, status: 'done' } as AgentEvent)
+    expect(t.events.filter((e) => e.kind === 'end_requested')).toHaveLength(1)
+
+    const u = setup()
+    await u.session.start()
+    u.session.link.controls.end()
+    expect(u.events.filter((e) => e.kind === 'end_requested')).toHaveLength(1)
+  })
+
+  it('tells app_status what the window shows', async () => {
+    const t = setup()
+    await t.session.start()
+    t.session.setTask(R, 'C:/work/site', 'settings')
+    expect(t.session.link.screen).toBe('settings')
+    t.session.follow(R)
+    expect(t.session.followedRunId).toBe(R)
+  })
+})
+
+describe('being called by name', () => {
   it('"Agent V" at the start, with or without "hey"', () => {
     expect(afterWakeName('Agent V, what time is it?')).toBe('what time is it?')
     expect(afterWakeName('Hey Agent V.')).toBe('')

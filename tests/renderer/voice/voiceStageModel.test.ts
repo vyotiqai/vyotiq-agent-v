@@ -84,6 +84,6 @@ describe('the summary', () => {
       { runId: 'r2', brief: 'Its current work', state: 'failed', outcome: 'Stopped by an error.', time: '5 s' }
     ])
     expect(summaryTitle(tasks)).toBe('1 task done · 1 stopped')
-    expect(summaryTitle([])).toBe('Nothing handed over')
+    expect(summaryTitle([])).toBe('No work started')
   })
 })

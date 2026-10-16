@@ -11,23 +11,17 @@ import { VoiceError } from './errors'
 import { sttProvider, ttsProvider } from './providers/registry'
 import { cachedModelVoices, prepareVoiceModels } from './modelCatalog'
 import { VoiceSession } from './session'
-import { makeResponderChat, prepareResponderModel, recordResponderUsage } from './responderChat'
 import { addRunEventTap } from '../agent/runEventTap'
 import { listPendingToolApprovals, resolveToolApproval, watchToolApprovals } from '../agent/toolApproval'
 import { listPendingAgentQuestions, resolveAgentQuestion, watchAgentQuestions } from '../agent/agentQuestion'
-import { cancelRun, getRunWorkspace, listActiveRuns } from '../agent/runRegistry'
-import { readWorkspaceRules } from '../agent/context/rules'
-import { memoryNoteDetails } from '../agent/context/memory'
-import { formatAppContext, readGitBranch, ruleHeadline, type AppSnapshot, type AppTaskState } from './appContext'
-import { setVoiceReplyWorkspace } from './voiceReply'
-import { runAppActionInApp, type AppActionResult } from '../appControl'
+import { cancelRun, getRunWorkspace } from '../agent/runRegistry'
+import { onSpokenTurnStarted, setVoiceFollowedRun, setVoiceReplyWorkspace, voiceSessionsOn } from './voiceReply'
+import type { AppActionResult } from '../appControl'
+import { setVoiceLink } from '../appControl/voiceLink'
 import { enqueueSettingsMutation, setSettings } from '../settings/settings'
 import { VoiceConversationLog } from './conversationLog'
-import { lastConversationForRun, pastConversationMessages } from './conversationHistory'
-import { resolveRunDir, userDataRoot, workspaceUsageDir } from '../storage/paths'
-import { loadMessagesWindowAsync, loadStatus } from '../agent/state'
-import { TASK_CONTEXT_MESSAGES, formatTaskContext } from './taskContext'
-import { basename, join } from 'path'
+import { userDataRoot, workspaceUsageDir } from '../storage/paths'
+import { join } from 'path'
 import { notifyBadgeChange } from '../app/badges'
 import {
   chooseModel,
@@ -56,8 +50,7 @@ export function warmVoiceConnections(settings: VoiceSettings, fetchImpl: typeof 
   const keys = voiceKeyAvailability()
   const listener = resolveSttProvider(settings.sttProvider, keys)
   const speaker = resolveTtsProvider(settings.ttsProvider, keys)
-  const usesOpenRouter =
-    (listener.ok && listener.id === 'openrouter') || (speaker.ok && speaker.id === 'openrouter') || settings.responder.provider === 'openrouter'
+  const usesOpenRouter = (listener.ok && listener.id === 'openrouter') || (speaker.ok && speaker.id === 'openrouter')
   if (!usesOpenRouter) return
   void fetchImpl('https://openrouter.ai/api/v1/key', { method: 'HEAD', signal: AbortSignal.timeout(5000) }).catch(() => {})
 }
@@ -164,6 +157,36 @@ export function voiceEventPasses(event: VoiceEvent): boolean {
 }
 
 const sessions = new Map<string, { session: VoiceSession; owner: Owner; log: VoiceConversationLog | null }>()
+
+/**
+ * A run main started with words said out loud: the session that sent them
+ * follows it at once, never waiting on the window (§27).
+ */
+onSpokenTurnStarted((runId, workspacePath) => {
+  for (const id of voiceSessionsOn(workspacePath)) {
+    const entry = sessions.get(id)
+    if (!entry || !entry.session.spokenRunStarted(runId)) continue
+    setVoiceFollowedRun(id, runId)
+    logger.info('Voice follows the run its turn started', { scope: 'voice', correlationId: runId })
+    return
+  }
+})
+
+/**
+ * The agent's app_control reaches voice mode through this (§27): the voice's
+ * own controls, the screen and mute, for the session following its run, else
+ * any live one.
+ */
+setVoiceLink({
+  forRun: (runId) => {
+    for (const { session } of sessions.values()) if (session.state !== 'off' && session.followedRunId === runId) return session.link
+    return null
+  },
+  any: () => {
+    for (const { session } of sessions.values()) if (session.state !== 'off' && session.state !== 'error') return session.link
+    return null
+  }
+})
 const byOwner = new Map<number, string>()
 /** Windows whose close already ends their session: one hook per window, not one per start. */
 const watchedOwners = new Set<number>()
@@ -214,32 +237,10 @@ export async function startVoiceSession(
     pendingAsks: (runId) => ({ approvals: listPendingToolApprovals(runId), questions: listPendingAgentQuestions(runId) }),
     // `provider`, not `listener`: log fields pass an allowlist, and an unknown string key is dropped (A-19).
     logLatency: ({ listener, ...t }) => logger.info('Voice turn latency', { scope: 'voice', provider: listener ?? 'none', ...t }),
-    // The voice that answers (D-44): read per turn, so a Settings change applies to the next one.
-    responder: makeResponderChat,
-    // Charged where the work is: a task moved to its own worktree, or another workspace's, is billed there (W-04).
-    onResponderUsage: (usage, where) =>
-      void recordResponderUsage((where.runId ? getRunWorkspace(where.runId) : undefined) ?? where.workspacePath ?? workspacePath, usage),
-    onResponderTrouble: (what, retried) =>
-      logger.warn(
-        what === 'timeout' ? 'Voice model was slow to answer' : 'Voice model answered with nothing',
-        { scope: 'voice', code: 'VOICE_REPLY', reason: retried ? 'asked again' : 'gave up' }
-      ),
-    loadTaskContext: (runId, taskWorkspace) => loadVoiceTaskContext(runId, getRunWorkspace(runId) ?? taskWorkspace ?? workspacePath),
-    loadAppContext: ({ runId, workspacePath: taskWorkspace, screen }) =>
-      loadVoiceAppContext(runId, (runId ? getRunWorkspace(runId) : undefined) ?? taskWorkspace ?? workspacePath, screen),
-    loadPastConversation: async (runId, taskWorkspace) => {
-      const past = await lastConversationForRun(voiceLogDir(getRunWorkspace(runId) ?? taskWorkspace ?? workspacePath), runId, session.id)
-      return past ? pastConversationMessages(past.entries) : []
-    },
-    onResponderFailed: (message) =>
-      logger.warn('Voice model failed; the turn went to the agent', { scope: 'voice', code: 'VOICE_REPLY', reason: message.slice(0, 300) }),
-    onStayedQuiet: (chars) => logger.info('Voice stayed quiet on a turn', { scope: 'voice', chars }),
     onStandbyHeard: (what, chars) => logger.info('Voice heard words while waiting to be called', { scope: 'voice', reason: what, chars }),
     onTurnDropped: (reason, chars, stats) =>
       logger.info('Voice heard speech but took no turn', { scope: 'voice', reason, chars, ...stats }),
     warm: () => warmVoiceConnections(currentVoiceSettings()),
-    // The app's actions (§24.15): the same runner the agent's app_control uses.
-    runAppAction: (name, args, ctx) => runAppActionInApp(name, args, ctx),
     setVoiceName: (name) => setVoiceByName(name),
     record: (entry) => log?.add(entry)
   })
@@ -259,31 +260,8 @@ export async function startVoiceSession(
   // The speaking model's voices, fetched alongside: the first reply is seconds away, the mic is open now.
   const speaking = resolveTtsProvider(currentVoiceSettings().ttsProvider, voiceKeyAvailability())
   if (speaking.ok) void prepareVoiceModels(speaking.id)
-  // The voice model's details (how it thinks) are looked up now, not on the first turn.
-  prepareResponderModel()
   await session.start()
   return session.id
-}
-
-/**
- * The task's conversation so far, for the voice (taskContext.ts): read from
- * the end of its transcript. Empty when it can't be read; the voice then
- * goes on knowing only this conversation, as before.
- */
-export async function loadVoiceTaskContext(runId: string, workspacePath: string | null): Promise<string> {
-  if (!workspacePath) return ''
-  try {
-    const window = await loadMessagesWindowAsync(workspacePath, runId, { limit: TASK_CONTEXT_MESSAGES })
-    const status = loadStatus(resolveRunDir(workspacePath, runId))
-    return formatTaskContext(window.messages, {
-      ...(status?.goal ? { goal: status.goal } : {}),
-      earlier: window.hasEarlier,
-      ...(status ? { ended: { status: status.status, ...(status.error ? { error: status.error } : {}) } } : {})
-    })
-  } catch (err) {
-    logger.warn('Voice could not read the task', { scope: 'voice', reason: err instanceof Error ? err.message : String(err) })
-    return ''
-  }
 }
 
 /**
@@ -308,70 +286,7 @@ async function setVoiceByName(name: string): Promise<AppActionResult> {
   return { ok: true, message: `This is ${voiceId}.` }
 }
 
-/** A run's state for the voice: stopped on you when an approval or question waits, else its status. */
-function runState(runId: string, workspacePath: string): { title: string; state: AppTaskState } | null {
-  const status = loadStatus(resolveRunDir(workspacePath, runId))
-  if (!status) return null
-  const waiting = listPendingToolApprovals(runId).length > 0 || listPendingAgentQuestions(runId).length > 0
-  const title = (status.goal ?? '').split('\n')[0]!.trim() || 'Untitled task'
-  return { title, state: status.status === 'running' && waiting ? 'waiting' : status.status }
-}
-
-/**
- * The app around the task, for the voice (appContext.ts). Each part is read
- * on its own: one that fails is left out, never the whole picture.
- */
-export async function loadVoiceAppContext(runId: string | null, workspacePath: string | null, screen: VoiceScreen | null): Promise<string> {
-  const settings = getSettings()
-  const voice = currentVoiceSettings()
-  const snapshot: AppSnapshot = {
-    now: new Date(),
-    ...(screen ? { screen } : {}),
-    workspace: workspacePath ? { name: basename(workspacePath), ...withBranch(workspacePath) } : null,
-    task: null,
-    others: [],
-    settings: {
-      ...(settings.model ? { model: settings.model } : {}),
-      ...(settings.toolApproval?.mode ? { approvals: APPROVAL_WORDS[settings.toolApproval.mode] } : {}),
-      ...(settings.theme ? { theme: settings.theme } : {}),
-      voicePlacement: voice.placement,
-      voiceSpeed: voice.speed
-    },
-    rules: [],
-    memory: []
-  }
-  try {
-    if (runId && workspacePath) snapshot.task = runState(runId, workspacePath)
-    for (const run of listActiveRuns()) {
-      if (run.runId === runId) continue
-      const state = runState(run.runId, run.workspacePath)
-      if (state && (state.state === 'running' || state.state === 'waiting')) {
-        snapshot.others.push({ title: state.title, workspace: basename(run.workspacePath), state: state.state })
-      }
-    }
-  } catch (err) {
-    logger.warn('Voice could not read the tasks', { scope: 'voice', reason: err instanceof Error ? err.message : String(err) })
-  }
-  if (workspacePath) {
-    const [rules, memory] = await Promise.allSettled([readWorkspaceRules(workspacePath), memoryNoteDetails(workspacePath)])
-    if (rules.status === 'fulfilled') snapshot.rules = rules.value.map((r) => ruleHeadline(r.path, r.content))
-    if (memory.status === 'fulfilled') snapshot.memory = memory.value.map((n) => n.title || basename(n.path)).filter(Boolean)
-  }
-  return formatAppContext(snapshot)
-}
-
-const APPROVAL_WORDS: Readonly<Record<'off' | 'mutating' | 'all', string>> = {
-  off: 'off (the agent runs tools without asking)',
-  mutating: 'on for anything that changes things',
-  all: 'on for every tool'
-}
-
-function withBranch(workspacePath: string): { branch?: string } {
-  const branch = readGitBranch(workspacePath)
-  return branch ? { branch } : {}
-}
-
-/** The task this window's session is on, followed or not: its conversation becomes the voice's context. */
+/** The task this window's session is on, followed or not, and what the window shows. */
 export function setVoiceTask(ownerId: number, sessionId: string, runId: string | null, workspacePath: string | null, screen?: VoiceScreen): void {
   voiceSessionFor(ownerId, sessionId)?.setTask(runId, workspacePath, screen)
 }
@@ -386,6 +301,8 @@ export function followVoiceRun(ownerId: number, sessionId: string, runId: string
   if (!session) return
   const workspace = getRunWorkspace(runId)
   if (workspace) setVoiceReplyWorkspace(sessionId, workspace)
+  // Its commits and pushes wait for a spoken yes (§27).
+  setVoiceFollowedRun(sessionId, runId)
   session.follow(runId, handOffId)
 }
 
@@ -433,6 +350,7 @@ export async function stopVoiceSession(sessionId: string): Promise<void> {
   sessions.delete(sessionId)
   logger.info('Voice session ended', { scope: 'voice', status: entry.session.state })
   setVoiceReplyWorkspace(sessionId, null)
+  setVoiceFollowedRun(sessionId, null)
   if (byOwner.get(entry.owner.id) === sessionId) byOwner.delete(entry.owner.id)
   await entry.session.stop()
   await entry.log?.close()

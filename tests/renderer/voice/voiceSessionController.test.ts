@@ -144,6 +144,19 @@ describe('hand-offs the task never took (R3)', () => {
     await vi.waitFor(() => expect(t.bridge.voiceHandOffFailed).toHaveBeenCalledWith(expect.objectContaining({ reason: 'error' })))
   })
 
+  it('a run main already follows is never "couldn’t follow", however late the window learns it (2026-10-16 02:41:52)', async () => {
+    const sent = deferred<{ failed: 'unfollowed' }>()
+    const t = setup(undefined, { onTurn: () => sent.promise })
+    await t.c.start()
+    t.emit({ kind: 'hand_off', handOffId: 'h1', brief: 'Research the fastest voice models.' })
+    t.emit({ kind: 'followed', handOffId: 'h1', runId: 'r1' })
+    expect(t.c.snapshot.transcript.find((l) => l.id === 'h1')).toMatchObject({ runId: 'r1' })
+    sent.resolve({ failed: 'unfollowed' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(t.bridge.voiceHandOffFailed).not.toHaveBeenCalled()
+    expect(t.c.snapshot.transcript.find((l) => l.id === 'h1')!.failed).toBeUndefined()
+  })
+
   it('sent with no run known yet is not a failure', async () => {
     const t = setup(undefined, { onTurn: async () => null })
     await t.c.start()

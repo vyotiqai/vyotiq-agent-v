@@ -4,10 +4,51 @@
  * purpose: the prompt assembler imports it, and it imports nothing.
  */
 const active = new Map<string, string>()
+/** The run each session follows: its commits and pushes wait for a spoken yes (§27). */
+const followed = new Map<string, string>()
+
+export function setVoiceFollowedRun(sessionId: string, runId: string | null): void {
+  if (runId) followed.set(sessionId, runId)
+  else followed.delete(sessionId)
+}
+
+export function isVoiceFollowedRun(runId: string | null | undefined): boolean {
+  if (!runId || followed.size === 0) return false
+  for (const id of followed.values()) if (id === runId) return true
+  return false
+}
 
 export function setVoiceReplyWorkspace(sessionId: string, workspacePath: string | null): void {
   if (workspacePath) active.set(sessionId, normalise(workspacePath))
   else active.delete(sessionId)
+}
+
+/** The voice sessions open on this workspace. */
+export function voiceSessionsOn(workspacePath: string): string[] {
+  const want = normalise(workspacePath)
+  return [...active].filter(([, p]) => p === want).map(([id]) => id)
+}
+
+type SpokenTurnListener = (runId: string, workspacePath: string) => void
+let spokenTurnListener: SpokenTurnListener | null = null
+
+/** Voice sessions hear of a run main starts with a turn said out loud (§27). */
+export function onSpokenTurnStarted(fn: SpokenTurnListener | null): void {
+  spokenTurnListener = fn
+}
+
+/**
+ * A run started with your spoken words: the session that sent them follows
+ * it from here, without waiting for the window to say which run it was
+ * (2026-10-16 02:41:42: the run started at once, the window took 17 s and the
+ * voice said it couldn't follow the task).
+ */
+export function noteSpokenTurnStarted(runId: string, workspacePath: string): void {
+  try {
+    spokenTurnListener?.(runId, workspacePath)
+  } catch {
+    /* the voice's failure is its own; the run goes on */
+  }
 }
 
 export function isVoiceReplyActive(paths: ReadonlyArray<string | null | undefined>): boolean {

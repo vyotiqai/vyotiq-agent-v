@@ -102,6 +102,8 @@ export type AppShellProps = {
   onDeleteRunInWorkspace?: (path: string, runId: string) => void | Promise<boolean | void>
   /** Ask or Agent for the task in the focused pane; false with no task there. */
   onSetAgentMode?: (mode: 'ask' | 'agent') => boolean
+  /** A task's model from its next turn (app_control set_task_model); false when it can't be set. */
+  onSetTaskModel?: (path: string, runId: string, provider: string, model: string) => boolean
   onExportRunInWorkspace?: (path: string, runId: string) => void
   /** Import task…: a task bundle into this workspace, as a new read-only task. */
   onImportTask?: (path: string) => void
@@ -515,6 +517,7 @@ function AppShellInner(props: AppShellProps) {
     splitPane: props.onSplitPane,
     closePane: props.onCloseChat,
     onSetAgentMode: props.onSetAgentMode,
+    onSetTaskModel: props.onSetTaskModel,
     updateReady: () => update.status === 'downloaded',
     updateAvailable: () => update.status === 'available',
     inTaskView: () => view === 'chat'

@@ -3,7 +3,6 @@ import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { ProviderIdAny, SecretProvider } from '@shared/ipc'
 import { providerLabel } from '@shared/providers'
 import {
-  DEFAULT_VOICE_RESPONDER,
   DEFAULT_VOICE_SETTINGS,
   type VoiceModelList,
   type VoiceEndOfTurnPatience,
@@ -49,7 +48,6 @@ import type { VoiceOptionInfo } from '@shared/ipc/schemas/voice'
 import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup } from '../components/SettingsField'
-import { ModelRefPicker } from '../components/ModelRefField'
 import { SwitchField } from '../components/SwitchField'
 import type { SettingsOption } from '../types'
 
@@ -235,9 +233,6 @@ function OpenRouterCreditNote() {
     </p>
   )
 }
-
-/** How the default voice model reads in its menu (D-45). */
-const DEFAULT_RESPONDER_LABEL = 'Claude Haiku 5.5'
 
 /** What Preview says: short, and in the voice of a finished task. */
 export const PREVIEW_LINE = 'Done. I fixed the failing test, and the diff is on screen.'
@@ -731,10 +726,6 @@ export function VoiceModeSettings({
     (sttResolved.ok && sttResolved.fellBackFrom) || (ttsResolved.ok && ttsResolved.fellBackFrom) ? true : false
 
   const speedValue = SPEED_OPTIONS.some((o) => Number(o.value) === voice.speed) ? String(voice.speed) : '1'
-  const isDefaultResponder =
-    voice.responder.provider === DEFAULT_VOICE_RESPONDER.provider && voice.responder.model === DEFAULT_VOICE_RESPONDER.model
-  const responderProviderLabel = providerLabel(voice.responder.provider as ProviderIdAny)
-  const responderReady = (secrets as Record<string, boolean | undefined>)[voice.responder.provider] === true
   const ttsModel = chooseModel(tts, voice.tts[tts.id]?.model)
   const inUseVendors = new Set<VoiceKeyVendor>(
     [stt.key, tts.key].flatMap((k) => (k.kind === 'voice' ? [k.vendor] : []))
@@ -774,25 +765,6 @@ export function VoiceModeSettings({
           locked={locked}
           onChange={(model) => patch({ stt: { ...voice.stt, [stt.id]: { ...voice.stt[stt.id], model } } })}
         />
-        <SettingsField
-          id="voice-responder"
-          title="Answers with"
-          hint={
-            responderReady
-              ? 'Talks with you out loud and hands work to the agent. A fast model keeps it conversational.'
-              : `No ${responderProviderLabel} key: what you say goes straight to the agent.`
-          }
-          changed={!isDefaultResponder}
-        >
-          <ModelRefPicker
-            title="Answers with"
-            value={{ provider: voice.responder.provider as ProviderIdAny, model: voice.responder.model }}
-            form={form}
-            secrets={secrets}
-            emptyLabel={`Default (${DEFAULT_RESPONDER_LABEL})`}
-            onChange={(ref) => patch({ responder: ref ?? DEFAULT_VOICE_RESPONDER })}
-          />
-        </SettingsField>
         <SelectField
           id="voice-tts"
           title="Speaks with"
@@ -979,7 +951,7 @@ export function VoiceModeSettings({
         <SwitchField
           id="voice-approve"
           title="Approve by voice"
-          hint="Say yes, no, or always allow to ordinary approvals. Always allow remembers only what the card would; risky actions always need a click."
+          hint="Answer approvals out loud: yes, no, or always allow. Always allow remembers only what the card would; a risky action, like a delete, a commit or a push, takes a clear yes and is allowed once."
           checked={voice.approveByVoice}
           disabled={locked}
           {...form.nestedDefaultMark('voice', 'approveByVoice')}

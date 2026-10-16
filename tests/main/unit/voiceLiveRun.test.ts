@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import { VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
-import { RESPONDER_SYSTEM } from '@main/voice/responder'
 import { openFixtureStt, openFixtureTts, type FixtureSttSession } from '@main/voice/providers/fixture'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent } from '@shared/ipc/schemas/voice'
 import type { AgentQuestionRequest, ToolApprovalRequest } from '@shared/ipc'
@@ -95,7 +94,7 @@ describe('a run that was already working when voice mode opened', () => {
     await h.session.start()
     h.session.follow(R)
     expect(h.session.state).toBe('waiting_on_you')
-    expect(h.spoken.join(' ')).toContain('It wants to run pnpm test')
+    expect(h.spoken.join(' ')).toContain('Can I run pnpm test?')
     // And a spoken yes answers it, as for an approval asked after the follow.
     h.stt().say('yes')
     expect(h.resolveApproval).toHaveBeenCalledWith({ requestId: 'a1', runId: R, decision: 'once' })
@@ -168,10 +167,3 @@ describe('short answers to approvals and questions are heard', () => {
   })
 })
 
-
-describe('the voice model while an approval waits', () => {
-  it('is told it cannot answer for you, and not to hand your answer off as work', () => {
-    expect(RESPONDER_SYSTEM).toContain('stopped until the user answers')
-    expect(RESPONDER_SYSTEM).toContain('do not call hand_to_agent with their answer')
-  })
-})

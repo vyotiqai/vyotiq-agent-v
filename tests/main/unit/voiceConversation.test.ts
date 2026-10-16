@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, cueForTool, runFailedLine, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
-import { HAND_OFF_FAILED_LINE, VoiceSession, emptyProgress, trackProgress, type VoiceSessionDeps } from '@main/voice/session'
+import { HAND_OFF_FAILED_LINE, VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
 import { openFixtureStt, openFixtureTts, type FixtureSttSession, type FixtureTtsStream } from '@main/voice/providers/fixture'
 import { addRunEventTap, tapRunEvent } from '@main/agent/runEventTap'
 import { isVoiceReplyActive, setVoiceReplyWorkspace } from '@main/voice/voiceReply'
@@ -293,25 +293,6 @@ describe('ReplySpeaker', () => {
   })
 })
 
-describe('run progress for the voice (B6)', () => {
-  it('counts steps, names the running one, keeps the last narration, and records how it ended', () => {
-    let p = trackProgress(emptyProgress(), status('running'), 0)
-    p = trackProgress(p, toolStart('a', 'run_terminal', 'git for-each-ref refs/heads'), 1)
-    expect(p).toMatchObject({ running: true, steps: 1, current: 'run_terminal: git for-each-ref refs/heads' })
-    p = trackProgress(p, toolResult('a'), 2)
-    expect(p.current).toBeUndefined()
-    p = trackProgress(p, narration('Now the branches.'), 3)
-    p = trackProgress(p, toolStart('b', 'grep', 'TODO'), 4)
-    p = trackProgress(p, final('All done.'), 5)
-    expect(p).toMatchObject({ steps: 2, narration: 'Now the branches.' })
-    p = trackProgress(p, status('done'), 9)
-    expect(p).toMatchObject({ running: false, steps: 2, ended: { at: 9, outcome: 'done' } })
-    expect(p.current).toBeUndefined()
-    // A new run starts counting afresh.
-    expect(trackProgress(p, status('running'), 10)).toEqual({ running: true, steps: 0 })
-  })
-})
-
 describe('run event tap', () => {
   it('delivers a run’s events to its listeners only, and survives a throwing one', () => {
     const got: string[] = []
@@ -542,29 +523,19 @@ describe('VoiceSession conversation', () => {
     expect(h.session.state).toBe('listening')
   })
 
-  it('the voice is told the work never went, so it doesn’t claim the agent is on it (R3)', async () => {
+  it('when your words never reach the task it says so, in its own voice (R3)', async () => {
     const h = sessionHarness()
-    const seen: Array<{ status: string; messages: Array<{ role: string; content: unknown }> }> = []
-    let handOffNext = true
-    h.session['deps'].responder = () => async function* (req) {
-      seen.push({ status: req.status, messages: req.messages as never })
-      if (handOffNext) {
-        handOffNext = false
-        yield { type: 'tool_call' as const, name: 'hand_to_agent', arguments: JSON.stringify({ brief: 'Run the tests' }) }
-      } else {
-        yield { type: 'text' as const, text: 'Sure. ' }
-      }
-      yield { type: 'done' as const }
-    }
     await h.session.start()
     h.stt().say('run the tests')
     await vi.waitFor(() => expect(h.events.some((e) => e.kind === 'hand_off')).toBe(true))
-    const handOff = h.events.find((e) => e.kind === 'hand_off') as { handOffId: string }
+    const handOff = h.events.find((e) => e.kind === 'hand_off') as { handOffId: string; brief: string }
+    // Your words, as said: nothing rewrote them.
+    expect(handOff.brief).toBe('run the tests')
     h.session.handOffFailed(handOff.handOffId, 'refused')
-    h.stt().say('is it running?')
-    await vi.waitFor(() => expect(seen).toHaveLength(2))
-    expect(seen[1]!.status).toBe('The agent is idle.')
-    expect(JSON.stringify(seen[1]!.messages)).toContain('Nothing was handed to the agent.')
+    const said = h.events.flatMap((e) => (e.kind === 'say' ? [e.text] : []))
+    expect(said.at(-1)).toBe(HAND_OFF_FAILED_LINE.refused)
+    // Never "passed on" or "the agent": voice mode is the agent (§27).
+    for (const line of Object.values(HAND_OFF_FAILED_LINE)) expect(line).not.toMatch(/pass(ed)? (that|it) on|the agent/i)
   })
 
   it('keeps the conversation: each turn, each reply by who said it, and what became of each request (§24.8)', async () => {
@@ -682,7 +653,7 @@ describe('approvals by voice', () => {
     h.session.follow(R)
     h.ask()
     expect(h.session.state).toBe('waiting_on_you')
-    expect(h.said.at(-1)).toBe('It wants to run pnpm test. Say yes, no, or always allow.')
+    expect(h.said.at(-1)).toBe('Can I run pnpm test? Say yes, no, or always allow.')
     const turnsBefore = h.events.filter((e) => e.kind === 'turn').length
     h.stt().say('Yes.')
     expect(h.resolveApproval).toHaveBeenCalledWith({ requestId: 'a1', runId: R, decision: 'once' })
@@ -702,18 +673,21 @@ describe('approvals by voice', () => {
     h.stt().say('yes but use the other script')
     expect(h.resolveApproval).not.toHaveBeenCalled()
     expect(h.events).toContainEqual(expect.objectContaining({ kind: 'turn', text: 'yes but use the other script' }))
-    // No voice model in this harness: the words go to the agent as they are.
-    expect(h.events.at(-1)).toMatchObject({ kind: 'hand_off', brief: 'yes but use the other script' })
+    // Not a plain yes or no: the words go to the agent as they are, and it hears what is still waited on.
+    expect(h.events.findLast((e) => e.kind === 'hand_off')).toMatchObject({ kind: 'hand_off', brief: 'yes but use the other script' })
+    expect(h.said.at(-1)).toBe('I still need your yes or no first: can I run pnpm test?')
   })
 
-  it('a risky action is never approved by voice', async () => {
+  it('a risky action takes a clear spoken yes, once, and never "always" (2026-10-16 decision, §27)', async () => {
     const h = approvalHarness()
     await h.session.start()
     h.session.follow(R)
     h.ask({ danger: 'deletes files outside the workspace' })
-    expect(h.said.at(-1)).toContain('could be risky. Approve or deny it on screen.')
-    h.stt().say('yes')
+    expect(h.said.at(-1)).toBe('I need your yes to run pnpm test. It can’t easily be undone. Yes or no?'.replace('’', "'"))
+    h.stt().say('always allow')
     expect(h.resolveApproval).not.toHaveBeenCalled()
+    h.stt().say('yes')
+    expect(h.resolveApproval).toHaveBeenCalledWith({ requestId: 'a1', runId: R, decision: 'once' })
   })
 
   it('respects Approve by voice being off, and ignores other runs', async () => {
@@ -723,7 +697,7 @@ describe('approvals by voice', () => {
     h.ask({ runId: 'someone-else' })
     expect(h.session.state).toBe('listening')
     h.ask()
-    expect(h.said.at(-1)).toContain('Approve or deny it on screen.')
+    expect(h.said.at(-1)).toBe("I need your okay to run pnpm test. It's on your screen.")
     h.stt().say('yes')
     expect(h.resolveApproval).not.toHaveBeenCalled()
   })
@@ -757,7 +731,7 @@ describe('approvals by voice', () => {
     h.session.follow(R)
     // A command that chains: main gives no command to remember, and the card offers no Always.
     h.ask({ alwaysAllowCommand: null, summary: 'pnpm test && rm -rf out' })
-    expect(h.said.at(-1)).toMatch(/Say yes or no\.$/)
+    expect(h.said.at(-1)).toMatch(/Yes or no\?$/)
     h.stt().say('always allow')
     expect(h.resolveApproval).not.toHaveBeenCalled()
     expect(h.said.at(-1)).toBe('That one can only be allowed once. Say yes or no.')

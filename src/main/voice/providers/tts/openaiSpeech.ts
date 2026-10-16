@@ -7,6 +7,7 @@
  */
 import { voiceErrorFromStatus, type TtsProviderId, type VoiceErrorCode } from '../../../../shared/voice'
 import { MonoMixer, PcmAssembler } from '../../pcm'
+import { logger } from '../../../../shared/logger'
 import type { TtsProvider, TtsStream, TtsStreamOptions, VoiceOption } from '../types'
 
 /** OpenAI's `pcm` format: 24 kHz, 16-bit, mono, little-endian. */
@@ -35,6 +36,11 @@ const MAX_IN_FLIGHT = 2
  * voice.
  */
 const noSpeedModels = new Set<string>()
+
+/** This model refused a speed this run: a speed set for it is not heard (app_control says so). */
+export function speechModelRefusedSpeed(model: string): boolean {
+  return noSpeedModels.has(model)
+}
 
 /** Tests only. */
 export function resetSpeechModelQuirksForTests(): void {
@@ -215,6 +221,7 @@ class SpeechHttpStream implements TtsStream {
       const reason = res.ok ? 'no audio in the response' : await errorReason(res)
       if (res.status === 400 && job.sentSpeed && /\bspeed\b/i.test(reason) && !this.cancelled) {
         // This model takes no speed: say it at its own pace rather than not at all.
+        if (!noSpeedModels.has(this.opts.model)) logger.info('Speaking model refused a speed; it speaks at its own pace', { scope: 'voice', model: this.opts.model })
         noSpeedModels.add(this.opts.model)
         this.request(job)
         return this.play(job)

@@ -1463,6 +1463,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-49 | 2026-10-14 | Hold Space in an empty composer to dictate, like Claude Code's `/voice` (Ajay). Held 300 ms it starts a take; release puts the words in the field to edit and send; a tap is a space | Decided |
 | D-50 | 2026-10-14 | A hand-off in the voice view owns its run's live steps, what it waits on (answerable there, never a risky approval) and its result, from a `work` event main folds out of the run's own events; replaces the "To the agent" paragraph | Decided |
 | D-51 | 2026-10-14 | The voice view's layout (Conversation, Orb, Split) and the orb's look (nine canvas orbs, Liquid, Simple) are settings, not one fixed design (Ajay). Defaults: Conversation and Glow | Decided |
+| D-52 | 2026-10-16 | Voice mode is the agent (Ajay): no separate voice model; every turn goes to the task as said and the agent answers out loud. A spoken yes is enough for everything, and in voice mode commits and pushes wait for one; Hindi and Punjabi are kept with English. Supersedes D-44 and D-45 (§27) | Decided |
 
 ---
 
@@ -1972,8 +1973,6 @@ Tests: `tests/main/unit/voiceTurnReliability.test.ts`, a `setTask` case in
 
 Not checked here: a real mic and speaker run (same reason as §24.10).
 
----
-
 ### 24.13 A stop that missed the run, and a voice that can do nothing in the app (2026-10-15, eighth audit)
 
 A read-only audit first, then fixes Ajay approved. Evidence: the 16 kept
@@ -2254,6 +2253,10 @@ Not shown live:
 
 ## 25. The conversation (2026-10-14 redesign)
 
+> Superseded by §27 (2026-10-16): there is no separate voice model now. Every
+> turn goes to the agent as you said it, and the agent answers out loud.
+> §25.1–25.2 describe the design §27 replaced; §25.3 onwards still holds.
+
 What Ajay asked for: it should work like Claude's voice mode. Two ways to talk,
 from his answers: a hands-free conversation, and hold-to-talk dictation.
 
@@ -2498,3 +2501,130 @@ hadn't ended), and two buttons: Talk again (on the line you last used) and
 Conversation (what was said). A row opens its task and closes the summary.
 All voice conversations is in its header; Esc goes back from the conversation,
 then closes.
+
+## 27. Voice mode is the agent (2026-10-16)
+
+Asked for: "it's saying things, but I just can't do it … it is an agent. It
+should be the agent." Ajay's picks: the agent speaks (one model, one memory);
+a spoken yes before destructive actions only; Hindi and Punjabi kept.
+
+### 27.1 What the kept conversations showed
+
+From `workspaces/1d7ca570…/voice/` and run `fb8b6636`'s `events.jsonl`
+(times UTC):
+
+| When | Said | What happened |
+| --- | --- | --- |
+| 10-16 03:04:43 | "this task's model is set to Claude Haiku 5.5 from here on" | `set_model` only changes new tasks; the next run (03:05:43) used `z-ai/glm-5.3-flash` |
+| 10-16 02:48:19 | "I'll ask it to do that … handed to the agent." | No hand-off was recorded. The words imitated the `(handed to the agent)` note in its own history |
+| 10-16 02:37:55 | "There's an update ready to download" | `download_update` answered "There's no update to download": the voice had no update state |
+| 10-16 03:01:50 | "Still chugging along" | The run had ended (`done`) at 03:01:48 |
+| 10-16 03:05:07 | "starting a fresh one" | Only `stop_task` was called; the restart came 36 s later |
+| 10-16 02:41:52 | "I can't follow the task from here" | The run started at 02:41:42.318; the window reported its id 17 s later |
+| 10-16 02:35:00, 02:50:41 | "क्या?" | Dropped as another script with language `en` |
+
+The cause was the design: a second model in front of the agent, told "You
+cannot see or change the project yourself", calling `hand_to_agent` and
+answering before its actions' results came back.
+
+### 27.2 A turn now
+
+1. You talk; noise, echoes and fillers are dropped as before (§6). Words that
+   sound unfinished ("Can you") wait `UNFINISHED_WAIT_MS` for the rest.
+2. The words go to the task as said (`hand_off` with your words as `brief`,
+   marked `spoken`). Nothing answers or rewrites them in between.
+3. The agent answers with its `<spoken>` block (`VOICE_REPLY_TEXT`): it is
+   told it is Agent V, that there is no other agent, to say a thing is done
+   only once a tool result shows it, and to answer words that arrive while it
+   works at the start of its next message. `app_control` is on the wire from
+   the first step of a spoken turn, and its action list is in the prompt.
+4. Nothing said by `ACK_MS` (4 s): one short line ("One moment.").
+   Stopped on an approval or a question, the agent can't answer, so the
+   session says what it waits on instead.
+5. "Stop" still stops the work without a model. Approvals and the agent's
+   questions are still answered by voice in the session.
+
+Main follows the run a spoken turn starts (`noteSpokenTurnStarted` in
+`startAgentRun`), and tells the window with a `followed` event; the window's
+own, later word on the same turn changes nothing.
+
+### 27.3 What the agent gained in the app
+
+- `app_status`: the time, the screen, workspace and branch, tasks running or
+  waiting anywhere (by the run registry, not a status file that can say
+  "running" after a cancel), messages queued on the task, settings, voice
+  mode and the update.
+- `set_task_model`: a task's own model from its next turn (`set_model` says
+  plainly it only changes new tasks).
+- `check_update`: checks for an update now (the installed app only).
+- Voice mode's own controls (`voice_mute`, `voice_end`, `set_voice`,
+  `set_voice_speed`, `set_voice_placement`), reaching the session following
+  its run. `voice_end` waits until the run's reply has been handed to the
+  speaker. A speed the speaking model has refused this run is saved and said
+  not to take.
+
+### 27.4 Safety
+
+A spoken yes is enough for everything (2026-10-16 decision). In voice mode a
+commit or a push (`git_commit`, `github_pr_create`, `git commit`/`git push` in
+the terminal) waits for a yes whatever the approval settings say. Risky
+approvals (a delete, a guarded command, a commit or push) take a clear spoken
+yes and are allowed once; never "always".
+
+### 27.5 Removed
+
+`VoiceResponder`, `responderChat.ts`, `taskContext.ts`, the recall of past
+voice conversations into the voice model, `voice.responder` and Settings →
+Voice → **Answers with**. A saved `voice.responder` is dropped on read. The
+history keeps hand-offs; one that was your words as said shows only what
+became of it.
+
+### 27.6 Not changed, measured
+
+- 238 of 321 sounds that never became turns (14–16 Oct) came back empty from
+  the listener, median 220 ms of speech. "Stop." is 150–200 ms (§24.12), so
+  no length separates the two.
+- Last word to first sound, 97 turns on 15–16 Oct: p50 5.1 s, p90 8.5 s
+  (1.3 s fixed end-of-turn wait, listener p50 0.6 s, voice model first text
+  p50 1.6 s, speaking ~1.2 s).
+
+Real app after §27 (built app, throwaway profile copied from Ajay's, real
+OpenRouter listener and speaker, Claude Haiku 5.5 as the agent, SAPI-spoken
+questions through a fake microphone, 2026-10-16 04:12 UTC):
+
+| Said | Agent did | Turn sent → agent's words |
+| --- | --- | --- |
+| "What time is it right now?" | Answered from its own clock, no tool | 9.0 s |
+| "Switch the app to the light theme, please." | `app_control set_theme` (the setting read back `light`) | 9.0 s |
+| "Is there an app update available?" | `app_status` twice, then "The app hasn't checked for updates this session" | 15.7 s |
+
+Every turn went to the task as said and was followed from main within
+0.1–0.4 s; nothing said mentioned a hand-off or another agent; "One moment."
+came at 2.5 s each time. The time is the agent's steps: 4.2–8.5 s each with
+reasoning on, prompt cached (26k of 26.5k tokens), 84–437 tokens out. The
+voice model ran with reasoning off; so now does a spoken turn (below).
+`check_update` was added after the third turn showed the agent had no way to
+check.
+
+Tests: `voiceAppAction` (turns as said, the short line, follow from main,
+controls), `voiceIsTheAgent` (prompt, commit/push hold), `voiceAppContext`,
+`appControl` (`set_task_model`, `app_status`, voice controls, speed),
+`voiceConversation`, `voiceTurnReliability`, `voiceStopReachesRun`,
+`voiceQuestions`, `voiceAgentRows`, `appActionExecutor`.
+
+### 27.7 Reasoning on a spoken turn (2026-10-16, Ajay's pick)
+
+A spoken turn runs with reasoning off where the model allows it, else the
+lowest effort it lists (`spokenTurnThinking`); typed turns keep the set
+effort. The same three questions in the real app, 04:44 UTC:
+
+| Said | Before (set effort) | Now | Reasoning tokens |
+| --- | --- | --- | --- |
+| "What time is it right now?" | 9.0 s | 2.3 s | 0 |
+| "Switch the app to the light theme, please." | 9.0 s | 3.1 s | 0 |
+| "Is there an app update available?" | 15.7 s | 3.2 s | 0 |
+
+Steps took 1.4–2.2 s (were 4.2–8.5 s). The theme read back `light`; the
+update question was answered from `check_update` ("only works in an installed
+build"). `ACK_MS` went from 2.5 to 4 s, since the line now came half a second
+before the answer.
