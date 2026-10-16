@@ -105,6 +105,42 @@ describe('app_action', () => {
     await vi.waitFor(() => expect(t.spoken()).toEqual(['Sure.', 'Opening it.', 'No task matches “billing”.']))
   })
 
+  it('its reasoning about "the user" is never said, and the result is (2026-10-16 live check)', async () => {
+    const run = vi.fn(async () => ({ ok: true, message: 'Forked “Say hello”; the copy is open.' }))
+    const t = setup(
+      {
+        'Make a fork of the hello task.': {
+          text: 'The user wants a fork of the hello task. The on-screen task is "Say hello," and the user named "the hello task," which matches it, so I\'ll fork the task on screen.',
+          call: { action: 'fork_task', args: {} }
+        },
+        'What did it change?': { text: 'It now sends the user to the login page when the session ends.' }
+      },
+      run
+    )
+    await t.session.start()
+    await t.say('Make a fork of the hello task.')
+    await vi.waitFor(() => expect(t.spoken()).toEqual(['Forked “Say hello”; the copy is open.']))
+    // What the code does to a user is an answer, not reasoning about you.
+    await t.say('What did it change?')
+    await vi.waitFor(() => expect(t.spoken().at(-1)).toBe('It now sends the user to the login page when the session ends.'))
+  })
+
+  it('a sentence naming its own action is never said, and the result is; plain words like "find" still are (2026-10-16 live check)', async () => {
+    const run = vi.fn(async () => ({ ok: true, message: 'Split: there’s room for another task beside it.' }))
+    const t = setup(
+      {
+        'Split the screen.': { text: 'That’s an app action: split_pane runs on the task on screen.', call: { action: 'run_command', args: { command: 'split_pane' } } },
+        'Where is it?': { text: 'I couldn’t find it.' }
+      },
+      run
+    )
+    await t.session.start()
+    await t.say('Split the screen.')
+    await vi.waitFor(() => expect(t.spoken()).toEqual(['Split: there’s room for another task beside it.']))
+    await t.say('Where is it?')
+    await vi.waitFor(() => expect(t.spoken().at(-1)).toBe('I couldn’t find it.'))
+  })
+
   it('never deletes on its own say-so: only after the user’s yes', async () => {
     const run = vi.fn(async () => ({ ok: true, message: 'Deleted it.' }))
     const t = setup(

@@ -111,7 +111,7 @@ export type AppShellProps = {
   /** Carry a failed task on, as its record's Retry does (row menu, Inbox). */
   onRetryRunInWorkspace?: (path: string, runId: string) => void
   /** The task header's Fork, from the row menu. */
-  onForkRunInWorkspace?: (path: string, runId: string) => void
+  onForkRunInWorkspace?: (path: string, runId: string) => void | Promise<boolean | void>
   /** Open a task in a new pane beside the focused one. */
   onOpenRunBesideInWorkspace?: (path: string, runId: string) => void
   /** Back (-1) and Forward (1) through the views and tasks visited. */
@@ -145,9 +145,9 @@ export type AppShellProps = {
   running?: boolean
   onChatStop?: () => void
   /** Close the focused task tab (Ctrl/Cmd+W). */
-  onCloseChat?: () => void
+  onCloseChat?: () => boolean | void
   /** Insert an empty pane beside the focused one (Ctrl/Cmd+\). */
-  onSplitPane?: () => void
+  onSplitPane?: () => boolean | void
   children: ReactNode
   loading?: boolean
   /**
@@ -511,6 +511,9 @@ function AppShellInner(props: AppShellProps) {
     isArchived: (path, runId) => props.archivedRunKeys?.includes(pinnedRunKey(path, runId)) ?? false,
     onDeleteRun: props.onDeleteRunInWorkspace,
     onRenameRun: props.onRenameRunInWorkspace,
+    onForkRun: props.onForkRunInWorkspace,
+    splitPane: props.onSplitPane,
+    closePane: props.onCloseChat,
     onSetAgentMode: props.onSetAgentMode,
     updateReady: () => update.status === 'downloaded',
     updateAvailable: () => update.status === 'available',

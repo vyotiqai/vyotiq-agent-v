@@ -8,6 +8,7 @@ import { APP_PANELS, SETTINGS_SECTIONS, type AppWindowAction } from '@shared/app
 import type { SettingsSection } from '@renderer/features/settings/types'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { runPaletteCommand, type PaletteHandlers } from '@renderer/features/commandPalette/paletteCommands'
+import { openInEditor } from '@renderer/lib/openInEditor'
 
 export type WindowActionHandlers = PaletteHandlers & {
   onOpenSettingsSection?: (section: SettingsSection) => void
@@ -19,6 +20,12 @@ export type WindowActionHandlers = PaletteHandlers & {
   onDeleteRun?: (path: string, runId: string) => Promise<boolean | void> | void
   /** False when it couldn't be renamed (the screen says why). */
   onRenameRun?: (path: string, runId: string, title: string) => Promise<boolean | void> | void
+  /** False when it couldn't be forked (the screen says why). */
+  onForkRun?: (path: string, runId: string) => Promise<boolean | void> | void
+  /** False when there was no room or nothing to split. */
+  splitPane?: () => boolean | void
+  /** False when no task tab was open to close. */
+  closePane?: () => boolean | void
   onSetAgentMode?: (mode: 'ask' | 'agent') => boolean
   /** An update is downloaded and ready to install. */
   updateReady?: () => boolean
@@ -44,6 +51,61 @@ const VIEW_COMMAND: Readonly<Record<string, { id: string; said: string }>> = {
 
 /** The task view opens the panel named in `detail.panel` (ChatView). */
 export const OPEN_PANEL_EVENT = 'vyotiq:open-panel'
+
+/** A `vyotiq:command` for the focused task pane; true when one took it (it sets `handled`). */
+function paneCommand(id: string): boolean {
+  const detail = { id, handled: false }
+  window.dispatchEvent(new CustomEvent('vyotiq:command', { detail }))
+  return detail.handled
+}
+
+async function runCommand(command: string, h: WindowActionHandlers): Promise<WindowActionOutcome> {
+  const inTask = h.inTaskView?.() ?? true
+  switch (command) {
+    case 'split_pane':
+      if (!h.splitPane) return { ok: false, message: 'Panes can’t be split here.' }
+      return h.splitPane() === false
+        ? { ok: false, message: 'It couldn’t be split.' }
+        : { ok: true, message: 'Split: there’s room for another task beside it.' }
+    case 'close_pane':
+      if (!inTask || !h.closePane || h.closePane() === false) return { ok: false, message: 'No task is open to close.' }
+      return { ok: true, message: 'Closed it; the task is still in the list.' }
+    case 'find':
+      if (!inTask || !paneCommand('find')) return { ok: false, message: 'No task is on screen to search.' }
+      return { ok: true, message: 'Find is open; type what to look for.' }
+    case 'find_in_files':
+      if (!inTask || !h.activeWorkspacePath) return { ok: false, message: 'Open a task first; find in files sits beside it.' }
+      runPaletteCommand('findInFiles', h)
+      return { ok: true, message: 'Find in files is open; type what to look for.' }
+    case 'show_reasoning':
+    case 'hide_reasoning': {
+      const show = command === 'show_reasoning'
+      if (!inTask || !paneCommand(show ? 'showReasoning' : 'hideReasoning')) return { ok: false, message: 'No task is on screen.' }
+      return { ok: true, message: show ? 'Reasoning is shown.' : 'Reasoning is hidden.' }
+    }
+    case 'open_in_editor': {
+      const path = h.activeWorkspacePath
+      if (!path) return { ok: false, message: 'No workspace is open.' }
+      return (await openInEditor({ workspacePath: path }))
+        ? { ok: true, message: `${formatWorkspaceName(path)} is opening in your editor.` }
+        : { ok: false, message: 'It couldn’t open in an editor; the screen says why.' }
+    }
+    case 'add_workspace':
+      if (!h.onAddWorkspace) return { ok: false, message: 'Workspaces can’t be added here.' }
+      h.onAddWorkspace()
+      return { ok: true, message: 'Pick the folder in the window that opened.' }
+    case 'import_task':
+      if (!h.onImportTask || !h.activeWorkspacePath) return { ok: false, message: 'There’s no workspace to import into.' }
+      h.onImportTask()
+      return { ok: true, message: 'Pick the task file in the window that opened.' }
+    case 'send_feedback':
+      if (!h.onOpenFeedback) return { ok: false, message: 'Feedback can’t be sent from here.' }
+      h.onOpenFeedback()
+      return { ok: true, message: 'The feedback form is open.' }
+    default:
+      return { ok: false, message: 'There’s no such command.' }
+  }
+}
 
 export async function executeWindowAction(action: AppWindowAction, h: WindowActionHandlers): Promise<WindowActionOutcome> {
   const a = action.args
@@ -75,6 +137,8 @@ export async function executeWindowAction(action: AppWindowAction, h: WindowActi
     case 'toggle_navigator':
       h.onToggleNavigator()
       return { ok: true, message: 'Done.' }
+    case 'run_command':
+      return runCommand(String(a.command), h)
     case 'next_needs_you':
       h.onNextNeedsYou()
       return { ok: true, message: 'Okay.' }
@@ -105,6 +169,11 @@ export async function executeWindowAction(action: AppWindowAction, h: WindowActi
       return done === false
         ? { ok: false, message: 'It couldn’t be deleted; the screen says why.' }
         : { ok: true, message: 'Deleted {task}. It’s in Recently deleted for 30 days.' }
+    }
+    case 'fork_task': {
+      if (!path || !runId || !h.onForkRun) return { ok: false, message: 'That task can’t be forked from here.' }
+      const done = await h.onForkRun(path, runId)
+      return done === false ? { ok: false, message: 'It couldn’t be forked; the screen says why.' } : { ok: true, message: 'Forked {task}; the copy is open.' }
     }
     case 'rename_task': {
       const title = typeof a.title === 'string' ? a.title.trim() : ''

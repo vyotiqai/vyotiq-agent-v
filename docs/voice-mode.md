@@ -2205,8 +2205,52 @@ Not shown by the run:
 
 Left as is, for a decision:
 - **Risky approvals.** The picks say "a spoken yes". The voice instead says to approve or deny on screen and never settles one itself (`voiceMayAnswer`), which is stricter.
-- **Palette commands without an action:** fork task, open workspace in editor, split pane, close task, find, find in files, show reasoning, add workspace, import task, send feedback. The last three open a dialog that needs the screen.
+- **Palette commands without an action:** closed in §24.18.
 - **A running task's model.** `set_model` sets the model for new tasks only.
+
+### 24.18 The palette's last commands (2026-10-16)
+
+The picks put the palette in scope. Ten of its commands still had no action.
+They now have two:
+
+- `fork_task {task?}` finds the task like the other task actions, in any open workspace. Main refuses a running task, as its own fork does ("Cancel run first"), and says so in words.
+- `run_command {command}` acts on what is on screen. Its commands are `split_pane`, `close_pane`, `find`, `find_in_files`, `show_reasoning`, `hide_reasoning`, `open_in_editor`, `add_workspace`, `import_task` and `send_feedback`.
+
+Each command says what actually happened, never a bare "done":
+
+| Command | How it knows |
+| --- | --- |
+| Fork, split, close | App's handlers return whether they worked (they used to return nothing, with a toast on failure) |
+| Find, show and hide reasoning | The focused task pane marks the `vyotiq:command` event `handled`. Reasoning is set as asked, never toggled, as with archive in §24.17 |
+| Open in editor | `openInEditor`'s own result |
+| Find in files | Only beside a task, where the Files panel opens |
+| Add workspace, import task, send feedback | They open a picker or a form for the user. The voice says so and doesn't claim the result |
+
+**Live check (2026-10-16, 02:28-02:50).** Same method as §24.16: the built app, a profile copy, Haiku 5.5, and recorded sentences as the mic. Four runs.
+
+Worked, each read from the page or the run list after the step:
+- **Find:** the find bar opened.
+- **Find in files:** the Files panel opened.
+- **Split:** 1 pane became 2.
+- **Close after a split:** 2 panes became 1.
+- **Fork:** a new run, "Say hello in one line. (fork)", was made and opened.
+- **Feedback:** the "Send feedback" dialog opened.
+- **Hide reasoning:** the action ran and answered "Reasoning is hidden."
+
+Found and fixed on the way:
+
+| Seen | Now |
+| --- | --- |
+| After a split, "close this pane" said "No task is open to close." The focused pane is the new empty one, which has no tab, so Ctrl+W did nothing there either | An empty pane among several closes, through the same `closePaneById` as its own close button. Ctrl+W goes through this path too |
+| The voice read out its reasoning: "The user wants a fork of the hello task. The on-screen task is…". Counted as said, it also kept the fork's result from being spoken | A sentence reasoning about "the user" in the third person (`ABOUT_USER_RE`: "the user wants / asked / named…") is never said. "It sends the user to the login page" still is |
+| "That's an app action: split_pane runs on the task on screen." | A sentence naming the voice's own tools, actions or commands (snake_case only, so "find" stays a word) is never said. The action's result is said instead |
+
+After the fixes, a fresh build ran fork, split and close. Each step said only the action's result or a short line of its own.
+
+Not shown live:
+- **Show and hide reasoning, on screen.** The hello task had no reasoning lines to show or hide, so only the action's answer was seen.
+- **Open in editor, add workspace, import task.** Left out of the live run: they open your editor or a system file dialog. Unit tests cover the calls.
+- **Whether the model wrote reasoning in the last fork run.** Dropped sentences aren't logged.
 
 ## 25. The conversation (2026-10-14 redesign)
 

@@ -131,6 +131,90 @@ describe('executeWindowAction', () => {
     })
   })
 
+  it('forks the task main found; a refused fork says the screen has why', async () => {
+    const onForkRun = vi.fn(async () => true)
+    const at = { workspacePath: 'C:/work/api', runId: 'r2' }
+    expect(await executeWindowAction(act('fork_task', {}, at), handlers({ onForkRun }))).toEqual({ ok: true, message: 'Forked {task}; the copy is open.' })
+    expect(onForkRun).toHaveBeenCalledWith('C:/work/api', 'r2')
+    expect(await executeWindowAction(act('fork_task', {}, at), handlers({ onForkRun: async () => false }))).toEqual({
+      ok: false,
+      message: 'It couldn’t be forked; the screen says why.'
+    })
+    expect((await executeWindowAction(act('fork_task'), handlers({ onForkRun }))).ok).toBe(false)
+  })
+
+  it('split and close say whether they happened', async () => {
+    const cmd = (command: string, over: Partial<WindowActionHandlers>) => executeWindowAction(act('run_command', { command }), handlers(over))
+    expect(await cmd('split_pane', { splitPane: () => true })).toMatchObject({ ok: true })
+    expect(await cmd('split_pane', { splitPane: () => false })).toEqual({ ok: false, message: 'It couldn’t be split.' })
+    expect(await cmd('close_pane', { closePane: () => true, inTaskView: () => true })).toEqual({ ok: true, message: 'Closed it; the task is still in the list.' })
+    expect(await cmd('close_pane', { closePane: () => false, inTaskView: () => true })).toMatchObject({ ok: false })
+    const closePane = vi.fn(() => true)
+    expect(await cmd('close_pane', { closePane, inTaskView: () => false })).toMatchObject({ ok: false })
+    expect(closePane).not.toHaveBeenCalled()
+  })
+
+  it('find and reasoning count only when a task pane takes them; reasoning is set as asked, not toggled', async () => {
+    const seen: string[] = []
+    const pane = (e: Event): void => {
+      const detail = (e as CustomEvent<{ id?: string; handled?: boolean }>).detail
+      seen.push(String(detail.id))
+      detail.handled = true
+    }
+    const cmd = (command: string) => executeWindowAction(act('run_command', { command }), handlers({ inTaskView: () => true }))
+    expect(await cmd('find')).toEqual({ ok: false, message: 'No task is on screen to search.' })
+    window.addEventListener('vyotiq:command', pane)
+    try {
+      expect(await cmd('find')).toEqual({ ok: true, message: 'Find is open; type what to look for.' })
+      expect(await cmd('show_reasoning')).toEqual({ ok: true, message: 'Reasoning is shown.' })
+      expect(await cmd('hide_reasoning')).toEqual({ ok: true, message: 'Reasoning is hidden.' })
+    } finally {
+      window.removeEventListener('vyotiq:command', pane)
+    }
+    expect(seen).toEqual(['find', 'showReasoning', 'hideReasoning'])
+  })
+
+  it('pickers and the feedback form open when the app has them, and say so when not', async () => {
+    const onAddWorkspace = vi.fn()
+    const onImportTask = vi.fn()
+    const onOpenFeedback = vi.fn()
+    const cmd = (command: string, over: Partial<WindowActionHandlers>) => executeWindowAction(act('run_command', { command }), handlers(over))
+    expect(await cmd('add_workspace', { onAddWorkspace })).toEqual({ ok: true, message: 'Pick the folder in the window that opened.' })
+    expect(await cmd('import_task', { onImportTask, activeWorkspacePath: 'C:/work/api' })).toMatchObject({ ok: true })
+    expect(await cmd('import_task', { onImportTask })).toMatchObject({ ok: false })
+    expect(await cmd('send_feedback', { onOpenFeedback })).toEqual({ ok: true, message: 'The feedback form is open.' })
+    expect(await cmd('send_feedback', {})).toMatchObject({ ok: false })
+    expect(await cmd('add_workspace', {})).toMatchObject({ ok: false })
+    expect([onAddWorkspace, onImportTask, onOpenFeedback].map((f) => f.mock.calls.length)).toEqual([1, 1, 1])
+  })
+
+  it('find in files opens beside a task; the workspace opens in the editor, and a failure says so', async () => {
+    const found: string[] = []
+    const onFind = (): void => {
+      found.push('files')
+    }
+    window.addEventListener('vyotiq:find-in-files', onFind)
+    try {
+      const at = { inTaskView: () => true, activeWorkspacePath: 'C:/work/api' }
+      expect(await executeWindowAction(act('run_command', { command: 'find_in_files' }), handlers(at))).toMatchObject({ ok: true })
+      expect(await executeWindowAction(act('run_command', { command: 'find_in_files' }), handlers({ inTaskView: () => false }))).toMatchObject({ ok: false })
+    } finally {
+      window.removeEventListener('vyotiq:find-in-files', onFind)
+    }
+    expect(found).toEqual(['files'])
+    const editorOpen = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }))
+    vi.stubGlobal('vyotiq', { editorOpen })
+    try {
+      const at = handlers({ activeWorkspacePath: 'C:/work/api' })
+      expect(await executeWindowAction(act('run_command', { command: 'open_in_editor' }), at)).toEqual({ ok: true, message: 'api is opening in your editor.' })
+      expect(editorOpen).toHaveBeenCalledWith({ workspacePath: 'C:/work/api' })
+      editorOpen.mockResolvedValueOnce({ ok: false, error: 'No editor' })
+      expect(await executeWindowAction(act('run_command', { command: 'open_in_editor' }), at)).toMatchObject({ ok: false })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('sets Ask or Agent on the task on screen, or says there is none', async () => {
     const set = vi.fn(() => true)
     expect(await executeWindowAction(act('set_agent_mode', { mode: 'ask' }), handlers({ onSetAgentMode: set }))).toMatchObject({ ok: true })

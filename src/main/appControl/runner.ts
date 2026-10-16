@@ -219,11 +219,13 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
     case 'open_task':
     case 'archive_task':
     case 'delete_task':
-    case 'rename_task': {
+    case 'rename_task':
+    case 'fork_task': {
       const found = await task()
       if ('error' in found) return { ok: false, message: found.error }
-      if (name === 'rename_task' && deps.runActive(found.runId)) {
-        return { ok: false, message: `${quoted(found.title)} is running; it can be renamed once it stops.` }
+      // Main renames and forks only a stopped task; said here, not as the screen's toast.
+      if ((name === 'rename_task' || name === 'fork_task') && deps.runActive(found.runId)) {
+        return { ok: false, message: `${quoted(found.title)} is running; it can be ${name === 'fork_task' ? 'forked' : 'renamed'} once it stops.` }
       }
       const r = await toWindow({ workspacePath: found.workspacePath, runId: found.runId })
       return r.ok ? { ...r, message: r.message.replace('{task}', quoted(found.title)), runId: found.runId } : r

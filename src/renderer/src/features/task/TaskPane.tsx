@@ -533,7 +533,11 @@ export function TaskPane(props: TaskPaneProps) {
       }
     }
     const onCommand = (event: Event): void => {
-      if ((event as CustomEvent<{ id?: string }>).detail?.id === 'find' && paneOwns(null)) setFindOpen(true)
+      const detail = (event as CustomEvent<{ id?: string; handled?: boolean } | null>).detail
+      if (detail?.id !== 'find' || !paneOwns(null)) return
+      setFindOpen(true)
+      // The voice's or the agent's find (appActionExecutor) says whether a pane took it.
+      detail.handled = true
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('vyotiq:command', onCommand)
@@ -552,11 +556,20 @@ export function TaskPane(props: TaskPaneProps) {
   taskStateRef.current = { runId, liveNow, archived }
   useEffect(() => {
     const onCommand = (event: Event): void => {
-      const command = (event as CustomEvent<{ id?: string }>).detail?.id ?? ''
+      const detail = (event as CustomEvent<{ id?: string; handled?: boolean } | null>).detail
+      const command = detail?.id ?? ''
+      const reasoning = command === 'showReasoning' || command === 'hideReasoning'
       const itemId = TASK_COMMAND_MENU_ITEMS[command]
-      if (!itemId) return
+      if (!itemId && !reasoning) return
       const pane = scroll.scrollRef.current?.closest('[data-chat-pane]')
       if (!scroll.scrollRef.current || pane?.getAttribute('data-chat-pane-focused') === '0') return
+      // The voice's or the agent's show or hide (appActionExecutor): set as asked, never toggled.
+      if (reasoning) {
+        if (!taskStateRef.current.runId || !detail) return
+        setReasoningChoice(command === 'showReasoning')
+        detail.handled = true
+        return
+      }
       const item = menuItemsRef.current.find((entry) => entry.id === itemId)
       // A greyed-out item (Archive while it works) is as unavailable from the palette.
       if (item && !item.disabled) {

@@ -418,6 +418,23 @@ describe('reasoning, from the task menu', () => {
     expect(container.querySelectorAll('[data-record-thought]')).toHaveLength(0)
   })
 
+  it('the voice’s show and hide set reasoning as asked, never toggle it, and say a pane took them', () => {
+    const container = pane(true)
+    const send = (id: string): boolean => {
+      const detail = { id, handled: false }
+      act(() => {
+        window.dispatchEvent(new CustomEvent('vyotiq:command', { detail }))
+      })
+      return detail.handled
+    }
+    expect(send('showReasoning')).toBe(true)
+    expect(container.querySelectorAll('[data-record-thought]').length).toBeGreaterThan(0)
+    expect(send('hideReasoning')).toBe(true)
+    expect(send('hideReasoning')).toBe(true)
+    expect(container.querySelectorAll('[data-record-thought]')).toHaveLength(0)
+    expect(send('find')).toBe(true)
+  })
+
   it('shows them on request where the setting has them off', () => {
     const container = pane(false)
     expect(container.querySelectorAll('[data-record-thought]')).toHaveLength(0)

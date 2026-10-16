@@ -202,6 +202,33 @@ describe('running them', () => {
     expect(w.sent[0]).toMatchObject({ name: 'rename_task', args: { title: 'Login fix' }, resolved: { workspacePath: 'C:/work/api', runId: 'r2' } })
   })
 
+  it('a fork goes to the window with the task found, never while it runs (main forks only a stopped task)', async () => {
+    const w = fakeWindow(() => ({ ok: true, message: 'Forked {task}; the copy is open.' }))
+    const d = deps({ window: () => w.wc })
+    expect(await runAppAction(d, 'fork_task', { task: 'tests' }, voice)).toEqual({
+      ok: false,
+      message: '“Run the tests” is running; it can be forked once it stops.'
+    })
+    expect(w.sent).toEqual([])
+    expect(await runAppAction(d, 'fork_task', { task: 'login page' }, voice)).toEqual({
+      ok: true,
+      message: 'Forked “Fix the login page”; the copy is open.',
+      runId: 'r2'
+    })
+    expect(w.sent[0]).toMatchObject({ name: 'fork_task', resolved: { workspacePath: 'C:/work/api', runId: 'r2' } })
+  })
+
+  it('a palette command goes to the window as it is; one it doesn’t have is refused in words', async () => {
+    const w = fakeWindow(() => ({ ok: true, message: 'Find is open; type what to look for.' }))
+    const d = deps({ window: () => w.wc })
+    expect(await runAppAction(d, 'run_command', { command: 'find' }, voice)).toMatchObject({ ok: true, message: 'Find is open; type what to look for.' })
+    expect(w.sent[0]).toMatchObject({ name: 'run_command', args: { command: 'find' } })
+    const wrong = await runAppAction(d, 'run_command', { command: 'format_disk' }, voice)
+    expect(wrong.ok).toBe(false)
+    expect(wrong.message).toContain('command has to be split_pane or close_pane')
+    expect(w.sent).toHaveLength(1)
+  })
+
   it('a window that never answers fails, not hangs', async () => {
     vi.useFakeTimers()
     try {

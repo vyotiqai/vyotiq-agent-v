@@ -18,7 +18,7 @@ import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import type { ToolDefinition, TokenUsage } from '../agent/providers/types'
 import type { TtsStream } from './providers/types'
 import { SentenceSplitter, asksToCommitOrPush, confirmsAction, fallbackSummary, toSpeakable } from './speechText'
-import { appActionsFor, describeAppActions } from '../../shared/appActions'
+import { APP_ACTION_NAMES, APP_COMMANDS, appActionsFor, describeAppActions } from '../../shared/appActions'
 
 /** One streamed piece of the model's answer. */
 export type ResponderChunk =
@@ -878,6 +878,10 @@ export class VoiceResponder {
       if (toolWord[1] === QUIET_TOOL && !reply.said && mayStayQuiet(reply.userText)) reply.quiet = true
       return
     }
+    // Its reasoning about you, or about its own tools, never said (2026-10-16 live check: "The user wants a fork of the
+    // hello task." and "That's an app action: split_pane runs…" were read out, and, counting as said, kept the action's
+    // own result from being spoken).
+    if (ABOUT_USER_RE.test(raw) || INTERNAL_NAME_RE.test(raw)) return
     // A note in brackets cleans to nothing and stays nothing: it was never meant to be said.
     const note = NOTE_RE.test(raw)
     const piece = redactSecretsInText(toSpeakable(raw) || (note ? '' : raw.trim()))
@@ -991,6 +995,13 @@ const SENTENCE_END_RE = /[.!?]["'”’)\]]*$/
 /** Only a note in brackets ("(Noted, staying quiet.)"). */
 /** A reply piece that is only one of the voice's tool names. */
 const TOOL_WORD_RE = /^[`"'(]*(stay_quiet|stop_agent|hand_to_agent|app_action)[`"')]*[.!]?$/
+/** The model reasoning about "the user" in the third person; what it did to "the user" (an answer about code) is not this. */
+const ABOUT_USER_RE =
+  /\bthe user(?:['’]s)?\s+(?:wants?|wanted|asks?|asked|is asking|has asked|named|names|said|says|has said|just said|confirmed|has confirmed|means|meant|is referring|refers to|requested)\b/i
+/** A sentence naming one of the voice's own tools, actions or commands (`split_pane`); only snake_case names, so "find" stays a word. */
+const INTERNAL_NAME_RE = new RegExp(
+  `(?<![\\w-])(?:${[HAND_OFF_TOOL, STOP_TOOL, QUIET_TOOL, APP_TOOL, ...APP_ACTION_NAMES, ...APP_COMMANDS].filter((n) => n.includes('_')).join('|')})(?![\\w-])`
+)
 const NOTE_RE = /^\s*[([][^()[\]]*[)\]][.!?]?\s*$/
 const PAST_HEADER = '(Earlier, in your last voice conversation on this task:)'
 const TASK_HEADER = 'The task on screen so far (oldest first; [You] is the user, [Agent] the coding agent’s answers):'

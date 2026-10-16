@@ -1002,20 +1002,22 @@ function App() {
 
   // Ctrl/Cmd+\ and the pane-header "+" button. Pointerdown already focuses the
   // clicked pane, so the header button splits beside the pane it sits on.
-  const onSplitPane = useCallback((): void => {
+  /** False when nothing was split (the voice's and the agent's split say so). */
+  const onSplitPane = useCallback((): boolean => {
     const focused = getFocusedPane()
     // No hydrated layout yet — nothing to split; stay quiet instead of
     // claiming the row is full.
-    if (!focused) return
+    if (!focused) return false
     if (focused.runId == null) {
       pushToast('Give this task an instruction first.')
-      return
+      return false
     }
     if (!splitFocusedPane()) {
       pushToast('Not enough room for another task pane.')
-      return
+      return false
     }
     setView('chat')
+    return true
   }, [getFocusedPane, splitFocusedPane])
 
   const onNewChat = useCallback((): void => {
@@ -2221,7 +2223,7 @@ function App() {
     rename: (path: string, runId: string, title: string) => Promise<void>
     exportRun: (path: string, runId: string) => Promise<void>
     deleteRun: (path: string, runId: string) => Promise<void>
-    fork: (path: string, runId: string, forkIndex?: number) => Promise<void>
+    fork: (path: string, runId: string, forkIndex?: number) => Promise<boolean>
     togglePin: (path: string, runId: string) => void
     isPinned: (path: string, runId: string) => boolean
     toggleArchive: (path: string, runId: string) => void
@@ -2230,7 +2232,7 @@ function App() {
     rename: async () => {},
     exportRun: async () => {},
     deleteRun: async () => {},
-    fork: async () => {},
+    fork: async () => false,
     togglePin: () => {},
     isPinned: () => false,
     toggleArchive: () => {},
@@ -2831,15 +2833,16 @@ function App() {
    * are — all of it, or (from an instruction's "Fork from here") the first
    * `forkIndex` messages.
    */
-  const onForkRunInWorkspace = async (path: string, runId: string, forkIndex?: number): Promise<void> => {
+  const onForkRunInWorkspace = async (path: string, runId: string, forkIndex?: number): Promise<boolean> => {
     const res = await window.vyotiq.forkRun(path, runId, forkIndex)
     if (!res.ok) {
       pushToast(`Couldn’t fork the task: ${res.error}`, 'error')
-      return
+      return false
     }
     refreshWorkspaceRuns(path)
     await onSelectRunInWorkspace(path, res.data)
     pushToast('Forked — a copy of the task to take another way', { kind: 'success', icon: 'fork' })
+    return true
   }
 
   /** Import task…: a task bundle as a new, finished, read-only task, opened where you are. */
@@ -3308,7 +3311,7 @@ function App() {
       onStopRunInWorkspace={(path, runId) => void onStopRunInWorkspace(path, runId)}
       onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
       onRetryRunInWorkspace={(path, runId) => void onRetryRunInWorkspace(path, runId)}
-      onForkRunInWorkspace={(path, runId) => void paneRunActionsRef.current.fork(path, runId)}
+      onForkRunInWorkspace={(path, runId) => paneRunActionsRef.current.fork(path, runId)}
       onNavigate={onNavigate}
       onRunsRestored={refreshWorkspaceRuns}
       onOpenRunBesideInWorkspace={(path, runId) => {
@@ -3324,7 +3327,15 @@ function App() {
       onChatStop={onChatStop}
       onCloseChat={() => {
         const id = chat.runId ?? getFocusedPane()?.runId
-        if (id) closeRunTab(id)
+        if (id) {
+          closeRunTab(id)
+          return true
+        }
+        // An empty pane beside others (a split) has no tab: close the pane, as its own close button does.
+        const pane = getFocusedPane()
+        if (!pane || (paneLayout?.panes.length ?? 1) < 2) return false
+        closePaneById(pane.paneId)
+        return true
       }}
       onSplitPane={onSplitPane}
       {...shellWorkspaceProps}

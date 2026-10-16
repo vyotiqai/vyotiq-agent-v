@@ -29,6 +29,22 @@ export const SETTINGS_SECTIONS = [
   'diagnostics',
   'about'
 ] as const
+/**
+ * The palette's commands with no action of their own, on what is on screen
+ * (§24.18): the voice heard "split the screen" and had nothing to call.
+ */
+export const APP_COMMANDS = [
+  'split_pane',
+  'close_pane',
+  'find',
+  'find_in_files',
+  'show_reasoning',
+  'hide_reasoning',
+  'open_in_editor',
+  'add_workspace',
+  'import_task',
+  'send_feedback'
+] as const
 export const VOICE_PLACEMENT_NAMES = ['inline', 'companion', 'takeover', 'capsule', 'mini'] as const
 
 /** A task, by its run id or words from its title; empty is the task on screen. */
@@ -42,6 +58,7 @@ export const APP_ACTION_ARGS = {
   open_settings: z.object({ section: z.enum(SETTINGS_SECTIONS).optional() }),
   open_panel: z.object({ panel: z.enum(APP_PANELS) }),
   toggle_navigator: z.object({}),
+  run_command: z.object({ command: z.enum(APP_COMMANDS) }),
   new_task: z.object({ workspace: Workspace }),
   open_task: z.object({ task: z.string().trim().min(1).max(300) }),
   next_needs_you: z.object({}),
@@ -54,6 +71,7 @@ export const APP_ACTION_ARGS = {
   rename_task: z.object({ title: z.string().trim().min(1).max(200), task: Task }),
   archive_task: z.object({ task: Task, unarchive: z.boolean().optional() }),
   delete_task: z.object({ task: Task }),
+  fork_task: z.object({ task: Task }),
   // ── Settings ────────────────────────────────────────────────────────────
   set_theme: z.object({ theme: z.enum(['system', 'light', 'dark']) }),
   set_skin: z.object({ skin: z.enum(['native', 'default', 'proof', 'bench', 'gild']) }),
@@ -93,6 +111,11 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   open_settings: { summary: `Open Settings, optionally at a section: ${SETTINGS_SECTIONS.join(', ')}.`, runs: 'window' },
   open_panel: { summary: `Open a panel beside the task on screen: ${APP_PANELS.join(', ')}.`, runs: 'window' },
   toggle_navigator: { summary: 'Show or hide the task list.', runs: 'window' },
+  run_command: {
+    summary:
+      'On what is on screen: split_pane (another task beside it), close_pane (closes the task’s tab; the task stays in the list), find (in the task), find_in_files, show_reasoning, hide_reasoning, open_in_editor (the workspace), add_workspace and import_task (open a picker for the user), send_feedback (opens the form).',
+    runs: 'window'
+  },
   new_task: { summary: 'Open New task, in a workspace if named.', runs: 'window' },
   open_task: { summary: 'Open a task, in any open workspace, by words from its title.', runs: 'window' },
   next_needs_you: { summary: 'Open the next task that is waiting on the user.', runs: 'window' },
@@ -107,6 +130,7 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   rename_task: { summary: 'Rename a task (not while it runs); the task on screen if none is named.', runs: 'window' },
   archive_task: { summary: 'Archive a task (out of the list, not deleted); unarchive true brings it back.', runs: 'window' },
   delete_task: { summary: 'Delete a task (it goes to Recently deleted).', runs: 'window', destructive: true },
+  fork_task: { summary: 'Fork a stopped task: a copy to take another way, opened. The task on screen if none is named.', runs: 'window' },
   set_theme: { summary: 'Set the app theme: system, light or dark.', runs: 'main' },
   set_skin: { summary: 'Set the app skin: native, default, proof, bench or gild.', runs: 'main' },
   set_tool_approvals: { summary: 'Tool approvals: off, mutating (ask before changes) or all (ask for every tool).', runs: 'main' },
