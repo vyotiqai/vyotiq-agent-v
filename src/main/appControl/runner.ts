@@ -392,7 +392,8 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
       const voice = voiceOf(deps, ctx)
       const waits = Boolean(ctx.runId && voice?.afterReply?.(ctx.runId, () => deps.quit()))
       if (!waits) setTimeout(() => deps.quit(), 1500)
-      return { ok: true, message: 'Quitting.' }
+      // Said so: told only "Quitting.", the agent read the app still open and said the quit failed (2026-10-16 probe).
+      return { ok: true, message: 'Quitting once this reply is done; the app stays open until then, so there is nothing to check. Just say goodbye.' }
     }
     case 'voice_mute': {
       const voice = voiceOf(deps, ctx)

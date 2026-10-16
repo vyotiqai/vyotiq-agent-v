@@ -208,7 +208,9 @@ export class ReplySpeaker {
           // The answer to what they said while it worked, written without a <spoken> block:
           // said anyway. 2026-10-16 probe: "What are you doing right now?" was answered on
           // screen ("I'm waiting on the 15-second sleep command") and never out loud.
-          const summary = fallbackSummary(ev.content ?? '')
+          // Not when it is the model talking to itself about the person: "The user asks to quit the app.
+          // Quitting needs their OK…" was read out (2026-10-16 probe, §27.11).
+          const summary = narratesAboutUser(ev.content ?? '') ? '' : fallbackSummary(ev.content ?? '')
           if (summary) {
             this.speak(`${summary} `)
             this.owesAnswer = false
@@ -372,4 +374,9 @@ export class ReplySpeaker {
     this.stepText = ''
     this.blockClosed = false
   }
+}
+
+/** The model narrating its own steps about the person ("The user confirmed…"), not words for them. */
+export function narratesAboutUser(text: string): boolean {
+  return /\b(?:the user|user['’]s|the person)\b/i.test(text)
 }

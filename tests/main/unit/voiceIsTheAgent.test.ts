@@ -16,6 +16,9 @@ describe('the agent, on a spoken turn', () => {
     expect(VOICE_REPLY_TEXT).toContain('You are Agent V')
     expect(VOICE_REPLY_TEXT).toContain('There is no separate voice and no other agent')
     expect(VOICE_REPLY_TEXT).toContain('Never say you will hand something off')
+    // One yes for a destructive action: it asked with ask_question, then the approval asked again (2026-10-16 probe).
+    expect(VOICE_REPLY_TEXT).toContain('Never ask first with ask_question or in words')
+    expect(VOICE_REPLY_TEXT).not.toContain('Needs the user’s yes first')
     expect(VOICE_REPLY_TEXT).toContain('Say a thing is done only once a tool result shows it')
     // 2026-10-16 probe: asked which orb it used, it answered from memory of setting it, without reading the app.
     expect(VOICE_REPLY_TEXT).toContain('even what you set yourself earlier')

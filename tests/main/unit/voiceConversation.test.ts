@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, cueForTool, runFailedLine, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
+import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, cueForTool, narratesAboutUser, runFailedLine, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
 import { HAND_OFF_FAILED_LINE, VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
 import { openFixtureStt, openFixtureTts, type FixtureSttSession, type FixtureTtsStream } from '@main/voice/providers/fixture'
 import { addRunEventTap, tapRunEvent } from '@main/agent/runEventTap'
@@ -112,6 +112,20 @@ describe('ReplySpeaker', () => {
     // Owed once: the next narration isn't read out.
     h.speaker.handle(narration('Checking the session again.'))
     expect(h.said).toHaveLength(3)
+  })
+
+  it('never reads out the model talking to itself about the person (2026-10-16 probe: "The user asks to quit the app.")', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    h.speaker.handle({ type: 'follow_up_applied', runId: R, ids: ['f1'], messages: [{ role: 'user', content: 'Quit the app.', spoken: true }] } as AgentEvent)
+    h.speaker.handle(narration('The user asks to quit the app. Quitting needs their OK, and their request is explicit, so I’ll ask first.'))
+    h.speaker.handle(narration('The user’s latest message asks to delete this task.'))
+    expect(h.said).toEqual([])
+    // Still owed: words for them are said.
+    h.speaker.handle(narration('Quitting now.'))
+    expect(h.said).toEqual(['Quitting now.'])
+    expect(narratesAboutUser('I’m waiting on the 15-second sleep command.')).toBe(false)
+    expect(narratesAboutUser('The user confirmed the deletion.')).toBe(true)
   })
 
   it('a typed follow-up mid-work owes nothing out loud', () => {

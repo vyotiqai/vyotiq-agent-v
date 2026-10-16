@@ -80,7 +80,7 @@ describe('the catalog', () => {
     expect(APP_ACTION_NAMES).toContain('voice_mute')
     expect(APP_ACTION_NAMES).toContain('set_task_model')
     expect(APP_ACTION_NAMES).toContain('app_status')
-    expect(describeAppActions()).toContain('delete_task {task?}: Delete a task (it goes to Recently deleted). Needs the user’s yes first.')
+    expect(describeAppActions()).toContain('delete_task {task?}: Delete a task (it goes to Recently deleted). The app asks the user for a yes when you call it: call it without asking first.')
     expect(describeAppActions()).toContain('start_task {brief, workspace?}')
     expect(describeAppActions()).toContain('set_task_model {model, task?}')
     expect(Object.entries(APP_ACTIONS).filter(([, d]) => d.destructive).map(([n]) => n).sort()).toEqual(['delete_task', 'install_update', 'quit_app'])
@@ -379,7 +379,7 @@ describe('running them', () => {
     const quit = vi.fn()
     let after: (() => void) | null = null
     const withVoice = { ...voice, voice: { mute: () => {}, end: () => {}, setVoice: async () => ({ ok: true, message: '' }), afterReply: (runId: string, fn: () => void) => runId === 'r1' && Boolean((after = fn)) } }
-    expect(await runAppAction(deps({ quit }), 'quit_app', {}, withVoice)).toEqual({ ok: true, message: 'Quitting.' })
+    expect(await runAppAction(deps({ quit }), 'quit_app', {}, withVoice)).toMatchObject({ ok: true, message: expect.stringContaining('the app stays open until then') })
     expect(quit).not.toHaveBeenCalled()
     after!()
     expect(quit).toHaveBeenCalledTimes(1)

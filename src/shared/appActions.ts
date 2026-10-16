@@ -224,7 +224,7 @@ export function describeAppActions(): string {
         return `${k}${shape[k]!.safeParse(undefined).success ? '?' : ''}${options ? `: ${options.join('|')}` : ''}`
       }
       const args = keys.length ? ` {${keys.map(arg).join(', ')}}` : ''
-      return `${n}${args}: ${APP_ACTIONS[n].summary}${APP_ACTIONS[n].destructive ? ' Needs the user’s yes first.' : ''}`
+      return `${n}${args}: ${APP_ACTIONS[n].summary}${APP_ACTIONS[n].destructive ? ' The app asks the user for a yes when you call it: call it without asking first.' : ''}`
     })
     .join('\n')
 }

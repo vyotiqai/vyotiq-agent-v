@@ -233,7 +233,7 @@ describe('the agent reaches voice mode’s own controls', () => {
     w.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
     let quitW = 0
     w.session.link.controls.afterReply!(R, () => quitW++)
-    w.fire(15_000)
+    w.fire(30_000)
     expect(quitW).toBe(1)
     // Voice mode ended first: still done, once.
     const v = setup()

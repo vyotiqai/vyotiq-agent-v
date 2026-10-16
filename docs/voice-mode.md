@@ -2681,3 +2681,26 @@ Not checked in the running app: these are covered by unit tests only.
 | A quit typed in one task could wait on, or skip the wait for, a voice following another (§27.9's own change) | the voice controls fall back to any live session | Only the session following the asking run waits for its reply; otherwise the 1.5 s wait as before |
 
 Not checked in the running app: unit tests only.
+
+### 27.11 Fifth pass: the built app, spoken to (2026-10-16)
+
+The §27.9 and §27.10 fixes, probed with spoken audio on a built copy and a
+throwaway profile, plus the gui-e2e voice-mode and app-control specs.
+
+| Checked | Result |
+| --- | --- |
+| "Wait longer before I'm done", then "back to normal" | The listener reopened each time (a new `engine` event); the next turns waited 2000 ms, then 1300 ms again |
+| "Listen for Hindi", then "English again" | The listener reopened with `hi`, then `en` |
+| gui-e2e voice-mode (6) and app-control (1) | All pass; app-control failed once with a blank window that didn't come back in three more runs, and passed on the committed tree alone |
+
+What the probe found, and fixed:
+
+| Found | Evidence | Fixed |
+| --- | --- | --- |
+| A destructive action was asked twice | The agent asked with `ask_question` ("Do you want me to delete…? Yes or no?"), then the approval asked again; it said "Deletion needs the user's yes first, per the tool rules, so I'll ask" | The catalog says the app asks for the yes itself and not to ask first; the voice prompt says the same. Probe after: one ask, "No." denied it; one ask, "Yes." quit |
+| The model's own reasoning was read out | "The user asks to quit the app. Quitting needs their OK…": §27.8's fallback speaks a mid-work message without a `<spoken>` block | It skips text that talks about the user in the third person |
+| The agent said the quit "didn't go through" | Told only "Quitting.", it read app_status, saw the app open, and said so; the 15 s cap then quit mid-reply | The result says the app stays open until the reply is done; the cap is 30 s. Probe after: "Goodbye." played, and the app quit 4 ms after the audio ended |
+
+In the first probe the delete question and the quit approval were answered
+from the window, not by voice: Ajay clicked them in the probe window (he said
+so). Nothing in the app answers on its own.

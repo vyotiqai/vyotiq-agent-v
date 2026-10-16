@@ -141,6 +141,8 @@ describe('VoiceConversationsDialog', () => {
     })
     expect(list).not.toHaveBeenCalled()
     expect(document.querySelector(`[data-voice-history-detail="${SUMMARY.id}"]`)).not.toBeNull()
+    // The agent answered it itself (§27): nothing reads as handing it off.
+    expect(screen.queryByText(/Sent to the task/)).toBeNull()
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Open task' }))
     })

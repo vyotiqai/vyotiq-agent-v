@@ -90,7 +90,7 @@ const KEEPALIVE_MS = 5000
 /** The view's steps refresh at most this often while a run works. */
 const WORK_EMIT_MS = 120
 /** The longest quit_app waits for the reply to be heard. */
-const AFTER_REPLY_CAP_MS = 15_000
+const AFTER_REPLY_CAP_MS = 30_000
 /** A listener whose settings changed connects again once nobody is talking; until then it checks this often. */
 const RELISTEN_RETRY_MS = 1000
 /** Where nobody is mid-turn, so the listener can be swapped without losing words. */

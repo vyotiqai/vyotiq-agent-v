@@ -130,14 +130,14 @@ function HandOffLine({
         </p>
       ) : null}
       {outcome.kind === 'sent' ? (
-        <div className="flex items-center gap-2" data-voice-history-outcome="sent">
-          <span className="text-caption text-tertiary">Sent to the task</span>
-          {onOpenTask ? (
+        // No "Sent to the task": the agent answered it itself (§27), and the words read as a hand-off.
+        onOpenTask ? (
+          <div className="flex items-center gap-2" data-voice-history-outcome="sent">
             <Button size="xs" variant="ghost" icon="arrowRight" onClick={() => onOpenTask(outcome.runId)}>
               Open task
             </Button>
-          ) : null}
-        </div>
+          </div>
+        ) : null
       ) : outcome.kind === 'not_sent' ? (
         <div className="flex items-center gap-1.5 text-caption text-danger" data-voice-history-outcome="not_sent">
           <Icon name="warningCircle" size={12} />
