@@ -198,6 +198,49 @@ describe('the agent reaches voice mode’s own controls', () => {
     expect(u.events.filter((e) => e.kind === 'end_requested')).toHaveLength(1)
   })
 
+  it('quit waits until the run’s reply has been heard, and never longer than the cap', async () => {
+    // Quitting 1.5 s after the tool returned cut off the answer, which comes 1.4–4 s later (§27.8 probes).
+    const t = setup()
+    await t.session.start()
+    t.session.follow(R)
+    t.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    let quit = 0
+    t.session.link.controls.afterReply!(() => quit++)
+    t.tap({ type: 'assistant_message', runId: R, content: '<spoken>Quitting now.</spoken>' } as unknown as AgentEvent)
+    t.tap({ type: 'status', runId: R, status: 'done' } as AgentEvent)
+    const said = t.events.find((e) => e.kind === 'say') as { contextId: string } | undefined
+    expect(said).toBeDefined()
+    expect(quit).toBe(0)
+    t.session.playback(said!.contextId, 'started')
+    expect(quit).toBe(0)
+    t.session.playback(said!.contextId, 'drained')
+    expect(quit).toBe(1)
+
+    // Nothing to hear: done at once. A reply that never plays: done at the cap.
+    const u = setup()
+    await u.session.start()
+    let quitU = 0
+    u.session.link.controls.afterReply!(() => quitU++)
+    expect(quitU).toBe(1)
+    const w = setup()
+    await w.session.start()
+    w.session.follow(R)
+    w.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    let quitW = 0
+    w.session.link.controls.afterReply!(() => quitW++)
+    w.fire(15_000)
+    expect(quitW).toBe(1)
+    // Voice mode ended first: still done, once.
+    const v = setup()
+    await v.session.start()
+    v.session.follow(R)
+    v.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
+    let quitV = 0
+    v.session.link.controls.afterReply!(() => quitV++)
+    await v.session.stop()
+    expect(quitV).toBe(1)
+  })
+
   it('tells app_status what the window shows', async () => {
     const t = setup()
     await t.session.start()

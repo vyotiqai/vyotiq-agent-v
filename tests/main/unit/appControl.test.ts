@@ -4,7 +4,7 @@
  * to the window. The voice had three tools and the agent none for the app:
  * "switch to dark mode" went to the coding agent, which edited the project.
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -353,6 +353,41 @@ describe('running them', () => {
     expect(await runAppAction(d, 'set_voice_options', {}, voice)).toEqual({ ok: false, message: 'I couldn’t do that: no voice option was named.' })
     expect(await runAppAction(d, 'set_voice_options', { look: 'smoke' }, voice)).toMatchObject({ ok: false, message: expect.stringContaining('look has to be sphere or glow') })
     expect(describeAppActions()).toContain('set_voice_options {look?: sphere|glow|pearl|aura|wire|cloud')
+    // "Listen in Hindi" had nothing to call; detect is the empty language Settings stores.
+    expect(await runAppAction(d, 'set_voice_options', { language: 'HI' }, voice)).toEqual({ ok: true, message: 'Set: it listens for language hi.' })
+    expect(d.patches.at(-1)).toEqual({ voice: { placement: 'capsule', language: 'hi' } })
+    expect(await runAppAction(d, 'set_voice_options', { language: 'detect' }, voice)).toEqual({ ok: true, message: 'Set: it detects the language.' })
+    expect(d.patches.at(-1)).toEqual({ voice: { placement: 'capsule', language: '' } })
+    expect(await runAppAction(d, 'set_voice_options', { language: 'Hindi' }, voice)).toMatchObject({ ok: false, message: 'I couldn’t do that: the language didn’t fit.' })
+  })
+
+  it('quit in voice mode waits for the spoken reply; without voice it waits 1.5 s', async () => {
+    const quit = vi.fn()
+    let after: (() => void) | null = null
+    const withVoice = { ...voice, voice: { mute: () => {}, end: () => {}, setVoice: async () => ({ ok: true, message: '' }), afterReply: (fn: () => void) => (after = fn) } }
+    expect(await runAppAction(deps({ quit }), 'quit_app', {}, withVoice)).toEqual({ ok: true, message: 'Quitting.' })
+    expect(quit).not.toHaveBeenCalled()
+    after!()
+    expect(quit).toHaveBeenCalledTimes(1)
+    vi.useFakeTimers()
+    try {
+      const quit2 = vi.fn()
+      await runAppAction(deps({ quit: quit2 }), 'quit_app', {}, voice)
+      vi.advanceTimersByTime(1499)
+      expect(quit2).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      expect(quit2).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the docs’ table of actions names every action in the catalog', () => {
+    // It had fallen seven behind (set_voice_options, set_task_model, fork_task, run_command, app_status, check_update, download_update).
+    const doc = readFileSync(join(__dirname, '../../../docs/voice-mode.md'), 'utf8').replace(/\r\n/g, '\n')
+    const table = doc.slice(doc.indexOf('| Group | Actions | Runs in |'))
+    const rows = table.slice(0, table.indexOf('\n\n'))
+    expect(APP_ACTION_NAMES.filter((n) => !rows.includes(`\`${n}\``))).toEqual([])
   })
 
   it('remembers what a run set, so a change made since by someone else is told apart (2026-10-16 probe: it set cloud back twice)', async () => {

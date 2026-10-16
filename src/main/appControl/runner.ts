@@ -39,6 +39,8 @@ export type AppActionContext = {
     mute: (untilCalled: boolean) => void
     end: () => void
     setVoice: (name: string) => Promise<AppActionResult>
+    /** Do this once the run's reply has been heard. */
+    afterReply?: (fn: () => void) => void
   }
 }
 
@@ -384,10 +386,13 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
       await deps.openExternal(url.toString())
       return { ok: true, message: `Opened ${url.hostname}.` }
     }
-    case 'quit_app':
-      // After this answer is said: quitting now would cut it off.
-      setTimeout(() => deps.quit(), 1500)
+    case 'quit_app': {
+      // After the answer is said: quitting now would cut it off. In voice mode that is once the reply has played.
+      const voice = voiceOf(deps, ctx)
+      if (voice?.afterReply) voice.afterReply(() => deps.quit())
+      else setTimeout(() => deps.quit(), 1500)
       return { ok: true, message: 'Quitting.' }
+    }
     case 'voice_mute': {
       const voice = voiceOf(deps, ctx)
       if (!voice) return { ok: false, message: 'Voice mode isn’t on.' }
@@ -422,7 +427,8 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
         ...(o.captions !== undefined ? { captions: o.captions } : {}),
         ...(o.sounds !== undefined ? { earcons: o.sounds } : {}),
         ...(o.progress !== undefined ? { speakProgress: o.progress } : {}),
-        ...(o.hold_to_talk !== undefined ? { pushToTalkOnly: o.hold_to_talk } : {})
+        ...(o.hold_to_talk !== undefined ? { pushToTalkOnly: o.hold_to_talk } : {}),
+        ...(o.language !== undefined ? { language: o.language === 'detect' ? '' : o.language } : {})
       }
       if (Object.keys(patch).length === 0) return { ok: false, message: 'I couldn’t do that: no voice option was named.' }
       const voice = (deps.settings() as { voice?: Record<string, unknown> }).voice ?? {}
@@ -435,7 +441,8 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
         o.captions !== undefined && `captions are ${o.captions ? 'on' : 'off'}`,
         o.sounds !== undefined && `sounds are ${o.sounds ? 'on' : 'off'}`,
         o.progress !== undefined && `progress is ${o.progress ? 'spoken' : 'not spoken'}`,
-        o.hold_to_talk !== undefined && (o.hold_to_talk ? 'it listens only while you hold to talk' : 'it listens without holding')
+        o.hold_to_talk !== undefined && (o.hold_to_talk ? 'it listens only while you hold to talk' : 'it listens without holding'),
+        o.language !== undefined && (o.language === 'detect' ? 'it detects the language' : `it listens for language ${o.language}`)
       ].filter(Boolean)
       return { ok: true, message: `Set: ${said.join(', ')}.` }
     }

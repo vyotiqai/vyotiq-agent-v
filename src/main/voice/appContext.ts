@@ -12,7 +12,7 @@
 import { existsSync, readFileSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { redactSecretsInText } from '../../shared/utils/redactSecrets'
-import type { VoiceScreen } from '../../shared/ipc/schemas/voice'
+import { DEFAULT_VOICE_SETTINGS, type VoiceScreen } from '../../shared/ipc/schemas/voice'
 
 export type AppTaskState = 'running' | 'waiting' | 'done' | 'error' | 'cancelled'
 
@@ -31,9 +31,23 @@ export type AppSnapshot = {
     model?: string
     approvals?: string
     theme?: string
+    skin?: string
   }
-  /** Voice mode, when it is on. */
-  voice?: { placement: string; speed: number; look?: string; style?: string; muted?: 'until_called' | 'until_unmuted' } | null
+  /** Voice mode, when it is on; the options past placement and speed are said only where they aren't the default. */
+  voice?: {
+    placement: string
+    speed: number
+    look?: string
+    style?: string
+    muted?: 'until_called' | 'until_unmuted'
+    layout?: string
+    patience?: string
+    captions?: boolean
+    sounds?: boolean
+    progress?: boolean
+    holdToTalk?: boolean
+    language?: string
+  } | null
   /** Settings this run set that someone else has changed since (appControl/setByAgent). */
   changedSince?: Array<{ what: string; set: string; now: string }>
   /** The app's update, as the updater last knew it. */
@@ -104,12 +118,26 @@ export function formatAppContext(s: AppSnapshot): string {
   const settings = [
     set.model ? `new tasks start on ${set.model}` : '',
     set.approvals ? `tool approvals are ${set.approvals}` : '',
-    set.theme ? `${set.theme} theme` : ''
+    set.theme ? `${set.theme} theme` : '',
+    set.skin ? `${set.skin} skin` : ''
   ].filter(Boolean)
   if (settings.length > 0) lines.push(`Settings: ${settings.join('; ')}.`)
   if (s.voice) {
     const muted = s.voice.muted === 'until_called' ? ', muted until called by name' : s.voice.muted === 'until_unmuted' ? ', muted' : ''
     lines.push(`Voice mode is on, shown as ${s.voice.placement}${s.voice.look ? ` with the ${s.voice.look} orb` : ''}${s.voice.style ? `, ${s.voice.style} style` : ''}${s.voice.speed !== 1 ? ` at ${s.voice.speed} times speed` : ''}${muted}.`)
+    // What set_voice_options can set, so "are captions on?" is read, not guessed; defaults stay unsaid.
+    const v = s.voice
+    const d = DEFAULT_VOICE_SETTINGS
+    const options = [
+      v.layout !== undefined && v.layout !== d.viewLayout ? `full-screen layout ${v.layout}` : '',
+      v.patience !== undefined && v.patience !== d.endOfTurnPatience ? `waits ${v.patience === 'quick' ? 'briefly' : 'longer'} before you’re done` : '',
+      v.captions === false ? 'captions off' : '',
+      v.sounds === false ? 'sounds off' : '',
+      v.progress === true ? 'progress spoken' : '',
+      v.holdToTalk === true ? 'listens only while you hold to talk' : '',
+      v.language !== undefined && v.language !== d.language ? (v.language ? `listens for language ${v.language}` : 'detects the language') : ''
+    ].filter(Boolean)
+    if (options.length > 0) lines.push(`Voice options: ${options.join('; ')}.`)
   }
   if (s.changedSince?.length) {
     const changes = s.changedSince.map((c) => `${c.what} is ${c.now} now (you set ${c.set})`)

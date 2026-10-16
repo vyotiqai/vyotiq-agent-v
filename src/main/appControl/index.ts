@@ -180,9 +180,25 @@ export async function appStatus(runId: string | null, workspaceHint: string | nu
     settings: {
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.toolApproval?.mode ? { approvals: APPROVAL_WORDS[settings.toolApproval.mode] } : {}),
-      ...(settings.theme ? { theme: settings.theme } : {})
+      ...(settings.theme ? { theme: settings.theme } : {}),
+      ...(settings.skinId ? { skin: settings.skinId } : {})
     },
-    voice: voiceSession ? { placement: voice.placement, speed: voice.speed, look: voice.orbLook, style: voice.style, ...(voiceSession.muted ? { muted: voiceSession.muted } : {}) } : null,
+    voice: voiceSession
+      ? {
+          placement: voice.placement,
+          speed: voice.speed,
+          look: voice.orbLook,
+          style: voice.style,
+          ...(voiceSession.muted ? { muted: voiceSession.muted } : {}),
+          layout: voice.viewLayout,
+          patience: voice.endOfTurnPatience,
+          captions: voice.captions,
+          sounds: voice.earcons,
+          progress: voice.speakProgress,
+          holdToTalk: voice.pushToTalkOnly,
+          language: voice.language
+        }
+      : null,
     changedSince: settingsChangedSince(runId, settings),
     update: { status: update.status, ...(update.info?.version ? { version: update.info.version } : {}) },
     rules: [],

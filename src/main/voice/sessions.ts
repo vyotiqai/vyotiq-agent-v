@@ -18,7 +18,7 @@ import { cancelRun, getRunWorkspace } from '../agent/runRegistry'
 import { onSpokenTurnStarted, setVoiceFollowedRun, setVoiceReplyWorkspace, voiceSessionsOn } from './voiceReply'
 import type { AppActionResult } from '../appControl'
 import { setVoiceLink } from '../appControl/voiceLink'
-import { enqueueSettingsMutation, setSettings } from '../settings/settings'
+import { enqueueSettingsMutation, onSettingsWritten, setSettings } from '../settings/settings'
 import { VoiceConversationLog } from './conversationLog'
 import { userDataRoot, workspaceUsageDir } from '../storage/paths'
 import { join } from 'path'
@@ -186,6 +186,11 @@ setVoiceLink({
     for (const { session } of sessions.values()) if (session.state !== 'off' && session.state !== 'error') return session.link
     return null
   }
+})
+/** Voice settings changed (Settings, Voice, or the agent's set_voice_options): live sessions take them now. */
+onSettingsWritten((next, prev) => {
+  if (JSON.stringify(next.voice ?? null) === JSON.stringify(prev.voice ?? null)) return
+  for (const { session } of sessions.values()) session.settingsChanged()
 })
 const byOwner = new Map<number, string>()
 /** Windows whose close already ends their session: one hook per window, not one per start. */

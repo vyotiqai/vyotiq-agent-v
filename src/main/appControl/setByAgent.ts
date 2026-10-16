@@ -24,7 +24,8 @@ const LABELS: Readonly<Record<string, string>> = {
   'voice.captions': 'captions',
   'voice.earcons': 'sounds',
   'voice.speakProgress': 'spoken progress',
-  'voice.pushToTalkOnly': 'hold to talk only'
+  'voice.pushToTalkOnly': 'hold to talk only',
+  'voice.language': 'the language it listens for'
 }
 
 /** Runs remembered at once: the newest. */

@@ -159,6 +159,46 @@ describe('VoiceSession', () => {
     expect(h.events).toContainEqual({ sessionId: 'id1', kind: 'engine', stt: 'deepgram' })
   })
 
+  it('a patience or language changed mid-session reaches the listener without restarting voice mode', async () => {
+    // Before: set_voice_options "wait longer" was saved and said as done, and the open listener kept the old wait.
+    const h = harness({ sttProvider: 'openai' })
+    await h.session.start()
+    const first = h.stt()
+    h.settings.endOfTurnPatience = 'patient'
+    h.session.settingsChanged()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(first.closed).toBe(true)
+    expect(h.opens).toHaveLength(2)
+    expect(h.opens[1]).toMatchObject({ patience: 'patient' })
+    // Our own pause waits the new length at once: a normal-length pause no longer ends the turn.
+    const endTurn = vi.spyOn(h.stt(), 'endTurn')
+    h.session.pushAudio(tone(400))
+    h.session.pushAudio(silence(SILENCE_MS.normal + 100))
+    expect(endTurn).not.toHaveBeenCalled()
+    h.session.pushAudio(silence(SILENCE_MS.patient))
+    expect(endTurn).toHaveBeenCalledTimes(1)
+    // Nothing the listener uses changed: no new connection.
+    h.settings.captions = false
+    h.session.settingsChanged()
+    expect(h.opens).toHaveLength(2)
+  })
+
+  it('a listener change waits for the turn being spoken, so no words are lost', async () => {
+    const h = harness({ sttProvider: 'openai' })
+    await h.session.start()
+    h.session.pushAudio(tone(400))
+    expect(h.session.state).toBe('hearing')
+    h.settings.language = 'hi'
+    h.session.settingsChanged()
+    expect(h.opens).toHaveLength(1)
+    expect(h.timers.some((t) => t.ms === 1000)).toBe(true)
+    h.stt().say('')
+    await h.runTimers()
+    expect(h.opens).toHaveLength(2)
+    expect(h.opens[1]).toMatchObject({ language: 'hi' })
+  })
+
   it('a finished turn is emitted for the renderer to send, and the session waits on the agent', async () => {
     const h = harness()
     await h.session.start()

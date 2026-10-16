@@ -102,6 +102,18 @@ describe('the app, as the voice reads it', () => {
     expect(formatAppContext({ ...base, voice: { placement: 'capsule', speed: 1, look: 'cloud', style: 'ambient' } })).toContain(
       'Voice mode is on, shown as capsule with the cloud orb, ambient style.'
     )
+    // What set_voice_options sets is read back where it isn't the default; defaults stay unsaid.
+    const options = formatAppContext({
+      ...base,
+      settings: { skin: 'gild' },
+      voice: { placement: 'takeover', speed: 1, layout: 'orb', patience: 'patient', captions: false, sounds: true, progress: true, holdToTalk: false, language: 'hi' }
+    })
+    expect(options).toContain('Voice options: full-screen layout orb; waits longer before you’re done; captions off; progress spoken; listens for language hi.')
+    expect(options).toContain('gild skin')
+    expect(
+      formatAppContext({ ...base, voice: { placement: 'takeover', speed: 1, layout: 'conversation', patience: 'normal', captions: true, sounds: true, progress: false, holdToTalk: false, language: 'en' } })
+    ).not.toContain('Voice options')
+    expect(formatAppContext({ ...base, voice: { placement: 'takeover', speed: 1, language: '' } })).toContain('Voice options: detects the language.')
     expect(formatAppContext({ ...base, changedSince: [{ what: 'the orb', set: 'cloud', now: 'pearl' }] })).toContain(
       'Changed since you set it, by the person or another task, not by you: the orb is pearl now (you set cloud). Say so; don’t set it back unless they ask.'
     )

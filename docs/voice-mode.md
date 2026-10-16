@@ -2071,12 +2071,13 @@ agent, which edited the project's theme. Now one catalog of app actions
 
 | Group | Actions | Runs in |
 | --- | --- | --- |
-| Views and panes | `open_view` (Home, Settings, Usage, Inbox, Scheduled, Extensions, docs, What's new, shortcuts), `open_settings` (at a section), `open_panel` (terminal, changes, browser, files, plan, PR), `toggle_navigator`, `next_needs_you`, `new_task`, `switch_workspace` | the window |
-| Tasks, any open workspace | `open_task`, `start_task` (a brief, a workspace; opened once started), `send_to_task` and `rename_task` (§24.16), `stop_task`, `archive_task` (`unarchive?`, §24.17), `delete_task` | main finds the task by words from its title or its run id; start and stop run in main, the rest in the window |
-| The agent | `set_agent_mode` (Ask or Agent on the task on screen), `set_model` (from the recent and favourite models) | window, main |
+| Views and panes | `open_view` (Home, Settings, Usage, Inbox, Scheduled, Extensions, docs, What's new, shortcuts), `open_settings` (at a section), `open_panel` (terminal, changes, browser, files, plan, PR), `toggle_navigator`, `next_needs_you`, `new_task`, `switch_workspace`, `run_command` (split or close a pane, find, find in files, show or hide reasoning, open in editor, add a workspace, import a task, send feedback) | the window |
+| Tasks, any open workspace | `open_task`, `start_task` (a brief, a workspace; opened once started), `send_to_task` and `rename_task` (§24.16), `stop_task`, `archive_task` (`unarchive?`, §24.17), `delete_task`, `fork_task` | main finds the task by words from its title or its run id; start and stop run in main, the rest in the window |
+| The agent | `set_agent_mode` (Ask or Agent on the task on screen), `set_model` (new tasks, from the recent and favourite models), `set_task_model` (a task, from its next turn) | window, main |
+| Reading the app | `app_status` (also given with each spoken step, §27.8) | main |
 | Settings | `set_theme`, `set_skin`, `set_tool_approvals` | main |
-| The system | `open_path` (a file or folder, never a program), `reveal_path`, `open_url` (http and https only), `install_update`, `quit_app` | main, window |
-| The voice itself | `voice_mute` (until called by name, or until unmuted), `voice_end`, `set_voice_speed`, `set_voice` (by name, where the speaker's voices are named), `set_voice_placement` | main |
+| The system | `open_path` (a file or folder, never a program), `reveal_path`, `open_url` (http and https only), `check_update`, `download_update`, `install_update`, `quit_app` | main, window |
+| The voice itself | `voice_mute` (until called by name, or until unmuted), `voice_end`, `set_voice_speed`, `set_voice` (by name, where the speaker's voices are named), `set_voice_placement`, `set_voice_options` (orb, style, layout, patience, captions, sounds, spoken progress, hold to talk, language) | main |
 
 How it runs (`src/main/appControl/`): main checks the arguments, finds what
 was named across every open workspace, and runs main's own actions. A window
@@ -2654,3 +2655,20 @@ Not verified: what showed "cancelled" on your screen at 03:50 UTC. The run's
 events show it running then (invokeId 9), and the logs don't show what was on
 screen. The agent can't read the app's own data folder (its guard refused the
 log read); that guard was left as it is.
+
+### 27.9 Third pass: settings that didn't take, and a quit that cut off its answer (2026-10-16)
+
+The live log since §27.8 has only the code from before 93fe351f (its last
+"Voice stayed quiet on a turn" line is from the voice responder that commit
+removed; the app has not run since 10:35), so this pass read the code.
+
+| Found | Evidence | Fixed |
+| --- | --- | --- |
+| Patience, language and the listener changed mid-session did nothing until voice mode restarted | `session.ts` read them only in `connect()`; nothing in main told a live session that settings changed | Every voice settings write reaches live sessions (`sessions.ts`, `onSettingsWritten`). The pause applies at once; the listener reopens with the new settings once nobody is mid-turn |
+| "Listen in Hindi" had nothing to call | `set_voice_options` had no language | `language`: a two-letter code or `detect` |
+| `app_status` couldn't say what `set_voice_options` sets | its voice line had placement, speed, orb and style only | A "Voice options" line with whatever isn't the default; the skin is in Settings too |
+| A spoken "quit" was never answered out loud | `quit_app` quit 1.5 s after the tool returned; the agent's first words come 1.4–4 s after it (§27.8) | In voice mode it quits once the reply has played, at most 15 s later, or when voice mode ends |
+| The docs' table of actions was seven behind | `set_voice_options`, `set_task_model`, `fork_task`, `run_command`, `app_status`, `check_update`, `download_update` were missing | Listed; a test keeps the table naming every action |
+| The catalog kept its own copies of the placements and skins | two literal lists beside `VOICE_PLACEMENTS` and `SkinIdSchema` | It uses them |
+
+Not checked in the running app: these are covered by unit tests only.

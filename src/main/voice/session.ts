@@ -89,6 +89,17 @@ export const ACK_LINES = ['One moment.', 'Just a second.', 'Give me a moment.'] 
 const KEEPALIVE_MS = 5000
 /** The view's steps refresh at most this often while a run works. */
 const WORK_EMIT_MS = 120
+/** The longest quit_app waits for the reply to be heard. */
+const AFTER_REPLY_CAP_MS = 15_000
+/** A listener whose settings changed connects again once nobody is talking; until then it checks this often. */
+const RELISTEN_RETRY_MS = 1000
+/** Where nobody is mid-turn, so the listener can be swapped without losing words. */
+const RELISTEN_STATES: ReadonlySet<VoiceSessionState> = new Set(['listening', 'working', 'speaking', 'waiting_on_you', 'paused'])
+
+/** What a listener is opened with: a change to any of it needs a new one. */
+function listenerKey(s: VoiceSettings): string {
+  return JSON.stringify([s.sttProvider, s.stt, s.language, s.endOfTurnPatience])
+}
 /**
  * A connection that stayed up this long counts as recovered: the next drop
  * starts the backoff afresh. One that drops sooner carries on from where the
@@ -223,6 +234,9 @@ export class VoiceSession {
   private turnEnds: number[] = []
   private attempt = 0
   private reconnectTimer: unknown = null
+  /** What the listener was opened with (`listenerKey`), and the wait to open a new one once that changed. */
+  private listenedWith = ''
+  private relistenTimer: unknown = null
   private keepAliveTimer: unknown = null
   private pttDown = false
   /** Bumps on every (re)connect, so a stale listener's events are ignored. */
@@ -241,6 +255,10 @@ export class VoiceSession {
   private ackUses = 0
   /** The agent ended voice mode (app_control voice_end): it ends once the run's reply has been said. */
   private endWhenDone = false
+  /** Done once the run's reply has been heard (quit_app): the run is still going, or its reply still playing. */
+  private afterReply: Array<() => void> = []
+  private afterReplyArmed = false
+  private afterReplyCap: unknown = null
   /** Your turns sent to the task whose run isn't known yet, oldest first. */
   private unfollowed: string[] = []
   /** Turns whose run is followed: the window's later word on them changes nothing. */
@@ -318,6 +336,10 @@ export class VoiceSession {
           this.endWhenDone = false
           this.emitEvent({ kind: 'end_requested' })
         }
+        if (this.afterReply.length > 0) {
+          this.afterReplyArmed = true
+          this.runAfterReplyIfHeard()
+        }
       },
       speakProgress: () => this.deps.settings().speakProgress,
       quietCue: () => this.emitEvent({ kind: 'cue' }),
@@ -326,6 +348,30 @@ export class VoiceSession {
       setTimer: this.setTimer,
       clearTimer: this.clearTimer
     })
+  }
+
+  /**
+   * Do `fn` once the run's reply has been heard: quitting 1.5 s after the
+   * tool returned cut off the answer, which comes 1.4–4 s later (§27.8
+   * probes). Capped, so it is done even if the reply never plays.
+   */
+  private whenReplyHeard(fn: () => void): void {
+    this.afterReply.push(fn)
+    if (!this.reply.runActive) this.afterReplyArmed = true
+    if (!this.afterReplyCap) this.afterReplyCap = this.setTimer(() => this.flushAfterReply(), AFTER_REPLY_CAP_MS)
+    this.runAfterReplyIfHeard()
+  }
+
+  private runAfterReplyIfHeard(): void {
+    if (this.afterReplyArmed && this.playing.size === 0 && this.awaitingAudio.size === 0) this.flushAfterReply()
+  }
+
+  private flushAfterReply(): void {
+    if (this.afterReplyCap) this.clearTimer(this.afterReplyCap)
+    this.afterReplyCap = null
+    this.afterReplyArmed = false
+    const due = this.afterReply.splice(0)
+    for (const fn of due) fn()
   }
 
   /**
@@ -364,7 +410,8 @@ export class VoiceSession {
           if (this.reply.runActive) this.endWhenDone = true
           else this.emitEvent({ kind: 'end_requested' })
         },
-        setVoice: (name) => this.deps.setVoiceName?.(name) ?? Promise.resolve({ ok: false, message: 'Voices can’t be changed from here.' })
+        setVoice: (name) => this.deps.setVoiceName?.(name) ?? Promise.resolve({ ok: false, message: 'Voices can’t be changed from here.' }),
+        afterReply: (fn) => this.whenReplyHeard(fn)
       },
       screen: this.screen,
       muted: this.standby ? 'until_called' : this.stateValue === 'paused' ? 'until_unmuted' : null
@@ -446,6 +493,7 @@ export class VoiceSession {
     if (!this.awaitingAudio.delete(contextId) || this.stateValue === 'off') return
     this.deps.onUnheard?.()
     if (this.playing.size > 0 || this.awaitingAudio.size > 0) return
+    this.runAfterReplyIfHeard()
     if (this.stateValue === 'thinking') this.dispatch({ type: 'reply_done', runActive: this.reply.runActive })
     else if (this.stateValue === 'speaking') this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
   }
@@ -591,6 +639,7 @@ export class VoiceSession {
     const wasDucked = this.duck !== null
     if (wasDucked) this.endDuck()
     this.dispatch({ type: 'audio_done', runActive: this.reply.runActive })
+    this.runAfterReplyIfHeard()
     // The agent finished while you might have been talking: if you still are, it's your turn.
     if (wasDucked && this.pause.voicedMs > 0) this.onSpeechStart()
   }
@@ -651,6 +700,7 @@ export class VoiceSession {
       return
     }
     this.stt = session
+    this.listenedWith = listenerKey(settings)
     this.sttId = entry.id
     this.turnDetection = entry.caps.turnDetection
     this.listenerStreams = entry.caps.streaming
@@ -672,6 +722,48 @@ export class VoiceSession {
           }
         : {})
     })
+  }
+
+  /**
+   * Settings changed while voice mode is on. The pause it waits for applies at
+   * once; the listener was opened with its provider, model, language and
+   * patience, so it is opened again with the new ones once nobody is mid-turn.
+   * Before, "wait longer before I'm done" (Settings, or set_voice_options) was
+   * saved and said back as done, and changed nothing until voice mode restarted.
+   */
+  settingsChanged(): void {
+    if (this.stateValue === 'off' || this.stateValue === 'error') return
+    this.pause.setPatience(this.deps.settings().endOfTurnPatience)
+    if (!this.relistenTimer) this.relistenWhenQuiet()
+  }
+
+  private relistenWhenQuiet(): void {
+    this.relistenTimer = null
+    if (!this.stt || listenerKey(this.deps.settings()) === this.listenedWith) return
+    const quiet = RELISTEN_STATES.has(this.stateValue) && !this.pendingTurn && this.turnEnds.length === 0 && !this.overFloor
+    if (!quiet) {
+      this.relistenTimer = this.setTimer(() => this.relistenWhenQuiet(), RELISTEN_RETRY_MS)
+      return
+    }
+    void this.relisten()
+  }
+
+  private async relisten(): Promise<void> {
+    // The old listener's "closed" is ours, not a drop to reconnect from.
+    this.generation++
+    this.ctrl.abort()
+    const stale = this.stt
+    this.stt = null
+    void stale?.close()
+    try {
+      await this.connect()
+      // Changed again while it opened: once more, with those.
+      if (!this.relistenTimer) this.relistenWhenQuiet()
+    } catch (err) {
+      // It couldn't open with the new settings: the same as a dropped listener, tried again and said if it gives up.
+      this.lastDropReason = toVoiceError(err).message
+      this.beginReconnect()
+    }
   }
 
   /** Mic audio from the renderer. */
@@ -774,6 +866,8 @@ export class VoiceSession {
     this.generation++
     if (this.reconnectTimer) this.clearTimer(this.reconnectTimer)
     this.reconnectTimer = null
+    if (this.relistenTimer) this.clearTimer(this.relistenTimer)
+    this.relistenTimer = null
     this.stopKeepAlive()
     this.untap?.()
     this.untap = null
@@ -797,6 +891,8 @@ export class VoiceSession {
     this.screen = null
     this.standby = false
     this.endWhenDone = false
+    // Voice mode ended first: what waited on the reply is done now, never dropped.
+    this.flushAfterReply()
     this.unfollowed = []
     this.followedTurns.clear()
     this.dropPendingTurn()

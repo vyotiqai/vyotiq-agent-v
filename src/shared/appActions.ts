@@ -9,7 +9,8 @@
  * voice, placement) are here for the agent, and work while voice mode is on.
  */
 import { z } from 'zod'
-import { VOICE_ORB_LOOKS, VOICE_STYLES, VOICE_VIEW_LAYOUTS, VoiceEndOfTurnPatienceSchema } from './ipc/schemas/voice'
+import { VOICE_ORB_LOOKS, VOICE_PLACEMENTS, VOICE_STYLES, VOICE_VIEW_LAYOUTS, VoiceEndOfTurnPatienceSchema } from './ipc/schemas/voice'
+import { SkinIdSchema } from './skins'
 
 export const APP_VIEWS = ['home', 'settings', 'usage', 'inbox', 'scheduled', 'extensions', 'docs', 'whats_new', 'shortcuts'] as const
 export const APP_PANELS = ['terminal', 'changes', 'browser', 'files', 'plan', 'pr'] as const
@@ -44,7 +45,8 @@ export const APP_COMMANDS = [
   'import_task',
   'send_feedback'
 ] as const
-export const VOICE_PLACEMENT_NAMES = ['inline', 'companion', 'takeover', 'capsule', 'mini'] as const
+/** Voice mode's placements: Settings' own list, so one added there can be asked for. */
+export const VOICE_PLACEMENT_NAMES = VOICE_PLACEMENTS
 
 /** A task, by its run id or words from its title; empty is the task on screen. */
 const Task = z.string().trim().max(300).optional()
@@ -73,7 +75,7 @@ export const APP_ACTION_ARGS = {
   fork_task: z.object({ task: Task }),
   // ── Settings ────────────────────────────────────────────────────────────
   set_theme: z.object({ theme: z.enum(['system', 'light', 'dark']) }),
-  set_skin: z.object({ skin: z.enum(['native', 'default', 'proof', 'bench', 'gild']) }),
+  set_skin: z.object({ skin: SkinIdSchema }),
   set_tool_approvals: z.object({ mode: z.enum(['off', 'mutating', 'all']) }),
   set_model: z.object({ model: z.string().trim().min(1).max(200) }),
   set_task_model: z.object({ model: z.string().trim().min(1).max(200), task: Task }),
@@ -102,7 +104,9 @@ export const APP_ACTION_ARGS = {
     captions: z.boolean().optional(),
     sounds: z.boolean().optional(),
     progress: z.boolean().optional(),
-    hold_to_talk: z.boolean().optional()
+    hold_to_talk: z.boolean().optional(),
+    // ISO-639-1, or detect: "listen in Hindi" had nothing to call.
+    language: z.string().trim().toLowerCase().regex(/^(?:[a-z]{2}|detect)$/).optional()
   })
 } as const
 
@@ -144,7 +148,7 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   delete_task: { summary: 'Delete a task (it goes to Recently deleted).', runs: 'window', destructive: true },
   fork_task: { summary: 'Fork a stopped task: a copy to take another way, opened. The task on screen if none is named.', runs: 'window' },
   set_theme: { summary: 'Set the app theme: system, light or dark.', runs: 'main' },
-  set_skin: { summary: 'Set the app skin: native, default, proof, bench or gild.', runs: 'main' },
+  set_skin: { summary: `Set the app skin: ${SkinIdSchema.options.join(', ')}.`, runs: 'main' },
   set_tool_approvals: { summary: 'Tool approvals: off, mutating (ask before changes) or all (ask for every tool).', runs: 'main' },
   set_model: { summary: 'Set the model new tasks start with, from the models used recently or marked favourite. It does not change a task that exists; set_task_model does.', runs: 'main' },
   set_task_model: {
@@ -169,7 +173,7 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   set_voice_placement: { summary: `Where voice mode shows: ${VOICE_PLACEMENT_NAMES.join(', ')}.`, runs: 'main' },
   set_voice_options: {
     summary:
-      'The rest of Settings, Voice, any of: the orb’s look, the style (quiet or ambient, glass), the full-screen layout, how long it waits before you are done speaking, captions, sounds, spoken progress while it works, and hold to talk only.',
+      'The rest of Settings, Voice, any of: the orb’s look, the style (quiet or ambient, glass), the full-screen layout, how long it waits before you are done speaking, captions, sounds, spoken progress while it works, hold to talk only, and the language it listens for (a two-letter code such as en or hi, or detect).',
     runs: 'main'
   }
 }
