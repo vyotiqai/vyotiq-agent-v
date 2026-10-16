@@ -33,7 +33,9 @@ export type AppSnapshot = {
     theme?: string
   }
   /** Voice mode, when it is on. */
-  voice?: { placement: string; speed: number; muted?: 'until_called' | 'until_unmuted' } | null
+  voice?: { placement: string; speed: number; look?: string; style?: string; muted?: 'until_called' | 'until_unmuted' } | null
+  /** Settings this run set that someone else has changed since (appControl/setByAgent). */
+  changedSince?: Array<{ what: string; set: string; now: string }>
   /** The app's update, as the updater last knew it. */
   update?: { status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'; version?: string }
   /** The workspace's rules files, by name and first heading. */
@@ -107,7 +109,11 @@ export function formatAppContext(s: AppSnapshot): string {
   if (settings.length > 0) lines.push(`Settings: ${settings.join('; ')}.`)
   if (s.voice) {
     const muted = s.voice.muted === 'until_called' ? ', muted until called by name' : s.voice.muted === 'until_unmuted' ? ', muted' : ''
-    lines.push(`Voice mode is on, shown as ${s.voice.placement}${s.voice.speed !== 1 ? ` at ${s.voice.speed} times speed` : ''}${muted}.`)
+    lines.push(`Voice mode is on, shown as ${s.voice.placement}${s.voice.look ? ` with the ${s.voice.look} orb` : ''}${s.voice.style ? `, ${s.voice.style} style` : ''}${s.voice.speed !== 1 ? ` at ${s.voice.speed} times speed` : ''}${muted}.`)
+  }
+  if (s.changedSince?.length) {
+    const changes = s.changedSince.map((c) => `${c.what} is ${c.now} now (you set ${c.set})`)
+    lines.push(`Changed since you set it, by the person or another task, not by you: ${changes.join('; ')}. Say so; don’t set it back unless they ask.`)
   }
   if (s.update) lines.push(`Update: ${UPDATE_WORDS[s.update.status]}${s.update.version && s.update.status !== 'not-available' ? ` (version ${s.update.version})` : ''}.`)
   if (s.rules.length > 0) lines.push(`Project rules the agent follows: ${s.rules.slice(0, MAX_HEADLINES).join('; ')}.`)

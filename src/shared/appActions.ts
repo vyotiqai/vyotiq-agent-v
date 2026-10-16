@@ -9,6 +9,7 @@
  * voice, placement) are here for the agent, and work while voice mode is on.
  */
 import { z } from 'zod'
+import { VOICE_ORB_LOOKS, VOICE_STYLES, VOICE_VIEW_LAYOUTS, VoiceEndOfTurnPatienceSchema } from './ipc/schemas/voice'
 
 export const APP_VIEWS = ['home', 'settings', 'usage', 'inbox', 'scheduled', 'extensions', 'docs', 'whats_new', 'shortcuts'] as const
 export const APP_PANELS = ['terminal', 'changes', 'browser', 'files', 'plan', 'pr'] as const
@@ -91,7 +92,18 @@ export const APP_ACTION_ARGS = {
   voice_end: z.object({}),
   set_voice_speed: z.object({ speed: z.number().min(0.5).max(2) }),
   set_voice: z.object({ voice: z.string().trim().min(1).max(100) }),
-  set_voice_placement: z.object({ placement: z.enum(VOICE_PLACEMENT_NAMES) })
+  set_voice_placement: z.object({ placement: z.enum(VOICE_PLACEMENT_NAMES) }),
+  // "Orb to cloud" (2026-10-16 kept conversation) had nothing to call: the rest of Settings, Voice.
+  set_voice_options: z.object({
+    look: z.enum(VOICE_ORB_LOOKS).optional(),
+    style: z.enum(VOICE_STYLES).optional(),
+    layout: z.enum(VOICE_VIEW_LAYOUTS).optional(),
+    patience: VoiceEndOfTurnPatienceSchema.optional(),
+    captions: z.boolean().optional(),
+    sounds: z.boolean().optional(),
+    progress: z.boolean().optional(),
+    hold_to_talk: z.boolean().optional()
+  })
 } as const
 
 export type AppActionName = keyof typeof APP_ACTION_ARGS
@@ -154,7 +166,12 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   voice_end: { summary: 'End voice mode, once what you are saying has been heard.', runs: 'main' },
   set_voice_speed: { summary: 'How fast the voice speaks, 0.5 to 2 (1 is normal).', runs: 'main' },
   set_voice: { summary: 'Speak in another voice, by its name.', runs: 'main' },
-  set_voice_placement: { summary: `Where voice mode shows: ${VOICE_PLACEMENT_NAMES.join(', ')}.`, runs: 'main' }
+  set_voice_placement: { summary: `Where voice mode shows: ${VOICE_PLACEMENT_NAMES.join(', ')}.`, runs: 'main' },
+  set_voice_options: {
+    summary:
+      'The rest of Settings, Voice, any of: the orb’s look, the style (quiet or ambient, glass), the full-screen layout, how long it waits before you are done speaking, captions, sounds, spoken progress while it works, and hold to talk only.',
+    runs: 'main'
+  }
 }
 
 export const APP_ACTION_NAMES = Object.keys(APP_ACTIONS) as AppActionName[]

@@ -29,6 +29,30 @@ export function voiceSessionsOn(workspacePath: string): string[] {
   return [...active].filter(([, p]) => p === want).map(([id]) => id)
 }
 
+type SpokenTurnState = (runId: string, workspacePath: string) => Promise<string>
+let spokenTurnState: SpokenTurnState | null = null
+
+/** The app as it is now, read for each step of a spoken turn (appControl's app_status registers it). */
+export function onSpokenTurnState(fn: SpokenTurnState | null): void {
+  spokenTurnState = fn
+}
+
+/**
+ * The app as it is now, for a step of a spoken turn; empty when nothing
+ * reads it or the read fails. 2026-10-16 probe: asked which orb it used, the
+ * agent said "cloud" from memory of setting it, after it had been changed to
+ * pearl. Told to read the app first, it still didn't; given the app, it can't
+ * be stale.
+ */
+export async function spokenTurnStateText(runId: string, workspacePath: string): Promise<string> {
+  if (!spokenTurnState) return ''
+  try {
+    return await spokenTurnState(runId, workspacePath)
+  } catch {
+    return ''
+  }
+}
+
 type SpokenTurnListener = (runId: string, workspacePath: string) => void
 let spokenTurnListener: SpokenTurnListener | null = null
 

@@ -2628,3 +2628,29 @@ Steps took 1.4–2.2 s (were 4.2–8.5 s). The theme read back `light`; the
 update question was answered from `check_update` ("only works in an installed
 build"). `ACK_MS` went from 2.5 to 4 s, since the line now came half a second
 before the answer.
+
+### 27.8 Second pass: the live log, the kept conversation and probes (2026-10-16)
+
+Your log has no `Voice follows the run its turn started` line, which only
+§27's code writes: your app never ran it. Your last session (08:24–09:47
+local) ran the old design and the app was closed at 10:35. That session's
+kept conversation and run `fb8b6636`, and probes of the new build on a copy of
+your profile (port 9444, recorded sentences as the mic), found:
+
+| Found | Evidence | Fixed |
+| --- | --- | --- |
+| "Orb to cloud" had no action to call | 04:15 UTC turn; `cloud` is in `VOICE_ORB_LOOKS`, no app action set it | `set_voice_options`: orb, style, layout, patience, captions, sounds, spoken progress, hold to talk. `app_status` says the orb and style |
+| A voice "log these issues" ran 10.5 minutes | `fb8b6636`: ISSUES.md written in 12 s, then the verification gate asked for a check; `diagnostics` lint killed at 120 s, then `pnpm run lint` took 6 min 17 s | Prose (`.md`, `.mdx`, `.markdown`, `.txt`, `.rst`, `.adoc`) no longer asks for a check, in the live gate and the receipt alike (`isProseEditPath`). Probe: `voiceprobe.txt` made and answered in 3.1 s, no lint |
+| `%APPDATA%\vyotiq\logs\vyotiq.log` read as a workspace path | the run wrote the path that way; `open_path` resolved it under the workspace | `open_path` and `reveal_path` read `%VAR%`, `$env:VAR` and `~` |
+| Asked which orb it used, it said one it had set, after the orb had been changed | probe: said "cloud", setting was `pearl`; a stricter rule alone still failed | Each step of a spoken turn gets the app as it is now, in the request's volatile tail (the cache before it holds) |
+| Shown the change, it set the orb back unasked and gave a made-up reason | 2 probe runs in 3: "my earlier change didn't stick", "the status I read was stale" | Each run's own settings changes are remembered (`setByAgent`); `app_status` says what was changed since, not by it. Then 3 runs in 3: said `pearl`, said someone else changed it, left it |
+| Two spoken lines ran together | probe: "Setting the voice orb to cloud now.The orb is now set" | A spoken block's last sentence goes when the block closes, not at the next step |
+| "What are you doing right now?" while a command ran went unheard | probe: answered on screen ("I'm waiting on the 15-second sleep command") with no `<spoken>` block, so nothing was said until the run ended | After a spoken follow-up, the next message with words is said even without a block. Probe: answered out loud 1.7 s after the question |
+| A command cut short by a spoken question read as a timeout | probe: a 15 s sleep came back at 7 s as `status: timeout`, `exit_code: -1`; the agent said it "hit my 60-second wait limit" | A wait ended by a new message says `status: running` and that it stopped early for the user's message |
+
+"Stop." while a command ran stopped the run in the same second (`status cancelled`).
+
+Not verified: what showed "cancelled" on your screen at 03:50 UTC. The run's
+events show it running then (invokeId 9), and the logs don't show what was on
+screen. The agent can't read the app's own data folder (its guard refused the
+log read); that guard was left as it is.

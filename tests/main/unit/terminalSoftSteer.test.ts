@@ -68,6 +68,9 @@ describe('background terminal vs soft steer', () => {
       signal: tool, lifetimeSignal: run.signal, blockUntilMs: 15_000, killOnTimeout: true
     })
     expect(started).not.toMatch(/exit_code: 124/)
+    // Not "timeout": a spoken question cut a 15 s sleep at 7 s and the agent said it "hit my 60-second wait limit" (2026-10-16 probe).
+    expect(started).toMatch(/status: running/)
+    expect(started).toMatch(/the wait stopped early for a new message from the user/)
     const polled = await pollTerminalSession({
       runId: 'r', invokeId: 1, sessionId: sessionIdOf(started), blockUntilMs: 0,
       signal: new AbortController().signal, runSignal: run.signal

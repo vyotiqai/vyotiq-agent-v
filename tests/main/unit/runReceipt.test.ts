@@ -10,6 +10,7 @@ import {
   RUN_RECEIPT_FILENAME,
   RUN_RECEIPT_VERSION
 } from '@main/agent/runReceipt'
+import { isProseEditPath } from '@main/agent/loopPolicy'
 import { RunReceiptSchema } from '@shared/ipc'
 import type { ChatMessage, PersistedEvent, RunStatus } from '@shared/ipc'
 
@@ -1227,6 +1228,27 @@ describe('runReceipt', () => {
     const flush = (min: number, files: Array<Record<string, unknown>>, undone = false) => ({
       at: at(min),
       event: { type: 'writes_checkpoint', runId: 'r', checkpointId: 'cp', files, ...(undone ? { undone: true } : {}) }
+    })
+
+    it('does not ask for a check after prose: ISSUES.md took 10 minutes of lints in run fb8b6636 (2026-10-16)', () => {
+      const prose = receipt([edit(0, 'ISSUES.md'), flush(1, [{ path: 'ISSUES.md', action: 'created', undoable: true, recordedAt: at(0) }])])
+      expect(prose.verification).toBeUndefined()
+      // Code then prose: the code's check still counts, and the prose doesn't make it stale.
+      const r = receipt([
+        edit(0),
+        result(1, 'diagnostics', true, 'command: tsc\n\n(no output)'),
+        edit(2, 'docs/notes.md'),
+        flush(3, [
+          { path: 'src/a.ts', action: 'modified', undoable: true, recordedAt: at(0) },
+          { path: 'docs/notes.md', action: 'modified', undoable: true, recordedAt: at(2) }
+        ])
+      ])
+      expect(r.verification).toMatchObject({ lastMutationAt: at(0), verifiedAfterLastMutation: true })
+      expect(isProseEditPath('README.MD')).toBe(true)
+      expect(isProseEditPath('notes.txt')).toBe(true)
+      expect(isProseEditPath('src/a.ts')).toBe(false)
+      expect(isProseEditPath('src/md.ts')).toBe(false)
+      expect(isProseEditPath(undefined)).toBe(false)
     })
 
     it('dates a non-edit re-write of an already-written path by lastMutatedAt', () => {

@@ -99,6 +99,12 @@ describe('the app, as the voice reads it', () => {
     expect(text).toContain('2 messages are queued on it, given to it at its next step.')
     expect(text).toContain('Voice mode is on, shown as takeover at 1.25 times speed, muted until called by name.')
     expect(text).toContain('Update: one is out and not downloaded (version 1.4.0).')
+    expect(formatAppContext({ ...base, voice: { placement: 'capsule', speed: 1, look: 'cloud', style: 'ambient' } })).toContain(
+      'Voice mode is on, shown as capsule with the cloud orb, ambient style.'
+    )
+    expect(formatAppContext({ ...base, changedSince: [{ what: 'the orb', set: 'cloud', now: 'pearl' }] })).toContain(
+      'Changed since you set it, by the person or another task, not by you: the orb is pearl now (you set cloud). Say so; don’t set it back unless they ask.'
+    )
     expect(formatAppContext({ ...base, update: { status: 'not-available', version: '1.4.0' } })).toContain('Update: none, this is the newest.')
     expect(formatAppContext(base)).not.toMatch(/Voice mode|Update:|queued/)
   })

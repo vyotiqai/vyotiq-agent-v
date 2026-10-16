@@ -387,6 +387,18 @@ export function isRunArtifactEditPath(pathArg: string | undefined): boolean {
 }
 
 /**
+ * Prose, not code: no test, typecheck or lint proves an edit to it, so it
+ * doesn't ask for a check. Run fb8b6636 (2026-10-16) wrote ISSUES.md in 12 s
+ * when asked by voice, then spent 10 minutes on two full-repo lints the gate
+ * asked for.
+ */
+const PROSE_EDIT_RE = /\.(?:md|mdx|markdown|txt|rst|adoc)$/i
+
+export function isProseEditPath(pathArg: string | undefined): boolean {
+  return !!pathArg && PROSE_EDIT_RE.test(pathArg.trim())
+}
+
+/**
  * Paths that count as “seen”: `read`, concrete `grep` include / `glob` pattern
  * (no wildcards), `search` hit paths, or `codebase_search` hit paths from tool result text.
  */

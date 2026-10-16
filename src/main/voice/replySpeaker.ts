@@ -98,6 +98,10 @@ export function cueForTool(name: string, summary: string): string | null {
 
 export class ReplySpeaker {
   private parser = new SpokenStreamParser()
+  /** This step's spoken block closed and its last sentence was let go. */
+  private blockClosed = false
+  /** They spoke while it worked: its next message answers them, out loud. */
+  private owesAnswer = false
   private stepText = ''
   private reply: Reply | null = null
   private quiet = false
@@ -171,6 +175,7 @@ export class ReplySpeaker {
         this.stepText += ev.text
         const spoken = this.parser.push(ev.text)
         if (spoken && !this.heard) this.speak(spoken)
+        this.closeBlock()
         return
       }
       case 'error':
@@ -179,6 +184,7 @@ export class ReplySpeaker {
       case 'follow_up_applied':
         // A follow-up is a new turn inside the same run: its answer is said.
         this.heard = false
+        this.owesAnswer = ev.messages.some((m) => m.role === 'user' && m.spoken === true)
         return
       case 'stream_reset':
         // What was said can't be unsaid; what wasn't, won't be.
@@ -196,7 +202,20 @@ export class ReplySpeaker {
       case 'assistant_message': {
         const tail = this.parser.end()
         if (tail && !this.heard) this.speak(tail)
+        this.closeBlock()
         const final = !ev.toolCalls || ev.toolCalls.length === 0
+        if (!final && this.owesAnswer && !this.heard && this.parser.phase === 'absent') {
+          // The answer to what they said while it worked, written without a <spoken> block:
+          // said anyway. 2026-10-16 probe: "What are you doing right now?" was answered on
+          // screen ("I'm waiting on the 15-second sleep command") and never out loud.
+          const summary = fallbackSummary(ev.content ?? '')
+          if (summary) {
+            this.speak(`${summary} `)
+            this.owesAnswer = false
+          }
+        }
+        // Answered in a block, or the final answer (said or summarised as ever); a bare tool call answers nothing.
+        if (final || this.parser.phase === 'after') this.owesAnswer = false
         if (final) {
           const answer = ev.content || this.stepText
           // Already said this turn: this one only replaces the result.
@@ -336,8 +355,21 @@ export class ReplySpeaker {
     this.cueTimers.clear()
   }
 
+  /**
+   * The step's spoken block just closed: its last sentence is complete, so it
+   * goes now. Left in the splitter it waited for the next step's block and ran
+   * into it ("Setting the voice orb to cloud now.The orb is now set", 2026-10-16
+   * probe), heard late and as one sentence.
+   */
+  private closeBlock(): void {
+    if (this.blockClosed || this.parser.phase !== 'after') return
+    this.blockClosed = true
+    if (!this.heard) this.speak(' ')
+  }
+
   private resetStep(): void {
     this.parser = new SpokenStreamParser()
     this.stepText = ''
+    this.blockClosed = false
   }
 }

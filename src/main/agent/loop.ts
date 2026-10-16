@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { voiceReplyWanted } from '../voice/voiceReply'
+import { spokenTurnStateText, voiceReplyWanted } from '../voice/voiceReply'
 import type {
   AgentEvent,
   AgentInteractionMode,
@@ -2738,6 +2738,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // values without a second sync read per step.
       const stepTodos = readTodos(runDir)
       const stepGoal = isInlineInstance ? null : readGoal(runDir)
+      const spokenAppState = spokenTurn ? await spokenTurnStateText(runId, toolWorkspace) : ''
       const assembleBase = {
         harness,
         messages,
@@ -2748,7 +2749,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         goal,
         ...promptArtifactFields(artifacts),
         // Added folders are per task: the volatile zone, beside the session block.
-        sessionEnv: [buildSessionEnvSection(settings.terminalShell), formatExtraRootsSection(runExtraRoots)]
+        // A spoken turn also gets the app as it is now, at the request's tail (the volatile zone), so the cache before it holds.
+        // First, so the section's budget cap never cuts it.
+        sessionEnv: [spokenAppState, buildSessionEnvSection(settings.terminalShell), formatExtraRootsSection(runExtraRoots)]
           .filter(Boolean)
           .join('\n\n'),
         model: modelInfo,

@@ -17,7 +17,7 @@ import {
   toolArgsFromCall,
   unreadExistingEditPaths
 } from './loopPolicy'
-import { isFileMutationToolName, isRunArtifactEditPath } from './loopPolicy'
+import { isFileMutationToolName, isProseEditPath, isRunArtifactEditPath } from './loopPolicy'
 import { looksLikeWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 import { parseDiagnosticLines } from './tools/diagnostics'
 import { parseTestResultHeader, parseTestSummary } from './tools/runTests'
@@ -388,6 +388,8 @@ function checkpointMutationAt(
 ): string | undefined {
   if (!Array.isArray(files) || files.length === 0) return flushedAt
   let latest: string | undefined
+  // Every file was prose or build output: no write a check could prove (isProseEditPath).
+  let noneCounts = true
   for (const file of files as Array<{
     path?: unknown
     recordedAt?: unknown
@@ -397,7 +399,9 @@ function checkpointMutationAt(
     if (typeof file?.path === 'string') {
       const path = normalizeWorkspaceRelPath(file.path)
       if (!path || isBuildOutputRelPath(path)) continue
+      if (isProseEditPath(path)) continue
     }
+    noneCounts = false
     let at: string | undefined
     if (undone && file?.resolved === 'discarded') at = flushedAt
     else if (typeof file?.lastMutatedAt === 'string') at = file.lastMutatedAt
@@ -405,6 +409,7 @@ function checkpointMutationAt(
     if (at == null) continue
     latest = laterIso(latest, at)
   }
+  if (noneCounts) return undefined
   return latest ?? flushedAt
 }
 
@@ -477,6 +482,7 @@ function verificationFromEvents(
       ev.name &&
       isFileMutationToolName(ev.name) &&
       !isRunArtifactEditPath(typeof ev.summary === 'string' ? ev.summary : undefined) &&
+      !isProseEditPath(typeof ev.summary === 'string' ? ev.summary : undefined) &&
       row.at
     ) {
       lastMutationAt = laterIso(lastMutationAt, row.at)

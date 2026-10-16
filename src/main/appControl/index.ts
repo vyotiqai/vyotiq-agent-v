@@ -40,6 +40,8 @@ import { chooseModel, resolveTtsProvider, ttsEntry } from '../../shared/voice'
 import { voiceKeyAvailability } from '../voice/keys'
 import { speechModelRefusedSpeed } from '../voice/providers/tts/openaiSpeech'
 import { voiceLinkForRun } from './voiceLink'
+import { onSpokenTurnState } from '../voice/voiceReply'
+import { settingsChangedSince } from './setByAgent'
 
 export { settleWindowAction, setWindowActionChannel, type AppActionResult, type AppActionContext } from './runner'
 
@@ -159,6 +161,9 @@ function runState(runId: string, workspacePath: string): { title: string; state:
  * The app as it is now, for app_status (src/main/voice/appContext.ts). Each
  * part is read on its own: one that fails is left out, never the whole picture.
  */
+// Each step of a spoken turn is given the app as it is (§27): the agent can't answer from a stale memory.
+onSpokenTurnState((runId, workspacePath) => appStatus(runId, workspacePath))
+
 export async function appStatus(runId: string | null, workspaceHint: string | null): Promise<string> {
   const settings = getSettings()
   const workspacePath = (runId ? getRunWorkspace(runId) : undefined) ?? workspaceHint ?? getWorkspaces().activePath ?? null
@@ -177,7 +182,8 @@ export async function appStatus(runId: string | null, workspaceHint: string | nu
       ...(settings.toolApproval?.mode ? { approvals: APPROVAL_WORDS[settings.toolApproval.mode] } : {}),
       ...(settings.theme ? { theme: settings.theme } : {})
     },
-    voice: voiceSession ? { placement: voice.placement, speed: voice.speed, ...(voiceSession.muted ? { muted: voiceSession.muted } : {}) } : null,
+    voice: voiceSession ? { placement: voice.placement, speed: voice.speed, look: voice.orbLook, style: voice.style, ...(voiceSession.muted ? { muted: voiceSession.muted } : {}) } : null,
+    changedSince: settingsChangedSince(runId, settings),
     update: { status: update.status, ...(update.info?.version ? { version: update.info.version } : {}) },
     rules: [],
     memory: []

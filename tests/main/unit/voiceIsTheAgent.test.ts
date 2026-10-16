@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ToolApprovalRequest } from '@shared/ipc'
 import { commitsOrPushes, createApprovalGate, registerApprovalSender, resetToolApprovalForTests, resolveToolApproval } from '@main/agent/toolApproval'
 import { VOICE_REPLY_TEXT } from '@main/agent/context/userRules'
-import { isVoiceFollowedRun, setVoiceFollowedRun } from '@main/voice/voiceReply'
+import { isVoiceFollowedRun, onSpokenTurnState, setVoiceFollowedRun, spokenTurnStateText } from '@main/voice/voiceReply'
 import { spokenTurnThinking } from '@main/agent/loopPolicy'
 
 describe('the agent, on a spoken turn', () => {
@@ -17,6 +17,11 @@ describe('the agent, on a spoken turn', () => {
     expect(VOICE_REPLY_TEXT).toContain('There is no separate voice and no other agent')
     expect(VOICE_REPLY_TEXT).toContain('Never say you will hand something off')
     expect(VOICE_REPLY_TEXT).toContain('Say a thing is done only once a tool result shows it')
+    // 2026-10-16 probe: asked which orb it used, it answered from memory of setting it, without reading the app.
+    expect(VOICE_REPLY_TEXT).toContain('even what you set yourself earlier')
+    // The next probe: shown pearl, it set cloud again unasked and said "the status I read was stale".
+    expect(VOICE_REPLY_TEXT).toContain('the person changed it since: say what it is now and never set it back unless they ask')
+    expect(VOICE_REPLY_TEXT).toContain('Don’t invent a reason for anything'.replace('’', "'"))
   })
 
   it('knows a task’s model from the model new tasks start with, and has the app’s actions without a lookup', () => {
@@ -27,6 +32,23 @@ describe('the agent, on a spoken turn', () => {
 
   it('answers you between its steps when you speak while it works', () => {
     expect(VOICE_REPLY_TEXT).toContain('answer them first, in a short <spoken> block at the start of your next message')
+  })
+})
+
+describe('the app as it is, on each step of a spoken turn (2026-10-16 probe: "cloud" said from memory, the orb was pearl)', () => {
+  afterEach(() => onSpokenTurnState(null))
+
+  it('reads it fresh for each step, and is empty when nothing reads it or the read fails', async () => {
+    expect(await spokenTurnStateText('r1', 'C:/work')).toBe('')
+    let look = 'cloud'
+    onSpokenTurnState(async (runId, ws) => `(The app right now:) ${runId} ${ws} orb ${look}`)
+    expect(await spokenTurnStateText('r1', 'C:/work')).toBe('(The app right now:) r1 C:/work orb cloud')
+    look = 'pearl'
+    expect(await spokenTurnStateText('r1', 'C:/work')).toContain('orb pearl')
+    onSpokenTurnState(async () => {
+      throw new Error('no window')
+    })
+    expect(await spokenTurnStateText('r1', 'C:/work')).toBe('')
   })
 })
 

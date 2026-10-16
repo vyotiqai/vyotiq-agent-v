@@ -78,11 +78,48 @@ describe('ReplySpeaker', () => {
     // A word split across deltas ("pa" + "ss") must come out whole.
     for (const piece of ['<spo', 'ken>I fixed the race. ', 'Tests pa', 'ss now.</spo', 'ken>\n\n## Details\nlong text'])
       h.speaker.handle(delta(piece))
-    expect(h.said).toEqual(['I fixed the race.'])
+    // The block closed: its last sentence is complete and goes at once, not at the final message.
+    expect(h.said).toEqual(['I fixed the race.', 'Tests pass now.'])
     h.speaker.handle(final('<spoken>I fixed the race. Tests pass now.</spoken>\n\n## Details\nlong text'))
     expect(h.said).toEqual(['I fixed the race.', 'Tests pass now.'])
     expect(h.streams).toHaveLength(1)
     expect(h.streams[0]!.spoken).toEqual(['I fixed the race.', 'Tests pass now.'])
+  })
+
+  it('a step’s spoken line goes when its block closes, never glued to the next step’s (2026-10-16 probe: "cloud now.The orb")', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    for (const piece of ['<spoken>Setting the voice orb to cloud now.', '</spoken>']) h.speaker.handle(delta(piece))
+    // Said before the step's tools run, not held for the next step.
+    expect(h.said).toEqual(['Setting the voice orb to cloud now.'])
+    h.speaker.handle(narration('<spoken>Setting the voice orb to cloud now.</spoken>'))
+    for (const piece of ['<spoken>The orb is now set to cloud, ', 'so you should see it change.</spoken> Done.']) h.speaker.handle(delta(piece))
+    h.speaker.handle(final('<spoken>The orb is now set to cloud, so you should see it change.</spoken> Done.'))
+    expect(h.said).toEqual(['Setting the voice orb to cloud now.', 'The orb is now set to cloud, so you should see it change.'])
+  })
+
+  it('says the answer to what they asked mid-work even without a <spoken> block (2026-10-16 probe: "What are you doing right now?")', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    for (const piece of ['<spoken>Running it now.', '</spoken>']) h.speaker.handle(delta(piece))
+    h.speaker.handle(narration('<spoken>Running it now.</spoken>'))
+    const asked = { type: 'follow_up_applied', runId: R, ids: ['f1'], messages: [{ role: 'user', content: 'What are you doing right now?', spoken: true }] } as AgentEvent
+    h.speaker.handle(asked)
+    // A bare tool call answers nothing: still owed.
+    h.speaker.handle(narration(''))
+    h.speaker.handle(narration('I’m waiting on the 15-second sleep command. It should finish in a few seconds.'))
+    expect(h.said.slice(1)).toEqual(['I’m waiting on the 15-second sleep command.', 'It should finish in a few seconds.'])
+    // Owed once: the next narration isn't read out.
+    h.speaker.handle(narration('Checking the session again.'))
+    expect(h.said).toHaveLength(3)
+  })
+
+  it('a typed follow-up mid-work owes nothing out loud', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    h.speaker.handle({ type: 'follow_up_applied', runId: R, ids: ['f1'], messages: [{ role: 'user', content: 'also check the docs' }] } as AgentEvent)
+    h.speaker.handle(narration('Checking the docs too.'))
+    expect(h.said).toEqual([])
   })
 
   it('falls back to a short summary when the answer has no <spoken> block and no voice can report it', () => {

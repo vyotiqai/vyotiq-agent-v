@@ -770,6 +770,12 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
     }
     // Timed out waiting; leave process running for further polls.
     opts.onStillRunning?.(session.id)
+    // A steer is a new message, not the wait expiring: called "timeout", a
+    // 15-second sleep cut off at 7 s by a spoken question read as "hit my
+    // 60-second wait limit" to the agent (2026-10-16 probe).
+    if (steered) {
+      return `${formatSession({ ...session, status: 'running' })}\nnote: still running; the wait stopped early for a new message from the user. Poll this session_id for its result.`
+    }
     return formatSession({ ...session, status: 'timeout' })
   }
   return formatSession(session)

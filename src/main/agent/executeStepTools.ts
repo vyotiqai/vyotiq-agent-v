@@ -26,6 +26,7 @@ import {
   editPathsFromToolCall,
   isFileMutationToolName,
   isInspectToolName,
+  isProseEditPath,
   isRunArtifactEditPath,
   readPathFromToolCall,
   toolArgsFromCall,
@@ -660,7 +661,7 @@ async function runSingleTool(
       // `content`, not `result.content`: this is the text that gets persisted,
       // so the live verdict reads exactly what the receipt will re-read later.
       const editPath = editTargetPath(call.name, toolArgs)
-      if (isFileMutationToolName(call.name) && !isRunArtifactEditPath(editPath)) {
+      if (isFileMutationToolName(call.name) && !isRunArtifactEditPath(editPath) && !isProseEditPath(editPath)) {
         ctx.verification.noteMutation(editPath, result.ok)
       }
       // Writes this call made through anything but an edit tool — a terminal

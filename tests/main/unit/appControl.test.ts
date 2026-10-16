@@ -17,8 +17,9 @@ import {
   parseAppActionArgs,
   type AppWindowAction
 } from '@shared/appActions'
-import { contextAtHome, findTask, findWorkspace, runAppAction, settleWindowAction, type AppControlDeps } from '@main/appControl/runner'
+import { contextAtHome, expandPathVars, findTask, findWorkspace, runAppAction, settleWindowAction, type AppControlDeps } from '@main/appControl/runner'
 import { isApprovalExemptTool } from '@main/agent/tools/classify'
+import { resetSettingsSetForTests, settingsChangedSince } from '@main/appControl/setByAgent'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -269,6 +270,17 @@ describe('running them', () => {
     expect((await runAppAction(d, 'open_path', { path: 'setup.exe' }, at)).message).toBe('setup.exe is a program; it isn’t opened from here.')
     expect((await runAppAction(d, 'open_path', { path: 'missing.txt' }, at)).ok).toBe(false)
     expect(opened).toEqual([join(dir, 'notes.md')])
+    // The path as the agent wrote it (run fb8b6636): %VAR% and $env:VAR are read as a shell would.
+    vi.stubEnv('VY_TEST_LOGS', dir)
+    expect(await runAppAction(d, 'open_path', { path: '%VY_TEST_LOGS%\\notes.md' }, at)).toEqual({ ok: true, message: 'Opened notes.md.' })
+    expect((await runAppAction(d, 'open_path', { path: '$env:VY_TEST_LOGS/notes.md' }, at)).ok).toBe(true)
+    vi.unstubAllEnvs()
+    expect(expandPathVars('%NOT_A_VAR_HERE%\\x.log', {})).toBe('%NOT_A_VAR_HERE%\\x.log')
+    expect(expandPathVars('~/x.log', {}, 'C:/Users/me')).toBe('C:/Users/me/x.log')
+    expect(expandPathVars('~\\x.log', {}, 'C:\\Users\\me')).toBe('C:\\Users\\me\\x.log')
+    expect(expandPathVars('~other/x.log', {}, 'C:/Users/me')).toBe('~other/x.log')
+    expect(expandPathVars('%appdata%\\vyotiq', { APPDATA: 'C:\\Users\\me\\AppData\\Roaming' })).toBe('C:\\Users\\me\\AppData\\Roaming\\vyotiq')
+    opened.splice(0)
     expect((await runAppAction(d, 'open_url', { url: 'file:///C:/Windows/system32/calc.exe' }, at)).ok).toBe(false)
     expect(await runAppAction(d, 'open_url', { url: 'https://example.com/docs' }, at)).toEqual({ ok: true, message: 'Opened example.com.' })
     expect(urls).toEqual(['https://example.com/docs'])
@@ -323,6 +335,47 @@ describe('running them', () => {
     expect(r.ok).toBe(false)
     expect(r.message).toContain('can’t change its speed')
     expect(refuses.patches).toEqual([{ voice: { speed: 1.25 } }])
+  })
+
+  it('sets the rest of Settings, Voice (2026-10-16 kept conversation: "Orb to cloud" had nothing to call)', async () => {
+    const settings: Record<string, unknown> = { voice: { placement: 'capsule' } }
+    const d = deps({ settings: () => settings })
+    expect(await runAppAction(d, 'set_voice_options', { look: 'cloud' }, voice)).toEqual({ ok: true, message: 'Set: the orb is cloud.' })
+    expect(d.patches).toEqual([{ voice: { placement: 'capsule', orbLook: 'cloud' } }])
+    expect(await runAppAction(d, 'set_voice_options', { style: 'ambient', captions: false, sounds: false, progress: true, hold_to_talk: true, patience: 'patient', layout: 'orb' }, voice)).toEqual({
+      ok: true,
+      message:
+        'Set: the style is ambient, the layout is orb, it waits longer before you’re done, captions are off, sounds are off, progress is spoken, it listens only while you hold to talk.'
+    })
+    expect(d.patches[1]).toEqual({
+      voice: { placement: 'capsule', style: 'ambient', viewLayout: 'orb', endOfTurnPatience: 'patient', captions: false, earcons: false, speakProgress: true, pushToTalkOnly: true }
+    })
+    expect(await runAppAction(d, 'set_voice_options', {}, voice)).toEqual({ ok: false, message: 'I couldn’t do that: no voice option was named.' })
+    expect(await runAppAction(d, 'set_voice_options', { look: 'smoke' }, voice)).toMatchObject({ ok: false, message: expect.stringContaining('look has to be sphere or glow') })
+    expect(describeAppActions()).toContain('set_voice_options {look?: sphere|glow|pearl|aura|wire|cloud')
+  })
+
+  it('remembers what a run set, so a change made since by someone else is told apart (2026-10-16 probe: it set cloud back twice)', async () => {
+    resetSettingsSetForTests()
+    let store: Record<string, unknown> = { theme: 'dark', voice: { placement: 'capsule', orbLook: 'wire' } }
+    const d = deps({
+      settings: () => store,
+      patchSettings: async (p) => {
+        store = { ...store, ...p }
+      }
+    })
+    await runAppAction(d, 'set_voice_options', { look: 'cloud' }, voice)
+    expect(settingsChangedSince('r1', store)).toEqual([])
+    // Changed the way the person would, in Settings.
+    store = { ...store, voice: { ...(store.voice as object), orbLook: 'pearl' } }
+    expect(settingsChangedSince('r1', store)).toEqual([{ what: 'the orb', set: 'cloud', now: 'pearl' }])
+    // Another run set nothing; what it didn't touch isn't reported, nor is the theme nobody set.
+    expect(settingsChangedSince('r9', store)).toEqual([])
+    store = { ...store, theme: 'light' }
+    expect(settingsChangedSince('r1', store)).toHaveLength(1)
+    // Set again by this run: nothing to tell.
+    await runAppAction(d, 'set_voice_options', { look: 'pearl' }, voice)
+    expect(settingsChangedSince('r1', store)).toEqual([])
   })
 
   it('checks for an update when asked, and says where it can’t (2026-10-16 probe: "I don’t have a way to run that check")', async () => {

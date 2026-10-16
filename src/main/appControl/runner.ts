@@ -10,6 +10,7 @@
  */
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
+import { homedir } from 'os'
 import { basename, extname, isAbsolute, resolve } from 'path'
 import type { WebContents } from 'electron'
 import {
@@ -21,6 +22,7 @@ import {
   type AppWindowActionResult
 } from '../../shared/appActions'
 import { workspacePathsEqual } from '../../shared/workspacePathMatch'
+import { rememberSettingsSet } from './setByAgent'
 import type { ChatMessage } from '../../shared/ipc'
 
 export type AppActionResult = { ok: boolean; message: string; runId?: string }
@@ -96,6 +98,18 @@ const PROGRAM_EXT = new Set([
   '.exe', '.com', '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.msi', '.msp', '.scr',
   '.lnk', '.reg', '.jar', '.sh', '.command', '.app', '.cpl', '.hta', '.pif', '.appref-ms'
 ])
+
+/** `%APPDATA%`, `$env:APPDATA` and a leading `~` in a path, as a shell would read them; an unknown name is left as written. */
+export function expandPathVars(path: string, env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const named = (name: string): string | undefined => {
+    const key = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase())
+    return key ? env[key] : undefined
+  }
+  return path
+    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (whole, name: string) => named(name) ?? whole)
+    .replace(/\$env:([A-Za-z_][A-Za-z0-9_]*)/gi, (whole, name: string) => named(name) ?? whole)
+    .replace(/^~(?=$|[\\/])/, home)
+}
 
 const pending = new Map<string, (r: AppWindowActionResult) => void>()
 
@@ -221,6 +235,12 @@ export async function runAppAction(deps: AppControlDeps, name: string, rawArgs: 
 
 async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArgs, ctx: AppActionContext): Promise<AppActionResult> {
   const a = args as Record<string, unknown>
+  // What this run sets is remembered, so app_status can say when it was changed since by someone else.
+  // `meant`: what the action set, when the patch carries more (a whole voice object).
+  const patchSettings = async (patch: Record<string, unknown>, meant: Record<string, unknown> = patch): Promise<void> => {
+    await deps.patchSettings(patch)
+    rememberSettingsSet(ctx.runId, meant, deps.settings())
+  }
   const window = (): WebContents | null => {
     const wc = deps.window()
     return wc && !wc.isDestroyed() ? wc : null
@@ -321,26 +341,27 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
         : { ok: false, message: `${quoted(found.title)} isn’t running.` }
     }
     case 'set_theme':
-      await deps.patchSettings({ theme: a.theme })
+      await patchSettings({ theme: a.theme })
       return { ok: true, message: `The theme is ${String(a.theme)} now.` }
     case 'set_skin':
-      await deps.patchSettings({ skinId: a.skin })
+      await patchSettings({ skinId: a.skin })
       return { ok: true, message: `The skin is ${String(a.skin)} now.` }
     case 'set_tool_approvals': {
       const current = (deps.settings() as { toolApproval?: Record<string, unknown> }).toolApproval ?? {}
-      await deps.patchSettings({ toolApproval: { ...current, mode: a.mode } })
+      await patchSettings({ toolApproval: { ...current, mode: a.mode } }, { toolApproval: { mode: a.mode } })
       return { ok: true, message: a.mode === 'off' ? 'Tool approvals are off.' : `Tool approvals are on for ${a.mode === 'all' ? 'every tool' : 'changes'}.` }
     }
     case 'set_model': {
       const key = knownModel(deps, String(a.model))
       if (!key) return { ok: false, message: NOT_A_KNOWN_MODEL }
-      await deps.patchSettings({ provider: key.provider, model: key.model })
+      await patchSettings({ provider: key.provider, model: key.model })
       // Said in full: "New tasks use…" was taken to mean the task on screen too (2026-10-16 03:04).
       return { ok: true, message: `New tasks start on ${key.model}. Tasks that exist keep their own model.` }
     }
     case 'open_path':
     case 'reveal_path': {
-      const raw = String(a.path)
+      // "%APPDATA%\vyotiq\logs\vyotiq.log" is how the agent itself wrote the log's path (2026-10-16 run fb8b6636).
+      const raw = expandPathVars(String(a.path))
       const base = ctx.filesRoot ?? ctx.workspacePath ?? deps.activeWorkspace()
       const path = isAbsolute(raw) ? raw : base ? resolve(base, raw) : null
       if (!path || !existsSync(path)) return { ok: false, message: `There’s nothing at ${raw}.` }
@@ -384,12 +405,39 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
     case 'set_voice_placement': {
       const voice = (deps.settings() as { voice?: Record<string, unknown> }).voice ?? {}
       const patch = name === 'set_voice_speed' ? { speed: a.speed } : { placement: a.placement }
-      await deps.patchSettings({ voice: { ...voice, ...patch } })
+      await patchSettings({ voice: { ...voice, ...patch } }, { voice: patch })
       if (name === 'set_voice_placement') return { ok: true, message: `Voice shows as ${String(a.placement)} now.` }
       // Saved either way; a model that refuses a speed must not be told it took (2026-10-16: speed 1.15 on Eleven v4).
       return deps.speedIgnored?.()
         ? { ok: false, message: `Saved ${String(a.speed)} times, but the speaking model in use can’t change its speed. Another model in Settings, Voice, can.` }
         : { ok: true, message: `The voice speaks at ${String(a.speed)} times speed now.` }
+    }
+    case 'set_voice_options': {
+      const o = args as AppActionArgs<'set_voice_options'>
+      const patch = {
+        ...(o.look !== undefined ? { orbLook: o.look } : {}),
+        ...(o.style !== undefined ? { style: o.style } : {}),
+        ...(o.layout !== undefined ? { viewLayout: o.layout } : {}),
+        ...(o.patience !== undefined ? { endOfTurnPatience: o.patience } : {}),
+        ...(o.captions !== undefined ? { captions: o.captions } : {}),
+        ...(o.sounds !== undefined ? { earcons: o.sounds } : {}),
+        ...(o.progress !== undefined ? { speakProgress: o.progress } : {}),
+        ...(o.hold_to_talk !== undefined ? { pushToTalkOnly: o.hold_to_talk } : {})
+      }
+      if (Object.keys(patch).length === 0) return { ok: false, message: 'I couldn’t do that: no voice option was named.' }
+      const voice = (deps.settings() as { voice?: Record<string, unknown> }).voice ?? {}
+      await patchSettings({ voice: { ...voice, ...patch } }, { voice: patch })
+      const said = [
+        o.look !== undefined && `the orb is ${o.look}`,
+        o.style !== undefined && `the style is ${o.style}`,
+        o.layout !== undefined && `the layout is ${o.layout}`,
+        o.patience !== undefined && `it waits ${o.patience === 'quick' ? 'briefly' : o.patience === 'patient' ? 'longer' : 'the usual time'} before you’re done`,
+        o.captions !== undefined && `captions are ${o.captions ? 'on' : 'off'}`,
+        o.sounds !== undefined && `sounds are ${o.sounds ? 'on' : 'off'}`,
+        o.progress !== undefined && `progress is ${o.progress ? 'spoken' : 'not spoken'}`,
+        o.hold_to_talk !== undefined && (o.hold_to_talk ? 'it listens only while you hold to talk' : 'it listens without holding')
+      ].filter(Boolean)
+      return { ok: true, message: `Set: ${said.join(', ')}.` }
     }
     case 'set_voice': {
       const voice = voiceOf(deps, ctx)
