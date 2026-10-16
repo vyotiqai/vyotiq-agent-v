@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { MAX_VOICED_ZCR, MIN_SPEECH_MS, PauseDetector, SILENCE_MS, settleMs, zeroCrossingRate } from '@main/voice/pauseDetector'
 import { RECONNECT_DELAYS_MS, VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
 import { FixtureSttSession, openFixtureStt } from '@main/voice/providers/fixture'
+import { VoiceError } from '@main/voice/errors'
 import type { SttOpenOptions, SttProvider } from '@main/voice/providers/types'
 import { DEFAULT_VOICE_SETTINGS, type VoiceEvent, type VoiceSettings } from '@shared/ipc/schemas/voice'
 import type { VoiceKeyAvailability } from '@shared/voice'
@@ -382,5 +383,158 @@ describe('VoiceSession', () => {
     expect(h.session.state).toBe('speaking')
     h.stt().say('wait, actually', false)
     expect(h.session.state).toBe('hearing')
+  })
+})
+
+describe('VoiceSession: 2026-10-16 audit fixes', () => {
+  const handOffs = (events: VoiceEvent[]) => events.flatMap((e) => (e.kind === 'hand_off' ? [e.brief] : []))
+
+  it('a listener that drops while muted is opened again on unmute (H1)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.session.setMuted(true)
+    // The vendor closes the idle socket (or the network blips) while muted.
+    h.opens[0]!.emit({ kind: 'closed', reason: 'idle timeout' })
+    expect(h.session.state).toBe('paused')
+    h.session.setMuted(false)
+    await h.runTimers()
+    expect(h.opens).toHaveLength(2)
+    expect(h.session.state).toBe('listening')
+    expect(states(h.events).slice(-3)).toEqual(['listening', 'reconnecting', 'listening'])
+  })
+
+  it('muted mid-reconnect stops trying, and opens the listener on unmute (H2)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.opens[0]!.emit({ kind: 'error', code: 'offline', message: 'drop', retryable: true })
+    expect(h.session.state).toBe('reconnecting')
+    h.session.setMuted(true)
+    expect(h.session.state).toBe('paused')
+    expect(h.timers.some((t) => t.ms === RECONNECT_DELAYS_MS[0])).toBe(false)
+    h.session.setMuted(false)
+    await h.runTimers()
+    expect(h.opens).toHaveLength(2)
+    expect(h.session.state).toBe('listening')
+  })
+
+  it('hold-to-talk only: audio said with the key up during a reconnect is never replayed (H3)', async () => {
+    const h = harness({ pushToTalkOnly: true })
+    await h.session.start()
+    h.opens[0]!.emit({ kind: 'error', code: 'offline', message: 'drop', retryable: true })
+    h.session.pushAudio(tone(800))
+    await h.runTimers()
+    expect(h.session.state).toBe('listening')
+    expect(h.stt().received).toHaveLength(0)
+    // Held, it is kept and replayed as before.
+    h.opens[1]!.emit({ kind: 'error', code: 'offline', message: 'drop', retryable: true })
+    h.session.ptt(true)
+    h.session.pushAudio(tone(400))
+    await h.runTimers()
+    expect(h.stt().received).toHaveLength(1)
+  })
+
+  it('words waiting for the rest wait on while you are still talking (M1)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.stt().say('Can you')
+    h.stt().say('look at the login page', false)
+    // The wait runs out mid-sentence: nothing goes yet.
+    await h.runTimers()
+    expect(handOffs(h.events)).toEqual([])
+    h.stt().endTurn()
+    expect(handOffs(h.events)).toEqual(['Can you look at the login page'])
+  })
+
+  it('a sound that was not the rest lets the waiting words go (M1)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.stt().say('Can you')
+    h.stt().say('um')
+    await h.runTimers()
+    expect(handOffs(h.events)).toEqual(['Can you'])
+  })
+
+  it('back from a reconnect, it is where it was: working, or speaking (M2)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.session.follow('run1')
+    h.opens[0]!.emit({ kind: 'error', code: 'offline', message: 'drop', retryable: true })
+    await h.runTimers()
+    expect(h.session.state).toBe('working')
+    h.opens[1]!.emit({ kind: 'error', code: 'offline', message: 'drop', retryable: true })
+    h.session.playback('c1', 'started')
+    await h.runTimers()
+    expect(h.session.state).toBe('speaking')
+    h.session.playback('c1', 'drained')
+    expect(h.session.state).toBe('working')
+  })
+
+  it('a failed session says nothing more and sends nothing waiting (M3)', async () => {
+    const h = harness()
+    await h.session.start()
+    h.stt().say('Make the button blue.')
+    h.stt().say('Can you')
+    h.opens[0]!.emit({ kind: 'error', code: 'rejected_key', message: 'bad key', retryable: false })
+    expect(h.session.state).toBe('error')
+    const before = h.events.length
+    await h.runTimers()
+    expect(h.events.slice(before).filter((e) => e.kind === 'say' || e.kind === 'hand_off')).toEqual([])
+  })
+
+  it('stopped while a reconnect opens: no further attempt (M4)', async () => {
+    let reject: ((e: Error) => void) | null = null
+    let calls = 0
+    const h = harness({}, undefined, (id) => ({
+      id: id as 'deepgram',
+      open: async (o) => {
+        calls++
+        if (calls === 1) return openFixtureStt(o)
+        return new Promise<never>((_res, rej) => {
+          reject = rej
+        })
+      }
+    }))
+    await h.session.start()
+    ;(h.session as unknown as { onStt: (e: unknown) => void }).onStt({ kind: 'error', code: 'offline', message: 'drop', retryable: true })
+    await h.runTimers()
+    await h.session.stop()
+    const before = h.events.length
+    reject!(new VoiceError('offline', 'nope'))
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(h.events.slice(before)).toEqual([])
+    expect(h.timers).toEqual([])
+  })
+
+  it('what you say while the listener reopens with new settings reaches the new one (M5)', async () => {
+    const h = harness({ sttProvider: 'openai' })
+    await h.session.start()
+    h.settings.endOfTurnPatience = 'patient'
+    h.session.settingsChanged()
+    // Talking before the new listener is open.
+    h.session.pushAudio(tone(400))
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(h.opens).toHaveLength(2)
+    expect(h.stt().received.length).toBeGreaterThan(0)
+  })
+
+  it('settings changed while it connects are applied once it is open (M5)', async () => {
+    let release: (() => void) | null = null
+    const opens: SttOpenOptions[] = []
+    const h = harness({ sttProvider: 'openai' }, undefined, (id) => ({
+      id: id as 'openai',
+      open: async (o) => {
+        opens.push(o)
+        if (opens.length === 1) await new Promise<void>((r) => (release = r))
+        return openFixtureStt(o)
+      }
+    }))
+    const started = h.session.start()
+    await Promise.resolve()
+    h.settings.endOfTurnPatience = 'patient'
+    h.session.settingsChanged()
+    release!()
+    await started
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(opens.map((o) => o.patience)).toEqual(['normal', 'patient'])
   })
 })

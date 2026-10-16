@@ -24,7 +24,6 @@ export type VoiceSessionEvent =
   | { type: 'start' }
   | { type: 'ready' }
   | { type: 'speech_start' }
-  /** Speech stopped without producing words (a cough, a door). */
   /** Not a turn after all (a cough, the agent's own echo); `runActive` returns to the agent's work. */
   | { type: 'false_start'; runActive?: boolean }
   | { type: 'end_of_turn' }
@@ -130,7 +129,10 @@ export function nextVoiceState(state: VoiceSessionState, event: VoiceSessionEven
     case 'paused':
       return event.type === 'unmute' ? 'listening' : null
     case 'reconnecting':
-      return event.type === 'connection_restored' ? 'listening' : null
+      if (event.type === 'connection_restored') return 'listening'
+      // Muted mid-reconnect: the listener is opened again on unmute.
+      if (event.type === 'mute') return 'paused'
+      return null
     case 'error':
       return event.type === 'retry' ? 'connecting' : null
   }

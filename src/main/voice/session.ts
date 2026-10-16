@@ -75,6 +75,8 @@ export const HOLD_MAX_MS = 10_000
 export const ASKED_WINDOW_MS = 60_000
 /** Talk that stopped mid-thought ("Can you") waits this long for the rest before it goes to the agent. */
 export const UNFINISHED_WAIT_MS = 2500
+/** However long you keep talking, the words waiting for the rest go by this long after they came. */
+export const UNFINISHED_MAX_MS = 20_000
 /**
  * Nothing said this long after your turn went to the agent: a short line, so
  * you know it heard you. With reasoning at its lowest on a spoken turn the
@@ -249,7 +251,7 @@ export class VoiceSession {
    * Your words that sounded unfinished ("Can you"), waiting UNFINISHED_WAIT_MS
    * for the rest: more words join them, one stretch of talk is one turn (D-43).
    */
-  private pendingTurn: { text: string; turnIds: string[]; timer: unknown } | null = null
+  private pendingTurn: { text: string; turnIds: string[]; timer: unknown; since: number; talking: boolean } | null = null
   /** Says a short line if nothing has been said by ACK_MS after your turn went. */
   private ackTimer: unknown = null
   private ackUses = 0
@@ -673,6 +675,8 @@ export class VoiceSession {
       this.warmUp()
       await this.connect()
       this.dispatch({ type: 'ready' })
+      // Settings changed while it opened (it read them as it began): opened again with them.
+      if (!this.relistenTimer) this.relistenWhenQuiet()
     } catch (err) {
       const e = toVoiceError(err)
       this.failWith(e.code, e.message)
@@ -681,6 +685,8 @@ export class VoiceSession {
 
   private async connect(): Promise<void> {
     const settings = this.deps.settings()
+    // What it opens with, as it begins: a change made while it opens is not one it has.
+    const openedWith = listenerKey(settings)
     const resolved = resolveSttProvider(settings.sttProvider, this.deps.keys())
     if (!resolved.ok) throw new VoiceError('no_key', 'No speech-to-text provider has a key')
     const entry = sttEntry(resolved.id)
@@ -704,7 +710,7 @@ export class VoiceSession {
       return
     }
     this.stt = session
-    this.listenedWith = listenerKey(settings)
+    this.listenedWith = openedWith
     this.sttId = entry.id
     this.turnDetection = entry.caps.turnDetection
     this.listenerStreams = entry.caps.streaming
@@ -759,8 +765,13 @@ export class VoiceSession {
     const stale = this.stt
     this.stt = null
     void stale?.close()
+    // Audio from here on reaches no listener until the new one opens: it is given to it then.
+    const from = this.ringTotal
     try {
       await this.connect()
+      if (this.stateValue === 'off' || this.stateValue === 'error') return
+      // What you said while it opened ("Wait longer" and straight on talking) wasn't lost.
+      this.replay(from)
       // Changed again while it opened: once more, with those.
       if (!this.relistenTimer) this.relistenWhenQuiet()
     } catch (err) {
@@ -775,6 +786,8 @@ export class VoiceSession {
     const s = this.stateValue
     if (s === 'off' || s === 'connecting' || s === 'paused' || s === 'error') return
     if (s === 'reconnecting') {
+      // Hold to talk: only what's said while held is kept for the replay, as when connected.
+      if (this.deps.settings().pushToTalkOnly && !this.pttDown) return
       this.remember(pcm)
       // A turn you finish while it's down is ended at the same place when it's back.
       if (!this.turnDetection && !this.deps.settings().pushToTalkOnly) {
@@ -836,15 +849,38 @@ export class VoiceSession {
 
   setMuted(muted: boolean): void {
     if (muted) {
+      const wasReconnecting = this.stateValue === 'reconnecting'
       if (!this.dispatch({ type: 'mute' })) return
       this.pause.reset()
+      // Muted mid-reconnect: nothing is heard until unmuted, so the listener is opened then.
+      if (wasReconnecting) {
+        if (this.reconnectTimer) this.clearTimer(this.reconnectTimer)
+        this.reconnectTimer = null
+      }
+      this.stopKeepAlive()
       this.keepAliveTimer = this.setTimer(() => this.keepAlive(), KEEPALIVE_MS)
     } else {
       this.stopKeepAlive()
       // Unmuted by hand: it listens to everything again, called by name or not.
       this.setStandby(false)
-      this.dispatch({ type: 'unmute' })
+      if (!this.dispatch({ type: 'unmute' })) return
+      // The listener went away while muted: it is opened again now, as any dropped one is.
+      if (!this.stt) this.beginReconnect()
     }
+  }
+
+  /**
+   * The listener dropped while muted. Muted can't go to reconnecting (that
+   * would unmute you), and nothing is heard meanwhile, so it is let go now and
+   * opened again on unmute. Before, it stayed as a dead listener: unmuted,
+   * voice mode said Listening and heard nothing.
+   */
+  private droppedWhileMuted(): void {
+    this.generation++
+    this.ctrl.abort()
+    const stale = this.stt
+    this.stt = null
+    void stale?.close()
   }
 
   private keepAlive(): void {
@@ -950,12 +986,14 @@ export class VoiceSession {
         else if (!this.listenerStreams) this.turnFailed(event.code, event.message)
         else {
           this.lastDropReason = event.message
-          this.beginReconnect()
+          if (this.stateValue === 'paused') this.droppedWhileMuted()
+          else this.beginReconnect()
         }
         return
       case 'closed':
         // Closed under us (not by stop): try to get it back.
-        if (this.stateValue !== 'off' && this.stateValue !== 'error') this.beginReconnect()
+        if (this.stateValue === 'paused') this.droppedWhileMuted()
+        else if (this.stateValue !== 'off' && this.stateValue !== 'error') this.beginReconnect()
         return
       case 'open':
         return
@@ -981,6 +1019,8 @@ export class VoiceSession {
   }
 
   private onSpeechStart(): void {
+    // Words waiting for the rest: here it comes, so they wait for it.
+    if (this.pendingTurn) this.pendingTurn.talking = true
     const s = this.stateValue
     if (!AGENT_FLOOR_STATES.has(s)) {
       this.dispatch({ type: 'speech_start' })
@@ -1124,6 +1164,8 @@ export class VoiceSession {
         this.emitEvent({ kind: 'unanswered', turnId, text })
       }
       this.endOverFloor()
+      // That sound wasn't the rest of the words waiting: they go at their next tick.
+      if (this.pendingTurn) this.pendingTurn.talking = false
       this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
       return
     }
@@ -1204,15 +1246,28 @@ export class VoiceSession {
       this.sendTurn(joined)
       return
     }
-    this.pendingTurn = {
-      text: joined,
-      turnIds,
-      timer: this.setTimer(() => {
-        const waiting = this.pendingTurn
-        this.pendingTurn = null
-        if (waiting && this.stateValue !== 'off') this.sendTurn(waiting.text)
-      }, UNFINISHED_WAIT_MS)
-    }
+    this.pendingTurn = { text: joined, turnIds, timer: null, since: pending?.since ?? this.now(), talking: false }
+    this.armPendingTurn()
+  }
+
+  /**
+   * The wait for the rest of an unfinished turn. While you're still talking
+   * the rest is on its way, so it waits on (up to UNFINISHED_MAX_MS): sent at
+   * 2.5 s, "Can you" went alone and the rest came after as a second message.
+   */
+  private armPendingTurn(): void {
+    const pending = this.pendingTurn
+    if (!pending) return
+    pending.timer = this.setTimer(() => {
+      const waiting = this.pendingTurn
+      if (!waiting) return
+      if (waiting.talking && this.now() - waiting.since < UNFINISHED_MAX_MS) {
+        this.armPendingTurn()
+        return
+      }
+      this.pendingTurn = null
+      if (this.stateValue !== 'off' && this.stateValue !== 'error') this.sendTurn(waiting.text)
+    }, UNFINISHED_WAIT_MS)
   }
 
   private dropPendingTurn(): void {
@@ -1251,7 +1306,7 @@ export class VoiceSession {
     const sentAt = this.now()
     this.ackTimer = this.setTimer(() => {
       this.ackTimer = null
-      if (this.stateValue === 'off' || this.standby) return
+      if (this.stateValue === 'off' || this.stateValue === 'error' || this.standby) return
       if ((this.lastSaid?.at ?? Number.NEGATIVE_INFINITY) >= sentAt || this.playing.size > 0) return
       if (this.approval || this.question) return
       this.sayLine(ACK_LINES[this.ackUses++ % ACK_LINES.length]!)
@@ -1366,6 +1421,7 @@ export class VoiceSession {
    */
   private turnFailed(code: VoiceErrorCode, message: string): void {
     this.endOverFloor()
+    if (this.pendingTurn) this.pendingTurn.talking = false
     this.pause.reset()
     this.clearRing()
     this.dispatch({ type: 'false_start', runActive: this.reply.runActive })
@@ -1432,6 +1488,8 @@ export class VoiceSession {
     try {
       await this.connect()
     } catch (err) {
+      // Stopped or muted while it tried: not another attempt (it logged "reconnecting" after the end).
+      if (this.stateValue !== 'reconnecting') return
       const e = toVoiceError(err)
       if (!e.retryable) return this.failWith(e.code, e.message)
       return this.scheduleReconnect()
@@ -1439,10 +1497,30 @@ export class VoiceSession {
     if (this.stateValue !== 'reconnecting') return
     // Listening again first: a turn the replay ends must find the session ready for it.
     this.dispatch({ type: 'connection_restored' })
+    this.resumeFloor()
     // Replay what wasn't answered (said during the dropout, or a turn whose answer
     // the drop took), ending each turn where it ended before.
-    const ends = [...this.turnEnds]
+    this.replay(Number.NEGATIVE_INFINITY)
+    // Settings changed while it was down were read by this connect; any since, now.
+    if (!this.relistenTimer) this.relistenWhenQuiet()
+  }
+
+  /**
+   * Back from a reconnect, where the session was: the agent's voice playing, it
+   * stopped on you, or still working. Reconnecting takes none of their events,
+   * so a reply that played through it showed Listening until it ended.
+   */
+  private resumeFloor(): void {
+    if (this.playing.size > 0) this.dispatch({ type: 'audio_start' })
+    else if (this.approval || this.question) this.dispatch({ type: 'needs_you' })
+    else if (this.reply.runActive) this.dispatch({ type: 'tool_start' })
+  }
+
+  /** Give the open listener the kept audio that starts at or after `from`, ending each turn where it ended. */
+  private replay(from: number): void {
+    const ends = this.turnEnds.filter((e) => e > from)
     for (const { pcm, end } of this.ring) {
+      if (end - pcm.length < from) continue
       this.stt?.pushAudio(pcm)
       while (ends.length > 0 && end >= ends[0]!) {
         ends.shift()
@@ -1456,6 +1534,13 @@ export class VoiceSession {
   private failWith(code: VoiceErrorCode, message = ''): void {
     if (!this.dispatch({ type: 'fail' })) return
     this.endOverFloor()
+    // Stopped: nothing it was waiting to do still happens ("One moment." after the error, a half-turn sent).
+    this.stopAck()
+    this.dropPendingTurn()
+    for (const timer of [this.reconnectTimer, this.relistenTimer]) if (timer) this.clearTimer(timer)
+    this.reconnectTimer = null
+    this.relistenTimer = null
+    this.stopKeepAlive()
     this.generation++
     this.ctrl.abort()
     const stt = this.stt

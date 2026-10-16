@@ -712,3 +712,30 @@ describe('a hold through mute that nothing was heard in', () => {
     }
   })
 })
+
+describe('muted is the session’s state (2026-10-16 audit, H2)', () => {
+  it('muted by the agent (voice_mute), the window shows it, and hold-to-talk unmutes', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'state', state: 'listening' })
+    t.emit({ kind: 'state', state: 'paused' })
+    expect(t.c.snapshot.muted).toBe(true)
+    // Nothing is sent while muted.
+    t.samples(new Int16Array(160))
+    expect(t.bridge.voiceAudio).not.toHaveBeenCalled()
+    // Held, it talks: unmuted for the hold.
+    t.c.ptt(true)
+    expect(t.bridge.voiceMute).toHaveBeenCalledWith({ sessionId: 's1', muted: false })
+    t.emit({ kind: 'state', state: 'listening' })
+    expect(t.c.snapshot.muted).toBe(false)
+  })
+
+  it('unmuted in main, the window is unmuted too', async () => {
+    const t = setup()
+    await t.c.start()
+    t.c.setMuted(true)
+    t.emit({ kind: 'state', state: 'paused' })
+    t.emit({ kind: 'state', state: 'listening' })
+    expect(t.c.snapshot.muted).toBe(false)
+  })
+})

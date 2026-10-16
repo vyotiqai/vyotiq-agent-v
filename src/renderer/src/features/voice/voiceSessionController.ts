@@ -403,6 +403,9 @@ export class VoiceSessionController {
         if (e.state === 'error') this.releaseMic()
         this.set({
           state: e.state,
+          // Muted is main's state: the agent mutes it too (voice_mute). Mute, M and hold-to-talk act on
+          // what is, not on the last press here (the button said Mute and its first press did nothing).
+          ...(e.state === 'paused' ? { muted: true } : this.snap.state === 'paused' ? { muted: false } : {}),
           ...(e.state === 'hearing' ? { partial: '', lastTurn: '', turnError: null } : {}),
           ...(e.state === 'listening' ? { reconnectAttempt: 0 } : {})
         })
