@@ -133,12 +133,12 @@ test.describe('Settings: permission rules, sandbox, fallback, diagnostics', () =
       if (!res.ok) throw new Error(res.error)
       return res.data
     })
-    if (process.platform === 'win32') {
-      expect(cap.available).toBe(false)
-      await expect(field).toContainText('Windows has no built-in way to confine')
-      await expect(workspaceOnly).toBeDisabled()
-      await expect(group).toHaveAttribute('aria-disabled', 'true')
-      // Off by default, so its network choice has nothing to apply to.
+    if (process.platform === 'win32' && cap.available) {
+      // Low integrity confines writes, not reads or the network.
+      expect(cap.mechanism).toBe('low-integrity')
+      await expect(workspaceOnly).toBeEnabled()
+      await expect(field).toContainText('They can still read the disk and use the network.')
+      await expect(page.locator('[data-settings-field="agent-sandbox-network"]')).toContainText('Not on Windows')
       await expect(network.getByRole('radio', { name: 'Deny' })).toBeDisabled()
     } else if (cap.available) {
       await expect(workspaceOnly).toBeEnabled()
@@ -518,8 +518,8 @@ test.describe('New task folders, help, palette and Usage', () => {
     await brief.press(`${MOD}+Enter`)
     const folders = newTask.getByRole('list', { name: 'Added folders' })
     await expect(folders).toBeVisible({ timeout: 20_000 })
-    // A chip named for the folder, with its whole path as the title.
-    await expect(folders.locator(`[title="${extra}"]`)).toBeVisible()
+    // A row named for the folder's whole path.
+    await expect(folders.getByRole('listitem', { name: extra, exact: true })).toBeVisible()
     // The command is spent, not sent as a task: still on New task, brief emptied.
     await expect(newTask).toBeVisible()
     await expect(brief).not.toContainText('/add-dir')

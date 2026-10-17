@@ -6,7 +6,7 @@
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, sep } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import {
@@ -274,7 +274,7 @@ describe('running them', () => {
     expect(opened).toEqual([join(dir, 'notes.md')])
     // The path as the agent wrote it (run fb8b6636): %VAR% and $env:VAR are read as a shell would.
     vi.stubEnv('VY_TEST_LOGS', dir)
-    expect(await runAppAction(d, 'open_path', { path: '%VY_TEST_LOGS%\\notes.md' }, at)).toEqual({ ok: true, message: 'Opened notes.md.' })
+    expect(await runAppAction(d, 'open_path', { path: `%VY_TEST_LOGS%${sep}notes.md` }, at)).toEqual({ ok: true, message: 'Opened notes.md.' })
     expect((await runAppAction(d, 'open_path', { path: '$env:VY_TEST_LOGS/notes.md' }, at)).ok).toBe(true)
     vi.unstubAllEnvs()
     expect(expandPathVars('%NOT_A_VAR_HERE%\\x.log', {})).toBe('%NOT_A_VAR_HERE%\\x.log')
