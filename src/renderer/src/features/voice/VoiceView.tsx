@@ -223,6 +223,7 @@ function useMainStage(onOpenVoiceSettings?: () => void): StageApi {
       respondApproval: (requestId, decision, runId) => Promise.resolve(window.vyotiq.respondToolApproval?.(requestId, decision, runId)),
       respondQuestion: (requestId, questionId, value, runId) =>
         Promise.resolve(window.vyotiq.respondAgentQuestion?.(requestId, [{ questionId, values: [value] }], runId)),
+      respondForm: (requestId, answers, runId) => Promise.resolve(window.vyotiq.respondAgentQuestion?.(requestId, answers, runId)),
       pickers: true
     }),
     [v, settings, startedAt, escArmed, level, micLevel, controller, owner, workspacePath, onOpenVoiceSettings]

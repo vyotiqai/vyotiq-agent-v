@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
 import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from '@shared/ipc/schemas/voice'
 import type { VoiceMiniCommand, VoiceMiniState } from '@shared/ipc/schemas/voiceMini'
 import { Icon } from '@renderer/lib/icons'
@@ -126,6 +127,10 @@ function useMiniStage(state: VoiceMiniState, level: { current: { level: number; 
         send({ kind: 'question', requestId, questionId, value, runId })
         return answered(latest, runId, requestId)
       },
+      respondForm: (requestId, answers, runId) => {
+        send({ kind: 'form', requestId, answers, runId })
+        return answered(latest, runId, requestId)
+      },
       // Voices and devices live in the main window: only the Layout tab here.
       pickers: false
     }
@@ -171,7 +176,8 @@ function useMiniKeys(api: StageApi): void {
         lastEsc = t
         return
       }
-      if (e.ctrlKey || e.metaKey || e.altKey) return
+      // Letters and Space typed into the question's field are theirs, not M and push-to-talk.
+      if (isEditableShortcutTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'm' || e.key === 'M') {
         e.preventDefault()
         a.mute(!a.v.muted)

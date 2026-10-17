@@ -382,16 +382,40 @@ export function soundsUnfinished(utterance: string): boolean {
   return DANGLING_END_RE.test(text)
 }
 
+/** Lower case, punctuation gone; letters' marks kept (हाँ is ह, ा and ँ: without them it is ह). */
 function normaliseUtterance(utterance: string): string {
   return utterance
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s']/gu, ' ')
+    .replace(/[’]/g, "'")
+    .replace(/[^\p{L}\p{M}\p{N}\s']/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
 
-const YES = new Set(['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'do it', 'allow', 'allow it', 'approve', 'approve it', 'yes please', 'go for it', 'fine', 'yes go ahead'])
-const NO = new Set(['no', 'nope', 'nah', 'deny', 'deny it', "don't", 'do not', "don't do it", 'no thanks', 'skip', 'skip it', 'no don\'t'])
+const YES = new Set([
+  'yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'do it', 'allow', 'allow it', 'approve', 'approve it', 'yes please', 'go for it',
+  'fine', 'yes go ahead', 'mm hmm', 'mhm', 'uh huh',
+  // Hindi and Punjabi, which they also speak (2026-10-16 decision), in their own script and in Latin letters.
+  'हाँ', 'हां', 'हाँ जी', 'हां जी', 'जी', 'जी हाँ', 'जी हां', 'ठीक है', 'हाँ करो', 'हां करो', 'ਹਾਂ', 'ਹਾਂ ਜੀ', 'ਜੀ', 'ਠੀਕ ਹੈ',
+  'haan', 'haan ji', 'han ji', 'theek hai', 'thik hai'
+])
+const NO = new Set([
+  'no', 'nope', 'nah', 'deny', 'deny it', "don't", 'do not', "don't do it", 'no thanks', 'skip', 'skip it', 'no don\'t',
+  'नहीं', 'नही', 'ना', 'मत करो', 'नहीं जी', 'ਨਹੀਂ', 'ਨਾ', 'nahi', 'nahin', 'mat karo'
+])
+/**
+ * One word of a yes or a no said more loosely: "Yes, yes. Oh." and "Yeah, go
+ * ahead" are a yes. "Yes, yes. Oh." wasn't, at 09:29:02 on 2026-10-17: it went
+ * to the agent as a message, which cancelled the push it said yes to, and the
+ * agent had to ask again.
+ */
+const YES_WORDS = new Set(['yes', 'yeah', 'yep', 'yup', 'yea', 'ya', 'sure', 'ok', 'okay', 'fine', 'allow', 'approve', 'approved', 'go', 'ahead', 'do', 'it', 'please', 'proceed', 'absolutely', 'definitely', 'alright'])
+/** At least one of these: "do it please" alone is a yes, "it" alone is not. */
+const YES_CORE = new Set(['yes', 'yeah', 'yep', 'yup', 'yea', 'ya', 'sure', 'ok', 'okay', 'allow', 'approve', 'approved', 'go', 'proceed', 'absolutely', 'definitely', 'alright'])
+const NO_WORDS = new Set(['no', 'nope', 'nah', 'deny', 'denied', "don't", 'dont', 'not', 'skip', 'do', 'it', 'that', 'thanks', 'please'])
+const NO_CORE = new Set(['no', 'nope', 'nah', 'deny', 'denied', "don't", 'dont', 'skip'])
+/** Sounds around an answer that change nothing: "oh", "uh", "well, yes". */
+const ANSWER_FILLERS = new Set(['oh', 'uh', 'um', 'umm', 'ah', 'eh', 'well', 'so', 'then', 'just', 'man', 'now', 'and', 'i', 'said', 'mean'])
 
 const ALWAYS = new Set([
   'always',
@@ -415,6 +439,20 @@ const ALWAYS = new Set([
  */
 export function approvalAnswer(utterance: string): 'once' | 'deny' | 'always' | null {
   const norm = normaliseUtterance(utterance)
+  const exact = answerFromSets(norm)
+  if (exact) return exact
+  // Said more loosely: fillers out, a word said twice once ("yes yes", "no no no").
+  const words = norm.split(' ').filter((w) => w && !ANSWER_FILLERS.has(w))
+  const loose = words.filter((w, i) => w !== words[i - 1])
+  if (loose.length === 0 || loose.length > 6) return null
+  const again = answerFromSets(loose.join(' '))
+  if (again) return again
+  if (loose.every((w) => NO_WORDS.has(w)) && loose.some((w) => NO_CORE.has(w))) return 'deny'
+  if (loose.every((w) => YES_WORDS.has(w)) && loose.some((w) => YES_CORE.has(w))) return 'once'
+  return null
+}
+
+function answerFromSets(norm: string): 'once' | 'deny' | 'always' | null {
   if (YES.has(norm)) return 'once'
   if (NO.has(norm)) return 'deny'
   if (ALWAYS.has(norm)) return 'always'

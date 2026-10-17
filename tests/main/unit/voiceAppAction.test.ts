@@ -124,14 +124,17 @@ describe('every turn goes to the agent as you said it', () => {
     expect(u.spoken()).toEqual(['You’re on main.'])
   })
 
-  it('stopped on an approval, words that aren’t the answer hear what it waits on', async () => {
+  it('stopped on an approval, words that aren’t the answer wait for it, and go to the agent once it is answered (2026-10-17 09:29:02)', async () => {
     const t = setup()
     await t.session.start()
     t.session.follow(R)
     t.approvals()!.asked({ requestId: 'a1', runId: R, toolCallId: 't1', name: 'terminal', summary: 'pnpm test', argsPreview: '', timeoutMs: 0, mutating: true, alwaysAllowCommand: 'pnpm test' } as ToolApprovalRequest)
     await t.say('How long will it take?')
+    // Sent now, they would cancel the approval (promoteFollowUp): it stays, and you hear what it does.
+    expect(t.handOffs()).toEqual([])
+    expect(t.spoken().at(-1)).toBe('It would run pnpm test. The whole command is on your screen. Yes or no?')
+    await t.say('Yes.')
     expect(t.handOffs()).toEqual(['How long will it take?'])
-    expect(t.spoken().at(-1)).toBe('I still need your yes or no first: can I run pnpm test?')
   })
 })
 

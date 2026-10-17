@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { VoicePlacementSchema, VoiceStyleSchema, VoiceViewLayoutSchema } from './voice'
+import { AgentQuestionAnswerSchema } from './agentQuestion'
+import { AGENT_QUESTION_MAX_ITEMS } from '../../utils/agentQuestionForm'
 
 /*
   The voice mini window (docs/voice-mode.md §26.5, 2026-10-15 decision): its
@@ -51,6 +53,13 @@ export const VoiceMiniCommandSchema = z.discriminatedUnion('kind', [
     requestId: z.string().min(1).max(200),
     questionId: z.string().min(1).max(200),
     value: z.string().max(200),
+    runId: z.string().min(1).max(200)
+  }),
+  /** A whole form sent from the mini window: typed answers, several picks or questions. */
+  z.object({
+    kind: z.literal('form'),
+    requestId: z.string().min(1).max(200),
+    answers: z.array(AgentQuestionAnswerSchema).max(AGENT_QUESTION_MAX_ITEMS),
     runId: z.string().min(1).max(200)
   }),
   /** Main says the mini window went away (closed from the OS): the main window shows the session itself again. */

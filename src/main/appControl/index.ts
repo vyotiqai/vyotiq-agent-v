@@ -4,7 +4,11 @@
  */
 import { app, shell } from 'electron'
 import { getWorkspaces } from '../workspace/workspaces'
-import { listRuns, loadStatus } from '../agent/state'
+import { listRuns, loadMessagesWindowAsync, loadStatus } from '../agent/state'
+import { readUsageLedgerAsync } from '../agent/usageLedger'
+import { readSpendSoFar } from '../agent/spendBudget'
+import { extractSpokenBlock, stripSpokenBlock } from '../../shared/spokenSummary'
+import { redactSecretsInText } from '../../shared/utils/redactSecrets'
 import {
   cancelRun,
   enqueueFollowUp,
@@ -34,7 +38,17 @@ import { listPendingAgentQuestions } from '../agent/agentQuestion'
 import { readWorkspaceRules } from '../agent/context/rules'
 import { memoryNoteDetails } from '../agent/context/memory'
 import { checkForAppUpdates, updaterState } from '../updater'
-import { formatAppContext, readGitBranch, ruleHeadline, type AppSnapshot, type AppTaskState } from '../voice/appContext'
+import {
+  formatAppContext,
+  formatSpend,
+  readGitBranch,
+  ruleHeadline,
+  spentOf,
+  spokenAgo,
+  type AppSnapshot,
+  type AppTaskState,
+  type Spent
+} from '../voice/appContext'
 import { DEFAULT_VOICE_SETTINGS } from '../../shared/ipc/schemas/voice'
 import { chooseModel, resolveTtsProvider, ttsEntry } from '../../shared/voice'
 import { voiceKeyAvailability } from '../voice/keys'
@@ -66,6 +80,7 @@ const appDeps: AppControlDeps = {
   },
   settings: () => getSettings(),
   status: (ctx) => appStatus(ctx.runId ?? null, ctx.workspacePath ?? null),
+  readTask: (workspacePath, runId) => readTask(workspacePath, runId),
   voiceControls: (runId) => voiceLinkForRun(runId)?.controls ?? null,
   speedIgnored: () => {
     const voice = { ...DEFAULT_VOICE_SETTINGS, ...getSettings().voice }
@@ -89,7 +104,7 @@ const appDeps: AppControlDeps = {
 export async function runAppActionInApp(name: string, args: unknown, ctx: AppActionContext): Promise<AppActionResult> {
   const result = await runAppAction(appDeps, name, args, contextAtHome(ctx, ctx.runId ? getRunWorkspace(ctx.runId) : undefined))
   // Said in voice mode: the kept conversation shows what the agent did in the app (§24.8). Looking isn't doing.
-  if (name !== 'app_status') voiceSessionFollowing(ctx.runId)?.noteAction(name, result)
+  if (name !== 'app_status' && name !== 'read_task') voiceSessionFollowing(ctx.runId)?.noteAction(name, result)
   return result
 }
 
@@ -167,6 +182,93 @@ function runState(runId: string, workspacePath: string): { title: string; state:
 // Each step of a spoken turn is given the app as it is (§27): the agent can't answer from a stale memory.
 onSpokenTurnState((runId, workspacePath) => appStatus(runId, workspacePath))
 
+/** This task's spend so far, from its usage ledger (written each step, so a running task has one). */
+async function taskSpend(workspacePath: string, runId: string): Promise<Spent | undefined> {
+  const ledger = await readUsageLedgerAsync(resolveRunDir(workspacePath, runId))
+  return ledger ? spentOf(ledger.lastTotals.billedCost, ledger.lastTotals.estimatedCost) : undefined
+}
+
+/**
+ * Today's and this month's spend, read fresh each time: kept for 30 s, the
+ * day's sum came from the turn before while this task's came from now, and
+ * "today about $0.0039, this task $0.0044" was said (2026-10-17 probe). Calls
+ * at the same moment share one read.
+ */
+let spendRead: Promise<Awaited<ReturnType<typeof readSpendSoFar>>> | null = null
+
+function spendSoFar(now: Date): Promise<Awaited<ReturnType<typeof readSpendSoFar>>> {
+  if (!spendRead) {
+    spendRead = readSpendSoFar(now).finally(() => {
+      spendRead = null
+    })
+  }
+  return spendRead
+}
+
+const REPLY_CHARS = 700
+
+/** The text of a message, its parts joined. */
+function messageText(content: ChatMessage['content']): string {
+  if (typeof content === 'string') return content
+  return content.map((part) => (part.type === 'text' ? part.text : '')).join('\n')
+}
+
+const STATE_LINE: Readonly<Record<AppTaskState, string>> = {
+  running: 'running now',
+  waiting: 'stopped until the user answers',
+  done: 'finished',
+  error: 'stopped with an error',
+  cancelled: 'stopped'
+}
+
+/**
+ * Another task, for read_task: how it stands, when it last ran, its cost,
+ * what it waits on, and its last reply. Asked to check a task, the agent
+ * said "I can't read the new task from here" (2026-10-17 09:22:44).
+ */
+export async function readTask(workspacePath: string, runId: string): Promise<string> {
+  const now = new Date()
+  const status = loadStatus(resolveRunDir(workspacePath, runId))
+  if (!status) return 'That task has nothing saved yet: it was never started.'
+  const state = runState(runId, workspacePath)
+  const title = state?.title ?? 'Untitled task'
+  const lines: string[] = [
+    `“${title}” in ${basename(workspacePath)}: ${STATE_LINE[state?.state ?? 'done']}, last active ${spokenAgo(new Date(status.updatedAt), now)}.`
+  ]
+  const error = status.status === 'error' ? (status.lastError?.message ?? status.error ?? '').trim() : ''
+  if (error) lines.push(`Its error: ${error.slice(0, 300)}`)
+  const approval = listPendingToolApprovals(runId)[0]
+  const question = listPendingAgentQuestions(runId)[0]?.questions[0]
+  if (approval) lines.push(`It waits for an okay to use ${approval.name}: ${approval.summary.slice(0, 200)}`)
+  if (question) lines.push(`It asks: ${question.prompt.slice(0, 300)}`)
+  const queued = isActive(runId) ? peekFollowUps(runId).length : 0
+  if (queued) lines.push(`${queued} message${queued === 1 ? ' is' : 's are'} queued on it.`)
+  try {
+    const spend = await taskSpend(workspacePath, runId)
+    const said = spend ? formatSpend({ task: spend }) : ''
+    if (said) lines.push(said)
+  } catch {
+    // No ledger to read: no figure, never a guessed one.
+  }
+  try {
+    const { messages } = await loadMessagesWindowAsync(workspacePath, runId, { limit: 12 })
+    const last = [...messages].reverse().find((m) => m.role === 'assistant' && messageText(m.content).trim())
+    if (last) {
+      const text = messageText(last.content)
+      const written = stripSpokenBlock(text).trim() || extractSpokenBlock(text) || ''
+      const flat = written.replace(/\s+/g, ' ').trim()
+      if (flat) lines.push(`Its last reply: ${flat.length > REPLY_CHARS ? `${flat.slice(0, REPLY_CHARS - 1)}…` : flat}`)
+    } else lines.push('It hasn’t replied yet.')
+  } catch (err) {
+    logger.warn('read_task could not read the messages', {
+      scope: 'app-control',
+      correlationId: runId,
+      reason: err instanceof Error ? err.message : String(err)
+    })
+  }
+  return redactSecretsInText(lines.join('\n'))
+}
+
 export async function appStatus(runId: string | null, workspaceHint: string | null): Promise<string> {
   const settings = getSettings()
   const workspacePath = (runId ? getRunWorkspace(runId) : undefined) ?? workspaceHint ?? getWorkspaces().activePath ?? null
@@ -223,6 +325,35 @@ export async function appStatus(runId: string | null, workspaceHint: string | nu
   } catch (err) {
     logger.warn('App status could not read the tasks', { scope: 'app-control', reason: err instanceof Error ? err.message : String(err) })
   }
+  // The latest tasks here that aren't running: "the task I started earlier" is one of these, or none was started.
+  if (workspacePath) {
+    try {
+      const { runs } = await listRuns(workspacePath)
+      snapshot.recent = runs
+        .filter((r) => r.runId !== runId && !isActive(r.runId))
+        .slice(0, 5)
+        .map((r) => ({
+          title: (r.goal ?? '').split('\n')[0]!.trim() || 'Untitled task',
+          // "running" on disk with no run in this app: it was stopped (runState says the same).
+          state: r.status === 'running' ? 'cancelled' : r.status,
+          at: new Date(r.updatedAt)
+        }))
+    } catch (err) {
+      logger.warn('App status could not list the tasks', { scope: 'app-control', reason: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  const spend: NonNullable<AppSnapshot['spend']> = {}
+  try {
+    if (runId && workspacePath) spend.task = await taskSpend(workspacePath, runId)
+    const sums = await spendSoFar(snapshot.now)
+    spend.today = spentOf(sums.today.billed, sums.today.estimated)
+    spend.month = spentOf(sums.month.billed, sums.month.estimated)
+    if (sums.dailyUsd > 0) spend.dailyBudget = sums.dailyUsd
+    if (sums.monthlyUsd > 0) spend.monthlyBudget = sums.monthlyUsd
+  } catch (err) {
+    logger.warn('App status could not read the spend', { scope: 'app-control', reason: err instanceof Error ? err.message : String(err) })
+  }
+  snapshot.spend = spend
   if (workspacePath) {
     const [rules, memory] = await Promise.allSettled([readWorkspaceRules(workspacePath), memoryNoteDetails(workspacePath)])
     if (rules.status === 'fulfilled') snapshot.rules = rules.value.map((r) => ruleHeadline(r.path, r.content))

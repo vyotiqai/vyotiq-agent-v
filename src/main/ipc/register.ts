@@ -340,7 +340,7 @@ import {
 } from '../attachments/composerStore'
 import { requireKey, transcribeDictation, type DictationRequestExtras } from '../dictation/transcribe'
 import { appendLiveAudio, closeLiveTake, commitLive, openLiveTake } from '../dictation/liveOpenAI'
-import { dictationKeywordsFromFiles } from '../dictation/keywords'
+import { VOICE_APP_TERMS, dictationKeywordsFromFiles, voiceKeyterms } from '../dictation/keywords'
 import { dictationFinalModelId, prepareLocalDictation } from '../dictation/local'
 import { isDictationError } from '../dictation/errors'
 import { dictationMicAccess, openMicSettings } from '../dictation/micAccess'
@@ -2033,7 +2033,8 @@ export function registerIpc(): void {
       // The open workspace's names, so "run agent" can come out as runAgent; only from a list already walked.
       const files =
         req.workspacePath && isOpenWorkspace(req.workspacePath) ? peekWorkspaceFileListCached(req.workspacePath) : null
-      const keyterms = files ? dictationKeywordsFromFiles(files).slice(0, 100) : []
+      // The app's words and the workspace's folder names too: "aether" is lower case, so the names alone left it out.
+      const keyterms = files ? voiceKeyterms(files, 100) : [...VOICE_APP_TERMS]
       const sessionId = await startVoiceSession(
         event.sender,
         { events: IPC.voiceEvent, audio: IPC.voiceAudioOut },

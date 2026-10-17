@@ -256,6 +256,16 @@ export class VoiceSession {
   /** Says a short line if nothing has been said by ACK_MS after your turn went. */
   private ackTimer: unknown = null
   private ackUses = 0
+  /** The short line said for it, until the agent's own words come. */
+  private ackLine: { contextId: string; stream: TtsStream } | null = null
+  /**
+   * When the voice or the agent last asked or offered something, until your
+   * next turn answers it. Only the last reply was looked at: "Should I ignore
+   * the three folders too?", then "What did you say?" and a reply that ended
+   * "I'm asking whether to ignore them.", and the "Yep." after it was dropped
+   * as a backchannel (2026-10-17 09:06:34).
+   */
+  private askedAt = Number.NEGATIVE_INFINITY
   /** The agent ended voice mode (app_control voice_end): it ends once the run's reply has been said. */
   private endWhenDone = false
   /** Done once the run's reply has been heard (quit_app): the run is still going, or its reply still playing. */
@@ -288,6 +298,13 @@ export class VoiceSession {
   private lastWarmAt = Number.NEGATIVE_INFINITY
   /** The followed run's approval waiting on the person, if any. */
   private approval: ToolApprovalRequest | null = null
+  /**
+   * What you said while an approval waited that wasn't a yes or no: held, so
+   * the approval stays, and passed on once it is answered. Sent at once, the
+   * words cancelled it (runRegistry.promoteFollowUp), and the agent asked for
+   * the same push again (2026-10-17 09:28–09:29). Said again, they are sent.
+   */
+  private heldWords: string | null = null
   private unwatchQuestions: (() => void) | null = null
   /** The followed run's question waiting on the person, if any. */
   private question: AgentQuestionRequest | null = null
@@ -451,11 +468,14 @@ export class VoiceSession {
 
   /** Something is about to be said, by the voice or the agent: captions, echo memory, timing. */
   private said(contextId: string, text: string, who: 'voice' | 'agent', audible: boolean): void {
+    // The agent's words are here: a short line not yet heard would only be said over them.
+    if (who === 'agent') this.dropAckLine()
     this.deps.record?.({ kind: who, contextId, text })
     this.echo.said(text, this.now())
     // A reply is said a sentence at a time: "Want me to check? It takes a minute." asked all the same.
     const same = this.lastSaid?.contextId === contextId ? this.lastSaid.text : ''
     this.lastSaid = { contextId, text: `${same} ${text}`.trim().slice(-400), at: this.now() }
+    if (asksSomething(this.lastSaid.text)) this.askedAt = this.now()
     if (this.timing && this.timing.firstSayAt === undefined) this.timing.firstSayAt = this.now()
     // Always sent, captions or not: it is how the window learns which audio to play (A-09).
     this.emitEvent({ kind: 'say', contextId, text, audible })
@@ -466,16 +486,31 @@ export class VoiceSession {
    * and remembered like any other. With nothing that can speak, the session
    * moves on now instead of waiting for audio that won't come.
    */
-  private sayLine(text: string): void {
+  private sayLine(text: string): { contextId: string; stream: TtsStream } | null {
     const contextId = (this.deps.newId ?? randomUUID)()
     const stream = this.openReplyTts(contextId)
     this.said(contextId, text, 'voice', stream !== null)
     if (stream) {
       stream.pushText(text)
       stream.end()
-      return
+      return { contextId, stream }
     }
     this.dispatch({ type: 'reply_done', runActive: this.reply.runActive })
+    return null
+  }
+
+  /**
+   * The "One moment." line, if its audio hasn't started: the answer it stood
+   * in for has come, so it isn't said at all. 2026-10-17 09:22:44 had the
+   * line 0.27 s before the agent's words, and 06:08:19 0.03 s.
+   */
+  private dropAckLine(): void {
+    const ack = this.ackLine
+    this.ackLine = null
+    if (!ack || !this.awaitingAudio.delete(ack.contextId)) return
+    ack.stream.cancel()
+    this.liveTts.delete(ack.stream)
+    this.emitEvent({ kind: 'flush', contextId: ack.contextId, unsaid: true })
   }
 
   private openReplyTts(contextId: string): TtsStream | null {
@@ -954,6 +989,9 @@ export class VoiceSession {
     this.dropPendingTurn()
     this.stopAck()
     this.lastSaid = null
+    this.askedAt = Number.NEGATIVE_INFINITY
+    this.ackLine = null
+    this.heldWords = null
     this.reply.dispose()
     // A line still being made ("One moment.", a cue) would keep calling the provider after End.
     for (const stream of this.liveTts) stream.cancel()
@@ -1147,8 +1185,7 @@ export class VoiceSession {
    * bare "okay" or "yes" is then your answer, not a backchannel to ignore.
    */
   private justAsked(): boolean {
-    const last = this.lastSaid
-    return Boolean(last && this.now() - last.at <= ASKED_WINDOW_MS && asksSomething(last.text))
+    return this.now() - this.askedAt <= ASKED_WINDOW_MS
   }
 
   private onEndOfTurn(raw: string, listen?: TurnListenStats): void {
@@ -1253,6 +1290,7 @@ export class VoiceSession {
       } else this.dispatch({ type: 'reply_done', runActive: false })
       return
     }
+    if (this.holdForApproval(text)) return
     this.takeTurn(text, turnId)
   }
 
@@ -1310,22 +1348,14 @@ export class VoiceSession {
   private sendTurn(text: string): void {
     const handOffId = (this.deps.newId ?? randomUUID)()
     this.unfollowed.push(handOffId)
+    // Your turn answers whatever was asked: a later "okay" needs a new question to be an answer.
+    this.askedAt = Number.NEGATIVE_INFINITY
     this.deps.record?.({ kind: 'hand_off', handOffId, brief: text })
     this.emitEvent({ kind: 'hand_off', handOffId, brief: text })
-    // Stopped on you: the agent can't answer until you do, so say what it waits on rather than nothing.
-    const waiting = this.waitingLine()
-    if (waiting) this.sayLine(waiting)
+    // Sent while an approval waits, these settle it (runRegistry.promoteFollowUp): holdForApproval
+    // keeps a first non-answer back, so only words said twice, or with approvals by voice off, get here.
     // "Shut up, shut up" was answered "Give me a moment." (2026-10-16 16:02): no filler when they asked for quiet.
-    else if (!asksForQuiet(text)) this.startAck()
-  }
-
-  /** What the followed run is stopped on, said again; null when it isn't. */
-  private waitingLine(): string | null {
-    if (this.approval) {
-      return this.voiceMayAnswer() ? `I still need your yes or no first: can I ${describeApproval(this.approval)}?` : 'I still need your okay on screen first.'
-    }
-    if (this.question) return `I still need your answer first. ${describeQuestion(this.question)}`
-    return null
+    if (!asksForQuiet(text)) this.startAck()
   }
 
   /** Nothing said by ACK_MS: a short line, once, so you know it heard you. */
@@ -1337,7 +1367,7 @@ export class VoiceSession {
       if (this.stateValue === 'off' || this.stateValue === 'error' || this.standby) return
       if ((this.lastSaid?.at ?? Number.NEGATIVE_INFINITY) >= sentAt || this.playing.size > 0) return
       if (this.approval || this.question) return
-      this.sayLine(ACK_LINES[this.ackUses++ % ACK_LINES.length]!)
+      this.ackLine = this.sayLine(ACK_LINES[this.ackUses++ % ACK_LINES.length]!)
     }, ACK_MS)
   }
 
@@ -1362,7 +1392,7 @@ export class VoiceSession {
     this.approval = req
     this.scheduleWork()
     this.dispatch({ type: 'needs_you' })
-    const what = describeApproval(req)
+    const what = speakApproval(req)
     // The agent asking, in its own voice: voice mode is the agent (§27).
     this.reply.announce(
       !this.voiceMayAnswer()
@@ -1380,6 +1410,37 @@ export class VoiceSession {
     this.approval = null
     this.scheduleWork()
     this.dispatch({ type: 'answered' })
+    // Answered on screen, or the run moved on: what you said meanwhile goes to it now.
+    this.releaseHeldWords()
+  }
+
+  /**
+   * Words that aren't a yes or no while an approval waits: the approval stays,
+   * the words wait for it, and you hear what it waits on (or, asked, what it
+   * does). The same words, or any others, said again go to the agent, which
+   * cancels the approval as typing would.
+   */
+  private holdForApproval(text: string): boolean {
+    const req = this.approval
+    if (!req || !this.voiceMayAnswer()) return false
+    // "Hold on", "be quiet": its voice has stopped; the approval waits, and nothing is said.
+    if (asksForQuiet(text)) return true
+    if (this.heldWords !== null) {
+      const words = `${this.heldWords} ${text}`
+      this.heldWords = null
+      this.deps.record?.({ kind: 'answered', what: 'approval', text, decision: 'passed on: the approval is cancelled', tool: req.name })
+      this.sendTurn(words)
+      return true
+    }
+    this.heldWords = text
+    this.sayLine(heldLine(req, text))
+    return true
+  }
+
+  private releaseHeldWords(): void {
+    const words = this.heldWords
+    this.heldWords = null
+    if (words !== null && this.stateValue !== 'off' && this.stateValue !== 'error') this.sendTurn(words)
   }
 
   /** A whole-utterance yes/no answers the pending approval instead of becoming a message. */
@@ -1397,9 +1458,11 @@ export class VoiceSession {
     const ok = this.deps.resolveApproval?.({ requestId: req.requestId, runId: req.runId, decision }) ?? false
     if (!ok) return false
     this.deps.record?.({ kind: 'answered', what: 'approval', text, decision, tool: req.name })
+    this.askedAt = Number.NEGATIVE_INFINITY
     const said =
       decision === 'once' ? 'Allowed.' : decision === 'deny' ? 'Denied.' : `Allowed. It won’t ask again for ${alwaysAllowWhat(req)} in this workspace.`
     this.sayLine(said)
+    this.releaseHeldWords()
     return true
   }
 
@@ -1428,7 +1491,14 @@ export class VoiceSession {
    */
   private answerQuestionByVoice(text: string): boolean {
     const req = this.question
-    if (!req || !this.deps.resolveQuestion || isStopPhrase(text) || !answerableByVoice(req)) return false
+    if (!req || !this.deps.resolveQuestion || isStopPhrase(text)) return false
+    // "Hold on", "let me type it": not the answer. The form stays for them to type in.
+    if (asksForQuiet(text)) return true
+    if (TYPING_IT.test(text) && req.questions.some((q) => q.type === 'text')) {
+      this.sayLine('Go ahead, it’s on your screen.')
+      return true
+    }
+    if (!answerableByVoice(req)) return false
     const item = req.questions[0]!
     const values = questionAnswer(item, text)
     if (!values) return false
@@ -1439,6 +1509,7 @@ export class VoiceSession {
     })
     if (!ok) return false
     this.deps.record?.({ kind: 'answered', what: 'question', text, decision: values.join(', ') })
+    this.askedAt = Number.NEGATIVE_INFINITY
     this.sayLine('Got it.')
     return true
   }
@@ -1622,8 +1693,15 @@ function alwaysAllowWhat(req: Pick<ToolApprovalRequest, 'name' | 'alwaysAllowCom
   return toSpeakable(req.alwaysAllowCommand).replace(/[.]+$/, '') || 'that command'
 }
 
-/** An offer that wants a yes or no, with or without a question mark ("I can have it check if you like."). */
-const OFFER_RE = /\b(?:want me to|should i|shall i|would you like|do you want|if you(?:['’]?d)? like|let me know if)\b/i
+/**
+ * An offer that wants a yes or no, with or without a question mark ("I can
+ * have it check if you like."). And a question put as a statement, as the
+ * agent did on 2026-10-17: "I'm asking whether to ignore the three remaining
+ * tool folders.", "I'm waiting on your call about the aether folder.", "I
+ * need you to pick one of two ways to handle it.", "Just say yes or no."
+ */
+const OFFER_RE =
+  /\b(?:want me to|should i|shall i|would you like|do you want|if you(?:['’]?d)? like|let me know if|yes or no|(?:i'?m |i am )?asking (?:you )?(?:whether|if)|waiting (?:on|for) your|your (?:call|choice|go-ahead|okay|ok)\b|pick (?:one|between)|up to you)/i
 
 /** Whether what was just said asks or offers something: a bare "yes" or "okay" then answers it. */
 export function asksSomething(text: string): boolean {
@@ -1654,6 +1732,89 @@ function describeAppControl(summary: string): string {
   if (action === 'install_update') return 'install the update and restart the app'
   if (!action) return 'do that in the app'
   return `${action.replace(/_/g, ' ')}${on ? ` ${on}` : ''}`
+}
+
+/** Programs whose first word after them says what they do ("pnpm install", "cargo test"). */
+const TWO_WORD_PROGRAMS = new Set(['npm', 'pnpm', 'yarn', 'bun', 'npx', 'cargo', 'go', 'docker', 'dotnet', 'gh', 'kubectl', 'pip', 'uv', 'make', 'poetry'])
+/** Pieces of a command line that say nothing worth hearing: the shell's own bookkeeping. */
+const QUIET_PROGRAMS = new Set(['echo', 'exit', 'cd', 'set', 'true', 'write-host', 'write-output', 'set-location', 'pushd', 'popd', 'export', ':'])
+
+/**
+ * A command line, the way you'd say it: what runs, not how. "git -C aether
+ * push -u origin local-changes-2026-10-17 2>&1; echo push exit $LASTEXITCODE;
+ * exit 0" is "git push in aether". Every word of it was read out on
+ * 2026-10-17 (09:28:08–09:29:14, three times in a minute); the command is on
+ * screen.
+ */
+export function speakCommand(command: string): string {
+  const said: string[] = []
+  let gitDir = ''
+  const gitSubs: string[] = []
+  for (const raw of command.split(/&&|\|\||[;\n|]/)) {
+    // Shell variables set for the command ($env:GIT_TERMINAL_PROMPT='0', FOO=1) and redirections.
+    const words = raw
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w && !/^\$env:/i.test(w) && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && !/^\d?>/.test(w) && !/^2&1$/.test(w))
+    const first = words[0]
+    if (!first) continue
+    const program = (first.split(/[\\/]/).pop() ?? first).replace(/\.(?:exe|cmd|bat|ps1)$/i, '').replace(/^["'&]+|["']+$/g, '').toLowerCase()
+    if (!program || QUIET_PROGRAMS.has(program) || !/^[a-z]/.test(program)) continue
+    if (program === 'git') {
+      // git -C <dir> -c key=value <sub>: the folder and the sub-command are what it does.
+      let i = 1
+      for (; i < words.length; i++) {
+        const w = words[i]!
+        if (w === '-C' && words[i + 1]) gitDir = (words[++i]!.replace(/["']/g, '').split(/[\\/]/).filter(Boolean).pop() ?? '')
+        else if (w === '-c') i++
+        else if (!w.startsWith('-')) break
+      }
+      const sub = words[i]?.toLowerCase()
+      if (sub && /^[a-z][a-z-]*$/.test(sub) && !gitSubs.includes(sub)) gitSubs.push(sub)
+      continue
+    }
+    const next = words.slice(1).find((w) => !w.startsWith('-'))
+    const phrase = TWO_WORD_PROGRAMS.has(program) && next && /^[a-z][\w:-]*$/i.test(next) ? `${program} ${next.toLowerCase()}` : program
+    if (!said.includes(phrase)) said.push(phrase)
+  }
+  if (gitSubs.length > 0) {
+    const subs = gitSubs.length === 1 ? gitSubs[0]! : `${gitSubs.slice(0, -1).join(', ')} and ${gitSubs.at(-1)!}`
+    said.unshift(`git ${subs}${gitDir ? ` in ${gitDir}` : ''}`)
+  }
+  if (said.length === 0) return 'a command'
+  const kept = said.slice(0, 3)
+  return `${kept.join(', then ')}${said.length > kept.length ? ', and more' : ''}`
+}
+
+/**
+ * An approval as it is asked out loud: a command by what it runs. The view
+ * keeps `describeApproval`'s longer wording, under the full command.
+ */
+/** "Let me type it", "I'll write it in": they're answering the form by hand. */
+const TYPING_IT = /\b(?:let me|i'?ll|i will|i'?m going to|i want to|can i) (?:just )?(?:type|write|enter|fill)\b/i
+
+const ASKS_ABOUT = /\?\s*$|^(?:what|why|which|how|where|who|is|does|do|can|will|would|should|kya|क्या|ਕੀ)(?=[\s,.!?]|$)/iu
+
+/**
+ * Said when words that aren't a yes or no come while an approval waits:
+ * asked about it, what it does; else that it still waits, and how to go on
+ * without it.
+ */
+export function heldLine(req: Pick<ToolApprovalRequest, 'name' | 'summary' | 'danger'>, said: string): string {
+  const what = speakApproval(req)
+  if (ASKS_ABOUT.test(said.trim())) {
+    const danger = req.danger?.trim().replace(/[.]+$/, '') ?? ''
+    // The guard's reason says what it does ("Force-pushes, which rewrites history"); voice mode's own says only that it asks.
+    const reason = danger && !/voice mode/i.test(danger) ? `${danger[0]!.toUpperCase()}${danger.slice(1)}.` : danger ? "It can't easily be undone." : ''
+    const where = /terminal|shell|command|bash/.test(req.name.toLowerCase()) ? 'The whole command is on your screen.' : 'The details are on your screen.'
+    return `It would ${what}.${reason ? ` ${reason}` : ''} ${where} Yes or no?`
+  }
+  return `I'm still waiting to ${what}. Yes or no first, or say it again to cancel it.`
+}
+
+export function speakApproval(req: Pick<ToolApprovalRequest, 'name' | 'summary'>): string {
+  if (/terminal|shell|command|bash/.test(req.name.toLowerCase()) && req.summary.trim()) return `run ${speakCommand(req.summary)}`
+  return describeApproval(req)
 }
 
 /** What an approval asks for, in a few spoken words (§7.5). */

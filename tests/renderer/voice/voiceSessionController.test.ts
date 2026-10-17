@@ -517,6 +517,20 @@ describe('VoiceSessionController', () => {
     }
   })
 
+  it('a "One moment." dropped unsaid leaves no line and no cut mark; the answer’s caption stays (2026-10-17)', async () => {
+    const t = setup()
+    await t.c.start()
+    t.emit({ kind: 'say', contextId: 'ack', text: 'One moment.' })
+    t.emit({ kind: 'say', contextId: 'c1', text: 'It’s idle.' })
+    t.emit({ kind: 'flush', contextId: 'ack', unsaid: true })
+    expect(t.c.snapshot.transcript.map((l) => l.text)).toEqual(['It’s idle.'])
+    expect(t.c.snapshot.cutLineId).toBeNull()
+    expect(t.c.snapshot.saying).toBe('It’s idle.')
+    // A reply cut by barge-in is still marked where it was cut.
+    t.emit({ kind: 'flush', contextId: 'c1' })
+    expect(t.c.snapshot.cutLineId).toBe('c1')
+  })
+
   it('a barge-in drops captions not yet heard', async () => {
     vi.useFakeTimers()
     try {

@@ -12,9 +12,19 @@
 import { existsSync, readFileSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { redactSecretsInText } from '../../shared/utils/redactSecrets'
+import { formatUsdCost } from '../../shared/utils/costDisplay'
 import { DEFAULT_VOICE_SETTINGS, type VoiceScreen } from '../../shared/ipc/schemas/voice'
 
 export type AppTaskState = 'running' | 'waiting' | 'done' | 'error' | 'cancelled'
+
+/** Dollars spent; `estimated` when any of it is tokens × published prices rather than a provider's bill. */
+export type Spent = { usd: number; estimated: boolean }
+
+/** A bill and an estimate as one figure: what the Usage page adds up. */
+export function spentOf(billed: number | undefined, estimated: number | undefined): Spent | undefined {
+  if (billed === undefined && estimated === undefined) return undefined
+  return { usd: (billed ?? 0) + (estimated ?? 0), estimated: (estimated ?? 0) > 0 }
+}
 
 export type AppSnapshot = {
   now: Date
@@ -27,6 +37,14 @@ export type AppSnapshot = {
   others: Array<{ title: string; workspace: string; state: 'running' | 'waiting' }>
   /** Messages queued on the task, sent at its next step. */
   queued?: number
+  /** This workspace's latest tasks besides this one that aren't running, newest first. */
+  recent?: Array<{ title: string; state: AppTaskState; at: Date }>
+  /**
+   * What was spent, in US dollars: this task so far, and today and this month
+   * across every workspace (the sums Usage shows), against any budget set.
+   * Without it the agent said "I don't have a cost figure" (2026-10-17 09:19:13).
+   */
+  spend?: { task?: Spent; today?: Spent; month?: Spent; dailyBudget?: number; monthlyBudget?: number }
   settings: {
     model?: string
     approvals?: string
@@ -62,6 +80,7 @@ export type AppSnapshot = {
 
 /** Lists are cut here: headlines, not contents. */
 const MAX_OTHERS = 6
+const MAX_RECENT = 5
 const MAX_HEADLINES = 8
 const TITLE_CHARS = 90
 
@@ -97,6 +116,37 @@ const UPDATE_WORDS: Readonly<Record<NonNullable<AppSnapshot['update']>['status']
   error: 'the last check failed'
 }
 
+/** "just now", "12 minutes ago", "3 hours ago", "2 days ago". */
+export function spokenAgo(at: Date, now: Date): string {
+  const minutes = Math.max(0, Math.round((now.getTime() - at.getTime()) / 60_000))
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'} ago`
+}
+
+/** "$0.08", "about $0.08 (an estimate)", and "of a $5.00 budget" where one is set. */
+function spent(x: Spent, budget?: number): string {
+  const usd = x.estimated ? `about ${formatUsdCost(x.usd)}` : formatUsdCost(x.usd)
+  return `${usd}${budget && budget > 0 ? ` of a ${formatUsdCost(budget)} budget` : ''}`
+}
+
+export function formatSpend(spend: NonNullable<AppSnapshot['spend']>): string {
+  const parts = [
+    spend.task ? `this task ${spent(spend.task)} so far` : '',
+    spend.today ? `today ${spent(spend.today, spend.dailyBudget)}` : '',
+    spend.month ? `this month ${spent(spend.month, spend.monthlyBudget)}` : ''
+  ].filter(Boolean)
+  if (parts.length === 0) return ''
+  const across = spend.today || spend.month ? ' (today and this month across every workspace)' : ''
+  const estimate = [spend.task, spend.today, spend.month].some((x) => x?.estimated)
+    ? ' “About” is an estimate from published prices where the provider bills no figure.'
+    : ''
+  return `Spend: ${parts.join('; ')}${across}.${estimate} The Usage view has the breakdown.`
+}
+
 /** "Thursday 15 October 2026, 7:05 pm", in the app's own time zone. */
 export function spokenNow(now: Date): string {
   const day = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -116,6 +166,13 @@ export function formatAppContext(s: AppSnapshot): string {
     const more = s.others.length - others.length
     lines.push(`Other tasks: ${listed.join('; ')}${more > 0 ? `; and ${more} more` : ''}.`)
   } else lines.push('No other tasks are running.')
+  const recent = (s.recent ?? []).slice(0, MAX_RECENT)
+  if (recent.length > 0) {
+    const listed = recent.map((r) => `“${clip(r.title, TITLE_CHARS)}” (${STATE_WORDS[r.state]}, ${spokenAgo(r.at, s.now)})`)
+    lines.push(`Latest other tasks here: ${listed.join('; ')}. read_task reads one.`)
+  }
+  const spend = s.spend ? formatSpend(s.spend) : ''
+  if (spend) lines.push(spend)
   const set = s.settings
   const settings = [
     set.model ? `new tasks start on ${set.model}` : '',

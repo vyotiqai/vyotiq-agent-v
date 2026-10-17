@@ -2092,7 +2092,7 @@ agent, which edited the project's theme. Now one catalog of app actions
 | Views and panes | `open_view` (Home, Settings, Usage, Inbox, Scheduled, Extensions, docs, What's new, shortcuts), `open_settings` (at a section), `open_panel` (terminal, changes, browser, files, plan, PR), `toggle_navigator`, `next_needs_you`, `new_task`, `switch_workspace`, `run_command` (split or close a pane, find, find in files, show or hide reasoning, open in editor, add a workspace, import a task, send feedback) | the window |
 | Tasks, any open workspace | `open_task`, `start_task` (a brief, a workspace; opened once started), `send_to_task` and `rename_task` (§24.16), `stop_task`, `archive_task` (`unarchive?`, §24.17), `delete_task`, `fork_task` | main finds the task by words from its title or its run id; start and stop run in main, the rest in the window |
 | The agent | `set_agent_mode` (Ask or Agent on the task on screen), `set_model` (new tasks, from the recent and favourite models), `set_task_model` (a task, from its next turn) | window, main |
-| Reading the app | `app_status` (also given with each spoken step, §27.8; says Home's backdrop and greeting name), `read_home` (Home's day sentence as Home would draw it now, read fresh without opening Home) | main, window |
+| Reading the app | `app_status` (also given with each spoken step, §27.8; says Home's backdrop and greeting name, the latest tasks here and the spend, §27.14), `read_task` (another task: how it stands, its cost, what it waits on, its last reply), `read_home` (Home's day sentence as Home would draw it now, read fresh without opening Home) | main, window |
 | Settings | `set_theme`, `set_skin`, `set_tool_approvals`, `set_home_options` (Home's backdrop: none, pixels, field, or image once a picture was picked in Settings; the name Home greets by) | main |
 | The system | `open_path` (a file or folder, never a program), `reveal_path`, `open_url` (http and https only), `check_update`, `download_update`, `install_update`, `quit_app` | main, window |
 | The voice itself | `voice_mute` (until called by name, or until unmuted), `voice_end`, `set_voice_speed`, `set_voice` (by name, where the speaker's voices are named), `set_voice_placement`, `set_voice_options` (orb, style, layout, patience, captions, sounds, spoken progress, hold to talk, language) | main |
@@ -2762,3 +2762,48 @@ openrouter/auto, SAPI WAVs as the mic), two runs:
 No "System prompt sections cut" line in the probe's log. The "…." from run 1
 is fixed (a piece with no letters or digits is never spoken) and covered by a
 unit test; run 2 didn't produce an empty block, so that fix wasn't seen live.
+
+### 27.13 Seventh pass: two voices, a yes not heard, whole commands read out (2026-10-17)
+
+Ajay's report: "sometimes two voices at the same time", "talking the entire
+command", "I said yes and it doesn't listen". Read from the kept
+conversations of 2026-10-17 08:04–09:29 (`workspaces/172161f4…/voice/`) and
+`vyotiq.log` 14:30–15:01.
+
+| What the logs show | Cause | Fix |
+| --- | --- | --- |
+| "One moment." 0.03–0.5 s before the agent's own words, 20 of 58 short lines with the reply inside 2.5 s | The window scheduled every reply's audio on one clock as it arrived: two streams' chunks were cut into each other | The player plays one context at a time (`oneAtATime`); a short line whose audio hasn't started is dropped when the agent speaks (`dropAckLine`) |
+| 09:29:02 "Yes, yes. Oh." went as a message; the voice said "I still need your yes or no first: can I run git -C aether push …?" and the agent answered 2.7 s later | `approvalAnswer` matched whole phrases only; any message cancels the waiting approval in main (`promoteFollowUp` → `cancelPendingGateWaiters`), so the "still need" line was false and said over the agent | Fillers and repeats are dropped before matching; the "still need" line is gone; Hindi and Punjabi yes/no added |
+| 09:06:34 "Yep." dropped as a backchannel | Only the last reply was checked for a question, and it said "I'm asking whether to ignore the three folders." | An ask counts until your next turn; questions put as statements count (`OFFER_RE`) |
+| "I need your yes to run git -C aether checkout -b …; git -C aether add -A; …" three times in a minute | `describeApproval` spoke the command line | `speakApproval`/`speakCommand`: "run git checkout, add and commit in aether"; the view keeps the long form |
+| "Just type them here", then a new task opened so there'd be a box | The prompt never said a voice user may have no keyboard | Prompt: never ask them to type in the chat; take details by voice and say them back (an exact detail goes in a form since §27.14) |
+| "Want me to commit it?" → "Mm-hmm." → asked twice more, then the app asked again | Prompt | Prompt: a short yes after an offer is the yes; commit and push are called at once and the app asks |
+
+Not changed, seen: 13 empty transcripts from gpt-transcribe with 0.2–0.8 s of
+speech (14:41–14:50); "And tomato." heard, then "I said commit." 18 s later; OpenRouter
+takes no `prompt` or keyterms, so neither can be helped from here.
+
+### 27.14 The follow-ups to §27.13 (2026-10-17)
+
+| What | Before | Now |
+| --- | --- | --- |
+| Words said while an approval waits | Sent at once, they cancelled it (`promoteFollowUp` → `cancelPendingGateWaiters`) and the agent asked for the same push again | The first words that aren't a yes or no are held and the approval stays. Asked about it ("what does that do?"), the voice says what it would do from the approval itself, with the guard's reason; anything else gets "I'm still waiting to run git push in aether. Yes or no first, or say it again to cancel it." A yes or no, by voice or on screen, answers it and then the held words go to the agent. Said again, both go to the agent, which cancels the approval as typing does. "Hold on" leaves it waiting, unsaid. Only with approvals by voice on; with it off, words go to the agent as before |
+| A "One moment." dropped before it played | Flushed like a barge-in: where it had been captioned it was marked cut | Its `flush` carries `unsaid`: the view takes the line away, keeps the answer's caption, and marks nothing cut |
+| "I don't have a cost figure" (09:19:13) | `app_status` had no spend | `app_status` says this task's spend from its usage ledger, and today's and this month's across every workspace (the sums Usage and the budget notices use, read at most every 30 s), against a budget when one is set. A figure with any estimate in it says "about" |
+| "I can't read the new task from here" (09:22:44) | `app_status` listed only running or waiting tasks; nothing read another task | `app_status` lists this workspace's five latest other tasks with their state and when; `read_task` reads one by its words in any open workspace: its state, last activity, error, what it waits on, queued messages, cost and last reply. It only reads: it is never logged as something done |
+| An email or a name to give | The prompt said never ask them to type; the view's question row only had buttons, and "Answer on the task" for anything else | The prompt sends an exact detail to `ask_question` with a text question. A question no button can answer (typed, several picks, several questions) carries its whole form (`VoiceWorkAsk.form`), and the voice view draws the task's own question form (`AskQuestionPanel`, with its view block) in the work strip. It doesn't take focus, so Space stays push-to-talk until they click a field; M and Space typed into it are letters, in the mini window too (which sends a `form` command). Saying it still answers it; "let me type it" or "hold on" keeps the form open |
+| Hints for a listener that takes them | Only the workspace's camelCase names, so the folder `aether` was never one | `voiceKeyterms`: the app's words (Agent V, commit, push, pull request, branch…), the top-level folder names by use, then the mixed-case names, 100 in all. Deepgram Flux, AssemblyAI and OpenAI Realtime use them; OpenRouter's whole-turn listener takes none, so with only an OpenRouter key nothing changes until one of those keys is added |
+
+The schemas for one question and its answer moved to
+`schemas/agentQuestion.ts`: `voice.ts` needs them, and importing `agent.ts`
+from there made a cycle (agent → settings → voice → agent) that leaves them
+undefined at load.
+
+Checked in the built app on a throwaway profile (port 9444, a scratch git
+folder, Haiku 5.5, the OpenRouter listener and speaker, a fake mic playing
+Windows speech):
+
+- "Please commit the readme" → "I need your yes to commit the changes…"; "What does that do?" → "It would commit the changes. It can't easily be undone. The details are on your screen. Yes or no?", no hand-off, the approval still open; "Yes." → "Allowed.", then "What does that do?" went to the agent.
+- "How much have I spent today, and what other tasks are there?" → today about $0.012 across workspaces, this task about $0.0035, and the earlier task by name. The first run said today $0.0039 and this task $0.0044: the day's sum was kept for 30 s and came from the turn before. It is read fresh now.
+- "Ask me for my email with a form" → `ask_question` with a text question, drawn as the form in Takeover; typing "probe mail@example.com" in it kept Space and M as letters; Submit sent it and the repo's `user.email` was set. The form first sat under the dock with only its field showing (the caption above it appears when its audio starts and pushed it down); it is now kept in view as its pane changes size, until they type in it.
+

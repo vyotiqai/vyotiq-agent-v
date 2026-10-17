@@ -119,3 +119,68 @@ describe('VoicePlayer', () => {
     expect(Array.from(int16ToFloat32(Int16Array.from([0, 16384, -32768])))).toEqual([0, 0.5, -1])
   })
 })
+
+describe('VoicePlayer, one context at a time (2026-10-17: "One moment." and the reply cut into each other)', () => {
+  it('holds a second context until the first has all arrived, then plays it straight after', () => {
+    const f = fakeContext()
+    const scheduled = vi.fn()
+    const p = new VoicePlayer({ createContext: () => f.ctx, oneAtATime: true, onScheduled: scheduled, onContextDrained: () => {} })
+    p.enqueue(chunk(2400, 'ack')) // 0.1 s
+    expect(p.enqueue(chunk(4800, 'reply'))).toBeNull()
+    p.enqueue(chunk(2400, 'ack'))
+    // Only the line's own chunks so far, back to back.
+    expect(f.sources).toHaveLength(2)
+    p.endContext('ack')
+    expect(f.sources).toHaveLength(3)
+    expect(f.sources[2]!.startedAt).toBeCloseTo(10 + JITTER_BUFFER_S + 0.2)
+    expect(scheduled.mock.calls.map(([c]) => c.contextId)).toEqual(['ack', 'ack', 'reply'])
+  })
+
+  it('a context that ended while it waited lets the next one go too', () => {
+    const f = fakeContext()
+    const p = new VoicePlayer({ createContext: () => f.ctx, oneAtATime: true, onContextDrained: () => {} })
+    p.enqueue(chunk(240, 'a'))
+    p.enqueue(chunk(240, 'b'))
+    p.endContext('b')
+    p.enqueue(chunk(240, 'c'))
+    p.endContext('a')
+    expect(f.sources).toHaveLength(3)
+  })
+
+  it('cancelling the one playing lets the next one in; cancelling all drops what waits', () => {
+    const f = fakeContext()
+    const p = new VoicePlayer({ createContext: () => f.ctx, oneAtATime: true, onContextDrained: () => {} })
+    p.enqueue(chunk(240, 'a'))
+    p.enqueue(chunk(240, 'b'))
+    p.cancel('a')
+    expect(f.sources).toHaveLength(2)
+    p.enqueue(chunk(240, 'c'))
+    p.cancel()
+    p.endContext('b')
+    p.enqueue(chunk(240, 'c'))
+    expect(f.sources).toHaveLength(2)
+  })
+
+  it('a stream that hung is drained by the stall timer and lets the next one go', () => {
+    vi.useFakeTimers()
+    try {
+      const f = fakeContext()
+      const p = new VoicePlayer({ createContext: () => f.ctx, oneAtATime: true, onContextDrained: () => {} })
+      p.enqueue(chunk(240, 'a'))
+      p.enqueue(chunk(240, 'b'))
+      f.sources[0]!.onended?.()
+      vi.advanceTimersByTime(8000)
+      expect(f.sources).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('without it, contexts are scheduled as they come (read-aloud never ends one)', () => {
+    const f = fakeContext()
+    const p = new VoicePlayer({ createContext: () => f.ctx })
+    p.enqueue(chunk(240, 'a'))
+    p.enqueue(chunk(240, 'b'))
+    expect(f.sources).toHaveLength(2)
+  })
+})

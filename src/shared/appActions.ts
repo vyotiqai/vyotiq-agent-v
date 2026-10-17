@@ -87,6 +87,7 @@ export const APP_ACTION_ARGS = {
   }),
   // ── Reading the app ─────────────────────────────────────────────────────
   app_status: z.object({}),
+  read_task: z.object({ task: Task }),
   read_home: z.object({}),
   // ── The system ──────────────────────────────────────────────────────────
   open_path: z.object({ path: z.string().trim().min(1).max(4096) }),
@@ -173,7 +174,11 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
     runs: 'window'
   },
   app_status: {
-    summary: 'Read the app as it is now: the date and time, what is on screen, the workspace and branch, tasks running or waiting in any workspace, the model and other settings, voice mode, and whether an update is out. Read it rather than guess.',
+    summary: 'Read the app as it is now: the date and time, what is on screen, the workspace and branch, tasks running or waiting in any workspace and the latest ones here, what this task and today and this month cost, the model and other settings, voice mode, and whether an update is out. Read it rather than guess.',
+    runs: 'main'
+  },
+  read_task: {
+    summary: 'Read another task, in any open workspace, by words from its title: how it stands, when it last ran, what it cost, what it waits on, and its last reply. The task on screen if none is named.',
     runs: 'main'
   },
   open_path: { summary: 'Open a file or folder with the system’s app (a path in the workspace, or absolute). Never a program.', runs: 'main' },

@@ -112,7 +112,11 @@ export function workAsk(
       requestId: question.requestId,
       questionId: first.id,
       prompt: oneLine(one ? first.prompt : `It has ${question.questions.length} questions for you.`, 1000),
-      options: options.map((o) => oneLine(o, 200))
+      options: options.map((o) => oneLine(o, 200)),
+      // No buttons can answer it: the form itself, to type in (or say it).
+      ...(options.length === 0
+        ? { form: { ...(question.title ? { title: question.title } : {}), questions: question.questions, ...(question.view ? { view: question.view } : {}) } }
+        : {})
     }
   }
   return undefined

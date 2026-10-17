@@ -80,6 +80,8 @@ export type AppControlDeps = {
   settings: () => { recentModels?: string[]; favoriteModels?: string[] }
   /** The app as it is now, in words (app_status). */
   status: (ctx: AppActionContext) => Promise<string>
+  /** Another task in words: its state, cost, what it waits on and its last reply (read_task). */
+  readTask?: (workspacePath: string, runId: string) => Promise<string>
   /** Voice mode's controls for the session following this run, if one does. */
   voiceControls?: (runId: string) => AppActionContext['voice'] | null
   /** The speaking model in use ignores a speed (it refuses one; §24.12). */
@@ -292,6 +294,12 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
     }
     case 'app_status':
       return { ok: true, message: await deps.status(ctx) }
+    case 'read_task': {
+      if (!deps.readTask) return { ok: false, message: 'Tasks can’t be read from here.' }
+      const found = await task()
+      if ('error' in found) return { ok: false, message: found.error }
+      return { ok: true, message: await deps.readTask(found.workspacePath, found.runId), runId: found.runId }
+    }
     case 'check_update': {
       const r = deps.checkUpdate ? await deps.checkUpdate() : ({ checked: false } as const)
       if (!r.checked) return { ok: false, message: 'Updates are checked only in the installed app; this is a development build.' }

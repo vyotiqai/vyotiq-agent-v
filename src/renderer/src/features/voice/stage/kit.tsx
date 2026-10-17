@@ -20,6 +20,8 @@ import { ProblemText, formatTime, sessionNotes, type ShownProblem } from '../Voi
 import { EngineToken as EngineTokenBase, HAND_OFF_FAILED, Result, Steps, WHO, buildEntries, elapsed, stepVerb, workGlyph } from '../view/parts'
 import type { VoiceSnapshot } from '../voiceSessionController'
 import { exchange, headline, hint, latestWork, type WorkEntry } from './model'
+import { AskQuestionPanel } from '@renderer/features/chat/components/AskQuestionPanel'
+import type { AgentQuestionAnswer } from '@shared/ipc'
 
 /*
   The redesigned voice view's shared pieces (docs/voice-mode.md §26). Every
@@ -64,6 +66,8 @@ export type StageApi = {
   patchSettings: (patch: Partial<VoiceSettings>) => void
   respondApproval: (requestId: string, decision: ApprovalDecision, runId: string) => Promise<{ ok: boolean } | undefined>
   respondQuestion: (requestId: string, questionId: string, value: string, runId: string) => Promise<{ ok: boolean } | undefined>
+  /** A whole form's answers (typed, several picks, several questions); absent where no form can be sent. */
+  respondForm?: (requestId: string, answers: AgentQuestionAnswer[], runId: string) => Promise<{ ok: boolean } | undefined>
   /** The voice and device pickers need the main window (voices over IPC, the mic in this renderer); the mini window has none. */
   pickers: boolean
 }
@@ -665,11 +669,44 @@ export function Captions({ size = 'heading', align = 'center', lines = 3 }: { si
  * What the run is stopped on, answerable here: an approval (Allow once,
  * Always allow where the card offers it, Deny), a question with picks. A
  * risky approval is answered here too, as a spoken yes may (D-52), but only
- * ever once. A free-text question is answered on the task.
+ * ever once. A question no button can answer (a typed answer, several picks
+ * or questions) is the task's own form, view and all, to type in or say.
  */
 export function AskRow({ work }: { work: VoiceWork }) {
   // One set of buttons per request: a second approval in the same run starts with them live.
   return <AskFor key={work.ask?.requestId ?? 'none'} work={work} />
+}
+
+/**
+ * A form at the foot of a placement, kept whole in its pane, Submit too. It
+ * arrives before the caption above it is shown (that waits for its audio),
+ * and the caption pushed it under Takeover's dock with only its first field
+ * in sight (2026-10-17 probe). So it is scrolled into view again whenever the
+ * pane's content changes size, until they are typing in it.
+ */
+function KeepInView({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const show = (): void => {
+      if (el.contains(document.activeElement)) return
+      // A block body: Chromium's scrollIntoView returns a promise.
+      void el.scrollIntoView?.({ block: 'nearest' })
+    }
+    show()
+    const pane = el.closest<HTMLElement>('.overflow-y-auto')
+    if (!pane || typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(show)
+    for (const child of Array.from(pane.children)) watch.observe(child)
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [])
+  return (
+    <div ref={ref} className="mt-2 vy-rise" data-voice-ask="form">
+      {children}
+    </div>
+  )
 }
 
 function AskFor({ work }: { work: VoiceWork }) {
@@ -677,6 +714,22 @@ function AskFor({ work }: { work: VoiceWork }) {
   const [sent, setSent] = useState<string | null>(null)
   const ask = work.ask
   if (!ask || work.state !== 'needs') return null
+  if (ask.kind === 'question' && ask.form && api.respondForm) {
+    const respond = api.respondForm
+    return (
+      <KeepInView>
+        <AskQuestionPanel
+          question={{ requestId: ask.requestId, toolCallId: ask.requestId, ...ask.form }}
+          // Not taken on arrival: Space is push-to-talk until they click into the field.
+          captureFocus={false}
+          onSubmit={async (requestId, answers) => {
+            const res = await respond(requestId, answers, work.runId)
+            if (!res?.ok) throw new Error('The answer didn’t reach the task. Try again, or say it.')
+          }}
+        />
+      </KeepInView>
+    )
+  }
   // The buttons stay off once an answer is on its way; one refused (or that failed) can be given again.
   const answer = (key: string, fn: () => Promise<{ ok: boolean } | undefined>): void => {
     setSent(key)

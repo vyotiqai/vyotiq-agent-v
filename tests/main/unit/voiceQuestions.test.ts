@@ -219,17 +219,13 @@ describe('questions in a live session', () => {
     h.session.follow(R)
     h.tap({ type: 'status', runId: R, status: 'running' } as AgentEvent)
     h.ask(request([single()]))
+    const asked = h.said.length
     h.stt().say('how is it going')
     expect(h.turns()).toHaveLength(1)
-    // The agent can't answer while it waits: you hear what it waits on, and those words play out.
-    await vi.waitFor(() => expect(h.said.at(-1)).toBe('I still need your answer first. Which database should I use? Postgres, SQLite or MySQL.'))
-    const say = h.events.findLast((e) => e.kind === 'say')!
-    const contextId = say.kind === 'say' ? say.contextId : ''
-    h.session.playback(contextId, 'started')
-    expect(h.session.state).toBe('speaking')
-    h.session.playback(contextId, 'drained')
-    // Still blocked on you, so not "working".
-    expect(h.session.state).toBe('waiting_on_you')
+    // The words go to the agent and settle its question (runRegistry.promoteFollowUp): no "I still need your answer" over its reply.
+    expect(h.said).toHaveLength(asked)
+    // Still blocked on you until main settles it, so not "working".
+    expect(h.session.state).not.toBe('working')
     h.watcher()!.settled('qr1', R)
     expect(h.session.state).toBe('thinking')
   })

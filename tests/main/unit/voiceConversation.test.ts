@@ -807,9 +807,13 @@ describe('approvals by voice', () => {
     h.stt().say('yes but use the other script')
     expect(h.resolveApproval).not.toHaveBeenCalled()
     expect(h.events).toContainEqual(expect.objectContaining({ kind: 'turn', text: 'yes but use the other script' }))
-    // Not a plain yes or no: the words go to the agent as they are, and it hears what is still waited on.
-    expect(h.events.findLast((e) => e.kind === 'hand_off')).toMatchObject({ kind: 'hand_off', brief: 'yes but use the other script' })
-    expect(h.said.at(-1)).toBe('I still need your yes or no first: can I run pnpm test?')
+    // Not a plain yes or no: the approval stays, and you hear that it waits.
+    expect(h.events.findLast((e) => e.kind === 'hand_off')).toBeUndefined()
+    expect(h.said.at(-1)).toBe("I'm still waiting to run pnpm test. Yes or no first, or say it again to cancel it.")
+    // Said again: they mean it. The words go to the agent as they were said, which cancels the approval.
+    h.stt().say('use the other script')
+    expect(h.resolveApproval).not.toHaveBeenCalled()
+    expect(h.events.findLast((e) => e.kind === 'hand_off')).toMatchObject({ kind: 'hand_off', brief: 'yes but use the other script use the other script' })
   })
 
   it('a risky action takes a clear spoken yes, once, and never "always" (2026-10-16 decision, §27)', async () => {

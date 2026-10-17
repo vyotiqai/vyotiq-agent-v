@@ -247,6 +247,31 @@ export async function readBudgetStatus(
   }
 }
 
+/**
+ * What was spent today and this month across every workspace, billed and
+ * estimated apart (the sums Usage and the budget notices use), and the
+ * budgets set. For the agent's app_status.
+ */
+export async function readSpendSoFar(
+  now = new Date(),
+  deps: Pick<SpendBudgetDeps, 'collect' | 'workspacePaths' | 'budget'> = defaultDeps
+): Promise<{
+  today: { billed: number; estimated: number }
+  month: { billed: number; estimated: number }
+  dailyUsd: number
+  monthlyUsd: number
+}> {
+  const paths = deps.workspacePaths()
+  const sum = async (windowDays: number): Promise<{ billed: number; estimated: number }> => {
+    if (paths.length === 0) return { billed: 0, estimated: 0 }
+    const { totals } = await deps.collect(paths, now, windowDays)
+    return { billed: totals.billedCost ?? 0, estimated: totals.estimatedCost ?? 0 }
+  }
+  const budget = deps.budget()
+  const [today, month] = await Promise.all([sum(1), sum(now.getDate())])
+  return { today, month, dailyUsd: budget.dailyUsd, monthlyUsd: budget.monthlyUsd }
+}
+
 let lastCheckAt = 0
 let checking = false
 

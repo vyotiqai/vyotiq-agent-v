@@ -285,8 +285,13 @@ export class VoiceSessionController {
         this.captions.ended(chunk.utteranceId)
         return
       }
-      const delayMs = this.ensurePlayer().enqueue({ pcm: chunk.pcm, sampleRate: chunk.sampleRate, contextId: chunk.utteranceId })
-      if (delayMs !== null) this.captions.audio(chunk.utteranceId, chunk.piece, delayMs)
+      // Its captions move on when it is scheduled (`onScheduled`): now, or once the line before it is done.
+      this.ensurePlayer().enqueue({
+        pcm: chunk.pcm,
+        sampleRate: chunk.sampleRate,
+        contextId: chunk.utteranceId,
+        ...(chunk.piece !== undefined ? { piece: chunk.piece } : {})
+      })
     })
     // Open the mic first: a blocked mic should fail before anything is billed.
     this.deviceId = opts.deviceId || undefined
@@ -452,6 +457,13 @@ export class VoiceSessionController {
         this.sounding.delete(e.contextId)
         this.captions.drop(e.contextId)
         this.player?.cancel(e.contextId)
+        // Never said ("One moment." once the answer came): not a cut reply, and not a line at all.
+        if (e.unsaid) {
+          // The caption showing may already be the answer's: only its own is taken down.
+          const own = this.snap.transcript.at(-1)?.id === e.contextId
+          this.set({ ...(own ? { saying: '' } : {}), transcript: this.snap.transcript.filter((l) => l.id !== e.contextId) })
+          return
+        }
         // Its line holds the words that had played: that's where it was cut.
         this.set({ saying: '', cutLineId: this.snap.transcript.some((l) => l.id === e.contextId) ? e.contextId : this.snap.cutLineId })
         return
@@ -550,6 +562,8 @@ export class VoiceSessionController {
     if (!this.player) {
       this.player = new VoicePlayer({
         createContext: this.makeAudioContext,
+        oneAtATime: true,
+        onScheduled: (chunk, delayMs) => this.captions.audio(chunk.contextId, chunk.piece, delayMs),
         onContextStart: (contextId) => {
           this.sounding.add(contextId)
           const id = this.sessionId

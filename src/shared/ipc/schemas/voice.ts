@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import { VOICE_SESSION_STATES } from '../../voiceSession'
 import { STT_PROVIDER_IDS, TTS_PROVIDER_IDS, VOICE_ERROR_CODES, VOICE_KEY_VENDORS } from '../../voice'
+import { AgentQuestionItemSchema } from './agentQuestion'
+import { AGENT_QUESTION_MAX_ITEMS, AGENT_QUESTION_MAX_TITLE_CHARS } from '../../utils/agentQuestionForm'
+import { VIEW_SPEC_MAX_CHARS } from '../../viewSpec'
 
 /** Int16 PCM over IPC; any backing buffer (the mic's may not be a plain ArrayBuffer). */
 const Int16PcmSchema = z.custom<Int16Array>((v) => v instanceof Int16Array, 'expected Int16Array')
@@ -327,7 +330,19 @@ export const VoiceWorkAskSchema = z.discriminatedUnion('kind', [
     requestId: z.string().max(200),
     questionId: z.string().max(200),
     prompt: z.string().max(1000),
-    options: z.array(z.string().max(200)).max(12)
+    options: z.array(z.string().max(200)).max(12),
+    /**
+     * The whole form, when a click can't answer it (a typed answer, several
+     * picks, several questions): the view draws the task's own question form
+     * with its view, so an email or a name can be typed as well as said.
+     */
+    form: z
+      .object({
+        title: z.string().max(AGENT_QUESTION_MAX_TITLE_CHARS).optional(),
+        questions: z.array(AgentQuestionItemSchema).min(1).max(AGENT_QUESTION_MAX_ITEMS),
+        view: z.string().max(VIEW_SPEC_MAX_CHARS).optional()
+      })
+      .optional()
   })
 ])
 export type VoiceWorkAsk = z.infer<typeof VoiceWorkAskSchema>
@@ -412,8 +427,12 @@ export const VoiceEventSchema = z.discriminatedUnion('kind', [
   z.object({ sessionId: z.string(), kind: z.literal('standby'), on: z.boolean() }),
   /** The voice was asked to end voice mode: the window ends it. */
   z.object({ sessionId: z.string(), kind: z.literal('end_requested') }),
-  /** Barge-in: drop this reply's queued audio from the speakers now. */
-  z.object({ sessionId: z.string(), kind: z.literal('flush'), contextId: z.string() }),
+  /**
+   * Barge-in: drop this reply's queued audio from the speakers now. `unsaid`:
+   * a line dropped before any of it played ("One moment." once the answer
+   * came), so it was never said, not cut off.
+   */
+  z.object({ sessionId: z.string(), kind: z.literal('flush'), contextId: z.string(), unsaid: z.literal(true).optional() }),
   z.object({
     sessionId: z.string(),
     kind: z.literal('error'),

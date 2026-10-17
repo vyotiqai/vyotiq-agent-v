@@ -19,7 +19,8 @@ const RAMP_S = 0.03
  */
 export const STALL_DRAIN_MS = 8000
 
-export type PlayerChunk = { pcm: Int16Array; sampleRate: number; contextId: string }
+/** `piece`: the chunk starts that sentence of the reply (for captions). */
+export type PlayerChunk = { pcm: Int16Array; sampleRate: number; contextId: string; piece?: number }
 
 /** The slice of the Web Audio API the player uses; tests pass a fake. */
 export type PlayerAudioContext = Pick<
@@ -38,6 +39,17 @@ export type VoicePlayerOptions = {
    * gap while more speech is still coming is not this.
    */
   onContextDrained?: (contextId: string) => void
+  /**
+   * One context at a time (live sessions): another context's audio waits
+   * until this one's speech has all arrived. Scheduled by arrival, "One
+   * moment." and the reply that came 0.2 s after it were cut into each other
+   * chunk by chunk, two voices at once (2026-10-17 kept conversations: 20 of
+   * 58 short lines had the reply start within 2.5 s). Off for read-aloud,
+   * which never ends a context.
+   */
+  oneAtATime?: boolean
+  /** A chunk was scheduled to be heard in `delayMs`, now or once its turn came. */
+  onScheduled?: (chunk: PlayerChunk, delayMs: number) => void
 }
 
 export function int16ToFloat32(pcm: Int16Array): Float32Array {
@@ -63,6 +75,11 @@ export class VoicePlayer {
   private stalls = new Map<string, ReturnType<typeof setTimeout>>()
   private ducked = false
   private levelBuf: Float32Array<ArrayBuffer> | null = null
+  /** `oneAtATime`: the context being scheduled now. */
+  private current: string | null = null
+  /** `oneAtATime`: chunks of later contexts, oldest context first, and those whose speech already all arrived. */
+  private held = new Map<string, PlayerChunk[]>()
+  private heldEnded = new Set<string>()
 
   constructor(private readonly opts: VoicePlayerOptions = {}) {}
 
@@ -91,9 +108,41 @@ export class VoicePlayer {
     return { ctx, gain }
   }
 
-  /** Schedule a chunk; how many ms until it is heard, or null when it was dropped. */
+  /** Schedule a chunk; how many ms until it is heard, or null when it was dropped or waits its turn (`oneAtATime`). */
   enqueue(chunk: PlayerChunk): number | null {
     if (this.cancelled.has(chunk.contextId) || chunk.pcm.length === 0) return null
+    if (this.opts.oneAtATime) {
+      if (this.current !== null && this.current !== chunk.contextId) {
+        const waiting = this.held.get(chunk.contextId) ?? []
+        waiting.push(chunk)
+        this.held.set(chunk.contextId, waiting)
+        return null
+      }
+      this.current = chunk.contextId
+    }
+    return this.schedule(chunk)
+  }
+
+  /** The context scheduled now is done arriving (or gone): the oldest waiting one goes next, after it. */
+  private releaseNext(): void {
+    this.current = null
+    for (;;) {
+      const next = this.held.keys().next()
+      if (next.done) return
+      const contextId = next.value
+      const chunks = this.held.get(contextId) ?? []
+      this.held.delete(contextId)
+      this.current = contextId
+      for (const c of chunks) this.schedule(c)
+      if (!this.heldEnded.delete(contextId)) return
+      // Its speech had all arrived while it waited.
+      this.current = null
+      this.ended.add(contextId)
+      this.checkDrained(contextId)
+    }
+  }
+
+  private schedule(chunk: PlayerChunk): number {
     const { ctx, gain } = this.ensure()
     if (ctx.state === 'suspended') void ctx.resume?.()
     const buffer = ctx.createBuffer(1, chunk.pcm.length, chunk.sampleRate)
@@ -114,7 +163,9 @@ export class VoicePlayer {
       this.started.add(chunk.contextId)
       this.opts.onContextStart?.(chunk.contextId)
     }
-    return Math.max(0, (startAt - now) * 1000)
+    const delayMs = Math.max(0, (startAt - now) * 1000)
+    this.opts.onScheduled?.(chunk, delayMs)
+    return delayMs
   }
 
   private onEnded(entry: Scheduled): void {
@@ -131,8 +182,13 @@ export class VoicePlayer {
    */
   endContext(contextId: string): void {
     if (this.cancelled.has(contextId)) return
+    if (this.held.has(contextId)) {
+      this.heldEnded.add(contextId)
+      return
+    }
     this.ended.add(contextId)
     this.checkDrained(contextId)
+    if (this.current === contextId) this.releaseNext()
   }
 
   private checkDrained(contextId: string): void {
@@ -162,6 +218,8 @@ export class VoicePlayer {
     this.started.delete(contextId)
     this.cancelled.add(contextId)
     this.opts.onContextDrained?.(contextId)
+    // A stream that hung (drained by the stall timer) mustn't hold the next one back for good.
+    if (this.current === contextId) this.releaseNext()
   }
 
   private clearStall(contextId: string): void {
@@ -184,6 +242,19 @@ export class VoicePlayer {
       this.clearStall(id)
       this.ended.delete(id)
     }
+    // What waits its turn goes too: everything, or the one cancelled.
+    for (const id of contextId ? [contextId] : [...this.held.keys()]) {
+      this.held.delete(id)
+      this.heldEnded.delete(id)
+      if (!contextId) this.cancelled.add(id)
+    }
+    const releases = contextId !== undefined && this.current === contextId
+    if (!contextId) this.current = null
+    this.stopVictims(ctx, victims)
+    if (releases) this.releaseNext()
+  }
+
+  private stopVictims(ctx: PlayerAudioContext | null, victims: Scheduled[]): void {
     if (!ctx || !this.gain || victims.length === 0) return
     const stopAt = ctx.currentTime + RAMP_S * 3
     if (victims.length === this.scheduled.length) {
@@ -231,6 +302,9 @@ export class VoicePlayer {
     this.started.clear()
     this.cancelled.clear()
     this.ended.clear()
+    this.held.clear()
+    this.heldEnded.clear()
+    this.current = null
     for (const t of this.stalls.values()) clearTimeout(t)
     this.stalls.clear()
     if (ctx && ctx.state !== 'closed') await ctx.close()

@@ -50,7 +50,7 @@ None of these act while the cursor is in a text field.
 - **No dead air.** When a slow step starts, it says a few words, such as "Running the tests." Turn this off with "Spoken progress".
 - **Interrupt any time.** It stops talking the moment you talk, and answers what you said. Talking never cancels the agent's work.
 - **"Stop" or "Never mind"** on their own stop the agent's work.
-- **Approvals by voice.** When the agent needs your OK, it asks out loud ("It wants to run pnpm test. Say yes or no."). Yes allows it once and no denies it, and it says which out loud; "always allow" allows it and stops asking for that command or tool in this workspace, exactly as the card's Always allow does (it's offered out loud only where the card offers it). Anything else you say goes to the agent as a message. Risky actions always need a click on the card. Turn this off with "Approve by voice".
+- **Approvals by voice.** When the agent needs your OK, it asks out loud ("It wants to run pnpm test. Say yes or no."). Yes allows it once and no denies it, and it says which out loud; "always allow" allows it and stops asking for that command or tool in this workspace, exactly as the card's Always allow does (it's offered out loud only where the card offers it). Say something else and the approval keeps waiting: ask "what does it do?" and it tells you, then a yes or no answers it and your words go on to the agent. Say something else again and it goes to the agent as a message, and the approval is dropped. Risky actions always need a click on the card. Turn this off with "Approve by voice".
 
 ## Choose who listens and who speaks
 

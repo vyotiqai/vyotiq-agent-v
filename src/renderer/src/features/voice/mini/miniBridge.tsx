@@ -48,6 +48,9 @@ export function runMiniCommand(api: StageApi, cmd: VoiceMiniCommand): void {
     case 'question':
       void api.respondQuestion(cmd.requestId, cmd.questionId, cmd.value, cmd.runId)
       return
+    case 'form':
+      void api.respondForm?.(cmd.requestId, cmd.answers, cmd.runId)
+      return
     case 'closed':
     case 'ready':
       return
