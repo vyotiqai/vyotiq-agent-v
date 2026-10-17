@@ -119,10 +119,10 @@ function rgbOf(color: string): [number, number, number] {
  * spreads a pure-white or pure-black picture still leaves muted text at AA
  * once the 70% scrim is on (measured 2026-10-17: ≥ 4.67:1 in every skin).
  */
-export const IMAGE_SPREAD = { dark: 0.3, light: 0.22 } as const
+const IMAGE_SPREAD = { dark: 0.3, light: 0.22 } as const
 
 /** Pull every pixel toward `bg` by `k`: 0 is the page colour, 1 the picture as it is. */
-export function toneTowards(px: Uint8ClampedArray, bg: readonly [number, number, number], k: number): void {
+function toneTowards(px: Uint8ClampedArray, bg: readonly [number, number, number], k: number): void {
   for (let i = 0; i < px.length; i += 4) {
     px[i] = bg[0] + (px[i]! - bg[0]) * k
     px[i + 1] = bg[1] + (px[i + 1]! - bg[1]) * k

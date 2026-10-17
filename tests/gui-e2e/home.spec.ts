@@ -210,8 +210,11 @@ test.describe('Home and Usage', () => {
     const { window } = launched
     await expect(window.getByRole('heading', { name: DAY, exact: true, level: 1 })).toBeVisible({ timeout: 30_000 })
     await expect(window.locator('[data-day-sentence]')).toBeVisible()
-    // No task field: a task starts from its brief.
-    await expect(window.locator('[data-home]').getByRole('textbox')).toHaveCount(0)
+    // The one place to type is New task's brief under the sentence: the brief and its next check.
+    const brief = window.locator('[data-home] [data-home-brief]')
+    await expect(brief.getByRole('combobox', { name: 'Brief' })).toBeVisible()
+    await expect(window.locator('[data-home]').getByRole('textbox')).toHaveCount(1)
+    await expect(brief.getByRole('textbox', { name: 'New check' })).toBeVisible()
     // Nothing waits on you, so the sentence doesn't say anything does and Needs you isn't open.
     await expect(window.locator('[data-day-sentence]')).not.toContainText('need you')
     await expect(window.locator('[data-home]').getByRole('region', { name: 'Needs you' })).toHaveCount(0)
@@ -275,11 +278,13 @@ test.describe('Home and Usage', () => {
     await goHome(window)
     await openFromFoot(window, 'workspaces')
     await window.getByRole('region', { name: 'Workspaces' }).getByRole('button', { name: `New task in ${workspaceName}` }).click()
-    const brief = window.getByRole('combobox', { name: 'Brief' })
+    // Started from Home's own brief: the task opens in its pane as it starts.
+    const brief = window.locator('[data-home-brief]').getByRole('combobox', { name: 'Brief' })
     await expect(brief).toBeVisible({ timeout: 20_000 })
     await brief.fill('Run the updater suite and report')
     // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
     await brief.press('Control+Enter')
+    await expect(window.locator('[data-home]')).toHaveCount(0)
 
     // Started at once — the record, already asking before the command.
     const card = window.locator('[data-tool-approval]')
@@ -328,12 +333,16 @@ test.describe('Home and Usage', () => {
     await window.keyboard.press('Escape')
   })
 
-  test('a workspace row opens a new task there', async () => {
+  test('a workspace row points Home’s brief there, ready to type', async () => {
     const { window } = launched
     await goHome(window)
     await openFromFoot(window, 'workspaces')
     await window.getByRole('region', { name: 'Workspaces' }).getByRole('button', { name: `New task in ${workspaceName}` }).click()
-    await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
+    // Home stays: the brief under the sentence is that workspace's, with the caret in it.
+    const brief = window.locator('[data-home] [data-home-brief]')
+    await expect(brief.locator('[data-task-header]')).toContainText(workspaceName)
+    await expect(brief.getByRole('combobox', { name: 'Brief' })).toBeFocused({ timeout: 20_000 })
+    await expect(window.locator('[data-new-task]')).toHaveCount(0)
   })
 })
 

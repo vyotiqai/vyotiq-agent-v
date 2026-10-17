@@ -49,7 +49,6 @@ export function ComingUpSection({
     <HomeSection
       id="home-coming-up"
       label="Coming up"
-      className="mt-10"
       trailing={<HomeLink onClick={() => void requestScheduledTasks()}>Scheduled tasks</HomeLink>}
     >
       {upcoming.slice(0, SHOWN).map((schedule) => (

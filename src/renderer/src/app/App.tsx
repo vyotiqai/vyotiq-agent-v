@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AppShell } from './AppShell'
 import { requestOpenWorkspaceFile } from '@renderer/lib/chat/workspaceFileRequests'
 import { launchViewFor } from './launchView'
@@ -10,6 +10,7 @@ import { requestUpdatePanel } from './navigator/UpdateChip'
 import { exportTaskJson, importTaskInto } from '../features/task/taskBundle'
 import { ChatView, type SettleActions } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
+import { Composer } from '../features/chat/components/composer'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
 import { runTitle } from './navigator/runTitle'
 import { PLACEHOLDER_GOAL } from '@shared/utils/taskTitle'
@@ -1083,7 +1084,7 @@ function App() {
     [focusComposerSoon, newChatInWorkspace]
   )
 
-  // Home start bar / workspace cards route here: same switch + focus flow as
+  // New task with a brief (a moved brief, a draft, the palette) routes here: same switch + focus flow as
   // onNewChatInWorkspace, then the typed goal lands in the new session's
   // composer draft in that workspace. The new session is a draft (runId null),
   // so setComposerDraftForPane(path, null, goal) targets it; empty goals skip
@@ -1111,7 +1112,9 @@ function App() {
   )
 
   /** Move a New task brief to another workspace (set below, once `confirm` exists). */
-  const moveBriefRef = useRef<(from: string, to: string, brief: MovedBrief) => Promise<boolean>>(async () => false)
+  const moveBriefRef = useRef<
+    (from: string, to: string, brief: MovedBrief, opts?: { stayOnHome?: boolean }) => Promise<boolean>
+  >(async () => false)
   // Where a new task's brief can move: the open workspaces, named as the navigator names them.
   const newTaskTargets = useMemo<AppNewTaskTargets>(
     () => ({
@@ -1119,6 +1122,16 @@ function App() {
       onMove: (from, to, brief) => moveBriefRef.current(from, to, brief)
     }),
     [openWorkspaces]
+  )
+  /** The workspace Home's brief was moved or pointed to; the active one until then, or once it closes. */
+  const [homeBriefPick, setHomeBriefPick] = useState<string | null>(null)
+  // On Home the brief moves and Home stays: the box shows the brief in its new workspace.
+  const homeBriefTargets = useMemo<AppNewTaskTargets>(
+    () => ({
+      workspaces: newTaskTargets.workspaces,
+      onMove: (from, to, brief) => moveBriefRef.current(from, to, brief, { stayOnHome: true })
+    }),
+    [newTaskTargets.workspaces]
   )
 
   /** After a successful add: show Chat, draft if fresh, focus composer. */
@@ -1551,7 +1564,7 @@ function App() {
    * there with unsent work of its own is replaced only once you say so. The
    * draft being continued stays saved where it was; it is not this page's.
    */
-  moveBriefRef.current = async (from, to, brief) => {
+  moveBriefRef.current = async (from, to, brief, opts) => {
     const attachmentCount = (b: { images: unknown[]; files: unknown[]; nativeFiles: unknown[]; audio: unknown[] }): number =>
       b.images.length + b.files.length + b.nativeFiles.length + b.audio.length
     const moving =
@@ -1589,7 +1602,8 @@ function App() {
       const fromKey = composerAttachmentKey(from, null)
       if (fromKey) clearComposerAttachments(fromKey)
     }
-    onNewSessionInWorkspace(to, moving ? brief.text : '')
+    if (opts?.stayOnHome) setHomeBriefPick(to)
+    else onNewSessionInWorkspace(to, moving ? brief.text : '')
     return true
   }
 
@@ -3279,6 +3293,105 @@ function App() {
     }
   }
 
+  /**
+   * Home's New task: the same brief the pane's New task page is, for one
+   * workspace's task that has not started (runId null), so text, checks,
+   * folders and attachments are one brief in both places. Start opens that
+   * workspace's New task in the pane and starts there, through the same gate,
+   * queue and controller as the pane's Start; a worktree or a comparison
+   * start makes its own workspace first, so it goes straight to the gate.
+   */
+  const homeBriefPath =
+    (homeBriefPick ? openWorkspaces.find((open) => workspacePathsEqual(open, homeBriefPick)) : undefined) ??
+    activeWorkspace ??
+    null
+  const startFromHome = async (
+    path: string,
+    text: string,
+    images?: string[],
+    files?: AttachedFile[],
+    extras?: import('@shared/ipc').ComposerSendExtras
+  ): Promise<boolean> => {
+    if (extras?.worktree || extras?.compareWith) {
+      return gateSendWithOnboarding(async () => false, text, images, files, extras, { workspacePath: path, runId: null })
+    }
+    setOpenInstanceByParent({})
+    setView('chat')
+    await newChatInWorkspace(path)
+    return gateSendWithOnboarding(
+      (t, i, f, e) =>
+        sendWithOfflineQueue(
+          t,
+          i,
+          f,
+          e,
+          (t2, i2, f2, e2) => getRunControllerRef.current(null, path)?.send(t2, i2, f2, e2) ?? false,
+          { runId: null, paneId: draftPaneIdIn(path), workspacePath: path }
+        ),
+      text,
+      images,
+      files,
+      extras,
+      { workspacePath: path, runId: null }
+    )
+  }
+  const renderHomeBrief = (path: string): ReactNode => {
+    const ctx = findByWorkspacePath(contexts, path)
+    const snap = getPaneChatSnapshot(path, null)
+    const chatSettings = resolveEffectiveSettings(settings, ctx?.settingsOverride)
+    const provider = snap.providerModel?.provider ?? chatSettings.provider
+    const model = snap.providerModel?.model ?? chatSettings.model
+    return (
+      <Composer
+        // A brief per workspace: moving it remounts the box on the new one's.
+        key={`home-brief:${path}`}
+        variant="brief"
+        briefLayout="home"
+        workspacePath={path}
+        hasWorkspace
+        activeRunId={null}
+        running={false}
+        provider={provider}
+        model={model}
+        ollamaBaseUrl={chatSettings.ollamaBaseUrl}
+        customOpenAiBaseUrl={chatSettings.customOpenAiBaseUrl}
+        modelsRefreshKey={modelsRefreshKeyFor(chatSettings, secrets, modelsRefreshNonce)}
+        secrets={secrets}
+        draft={ctx ? resolveComposerDraft(ctx.ui, null) : undefined}
+        onDraftChange={(draft) => setComposerDraftForPane(path, null, draft)}
+        onProviderModel={(nextProvider, nextModel) => {
+          getRunControllerRef.current(null, path)?.setProviderModel(nextProvider, nextModel)
+          onProviderModelForWorkspace(path, nextProvider, nextModel)
+        }}
+        favoriteModels={settings.favoriteModels}
+        recentModels={settings.recentModels}
+        serviceTier={resolveServiceTier(settings, provider, model)}
+        onToggleFavorite={onToggleFavorite}
+        onServiceTierChange={(tier) => {
+          const key = modelSelectionKey(provider, model)
+          void update({ serviceTier: tier, serviceTierByModel: { ...settings.serviceTierByModel, [key]: tier } })
+        }}
+        chatSettings={snap.providerModel ? { ...chatSettings, ...snap.providerModel } : chatSettings}
+        onChatSettingsChange={(patch) => onChatSettingsChangeForWorkspace(path, patch, chatSettings)}
+        agentMode={ctx?.ui.agentMode ?? 'agent'}
+        onAgentModeChange={(mode) => setAgentMode(mode, { workspacePath: path, runId: null })}
+        onSend={(text, images, files, extras) => startFromHome(path, text, images, files, extras)}
+        slashHandlers={createSlashHandlers({
+          workspacePath: path,
+          runId: null,
+          running: false,
+          pendingRun: false,
+          // Nothing has started on Home: there is no record to clear, compact or undo.
+          onClear: () => {},
+          onCompact: async () => ({ ok: false as const, message: 'Start the task first.' }),
+          onUndoWrites: async () => false,
+          onSetAgentMode: (mode) => setAgentMode(mode, { workspacePath: path, runId: null })
+        })}
+        newTaskTargets={homeBriefTargets}
+      />
+    )
+  }
+
   if (loading || setupUndecided) {
     return (
       <AppShell
@@ -3497,7 +3610,14 @@ function App() {
               providerIssue={homeProviderIssue}
               userName={settings.userName}
               backdrop={{ kind: settings.homeBackdrop, imageStamp: settings.homeBackdropImageStamp }}
-              onNewTaskInWorkspace={(path) => onNewSessionInWorkspace(path, '')}
+              brief={homeBriefPath ? renderHomeBrief(homeBriefPath) : null}
+              onNewTaskInWorkspace={(path) => {
+                // That workspace's own brief, in the box above, ready to type into.
+                setHomeBriefPick(path)
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => focusComposerMessage(document.querySelector('[data-home-brief]')))
+                )
+              }}
               onOpenTask={shellWorkspaceProps.onSelectRunInWorkspace}
               onRetryTask={(path, runId) => void onRetryRunInWorkspace(path, runId)}
               onOpenWorkspace={(path) => {

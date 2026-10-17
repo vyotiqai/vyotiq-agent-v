@@ -5,8 +5,6 @@ import type { HomeActivityResult } from '@shared/ipc'
 export const ACTIVITY_WORKSPACE_CAP = 12
 const WORKSPACE_CAP = ACTIVITY_WORKSPACE_CAP
 
-export type ActivityWindowDays = 7 | 30
-
 export type HomeActivityOptions = {
   /** Last local day (YYYY-MM-DD) of a custom range; absent ends the window today. */
   endDay?: string

@@ -213,6 +213,7 @@ export function Composer({
   lineOutcome = null,
   newTaskTargets,
   briefHeaderActions,
+  briefLayout = 'page',
   taskFiles
 }: {
   provider: ProviderIdAny
@@ -284,6 +285,8 @@ export function Composer({
   newTaskTargets?: NewTaskTargets
   /** Brief only: the pane's controls, at the end of its header. */
   briefHeaderActions?: React.ReactNode
+  /** Brief only: the pane's New task page, or the block on Home. */
+  briefLayout?: 'page' | 'home'
   /** Files this task read or edited, most recent first — the @ menu's recent files. */
   taskFiles?: readonly string[]
 }) {
@@ -1988,6 +1991,7 @@ export function Composer({
         }
         onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
         onOpenRules={slashHandlers?.onOpenRules}
+        layout={briefLayout}
         headerActions={briefHeaderActions}
       />
     )

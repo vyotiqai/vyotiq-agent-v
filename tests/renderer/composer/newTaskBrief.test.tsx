@@ -975,3 +975,48 @@ describe('New task brief: ↑ and ↓ in a recalled brief of several lines (B7)'
     await waitFor(() => expect(brief.textContent).toBe('Older one'))
   })
 })
+
+describe('New task brief on Home', () => {
+  it('is a block of Home’s page: no pane row, the facts on one line that opens', async () => {
+    renderBrief({ briefLayout: 'home' })
+    const block = document.querySelector('[data-home-brief]') as HTMLElement
+    // A section of Home, headed at Home's level; the pane's page and its row are not drawn.
+    expect(document.querySelector('[data-new-task]')).toBeNull()
+    expect(within(block).getByRole('heading', { name: 'New task', level: 2 })).toBeTruthy()
+    expect(within(block).queryByRole('heading', { level: 1 })).toBeNull()
+    expect(within(block).getByRole('combobox', { name: 'Brief' })).toBeTruthy()
+    expect(within(block).getByRole('button', { name: 'Start task' })).toBeTruthy()
+
+    // Folded at every width: the line is the toggle (no width class hides it), and the facts wait under it.
+    const toggle = within(block).getByRole('button', { name: 'Show what the agent will see' })
+    expect(toggle.className).not.toContain('@[640px]:hidden')
+    const facts = block.querySelector('[data-agent-facts]') as HTMLElement
+    expect(facts.classList.contains('hidden')).toBe(true)
+    await waitFor(() => expect(toggle.textContent).toContain('2 changed'))
+    expect(toggle.textContent).toContain('4 rules')
+
+    fireEvent.click(toggle)
+    expect(facts.classList.contains('grid')).toBe(true)
+    expect(facts.classList.contains('hidden')).toBe(false)
+    // Two facts to a line once there is room; never the 296px rail's single column.
+    expect(facts.className).toContain('@[640px]:grid-cols-2')
+    expect(facts.className).not.toContain('@[1100px]:grid-cols-1')
+    expect(within(block).getByRole('button', { name: 'Fold what the agent will see' })).toBeTruthy()
+  })
+
+  it('starts through the same send as the pane’s brief, with its checks', async () => {
+    const { props } = renderBrief({ briefLayout: 'home', workspacePath: '/ws/home-start' })
+    typeBrief('Fix the flaky updater test')
+    const check = screen.getByRole('textbox', { name: 'New check' })
+    fireEvent.change(check, { target: { value: 'pnpm vitest passes' } })
+    fireEvent.keyDown(check, { key: 'Enter' })
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(props.onSend).toHaveBeenCalledWith(
+      'Fix the flaky updater test',
+      undefined,
+      undefined,
+      expect.objectContaining({ doneWhen: ['pnpm vitest passes'] })
+    )
+  })
+})

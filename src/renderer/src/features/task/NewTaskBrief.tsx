@@ -95,7 +95,8 @@ export function NewTaskBrief({
   extraRoots = NO_FOLDERS,
   onExtraRootsChange,
   locked = false,
-  voice
+  voice,
+  layout = 'page'
 }: {
   workspacePath: string | null
   targets?: { workspaces: ReadonlyArray<{ path: string; name: string }>; onMove: (path: string) => void }
@@ -151,6 +152,12 @@ export function NewTaskBrief({
    * the first thing said starts the task (docs/voice-mode.md §13.5).
    */
   voice?: ReactNode
+  /**
+   * `page`: the pane's New task, with its 40px row, its own scroller and the
+   * facts as a rail. `home`: a block on Home's page, which scrolls it; the
+   * where-it-runs sentence heads the box and the facts fold to one line.
+   */
+  layout?: 'page' | 'home'
 }) {
   const [draftCheck, setDraftCheck] = useState('')
   const newCheckRef = useRef<HTMLInputElement>(null)
@@ -251,6 +258,133 @@ export function NewTaskBrief({
       </ul>
     ) : null
 
+  // One sentence: a new task, in this workspace, on this branch, here or in a
+  // worktree. The joining words stay quieter than the names they hold.
+  const where = workspacePath ? (
+    <>
+      <span className="shrink-0 @max-[560px]:hidden">in</span>
+      <span className="flex min-w-0 items-center">
+        <WorkspaceSelect workspacePath={workspacePath} targets={targets} disabled={locked} />
+      </span>
+      <BranchSelect workspacePath={workspacePath} git={git} disabled={locked} />
+      {onWorktreeChange && worktreeOffered ? (
+        <WhereItWorks worktree={worktree} onWorktreeChange={onWorktreeChange} disabled={locked} />
+      ) : null}
+    </>
+  ) : null
+
+  const box = (
+    <div>
+      {banners}
+      {voice ?? (
+        <div
+          className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
+          data-brief
+          // The composer's shell: Ctrl+. typed in the brief switches this box's mode.
+          data-composer-shell
+          aria-busy={locked || undefined}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          ref={boxRef}
+        >
+          {fileInput}
+          {notice ? <div className={cn('border-b px-1.5 py-1', BORDER_DIVIDER)}>{notice}</div> : null}
+          <div className="px-4 pt-3.5">{input}</div>
+          {attachments || folders ? (
+            <div className="flex flex-col gap-1.5 px-4 pt-2">
+              {attachments}
+              {folders}
+            </div>
+          ) : null}
+          {/* The checks the run is judged against are part of the brief: the
+              field for the next one is always there, so the first check is one
+              click into it, not two. Numbers are the checks' ids in the record. */}
+          <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
+            {checks.length > 0 ? (
+              <ol className="m-0 list-none p-0" aria-label="Done when">
+                {checks.map((text, index) => (
+                  <li
+                    key={`${index}:${text}`}
+                    className={cn('group -mx-1 flex h-7 items-center gap-2.5 rounded-md px-1', ROW_HOVER)}
+                  >
+                    <span className={cn(NUM, 'w-4 shrink-0 text-right text-tertiary')}>{index + 1}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
+                      {text}
+                    </span>
+                    <IconButton
+                      icon="close"
+                      label={`Remove “${text}”`}
+                      size="xs"
+                      tone="muted"
+                      disabled={locked}
+                      className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                      onClick={() => removeCheck(index)}
+                    />
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            <label className="group/check flex h-7 cursor-text items-center gap-2.5">
+              {/* The field has no box of its own inside the brief's: its + says
+                  where focus is, beside the outline the field draws when it has it. */}
+              <span className="flex w-4 shrink-0 justify-center">
+                <Icon name="plus" size={14} className="text-tertiary group-focus-within/check:text-fg" />
+              </span>
+              <input
+                ref={newCheckRef}
+                value={draftCheck}
+                maxLength={CHECK_MAX_CHARS}
+                readOnly={locked}
+                // At the limit the field stays, so a half-typed check stays in view.
+                aria-disabled={full || undefined}
+                onChange={(e) => setDraftCheck(e.target.value)}
+                onKeyDown={onCheckKeyDown}
+                placeholder={full ? `${MAX_CHECKS} checks is the limit` : 'Done when… a command passes, a file exists'}
+                aria-label="New check"
+                className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
+              />
+            </label>
+          </div>
+          {/* The control row is the box's action edge: how it runs, then
+              the one action that starts it (with the brief's other endings). */}
+          <div className={cn('border-t pb-1 pl-4 pr-2 @container', BORDER_DIVIDER)}>{controls}</div>
+        </div>
+      )}
+      {menus}
+    </div>
+  )
+
+  if (layout === 'home') {
+    // On Home the page scrolls and owns the column; the block is the brief,
+    // headed by where it runs, then what the agent sees on one line, then drafts.
+    return (
+      <section className="@container" aria-labelledby="home-new-task" data-home-brief>
+        <header className="mb-2 flex h-7 min-w-0 items-center gap-1 text-xs text-tertiary" data-task-header>
+          <h2 id="home-new-task" className="mr-1 shrink-0 whitespace-nowrap text-sm font-semibold text-fg-strong">
+            New task
+          </h2>
+          {where}
+        </header>
+        {box}
+        {workspacePath ? (
+          <WhatTheAgentSees
+            workspacePath={workspacePath}
+            worktree={worktree}
+            git={git}
+            folded
+            onOpenSettings={onOpenSettings}
+            onOpenRules={onOpenRules}
+          />
+        ) : null}
+        {workspacePath ? (
+          <div className="mt-6">
+            <DraftsList workspacePath={workspacePath} continuingDraftId={continuingDraftId} />
+          </div>
+        ) : null}
+      </section>
+    )
+  }
+
   return (
     // The pane around it is already the "New task" region.
     <div className="flex min-h-0 flex-1 flex-col bg-bg" data-new-task>
@@ -259,20 +393,7 @@ export function NewTaskBrief({
         data-task-header
       >
         <h1 className="mr-1 shrink-0 whitespace-nowrap text-sm font-semibold text-fg-strong">New task</h1>
-        {workspacePath ? (
-          <>
-            {/* One sentence: a new task, in this workspace, on this branch, here or in a
-                worktree. The joining words stay quieter than the names they hold. */}
-            <span className="shrink-0 @max-[560px]:hidden">in</span>
-            <span className="flex min-w-0 items-center">
-              <WorkspaceSelect workspacePath={workspacePath} targets={targets} disabled={locked} />
-            </span>
-            <BranchSelect workspacePath={workspacePath} git={git} disabled={locked} />
-            {onWorktreeChange && worktreeOffered ? (
-              <WhereItWorks worktree={worktree} onWorktreeChange={onWorktreeChange} disabled={locked} />
-            ) : null}
-          </>
-        ) : null}
+        {where}
         <span className="flex-1" />
         {headerActions}
       </header>
@@ -286,84 +407,7 @@ export function NewTaskBrief({
             so the brief is exactly as wide as the steps it becomes. */}
         <div className="mx-auto min-h-full w-full max-w-[1180px] px-5 pb-16 pt-10 @[720px]:px-8 @[900px]:pt-16 @[1100px]:grid @[1100px]:grid-cols-[minmax(0,1fr)_296px] @[1100px]:items-start @[1100px]:gap-x-10">
           <div className="mx-auto flex w-full max-w-[780px] flex-col gap-10">
-            <div>
-              {banners}
-              {voice ?? (
-                <div
-                  className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
-                  data-brief
-                  // The composer's shell: Ctrl+. typed in the brief switches this box's mode.
-                  data-composer-shell
-                  aria-busy={locked || undefined}
-                  onDragOver={onDragOver}
-                  onDrop={onDrop}
-                  ref={boxRef}
-                >
-                  {fileInput}
-                  {notice ? <div className={cn('border-b px-1.5 py-1', BORDER_DIVIDER)}>{notice}</div> : null}
-                  <div className="px-4 pt-3.5">{input}</div>
-                  {attachments || folders ? (
-                    <div className="flex flex-col gap-1.5 px-4 pt-2">
-                      {attachments}
-                      {folders}
-                    </div>
-                  ) : null}
-                  {/* The checks the run is judged against are part of the brief: the
-                      field for the next one is always there, so the first check is one
-                      click into it, not two. Numbers are the checks' ids in the record. */}
-                  <div className={cn('mt-3 border-t py-1 pl-4 pr-2', BORDER_DIVIDER)} data-done-when>
-                    {checks.length > 0 ? (
-                      <ol className="m-0 list-none p-0" aria-label="Done when">
-                        {checks.map((text, index) => (
-                          <li
-                            key={`${index}:${text}`}
-                            className={cn('group -mx-1 flex h-7 items-center gap-2.5 rounded-md px-1', ROW_HOVER)}
-                          >
-                            <span className={cn(NUM, 'w-4 shrink-0 text-right text-tertiary')}>{index + 1}</span>
-                            <span className="min-w-0 flex-1 truncate text-xs text-fg" title={text}>
-                              {text}
-                            </span>
-                            <IconButton
-                              icon="close"
-                              label={`Remove “${text}”`}
-                              size="xs"
-                              tone="muted"
-                              disabled={locked}
-                              className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                              onClick={() => removeCheck(index)}
-                            />
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
-                    <label className="group/check flex h-7 cursor-text items-center gap-2.5">
-                      {/* The field has no box of its own inside the brief's: its + says
-                          where focus is, beside the outline the field draws when it has it. */}
-                      <span className="flex w-4 shrink-0 justify-center">
-                        <Icon name="plus" size={14} className="text-tertiary group-focus-within/check:text-fg" />
-                      </span>
-                      <input
-                        ref={newCheckRef}
-                        value={draftCheck}
-                        maxLength={CHECK_MAX_CHARS}
-                        readOnly={locked}
-                        // At the limit the field stays, so a half-typed check stays in view.
-                        aria-disabled={full || undefined}
-                        onChange={(e) => setDraftCheck(e.target.value)}
-                        onKeyDown={onCheckKeyDown}
-                        placeholder={full ? `${MAX_CHECKS} checks is the limit` : 'Done when… a command passes, a file exists'}
-                        aria-label="New check"
-                        className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
-                      />
-                    </label>
-                  </div>
-                  {/* The control row is the box's action edge: how it runs, then
-                      the one action that starts it (with the brief's other endings). */}
-                  <div className={cn('border-t pb-1 pl-4 pr-2 @container', BORDER_DIVIDER)}>{controls}</div>
-                </div>
-              )}
-              {menus}
-            </div>
+            {box}
             {workspacePath ? <DraftsList workspacePath={workspacePath} continuingDraftId={continuingDraftId} /> : null}
           </div>
           {/* The rail: what the agent will see, where you change it. Beside
@@ -624,12 +668,15 @@ function WhatTheAgentSees({
   workspacePath,
   worktree,
   git,
+  folded = false,
   onOpenSettings,
   onOpenRules
 }: {
   workspacePath: string
   worktree: boolean
   git: GitStatusState
+  /** One line under the box at every width (Home), opening into the facts two to a line. */
+  folded?: boolean
   onOpenSettings?: (section: NewTaskFactTarget) => void
   onOpenRules?: () => void
 }) {
@@ -722,22 +769,27 @@ function WhatTheAgentSees({
     // 640px: a split pane, an open inspector) folds it to one line, the whole
     // line its own toggle.
     <aside
-      className={cn(
-        // Under the box it keeps the brief's 780 measure and centre, so the
-        // two share a left edge; beside it, the rail's own column.
-        'mx-auto mt-10 w-full min-w-0 max-w-[780px] border-t pt-3 @[1100px]:sticky @[1100px]:top-6 @[1100px]:mx-0 @[1100px]:mt-0 @[1100px]:max-w-none @[1100px]:border-t-0 @[1100px]:pt-0',
-        BORDER_DIVIDER
-      )}
+      className={
+        folded
+          ? 'mt-2 min-w-0'
+          : cn(
+              // Under the box it keeps the brief's 780 measure and centre, so the
+              // two share a left edge; beside it, the rail's own column.
+              'mx-auto mt-10 w-full min-w-0 max-w-[780px] border-t pt-3 @[1100px]:sticky @[1100px]:top-6 @[1100px]:mx-0 @[1100px]:mt-0 @[1100px]:max-w-none @[1100px]:border-t-0 @[1100px]:pt-0',
+              BORDER_DIVIDER
+            )
+      }
       aria-label="What the agent will see"
       data-agent-sees
     >
-      <h2 className={cn(SECTION_LABEL, '@max-[640px]:hidden')}>What the agent will see</h2>
+      {folded ? null : <h2 className={cn(SECTION_LABEL, '@max-[640px]:hidden')}>What the agent will see</h2>}
       <button
         type="button"
         aria-expanded={open}
         aria-label={open ? 'Fold what the agent will see' : 'Show what the agent will see'}
         className={cn(
-          '-mx-1 flex h-7 w-[calc(100%+0.5rem)] min-w-0 items-center gap-3 rounded-md px-1 text-left vy-transition focus-visible:vy-focus-ring @[640px]:hidden',
+          '-mx-1 flex h-7 w-[calc(100%+0.5rem)] min-w-0 items-center gap-3 rounded-md px-1 text-left vy-transition focus-visible:vy-focus-ring',
+          folded ? null : '@[640px]:hidden',
           ROW_HOVER
         )}
         onClick={() => setOpen((v) => !v)}
@@ -756,8 +808,10 @@ function WhatTheAgentSees({
         // is the 296px rail: the rows never wrap mid-value.
         <ul
           className={cn(
-            'm-0 mt-1 list-none grid-cols-1 gap-x-8 p-0 @[640px]:grid @[640px]:grid-cols-2 @[1100px]:grid-cols-1',
-            open ? 'grid' : 'hidden'
+            'm-0 mt-1 list-none grid-cols-1 gap-x-8 p-0',
+            folded
+              ? cn('@[640px]:grid-cols-2', open ? 'grid' : 'hidden')
+              : cn('@[640px]:grid @[640px]:grid-cols-2 @[1100px]:grid-cols-1', open ? 'grid' : 'hidden')
           )}
           data-agent-facts
         >

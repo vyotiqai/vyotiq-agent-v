@@ -46,6 +46,9 @@ export type HomePageProps = {
   userName?: string
   /** Settings › Appearance › Home backdrop. Absent: none. */
   backdrop?: { kind: HomeBackdropKind; imageStamp: string }
+  /** The New task brief, under the sentence: the composer's own, built by the app. */
+  brief?: ReactNode
+  /** A workspace row's New task: the brief above starts there. */
   onNewTaskInWorkspace: (workspacePath: string) => void
   onOpenTask: (workspacePath: string, runId: string) => void
   /** A failed task's Retry, from its row under the sentence. */
@@ -96,9 +99,11 @@ function useMinuteNow(): Date {
  * Home leads with the day and one sentence: what is waiting on you, what
  * runs, what is ready for review, what runs next on its own and what is
  * uncommitted. Each fact opens its rows in place under the sentence, one at
- * a time; the first that wants you starts open. The workspaces and the week
- * sit on one quiet line at the foot, opening the same way, so every section
- * Home had stays one click away. Pinned views stay on the page.
+ * a time; the first that wants you starts open. Under that, New task: the
+ * brief, so what is going on and what to start next read as one page. The
+ * workspaces and the week sit on one quiet line at the foot, opening the
+ * same way, so every section Home had stays one click away. Pinned views
+ * stay on the page.
  */
 export function HomePage({
   openWorkspaces,
@@ -108,6 +113,7 @@ export function HomePage({
   providerIssue,
   userName = '',
   backdrop,
+  brief,
   onNewTaskInWorkspace,
   onOpenTask,
   onRetryTask,
@@ -278,15 +284,17 @@ export function HomePage({
       {hasWorkspaces && backdrop && backdrop.kind !== 'none' ? (
         <HomeBackdrop kind={backdrop.kind} imageStamp={backdrop.imageStamp} />
       ) : null}
-      <div className="@container relative mx-auto w-full max-w-[880px] px-8 pb-12 pt-14">
+      {/* 844 = the record's 780 measure + the gutters: the brief here is as wide as the steps it becomes. */}
+      <div className="@container relative mx-auto w-full max-w-[844px] px-8 pb-12 pt-14">
         {hasWorkspaces ? (
           <>
             <DayHead now={now} wants={waiting.length + issues > 0} />
             <Sentence segments={segments} open={open} onToggle={toggle} />
             {/* One region at a time, under the sentence: what every fact and foot item names in aria-controls. */}
-            <div id={HOME_DETAIL_ID} className={open ? 'mt-8 [&>section]:mt-0' : undefined} data-home-detail={open ?? ''}>
+            <div id={HOME_DETAIL_ID} className={open ? 'mt-8' : undefined} data-home-detail={open ?? ''}>
               {open ? detail(open) : null}
             </div>
+            {brief ? <div className="mt-12">{brief}</div> : null}
             {/* Pinned views stay on the page: glances the person chose, not a fact. Nothing renders without a pin. */}
             {onOpenScreen ? <ScreensSection openWorkspaces={openWorkspaces} onOpenScreen={onOpenScreen} /> : null}
             <HomeFootLine
