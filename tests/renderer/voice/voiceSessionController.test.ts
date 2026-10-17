@@ -739,3 +739,4 @@ describe('muted is the session’s state (2026-10-16 audit, H2)', () => {
     expect(t.c.snapshot.muted).toBe(false)
   })
 })
+

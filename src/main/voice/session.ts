@@ -1041,6 +1041,14 @@ export class VoiceSession {
     if (this.pendingTurn) this.pendingTurn.talking = true
     const s = this.stateValue
     if (!AGENT_FLOOR_STATES.has(s)) {
+      // Answering while it's still reading the question out: stop reading.
+      // Not a barge-in — the reply that follows your answer is still spoken.
+      if (s === 'waiting_on_you' && this.playing.size > 0) {
+        for (const contextId of this.playing) this.emitEvent({ kind: 'flush', contextId })
+        this.playing.clear()
+        this.echo.setPlaying(false, this.now())
+        this.pause.setAgentSpeaking(false)
+      }
       this.dispatch({ type: 'speech_start' })
       return
     }
@@ -1649,12 +1657,29 @@ function describeAppControl(summary: string): string {
 /** What an approval asks for, in a few spoken words (§7.5). */
 export function describeApproval(req: Pick<ToolApprovalRequest, 'name' | 'summary'>): string {
   const name = req.name.toLowerCase()
-  const summary = toSpeakable(req.summary).replace(/[.]+$/, '').slice(0, 120)
+  const raw = req.summary.trim()
+  const summary = toSpeakable(raw).replace(/[.]+$/, '').slice(0, 120)
   if (name === 'git_commit') return summary ? `commit ${summary}` : 'commit the changes'
   if (name === 'github_pr_create') return 'push the branch and open a pull request'
   if (name === 'app_control') return describeAppControl(summary)
   if (/terminal|shell|command|bash/.test(name)) return summary ? `run ${summary}` : 'run a command'
-  if (/edit|write|patch|create|replace|delete/.test(name)) return summary ? `change ${summary}` : 'change a file'
-  if (/fetch|browser|navigate/.test(name)) return summary ? `open ${summary}` : 'open a web page'
+  // A path is said as its file's name: "change the saveDraft file", not "change saveDraft".
+  const isPath = /[\\/]|\.\w{1,6}$/.test(raw)
+  if (/^move$|rename/.test(name)) return summary ? `move ${isPath ? `the ${summary} file` : summary}` : 'move a file'
+  if (/delete|remove/.test(name)) return summary ? `delete ${isPath ? `the ${summary} file` : summary}` : 'delete a file'
+  if (/edit|write|patch|create|replace/.test(name)) return summary ? `change ${isPath ? `the ${summary} file` : summary}` : 'change a file'
+  if (/fetch|browser|navigate/.test(name)) {
+    // Say where, not "a link on screen": the site's name is what you'd check.
+    const host = /^https?:\/\//i.test(raw) ? hostOf(raw) : null
+    return host ? `open ${host}` : summary ? `open ${summary}` : 'open a web page'
+  }
   return summary ? `use ${req.name}: ${summary}` : `use ${req.name}`
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '') || null
+  } catch {
+    return null
+  }
 }

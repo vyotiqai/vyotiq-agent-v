@@ -1475,6 +1475,7 @@ Newest last. "Proposed" means waiting on Ajay.
 | D-50 | 2026-10-14 | A hand-off in the voice view owns its run's live steps, what it waits on (answerable there, never a risky approval) and its result, from a `work` event main folds out of the run's own events; replaces the "To the agent" paragraph | Decided |
 | D-51 | 2026-10-14 | The voice view's layout (Conversation, Orb, Split) and the orb's look (nine canvas orbs, Liquid, Simple) are settings, not one fixed design (Ajay). Defaults: Conversation and Glow | Decided |
 | D-52 | 2026-10-16 | Voice mode is the agent (Ajay): no separate voice model; every turn goes to the task as said and the agent answers out loud. A spoken yes is enough for everything, and in voice mode commits and pushes wait for one; Hindi and Punjabi are kept with English. Supersedes D-44 and D-45 (§27) | Decided |
+| D-53 | 2026-10-17 | Merging the 2026-10-14 end-to-end audit (origin, numbered D-35–D-41 there) into the redesigned voice mode. Kept: a window reload or navigation ends that window’s session; Deepgram gets 100 ms of silence every 5 s while muted; Scribe commits turns manually; answering while a question is read stops the reading; the scripted fixture listener for GUI e2e; web tools get their own spoken cues; approvals name files and sites. Dropped as already covered by the redesign: catching up on pending asks (`pendingAsks`), a muted listener that drops (`droppedWhileMuted`), reply audio while Listening (D-44), line hand-off (`registerVoiceLine` in the button), and failed sends (`handOffFailed`) | Decided |
 
 ---
 

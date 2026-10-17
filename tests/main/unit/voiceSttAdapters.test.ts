@@ -78,6 +78,15 @@ async function openWith(provider: SttProvider, o: SttOpenOptions) {
 const kinds = (events: SttEvent[]) => events.map((e) => e.kind)
 
 describe('Deepgram Flux', () => {
+  it('keeps a muted stream open with 100 ms of silence (Deepgram closes after ~10 s without audio)', async () => {
+    capture()
+    const { o } = opts({ model: 'flux-general-en' })
+    const { session, sock } = await openWith(deepgramFlux, o)
+    session.keepAlive?.()
+    expect(sock.binary.at(-1)).toEqual(new Uint8Array(3200))
+    expect(sock.json.filter((m) => m.type === 'KeepAlive')).toHaveLength(0)
+  })
+
   it('builds the v2 URL with patience, language and key terms', () => {
     const url = new URL(fluxUrl({ model: 'flux-general-en', language: '', patience: 'quick', keyterms: ['runAgent'] }))
     expect(url.pathname).toBe('/v2/listen')
@@ -140,6 +149,8 @@ describe('AssemblyAI', () => {
 describe('ElevenLabs Scribe', () => {
   it('sends JSON audio, and a commit ends the turn with everything committed', async () => {
     expect(new URL(scribeUrl({ model: 'scribe_v2_realtime', language: '' })).searchParams.get('audio_format')).toBe('pcm_16000')
+    // The session commits each turn itself (ElevenLabs doesn't document the model's default strategy).
+    expect(new URL(scribeUrl({ model: 'scribe_v2_realtime', language: '' })).searchParams.get('commit_strategy')).toBe('manual')
     capture()
     const { o, events } = opts()
     const { sock, session } = await openWith(elevenLabsScribe, o)

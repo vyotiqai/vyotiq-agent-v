@@ -77,6 +77,9 @@ type Reply = { contextId: string; stream: TtsStream; splitter: SentenceSplitter 
 /** A short spoken cue for a tool that's taking a while (§8.4), or null for none. */
 export function cueForTool(name: string, summary: string): string | null {
   const text = `${name} ${summary}`.toLowerCase()
+  // The web tools first: "web_search" would otherwise read as searching the code.
+  if (/^web_search$/.test(name.toLowerCase())) return 'Searching the web.'
+  if (/^web_fetch$/.test(name.toLowerCase())) return 'Reading a web page.'
   if (/\btests?\b|vitest|jest|pytest|cargo test|go test|spec\b/.test(text)) return 'Running the tests.'
   if (/\b(build|compile|tsc|webpack|vite build)\b/.test(text)) return 'Building it.'
   if (/install|pnpm add|npm i\b|pip install/.test(text)) return 'Installing dependencies.'

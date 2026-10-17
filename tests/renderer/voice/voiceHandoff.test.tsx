@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
 import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
 import {
+  ORPHAN_MS,
   HANDOFF_MS,
   beginVoiceHandoff,
   handleVoiceTurn,

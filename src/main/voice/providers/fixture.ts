@@ -11,6 +11,7 @@ import type {
   TtsStream,
   TtsStreamOptions
 } from './types'
+import { PauseDetector } from '../pauseDetector'
 
 export const FIXTURE_TTS_SAMPLE_RATE = 24000
 /** Audio the fixture "speaks" per character of text: 10 ms. */
@@ -60,8 +61,48 @@ export class FixtureSttSession implements SttSession {
   }
 }
 
-export async function openFixtureStt(opts: SttOpenOptions): Promise<FixtureSttSession> {
-  const session = new FixtureSttSession(opts.emit)
+/**
+ * The listener for end-to-end runs (`VYOTIQ_E2E_FIXTURE=1` with
+ * `VYOTIQ_VOICE_FIXTURE_TURNS` set to a JSON array of strings): it listens to
+ * the real mic audio the session sends it and, for each stretch of sound
+ * followed by a pause, "hears" the next scripted sentence. So a GUI test with
+ * a fake microphone drives the whole loop — capture, IPC, turn-taking, the
+ * agent and the spoken reply — with nothing faked after the mic.
+ */
+export class ScriptedFixtureSttSession extends FixtureSttSession {
+  private readonly detector = new PauseDetector('quick')
+  private next = 0
+
+  constructor(
+    emit: (event: SttEvent) => void,
+    private readonly turns: readonly string[]
+  ) {
+    super(emit)
+  }
+
+  override pushAudio(pcm16k: Int16Array): void {
+    super.pushAudio(pcm16k)
+    if (this.closed) return
+    for (const ev of this.detector.push(pcm16k)) {
+      if (ev.kind === 'pause' && ev.speechMs > 0) this.say(this.turns[this.next++] ?? '')
+    }
+  }
+}
+
+/** The scripted turns for an end-to-end run, or null outside one. */
+export function fixtureTurnsFromEnv(env: NodeJS.ProcessEnv = process.env): string[] | null {
+  const raw = env.VYOTIQ_VOICE_FIXTURE_TURNS?.trim()
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : null
+  } catch {
+    return null
+  }
+}
+
+export async function openFixtureStt(opts: SttOpenOptions, turns: readonly string[] | null = null): Promise<FixtureSttSession> {
+  const session = turns ? new ScriptedFixtureSttSession(opts.emit, turns) : new FixtureSttSession(opts.emit)
   if (opts.keyterms) session.setKeyterms(opts.keyterms)
   // The GUI e2e talks through the listener the app last opened: it hears nothing else.
   if (process.env.VYOTIQ_E2E_FIXTURE === '1') (globalThis as { __vyotiqVoiceFixtureStt?: FixtureSttSession }).__vyotiqVoiceFixtureStt = session

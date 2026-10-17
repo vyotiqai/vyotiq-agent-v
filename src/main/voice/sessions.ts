@@ -118,7 +118,15 @@ function openSessionTts(
   return stream
 }
 
-type Owner = { id: number; isDestroyed(): boolean; send(channel: string, payload: unknown): void; once?(ev: 'destroyed', fn: () => void): unknown }
+type NavigationDetails = { isMainFrame: boolean; isSameDocument: boolean }
+type Owner = {
+  id: number
+  isDestroyed(): boolean
+  send(channel: string, payload: unknown): void
+  once?(ev: 'destroyed', fn: () => void): unknown
+  on?(ev: 'did-start-navigation', fn: (details: NavigationDetails) => void): unknown
+  off?(ev: 'did-start-navigation', fn: (details: NavigationDetails) => void): unknown
+}
 
 /**
  * What a session did, for vyotiq.log (A-07): who listens and speaks, and
@@ -193,6 +201,7 @@ onSettingsWritten((next, prev) => {
   for (const { session } of sessions.values()) session.settingsChanged()
 })
 const byOwner = new Map<number, string>()
+const navigationListeners = new Map<string, () => void>()
 /** Windows whose close already ends their session: one hook per window, not one per start. */
 const watchedOwners = new Set<number>()
 
@@ -260,6 +269,14 @@ export async function startVoiceSession(
       if (id) void stopVoiceSession(id)
     })
   }
+  // A reload throws away the window's half of the session: it would stay listening in the tray with no bar (D-41).
+  const onNavigate = (details: NavigationDetails): void => {
+    if (!details.isMainFrame || details.isSameDocument) return
+    owner.off?.('did-start-navigation', onNavigate)
+    void stopVoiceSession(session.id)
+  }
+  owner.on?.('did-start-navigation', onNavigate)
+  navigationListeners.set(session.id, () => owner.off?.('did-start-navigation', onNavigate))
   // While it's open, replies in this workspace are written to be heard.
   setVoiceReplyWorkspace(session.id, workspacePath)
   // The speaking model's voices, fetched alongside: the first reply is seconds away, the mic is open now.
@@ -362,6 +379,8 @@ export async function stopVoiceSession(sessionId: string): Promise<void> {
   const entry = sessions.get(sessionId)
   if (!entry) return
   sessions.delete(sessionId)
+  navigationListeners.get(sessionId)?.()
+  navigationListeners.delete(sessionId)
   logger.info('Voice session ended', { scope: 'voice', status: entry.session.state })
   setVoiceReplyWorkspace(sessionId, null)
   setVoiceFollowedRun(sessionId, null)
