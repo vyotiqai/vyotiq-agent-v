@@ -282,5 +282,11 @@ export function installAppUpdate(): void {
   }
   // Installing was the choice: the running-tasks question would only repeat it.
   markQuitConfirmed()
-  autoUpdater.quitAndInstall()
+  // Silent, then relaunch: "Restart and install" means exactly that. With no
+  // arguments electron-updater runs the assisted NSIS installer visibly — the
+  // all-users / only-me page, a progress bar and a Finish page with "Run" —
+  // for an upgrade whose answers are already known (--updated keeps the
+  // install folder and scope). A per-machine install still gets its UAC
+  // prompt; only the wizard goes.
+  autoUpdater.quitAndInstall(true, true)
 }

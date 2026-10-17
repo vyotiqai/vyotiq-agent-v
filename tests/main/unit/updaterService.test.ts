@@ -393,5 +393,7 @@ describe('updater service', () => {
     autoUpdater.emit('update-downloaded', { version: '1.3.0' })
     updater.installAppUpdate()
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1)
+    // Silent + relaunch: no installer wizard on an in-app update.
+    expect(autoUpdater.quitAndInstall).toHaveBeenCalledWith(true, true)
   })
 })
