@@ -755,8 +755,9 @@ describe('Connect MCP wizard frame', () => {
     expect(oauth.getAttribute('tabindex')).toBe('0')
     expect(app.getAttribute('tabindex')).toBe('-1')
     fireEvent.keyDown(oauth, { key: 'ArrowUp' })
-    expect(app.getAttribute('aria-checked')).toBe('true')
-    expect(document.activeElement).toBe(app)
+    // The choice re-renders the group; focus follows on the next tick.
+    await waitFor(() => expect(within(method).getByRole('radio', { name: /Use the Agent V GitHub sign-in/i }).getAttribute('aria-checked')).toBe('true'))
+    await waitFor(() => expect(document.activeElement).toBe(within(method).getByRole('radio', { name: /Use the Agent V GitHub sign-in/i })))
   })
 
   it('keeps an unavailable scope visible, disabled, and out of the arrow-key cycle', async () => {

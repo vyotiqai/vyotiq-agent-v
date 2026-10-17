@@ -127,9 +127,12 @@ describe('a view’s Data and Copy', () => {
     api.writeClipboard = writeClipboard
     render(inSession(<ViewFence text={fence([{ type: 'live', source: 'git.changes' }, { type: 'note', text: 'One file' }])} streaming={false} onPlain={() => null} />))
     await screen.findByText('a.ts')
-    fireEvent.click(screen.getByRole('button', { name: 'Copy as Markdown' }))
-    await waitFor(() => expect(writeClipboard).toHaveBeenCalled())
-    const copied = String(writeClipboard.mock.calls[0]![0])
+    // The row can paint a tick before the copy sees the read: copy until it does.
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy as Markdown' }))
+      expect(String(writeClipboard.mock.calls.at(-1)?.[0] ?? '')).toContain('**Uncommitted** (1)')
+    })
+    const copied = String(writeClipboard.mock.calls.at(-1)![0])
     expect(copied).toContain('### A view')
     expect(copied).toContain('**Uncommitted** (1)')
     expect(copied).toContain('- src/a.ts · +3 −0')

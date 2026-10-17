@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir, userInfo } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 import { expect, test, type Page } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
@@ -518,8 +518,9 @@ test.describe('New task folders, help, palette and Usage', () => {
     await brief.press(`${MOD}+Enter`)
     const folders = newTask.getByRole('list', { name: 'Added folders' })
     await expect(folders).toBeVisible({ timeout: 20_000 })
-    // A row named for the folder's whole path.
-    await expect(folders.getByRole('listitem', { name: extra, exact: true })).toBeVisible()
+    // A row named for the folder's whole path, as the OS resolves it (macOS
+    // shows /var/folders as /private/var/folders), so match its last part.
+    await expect(folders.getByRole('listitem', { name: new RegExp(`[\\\\/]${basename(extra)}$`) })).toBeVisible()
     // The command is spent, not sent as a task: still on New task, brief emptied.
     await expect(newTask).toBeVisible()
     await expect(brief).not.toContainText('/add-dir')
