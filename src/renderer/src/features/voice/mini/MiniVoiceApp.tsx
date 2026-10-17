@@ -62,7 +62,34 @@ function useMirror(): { state: VoiceMiniState | null; level: { current: { level:
   return { state, level }
 }
 
+/** How long an answer sent from here has to clear what the run waits on before its buttons come back. */
+export const MINI_ANSWER_WAIT_MS = 3000
+const MINI_ANSWER_POLL_MS = 100
+
+/**
+ * The main window answers for this one and says nothing back: the answer took
+ * when the run stops waiting on it. Still waiting after a while, it didn't
+ * (refused, or it failed), and the buttons come back (2026-10-16 audit 3, A12).
+ */
+function answered(latest: { current: VoiceMiniState }, runId: string, requestId: string): Promise<{ ok: boolean }> {
+  const waiting = (): boolean => {
+    const works = (latest.current.snapshot as Partial<VoiceSnapshot>).works ?? {}
+    return works[runId]?.ask?.requestId === requestId
+  }
+  return new Promise((resolve) => {
+    const began = Date.now()
+    const tick = (): void => {
+      if (!waiting()) resolve({ ok: true })
+      else if (Date.now() - began >= MINI_ANSWER_WAIT_MS) resolve({ ok: false })
+      else window.setTimeout(tick, MINI_ANSWER_POLL_MS)
+    }
+    window.setTimeout(tick, MINI_ANSWER_POLL_MS)
+  })
+}
+
 function useMiniStage(state: VoiceMiniState, level: { current: { level: number; mic: number } }): StageApi {
+  const latest = useRef(state)
+  latest.current = state
   const readLevel = useMemo(() => () => level.current.level, [level])
   const readMic = useMemo(() => () => level.current.mic, [level])
   return useMemo<StageApi>(() => {
@@ -93,11 +120,11 @@ function useMiniStage(state: VoiceMiniState, level: { current: { level: number; 
       },
       respondApproval: (requestId, decision, runId) => {
         send({ kind: 'approval', requestId, decision, runId })
-        return Promise.resolve({ ok: true })
+        return answered(latest, runId, requestId)
       },
       respondQuestion: (requestId, questionId, value, runId) => {
         send({ kind: 'question', requestId, questionId, value, runId })
-        return Promise.resolve({ ok: true })
+        return answered(latest, runId, requestId)
       },
       // Voices and devices live in the main window: only the Layout tab here.
       pickers: false
@@ -160,11 +187,20 @@ function useMiniKeys(api: StageApi): void {
       held = false
       latest.current.hold(false)
     }
+    // Space held, then a click into your editor: its keyup goes there, so let go here (2026-10-16 audit 3, A4).
+    const release = (): void => {
+      if (!held) return
+      held = false
+      latest.current.hold(false)
+    }
     window.addEventListener('keydown', down, true)
     window.addEventListener('keyup', up, true)
+    window.addEventListener('blur', release)
     return () => {
+      release()
       window.removeEventListener('keydown', down, true)
       window.removeEventListener('keyup', up, true)
+      window.removeEventListener('blur', release)
     }
   }, [])
 }

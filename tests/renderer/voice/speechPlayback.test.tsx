@@ -4,7 +4,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { ReadAloudButton } from '@renderer/features/voice/ReadAloudButton'
 import { resetSpeechForTests, setSpeechOutput, speakText, stopSpeech, whenSpeechDone } from '@renderer/features/voice/speechPlayback'
 import type { PlayerAudioContext } from '@renderer/features/voice/voicePlayer'
-import type { VoiceAudioOut, VoiceSpeakEnd } from '@shared/ipc/schemas/voice'
+import { DEFAULT_VOICE_SETTINGS, type VoiceAudioOut, type VoiceSpeakEnd } from '@shared/ipc/schemas/voice'
+import { holdVoiceMic, playVoiceSample, resetVoiceModeForTests, startVoiceMode, stopVoiceSample } from '@renderer/features/voice/voiceMode'
+import { VoiceSessionController } from '@renderer/features/voice/voiceSessionController'
 
 const toasts = vi.hoisted(() => [] as string[])
 vi.mock('@renderer/lib/ui', async (importOriginal) => {
@@ -138,5 +140,72 @@ describe('where speech plays (voice mode’s samples, audit I11)', () => {
     act(() => endHandler!({ utteranceId: 'u1' }))
     act(() => sources.forEach((src) => src.onended?.()))
     await expect(done).resolves.toBeUndefined()
+  })
+})
+
+/** A session that only records what is asked of its mic. */
+class MicSpy extends VoiceSessionController {
+  held: boolean[] = []
+  constructor() {
+    super({ onTurn: () => null })
+  }
+  override async start(): Promise<void> {}
+  override async stop(): Promise<void> {}
+  override setOutput(): void {}
+  override holdMic(held: boolean): void {
+    this.held.push(held)
+  }
+}
+
+describe('samples and read aloud: the output and the mic (2026-10-16 audit 3)', () => {
+  let sinks: string[]
+  beforeEach(async () => {
+    // Voice settings are read from this bridge, not one an earlier test left.
+    await resetVoiceModeForTests()
+    sinks = []
+    // Contexts that say which output they were put on.
+    resetSpeechForTests(() => Object.assign(fakeContext(), { setSinkId: vi.fn(async (id: string) => void sinks.push(id)) }))
+    const bridge = (window as unknown as { vyotiq: Record<string, unknown> }).vyotiq
+    bridge.getSettings = async () => ({ ok: true, data: { voice: { ...DEFAULT_VOICE_SETTINGS, outputDeviceId: 'spk-2' } } })
+    bridge.onSettingsChanged = () => () => {}
+  })
+  afterEach(async () => {
+    await resetVoiceModeForTests()
+  })
+
+  it('read aloud plays where voice mode speaks (A11)', async () => {
+    render(<ReadAloudButton text="<spoken>Done.</spoken>" owner="answer:1" />)
+    // The voice settings arrive from the bridge.
+    await act(async () => {})
+    fireEvent.click(screen.getByRole('button', { name: 'Read aloud' }))
+    await waitFor(() => expect(voiceSpeak).toHaveBeenCalled())
+    act(() => audioHandler!(chunk('u1')))
+    expect(sinks).toEqual(['spk-2'])
+  })
+
+  it('a sample plays on the given output and holds a live session’s mic until it ends (A3, A11)', async () => {
+    const spy = new MicSpy()
+    await resetVoiceModeForTests(spy)
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    const done = playVoiceSample('preview', { text: 'Hi.', kind: 'plain' }, 'spk-3')
+    expect(spy.held).toEqual([true])
+    await waitFor(() => expect(voiceSpeak).toHaveBeenCalled())
+    act(() => audioHandler!(chunk('u1')))
+    expect(sinks).toEqual(['spk-3'])
+    act(() => endHandler!({ utteranceId: 'u1' }))
+    act(() => sources.forEach((src) => src.onended?.()))
+    await done
+    expect(spy.held).toEqual([true, false])
+  })
+
+  it('stopping a sample gives the mic back; with no session nothing is held (A3, A9)', async () => {
+    const spy = new MicSpy()
+    await resetVoiceModeForTests(spy)
+    holdVoiceMic(true)
+    expect(spy.held).toEqual([])
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    holdVoiceMic(true)
+    stopVoiceSample()
+    expect(spy.held).toEqual([true, false])
   })
 })

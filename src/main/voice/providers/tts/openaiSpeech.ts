@@ -37,6 +37,13 @@ const MAX_IN_FLIGHT = 2
  */
 const noSpeedModels = new Set<string>()
 
+/**
+ * Models that refused a `voice` this run. Fish Audio and ByteDance Seed take
+ * none and 400 on any; the model list says so, but a reply can start before
+ * that list is read, or with no list at all (2026-10-16 audit 3, A13).
+ */
+const noVoiceModels = new Set<string>()
+
 /** This model refused a speed this run: a speed set for it is not heard (app_control says so). */
 export function speechModelRefusedSpeed(model: string): boolean {
   return noSpeedModels.has(model)
@@ -45,6 +52,7 @@ export function speechModelRefusedSpeed(model: string): boolean {
 /** Tests only. */
 export function resetSpeechModelQuirksForTests(): void {
   noSpeedModels.clear()
+  noVoiceModels.clear()
 }
 
 /** How the voice should sound; honoured by models that take `instructions`. */
@@ -105,7 +113,7 @@ const ENDPOINTS: Readonly<Record<'openai' | 'openrouter', Endpoint>> = {
 }
 
 /** One flushed piece; `index` counts pieces in this stream, so its first audio can say which it is. */
-type Job = { text: string; index: number; response: Promise<Response> | null; ctrl: AbortController; sentSpeed: boolean }
+type Job = { text: string; index: number; response: Promise<Response> | null; ctrl: AbortController; sentSpeed: boolean; sentVoice: boolean }
 
 class SpeechHttpStream implements TtsStream {
   private buffer = ''
@@ -136,7 +144,7 @@ class SpeechHttpStream implements TtsStream {
     const piece = this.buffer.trim()
     this.buffer = ''
     if (!piece || this.cancelled) return
-    this.queue.push({ text: piece, index: this.pieces++, response: null, ctrl: new AbortController(), sentSpeed: false })
+    this.queue.push({ text: piece, index: this.pieces++, response: null, ctrl: new AbortController(), sentSpeed: false, sentVoice: false })
     this.startRequests()
     void this.pump()
   }
@@ -169,13 +177,14 @@ class SpeechHttpStream implements TtsStream {
   private request(job: Job): void {
     // Only when changed: models without speed control may refuse any value (A-13).
     job.sentSpeed = this.opts.speed !== 1 && !noSpeedModels.has(this.opts.model)
+    job.sentVoice = !noVoiceModels.has(this.opts.model)
     job.response = this.fetchImpl(this.endpoint.url, {
       method: 'POST',
       headers: this.endpoint.headers(this.opts.apiKey),
       body: JSON.stringify({
         model: this.opts.model,
         input: job.text,
-        voice: this.opts.voiceId,
+        ...(job.sentVoice ? { voice: this.opts.voiceId } : {}),
         response_format: 'pcm',
         ...(job.sentSpeed ? { speed: this.opts.speed } : {}),
         ...(this.opts.model.includes('gpt-4o-mini-tts') ? { instructions: SPEECH_INSTRUCTIONS } : {})
@@ -223,6 +232,13 @@ class SpeechHttpStream implements TtsStream {
         // This model takes no speed: say it at its own pace rather than not at all.
         if (!noSpeedModels.has(this.opts.model)) logger.info('Speaking model refused a speed; it speaks at its own pace', { scope: 'voice', model: this.opts.model })
         noSpeedModels.add(this.opts.model)
+        this.request(job)
+        return this.play(job)
+      }
+      if (res.status === 400 && job.sentVoice && /\bvoices?\b/i.test(reason) && !this.cancelled) {
+        // This model takes no voice: say it in its own rather than not at all.
+        if (!noVoiceModels.has(this.opts.model)) logger.info('Speaking model refused a voice; it speaks in its own', { scope: 'voice', model: this.opts.model })
+        noVoiceModels.add(this.opts.model)
         this.request(job)
         return this.play(job)
       }

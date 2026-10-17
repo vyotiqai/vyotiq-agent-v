@@ -78,7 +78,7 @@ export class FixtureTtsStream implements TtsStream {
   cancelled = false
   private buffer = ''
   private pieces = 0
-  private ended = false
+  ended = false
   private inFlight: Promise<void> = Promise.resolve()
   /** Settles on end (after the last piece's audio) or cancel, as the real adapters' `done` does. */
   private finished: Promise<void>

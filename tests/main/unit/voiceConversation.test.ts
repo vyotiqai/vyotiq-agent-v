@@ -212,6 +212,36 @@ describe('ReplySpeaker', () => {
     expect(h.said).toEqual(['Renamed it; the file reads back as expected.'])
   })
 
+  it('a slow step after a spoken one still gets its cue, and the spoken step’s stream is closed (2026-10-16 audit 3, A1)', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    h.speaker.handle(delta('<spoken>I will run the tests. </spoken>'))
+    h.speaker.handle(narration('<spoken>I will run the tests. </spoken>'))
+    expect(h.streams[0]!.ended).toBe(true)
+    h.tick(60_000)
+    h.speaker.handle(toolStart('a', 'run_terminal', 'pnpm test'))
+    h.tick(CUE_DELAY_MS)
+    h.speaker.handle(toolResult('a'))
+    expect(h.said).toEqual(['I will run the tests.', 'Running the tests.'])
+  })
+
+  it('a stream that fails mid-reply is replaced once; after a second failure the rest is on screen only (2026-10-16 audit 3, A2)', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    h.speaker.handle(delta('<spoken>One thing done. '))
+    h.streams[0]!.cancel()
+    h.speaker.streamFailed('c1')
+    h.speaker.handle(delta('Two things left. '))
+    expect(h.streams).toHaveLength(2)
+    expect(h.streams[1]!.spoken).toEqual(['Two things left.'])
+    h.streams[1]!.cancel()
+    h.speaker.streamFailed('c2')
+    h.speaker.handle(delta('Three. </spoken>'))
+    // Two failures in a turn: no third stream, the sentence is still captioned.
+    expect(h.streams).toHaveLength(2)
+    expect(h.said).toEqual(['One thing done.', 'Two things left.', 'Three.'])
+  })
+
   it('a follow-up applied mid-run, or the next invoke, is a new turn whose answer is said', () => {
     const h = speakerHarness()
     h.speaker.beginTurn()
@@ -477,6 +507,23 @@ describe('VoiceSession conversation', () => {
       expect.objectContaining({ side: 'speak', code: 'engine_failed', detail: 'OpenRouter (404): model not found' })
     ])
     expect(h.session.state).not.toBe('error')
+  })
+
+  it('a speaking failure reaches the reply: its next sentence gets a new stream (2026-10-16 audit 3, A2)', async () => {
+    const h = sessionHarness()
+    const opened: Array<{ contextId: string; fail: (code: 'offline', message: string) => void }> = []
+    h.session['deps'].openTts = (contextId, onError) => {
+      opened.push({ contextId, fail: onError })
+      return openFixtureTts({ apiKey: '', model: '', voiceId: '', speed: 1, contextId, signal: new AbortController().signal, onAudio: () => {}, onError })
+    }
+    await h.session.start()
+    h.stt().say('what failed?')
+    h.session.follow(R)
+    h.run(status('running'))
+    h.run(delta('<spoken>The lint step failed. '))
+    opened[0]!.fail('offline', 'dropped')
+    h.run(delta('Two files need a fix. </spoken>'))
+    expect(opened).toHaveLength(2)
   })
 
   it('tool work shows as working, and the end with nothing said returns to listening', async () => {

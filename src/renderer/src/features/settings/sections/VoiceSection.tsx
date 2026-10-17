@@ -9,7 +9,7 @@ import type {
 import { DEFAULT_DICTATION_SETTINGS } from '@shared/ipc'
 import { DICTATION_LOCAL_CATALOG, dictationModelIsMultilingual } from '@shared/dictation'
 import { Icon, type IconName } from '@renderer/lib/icons'
-import { ActionMenu, Badge, Button, IconButton, Keys, Segmented, cn, type ActionMenuItem } from '@renderer/lib/ui'
+import { ActionMenu, Badge, Button, IconButton, Keys, RadioMark, Segmented, cn, type ActionMenuItem } from '@renderer/lib/ui'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { listMicDevices, openMicCapture, MicCaptureError, type MicCapture } from '@renderer/lib/audio/micCapture'
 import { levelFromRms, rmsOfInt16 } from '@renderer/lib/audio/segmenter'
@@ -22,6 +22,7 @@ import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
 import { VoiceModeSettings } from './VoiceModeSettings'
+import { holdVoiceMic } from '@renderer/features/voice/voiceMode'
 
 /*
   Settings → Voice. Where the audio goes (never disabled — choosing This PC
@@ -49,17 +50,6 @@ function formatBytes(n: number): string {
 
 function formatSeconds(ms: number): string {
   return ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`
-}
-
-function Radio({ on }: { on: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn('grid size-4 shrink-0 place-items-center rounded-full border', on ? 'border-accent' : 'border-border-strong')}
-    >
-      {on ? <span className="size-2 rounded-full bg-accent" /> : null}
-    </span>
-  )
 }
 
 function ModelMenu({ label, items, disabled }: { label: string; items: ActionMenuItem[]; disabled: boolean }) {
@@ -163,7 +153,7 @@ function ModelRow({
         onClick={onSelect}
         className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left focus-visible:vy-focus-ring disabled:cursor-default"
       >
-        <Radio on={selected} />
+        <RadioMark on={selected} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2 text-sm text-fg-strong">
             {model.label}
@@ -195,6 +185,7 @@ function MicTest({ deviceId, onDevicesMayHaveLabels }: { deviceId: string; onDev
   const stop = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = null
+    if (captureRef.current) holdVoiceMic(false)
     captureRef.current?.stop()
     captureRef.current = null
     setRunning(false)
@@ -206,6 +197,8 @@ function MicTest({ deviceId, onDevicesMayHaveLabels }: { deviceId: string; onDev
 
   const start = async (): Promise<void> => {
     setError(null)
+    // A live voice session hears the same mic: what you say to test it must not reach the agent (2026-10-16 audit 3, A9).
+    holdVoiceMic(true)
     try {
       captureRef.current = await openMicCapture({
         deviceId: deviceId || undefined,
@@ -219,6 +212,7 @@ function MicTest({ deviceId, onDevicesMayHaveLabels }: { deviceId: string; onDev
       onDevicesMayHaveLabels()
       timerRef.current = setTimeout(stop, TEST_MS)
     } catch (err) {
+      holdVoiceMic(false)
       setError(err instanceof MicCaptureError ? err.message : 'The microphone could not start')
     }
   }

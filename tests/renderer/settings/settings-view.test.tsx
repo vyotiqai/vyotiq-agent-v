@@ -1694,6 +1694,10 @@ describe('settings', () => {
     )
     openSection('Voice')
     await waitFor(() => expect(document.querySelector('[data-dictation-model="whisper-tiny.en"]')?.textContent).toMatch(/loaded/))
+    // The model row's mark is the shared RadioMark (14px ring), not a hand-drawn 16px one (2026-10-16 audit 3, A15).
+    const mark = document.querySelector('[data-dictation-model="whisper-tiny.en"] [role="radio"] > span')!
+    expect(mark.classList.contains('size-3.5')).toBe(true)
+    expect(mark.classList.contains('size-4')).toBe(false)
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Runs on' })).getByRole('radio', { name: /This PC/ }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     expect(onUpdate).toHaveBeenCalledWith({

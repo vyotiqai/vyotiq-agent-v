@@ -41,7 +41,8 @@ import {
 import { relativeTimeAgo } from '@shared/utils/timeFormat'
 import { Icon } from '@renderer/lib/icons'
 import { Button, IconButton, Input, Menu, cn, selectTriggerClass } from '@renderer/lib/ui'
-import { speakText, stopSpeech, useSpeech } from '@renderer/features/voice/speechPlayback'
+import { useSpeech } from '@renderer/features/voice/speechPlayback'
+import { playVoiceSample, stopVoiceSample } from '@renderer/features/voice/voiceMode'
 import { AnimatedOrb, ORB_LOOK_OPTIONS } from '@renderer/features/voice/orb/AnimatedOrb'
 import { listSpeakerDevices } from '@renderer/lib/audio/micCapture'
 import type { VoiceOptionInfo } from '@shared/ipc/schemas/voice'
@@ -181,6 +182,7 @@ const LANGUAGE_OPTIONS: readonly SettingsOption<string>[] = [
   { value: 'fr', label: 'French' },
   { value: 'de', label: 'German' },
   { value: 'hi', label: 'Hindi' },
+  { value: 'pa', label: 'Punjabi' },
   { value: 'pt', label: 'Portuguese' },
   { value: 'it', label: 'Italian' },
   { value: 'ja', label: 'Japanese' },
@@ -192,10 +194,13 @@ const LANGUAGE_OPTIONS: readonly SettingsOption<string>[] = [
  * to the rest, so the blank row says which, and the rest get an explicit
  * English (A-15).
  */
-function languageOptions(id: SttProviderId): readonly SettingsOption<string>[] {
-  return blankLanguageMeans(id) === 'en'
-    ? [{ value: '', label: 'English' }, ...LANGUAGE_OPTIONS]
-    : [{ value: '', label: 'Detect automatically' }, { value: 'en', label: 'English' }, ...LANGUAGE_OPTIONS]
+function languageOptions(id: SttProviderId, saved: string): readonly SettingsOption<string>[] {
+  const options =
+    blankLanguageMeans(id) === 'en'
+      ? [{ value: '', label: 'English' }, ...LANGUAGE_OPTIONS]
+      : [{ value: '', label: 'Detect automatically' }, { value: 'en', label: 'English' }, ...LANGUAGE_OPTIONS]
+  // A code the agent set (it takes any two letters) shows as itself, not as a blank pick.
+  return saved && !options.some((o) => o.value === saved) ? [...options, { value: saved, label: saved }] : options
 }
 
 /**
@@ -369,6 +374,7 @@ function VoicePicker({
   value,
   fallback,
   speed,
+  outputDeviceId,
   keyReady,
   keysVersion,
   locked,
@@ -382,6 +388,8 @@ function VoicePicker({
   value: string
   fallback: { id: string; label: string }
   speed: number
+  /** Where voice mode speaks: the Preview plays there too. */
+  outputDeviceId: string
   keyReady: boolean
   /** Bumps when keys change, so the list is fetched again with the new key. */
   keysVersion: string
@@ -462,8 +470,9 @@ function VoicePicker({
           data-voice-preview={preview.active ? preview.phase : 'idle'}
           onClick={() =>
             preview.active
-              ? stopSpeech()
-              : void speakText('preview', { text: PREVIEW_LINE, kind: 'plain', provider, voiceId: current, speed })
+              ? stopVoiceSample()
+              : // On voice mode's output, with a live session's mic held: it would take the line for your words.
+                void playVoiceSample('preview', { text: PREVIEW_LINE, kind: 'plain', provider, voiceId: current, speed }, outputDeviceId)
           }
         >
           {preview.active ? 'Stop' : 'Preview'}
@@ -725,7 +734,13 @@ export function VoiceModeSettings({
   const fellBack =
     (sttResolved.ok && sttResolved.fellBackFrom) || (ttsResolved.ok && ttsResolved.fellBackFrom) ? true : false
 
-  const speedValue = SPEED_OPTIONS.some((o) => Number(o.value) === voice.speed) ? String(voice.speed) : '1'
+  const languageValue =
+    stt.caps.languages === 'en' || (voice.language === 'en' && blankLanguageMeans(stt.id) === 'en') ? '' : voice.language
+  const speedValue = String(voice.speed)
+  // A speed set elsewhere (the agent takes 0.5 to 2) shows as itself, never as Normal.
+  const speedOptions = SPEED_OPTIONS.some((o) => Number(o.value) === voice.speed)
+    ? SPEED_OPTIONS
+    : [...SPEED_OPTIONS, { value: speedValue, label: `${voice.speed}×` }].sort((a, b) => Number(a.value) - Number(b.value))
   const ttsModel = chooseModel(tts, voice.tts[tts.id]?.model)
   const inUseVendors = new Set<VoiceKeyVendor>(
     [stt.key, tts.key].flatMap((k) => (k.kind === 'voice' ? [k.vendor] : []))
@@ -797,6 +812,7 @@ export function VoiceModeSettings({
           value={voice.tts[tts.id]?.voiceId ?? ''}
           fallback={tts.defaultVoice}
           speed={clampSpeed(voice.speed, tts.caps.speed)}
+          outputDeviceId={voice.outputDeviceId}
           keyReady={keySourceReady(tts.key, keys)}
           keysVersion={JSON.stringify(keys)}
           locked={locked}
@@ -808,7 +824,7 @@ export function VoiceModeSettings({
           title="Speaking speed"
           hint={`Kept within what ${tts.label} supports.`}
           value={speedValue}
-          options={SPEED_OPTIONS}
+          options={speedOptions}
           disabled={locked}
           {...form.nestedDefaultMark('voice', 'speed')}
           onChange={(v) => patch({ speed: Number(v) })}
@@ -817,10 +833,8 @@ export function VoiceModeSettings({
           id="voice-language"
           title="Language"
           hint={stt.caps.languages === 'en' ? `${stt.label} understands English only.` : 'The language you speak in.'}
-          value={
-            stt.caps.languages === 'en' || (voice.language === 'en' && blankLanguageMeans(stt.id) === 'en') ? '' : voice.language
-          }
-          options={languageOptions(stt.id)}
+          value={languageValue}
+          options={languageOptions(stt.id, languageValue)}
           width={200}
           disabled={locked || stt.caps.languages === 'en'}
           {...form.nestedDefaultMark('voice', 'language')}

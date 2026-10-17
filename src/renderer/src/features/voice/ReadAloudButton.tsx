@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { IconButton, pushToast } from '@renderer/lib/ui'
-import { speakText, stopSpeech, useSpeech } from './speechPlayback'
+import { setSpeechOutput, speakText, stopSpeech, useSpeech } from './speechPlayback'
 import { useVoiceMode } from './voiceMode'
 
 /**
@@ -11,7 +11,8 @@ import { useVoiceMode } from './voiceMode'
 export function ReadAloudButton({ text, owner }: { text: string; owner: string }) {
   const { active, phase, error } = useSpeech(owner)
   // One voice at a time: during a conversation the agent's replies are already spoken.
-  const inConversation = useVoiceMode().owner !== null
+  const { owner: voiceOwner, settings } = useVoiceMode()
+  const inConversation = voiceOwner !== null
 
   useEffect(() => {
     if (error) pushToast(error, 'error')
@@ -28,7 +29,12 @@ export function ReadAloudButton({ text, owner }: { text: string; owner: string }
       aria-pressed={active}
       disabled={inConversation && !active}
       data-read-aloud={active ? phase : 'idle'}
-      onClick={() => (active ? stopSpeech() : void speakText(owner, { text, kind: 'answer' }))}
+      onClick={() => {
+        if (active) return stopSpeech()
+        // Where voice mode speaks, as Settings › Voice › Speaks through says (2026-10-16 audit 3, A11).
+        setSpeechOutput(settings.outputDeviceId)
+        void speakText(owner, { text, kind: 'answer' })
+      }}
     />
   )
 }

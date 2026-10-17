@@ -10,6 +10,7 @@ vi.mock('@main/voice/keys', () => ({
 
 import {
   cachedModelVoices,
+  FAILED_RETRY_MS,
   formatUsd,
   listVoiceModels,
   openRouterCredit,
@@ -117,6 +118,24 @@ describe('listVoiceModels', () => {
     expect(list).toMatchObject({ source: 'curated', error: 'provider_down' })
     expect(list.detail).toContain('OpenRouter model list (503)')
     expect(list.models.map((m) => m.id)).toEqual(['elevenlabs/eleven-flash-v2.5'])
+  })
+
+  it('a fetch that just failed isn’t asked again until a minute passes, or Refresh (2026-10-16 audit 3, A14)', async () => {
+    respond = () => new Response('', { status: 503 })
+    const first = await listVoiceModels('tts', 'openrouter')
+    const second = await listVoiceModels('tts', 'openrouter')
+    expect(calls).toHaveLength(1)
+    // The same answer, reason included.
+    expect(second).toEqual(first)
+    await listVoiceModels('tts', 'openrouter', true)
+    expect(calls).toHaveLength(2)
+    vi.useFakeTimers({ now: Date.now() + FAILED_RETRY_MS + 1 })
+    try {
+      await listVoiceModels('tts', 'openrouter')
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(calls).toHaveLength(3)
   })
 
   it('a failed refresh keeps serving the last list, and says so', async () => {

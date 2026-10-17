@@ -45,12 +45,20 @@ type Fetched = { models: VoiceModelInfo[]; voices: Map<string, string[]> }
 type Entry = { at: number; list: VoiceModelList; voices: Map<string, string[]> }
 
 const cache = new Map<string, Entry>()
+/**
+ * A fetch that just failed is not tried again for this long: offline, every
+ * Settings render and every reply's `prepareVoiceModels` asked again, each
+ * waiting out the timeout. Refresh in Settings still asks at once.
+ */
+export const FAILED_RETRY_MS = 60_000
+const failed = new Map<string, { at: number; error: VoiceModelList['error']; detail?: string }>()
 let fetchImpl: typeof fetch = (...args) => fetch(...args)
 
 /** Tests only: a fake `fetch`, and an empty cache. */
 export function setModelCatalogFetchForTests(fn: typeof fetch | null): void {
   fetchImpl = fn ?? ((...args) => fetch(...args))
   cache.clear()
+  failed.clear()
 }
 
 function entryFor(direction: Direction, provider: string) {
@@ -173,6 +181,11 @@ export async function listVoiceModels(direction: Direction, provider: string, re
   const cacheKey = `${direction}:${provider}:${key ? key.slice(-6) : ''}`
   const hit = cache.get(cacheKey)
   if (!refresh && hit && Date.now() - hit.at < MODEL_CACHE_MS) return hit.list
+  const lastFailure = failed.get(cacheKey)
+  if (!refresh && lastFailure && Date.now() - lastFailure.at < FAILED_RETRY_MS) {
+    const why = { error: lastFailure.error, ...(lastFailure.detail ? { detail: lastFailure.detail } : {}) }
+    return hit ? { ...hit.list, ...why } : { source: 'curated', models: fallback, ...why }
+  }
 
   try {
     const fetched =
@@ -184,10 +197,12 @@ export async function listVoiceModels(direction: Direction, provider: string, re
     if (fetched.models.length === 0) throw new VoiceError('engine_failed', 'The provider listed no models for this')
     const list: VoiceModelList = { source: 'api', fetchedAt: Date.now(), models: withRecommended(fetched.models, entry.models) }
     cache.set(cacheKey, { at: Date.now(), list, voices: fetched.voices })
+    failed.delete(cacheKey)
     return list
   } catch (err) {
     const e = toVoiceError(err)
     const detail = voiceDetail(e.message)
+    failed.set(cacheKey, { at: Date.now(), error: e.code, ...(detail ? { detail } : {}) })
     // A stale list beats none: keep serving it, and say the refresh failed.
     if (hit) return { ...hit.list, error: e.code, ...(detail ? { detail } : {}) }
     return { source: 'curated', models: fallback, error: e.code, ...(detail ? { detail } : {}) }

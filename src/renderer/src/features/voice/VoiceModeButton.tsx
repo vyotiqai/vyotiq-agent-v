@@ -179,10 +179,14 @@ function VoiceSetupPanel({ onAddKey }: { onAddKey?: (section: VoiceSetupTarget) 
         <span className="text-sm font-medium text-fg-strong">Talk with</span>
       </div>
       <div className="p-1">
-        <p className="m-0 px-2 pb-1.5 pt-2 text-xs text-muted">Voice mode needs a key for one listening service. Settings → Voice changes it later.</p>
-        {STT_AUTO_ORDER.map((id, index) => {
+        <p className="m-0 px-2 pb-1.5 pt-2 text-xs text-muted">
+          Voice mode needs a key for one listening service, or This PC. Settings → Voice changes it later.
+        </p>
+        {/* This PC needs no key. It's never picked automatically (slower), so it's chosen there (2026-10-16 audit 3, A10). */}
+        {[...STT_AUTO_ORDER, 'local' as const].map((id, index) => {
           const entry = sttEntry(id)
           const section: VoiceSetupTarget = entry.key.kind === 'chat' ? 'providers' : 'voice'
+          const keyless = entry.key.kind === 'none'
           return (
             <div key={id} className={cn('flex items-start gap-3 rounded-md px-2 py-2', ROW_HOVER)} data-voice-setup-choice={id}>
               <div className="min-w-0 flex-1">
@@ -195,7 +199,7 @@ function VoiceSetupPanel({ onAddKey }: { onAddKey?: (section: VoiceSetupTarget) 
               {onAddKey ? (
                 <div className="shrink-0 pt-px">
                   <Button size="xs" variant={index === 0 ? 'secondary' : 'ghost'} onClick={() => onAddKey(section)}>
-                    Add key
+                    {keyless ? 'Choose' : 'Add key'}
                   </Button>
                 </div>
               ) : null}

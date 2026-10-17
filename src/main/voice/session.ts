@@ -424,9 +424,9 @@ export class VoiceSession {
       screen: this.screen,
       muted: this.standby ? 'until_called' : this.stateValue === 'paused' ? 'until_unmuted' : null,
       noteAction: (action, result) => {
-        this.deps.record?.({ kind: 'app_action', action, ok: result.ok, message: result.message })
-        // The agent stopped the work it was doing for you.
+        // The agent stopped the work it was doing for you: one line for it, not that and the action too.
         if (action === 'stop_task' && result.ok && result.runId === this.followedRun) this.deps.record?.({ kind: 'stop_agent', by: 'voice' })
+        else this.deps.record?.({ kind: 'app_action', action, ok: result.ok, message: result.message })
       }
     }
   }
@@ -483,6 +483,8 @@ export class VoiceSession {
     const stream = this.deps.openTts(
       contextId,
       (code, message) => {
+        // The rest of this reply goes to a new stream, not into the failed one (§15).
+        this.reply.streamFailed(contextId)
         // Say it once a session: the reply is still on screen.
         if (this.speakErrorShown) return
         this.speakErrorShown = true

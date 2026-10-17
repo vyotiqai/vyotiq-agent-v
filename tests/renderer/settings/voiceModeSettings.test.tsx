@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { VoiceModeSettings, voiceKeyProblem } from '@renderer/features/settings/sections/VoiceModeSettings'
 import { DEFAULT_SETTINGS, emptySecretStatus, type Settings } from '@shared/ipc'
 import type { SettingsFormState } from '@renderer/features/settings/hooks/useSettingsForm'
 import type { VoiceKeyStatus } from '@shared/ipc/schemas/voice'
 import { resetSpeechForTests } from '@renderer/features/voice/speechPlayback'
+import { resetVoiceModeForTests, startVoiceMode } from '@renderer/features/voice/voiceMode'
+import { VoiceSessionController } from '@renderer/features/voice/voiceSessionController'
 
 const noKeys: VoiceKeyStatus = {
   voice: { deepgram: { set: false }, assemblyai: { set: false }, elevenlabs: { set: false }, cartesia: { set: false } },
@@ -143,6 +145,51 @@ describe('Settings → Voice mode', () => {
         expect.objectContaining({ kind: 'plain', provider: 'openai', voiceId: 'nova', speed: 1.15 })
       )
     )
+  })
+
+  it('Preview during a live session holds its mic, so it never answers the line (2026-10-16 audit 3, A3)', async () => {
+    const held: boolean[] = []
+    class MicSpy extends VoiceSessionController {
+      constructor() {
+        super({ onTurn: () => null })
+      }
+      override async start(): Promise<void> {}
+      override async stop(): Promise<void> {}
+      override setOutput(): void {}
+      override holdMic(h: boolean): void {
+        held.push(h)
+      }
+    }
+    await resetVoiceModeForTests(new MicSpy())
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    const { form } = makeForm({ voice: { ...DEFAULT_SETTINGS.voice, tts: { openai: { voiceId: 'nova' } } } })
+    render(<VoiceModeSettings form={form} secrets={{ ...emptySecretStatus(), openai: true }} />)
+    await waitFor(() => expect(document.querySelector('[data-settings-field="voice-voice"]')!.textContent).toContain('2 voices'))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    await waitFor(() => expect(voiceSpeak).toHaveBeenCalled())
+    expect(held).toEqual([true])
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(held).toEqual([true, false]))
+    await resetVoiceModeForTests()
+  })
+
+  it('a speed set elsewhere shows as itself, not as Normal (2026-10-16 audit 3, A5)', () => {
+    const { form } = makeForm({ voice: { ...DEFAULT_SETTINGS.voice, speed: 1.25 } })
+    render(<VoiceModeSettings form={form} secrets={emptySecretStatus()} />)
+    const row = document.querySelector('[data-settings-field="voice-speed"]')!
+    expect(within(row as HTMLElement).getByRole('radio', { name: '1.25×' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(row as HTMLElement).getByRole('radio', { name: 'Normal' }).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('Punjabi is offered, and a code the agent set shows as itself (2026-10-16 audit 3, A6)', () => {
+    const row = () => document.querySelector('[data-settings-field="voice-language"]')!.textContent
+    const punjabi = makeForm({ voice: { ...DEFAULT_SETTINGS.voice, sttProvider: 'elevenlabs', language: 'pa' } })
+    render(<VoiceModeSettings form={punjabi.form} secrets={emptySecretStatus()} />)
+    expect(row()).toContain('Punjabi')
+    cleanup()
+    const korean = makeForm({ voice: { ...DEFAULT_SETTINGS.voice, sttProvider: 'elevenlabs', language: 'ko' } })
+    render(<VoiceModeSettings form={korean.form} secrets={emptySecretStatus()} />)
+    expect(row()).toContain('ko')
   })
 
   it('without a key, the preview is off and says why', async () => {

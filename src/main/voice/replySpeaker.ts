@@ -87,6 +87,9 @@ export function cueForTool(name: string, summary: string): string | null {
   return null
 }
 
+/** Speaking streams reopened in one turn after a failure; past this, the reply is on screen only. */
+export const MAX_STREAM_REOPENS = 1
+
 export class ReplySpeaker {
   private parser = new SpokenStreamParser()
   /** This step's spoken block closed and its last sentence was let go. */
@@ -105,6 +108,8 @@ export class ReplySpeaker {
   private heard = false
   /** The run's last error event, said and kept if the run then ends in error. */
   private runError: { message: string; code?: string } | null = null
+  /** Speaking streams that failed this turn; past `MAX_STREAM_REOPENS` the rest stays on screen only. */
+  private streamFailures = 0
 
   constructor(private readonly deps: ReplySpeakerDeps) {}
 
@@ -118,6 +123,7 @@ export class ReplySpeaker {
     this.quiet = false
     this.active = true
     this.heard = false
+    this.streamFailures = 0
     this.resetStep()
   }
 
@@ -205,6 +211,9 @@ export class ReplySpeaker {
         }
         // Answered in a block, or the final answer (said or summarised as ever); a bare tool call answers nothing.
         if (final || this.parser.phase === 'after') this.owesAnswer = false
+        // The step's words are all out: its speech closes now. Held open across the tools that follow,
+        // it kept progress cues away for the rest of the run and left the vendor's stream idle.
+        if (!final) this.finishReply()
         if (final) {
           const answer = ev.content || this.stepText
           // Already said this turn: this one only replaces the result.
@@ -228,6 +237,18 @@ export class ReplySpeaker {
       default:
         return
     }
+  }
+
+  /**
+   * This reply's speaking stream failed. The next sentence opens a new one
+   * rather than going to a dead stream, unheard; after a second failure in
+   * the turn the rest stays on screen (§15).
+   */
+  streamFailed(contextId: string): void {
+    if (this.reply?.contextId !== contextId || this.streamFailures >= MAX_STREAM_REOPENS) return
+    this.streamFailures++
+    this.reply.stream.cancel()
+    this.reply = null
   }
 
   dispose(): void {

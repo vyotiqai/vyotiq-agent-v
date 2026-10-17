@@ -1062,6 +1062,12 @@ const SAMPLE_LINE = 'Hi, I’m ready when you are. Tell me what you want done.'
 /** The speeds offered; those outside the speaking provider's range are off. */
 const SPEEDS = [0.85, 1, 1.15, 1.3] as const
 
+/** The offered speeds, with the saved one among them when it isn't one of them (2026-10-16 audit 3, A5). */
+export function speedChoices(saved: number): number[] {
+  const list: number[] = [...SPEEDS]
+  return list.includes(saved) ? list : [...list, saved].sort((a, b) => a - b)
+}
+
 export type VoicePickerDeps = {
   /** Who speaks now (the session's speaker, else what settings resolve to). */
   provider: TtsProviderId | null
@@ -1152,11 +1158,12 @@ function VoiceTab() {
       <div className={cn('flex h-11 items-center gap-3 border-t px-3', BORDER_DIVIDER)}>
         <span className="flex-1 text-sm text-fg">Speed</span>
         <Segmented
-          items={SPEEDS.map((s) => {
+          // A speed set elsewhere (the agent takes 0.5 to 2) shows as itself, never as 1×.
+          items={speedChoices(speed).map((s) => {
             const out = s < entry.caps.speed[0] || s > entry.caps.speed[1]
             return { id: String(s), label: `${s}×`, disabled: out, title: out ? `${entry.label} speaks between ${entry.caps.speed[0]}× and ${entry.caps.speed[1]}×` : undefined }
           })}
-          value={String(SPEEDS.find((s) => s === speed) ?? 1)}
+          value={String(speed)}
           onChange={(s) => api.patchSettings({ speed: Number(s) })}
           label="Speed"
         />

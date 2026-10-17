@@ -194,6 +194,32 @@ describe('OpenAI-compatible speech (OpenAI, OpenRouter)', () => {
     expect(calls[0]!.body).not.toHaveProperty('speed')
   })
 
+  it('a model that refuses a voice speaks in its own, and isn’t asked with one again (2026-10-16 audit 3, A13)', async () => {
+    resetSpeechModelQuirksForTests()
+    const bodies: Array<Record<string, unknown>> = []
+    const fn = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>
+      bodies.push(body)
+      if ('voice' in body) return new Response(JSON.stringify({ error: { message: 'This model does not support the voice parameter.' } }), { status: 400 })
+      return new Response(pcmBytes([1, 2]), { status: 200, headers: { 'content-type': 'audio/pcm;rate=44100;channels=1' } })
+    }) as unknown as typeof fetch
+    const { opts, chunks, errors } = streamOpts({ model: 'fish-audio/s1', voiceId: 'alloy' })
+    const s = makeOpenAiCompatibleTts('openrouter', fn).stream(opts)
+    s.pushText('Hi.')
+    s.end()
+    await s.done()
+    expect(errors).toEqual([])
+    expect(chunks).toHaveLength(1)
+    expect(bodies.at(-1)).not.toHaveProperty('voice')
+    const again = makeOpenAiCompatibleTts('openrouter', fn).stream(streamOpts({ model: 'fish-audio/s1', voiceId: 'alloy' }).opts)
+    const before = bodies.length
+    again.pushText('Again.')
+    again.end()
+    await again.done()
+    expect(bodies.slice(before)).toEqual([expect.not.objectContaining({ voice: expect.anything() })])
+    resetSpeechModelQuirksForTests()
+  })
+
   it('a model that refuses speed says it at its own pace, and isn’t asked with speed again (Eleven v4, probed)', async () => {
     resetSpeechModelQuirksForTests()
     const bodies: Array<Record<string, unknown>> = []

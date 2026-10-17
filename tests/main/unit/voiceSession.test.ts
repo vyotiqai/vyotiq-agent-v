@@ -469,7 +469,7 @@ describe('VoiceSession: 2026-10-16 audit fixes', () => {
     h.session.link.noteAction('stop_task', { ok: true, message: 'Stopped “Other”.', runId: 'run2' })
     expect(h.recorded.filter((e) => e.kind === 'app_action' || e.kind === 'stop_agent')).toEqual([
       { kind: 'app_action', action: 'set_theme', ok: true, message: 'Dark theme.' },
-      { kind: 'app_action', action: 'stop_task', ok: true, message: 'Stopped “Fix it”.' },
+      // One line for one stop (2026-10-16 audit 3, A7): the history drew this one twice.
       { kind: 'stop_agent', by: 'voice' },
       { kind: 'app_action', action: 'stop_task', ok: true, message: 'Stopped “Other”.' }
     ])

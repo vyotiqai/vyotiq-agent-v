@@ -9,10 +9,10 @@
  * it appears, so the conversation carries on there.
  */
 import { useSyncExternalStore } from 'react'
-import { DEFAULT_VOICE_SETTINGS, type VoiceScreen, type VoiceSettings } from '@shared/ipc/schemas/voice'
+import { DEFAULT_VOICE_SETTINGS, type VoiceScreen, type VoiceSettings, type VoiceSpeakRequest } from '@shared/ipc/schemas/voice'
 import { getDictationState, patchDictationSettings } from '@renderer/features/chat/components/composer/take/dictationStore'
 import { routeVoiceTurn, type VoiceRunTarget } from './turnRouting'
-import { stopSpeech } from './speechPlayback'
+import { setSpeechOutput, speakText, stopSpeech, whenSpeechDone } from './speechPlayback'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot, type VoiceTurn, type VoiceTurnResult } from './voiceSessionController'
 
 type ModeState = {
@@ -236,6 +236,38 @@ export function dismissEndedVoice(): void {
  * Change voice settings from the view (placement, layout, style, voice,
  * speed, output): shown at once, then saved; main's echo settles it.
  */
+/**
+ * A voice sample (Settings' Preview, the view's voice picker): played on the
+ * output voice mode speaks through, and with a live session's mic held while
+ * it plays, or the session would take the sample for your words and answer
+ * it (2026-10-16 audit 3, A3, A11). Resolves once it has finished.
+ */
+export async function playVoiceSample(owner: string, req: VoiceSpeakRequest, outputDeviceId: string): Promise<void> {
+  setSpeechOutput(outputDeviceId)
+  holdVoiceMic(true)
+  try {
+    await speakText(owner, req)
+    await whenSpeechDone(owner)
+  } finally {
+    holdVoiceMic(false)
+  }
+}
+
+/** Stop a voice sample, and give a live session its mic back. */
+export function stopVoiceSample(): void {
+  stopSpeech()
+  holdVoiceMic(false)
+}
+
+/**
+ * Hold a live session's mic (it keeps running, sending nothing) while
+ * something else uses the microphone or the speakers: Settings' mic test, a
+ * sample. No session, nothing to hold.
+ */
+export function holdVoiceMic(held: boolean): void {
+  if (mode.owner !== null) controller?.holdMic(held)
+}
+
 export async function patchVoiceSettings(patch: Partial<VoiceSettings>): Promise<boolean> {
   emit({ settings: { ...mode.settings, ...patch } })
   // Only what changed: main keeps the rest as it is now, not as this copy last saw it.

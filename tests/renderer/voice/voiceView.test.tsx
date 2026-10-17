@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { VoiceCompanionColumn, VoiceTakeoverLayer, VoiceView, voiceSurface } from '@renderer/features/voice/VoiceView'
 import { VoiceBar } from '@renderer/features/voice/VoiceBar'
+import { speedChoices } from '@renderer/features/voice/stage/kit'
 import { registerVoiceLine, resetVoiceModeForTests, setVoiceEscArmed, setVoiceTarget, startVoiceMode, useVoiceMode } from '@renderer/features/voice/voiceMode'
 import { IDLE_VOICE, VoiceSessionController, type VoiceSnapshot } from '@renderer/features/voice/voiceSessionController'
 import type { VoiceRunTarget } from '@renderer/features/voice/turnRouting'
@@ -679,6 +680,26 @@ describe('after End: the summary (§26.7)', () => {
     expect(document.querySelector('[data-voice-ended]')).toBeNull()
   })
 
+  it('Esc with a menu open over the summary is the menu’s, not the summary’s (2026-10-16 audit 3, A8)', async () => {
+    render(<Shell />)
+    await start()
+    act(() => fake.update(said()))
+    fireEvent.click(screen.getByRole('button', { name: 'End' }))
+    await vi.waitFor(() => expect(document.querySelector('[data-voice-ended]')).not.toBeNull())
+    const menu = document.createElement('button')
+    menu.setAttribute('aria-haspopup', 'menu')
+    menu.setAttribute('aria-expanded', 'true')
+    document.body.appendChild(menu)
+    const menuHeard = vi.fn()
+    menu.addEventListener('keydown', menuHeard)
+    fireEvent.keyDown(menu, { key: 'Escape' })
+    expect(document.querySelector('[data-voice-ended]')).not.toBeNull()
+    expect(menuHeard).toHaveBeenCalled()
+    menu.remove()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(document.querySelector('[data-voice-ended]')).toBeNull()
+  })
+
   it('a row opens its task and closes the summary', async () => {
     const onOpenTask = vi.fn()
     render(<Shell onOpenTask={onOpenTask} />)
@@ -895,3 +916,10 @@ function step(id: string, tool: string, summary: string, state: 'running' | 'don
 function work(over: Partial<VoiceWork>): VoiceWork {
   return { runId: 'r1', state: 'running', startedAt: 0, stepCount: 0, steps: [], ...over }
 }
+
+describe('the view’s speed picker (2026-10-16 audit 3, A5)', () => {
+  it('a speed set elsewhere is one of the choices, never shown as 1×', () => {
+    expect(speedChoices(1.15)).toEqual([0.85, 1, 1.15, 1.3])
+    expect(speedChoices(1.25)).toEqual([0.85, 1, 1.15, 1.25, 1.3])
+  })
+})

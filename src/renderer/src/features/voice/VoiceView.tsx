@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { VoiceOptionInfo, VoiceSettings } from '@shared/ipc/schemas/voice'
 import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
-import { hasOpenFloatingLayer } from '@renderer/lib/hooks/floatingLayers'
+import { escapeBelongsToALayer } from './escapeLayer'
 import { useDictationState } from '@renderer/features/chat/components/composer/take/dictationStore'
 import { playEarcon } from './earcons'
 import { DOUBLE_ESC_MS, markFirstTipSeen } from './VoiceBar'
-import { setSpeechOutput, speakText, stopSpeech, whenSpeechDone } from './speechPlayback'
 import {
   dismissEndedVoice,
   endVoiceMode,
   patchVoiceSettings,
+  playVoiceSample,
   setVoiceEscArmed,
   setVoiceViewOpen,
   startVoiceMode,
+  stopVoiceSample,
   stopVoiceTarget,
   switchVoiceMic,
   talkAgain,
@@ -164,16 +165,10 @@ export function VoiceSessionEffects() {
 const SPACE_CONTROLS =
   'button, a[href], select, summary, [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"]'
 
+export { escapeBelongsToALayer }
+
 export function spaceActivates(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(SPACE_CONTROLS) !== null
-}
-
-/** An open menu, popover, modal dialog, or the view's own settings popover or history drawer: Escape closes that first. */
-export function escapeBelongsToALayer(): boolean {
-  return (
-    hasOpenFloatingLayer() ||
-    document.querySelector('[aria-expanded="true"][aria-haspopup], dialog[open], [aria-modal="true"], [data-voice-pop], [data-voice-drawer]') !== null
-  )
 }
 
 // ── The session, as the placements read it ─────────────────────────────────
@@ -239,7 +234,6 @@ const SAMPLE_LINE = 'Hi, I’m ready when you are. Tell me what you want done.'
 
 /** The voice and device pickers' reach into this window: voices over IPC, the mic in this renderer. */
 function PickerProviders({ v, settings, children }: { v: VoiceSnapshot; settings: VoiceSettings; children: ReactNode }) {
-  const controller = voiceController()
   const { settings: dictation } = useDictationState()
   const provider = speakerFor(v, settings, null)
   const voice = useMemo<VoicePickerDeps>(
@@ -249,24 +243,11 @@ function PickerProviders({ v, settings, children }: { v: VoiceSnapshot; settings
         const res = await window.vyotiq.voiceListVoices?.({ provider: p, model })
         return res?.ok ? (res.data as VoiceOptionInfo[]) : null
       },
-      playSample: async (p, voiceId, speed) => {
-        // Where its voice will play.
-        setSpeechOutput(settings.outputDeviceId)
-        // The mic must not hear the sample, or it would answer it: held for the sample's length.
-        controller.holdMic(true)
-        try {
-          await speakText(SAMPLE_OWNER, { text: SAMPLE_LINE, kind: 'plain', provider: p, voiceId, speed })
-          await whenSpeechDone(SAMPLE_OWNER)
-        } finally {
-          controller.holdMic(false)
-        }
-      },
-      stopSample: () => {
-        stopSpeech()
-        controller.holdMic(false)
-      }
+      // Where its voice will play, with the mic held: it must not hear the sample, or it would answer it.
+      playSample: (p, voiceId, speed) => playVoiceSample(SAMPLE_OWNER, { text: SAMPLE_LINE, kind: 'plain', provider: p, voiceId, speed }, settings.outputDeviceId),
+      stopSample: stopVoiceSample
     }),
-    [provider, controller, settings.outputDeviceId]
+    [provider, settings.outputDeviceId]
   )
   const devices = useMemo<DevicePickerDeps>(() => ({ micId: dictation.deviceId, switchMic: switchVoiceMic }), [dictation.deviceId])
   return (

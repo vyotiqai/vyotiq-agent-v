@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { FIRST_TIP, VoiceBar } from '@renderer/features/voice/VoiceBar'
 import { VoiceModeButton } from '@renderer/features/voice/VoiceModeButton'
 import { VoiceOrb } from '@renderer/features/voice/VoiceOrb'
@@ -306,6 +306,27 @@ describe('VoiceModeButton', () => {
     expect(fake.calls).toContain('start')
     fireEvent.click(screen.getByRole('button', { name: 'End voice mode' }))
     await vi.waitFor(() => expect(screen.getByTestId('owner').textContent).toBe('none'))
+  })
+
+  it('with no keys, the setup panel offers This PC too, which needs none (2026-10-16 audit 3, A10)', async () => {
+    const noKeys = {
+      voice: { deepgram: { set: false }, assemblyai: { set: false }, elevenlabs: { set: false }, cartesia: { set: false } },
+      chat: { openai: false, openrouter: false }
+    }
+    ;(window as unknown as { vyotiq: Record<string, unknown> }).vyotiq.voiceKeyStatus = vi.fn(async () => ({ ok: true, data: noKeys }))
+    const onOpenSettings = vi.fn()
+    render(<VoiceModeButton owner="line-1" workspacePath="/repo" onOpenSettings={onOpenSettings} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Talk with the agent' }))
+    const local = await vi.waitFor(() => {
+      const row = document.querySelector('[data-voice-setup-choice="local"]')
+      expect(row).not.toBeNull()
+      return row as HTMLElement
+    })
+    expect(local.textContent).toContain('This PC')
+    expect(local.textContent).toContain('Audio stays on this PC')
+    fireEvent.click(within(local).getByRole('button', { name: 'Choose' }))
+    expect(onOpenSettings).toHaveBeenCalledWith('voice')
+    expect(fake.calls).not.toContain('start')
   })
 
   it('the shortcut goes to the line last used, not to every line', async () => {

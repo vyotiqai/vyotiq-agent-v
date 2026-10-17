@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MiniVoiceApp } from '@renderer/features/voice/mini/MiniVoiceApp'
+import { MINI_ANSWER_WAIT_MS, MiniVoiceApp } from '@renderer/features/voice/mini/MiniVoiceApp'
 import { IDLE_VOICE } from '@renderer/features/voice/voiceSessionController'
 import { DEFAULT_VOICE_SETTINGS } from '@shared/ipc/schemas/voice'
 import type { VoiceMiniCommand, VoiceMiniState } from '@shared/ipc/schemas/voiceMini'
@@ -123,6 +123,48 @@ describe('the voice mini window', () => {
       { kind: 'stop_speaking' },
       { kind: 'end' }
     ])
+  })
+
+  it('Space held is let go when the window loses focus (2026-10-16 audit 3, A4)', () => {
+    render(<MiniVoiceApp />)
+    act(() => push!(state()))
+    sent = []
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' })
+    // The keyup goes to the editor you clicked into: the blur alone lets go.
+    fireEvent.blur(window)
+    expect(sent).toEqual([
+      { kind: 'hold', down: true },
+      { kind: 'hold', down: false }
+    ])
+    // A keyup that does arrive later changes nothing more.
+    fireEvent.keyUp(document.body, { key: ' ', code: 'Space' })
+    expect(sent).toHaveLength(2)
+  })
+
+  it('an answer the run is still waiting on after a moment can be given again (2026-10-16 audit 3, A12)', async () => {
+    vi.useFakeTimers()
+    try {
+      const waiting = state({
+        state: 'waiting_on_you',
+        transcript: [{ id: 'h1', who: 'agent', text: 'Clean up.', runId: 'r1' }],
+        works: {
+          r1: { runId: 'r1', state: 'needs', startedAt: 0, stepCount: 0, steps: [], ask: { kind: 'approval', requestId: 'q1', what: 'run git stash', risky: false } }
+        }
+      })
+      render(<MiniVoiceApp />)
+      act(() => push!(waiting))
+      const allow = (): HTMLButtonElement => screen.getByRole('button', { name: 'Allow once' }) as HTMLButtonElement
+      fireEvent.click(allow())
+      expect(sent.at(-1)).toEqual({ kind: 'approval', requestId: 'q1', decision: 'once', runId: 'r1' })
+      expect(allow().disabled).toBe(true)
+      // The main window refused it: the run still waits on the same approval.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MINI_ANSWER_WAIT_MS + 200)
+      })
+      expect(allow().disabled).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('only the Layout tab: voices and devices belong to the main window', () => {

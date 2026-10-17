@@ -1,4 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { escapeBelongsToALayer } from '../escapeLayer'
 import { VOICE_COMPANION_WIDTH } from '@shared/ipc/schemas/voice'
 import type { VoiceSessionState } from '@shared/voiceSession'
 import { Icon } from '@renderer/lib/icons'
@@ -606,7 +607,8 @@ export function Summary({
   // Esc closes it (capture, so it never also stops a run).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || document.querySelector('[aria-modal="true"], dialog[open]')) return
+      // A menu, popover or dialog open over it closes first, as everywhere else in voice mode (2026-10-16 audit 3, A8).
+      if (e.key !== 'Escape' || escapeBelongsToALayer()) return
       e.preventDefault()
       e.stopPropagation()
       if (showing) setShowing(false)
