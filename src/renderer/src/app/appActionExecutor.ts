@@ -35,6 +35,8 @@ export type WindowActionHandlers = PaletteHandlers & {
   updateAvailable?: () => boolean
   /** The task view is showing: panels sit beside a task. */
   inTaskView?: () => boolean
+  /** Home's day sentence as Home would draw it now (features/home/dayModel.ts). */
+  readHome?: () => Promise<string>
 }
 
 export type WindowActionOutcome = { ok: boolean; message: string }
@@ -144,6 +146,12 @@ export async function executeWindowAction(action: AppWindowAction, h: WindowActi
     case 'next_needs_you':
       h.onNextNeedsYou()
       return { ok: true, message: 'Okay.' }
+    case 'read_home': {
+      if (!h.readHome) return { ok: false, message: 'Home can’t be read from here.' }
+      // The answer is capped at 500 characters on its way back to main (AppWindowActionResultSchema).
+      const said = (await h.readHome()).trim()
+      return { ok: true, message: said.length > 500 ? `${said.slice(0, 499)}…` : said }
+    }
     case 'new_task':
       if (path && h.onNewChatInWorkspace) h.onNewChatInWorkspace(path)
       else h.onNewTask()

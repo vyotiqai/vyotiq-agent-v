@@ -468,4 +468,47 @@ describe('running them', () => {
     expect(d.patches).toEqual([])
     expect((await runAppAction(d, 'set_task_model', { model: 'gpt nine' }, voice)).ok).toBe(false)
   })
+
+  it('sets Home’s backdrop and greeting name; a picture only once one was picked in Settings', async () => {
+    resetSettingsSetForTests()
+    let store: Record<string, unknown> = { homeBackdrop: 'pixels', homeBackdropImageStamp: '', userName: '' }
+    const d = deps({
+      settings: () => store,
+      patchSettings: async (p) => {
+        store = { ...store, ...p }
+      }
+    })
+    expect(await runAppAction(d, 'set_home_options', { backdrop: 'field', name: '  Ajay ' }, voice)).toEqual({
+      ok: true,
+      message: 'Home’s backdrop is field, and Home greets you as Ajay.'
+    })
+    expect(store).toMatchObject({ homeBackdrop: 'field', userName: 'Ajay' })
+    expect(await runAppAction(d, 'set_home_options', { name: '' }, voice)).toEqual({ ok: true, message: 'Home doesn’t greet you by name.' })
+    expect(await runAppAction(d, 'set_home_options', { backdrop: 'none' }, voice)).toEqual({ ok: true, message: 'Home has no backdrop.' })
+    // The picture is picked in a file dialog by the user; with none, nothing is written.
+    const before = { ...store }
+    expect(await runAppAction(d, 'set_home_options', { backdrop: 'image' }, voice)).toEqual({
+      ok: false,
+      message: 'No picture has been picked for Home yet; choose one in Settings, Appearance, Home.'
+    })
+    expect(store).toEqual(before)
+    store = { ...store, homeBackdropImageStamp: '2026-10-17T10:00:00.000Z' }
+    expect(await runAppAction(d, 'set_home_options', { backdrop: 'image' }, voice)).toEqual({ ok: true, message: 'Home’s backdrop is your picture.' })
+    expect((await runAppAction(d, 'set_home_options', {}, voice)).ok).toBe(false)
+    expect((await runAppAction(d, 'set_home_options', { backdrop: 'stars' }, voice)).message).toBe(
+      'I couldn’t do that: backdrop has to be none or pixels or field or image.'
+    )
+    expect((await runAppAction(d, 'set_home_options', { name: 'x'.repeat(41) }, voice)).ok).toBe(false)
+    // Remembered as this run's, so a change made since in Settings is told apart.
+    store = { ...store, homeBackdrop: 'pixels' }
+    expect(settingsChangedSince('r1', store)).toEqual([{ what: 'Home’s backdrop', set: 'image', now: 'pixels' }])
+  })
+
+  it('reads Home’s day sentence from the window, which reads it fresh', async () => {
+    const w = fakeWindow(() => ({ ok: true, message: '2 tasks need you and 1 is running.' }))
+    const d = deps({ window: () => w.wc })
+    expect(await runAppAction(d, 'read_home', {}, voice)).toEqual({ ok: true, message: '2 tasks need you and 1 is running.' })
+    expect(w.sent[0]).toMatchObject({ name: 'read_home', args: {} })
+    expect(APP_ACTIONS.read_home.runs).toBe('window')
+  })
 })

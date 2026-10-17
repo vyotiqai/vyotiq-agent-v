@@ -255,4 +255,17 @@ describe('executeWindowAction', () => {
     expect((await executeWindowAction(act('new_task', {}, { workspacePath: 'C:/work/site' }), handlers({ onNewChatInWorkspace: inWs }))).ok).toBe(true)
     expect(inWs).toHaveBeenCalledWith('C:/work/site')
   })
+
+  it('reads Home’s sentence through the app, and says so where it can’t', async () => {
+    const read = vi.fn(async () => 'Good morning, Ajay. 1 task needs you. ')
+    expect(await executeWindowAction(act('read_home'), handlers({ readHome: read }))).toEqual({
+      ok: true,
+      message: 'Good morning, Ajay. 1 task needs you.'
+    })
+    // Kept inside what main takes back (500 characters).
+    const long = await executeWindowAction(act('read_home'), handlers({ readHome: async () => 'a'.repeat(600) }))
+    expect(long.message).toHaveLength(500)
+    expect(long.message.endsWith('…')).toBe(true)
+    expect(await executeWindowAction(act('read_home'), handlers())).toEqual({ ok: false, message: 'Home can’t be read from here.' })
+  })
 })

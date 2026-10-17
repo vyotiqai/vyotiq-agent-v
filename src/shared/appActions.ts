@@ -11,6 +11,7 @@
 import { z } from 'zod'
 import { VOICE_ORB_LOOKS, VOICE_PLACEMENTS, VOICE_STYLES, VOICE_VIEW_LAYOUTS, VoiceEndOfTurnPatienceSchema } from './ipc/schemas/voice'
 import { SkinIdSchema } from './skins'
+import { HomeBackdropSchema, USER_NAME_MAX } from './appearance'
 
 export const APP_VIEWS = ['home', 'settings', 'usage', 'inbox', 'scheduled', 'extensions', 'docs', 'whats_new', 'shortcuts'] as const
 export const APP_PANELS = ['terminal', 'changes', 'browser', 'files', 'plan', 'pr'] as const
@@ -79,8 +80,14 @@ export const APP_ACTION_ARGS = {
   set_tool_approvals: z.object({ mode: z.enum(['off', 'mutating', 'all']) }),
   set_model: z.object({ model: z.string().trim().min(1).max(200) }),
   set_task_model: z.object({ model: z.string().trim().min(1).max(200), task: Task }),
+  // Settings › Appearance › Home. An empty name clears the greeting.
+  set_home_options: z.object({
+    backdrop: HomeBackdropSchema.optional(),
+    name: z.string().trim().max(USER_NAME_MAX).optional()
+  }),
   // ── Reading the app ─────────────────────────────────────────────────────
   app_status: z.object({}),
+  read_home: z.object({}),
   // ── The system ──────────────────────────────────────────────────────────
   open_path: z.object({ path: z.string().trim().min(1).max(4096) }),
   reveal_path: z.object({ path: z.string().trim().min(1).max(4096) }),
@@ -153,6 +160,16 @@ export const APP_ACTIONS: Readonly<Record<AppActionName, AppActionDef>> = {
   set_model: { summary: 'Set the model new tasks start with, from the models used recently or marked favourite. It does not change a task that exists; set_task_model does.', runs: 'main' },
   set_task_model: {
     summary: 'Set the model a task runs on from its next turn (the task on screen if none is named), from the models used recently or marked favourite. A run already working finishes on the model it started with.',
+    runs: 'window'
+  },
+  set_home_options: {
+    summary:
+      'Home’s look, any of: the backdrop behind its day (none, pixels, field, or image for the picture the user picked in Settings) and the name it greets the user by (empty for no greeting).',
+    runs: 'main'
+  },
+  read_home: {
+    summary:
+      'Read Home’s day sentence as it would show now, without opening Home: what waits on the user, what failed, runs or is ready for review, the next scheduled run, uncommitted files and the week. For “what’s on today”.',
     runs: 'window'
   },
   app_status: {

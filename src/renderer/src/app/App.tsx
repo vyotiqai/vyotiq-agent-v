@@ -3256,6 +3256,19 @@ function App() {
       onProviderModelForWorkspace(path, parsed.data, model)
       return true
     },
+    // The agent's read_home: Home's sentence from the same inputs HomePage gets, with Home off screen too.
+    // Loaded on demand, as Home itself is.
+    readHome: (): Promise<string> =>
+      import('../features/home/dayModel').then((m) =>
+        m.readDaySentence({
+          openWorkspaces,
+          activeWorkspace: activeWorkspace ?? null,
+          runsByWorkspacePath,
+          activeRuns,
+          providerIssue: Boolean(homeProviderIssue),
+          userName: settings.userName
+        })
+      ),
     onExportRunInWorkspace: (path: string, runId: string) => void onExportRunInWorkspace(path, runId),
     onCopyRunLinkInWorkspace,
     onLoadOlderRuns: (path: string) => void loadOlderWorkspaceRuns(path),

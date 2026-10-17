@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { HomePage } from '@renderer/features/home/HomePage'
+import { readDaySentence } from '@renderer/features/home/dayModel'
 import type { ActiveRun, HomeActivityResult, RunSummary } from '@shared/ipc'
 
 const ALPHA = 'C:\\repo-alpha'
@@ -233,6 +234,54 @@ describe('Home', () => {
     expect(review.textContent).toContain('2 files to keep or undo')
     fireEvent.click(within(review).getByRole('button', { name: 'Review Tidy the composer' }))
     expect(handlers.onOpenTask).toHaveBeenCalledWith(ALPHA, 'edits')
+  })
+
+  it('reads the same sentence for the agent, without Home on screen (app_control read_home)', async () => {
+    renderHome({ userName: 'Ajay', providerIssue: { label: 'OpenRouter' } })
+    await waitFor(() => expect(sentence()).toContain('1 uncommitted file in repo-alpha.'))
+    const shown = sentence().trim()
+    cleanup()
+    const read = await readDaySentence({
+      openWorkspaces: [ALPHA, BETA],
+      activeWorkspace: ALPHA,
+      runsByWorkspacePath: {
+        [ALPHA]: {
+          runs: [run('approve', 'Add backpressure to the chat stream', 'running'), run('ask', 'Pick the release branch', 'running')],
+          activeRunId: null
+        },
+        [BETA]: { runs: [run('busy', 'Audit authentication end to end', 'running')], activeRunId: null }
+      },
+      activeRuns: [
+        live('approve', ALPHA, { kind: 'approval', since: TWO_MINUTES_AGO }),
+        live('ask', ALPHA, { kind: 'question', since: new Date().toISOString() }),
+        live('busy', BETA)
+      ],
+      providerIssue: true,
+      userName: 'Ajay'
+    })
+    expect(read).toBe(shown)
+    expect(read).toMatch(/^Good (morning|afternoon|evening), Ajay\. 2 tasks and 1 connection need you and 1 task is running\./)
+  })
+
+  it('reads a sentence with every part of the bridge missing or failing, never throwing', async () => {
+    window.vyotiq = {
+      gitStatus: vi.fn(async () => {
+        throw new Error('git gone')
+      }),
+      homeActivity: vi.fn(async () => ({ ok: false as const, error: 'no receipts' }))
+    } as unknown as typeof window.vyotiq
+    const read = await readDaySentence({
+      openWorkspaces: [ALPHA],
+      activeWorkspace: ALPHA,
+      runsByWorkspacePath: { [ALPHA]: { runs: [], activeRunId: null } },
+      activeRuns: [],
+      providerIssue: false,
+      userName: ''
+    })
+    expect(read).toBe('Nothing needs you.')
+    expect(await readDaySentence({ openWorkspaces: [], activeWorkspace: null, runsByWorkspacePath: {}, activeRuns: [], providerIssue: false, userName: '' })).toBe(
+      'No workspace is open, so Home has nothing to say yet.'
+    )
   })
 
   it('greets by name when one is set', async () => {

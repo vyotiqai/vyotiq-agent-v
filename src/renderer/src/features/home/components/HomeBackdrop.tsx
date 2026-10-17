@@ -31,6 +31,23 @@ function usePaintKey(): string {
 }
 
 /**
+ * The picture last read, by the stamp it was read for. Home unmounts every
+ * time another view opens; without this each return to Home sent the whole
+ * picture over IPC again, up to ~11 MB of base64 for an 8 MB file. A new
+ * pick moves the stamp, so a stale picture is never drawn.
+ */
+let pictureCache: { stamp: string; dataUrl: string } | null = null
+
+function cachedPicture(kind: HomeBackdropKind, stamp: string): string | null {
+  return kind === 'image' && stamp && pictureCache?.stamp === stamp ? pictureCache.dataUrl : null
+}
+
+/** Tests start from an empty cache. */
+export function resetHomeBackdropCacheForTests(): void {
+  pictureCache = null
+}
+
+/**
  * Place it inside Home's scrolling page (position: relative): as an absolute
  * child of the scroller it scrolls away with the head on its own.
  */
@@ -43,16 +60,26 @@ export function HomeBackdrop({
   imageStamp: string
 }) {
   const paint = usePaintKey()
-  const [image, setImage] = useState<string | null>(null)
+  const [image, setImage] = useState<string | null>(() => cachedPicture(kind, imageStamp))
 
   useEffect(() => {
     if (kind !== 'image' || !imageStamp) {
+      // Switched away or removed: let the picture go rather than hold it for a Home that won't draw it.
+      pictureCache = null
       setImage(null)
+      return
+    }
+    const cached = cachedPicture(kind, imageStamp)
+    if (cached) {
+      setImage(cached)
       return
     }
     let cancelled = false
     void window.vyotiq?.appearanceReadHomeBackdrop?.().then((res) => {
-      if (!cancelled) setImage(res?.ok ? res.data.dataUrl : null)
+      const dataUrl = res?.ok ? res.data.dataUrl : null
+      // Only a picture that read is kept: a failed read is tried again next time Home opens.
+      if (dataUrl) pictureCache = { stamp: imageStamp, dataUrl }
+      if (!cancelled) setImage(dataUrl)
     })
     return () => {
       cancelled = true
@@ -130,7 +157,23 @@ function useCanvasDraw(draw: (canvas: HTMLCanvasElement) => void, deps: readonly
     run()
     const ro = new ResizeObserver(run)
     ro.observe(canvas)
-    return () => ro.disconnect()
+    // Dragged to a screen with other scaling, the box keeps its CSS size and
+    // ResizeObserver stays quiet: watch the ratio itself, re-armed at each new one.
+    let media: MediaQueryList | null = null
+    const watchRatio = (): void => {
+      media?.removeEventListener('change', onRatio)
+      media = window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`) ?? null
+      media?.addEventListener('change', onRatio)
+    }
+    function onRatio(): void {
+      run()
+      watchRatio()
+    }
+    watchRatio()
+    return () => {
+      ro.disconnect()
+      media?.removeEventListener('change', onRatio)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `draw` is rebuilt each render; `deps` say when it changes
   }, deps)
   return ref

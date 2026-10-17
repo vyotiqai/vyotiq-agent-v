@@ -5,20 +5,20 @@ import type { HomeBackdrop as HomeBackdropKind } from '@shared/appearance'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon } from '@renderer/lib/icons'
 import { Button } from '@renderer/lib/ui'
-import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import type { WorkspaceRuns } from '@renderer/app/navigator/types'
 import { runTitle } from '@renderer/app/navigator/runTitle'
-import { buildNavigatorSections, type NavRow, type NavSectionKey } from '@renderer/app/navigator/navigatorModel'
+import type { NavRow } from '@renderer/app/navigator/navigatorModel'
 import { useWorkspaceGitSummaries } from './useWorkspaceGitSummaries'
 import { useHomeActivity } from './useHomeActivity'
 import { useMcpHealth } from './useMcpHealth'
 import { useIndexStatus } from './useIndexStatus'
 import { usePendingAsks } from './usePendingAsks'
-import { daySentence, factKeys } from './daySentence'
+import { factKeys } from './daySentence'
+import { homeDayModel } from './dayModel'
 import { NeedsYouSection, type ProviderIssue, type WaitingTask } from './components/NeedsYouSection'
 import { WorkspacesSection } from './components/WorkspacesSection'
 import { ThisWeekSection } from './components/ThisWeekSection'
-import { ComingUpSection, upcomingSchedules } from './components/ComingUpSection'
+import { ComingUpSection } from './components/ComingUpSection'
 import { ScreensSection } from './components/ScreensSection'
 import { HomeBackdrop } from './components/HomeBackdrop'
 import {
@@ -66,8 +66,6 @@ export type HomePageProps = {
   onOpenScreen?: (pinned: PinnedScreen) => void
   refreshVersion?: number
 }
-
-const DAY_MS = 86_400_000
 
 /**
  * Now, moved on at each minute's turn: the day, "at 16:00" vs "tomorrow" and
@@ -143,14 +141,41 @@ export function HomePage({
 
   const ownPath = (path: string): string | undefined => openWorkspaces.find((open) => workspacePathsEqual(open, path))
 
-  // Longest wait first, as the navigator orders them: that one holds work up.
-  const waiting = useMemo(
-    () =>
-      (activeRuns ?? [])
-        .filter((run) => run.waiting && openWorkspaces.some((path) => workspacePathsEqual(path, run.workspacePath)))
-        .sort((a, b) => Date.parse(a.waiting!.since) - Date.parse(b.waiting!.since)),
-    [activeRuns, openWorkspaces]
+  // The same model the agent's read_home reads: what the sentence says is what it would say.
+  const changedFiles = useMemo(
+    () => Object.fromEntries(Object.entries(git.data).map(([path, s]) => [path, s.changedFiles])),
+    [git.data]
   )
+  const model = useMemo(
+    () =>
+      homeDayModel({
+        openWorkspaces,
+        activeWorkspace: activeWorkspace ?? null,
+        runsByWorkspacePath,
+        activeRuns,
+        providerIssue: Boolean(providerIssue),
+        mcpIssues: mcp.issues.length,
+        schedules,
+        changedFiles,
+        doneThisWeek: activity.data?.outcomes.done ?? null,
+        userName,
+        now
+      }),
+    [
+      openWorkspaces,
+      activeWorkspace,
+      runsByWorkspacePath,
+      activeRuns,
+      providerIssue,
+      mcp.issues.length,
+      schedules,
+      changedFiles,
+      activity.data,
+      userName,
+      now
+    ]
+  )
+  const { waiting, running, review, failed, issues, segments } = model
   const asks = usePendingAsks(waiting)
   const tasks: WaitingTask[] = waiting.map((run) => {
     const path = ownPath(run.workspacePath) ?? run.workspacePath
@@ -168,50 +193,6 @@ export function HomePage({
     }
     return counts
   }, [activeRuns, openWorkspaces])
-
-  // Running and review come from the navigator's own model, so the sentence
-  // and the list beside it can never disagree: it folds in queued loops,
-  // failed runs with edits left and inline instances the same way.
-  const sections = useMemo(
-    () =>
-      buildNavigatorSections({
-        runsByWorkspacePath,
-        openPaths: openWorkspaces,
-        activePath: activeWorkspace ?? null,
-        activeRuns: activeRuns ?? [],
-        activeRunsLoaded: activeRuns !== undefined,
-        scopePath: null,
-        now: now.getTime()
-      }),
-    [runsByWorkspacePath, openWorkspaces, activeWorkspace, activeRuns, now]
-  )
-  const rowsOf = (key: NavSectionKey): NavRow[] => sections.find((s) => s.key === key)?.rows ?? []
-  const running = rowsOf('running')
-  const review = rowsOf('review')
-  // Failed in the last day and not already counted under review.
-  const failed = [...rowsOf('done'), ...rowsOf('pinned')]
-    .filter((r) => r.state === 'failed' && now.getTime() - Date.parse(r.run.updatedAt) < DAY_MS)
-    .sort((a, b) => b.run.updatedAt.localeCompare(a.run.updatedAt))
-  const upcoming = upcomingSchedules(schedules, openWorkspaces)
-  const dirty = Object.entries(git.data).filter(([, s]) => s.changedFiles > 0)
-  const issues = mcp.issues.length + (providerIssue ? 1 : 0)
-
-  const segments = daySentence({
-    needs: waiting.length,
-    issues,
-    failed: failed.length,
-    running: running.length,
-    review: review.length,
-    nextSchedule: upcoming[0]?.nextRunAt ? new Date(upcoming[0].nextRunAt) : null,
-    changes: {
-      files: dirty.reduce((n, [, s]) => n + s.changedFiles, 0),
-      workspaces: dirty.length,
-      name: dirty.length === 1 ? formatWorkspaceName(dirty[0]![0]) : null
-    },
-    doneThisWeek: activity.data?.outcomes.done ?? null,
-    userName,
-    now
-  })
 
   // The first fact that wants you starts open; a quiet day starts closed. A
   // region whose fact has left the sentence (its task answered) can't stay

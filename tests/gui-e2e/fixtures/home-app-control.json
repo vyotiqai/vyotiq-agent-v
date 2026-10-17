@@ -1,0 +1,23 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    { "type": "assistant_message", "content": "Setting up Home and reading it back." },
+    {
+      "type": "__app_control",
+      "toolCallId": "home-1",
+      "arguments": "{\"action\":\"set_home_options\",\"args\":{\"backdrop\":\"field\",\"name\":\"Ajay\"}}"
+    },
+    {
+      "type": "__app_control",
+      "toolCallId": "home-2",
+      "arguments": "{\"action\":\"set_home_options\",\"args\":{\"backdrop\":\"image\"}}"
+    },
+    {
+      "type": "__app_control",
+      "toolCallId": "home-3",
+      "arguments": "{\"action\":\"read_home\",\"args\":{}}"
+    },
+    { "type": "assistant_message", "content": "Done." },
+    { "type": "status", "status": "done" }
+  ]
+}

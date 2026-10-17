@@ -125,4 +125,12 @@ describe('the app, as the voice reads it', () => {
     expect(VOICE_REPLY_TEXT).toContain('read it with app_control app_status instead of guessing')
     expect(VOICE_REPLY_TEXT).toContain('app_status')
   })
+
+  it('says Home’s backdrop and greeting name with the settings', () => {
+    const ctx = (home: { backdrop: string; name: string }): string =>
+      formatAppContext({ now: new Date('2026-10-17T10:00:00Z'), workspace: null, task: null, others: [], settings: { home }, update: { status: 'idle' }, rules: [], memory: [] } as Parameters<typeof formatAppContext>[0])
+    expect(ctx({ backdrop: 'pixels', name: 'Ajay' })).toContain("Settings: Home's backdrop is pixels, it greets the user as Ajay.")
+    expect(ctx({ backdrop: 'image', name: '' })).toContain("Home's backdrop is the picked picture, no greeting name")
+    expect(ctx({ backdrop: 'none', name: '' })).toContain("Home's backdrop is off")
+  })
 })

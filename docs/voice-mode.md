@@ -2092,8 +2092,8 @@ agent, which edited the project's theme. Now one catalog of app actions
 | Views and panes | `open_view` (Home, Settings, Usage, Inbox, Scheduled, Extensions, docs, What's new, shortcuts), `open_settings` (at a section), `open_panel` (terminal, changes, browser, files, plan, PR), `toggle_navigator`, `next_needs_you`, `new_task`, `switch_workspace`, `run_command` (split or close a pane, find, find in files, show or hide reasoning, open in editor, add a workspace, import a task, send feedback) | the window |
 | Tasks, any open workspace | `open_task`, `start_task` (a brief, a workspace; opened once started), `send_to_task` and `rename_task` (§24.16), `stop_task`, `archive_task` (`unarchive?`, §24.17), `delete_task`, `fork_task` | main finds the task by words from its title or its run id; start and stop run in main, the rest in the window |
 | The agent | `set_agent_mode` (Ask or Agent on the task on screen), `set_model` (new tasks, from the recent and favourite models), `set_task_model` (a task, from its next turn) | window, main |
-| Reading the app | `app_status` (also given with each spoken step, §27.8) | main |
-| Settings | `set_theme`, `set_skin`, `set_tool_approvals` | main |
+| Reading the app | `app_status` (also given with each spoken step, §27.8; says Home's backdrop and greeting name), `read_home` (Home's day sentence as Home would draw it now, read fresh without opening Home) | main, window |
+| Settings | `set_theme`, `set_skin`, `set_tool_approvals`, `set_home_options` (Home's backdrop: none, pixels, field, or image once a picture was picked in Settings; the name Home greets by) | main |
 | The system | `open_path` (a file or folder, never a program), `reveal_path`, `open_url` (http and https only), `check_update`, `download_update`, `install_update`, `quit_app` | main, window |
 | The voice itself | `voice_mute` (until called by name, or until unmuted), `voice_end`, `set_voice_speed`, `set_voice` (by name, where the speaker's voices are named), `set_voice_placement`, `set_voice_options` (orb, style, layout, patience, captions, sounds, spoken progress, hold to talk, language) | main |
 

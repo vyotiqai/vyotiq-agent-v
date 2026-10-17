@@ -348,6 +348,22 @@ async function run(deps: AppControlDeps, name: AppActionName, args: AppActionArg
     case 'set_skin':
       await patchSettings({ skinId: a.skin })
       return { ok: true, message: `The skin is ${String(a.skin)} now.` }
+    case 'set_home_options': {
+      const backdrop = a.backdrop as string | undefined
+      const name = a.name as string | undefined
+      if (backdrop === undefined && name === undefined) return { ok: false, message: 'I couldn’t do that: say the backdrop or the name.' }
+      // A picture is picked in a file dialog, by the user: the agent can only switch back to one already picked.
+      const stamp = (deps.settings() as { homeBackdropImageStamp?: string }).homeBackdropImageStamp ?? ''
+      if (backdrop === 'image' && !stamp) {
+        return { ok: false, message: 'No picture has been picked for Home yet; choose one in Settings, Appearance, Home.' }
+      }
+      await patchSettings({ ...(backdrop !== undefined ? { homeBackdrop: backdrop } : {}), ...(name !== undefined ? { userName: name } : {}) })
+      const said = [
+        backdrop !== undefined && (backdrop === 'none' ? 'Home has no backdrop' : `Home’s backdrop is ${backdrop === 'image' ? 'your picture' : backdrop}`),
+        name !== undefined && (name ? `Home greets you as ${name}` : 'Home doesn’t greet you by name')
+      ].filter(Boolean)
+      return { ok: true, message: `${said.join(', and ')}.` }
+    }
     case 'set_tool_approvals': {
       const current = (deps.settings() as { toolApproval?: Record<string, unknown> }).toolApproval ?? {}
       await patchSettings({ toolApproval: { ...current, mode: a.mode } }, { toolApproval: { mode: a.mode } })

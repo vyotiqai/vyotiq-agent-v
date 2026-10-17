@@ -32,6 +32,8 @@ export type AppSnapshot = {
     approvals?: string
     theme?: string
     skin?: string
+    /** Settings › Appearance › Home: the backdrop and the name it greets by. */
+    home?: { backdrop: string; name: string }
   }
   /** Voice mode, when it is on; the options past placement and speed are said only where they aren't the default. */
   voice?: {
@@ -119,7 +121,10 @@ export function formatAppContext(s: AppSnapshot): string {
     set.model ? `new tasks start on ${set.model}` : '',
     set.approvals ? `tool approvals are ${set.approvals}` : '',
     set.theme ? `${set.theme} theme` : '',
-    set.skin ? `${set.skin} skin` : ''
+    set.skin ? `${set.skin} skin` : '',
+    set.home
+      ? `Home's backdrop ${set.home.backdrop === 'image' ? 'is the picked picture' : set.home.backdrop === 'none' ? 'is off' : `is ${set.home.backdrop}`}, ${set.home.name ? `it greets the user as ${set.home.name}` : 'no greeting name'}`
+      : ''
   ].filter(Boolean)
   if (settings.length > 0) lines.push(`Settings: ${settings.join('; ')}.`)
   if (s.voice) {

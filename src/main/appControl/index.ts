@@ -184,7 +184,8 @@ export async function appStatus(runId: string | null, workspaceHint: string | nu
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.toolApproval?.mode ? { approvals: APPROVAL_WORDS[settings.toolApproval.mode] } : {}),
       ...(settings.theme ? { theme: settings.theme } : {}),
-      ...(settings.skinId ? { skin: settings.skinId } : {})
+      ...(settings.skinId ? { skin: settings.skinId } : {}),
+      home: { backdrop: settings.homeBackdrop, name: settings.userName }
     },
     voice: voiceSession
       ? {

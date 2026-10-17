@@ -15,6 +15,8 @@ const LABELS: Readonly<Record<string, string>> = {
   skinId: 'the skin',
   model: 'the model new tasks start with',
   'toolApproval.mode': 'tool approvals',
+  homeBackdrop: 'Home’s backdrop',
+  userName: 'the name Home greets you by',
   'voice.orbLook': 'the orb',
   'voice.style': 'the voice style',
   'voice.viewLayout': 'the voice layout',
