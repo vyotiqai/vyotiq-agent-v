@@ -17,6 +17,7 @@ import { requireActivePath } from './helpers/seedWorkspace'
 
 let launched: LaunchedApp
 let workspacePath: string
+let secretWrite: { ok: boolean; error?: unknown } | null = null
 
 test.beforeAll(async () => {
   workspacePath = mkdtempSync(join(tmpdir(), 'vyotiq-voice-stop-ws-'))
@@ -38,12 +39,17 @@ test.beforeAll(async () => {
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
   workspacePath = requireActivePath(addRes.data.activePath)
-  await launched.window.evaluate(async () => {
+  secretWrite = await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
-    await window.vyotiq.setSecret('openai', 'sk-e2e-voice-fixture')
+    return window.vyotiq.setSecret('openai', 'sk-e2e-voice-fixture')
   })
   await launched.window.reload()
   await launched.window.waitForLoadState('domcontentloaded')
+})
+
+// The listener needs the OpenAI key: a runner with no OS keyring can't store one.
+test.beforeEach(() => {
+  if (secretWrite && !secretWrite.ok) test.skip(true, `setSecret unavailable: ${JSON.stringify(secretWrite.error)}`)
 })
 
 test.afterAll(async () => {
