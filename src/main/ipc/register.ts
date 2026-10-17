@@ -2508,16 +2508,24 @@ export function registerIpc(): void {
       if (!senderOk(event)) return fail('Invalid sender')
       try {
         const req = ChatFollowUpPromoteRequestSchema.parse(raw)
+        // Logged either way: a refused promote leaves the message waiting for the
+        // turn's end, and the renderer's own warning never reaches this log
+        // (spoken questions sat "Queued" 3½ min with no trace, 2026-10-17).
+        const refused = (error: string): IpcResult<ChatFollowUpPromoteResult> => {
+          logger.warn('Chat follow-up not sent now', { scope: 'ipc', correlationId: req.runId, channel: IPC.chatFollowUpPromote, reason: error })
+          return fail(error)
+        }
         if (!isActive(req.runId)) {
-          return fail('Run is not active')
+          return refused('Run is not active')
         }
         const workspace = getRunWorkspace(req.runId)
         if (!workspace || !isOpenWorkspace(workspace)) {
-          return fail('Workspace is not open')
+          return refused('Workspace is not open')
         }
         const result = promoteFollowUp(req.runId, req.id)
-        if (!result.ok) return fail(result.error)
+        if (!result.ok) return refused(result.error)
         syncFollowUpsToDisk(resolveRunDir(workspace, req.runId), req.runId)
+        logger.info('Chat follow-up sent now', { scope: 'ipc', correlationId: req.runId, channel: IPC.chatFollowUpPromote, queueLength: result.queueLength })
         return ok({ queueLength: result.queueLength })
       } catch (err) {
         return failFrom(err, IPC.chatFollowUpPromote)

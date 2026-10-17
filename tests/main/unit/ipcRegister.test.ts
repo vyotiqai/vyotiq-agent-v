@@ -45,6 +45,9 @@ const transcribeDictationMock = vi.hoisted(() => vi.fn())
 const runExistsMock = vi.hoisted(() => vi.fn())
 const validateExistingRunStartMock = vi.hoisted(() => vi.fn(() => ({ runtime: 'local' as const })))
 const isActiveMock = vi.hoisted(() => vi.fn(() => false))
+const promoteFollowUpMock = vi.hoisted(() =>
+  vi.fn((): { ok: true; queueLength: number } | { ok: false; error: string } => ({ ok: true, queueLength: 1 }))
+)
 const resolveWritesMock = vi.hoisted(() => vi.fn())
 const planRewindPreviewMock = vi.hoisted(() => vi.fn(async () => ({ checkpointIds: [], files: [] })))
 const renameRunMock = vi.hoisted(() => vi.fn())
@@ -192,6 +195,8 @@ vi.mock('@main/agent/runRegistry', () => ({
   isRunTurnComplete: isRunTurnCompleteMock,
   waitUntilRunInactive: waitUntilRunInactiveMock,
   enqueueFollowUp: vi.fn(),
+  promoteFollowUp: promoteFollowUpMock,
+  peekFollowUps: vi.fn(() => []),
   removeFollowUp: vi.fn(),
   getRunInvokeId: vi.fn(() => 1),
   followUpPreview: vi.fn(() => 'preview'),
@@ -1294,6 +1299,37 @@ describe('registerIpc', () => {
         expect(result.error).toMatch(/run not found/i)
         expect(result.code).not.toBe('IPC_HANDLER')
       }
+    })
+  })
+
+  describe('chatFollowUpPromote', () => {
+    // 2026-10-17: spoken questions sat Queued 3½ min and vyotiq.log had no
+    // trace of a promote, made or refused (the renderer's warning never reaches it).
+    const runId = '4d2a2b69-793e-4e42-ad2b-c0e4682dae63'
+
+    it('logs a refused promote with its reason', async () => {
+      const { logger } = await import('@shared/logger')
+      const warn = vi.spyOn(logger, 'warn')
+      isActiveMock.mockReturnValue(true)
+      promoteFollowUpMock.mockReturnValueOnce({ ok: false, error: 'Follow-up not found' })
+      const result = (await handlers.get(IPC.chatFollowUpPromote)!({ sender: mockWc, senderFrame: mockMainFrame }, { runId, id: 'fu-1' })) as { ok: boolean }
+      expect(result.ok).toBe(false)
+      expect(warn).toHaveBeenCalledWith('Chat follow-up not sent now', expect.objectContaining({ reason: 'Follow-up not found', correlationId: runId }))
+      warn.mockClear()
+      isActiveMock.mockReturnValue(false)
+      await handlers.get(IPC.chatFollowUpPromote)!({ sender: mockWc, senderFrame: mockMainFrame }, { runId, id: 'fu-1' })
+      expect(warn).toHaveBeenCalledWith('Chat follow-up not sent now', expect.objectContaining({ reason: 'Run is not active' }))
+      warn.mockRestore()
+    })
+
+    it('logs a promote that went through', async () => {
+      const { logger } = await import('@shared/logger')
+      const info = vi.spyOn(logger, 'info')
+      isActiveMock.mockReturnValue(true)
+      const result = (await handlers.get(IPC.chatFollowUpPromote)!({ sender: mockWc, senderFrame: mockMainFrame }, { runId, id: 'fu-1' })) as { ok: boolean }
+      expect(result.ok).toBe(true)
+      expect(info).toHaveBeenCalledWith('Chat follow-up sent now', expect.objectContaining({ correlationId: runId }))
+      info.mockRestore()
     })
   })
 

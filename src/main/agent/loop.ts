@@ -146,8 +146,8 @@ import {
   cancelRun,
   clearFollowUps,
   clearRunAbort,
-  takeNextFollowUp,
-  takeNextReadyFollowUp,
+  takeFollowUpsToApply,
+  joinSpokenFollowUps,
   hasPendingFollowUps,
   hasReadyFollowUps,
   isCurrentInvoke,
@@ -594,8 +594,11 @@ function* applyDrainedFollowUps(
   messages: ChatMessage[],
   mode: 'ready' | 'next' = 'ready'
 ): Generator<AgentEvent, boolean> {
-  const entry = mode === 'next' ? takeNextFollowUp(runId) : takeNextReadyFollowUp(runId)
-  if (!entry) return false
+  // Spoken words queued one after another go together, as one message (takeFollowUpsToApply).
+  const taken = takeFollowUpsToApply(runId, mode)
+  if (taken.length === 0) return false
+  const entry = taken.length > 1 ? { ...taken[0]!, message: joinSpokenFollowUps(taken.map((t) => t.message)) } : taken[0]!
+  const ids = taken.map((t) => t.id)
   // 'ready' drains a follow-up mid-turn (Send now / steer): the agent had not
   // finished, so the record carries its plan on across it. 'next' comes after
   // the turn ended, and starts the next one from nothing.
@@ -606,7 +609,7 @@ function* applyDrainedFollowUps(
   const ev: AgentEvent = {
     type: 'follow_up_applied',
     runId,
-    ids: [entry.id],
+    ids,
     messages: [message]
   }
   appendEvent(runDir, ev)
@@ -621,7 +624,7 @@ function* applyDrainedFollowUps(
   // (the IPC handlers write followups.json synchronously): a follow-up queued
   // meanwhile was erased, and a deleted one came back on the next resume.
   void enqueueMessageRewrite(runDir, () => {
-    saveFollowUps(runDir, loadFollowUps(runDir).filter((queued) => queued.id !== entry.id))
+    saveFollowUps(runDir, loadFollowUps(runDir).filter((queued) => !ids.includes(queued.id)))
   })
   return true
 }

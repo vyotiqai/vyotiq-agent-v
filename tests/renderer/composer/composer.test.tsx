@@ -628,6 +628,35 @@ describe('Composer', () => {
     expect(onRemoveFollowUp).toHaveBeenCalledWith('fu-1')
   })
 
+  // 2026-10-17: two spoken questions both read "Queued" with Send now, so
+  // nothing told you they were your words or whether they'd reached the run.
+  it('a row sent into the run says "next step" and drops Send now; spoken rows say "Said"', () => {
+    render(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running
+        hasWorkspace
+        secrets={testSecrets}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={vi.fn()}
+        pendingFollowUps={[
+          { id: 'fu-1', itemId: 'item-1', preview: 'Is it working?', text: 'Is it working?', ready: true, spoken: true },
+          { id: 'fu-2', itemId: 'item-2', preview: 'Typed later', text: 'Typed later' }
+        ]}
+        onSendFollowUpNow={vi.fn()}
+      />
+    )
+    const rows = document.querySelectorAll('[data-follow-up-queue] li')
+    expect(rows[0]?.textContent).toContain('Said · next step')
+    expect(rows[0]?.hasAttribute('data-follow-up-ready')).toBe(true)
+    expect(rows[1]?.textContent).toContain('Queued')
+    expect(screen.queryByRole('button', { name: /^Send queued instruction “Is it working\?” now$/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Send queued instruction “Typed later” now$/ })).toBeTruthy()
+  })
+
   it('keeps the queued instruction editor open when save fails', async () => {
     const onEditFollowUp = vi.fn().mockResolvedValue(false)
     render(

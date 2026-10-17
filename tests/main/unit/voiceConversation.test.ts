@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, cueForTool, narratesAboutUser, runFailedLine, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
+import { CUE_DELAY_MS, RUN_FAILED_LINE, ReplySpeaker, STILL_ON_IT_MS, cueForTool, narratesAboutUser, runFailedLine, stillOnItLine, type ReplySpeakerDeps } from '@main/voice/replySpeaker'
 import { DETAILS_ON_SCREEN } from '@main/voice/speechText'
 import { HAND_OFF_FAILED_LINE, VoiceSession, type VoiceSessionDeps } from '@main/voice/session'
 import { openFixtureStt, openFixtureTts, type FixtureSttSession, type FixtureTtsStream } from '@main/voice/providers/fixture'
@@ -127,6 +127,37 @@ describe('ReplySpeaker', () => {
     // Owed once: the next narration isn't read out.
     h.speaker.handle(narration('Checking the session again.'))
     expect(h.said).toHaveLength(3)
+  })
+
+  // 2026-10-17 probes: "Is it working?" 8 s into a 90 s sleep got a bare 86 s
+  // poll from the agent, twice, and silence until the command ended.
+  it('says where the work is when the agent keeps polling without answering what they asked', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    const call = (args: object): AgentEvent =>
+      ({ type: 'assistant_message', runId: R, content: '', toolCalls: [{ id: 't', name: 'terminal', arguments: JSON.stringify(args) }] }) as AgentEvent
+    h.speaker.handle(call({ command: 'Start-Sleep -Seconds 90', timeoutMs: 180000 }))
+    h.tick(8000)
+    h.speaker.handle({ type: 'follow_up_applied', runId: R, ids: ['f1'], messages: [{ role: 'user', content: 'Is it working?', spoken: true }] } as AgentEvent)
+    h.speaker.handle(call({ session_id: 's1', block_until_ms: 90000 }))
+    expect(h.said).toEqual([])
+    h.tick(STILL_ON_IT_MS)
+    expect(h.said).toEqual(["I'm still on it: running a command, 11 seconds so far. I'll tell you when it's done."])
+    // Owed once: the next bare poll says nothing more.
+    h.speaker.handle(call({ session_id: 's1', block_until_ms: 90000 }))
+    h.tick(STILL_ON_IT_MS)
+    expect(h.said).toHaveLength(1)
+    expect(stillOnItLine('Running the tests.', 125_000)).toBe("I'm still on it: running the tests, about 2 minutes so far. I'll tell you when it's done.")
+  })
+
+  it('stays out of it when the agent answers in its own words first', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    h.speaker.handle({ type: 'follow_up_applied', runId: R, ids: ['f1'], messages: [{ role: 'user', content: 'Is it working?', spoken: true }] } as AgentEvent)
+    h.speaker.handle(narration(''))
+    h.speaker.handle(narration('Yes, the sleep is still going.'))
+    h.tick(STILL_ON_IT_MS)
+    expect(h.said).toEqual(['Yes, the sleep is still going.'])
   })
 
   it('never reads out the model talking to itself about the person (2026-10-16 probe: "The user asks to quit the app.")', () => {

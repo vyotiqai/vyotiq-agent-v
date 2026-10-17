@@ -29,6 +29,35 @@ export const CUE_GAP_MS = 6000
 export const RUN_FAILED_LINE = 'That run hit an error. The details are on screen.'
 
 /**
+ * How long a bare tool call may stand in for the answer owed to what they
+ * said mid-work before the voice says where the work is. 2026-10-17 probes:
+ * asked "Is it working?" 8 s into a 90 s sleep, the agent (reasoning off on
+ * spoken turns) polled the command for 86 s without a word, twice, past both
+ * the prompt's "answer them first" and a note saying so beside the message.
+ */
+export const STILL_ON_IT_MS = 3000
+const STILL_ON_IT_KEY = 'still-on-it'
+
+/** What a step is, said in passing: "Running a command." → "running a command". */
+function cueClause(cue: string): string {
+  return cue.replace(/\.$/, '').replace(/^\p{Lu}/u, (c) => c.toLowerCase())
+}
+
+/** How long, the way it's said: "9 seconds", "about 2 minutes". */
+function spokenDuration(ms: number): string {
+  const secs = Math.max(1, Math.round(ms / 1000))
+  if (secs < 60) return `${secs} second${secs === 1 ? '' : 's'}`
+  const mins = Math.round(secs / 60)
+  return `about ${mins} minute${mins === 1 ? '' : 's'}`
+}
+
+/** Said when the agent keeps working without answering: only what the run itself shows. */
+export function stillOnItLine(cue: string | null, sinceMs: number | null): string {
+  const what = cue ? `: ${cueClause(cue)}${sinceMs !== null ? `, ${spokenDuration(sinceMs)} so far` : ''}` : ''
+  return `I'm still on it${what}. I'll tell you when it's done.`
+}
+
+/**
  * What a run's failure was, in words, by the run's error code. "That run hit
  * an error" alone left the person to find out at the screen that the
  * provider was out of credit (seen 2026-10-14: PROVIDER_BILLING, said as the
@@ -109,6 +138,8 @@ export class ReplySpeaker {
   private answer: { text: string; spoken: boolean } | null = null
   /** An answer was already said this turn; a later one is shown and kept, not said. */
   private heard = false
+  /** The command the agent last started, and when: a poll of it is still that work. */
+  private work: { cue: string; at: number } | null = null
   /** The run's last error event, said and kept if the run then ends in error. */
   private runError: { message: string; code?: string } | null = null
   /** Speaking streams that failed this turn; past `MAX_STREAM_REOPENS` the rest stays on screen only. */
@@ -179,6 +210,7 @@ export class ReplySpeaker {
         return
       case 'follow_up_applied':
         // A follow-up is a new turn inside the same run: its answer is said.
+        this.cancelCue(STILL_ON_IT_KEY)
         this.heard = false
         this.owesAnswer = ev.messages.some((m) => m.role === 'user' && m.spoken === true)
         return
@@ -196,6 +228,7 @@ export class ReplySpeaker {
         this.cancelCue(ev.toolCallId)
         return
       case 'assistant_message': {
+        this.noteWork(ev.toolCalls)
         const tail = this.parser.end()
         if (tail && !this.heard) this.speak(tail)
         this.closeBlock()
@@ -214,6 +247,8 @@ export class ReplySpeaker {
         }
         // Answered in a block, or the final answer (said or summarised as ever); a bare tool call answers nothing.
         if (final || this.parser.phase === 'after') this.owesAnswer = false
+        // A bare tool call while an answer is owed: if no words follow soon, say where the work is.
+        if (!final && this.owesAnswer && !this.heard && !(ev.content ?? '').trim()) this.armStillOnIt(ev.toolCalls)
         // The step's words are all out: its speech closes now. Held open across the tools that follow,
         // it kept progress cues away for the rest of the run and left the vendor's stream idle.
         if (!final) this.finishReply()
@@ -354,6 +389,35 @@ export class ReplySpeaker {
       else this.deps.quietCue?.()
     }, CUE_DELAY_MS)
     this.cueTimers.set(toolCallId, timer)
+  }
+
+  /** A new command started: what it is and when, for "still on it" while it's polled. */
+  private noteWork(calls: ReadonlyArray<{ name: string; arguments: string }> | undefined): void {
+    for (const call of calls ?? []) {
+      let command = ''
+      try {
+        const args = JSON.parse(call.arguments) as { command?: unknown }
+        command = typeof args.command === 'string' ? args.command.trim() : ''
+      } catch {
+        // Arguments that aren't JSON start no command we can name.
+      }
+      if (command) this.work = { cue: cueForTool(call.name, command) ?? 'Running a command.', at: this.deps.now() }
+    }
+  }
+
+  private armStillOnIt(calls: ReadonlyArray<{ name: string; arguments: string }> | undefined): void {
+    if (this.quiet || this.cueTimers.has(STILL_ON_IT_KEY)) return
+    const first = calls?.[0]
+    const timer = this.deps.setTimer(() => {
+      this.cueTimers.delete(STILL_ON_IT_KEY)
+      // Answered meanwhile, or talking now: nothing to add.
+      if (!this.owesAnswer || this.heard || this.quiet || this.reply) return
+      const work = this.work
+      const cue = work?.cue ?? (first ? cueForTool(first.name, first.arguments) : null)
+      this.owesAnswer = false
+      this.speakOnce(stillOnItLine(cue, work ? this.deps.now() - work.at : null))
+    }, STILL_ON_IT_MS)
+    this.cueTimers.set(STILL_ON_IT_KEY, timer)
   }
 
   private cancelCue(toolCallId: string): void {

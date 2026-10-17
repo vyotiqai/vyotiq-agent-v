@@ -69,6 +69,10 @@ const lines: string[] = []
 const lineBorn = new Map<string, number>()
 /** Voice bars on screen per owning line. */
 const ownerBars = new Map<string, number>()
+/** The task run each line on screen shows. */
+const lineRuns = new Map<string, string>()
+/** The run the session's turns went to (and whose replies it speaks). */
+let followedRun: string | null = null
 
 function emit(next: Partial<ModeState>): void {
   // A new output reaches the reply playing now, not only the next session.
@@ -138,7 +142,41 @@ export async function handleVoiceTurn(turn: VoiceTurn): Promise<VoiceTurnResult>
   if (routed.kind === 'stopped') return null
   if (routed.kind === 'dropped') return turn.stop ? null : { failed: 'refused' }
   // Sent, but no run to follow (A-112): say so, or the voice waits in Thinking for good.
-  return routed.runId ?? (await waitForRunId()) ?? (mode.owner ? { failed: 'unfollowed' } : null)
+  const runId = routed.runId ?? (await waitForRunId())
+  if (runId) noteFollowedRun(runId)
+  return runId ?? (mode.owner ? { failed: 'unfollowed' } : null)
+}
+
+function noteFollowedRun(runId: string): void {
+  followedRun = runId
+  claimFollowedRunLine()
+}
+
+/**
+ * The session's run is on a line that doesn't own it, while the owner can't
+ * drive that run: a brief (its target never runs, so nothing it sends
+ * steers) or a line whose bar left the screen (its target is a dead
+ * composer's). The line showing the run takes the session. On 2026-10-17 the
+ * brief that started run 4d2a2b69 kept the session after its hand-off
+ * lapsed: the task's own line showed the typing box, and two spoken
+ * questions sat "Queued" for 3½ minutes.
+ */
+function claimFollowedRunLine(): void {
+  const owner = mode.owner
+  if (!owner || !followedRun || !controller?.active) return
+  if (lineRuns.get(owner) === followedRun) return
+  if (!target?.brief && ownerBars.has(owner)) return
+  const heir = lines.filter((k) => k !== owner && lineRuns.get(k) === followedRun).at(-1)
+  if (!heir) return
+  handoff = null
+  emit({ owner: heir })
+}
+
+/** The task run a line on screen shows (null: none yet, or New task). */
+export function noteVoiceLineRun(key: string, runId: string | null): void {
+  if (runId) lineRuns.set(key, runId)
+  else lineRuns.delete(key)
+  claimFollowedRunLine()
 }
 
 /** "Stop it": the voice asked to stop the agent's work on the owning line's task. */
@@ -192,6 +230,7 @@ export async function endVoiceMode(): Promise<void> {
   const ended = c ? endedConversation(c.snapshot) : null
   emit({ owner: null, startedAt: null, workspacePath: null, escArmed: false, ended })
   target = null
+  followedRun = null
   lastTask = null
   await c?.stop()
 }
@@ -352,6 +391,7 @@ export function setVoiceTarget(owner: string, t: VoiceRunTarget, workspacePath?:
   // A run already working on this task (voice opened on it, or moved to it) is followed too.
   // After this render: following updates the store, which mustn't happen mid-render.
   const runId = t.running() ? t.runId() : null
+  if (runId) followedRun = runId
   if (runId && controller) {
     const c = controller
     queueMicrotask(() => {
@@ -391,6 +431,7 @@ export function registerVoiceLine(key: string): () => void {
     const i = lines.indexOf(key)
     if (i >= 0) lines.splice(i, 1)
     lineBorn.delete(key)
+    lineRuns.delete(key)
   }
 }
 
@@ -413,6 +454,8 @@ export function releaseVoiceLine(owner: string): void {
   }
   // A brief's pending hand-off already waits for the task's line.
   if (handoff?.from !== owner) handoff = { from: owner, until: now + HANDOFF_MS }
+  // Or a line that has shown the session's run all along takes it now.
+  claimFollowedRunLine()
 }
 
 export function noteVoiceLineFocus(key: string): void {
@@ -489,6 +532,7 @@ export async function resetVoiceModeForTests(c?: VoiceSessionController): Promis
     })
   }
   target = null
+  followedRun = null
   handoff = null
   appView = 'chat'
   lastTask = null
@@ -497,6 +541,7 @@ export async function resetVoiceModeForTests(c?: VoiceSessionController): Promis
   lines.length = 0
   lineBorn.clear()
   ownerBars.clear()
+  lineRuns.clear()
   // Settings are read again from the next test's bridge.
   watching = false
   mode = IDLE_MODE

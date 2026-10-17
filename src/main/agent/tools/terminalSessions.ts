@@ -431,6 +431,22 @@ export function disposeAllTerminalSessions(): void {
   for (const id of [...sessions.keys()]) disposeTerminalSession(id)
 }
 
+/**
+ * Why a wait ended early, with what there is to tell. "Poll this session_id"
+ * alone was taken as the next step: asked "Is it working?" 8 s into a 90 s
+ * sleep, the agent polled for 2 minutes and answered when it ended (2026-10-17
+ * probe). The prompt's "answer them first" lost to the note beside the
+ * message, so the note says it, with the facts the answer needs.
+ */
+export function steeredNote(session: Pick<TerminalSession, 'createdAt' | 'stdout' | 'stderr'>, now = Date.now()): string {
+  const secs = Math.max(0, Math.round((now - session.createdAt) / 1000))
+  const last = `${session.stdout}\n${session.stderr}`.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).at(-1)
+  return [
+    `note: still running, ${secs}s so far${last ? `; last output: ${last.slice(0, 160)}` : ', no output yet'}.`,
+    'The wait stopped early because the user sent a new message. Answer it first, in this next reply, from what you can see now; then poll this session_id if you still need the result.'
+  ].join(' ')
+}
+
 function formatSession(session: TerminalSession): string {
   return formatTerminalSessionOutput({
     cwd: session.cwd,
@@ -774,7 +790,7 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
     // 15-second sleep cut off at 7 s by a spoken question read as "hit my
     // 60-second wait limit" to the agent (2026-10-16 probe).
     if (steered) {
-      return `${formatSession({ ...session, status: 'running' })}\nnote: still running; the wait stopped early for a new message from the user. Poll this session_id for its result.`
+      return `${formatSession({ ...session, status: 'running' })}\n${steeredNote(session)}`
     }
     return formatSession({ ...session, status: 'timeout' })
   }

@@ -133,6 +133,16 @@ function followUpName(preview: string): string {
   return flat.length > 40 ? `${flat.slice(0, 39)}…` : flat
 }
 
+/**
+ * Where a queued instruction stands: waiting for the turn to end, or already
+ * sent into the run for its next step. "Said" marks words spoken in voice mode.
+ */
+export function followUpStatusLabel(entry: { offline?: boolean; ready?: boolean; spoken?: boolean }): string {
+  if (entry.offline) return 'Queued · offline'
+  const state = entry.ready ? 'Next step' : 'Queued'
+  return entry.spoken ? `Said · ${state.toLowerCase()}` : state
+}
+
 /** The inline editor's placeholder when the caller names none. */
 const INLINE_PLACEHOLDER = 'Edit the instruction…'
 
@@ -1779,6 +1789,7 @@ export function Composer({
               <VoiceModeButton
                 owner={voiceOwner}
                 workspacePath={workspacePath}
+                runId={isLine ? (activeRunId ?? null) : null}
                 // A dictation take owns the mic and the field until it's inserted or discarded.
                 disabled={inputLocked || takeOpen || briefLocked}
                 placement={isBrief ? 'down' : 'up'}
@@ -2102,11 +2113,14 @@ export function Composer({
                       key={entry.id}
                       className="flex h-8 items-center gap-2 pl-3 pr-2 text-xs"
                       data-follow-up-offline={entry.offline ? '' : undefined}
+                      data-follow-up-ready={entry.ready ? '' : undefined}
+                      data-follow-up-spoken={entry.spoken ? '' : undefined}
                     >
-                      {/* Offline: kept here, starts when the connection is back — the words say so. */}
+                      {/* Offline: kept here, starts when the connection is back. Sent now: the
+                          run takes it at its next step, so it isn't "Queued" behind the turn. */}
                       <span className="flex shrink-0 items-center gap-1.5 text-tertiary">
-                        <Icon name="clock" size={12} className="shrink-0" />
-                        {entry.offline ? 'Queued · offline' : 'Queued'}
+                        <Icon name={entry.spoken ? 'mic' : entry.ready ? 'enter' : 'clock'} size={12} className="shrink-0" />
+                        {followUpStatusLabel(entry)}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
                         {entry.preview}
@@ -2125,7 +2139,7 @@ export function Composer({
                           Edit
                         </Button>
                       ) : null}
-                      {onSendFollowUpNow && !entry.offline ? (
+                      {onSendFollowUpNow && !entry.offline && !entry.ready ? (
                         <Button
                           size="xs"
                           variant="ghost"

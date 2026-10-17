@@ -9,6 +9,8 @@ import {
   enqueueFollowUp,
   takeNextFollowUp,
   takeNextReadyFollowUp,
+  takeFollowUpsToApply,
+  joinSpokenFollowUps,
   removeFollowUp,
   updateFollowUp,
   mergeEditedFollowUp,
@@ -481,5 +483,40 @@ describe('cancelAndWaitActiveRuns', () => {
     const result = await waiting
     expect(result.timedOut).toEqual([])
     expect(isActive(runId)).toBe(false)
+  })
+})
+
+describe('spoken follow-ups drained together', () => {
+  // Run 4d2a2b69 (2026-10-17): two questions said while the agent worked each
+  // started their own turn when they drained, three replies 5 s apart.
+  it('a spoken follow-up takes the spoken ones right behind it, and stops at a typed one', () => {
+    resetActiveRunsForTests()
+    const runId = 'spoken-run'
+    registerRunAbort(runId, '/ws')
+    enqueueFollowUp(runId, { role: 'user', content: 'Is it working?', spoken: true })
+    enqueueFollowUp(runId, { role: 'user', content: 'Report me any progress.', spoken: true })
+    enqueueFollowUp(runId, { role: 'user', content: 'typed later' })
+    const taken = takeFollowUpsToApply(runId, 'next')
+    expect(taken.map((t) => t.message.content)).toEqual(['Is it working?', 'Report me any progress.'])
+    expect(peekFollowUps(runId).map((t) => t.message.content)).toEqual(['typed later'])
+    const joined = joinSpokenFollowUps(taken.map((t) => t.message))
+    expect(joined).toMatchObject({ role: 'user', spoken: true, content: 'Is it working?\n\nReport me any progress.' })
+  })
+
+  it('typed follow-ups still go one at a time, and mid-turn only promoted spoken ones join', () => {
+    resetActiveRunsForTests()
+    const runId = 'typed-run'
+    registerRunAbort(runId, '/ws')
+    enqueueFollowUp(runId, { role: 'user', content: 'one' })
+    enqueueFollowUp(runId, { role: 'user', content: 'two' })
+    expect(takeFollowUpsToApply(runId, 'next')).toHaveLength(1)
+    takeFollowUpsToApply(runId, 'next')
+    const a = enqueueFollowUp(runId, { role: 'user', content: 'said a', spoken: true })
+    const b = enqueueFollowUp(runId, { role: 'user', content: 'said b', spoken: true })
+    if (!a.ok || !b.ok) throw new Error('enqueue failed')
+    promoteFollowUp(runId, a.id)
+    expect(takeFollowUpsToApply(runId, 'ready').map((t) => t.id)).toEqual([a.id])
+    promoteFollowUp(runId, b.id)
+    expect(takeFollowUpsToApply(runId, 'ready').map((t) => t.id)).toEqual([b.id])
   })
 })

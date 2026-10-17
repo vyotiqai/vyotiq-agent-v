@@ -1281,6 +1281,10 @@ export type PendingFollowUpState = {
    * follow-up store, so it can be edited or removed but not sent now.
    */
   offline?: boolean
+  /** Sent into the live run (Send now, Shift+Enter, or said out loud): it applies at the run's next step. */
+  ready?: boolean
+  /** Said out loud in voice mode, not typed. */
+  spoken?: boolean
   /** Full queued message — preserved so text-only edits keep attachments. */
   message?: ChatMessage
 }
@@ -1318,6 +1322,8 @@ function hydratePendingFollowUps(
       itemId: localEntry?.itemId ?? `followup-${entry.id}`,
       preview: localEntry?.preview ?? entry.preview,
       text: localEntry?.text ?? entry.preview,
+      ...(entry.ready || localEntry?.ready ? { ready: true } : {}),
+      ...(localEntry?.spoken ? { spoken: true } : {}),
       ...(localEntry?.message ? { message: localEntry.message } : {})
     }
   })
@@ -4139,13 +4145,17 @@ export function createChatStreamController(
           itemId: `followup-${res.data.id}`,
           preview,
           text: displayText.trim() || preview,
+          ...(extras?.voice ? { spoken: true } : {}),
           message: user
         }
       ]
     })
     // Shift+Enter: steer — the queued row's "Send now", at once. Queued is
     // still true if that fails; the row then offers Send now itself.
-    if (extras?.steer) await sendFollowUpNow(res.data.id)
+    // Words said out loud always steer (D-12): a spoken question held until
+    // the agent's turn ended was answered minutes late (run 4d2a2b69,
+    // 2026-10-17), whichever voice line's target sent it.
+    if (extras?.steer || extras?.voice) await sendFollowUpNow(res.data.id)
     return true
   }
 
@@ -4208,13 +4218,16 @@ export function createChatStreamController(
       patch({ error: res.error })
       return false
     }
-    const nextPending = [...state.pendingFollowUps]
+    // Main moved it to the front of the queue and marked it ready: so does the row.
+    const nextPending = state.pendingFollowUps.map((entry) =>
+      entry.id === followUpId ? { ...entry, ready: true } : entry
+    )
     const idx = nextPending.findIndex((entry) => entry.id === followUpId)
     if (idx > 0) {
       const [item] = nextPending.splice(idx, 1)
       nextPending.unshift(item)
-      patch({ pendingFollowUps: nextPending })
     }
+    patch({ pendingFollowUps: nextPending })
     return true
   }
 

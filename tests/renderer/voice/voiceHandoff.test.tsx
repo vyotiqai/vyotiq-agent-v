@@ -11,6 +11,7 @@ import {
   HANDOFF_MS,
   beginVoiceHandoff,
   handleVoiceTurn,
+  noteVoiceLineRun,
   registerVoiceBar,
   registerVoiceLine,
   resetVoiceModeForTests,
@@ -126,6 +127,47 @@ describe('handing a session from the brief to the new task', () => {
     vi.setSystemTime(Date.now() + HANDOFF_MS + 1)
     registerVoiceLine('late')
     expect(voiceModeOwner()).toBe('brief')
+  })
+})
+
+describe('the line showing the session’s run takes it from an owner that can’t drive it', () => {
+  // 2026-10-17, run 4d2a2b69: the brief that started the task kept the
+  // session after its hand-off lapsed. Its target never "runs", so spoken
+  // questions went to the busy task without steer and sat Queued 3½ min.
+  it('a brief whose hand-off lapsed hands over to the line already showing its run', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    await startVoiceMode('brief', { workspacePath: '/repo' })
+    registerVoiceBar('brief')
+    registerVoiceLine('task-line')
+    noteVoiceLineRun('task-line', 'run-7')
+    setVoiceTarget('brief', briefTarget('brief'))
+    vi.setSystemTime(Date.now() + HANDOFF_MS + 1)
+    setVoiceTarget('brief', { ...briefTarget('brief'), runId: () => 'run-7' })
+    await handleVoiceTurn(turn('hello'))
+    expect(voiceModeOwner()).toBe('task-line')
+  })
+
+  it('a line whose bar left, with no new line, gives way to one already showing the run', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    registerVoiceLine('other')
+    noteVoiceLineRun('other', 'run-3')
+    setVoiceTarget('line-1', { ...lineTarget('run-3'), running: () => true })
+    vi.setSystemTime(Date.now() + HANDOFF_MS + 1)
+    const bar = registerVoiceBar('line-1')
+    bar()
+    await Promise.resolve()
+    expect(voiceModeOwner()).toBe('other')
+  })
+
+  it('an owner on screen driving its own line keeps it, even with another line on the same run', async () => {
+    await startVoiceMode('line-1', { workspacePath: '/repo' })
+    registerVoiceBar('line-1')
+    registerVoiceLine('split')
+    noteVoiceLineRun('split', 'run-3')
+    setVoiceTarget('line-1', { ...lineTarget('run-3'), running: () => true })
+    await handleVoiceTurn(turn('how is it going'))
+    expect(voiceModeOwner()).toBe('line-1')
   })
 })
 

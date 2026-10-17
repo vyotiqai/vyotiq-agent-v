@@ -8,7 +8,7 @@ import { matchShortcut } from '@renderer/lib/shortcuts/match'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { STT_AUTO_ORDER, resolveSttProvider, sttEntry, type VoiceKeyAvailability } from '@shared/voice'
 import type { VoiceKeyStatus, VoiceSettings } from '@shared/ipc/schemas/voice'
-import { endVoiceMode, noteVoiceLineFocus, registerVoiceLine, startVoiceMode, takeArmedVoiceStart, useVoiceMode, voiceShortcutTarget } from './voiceMode'
+import { endVoiceMode, noteVoiceLineFocus, noteVoiceLineRun, registerVoiceLine, startVoiceMode, takeArmedVoiceStart, useVoiceMode, voiceShortcutTarget } from './voiceMode'
 
 const PANEL_WIDTH_PX = 360
 
@@ -43,12 +43,15 @@ async function listenerReady(settings: VoiceSettings): Promise<boolean> {
 export function VoiceModeButton({
   owner,
   workspacePath,
+  runId = null,
   disabled,
   placement = 'up',
   onOpenSettings
 }: {
   owner: string
   workspacePath: string | null
+  /** The task run this line shows: a session following that run moves here if its owner can't drive it. */
+  runId?: string | null
   disabled?: boolean
   placement?: 'up' | 'down'
   /** Settings → Voice (or Providers, for an OpenAI key) from "Add key". */
@@ -92,6 +95,8 @@ export function VoiceModeButton({
     if (takeArmedVoiceStart()) toggleRef.current()
     return unregister
   }, [owner])
+
+  useEffect(() => noteVoiceLineRun(owner, runId), [owner, runId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

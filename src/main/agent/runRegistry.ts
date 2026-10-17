@@ -610,6 +610,42 @@ export function takeNextFollowUp(runId: string): FollowUpEntry | undefined {
   return entry.followUps.shift()
 }
 
+/**
+ * What the loop applies next: the front follow-up (any in 'next', promoted
+ * only in 'ready'), and with a spoken one, the spoken ones right behind it.
+ * Said one after another while the agent worked, each used to start its own
+ * turn when they drained: "Is it working?" and "Report me any progress" got
+ * three replies 5 s apart, the last "Nothing new since my last update" (run
+ * 4d2a2b69, 2026-10-17). Taken together they get one answer.
+ */
+export function takeFollowUpsToApply(runId: string, mode: 'ready' | 'next'): FollowUpEntry[] {
+  const take = (): FollowUpEntry | undefined => (mode === 'next' ? takeNextFollowUp(runId) : takeNextReadyFollowUp(runId))
+  const first = take()
+  if (!first) return []
+  const taken = [first]
+  if (!isPlainSpoken(first)) return taken
+  for (;;) {
+    const next = active.get(runId)?.followUps[0]
+    if (!next || !isPlainSpoken(next) || (mode === 'ready' && !next.ready)) break
+    taken.push(take()!)
+  }
+  return taken
+}
+
+/** Words said in voice mode, text only: nothing attached that a join would lose. */
+function isPlainSpoken(entry: FollowUpEntry): boolean {
+  return Boolean(entry.message.spoken) && typeof entry.message.content === 'string'
+}
+
+/** Spoken follow-ups as one user message: providers refuse two user turns in a row. */
+export function joinSpokenFollowUps(said: ChatMessage[]): ChatMessage {
+  const text = said
+    .map((m) => (typeof m.content === 'string' ? m.content.trim() : ''))
+    .filter(Boolean)
+    .join('\n\n')
+  return { ...said[said.length - 1]!, content: text, ...(said[0]!.at ? { at: said[0]!.at } : {}) }
+}
+
 /** Take the front follow-up only when promoted (Send now). */
 export function takeNextReadyFollowUp(runId: string): FollowUpEntry | undefined {
   const entry = active.get(runId)

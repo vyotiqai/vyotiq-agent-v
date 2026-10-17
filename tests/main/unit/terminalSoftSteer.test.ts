@@ -5,7 +5,8 @@ import { join } from 'path'
 import {
   pollTerminalSession,
   resetTerminalSessionsForTests,
-  startBackgroundTerminal
+  startBackgroundTerminal,
+  steeredNote
 } from '@main/agent/tools/terminalSessions'
 
 /**
@@ -70,7 +71,7 @@ describe('background terminal vs soft steer', () => {
     expect(started).not.toMatch(/exit_code: 124/)
     // Not "timeout": a spoken question cut a 15 s sleep at 7 s and the agent said it "hit my 60-second wait limit" (2026-10-16 probe).
     expect(started).toMatch(/status: running/)
-    expect(started).toMatch(/the wait stopped early for a new message from the user/)
+    expect(started).toMatch(/The wait stopped early because the user sent a new message\. Answer it first/)
     const polled = await pollTerminalSession({
       runId: 'r', invokeId: 1, sessionId: sessionIdOf(started), blockUntilMs: 0,
       signal: new AbortController().signal, runSignal: run.signal
@@ -92,4 +93,19 @@ describe('background terminal vs soft steer', () => {
     })
     expect(polled).toMatch(/status: aborted/)
   }, 30_000)
+})
+
+describe('steeredNote', () => {
+  // 2026-10-17 probe: with "Poll this session_id" as the note, "Is it working?"
+  // 8 s into a 90 s sleep got a 2-minute poll and was answered when it ended.
+  it('says to answer first, with how long it has run and its last output', () => {
+    const note = steeredNote({ createdAt: 1_000, stdout: 'compiling\ntest a ... ok\n', stderr: '' }, 9_400)
+    expect(note).toMatch(/^note: still running, 8s so far; last output: test a \.\.\. ok\./)
+    expect(note).toMatch(/Answer it first, in this next reply/)
+    expect(note).toMatch(/then poll this session_id if you still need the result/)
+  })
+
+  it('says when there is no output yet', () => {
+    expect(steeredNote({ createdAt: 0, stdout: '', stderr: '' }, 90_000)).toMatch(/90s so far, no output yet\./)
+  })
 })

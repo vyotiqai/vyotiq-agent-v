@@ -108,6 +108,46 @@ describe('useChatStream', () => {
     expect(chatFollowUpPromote).not.toHaveBeenCalled()
   })
 
+  // 2026-10-17, run 4d2a2b69: a voice line whose target said "not running"
+  // sent spoken questions without steer; they sat Queued for 3½ minutes.
+  it('words said out loud go into the live run now even without steer, and the row says so', async () => {
+    const chatFollowUpPromote = vi.fn(async () => ({ ok: true as const, data: { queueLength: 1 } }))
+    ;(window.vyotiq as unknown as { chatFollowUpPromote: typeof chatFollowUpPromote }).chatFollowUpPromote = chatFollowUpPromote
+    const { result } = renderHook(() => useChatStream('/ws'))
+    await act(async () => {
+      await result.current.send('start')
+    })
+    await act(async () => {
+      handler?.({ type: 'status', runId: 'run-1', status: 'running', invokeId: 1 })
+    })
+    await act(async () => {
+      await result.current.send('is it working?', undefined, undefined, { voice: true })
+    })
+    expect(chatFollowUpPromote).toHaveBeenCalledWith({ runId: 'run-1', id: 'fu-1' })
+    expect(result.current.pendingFollowUps[0]).toMatchObject({ id: 'fu-1', ready: true, spoken: true })
+  })
+
+  it('a typed instruction sent now is marked ready; one only queued is not', async () => {
+    const chatFollowUpPromote = vi.fn(async () => ({ ok: true as const, data: { queueLength: 2 } }))
+    ;(window.vyotiq as unknown as { chatFollowUpPromote: typeof chatFollowUpPromote }).chatFollowUpPromote = chatFollowUpPromote
+    const { result } = renderHook(() => useChatStream('/ws'))
+    await act(async () => {
+      await result.current.send('start')
+    })
+    await act(async () => {
+      handler?.({ type: 'status', runId: 'run-1', status: 'running', invokeId: 1 })
+    })
+    await act(async () => {
+      await result.current.send('later')
+    })
+    expect(result.current.pendingFollowUps[0]?.ready).toBeUndefined()
+    await act(async () => {
+      await result.current.sendFollowUpNow?.('fu-1')
+    })
+    expect(result.current.pendingFollowUps[0]).toMatchObject({ id: 'fu-1', ready: true })
+    expect(result.current.pendingFollowUps[0]?.spoken).toBeUndefined()
+  })
+
   it('surfaces runNotice when queued follow-ups are dropped', async () => {
     const { result } = renderHook(() => useChatStream('/ws'))
 
