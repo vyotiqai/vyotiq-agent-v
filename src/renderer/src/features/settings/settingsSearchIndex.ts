@@ -136,6 +136,18 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'appearance'
   },
   {
+    id: 'appearance-home-backdrop',
+    title: 'Backdrop',
+    keywords: ['appearance', 'home', 'backdrop', 'background', 'wallpaper', 'pixels', 'field', 'picture', 'image'],
+    section: 'appearance'
+  },
+  {
+    id: 'appearance-user-name',
+    title: 'Your name',
+    keywords: ['appearance', 'home', 'name', 'greeting', 'good morning', 'profile'],
+    section: 'appearance'
+  },
+  {
     id: 'appearance-custom-css',
     title: 'User CSS overlay',
     keywords: ['appearance', 'css', 'stylesheet', 'custom', 'overlay', 'tokens'],

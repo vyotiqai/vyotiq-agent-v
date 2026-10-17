@@ -544,6 +544,12 @@ import {
   readCustomCssForSettings,
   syncCustomCssWatch
 } from '@main/appearance/customCss'
+import {
+  HOME_BACKDROP_EXTENSIONS,
+  adoptHomeBackdrop,
+  clearHomeBackdrop,
+  readHomeBackdrop
+} from '@main/appearance/homeBackdrop'
 import { logsDirectory } from '../logging/init'
 import { getTraceAutoCapture } from '../perf/traceAutoCapture'
 import {
@@ -3808,6 +3814,45 @@ export function registerIpc(): void {
       return ok(result.filePaths[0])
     } catch (err) {
       return failFrom(err, IPC.appearancePickCustomCss)
+    }
+  })
+
+  ipcMain.handle(IPC.appearancePickHomeBackdrop, async (event) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options: Electron.OpenDialogOptions = {
+        title: 'Choose a picture for Home',
+        properties: ['openFile'],
+        filters: [{ name: 'Pictures', extensions: HOME_BACKDROP_EXTENSIONS }]
+      }
+      const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+      if (result.canceled || !result.filePaths[0]) return ok(null)
+      // Copied in, never referenced in place: settings only learns that a picture exists.
+      const adopted = await adoptHomeBackdrop(result.filePaths[0])
+      if (!adopted.ok) return failExpected(adopted.error, IPC.appearancePickHomeBackdrop)
+      return ok({ stamp: adopted.stamp })
+    } catch (err) {
+      return failFrom(err, IPC.appearancePickHomeBackdrop)
+    }
+  })
+
+  ipcMain.handle(IPC.appearanceReadHomeBackdrop, async (event) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok({ dataUrl: await readHomeBackdrop() })
+    } catch (err) {
+      return failFrom(err, IPC.appearanceReadHomeBackdrop)
+    }
+  })
+
+  ipcMain.handle(IPC.appearanceClearHomeBackdrop, async (event) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      await clearHomeBackdrop()
+      return ok(null)
+    } catch (err) {
+      return failFrom(err, IPC.appearanceClearHomeBackdrop)
     }
   })
 

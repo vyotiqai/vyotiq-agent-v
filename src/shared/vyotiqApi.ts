@@ -1186,6 +1186,12 @@ export interface VyotiqApi {
   appearancePickCustomCss: () => Promise<IpcResult<string | null>>
   appearanceReadCustomCss: () => Promise<IpcResult<{ css: string }>>
   onAppearanceCustomCssChanged: (handler: () => void) => () => void
+  /** Pick a picture for Home's backdrop; main copies it into userData. Null when the dialog was cancelled. */
+  appearancePickHomeBackdrop: () => Promise<IpcResult<{ stamp: string } | null>>
+  /** Home's backdrop picture as a data URL, or null when none was picked. */
+  appearanceReadHomeBackdrop: () => Promise<IpcResult<{ dataUrl: string | null }>>
+  /** Delete the copied backdrop picture. */
+  appearanceClearHomeBackdrop: () => Promise<IpcResult<null>>
   /** Main-process connectivity probe (1.1.1.1 HEAD) — matches agent retry logic. */
   probeNetwork: () => Promise<IpcResult<boolean>>
   /** Read-only "what the agent knows" summary for the active workspace. */

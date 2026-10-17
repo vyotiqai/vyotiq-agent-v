@@ -3482,8 +3482,11 @@ function App() {
               runsByWorkspacePath={runsByWorkspacePath}
               activeRuns={shellWorkspaceProps.activeRuns}
               providerIssue={homeProviderIssue}
+              userName={settings.userName}
+              backdrop={{ kind: settings.homeBackdrop, imageStamp: settings.homeBackdropImageStamp }}
               onNewTaskInWorkspace={(path) => onNewSessionInWorkspace(path, '')}
               onOpenTask={shellWorkspaceProps.onSelectRunInWorkspace}
+              onRetryTask={(path, runId) => void onRetryRunInWorkspace(path, runId)}
               onOpenWorkspace={(path) => {
                 shellWorkspaceProps.onSwitchWorkspace(path)
                 requestNavigatorScope(path)

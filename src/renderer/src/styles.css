@@ -1385,6 +1385,48 @@
   }
 }
 
+/* ── Home backdrop (2026-10-17, Settings › Appearance › Home backdrop) ─────
+   A band behind Home's head that fades into the page and scrolls with it.
+   The layout stays flush: the band is a layer under the page, not a card.
+   Under the head a flat 70% scrim of the page colour keeps muted text at AA
+   over the brightest pixel in every skin and theme (measured on 2026-10-17:
+   muted ≥ 4.60:1, tertiary ≥ 3.53:1). Plain classes, as vy-rise is. */
+.vy-home-band {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 300px;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 100%);
+}
+
+.vy-home-band::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--vy-bg) 70%, transparent);
+}
+
+/* Field: two pools of the accent and a warm one low on the right, over the page. */
+.vy-home-field {
+  background:
+    radial-gradient(55% 60% at 18% 12%, color-mix(in srgb, var(--vy-accent) 38%, transparent), transparent 70%),
+    radial-gradient(50% 55% at 88% 30%, color-mix(in srgb, var(--vy-accent) 22%, transparent), transparent 72%),
+    radial-gradient(60% 50% at 70% 100%, color-mix(in srgb, var(--vy-warning) 22%, transparent), transparent 70%),
+    var(--vy-bg);
+}
+
+/* More contrast asks for less behind text: the band goes. */
+[data-contrast='more'] .vy-home-band {
+  display: none;
+}
+
+@media (prefers-contrast: more), (forced-colors: active) {
+  .vy-home-band {
+    display: none;
+  }
+}
+
 /* ── Voice mode (2026-10-15 redesign, docs/voice-mode.md §26) ─────────────
    Two styles over every placement. Quiet uses the app's planes; Ambient
    gathers light around the orb and puts the controls on glass. Token mixes

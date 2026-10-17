@@ -1,17 +1,20 @@
+import { useEffect, useState } from 'react'
 import {
   FONT_SCALE_MAX,
   FONT_SCALE_MIN,
   FONT_SCALE_STEP,
+  USER_NAME_MAX,
   resolveFontScaleValue,
   type AppearanceSettings
 } from '@shared/appearance'
-import { Button, Segmented } from '@renderer/lib/ui'
+import { Button, Input, Segmented } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import {
   ANNOUNCE_VERBOSITY_OPTIONS,
   CONTRAST_OPTIONS,
   FONT_SCALE_OPTIONS,
+  HOME_BACKDROP_OPTIONS,
   REDUCE_MOTION_OPTIONS,
   THEME_OPTIONS
 } from '../constants'
@@ -192,6 +195,8 @@ export function AppearanceSection({
         />
       </SettingsGroup>
 
+      <HomeGroup form={form} />
+
       <SettingsGroup title="Custom CSS">
         <SettingsField
           id="appearance-custom-css"
@@ -230,5 +235,112 @@ export function AppearanceSection({
         </SettingsField>
       </SettingsGroup>
     </SettingsStack>
+  )
+}
+
+/**
+ * What Home looks like: the band behind its head and the name its greeting
+ * uses. A picture is copied in by main when picked; Remove deletes the copy.
+ */
+function HomeGroup({ form }: { form: SettingsFormState }) {
+  const settings = form.settings
+  const [pickError, setPickError] = useState<string | null>(null)
+  const [draft, setDraft] = useState(settings.userName)
+  useEffect(() => setDraft(settings.userName), [settings.userName])
+  const hasPicture = settings.homeBackdropImageStamp !== ''
+
+  const pickPicture = async (): Promise<void> => {
+    setPickError(null)
+    const res = await window.vyotiq?.appearancePickHomeBackdrop?.()
+    if (!res) return
+    if (!res.ok) {
+      setPickError(res.error)
+      return
+    }
+    if (res.data) await form.runUpdate({ homeBackdrop: 'image', homeBackdropImageStamp: res.data.stamp })
+  }
+
+  const removePicture = async (): Promise<void> => {
+    setPickError(null)
+    await window.vyotiq?.appearanceClearHomeBackdrop?.()
+    await form.runUpdate({
+      homeBackdropImageStamp: '',
+      ...(settings.homeBackdrop === 'image' ? { homeBackdrop: 'pixels' as const } : {})
+    })
+  }
+
+  const commitName = (): void => {
+    const next = draft.trim().slice(0, USER_NAME_MAX)
+    setDraft(next)
+    if (next !== settings.userName) void form.runUpdate({ userName: next })
+  }
+
+  return (
+    <SettingsGroup title="Home">
+      <SegmentedField
+        id="appearance-home-backdrop"
+        title="Backdrop"
+        label="Home backdrop"
+        hint="A band behind Home's day and sentence, in your skin's colours or from a picture."
+        value={settings.homeBackdrop}
+        options={HOME_BACKDROP_OPTIONS}
+        disabled={form.formLocked}
+        {...form.defaultMark('homeBackdrop')}
+        onChange={(homeBackdrop) => {
+          setPickError(null)
+          // Picture with nothing picked yet goes straight to the picker.
+          if (homeBackdrop === 'image' && !hasPicture) void pickPicture()
+          else void form.runUpdate({ homeBackdrop })
+        }}
+      />
+      {settings.homeBackdrop === 'image' || hasPicture ? (
+        <SettingsField
+          id="appearance-home-picture"
+          title="Picture"
+          hint="Toned toward your skin so text over it stays readable. PNG, JPEG, WebP, AVIF, GIF or BMP, up to 8 MB."
+          below={
+            pickError ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                {pickError}
+              </p>
+            ) : null
+          }
+        >
+          <div className="flex items-center gap-1.5">
+            {hasPicture ? (
+              <Button size="sm" variant="ghost" disabled={form.formLocked} onClick={() => void removePicture()}>
+                Remove
+              </Button>
+            ) : null}
+            <Button size="sm" variant="secondary" disabled={form.formLocked} onClick={() => void pickPicture()}>
+              {hasPicture ? 'Change…' : 'Choose picture…'}
+            </Button>
+          </div>
+        </SettingsField>
+      ) : null}
+      <SettingsField
+        id="appearance-user-name"
+        title="Your name"
+        hint="Home greets you with it. Leave empty for no greeting."
+        {...form.defaultMark('userName')}
+      >
+        <Input
+          size="sm"
+          aria-label="Your name"
+          placeholder="Your name"
+          maxLength={USER_NAME_MAX}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={form.formLocked}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          className="w-48"
+        />
+      </SettingsField>
+    </SettingsGroup>
   )
 }

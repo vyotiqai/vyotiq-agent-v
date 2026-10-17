@@ -1,4 +1,4 @@
-import type { FontScalePreset } from '@shared/appearance'
+import type { FontScalePreset, HomeBackdrop } from '@shared/appearance'
 import type {
   AgentSandboxMode,
   AgentSandboxNetwork,
@@ -25,6 +25,14 @@ export const THEME_OPTIONS: SettingsOption<ThemeId>[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' }
+]
+
+/** Settings › Appearance › Home backdrop. */
+export const HOME_BACKDROP_OPTIONS: SettingsOption<HomeBackdrop>[] = [
+  { value: 'none', label: 'None' },
+  { value: 'pixels', label: 'Pixels' },
+  { value: 'field', label: 'Field' },
+  { value: 'image', label: 'Picture' }
 ]
 
 export const FONT_SCALE_OPTIONS: SettingsOption<FontScalePreset>[] = [

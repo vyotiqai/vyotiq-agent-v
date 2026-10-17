@@ -119,6 +119,8 @@ describe('Home task entry points', () => {
     const onNewTaskInWorkspace = vi.fn()
     renderDemoHome({ onNewTaskInWorkspace })
 
+    // The workspaces open from Home's foot line, under the day sentence.
+    fireEvent.click(screen.getByRole('button', { name: '1 workspace' }))
     fireEvent.click(screen.getByRole('button', { name: 'New task in demo' }))
 
     expect(onNewTaskInWorkspace).toHaveBeenCalledTimes(1)

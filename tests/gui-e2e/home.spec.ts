@@ -172,7 +172,21 @@ function seedRuns(userDataDir: string): void {
 
 async function goHome(window: Page): Promise<void> {
   await window.keyboard.press(`${MOD}+Shift+H`)
-  await expect(window.getByRole('heading', { name: 'Home', exact: true, level: 1 })).toBeVisible({ timeout: 20_000 })
+  await expect(window.locator('[data-day-sentence]')).toBeVisible({ timeout: 20_000 })
+}
+
+/** Home leads with the day as its heading, not the word "Home". */
+const DAY = new Date().toLocaleDateString(undefined, { weekday: 'long' })
+
+/**
+ * Open one of Home's regions from the foot line (the workspaces, the week):
+ * under the day sentence one region shows at a time.
+ */
+async function openFromFoot(window: Page, region: 'workspaces' | 'week'): Promise<void> {
+  const name = region === 'workspaces' ? 'Workspaces' : 'This week'
+  if (await window.getByRole('region', { name }).isVisible()) return
+  await window.locator(`[data-home-foot] [data-foot="${region}"]`).click()
+  await expect(window.getByRole('region', { name })).toBeVisible({ timeout: 20_000 })
 }
 
 test.describe('Home and Usage', () => {
@@ -192,21 +206,25 @@ test.describe('Home and Usage', () => {
     if (launched) await closeApp(launched)
   })
 
-  test('Home holds only what the navigator can’t', async () => {
+  test('Home leads with the day and one sentence', async () => {
     const { window } = launched
-    await expect(window.getByRole('heading', { name: 'Home', exact: true, level: 1 })).toBeVisible({ timeout: 30_000 })
+    await expect(window.getByRole('heading', { name: DAY, exact: true, level: 1 })).toBeVisible({ timeout: 30_000 })
+    await expect(window.locator('[data-day-sentence]')).toBeVisible()
     // No task field: a task starts from its brief.
     await expect(window.locator('[data-home]').getByRole('textbox')).toHaveCount(0)
-    for (const name of ['Needs you', 'Workspaces', 'This week']) {
-      await expect(window.getByRole('region', { name })).toBeVisible()
-    }
+    // Nothing waits on you, so the sentence doesn't say anything does and Needs you isn't open.
+    await expect(window.locator('[data-day-sentence]')).not.toContainText('need you')
+    await expect(window.locator('[data-home]').getByRole('region', { name: 'Needs you' })).toHaveCount(0)
+    // The workspaces and the week stay one press away, on the foot line.
+    await expect(window.locator('[data-home-foot] [data-foot="workspaces"]')).toBeVisible()
+    await expect(window.locator('[data-home-foot] [data-foot="week"]')).toBeVisible({ timeout: 20_000 })
     // The task lists are the navigator's; the analytics are Usage's.
     await expect(window.getByRole('region', { name: /^(Activity|Repositories|In flight|Pinned)/ })).toHaveCount(0)
-    await expect(window.getByRole('region', { name: 'Needs you' })).toContainText('Nothing is waiting on you')
     await expect(window.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })
 
   test('Workspaces reports the branch git reports', async () => {
+    await openFromFoot(launched.window, 'workspaces')
     const region = launched.window.getByRole('region', { name: 'Workspaces' })
     await expect(region.getByRole('button', { name: `New task in ${workspaceName}` })).toBeVisible({ timeout: 20_000 })
     if (branch) {
@@ -218,6 +236,7 @@ test.describe('Home and Usage', () => {
   })
 
   test('This week sums the seeded receipts and ledgers', async () => {
+    await openFromFoot(launched.window, 'week')
     const region = launched.window.getByRole('region', { name: 'This week' })
     // Five runs with a receipt today: four done, one failed. The interrupted
     // run wrote no receipt, so it neither counts nor ended.
@@ -231,6 +250,7 @@ test.describe('Home and Usage', () => {
 
   test('Usage carries the analytics, read from the same receipts', async () => {
     const { window } = launched
+    await openFromFoot(window, 'week')
     await window.getByRole('region', { name: 'This week' }).getByRole('button', { name: 'Usage' }).click()
     const page = window.locator('[data-usage]')
     await expect(page).toBeVisible({ timeout: 20_000 })
@@ -253,6 +273,7 @@ test.describe('Home and Usage', () => {
   test('Home answers a started task’s approval in place', async () => {
     const { window } = launched
     await goHome(window)
+    await openFromFoot(window, 'workspaces')
     await window.getByRole('region', { name: 'Workspaces' }).getByRole('button', { name: `New task in ${workspaceName}` }).click()
     const brief = window.getByRole('combobox', { name: 'Brief' })
     await expect(brief).toBeVisible({ timeout: 20_000 })
@@ -287,7 +308,9 @@ test.describe('Home and Usage', () => {
     await expect(inbox).toBeHidden()
 
     await row.getByRole('button', { name: 'Allow once' }).click()
-    await expect(needs).toContainText('Nothing is waiting on you', { timeout: 20_000 })
+    // Answered: the sentence stops saying it, and Needs you closes with nothing in it.
+    await expect(window.locator('[data-day-sentence]')).not.toContainText('need you', { timeout: 20_000 })
+    await expect(needs).toHaveCount(0)
     await expect(window.locator('[data-nav-section="needs"]')).toHaveCount(0)
 
     // The run went on with the command's result and finished.
@@ -308,6 +331,7 @@ test.describe('Home and Usage', () => {
   test('a workspace row opens a new task there', async () => {
     const { window } = launched
     await goHome(window)
+    await openFromFoot(window, 'workspaces')
     await window.getByRole('region', { name: 'Workspaces' }).getByRole('button', { name: `New task in ${workspaceName}` }).click()
     await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
   })

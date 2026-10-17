@@ -162,13 +162,90 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 const needsYou = (): HTMLElement => screen.getByRole('region', { name: 'Needs you' })
+const sentence = (): string => (document.querySelector('[data-day-sentence]')?.textContent ?? '').replace(/\s+/g, ' ')
+/** A disclosure in the sentence or the foot line, by its words. */
+const control = (name: RegExp | string): HTMLElement => screen.getByRole('button', { name })
 
 describe('Home', () => {
-  it('is titled Home, with no task field of its own', () => {
+  it('leads with the day and one sentence, with no task field of its own', async () => {
     renderHome()
-    expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toBeTruthy()
+    const day = new Date().toLocaleDateString(undefined, { weekday: 'long' })
+    expect(screen.getByRole('heading', { name: day, level: 1 })).toBeTruthy()
+    await waitFor(() => expect(sentence()).toContain('2 tasks need you and 1 is running.'))
+    await waitFor(() => expect(sentence()).toContain('1 uncommitted file in repo-alpha.'))
     // A task starts from its brief, not from a line on Home.
     expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('opens what wants you first, and one region at a time', async () => {
+    renderHome()
+    const needs = control(/2 tasks need you/)
+    expect(needs.getAttribute('aria-expanded')).toBe('true')
+    expect(needs.getAttribute('aria-controls')).toBe('home-detail')
+    expect(needsYou()).toBeTruthy()
+
+    fireEvent.click(control(/1 is running/))
+    const running = screen.getByRole('region', { name: 'Running' })
+    expect(running.textContent).toContain('Audit authentication end to end')
+    expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
+    expect(needs.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(within(running).getByRole('button', { name: 'Open Audit authentication end to end' }))
+    expect(handlers.onOpenTask).toHaveBeenCalledWith(BETA, 'busy')
+
+    // The open one closes on a second press.
+    fireEvent.click(control(/1 is running/))
+    expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()
+    expect(document.getElementById('home-detail')?.childElementCount).toBe(0)
+  })
+
+  it('counts a connection that needs you, so the sentence never contradicts Needs you', async () => {
+    mcpServers = [{ id: 'linear', name: 'Linear', enabled: true, connected: false, toolCount: 0, error: 'ECONNREFUSED', errorKind: 'network' }]
+    renderHome({ activeRuns: [] })
+    await waitFor(() => expect(sentence()).toContain('1 connection needs you.'))
+    expect(within(needsYou()).getByText('Linear can’t be reached')).toBeTruthy()
+  })
+
+  it('lists a task that failed today with Retry, and a ready-for-review one', async () => {
+    const onRetryTask = vi.fn()
+    renderHome({
+      activeRuns: [],
+      onRetryTask,
+      runsByWorkspacePath: {
+        [ALPHA]: {
+          runs: [
+            { ...run('broke', 'Bump the lockfile', 'error'), error: 'pnpm exited with code 1', retryable: true },
+            { ...run('edits', 'Tidy the composer', 'done'), review: { files: 2, add: 4, del: 1 } }
+          ],
+          activeRunId: null
+        },
+        [BETA]: { runs: [], activeRunId: null }
+      }
+    })
+    await waitFor(() => expect(sentence()).toContain('1 task failed and 1 is ready for review.'))
+    const failed = screen.getByRole('region', { name: 'Failed' })
+    expect(failed.textContent).toContain('pnpm exited with code 1')
+    fireEvent.click(within(failed).getByRole('button', { name: 'Retry' }))
+    expect(onRetryTask).toHaveBeenCalledWith(ALPHA, 'broke')
+
+    fireEvent.click(control(/1 is ready for review/))
+    const review = screen.getByRole('region', { name: 'Ready for review' })
+    expect(review.textContent).toContain('2 files to keep or undo')
+    fireEvent.click(within(review).getByRole('button', { name: 'Review Tidy the composer' }))
+    expect(handlers.onOpenTask).toHaveBeenCalledWith(ALPHA, 'edits')
+  })
+
+  it('greets by name when one is set', async () => {
+    renderHome({ userName: 'Ajay' })
+    await waitFor(() => expect(sentence()).toMatch(/^Good (morning|afternoon|evening), Ajay\. 2 tasks need you/))
+  })
+
+  it('draws the backdrop band only when one is chosen', () => {
+    const { unmount } = renderHome({ backdrop: { kind: 'field', imageStamp: '' } })
+    expect(document.querySelector('[data-home-backdrop="field"]')?.getAttribute('aria-hidden')).toBe('true')
+    unmount()
+    renderHome({ backdrop: { kind: 'none', imageStamp: '' } })
+    expect(document.querySelector('[data-home-backdrop]')).toBeNull()
   })
 
   it('answers an approval in place: Deny and Allow once go to the run', async () => {
@@ -225,14 +302,17 @@ describe('Home', () => {
     await waitFor(() => expect(window.vyotiq.mcpRefresh).toHaveBeenCalledWith({ workspacePath: ALPHA }))
   })
 
-  it('says so when nothing is waiting', () => {
+  it('says so when nothing is waiting', async () => {
     renderHome({ activeRuns: [] })
-    expect(needsYou().textContent).toContain('Nothing is waiting on you.')
+    await waitFor(() => expect(sentence()).toMatch(/^Nothing needs you\./))
+    expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
   })
 
   it('shows each workspace as git sees it, with what runs there now', async () => {
     indexStatus = { phase: 'syncing', workspacePath: BETA }
     renderHome()
+    // Always reachable from the foot line, whether or not the sentence names a change.
+    fireEvent.click(control('2 workspaces'))
     const region = screen.getByRole('region', { name: 'Workspaces' })
     const alpha = (await within(region).findByRole('button', { name: 'repo-alpha' })).closest('li') as HTMLElement
     await waitFor(() => expect(alpha.textContent).toContain('feature/home'))
@@ -259,6 +339,7 @@ describe('Home', () => {
 
   it('sums the week from the receipts, with a bar per day', async () => {
     renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: '9 tasks this week' }))
     const region = screen.getByRole('region', { name: 'This week' })
     await waitFor(() => expect(region.textContent).toContain('9tasks'))
     expect(region.textContent).toContain('$4.21spent')

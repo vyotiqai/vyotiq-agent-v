@@ -70,6 +70,17 @@ export const AnnounceVerbositySchema = z.enum(['off', 'brief', 'full'])
 export type AnnounceVerbosity = z.infer<typeof AnnounceVerbositySchema>
 export const DEFAULT_ANNOUNCE_VERBOSITY: AnnounceVerbosity = 'full'
 
+/**
+ * Home's backdrop band: generated in the skin's colours (`pixels`, `field`),
+ * a picture the person chose (`image`), or none.
+ */
+export const HomeBackdropSchema = z.enum(['none', 'pixels', 'field', 'image'])
+export type HomeBackdrop = z.infer<typeof HomeBackdropSchema>
+export const DEFAULT_HOME_BACKDROP: HomeBackdrop = 'pixels'
+
+/** The longest name Home greets you by. */
+export const USER_NAME_MAX = 40
+
 export type AppearanceSettings = {
   theme: ThemeId
   fontScale: FontScale

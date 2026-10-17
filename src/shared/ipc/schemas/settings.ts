@@ -12,11 +12,14 @@ import {
   DEFAULT_ANNOUNCE_VERBOSITY,
   DEFAULT_CONTRAST,
   DEFAULT_FONT_SCALE,
+  DEFAULT_HOME_BACKDROP,
   DEFAULT_REDUCE_MOTION,
   DEFAULT_SKIN_ID,
   FontScaleSchema,
+  HomeBackdropSchema,
   ReduceMotionSchema,
-  SkinIdSchema
+  SkinIdSchema,
+  USER_NAME_MAX
 } from '../../appearance'
 import type { ThemeId } from '../../theme'
 import {
@@ -900,6 +903,16 @@ export const SettingsSchema = z.object({
   /** Local user CSS overlay path. Empty = none. */
   customCssPath: z.string().default(''),
   /**
+   * What sits behind Home's head (Settings › Appearance): a band that fades
+   * into the page. `image` draws the picture main copied into userData when
+   * it was picked; settings never holds a path to it.
+   */
+  homeBackdrop: HomeBackdropSchema.catch(DEFAULT_HOME_BACKDROP).default(DEFAULT_HOME_BACKDROP),
+  /** When the Home backdrop picture was last replaced: Home reads the picture again when this moves. Empty = none. */
+  homeBackdropImageStamp: z.string().max(64).catch('').default(''),
+  /** What Home calls you ("Good morning, Ajay."). Empty = no greeting. */
+  userName: z.string().trim().max(USER_NAME_MAX).catch('').default(''),
+  /**
    * Motion preference. `system` follows the OS reduced-motion setting,
    * `on` always reduces motion, `off` keeps app motion (the OS setting can
    * still reduce motion through the media query).
@@ -1153,6 +1166,9 @@ export const DEFAULT_SETTINGS: Settings = {
   fontScale: DEFAULT_FONT_SCALE,
   skinId: DEFAULT_SKIN_ID,
   customCssPath: '',
+  homeBackdrop: DEFAULT_HOME_BACKDROP,
+  homeBackdropImageStamp: '',
+  userName: '',
   reduceMotion: DEFAULT_REDUCE_MOTION,
   contrast: DEFAULT_CONTRAST,
   alwaysShowFocusRing: DEFAULT_ALWAYS_SHOW_FOCUS_RING,

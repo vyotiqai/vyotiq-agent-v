@@ -750,6 +750,9 @@ const api: VyotiqApi = {
   getSystemTheme: () => ipcRenderer.invoke(IPC.getSystemTheme),
   appearancePickCustomCss: () => ipcRenderer.invoke(IPC.appearancePickCustomCss),
   appearanceReadCustomCss: () => ipcRenderer.invoke(IPC.appearanceReadCustomCss),
+  appearancePickHomeBackdrop: () => ipcRenderer.invoke(IPC.appearancePickHomeBackdrop),
+  appearanceReadHomeBackdrop: () => ipcRenderer.invoke(IPC.appearanceReadHomeBackdrop),
+  appearanceClearHomeBackdrop: () => ipcRenderer.invoke(IPC.appearanceClearHomeBackdrop),
   onAppearanceCustomCssChanged: (handler) => {
     const listener = (_: IpcRendererEvent): void => handler()
     ipcRenderer.on(IPC.appearanceCustomCssChanged, listener)
