@@ -280,7 +280,19 @@ export function isNoiseTranscript(utterance: string): boolean {
  * a short phrase with no numbers ("(laughs)"), so "version (2)" is kept.
  * Listeners don't write spoken asides in parentheses.
  */
-const SOUND_TAG_RES = [/\[[^\]\n]{0,60}\]/g, /\*[^*\n]{1,40}\*/g, /\((?:[^()\n\d]{1,30})\)/g, /[♪♫♩♬]+/g]
+/**
+ * Plus the listener model's own control tokens and the tilde it trails on a
+ * drawn-out word. 2026-10-17 05:58–06:05: every transcript came as
+ * "<|speaker:0|> Hey." and "Stop~"; a bare "<|speaker:0|>" (no words at all)
+ * was sent to the agent twice as a turn, and it answered silence.
+ */
+const SOUND_TAG_RES = [
+  /<\|[^|>\n]{0,40}\|>/g,
+  /\[[^\]\n]{0,60}\]/g,
+  /\*[^*\n]{1,40}\*/g,
+  /\((?:[^()\n\d]{1,30})\)/g,
+  /[♪♫♩♬~]+/g
+]
 
 /** What you said, without the listener's sound descriptions. Empty when there were no words. */
 export function cleanTranscript(utterance: string): string {
@@ -331,12 +343,28 @@ const BACKCHANNELS = new Set([
 ])
 
 export function isBackchannel(utterance: string): boolean {
-  const norm = utterance
+  return BACKCHANNELS.has(normalizeWords(utterance))
+}
+
+function normalizeWords(utterance: string): string {
+  return utterance
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return BACKCHANNELS.has(norm)
+}
+
+/**
+ * They asked it to be quiet or wait ("I said just wait", "Okay, keep quiet",
+ * "Shut up, shut up"): a short request with nothing else in it. Such a turn
+ * gets no "One moment." filler (2026-10-16 16:02 and 2026-10-17 06:07–06:12).
+ */
+const QUIET_RE =
+  /^(?:(?:ok|okay|please|just|now|i said|hey|so)\s+)*(?:wait|hold on|hang on|shut up|be quiet|keep quiet|quiet|stop talking|hush|silence|one sec(?:ond)?|give me a (?:sec(?:ond)?|moment|minute))(?:\s+(?:please|now|a bit|a second|a moment|a minute|shut up|for (?:a )?(?:sec(?:ond)?|moment|minute|bit)))*$/
+
+export function asksForQuiet(utterance: string): boolean {
+  const norm = normalizeWords(utterance)
+  return norm.length > 0 && norm.split(' ').length <= 8 && QUIET_RE.test(norm)
 }
 
 /**

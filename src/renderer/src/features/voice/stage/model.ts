@@ -62,7 +62,7 @@ export function hint(v: VoiceSnapshot, settings: Pick<VoiceSettings, 'pushToTalk
     case 'thinking':
       return 'Working out an answer'
     case 'working':
-      if (!work) return 'Handing it to the task'
+      if (!work) return 'Working on it'
       if (work.state !== 'running') return 'It keeps going while you talk'
       return work.stepCount === 0 ? 'Getting started' : `${work.stepCount} step${work.stepCount === 1 ? '' : 's'} · ${elapsed(work, now)}`
     case 'speaking':

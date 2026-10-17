@@ -11,6 +11,29 @@
 export const SPOKEN_OPEN = '<spoken>'
 export const SPOKEN_CLOSE = '</spoken>'
 
+/**
+ * A blank line inside the block ends it too. The block is one to three
+ * sentences, never paragraphs, but models drop the closing tag: in run
+ * c79e6792 (2026-10-17) ten of 22 spoken replies had no `</spoken>`, so
+ * every list item and "1." of the written answer after them was read aloud,
+ * and the screen, which hid an unclosed block, showed none of it.
+ */
+const BLOCK_BREAK = /\n[ \t]*\r?\n/
+
+/** Where the block that starts at 0 of `inner` ends: its contents' length and where the rest begins. */
+function blockEnd(inner: string): { length: number; restAt: number } | null {
+  const close = inner.indexOf(SPOKEN_CLOSE)
+  const brk = BLOCK_BREAK.exec(inner)
+  if (brk && (close === -1 || brk.index < close)) return { length: brk.index, restAt: brk.index + brk[0].length }
+  if (close !== -1) return { length: close, restAt: close + SPOKEN_CLOSE.length }
+  return null
+}
+
+/** The written part after a block that a blank line ended; a closing tag the model added later isn't shown. */
+function withoutStrayClose(rest: string): string {
+  return rest.replace(SPOKEN_CLOSE, '')
+}
+
 /** True when `s` could still grow into `full` (it is a prefix of it). */
 function isPrefixOf(s: string, full: string): boolean {
   return s.length <= full.length && full.startsWith(s)
@@ -27,18 +50,20 @@ export function stripSpokenBlock(text: string): string {
   const rest = text.slice(lead)
   if (rest.length > 0 && rest.length < SPOKEN_OPEN.length && isPrefixOf(rest, SPOKEN_OPEN)) return ''
   if (!rest.startsWith(SPOKEN_OPEN)) return text
-  const close = rest.indexOf(SPOKEN_CLOSE, SPOKEN_OPEN.length)
-  if (close === -1) return ''
-  return rest.slice(close + SPOKEN_CLOSE.length).replace(/^\s+/, '')
+  const inner = rest.slice(SPOKEN_OPEN.length)
+  const end = blockEnd(inner)
+  if (!end) return ''
+  return withoutStrayClose(inner.slice(end.restAt)).replace(/^\s+/, '')
 }
 
 /** The block's contents when the answer opens with a complete one, else null. */
 export function extractSpokenBlock(text: string): string | null {
   const rest = text.trimStart()
   if (!rest.startsWith(SPOKEN_OPEN)) return null
-  const close = rest.indexOf(SPOKEN_CLOSE, SPOKEN_OPEN.length)
-  if (close === -1) return null
-  return rest.slice(SPOKEN_OPEN.length, close).trim()
+  const inner = rest.slice(SPOKEN_OPEN.length)
+  const end = blockEnd(inner)
+  if (!end) return null
+  return inner.slice(0, end.length).trim()
 }
 
 export type SpokenParserPhase =
@@ -104,14 +129,14 @@ export class SpokenStreamParser {
   }
 
   private drainInside(): string {
-    const close = this.pending.indexOf(SPOKEN_CLOSE)
-    if (close !== -1) {
-      const out = this.pending.slice(0, close)
+    const end = blockEnd(this.pending)
+    if (end) {
+      const out = this.pending.slice(0, end.length)
       this.pending = ''
       this.phaseValue = 'after'
       return out
     }
-    // Hold back a tail that could be the start of the closing tag.
+    // Hold back a tail that could be the start of the closing tag, or of a blank line.
     let hold = 0
     for (let n = Math.min(SPOKEN_CLOSE.length - 1, this.pending.length); n > 0; n--) {
       if (SPOKEN_CLOSE.startsWith(this.pending.slice(-n))) {
@@ -119,6 +144,8 @@ export class SpokenStreamParser {
         break
       }
     }
+    const lineBreak = /\n[ \t\r]*$/.exec(this.pending)
+    if (lineBreak) hold = Math.max(hold, lineBreak[0].length)
     const out = this.pending.slice(0, this.pending.length - hold)
     this.pending = this.pending.slice(this.pending.length - hold)
     return out

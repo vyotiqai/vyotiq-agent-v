@@ -170,6 +170,7 @@ function stableSystemFingerprint(parts: {
   harness: string
   userRules: string
   responseStyleSection: string
+  voiceReplySection: string
   rules: string
   skillsSection: string
   mcpSection: string
@@ -189,6 +190,7 @@ function stableSystemFingerprint(parts: {
     parts.harness,
     parts.userRules,
     parts.responseStyleSection,
+    parts.voiceReplySection,
     parts.rules,
     parts.skillsSection,
     parts.mcpSection,
@@ -419,6 +421,7 @@ type SystemSectionLabel =
   | 'pluginRules'
   | 'userRules'
   | 'responseStyle'
+  | 'voiceReply'
   | 'rules'
   | 'memory'
   | 'priorSession'
@@ -429,6 +432,8 @@ function buildStableSystem(parts: {
   harness: string
   userRules: string
   responseStyleSection?: string
+  /** The spoken-turn instructions (userRules.ts VOICE_REPLY_TEXT), kept whole: see buildStableSystem. */
+  voiceReplySection?: string
   rules: string
   skillsSection?: string
   mcpSection?: string
@@ -446,6 +451,7 @@ function buildStableSystem(parts: {
     harness: parts.harness,
     userRules: parts.userRules,
     responseStyleSection: parts.responseStyleSection ?? '',
+    voiceReplySection: parts.voiceReplySection ?? '',
     rules: parts.rules,
     skillsSection: parts.skillsSection ?? '',
     mcpSection: parts.mcpSection ?? '',
@@ -516,13 +522,25 @@ function buildStableSystem(parts: {
     return capped
   }
 
+  // The spoken-turn instructions are what make voice mode act rather than
+  // talk: who it is, the <spoken> block, and every app_control action it can
+  // take. Capped inside the 5% response-style slot (2026-10-17, run c79e6792)
+  // the action list never reached the model, which then told the person no
+  // setting existed and said "Okay" to "keep quiet" without muting. Its room is
+  // set aside before the harness takes its share, and it is never cut.
+  const voiceReply = parts.voiceReplySection?.trim() ?? ''
+  const voiceReplyTokens = voiceReply ? estimateTextTokens(voiceReply, parts.model) : 0
   const harness = capWithinSystem(
     'harness',
     parts.harness,
-    Math.floor(parts.budgets.system * 0.75),
+    Math.max(0, Math.min(Math.floor(parts.budgets.system * 0.75), parts.budgets.system - voiceReplyTokens)),
     capHarness
   )
   if (harness) sections.push({ label: 'harness', text: harness })
+  if (voiceReply) {
+    sections.push({ label: 'voiceReply', text: voiceReply })
+    systemTokensLeft = Math.max(0, systemTokensLeft - voiceReplyTokens)
+  }
 
   if (parts.modeSection?.trim()) {
     const mode = capWithinSystem(
@@ -668,6 +686,12 @@ function buildStableSystem(parts: {
   if (dropped.length > 0 || truncated.length > 0) {
     logger.warn('System prompt sections cut to fit the system budget', {
       scope: 'assemble',
+      // `dropped`/`truncated` aren't log-allowlisted keys and arrays are dropped: the line
+      // said something was cut and never what (2026-10-17). `reason` carries it.
+      reason: [
+        ...dropped.map((label) => `${label} dropped`),
+        ...truncated.map((t) => `${t.section} ${t.keptChars}/${t.chars} chars`)
+      ].join(', '),
       dropped,
       truncated,
       systemBudget: parts.budgets.system
@@ -745,6 +769,8 @@ function buildSystemZones(parts: {
   planVerbatim?: boolean
   sessionEnv?: string
   responseStyleSection?: string
+  /** The spoken-turn instructions (userRules.ts VOICE_REPLY_TEXT), kept whole: see buildStableSystem. */
+  voiceReplySection?: string
   memorySection?: string
   compaction?: CompactionRecord | null
   budgets: ReturnType<typeof allocateBudget>
@@ -757,6 +783,7 @@ function buildSystemZones(parts: {
     harness: parts.harness,
     userRules: parts.userRules,
     responseStyleSection: parts.responseStyleSection,
+    voiceReplySection: parts.voiceReplySection,
     rules: parts.rules,
     skillsSection: parts.skillsSection,
     mcpSection: parts.mcpSection,
@@ -964,23 +991,19 @@ export async function assembleContext(
   const estimateStarted = perfNow()
   const userRules = formatUserRules(input.userRules ?? [])
   const voiceReply = formatVoiceReply(voiceReplyWanted(input))
-  const responseStyleSection = [
-    formatResponseStyle({
-      identity: input.identity,
-      persona: input.persona,
-      tone: input.tone,
-      responseLanguage: input.responseLanguage,
-      responseVerbosity: input.responseVerbosity
-    }),
-    voiceReply
-  ]
-    .filter(Boolean)
-    .join('\n\n')
+  const responseStyleSection = formatResponseStyle({
+    identity: input.identity,
+    persona: input.persona,
+    tone: input.tone,
+    responseLanguage: input.responseLanguage,
+    responseVerbosity: input.responseVerbosity
+  })
   const systemParts = {
     harness: input.harness,
     workspace,
     userRules,
     responseStyleSection,
+    voiceReplySection: voiceReply,
     rules,
     skillsSection: input.skillsSection,
     mcpSection: input.mcpSection,

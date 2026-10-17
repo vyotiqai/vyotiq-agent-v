@@ -87,6 +87,20 @@ describe('ReplySpeaker', () => {
     expect(h.streams[0]!.spoken).toEqual(['I fixed the race.', 'Tests pass now.'])
   })
 
+  it('a block with no words says nothing, streamed or whole (2026-10-17 probe: "…" read out as "….")', () => {
+    const h = speakerHarness()
+    h.speaker.beginTurn()
+    for (const piece of ['<spoken>', '…', '</spoken>']) h.speaker.handle(delta(piece))
+    h.speaker.handle(final('<spoken>…</spoken>'))
+    h.speaker.handle(status('done'))
+    expect(h.said).toEqual([])
+    const whole = speakerHarness()
+    whole.speaker.beginTurn()
+    whole.speaker.handle(final('<spoken>...</spoken>'))
+    whole.speaker.handle(status('done'))
+    expect(whole.said).toEqual([])
+  })
+
   it('a step’s spoken line goes when its block closes, never glued to the next step’s (2026-10-16 probe: "cloud now.The orb")', () => {
     const h = speakerHarness()
     h.speaker.beginTurn()

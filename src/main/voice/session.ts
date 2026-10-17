@@ -33,6 +33,7 @@ import { EchoGuard } from './echoGuard'
 import {
   afterWakeName,
   approvalAnswer,
+  asksForQuiet,
   cleanTranscript,
   isBackchannel,
   isNoiseTranscript,
@@ -1314,7 +1315,8 @@ export class VoiceSession {
     // Stopped on you: the agent can't answer until you do, so say what it waits on rather than nothing.
     const waiting = this.waitingLine()
     if (waiting) this.sayLine(waiting)
-    else this.startAck()
+    // "Shut up, shut up" was answered "Give me a moment." (2026-10-16 16:02): no filler when they asked for quiet.
+    else if (!asksForQuiet(text)) this.startAck()
   }
 
   /** What the followed run is stopped on, said again; null when it isn't. */

@@ -99,12 +99,12 @@ export function workGlyph(entry: Extract<Entry, { who: 'work' }>): TaskState {
   return entry.work ? GLYPH[entry.work.state] : 'running'
 }
 
-/** Why a hand-off never reached the task, under its line. */
+/** Why what you said never started, under its line. Never "sent" or "handed": voice mode is the agent (§27). */
 export const HAND_OFF_FAILED: Readonly<Record<VoiceHandOffFailure, string>> = {
-  no_task: 'Not sent: no task was open to take it',
-  refused: 'Not sent: the task wasn’t ready to take it',
-  error: 'Not sent: it couldn’t be sent',
-  unfollowed: 'Sent, but voice couldn’t follow the task'
+  no_task: 'Didn’t start: no task was open',
+  refused: 'Didn’t start: the task wasn’t ready',
+  error: 'Didn’t start: something went wrong',
+  unfollowed: 'Working, but the answer won’t be spoken'
 }
 
 /**

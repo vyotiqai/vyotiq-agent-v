@@ -290,7 +290,9 @@ export class ReplySpeaker {
   private emitPiece(reply: Reply, raw: string): void {
     // Never send a secret the agent read to a speech vendor (D-10).
     const piece = redactSecretsInText(toSpeakable(raw) || raw.trim())
-    if (!piece) return
+    // No words in it: "<spoken>…</spoken>" after "keep quiet until I call you" was its
+    // way of saying nothing, and the speaker read it out as "…." (2026-10-17 probe).
+    if (!piece || !/[\p{L}\p{N}]/u.test(piece)) return
     this.deps.say(reply.contextId, piece)
     reply.stream.pushText(piece)
     reply.stream.flush()

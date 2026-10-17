@@ -198,7 +198,7 @@ describe('where voice mode lives (§26)', () => {
     // A hand-off the task refused: the pane says so.
     act(() => fake.update({ state: 'listening', transcript: [{ id: 'h2', who: 'agent', text: 'Run lint.', failed: 'no_task' }], works: {} }))
     const pane = screen.getByRole('complementary', { name: 'Its task' })
-    expect(pane.textContent).toContain('Not sent: no task was open to take it')
+    expect(pane.textContent).toContain('Didn’t start: no task was open')
   })
 
   it('Inline: the voice thread over the task, and the composer as the voice control', async () => {
@@ -392,7 +392,7 @@ describe('captions and the work', () => {
     act(() => fake.update({ transcript: [{ id: 'h1', who: 'agent', text: 'Run the tests.', failed: 'refused' }] }))
     const strip = document.querySelector('[data-voice-work]')!
     expect(strip.getAttribute('data-voice-work')).toBe('not_sent')
-    expect(strip.textContent).toContain('Not sent: the task wasn’t ready to take it')
+    expect(strip.textContent).toContain('Didn’t start: the task wasn’t ready')
   })
 
   it('a finished run shows how it ended and its answer', async () => {

@@ -2724,3 +2724,41 @@ What the probe found, and fixed:
 In the first probe the delete question and the quit approval were answered
 from the window, not by voice: Ajay clicked them in the probe window (he said
 so). Nothing in the app answers on its own.
+
+### 27.12 Sixth pass: what the live sessions of 2026-10-16 and 2026-10-17 show
+
+Read from the kept conversations (`voice/2026-10-16T14-55…`, `voice/2026-10-17T05-58…`),
+run c79e6792's `messages.jsonl` and vyotiq.log. Ajay: "it's saying things, but it
+doesn't do them", and "why is it saying it's delegating to the agent".
+
+| Found | Evidence | Fixed |
+| --- | --- | --- |
+| The voice instructions never reached the model whole | They rode in the response-style slot, capped at 5% of the system budget (768 of ~2,000 tokens); "System prompt sections cut to fit the system budget" at 11:28:49 when the prompt was built (later steps reuse the cached prompt). The app_control action list was cut off | `voiceReply` is its own section, set aside before the harness and never cut (`assemble.ts`); the warning now says what was cut in `reason` |
+| It claimed an app action no tool did | 10-16 14:55: "Start a new session." → "New session started" with no tool call at all | Follows from the cut list (new_task was never shown); the prompt also says an app request isn't done without a call |
+| "Keep quiet" was said, never done | 06:12: "Okay." then "I'm here, still quiet like you asked" with no voice_mute | Prompt: stop listening is voice_mute; wait or shut up is one or two words, then silence |
+| Whole written answers were read aloud, and hidden on screen | Ten of 22 spoken replies in run c79e6792 had no `</spoken>`: every list item and "1." was spoken, and the record (which hides an unclosed block) showed nothing | A blank line ends the block too (`spokenSummary.ts`), for the speaker and the screen |
+| Listener tokens reached the agent | "<\|speaker:0\|> Hey.", "Stop~"; a bare "<\|speaker:0\|>" was sent twice and answered as silence | `cleanTranscript` drops `<\|…\|>` and `~`; an empty turn is dropped as before |
+| "Give me a moment." after "Shut up, shut up" | 10-16 16:02 | No filler line when the turn only asks for quiet (`asksForQuiet`) |
+| "Handing it to the task", "Not sent" on the voice view | `stage/model.ts`, `view/parts.tsx` | "Working on it", "Didn't start: …" |
+
+Seen and not changed: 338 empty listener turns in 70 minutes on 10-16 (14:56 to
+16:06; each a paid transcription of noise, `dropped: empty`); speech failed with
+OpenRouter 402 out of credit three times between 06:14 and 06:15; one offline
+error at 06:11.
+
+Probed on the built app (throwaway profile, Ajay's model and voice settings,
+openrouter/auto, SAPI WAVs as the mic), two runs:
+
+| Said | Tool called | Heard back |
+| --- | --- | --- |
+| "Start a new session." | app_control new_task | "Done, I've opened a fresh new task in your home workspace…" |
+| "What can you do for me?" | none | Four short sentences; the written list after the block was not spoken |
+| "Switch the app to the dark theme." | app_control set_theme dark | "Done, the app's on dark theme now." |
+| "Just wait." | none | "Okay, I'll hold.", with no filler line before it |
+| "Keep quiet until I call you." | app_control voice_mute until called | Run 1: `<spoken>…</spoken>`, read out as "…."; run 2: "Muted, say my name when you need me." |
+| "Agent V, are you there?" | none | Woke from mute: "Yeah, I'm here. What do you need?" |
+| "Tell me what is on screen right now, and what I should do next." | app_control app_status, list_dir | Three spoken sentences from those results |
+
+No "System prompt sections cut" line in the probe's log. The "…." from run 1
+is fixed (a piece with no letters or digits is never spoken) and covered by a
+unit test; run 2 didn't produce an empty block, so that fix wasn't seen live.

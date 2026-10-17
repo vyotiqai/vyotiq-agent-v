@@ -147,5 +147,5 @@ function flat(text: string): string {
 
 /** Why a hand-off didn't go, as the live view says it (§24.8 A-54). */
 export function notSentText(reason: string): string {
-  return (HAND_OFF_FAILED as Readonly<Record<string, string>>)[reason] ?? `Not sent: ${reason}`
+  return (HAND_OFF_FAILED as Readonly<Record<string, string>>)[reason] ?? `Didn’t start: ${reason}`
 }

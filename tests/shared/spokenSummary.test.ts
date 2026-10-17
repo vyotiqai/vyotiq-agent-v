@@ -57,3 +57,37 @@ describe('stripSpokenBlock', () => {
     expect(extractSpokenBlock('<spoken>open')).toBeNull()
   })
 })
+
+// Run c79e6792 (2026-10-17): the model left </spoken> off ten of 22 spoken
+// replies. Every line of the written answer after the block was read aloud, and
+// the screen, hiding an unclosed block, showed none of it.
+describe('a block the model never closed', () => {
+  const LIVE =
+    "<spoken>Quick one so I fix the right thing. Is it your mic or the voice?\n\nThere's no dedicated noise knob.\n\n- **Mic hearing the room**: hold-to-talk."
+
+  it.each([1, 2, 3, 7, 1000])('ends at the first blank line when streamed in chunks of %i', (size) => {
+    expect(streamThrough(LIVE, size)).toEqual({
+      spoken: 'Quick one so I fix the right thing. Is it your mic or the voice?',
+      phase: 'after'
+    })
+  })
+
+  it('shows the written part on screen and speaks only the block from a whole reply', () => {
+    expect(stripSpokenBlock(LIVE)).toBe("There's no dedicated noise knob.\n\n- **Mic hearing the room**: hold-to-talk.")
+    expect(extractSpokenBlock(LIVE)).toBe('Quick one so I fix the right thing. Is it your mic or the voice?')
+  })
+
+  it('a blank line with CRLF or spaces ends it too; a single line break does not', () => {
+    expect(extractSpokenBlock('<spoken>One.\r\n  \r\nTwo.')).toBe('One.')
+    expect(streamThrough('<spoken>One\nstill spoken.</spoken> rest', 2).spoken).toBe('One\nstill spoken.')
+  })
+
+  it('a closing tag after a blank line is not shown', () => {
+    expect(stripSpokenBlock('<spoken>Said.\n\nMore said.</spoken>\n\nWritten.')).toBe('More said.\n\nWritten.')
+  })
+
+  it('a closed block is unchanged', () => {
+    expect(stripSpokenBlock(ANSWER)).toMatch(/^## Details/)
+    expect(extractSpokenBlock(ANSWER)).toBe('I fixed the race. Tests pass.')
+  })
+})
