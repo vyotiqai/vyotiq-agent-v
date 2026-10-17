@@ -764,6 +764,33 @@ describe('anthropic thinking fields', () => {
     expect(fields.thinking).toEqual({ type: 'disabled' })
   })
 
+  // Haiku 5.5 thinks when `thinking` is left out and 400s on budget_tokens:
+  // a cached catalog row that still reads 'manual' must not decide it.
+  it('turns thinking off on Haiku 5.5 even when its cached row reads manual', () => {
+    const modelInfo = {
+      id: 'claude-haiku-5-5',
+      supportsThinking: true,
+      thinkingMode: 'manual',
+      thinkingCanDisable: true
+    } as ProviderChatRequest['modelInfo']
+    expect(anthropicThinkingFields(baseReq({ model: 'claude-haiku-5-5', modelInfo, thinking: { enabled: false } }))).toEqual({
+      thinking: { type: 'disabled' }
+    })
+    const on = anthropicThinkingFields(
+      baseReq({ model: 'claude-haiku-5-5', modelInfo, thinking: { enabled: true, effort: 'medium', display: 'omitted' } })
+    )
+    expect(on).toEqual({ thinking: { type: 'adaptive', display: 'omitted' }, output_config: { effort: 'medium' } })
+  })
+
+  it('turns thinking off on Sonnet 5.5 with between_tools, its only off setting', () => {
+    expect(anthropicThinkingFields(baseReq({ model: 'claude-sonnet-5-5', thinking: { enabled: false } }))).toEqual({
+      thinking: { type: 'between_tools' }
+    })
+    expect(anthropicThinkingFields(baseReq({ model: 'claude-sonnet-5', thinking: { enabled: false } }))).toEqual({
+      thinking: { type: 'disabled' }
+    })
+  })
+
   it('uses manual budget on older Claude models', () => {
     const fields = anthropicThinkingFields(
       baseReq({

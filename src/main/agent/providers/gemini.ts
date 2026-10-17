@@ -189,13 +189,22 @@ export function geminiFunctionCallingMode(
  */
 const GEMINI_DISABLEABLE_THINKING_RE = /gemini-(2\.5-)?flash/i
 
+/** Gemini 3 and later: `thinkingLevel` is the control, and thinking is on when it is left out. */
+function geminiUsesThinkingLevel(model: string): boolean {
+  const major = /(?:^|\/)gemini-(\d+)(?:\.\d+)?-/i.exec(model)?.[1]
+  return major !== undefined && Number(major) >= 3
+}
+
 /** Exported for tests — thinkingConfig for the plain generateContent path. */
 export function geminiThinkingConfigForPlainPath(
   req: ProviderChatRequest
 ): Record<string, unknown> | undefined {
-  if (req.thinking?.enabled === false && GEMINI_DISABLEABLE_THINKING_RE.test(req.model)) {
-    return { thinkingBudget: 0 }
-  }
+  if (req.thinking?.enabled !== false) return undefined
+  if (GEMINI_DISABLEABLE_THINKING_RE.test(req.model)) return { thinkingBudget: 0 }
+  // Gemini 3+ thinks at high or medium when no level is sent (ai.google.dev/gemini-api/docs/thinking,
+  // 2026-10-17), so "off" was its full default on every spoken turn. `low` is the one level every
+  // model there lists. Flash-Lite already defaults to minimal, below it, so it is left alone.
+  if (geminiUsesThinkingLevel(req.model) && !/flash-lite/i.test(req.model)) return { thinkingLevel: 'low' }
   return undefined
 }
 

@@ -71,6 +71,21 @@ describe('gemini plain-path thinkingConfig', () => {
     expect(config?.thinkingBudget).toBe(0)
   })
 
+  // Gemini 3+ thinks at its default when no level is sent: "off" (a spoken turn) asks for low.
+  it('sends thinkingLevel low when thinking is off on Gemini 3 and later', async () => {
+    const { buildGeminiBody } = await import('@main/agent/providers/gemini')
+    const level = (model: string): unknown =>
+      (buildGeminiBody({ ...baseReq, model, thinking: { enabled: false } }).generationConfig as
+        | { thinkingConfig?: { thinkingLevel?: string } }
+        | undefined)?.thinkingConfig?.thinkingLevel
+    expect(level('gemini-3-pro-preview')).toBe('low')
+    expect(level('gemini-3.8-flash')).toBe('low')
+    expect(level('gemini-4-argon')).toBe('low')
+    expect(level('gemini-3.5-flash-lite')).toBeUndefined()
+    const on = buildGeminiBody({ ...baseReq, model: 'gemini-3.8-flash', thinking: { enabled: true, effort: 'high' } })
+    expect(on.generationConfig).toBeUndefined()
+  })
+
   it('omits thinkingConfig for 2.5 Pro (budget 0 is rejected with a 400)', async () => {
     const { buildGeminiBody } = await import('@main/agent/providers/gemini')
     const body = buildGeminiBody({

@@ -2,6 +2,7 @@ import type { ProviderChatRequest } from './types'
 import {
   anthropicBudgetTokensForEffort,
   anthropicThinkingCanDisable,
+  anthropicThinkingOff,
   anthropicUsesAdaptiveThinking,
   anthropicUsesManualThinking,
   normalizeEffortForAnthropic,
@@ -11,23 +12,21 @@ import {
 /** Build Anthropic thinking + effort request fields. */
 export function anthropicThinkingFields(req: ProviderChatRequest): Record<string, unknown> {
   const model = req.model
-  const mode =
-    req.modelInfo?.thinkingMode ??
-    (anthropicUsesAdaptiveThinking(model)
-      ? 'adaptive'
-      : anthropicUsesManualThinking(model)
-        ? 'manual'
-        : undefined)
+  // A model known to be adaptive is adaptive whatever a cached catalog row says:
+  // rows saved before Haiku 5.5 was known still read 'manual' (model-catalog-cache.json).
+  const mode = anthropicUsesAdaptiveThinking(model)
+    ? 'adaptive'
+    : (req.modelInfo?.thinkingMode ?? (anthropicUsesManualThinking(model) ? 'manual' : undefined))
 
   if (!req.thinking?.enabled) {
     // Explicit disable for models that may think by default (adaptive / Opus 5+).
-    if (mode === 'adaptive' || anthropicUsesAdaptiveThinking(model)) {
+    if (mode === 'adaptive') {
       // Always-thinking models 400 on `disabled`; the documented stand-in for
       // "thinking off" there is the lowest effort with `thinking` omitted.
       if (req.modelInfo?.thinkingCanDisable === false || !anthropicThinkingCanDisable(model)) {
         return { output_config: { effort: 'low' } }
       }
-      return { thinking: { type: 'disabled' } }
+      return { thinking: anthropicThinkingOff(model) }
     }
     return {}
   }

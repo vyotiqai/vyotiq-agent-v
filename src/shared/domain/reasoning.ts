@@ -375,7 +375,10 @@ export function thinkingApiFor(
  */
 export function anthropicUsesAdaptiveThinking(modelId: string): boolean {
   const m = modelId.toLowerCase()
-  if (/claude-(fable-5|mythos|opus-5|sonnet-5)/i.test(m)) return true
+  // Haiku 5.5 is adaptive only and thinks when `thinking` is left out: sorted as
+  // manual, its spoken turns sent no field and it thought at medium (29 of 30
+  // replies in run 3b045b11, 2026-10-17), and a typed one sent budget_tokens, a 400.
+  if (/claude-(fable-5|mythos|opus-5|sonnet-5|haiku-5)/i.test(m)) return true
   // Opus/Sonnet 4.6, 4.7, 4.8 (hyphen or dotted)
   if (/claude-(opus|sonnet)-4[.-]([6-9]|\d{2,})/i.test(m)) return true
   if (/claude-(opus|sonnet)-4-[6-9]/i.test(m)) return true
@@ -389,6 +392,15 @@ export function anthropicUsesAdaptiveThinking(modelId: string): boolean {
  */
 export function anthropicThinkingCanDisable(modelId: string): boolean {
   return !/claude-(fable-5|mythos|opus-5[.-]5(?![0-9]))/i.test(modelId)
+}
+
+/**
+ * The `thinking` that turns thinking off. Sonnet 5.5 answers `disabled` with a
+ * 400 and names `between_tools` as its lowest setting (no other field beside
+ * it, effort high or below); every other model that can turn it off takes `disabled`.
+ */
+export function anthropicThinkingOff(modelId: string): { type: 'disabled' } | { type: 'between_tools' } {
+  return /claude-sonnet-5[.-]5(?![0-9])/i.test(modelId) ? { type: 'between_tools' } : { type: 'disabled' }
 }
 
 /** Anthropic manual budget_tokens mode for older Claude models (pre-4.6). */

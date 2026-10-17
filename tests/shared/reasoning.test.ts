@@ -146,6 +146,9 @@ describe('reasoning', () => {
     expect(anthropicUsesManualThinking('claude-sonnet-4-5')).toBe(true)
     expect(anthropicUsesManualThinking('claude-sonnet-5')).toBe(false)
     expect(anthropicUsesManualThinking('claude-opus-5')).toBe(false)
+    expect(anthropicUsesAdaptiveThinking('claude-haiku-5-5')).toBe(true)
+    expect(anthropicUsesAdaptiveThinking('anthropic.claude-haiku-5-5')).toBe(true)
+    expect(anthropicUsesManualThinking('claude-haiku-4-5')).toBe(true)
   })
 
   it('round-trips provider reasoning state', () => {

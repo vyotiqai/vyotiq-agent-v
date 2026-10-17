@@ -2609,6 +2609,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
       step++
       stepsThisInvoke += 1
+      const stepStartedAt = Date.now()
       const stepSoftAbort = new AbortController()
       setStreamInterrupt(runId, stepSoftAbort)
       try {
@@ -2741,7 +2742,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // values without a second sync read per step.
       const stepTodos = readTodos(runDir)
       const stepGoal = isInlineInstance ? null : readGoal(runDir)
+      const stateStartedAt = Date.now()
       const spokenAppState = spokenTurn ? await spokenTurnStateText(runId, toolWorkspace) : ''
+      const spokenStateMs = Date.now() - stateStartedAt
       const assembleBase = {
         harness,
         messages,
@@ -3285,6 +3288,16 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         runAttempt: async function* (attempt) {
           const runDir = streamRunDir
           const streamStartedAt = Date.now()
+          // Someone is waiting to hear this step: what it cost before the model was asked.
+          if (spokenTurn && attempt === 1) {
+            logger.info('Spoken step request', {
+              scope: 'agent',
+              correlationId: runId,
+              step,
+              prepMs: streamStartedAt - stepStartedAt,
+              stateMs: spokenStateMs
+            })
+          }
           // The task's model unless a fallback took over (modelFallback.ts).
           // On the task's model every field below is what it always was, so
           // its prompt cache sees the same bytes.
