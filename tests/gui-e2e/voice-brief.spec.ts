@@ -104,18 +104,18 @@ test('a task said to the New task brief opens, and the voice follows its run (A-
 })
 
 /*
-  Voice mode from anywhere (§24.15): on Home no task line is on screen, so the
-  shortcut used to do nothing. Now it opens New task and starts there.
+  Voice mode from anywhere (§24.15): the shortcut on Home used to do nothing,
+  with no task line on screen. Home now holds the New task brief itself, and
+  the shortcut starts listening there.
 */
-test('the voice shortcut on Home opens New task and starts listening there', async () => {
+test('the voice shortcut on Home starts listening on its New task brief', async () => {
   const { window } = launched
   await window.evaluate(() => (document.querySelector('[data-voice-end]') as HTMLButtonElement | null)?.click())
   await expect(window.locator('[data-voice-view]')).toHaveCount(0, { timeout: 15_000 })
   await window.keyboard.press('Escape')
   await window.keyboard.press('Control+Shift+H')
   await expect(window.locator('[data-home]')).toBeVisible({ timeout: 15_000 })
-  await expect(window.locator('[aria-label="Brief"][data-composer-input]')).toHaveCount(0)
-  await expect(window.locator('[data-voice-button]')).toHaveCount(0)
+  await expect(window.locator('[data-home] [aria-label="Brief"][data-composer-input]')).toHaveCount(1)
 
   await window.keyboard.press('Control+Shift+M')
   await expect(window.locator('[data-voice-view]').first()).toHaveAttribute('data-voice-view', 'listening', { timeout: 20_000 })
