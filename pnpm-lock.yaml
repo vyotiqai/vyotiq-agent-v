@@ -191,11 +191,11 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0(electron@44.4.5(supports-color@7.2.0))
       '@huggingface/transformers':
-        specifier: ^4.3.0
-        version: 4.3.0(@types/node@24.13.6)
+        specifier: ^4.3.1
+        version: 4.3.1(@types/node@24.13.6)
       '@modelcontextprotocol/sdk':
         specifier: '>=1.31.0'
-        version: 1.32.1(supports-color@7.2.0)(zod@4.6.5)
+        version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
       '@sentry/electron':
         specifier: 7.20.0
         version: 7.20.0(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(supports-color@7.2.0)
@@ -212,8 +212,8 @@ importers:
         specifier: ^6.8.9
         version: 6.8.9(supports-color@7.2.0)
       gpt-tokenizer:
-        specifier: ^4.0.0
-        version: 4.0.0
+        specifier: ^4.0.3
+        version: 4.0.3
       onnxruntime-node:
         specifier: 1.30.0
         version: 1.30.0
@@ -224,8 +224,8 @@ importers:
         specifier: ^1.8.1
         version: 1.8.1
       zod:
-        specifier: ^4.6.5
-        version: 4.6.5
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@babel/core':
         specifier: ^8.0.6
@@ -1432,8 +1432,8 @@ packages:
   '@huggingface/tokenizers@0.2.0':
     resolution: {integrity: sha512-LidMHe1FpcSYH4vcSjXooda34pC0M8m1gmDOv7SQi6Iv+ib1zX7J3sHBCC9/3FPCkn2k1b55FneVqMRxrr99pg==}
 
-  '@huggingface/transformers@4.3.0':
-    resolution: {integrity: sha512-fL1A/WUZwouPrOlYxU5dzIwD2T5J781JiB2jDR8bFe5DwCj0Gfudq+NEXCMno49kQgajHA7xQkrRLJlqG1veEA==}
+  '@huggingface/transformers@4.3.1':
+    resolution: {integrity: sha512-5+voSeUCFK6PCKlY15dPhNOKq3/zOTxDN7oC+Wy9dFb1QZ0TSQomZRRy7URRK8YRuUoE9fGMQTTPC5d/pWBJhA==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -4534,8 +4534,8 @@ packages:
     resolution: {integrity: sha512-6tfZ91bOr7bOXnK7PRDCGBLa1H4U080YHNaAQ2KsMGlLEzRbk44nsZF2E1IeRc3vtJHPVbKCYgdFbaGO2ljd8g==}
     engines: {node: '>=10.19.0'}
 
-  gpt-tokenizer@4.0.0:
-    resolution: {integrity: sha512-YAWIyzvuVUHEfW7tFfFAxH8qQb+Q3RU9nYOTy7skMNX5qzU6Q8jxTHZLyO56ug1vYvCR7wndzpd3jwD86/mhjQ==}
+  gpt-tokenizer@4.0.3:
+    resolution: {integrity: sha512-GrrPDreSy2c3ZgM/u+5JN+lnHTLrJKm7QAFfTD5J+vgcSP69C+fFIUaJWiey/QQ8lS5u79OvluKuEmGBAbOS4A==}
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
@@ -7051,8 +7051,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
   zustand@3.7.2:
     resolution: {integrity: sha512-PIJDIZKtokhof+9+60cpockVOq05sJzHCriyvaLBmEJixseQ1a5Kdov6fWZfWOu5SK9c+FhH1jU0tntLxRJYMA==}
@@ -8088,7 +8088,7 @@ snapshots:
 
   '@huggingface/tokenizers@0.2.0': {}
 
-  '@huggingface/transformers@4.3.0(@types/node@24.13.6)':
+  '@huggingface/transformers@4.3.1(@types/node@24.13.6)':
     dependencies:
       '@huggingface/jinja': 0.5.10
       '@huggingface/tokenizers': 0.2.0
@@ -8501,7 +8501,7 @@ snapshots:
     dependencies:
       '@chevrotain/types': 11.1.2
 
-  '@modelcontextprotocol/sdk@1.32.1(supports-color@7.2.0)(zod@4.6.5)':
+  '@modelcontextprotocol/sdk@1.32.1(supports-color@7.2.0)(zod@4.6.7)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.7)
       ajv: 8.20.0
@@ -8518,8 +8518,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 4.6.5
-      zod-to-json-schema: 3.25.2(zod@4.6.5)
+      zod: 4.6.7
+      zod-to-json-schema: 3.25.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -11195,8 +11195,8 @@ snapshots:
       '@babel/parser': 7.29.8
       eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
       hermes-parser: 0.25.1
-      zod: 4.6.5
-      zod-validation-error: 4.0.2(zod@4.6.5)
+      zod: 4.6.7
+      zod-validation-error: 4.0.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -11622,7 +11622,7 @@ snapshots:
       p-cancelable: 2.1.1
       responselike: 2.0.1
 
-  gpt-tokenizer@4.0.0: {}
+  gpt-tokenizer@4.0.3: {}
 
   graceful-fs@4.2.11: {}
 
@@ -14703,15 +14703,15 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod-to-json-schema@3.25.2(zod@4.6.5):
+  zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
-      zod: 4.6.5
+      zod: 4.6.7
 
-  zod-validation-error@4.0.2(zod@4.6.5):
+  zod-validation-error@4.0.2(zod@4.6.7):
     dependencies:
-      zod: 4.6.5
+      zod: 4.6.7
 
-  zod@4.6.5: {}
+  zod@4.6.7: {}
 
   zustand@3.7.2(react@19.3.0):
     optionalDependencies:
